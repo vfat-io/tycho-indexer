@@ -29,7 +29,8 @@ Cargo.lock
 .LSOverride
 
 # Icon must end with two \r
-Icon
+Icon
+
 
 # Thumbnails
 ._*
@@ -76,3 +77,5 @@ Temporary Items
 
 # End of https://www.toptal.com/developers/gitignore/api/linux
 
+# Substreams spkg files are build artifacts
+*.spkg
