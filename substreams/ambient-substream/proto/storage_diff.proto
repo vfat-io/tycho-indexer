@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package protosim.evm.state.v1;
+
+
+message ContractStorageChange {
+    bytes address = 1;
+    bytes slot = 2;
+    bytes value = 3;
+    uint64 log_ordinal = 4;
+}
+
+message BlockStorageChanges {
+    uint64 number = 1;
+    bytes hash = 2;
+    repeated ContractStorageChange changes = 3;
+}
+
+message Changes {
+    repeated BlockStorageChanges changes = 1;
+}
