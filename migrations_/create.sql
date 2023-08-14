@@ -87,9 +87,6 @@ create table protocol_system (
 	-- The name of the procotol system, e.g. uniswap-v2, ambient, etc.
 	"name" VARCHAR(255) not null,
 	
-	-- The ts at which this system was created, e.g. factory deployed.
-	"created_at" timestamptz not null,
-	
 	-- Timestamp this entry was inserted into this table.
 	"inserted_ts" timestamptz not null default current_timestamp,
 	
@@ -98,6 +95,7 @@ create table protocol_system (
 );
 
 CREATE TYPE financial_protocol_type AS ENUM ('swap', 'psm', 'debt', 'leverage');
+CREATE TYPE protocol_implementation_type AS ENUM ('custom', 'vm');
 
 -- Table describing the different protocol types available in the system.
 CREATE TABLE protocol_type (
@@ -112,6 +110,9 @@ CREATE TABLE protocol_type (
     -- The jsonschema to evaluate the attribute json for pools of this type.
     "attribute_schema" JSONB,
     
+    -- What kind of implementation this protocol type uses.
+    "implementation" protocol_implementation_type not null,
+    
     -- Timestamp this entry was inserted into this table.
 	"inserted_ts" timestamptz not null default current_timestamp,
 	
@@ -119,10 +120,42 @@ CREATE TABLE protocol_type (
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
+
+-- Saves the state of an extractor, note that static extration parameters 
+-- 	are usually defined through infrastructure configuration tools e.g. 
+--	terraform. So this table only maintains dynamic state that changes during
+--	runtime and has to be persisted between restarts.
+CREATE TABLE extractor_instance_state (
+	"id" BIGSERIAL PRIMARY KEY,
+	-- name of the extractor
+	"name" varchar(255) not null,
+
+	-- version of this extractor
+	"version" varchar(255) not null,
+
+	-- last fully extracted cursor for the corresponding substream
+	"cursor" bytesa null,
+
+	-- Extractor instances are scoped to a specific chain.
+    "chain_id" bigint references "chain"(id) not null,
+
+	-- additional attributes that the extractor needs to persist
+	"attributes" jsonb,
+
+	-- Timestamp this entry was inserted into this table.
+	"inserted_ts" timestamptz not null default current_timestamp,
+
+	-- Timestamp this entry was inserted into this table.
+	"modified_ts" timestamptz not null default current_timestamp,
+
+	-- only allow a single extractor state instance per chain.
+	unique(chain_id, "name")
+)
+
 -- Describes the static attributes of a protocol (component). A protocol is usually
 --	a single component of a protocol system. E.g. uniswap-v2 is the system
 --	that creates and operates swap components (aka pools).
-create table protocol (
+create table protocol_component (
     "id" BIGSERIAL PRIMARY KEY,
     
     -- Protocols are scoped to a specific chain.
@@ -159,7 +192,7 @@ create table protocol (
     unique("chain_id", "protocol_system_id", "external_id")
 );
 
-create index idx_protocol_identity on protocol(external_id, protocol_system_id, chain_id);
+create index idx_protocol_identity on protocol_component(external_id, protocol_system_id, chain_id);
 
 -- Describes the mutable state of a component. Versioned by blocks.
 create table protocol_state (
@@ -178,7 +211,7 @@ create table protocol_state (
 	"state" JSONB,
 		
 	-- the transaction that modified the state to this entry.
-	"modify_tx" bigint references "transaction"(id),
+	"modify_tx" bigint references "transaction"(id) not null,
 	
 	-- The ts at which this state became valid at.
 	"valid_from" timestamptz not null,
@@ -194,13 +227,13 @@ create table protocol_state (
 	"modified_ts" timestamptz not null default current_timestamp,
     
     -- Reference to static attributes of the protocol.
-    "protocol_id" BIGINT REFERENCES Protocol(id) not null
+    "protocol_component_id" BIGINT REFERENCES protocol_component(id) not null
     
 );
 
 create index idx_protocol_state_tx on protocol_state(modify_tx);
 create index idx_protocol_state_valid_to on protocol_state(valid_to);
-create index idx_protocol_state_valid_protocol_id on protocol_state(protocol_id);
+create index idx_protocol_state_valid_protocol_component_id on protocol_state(protocol_component_id);
 
 
 -- Describes a single contract.
@@ -219,8 +252,9 @@ create table contract (
 	-- transaction that created this contract.
 	"creation_tx" bigint references transaction(id) not null,
 	
-	-- The ts this contract was created.
-	"created_at" timestamptz not null,
+	-- The ts this contract was created. While inserting tokens 
+	--	we might not know who created it, so it is nullable.
+	"created_at" timestamptz,
 	
 	-- The tx this contract was destroyed. Null in case it is active.
     "deleted_at" timestamptz,
@@ -235,7 +269,7 @@ create table contract (
     UNIQUE ("chain_id", "address")
 );
 
-create index idx_contract_chain_id on contract(chain_id)
+create index idx_contract_chain_id on contract(chain_id);
 
 -- Describes tokens e.g. ERC20 on evm chains.
 create table "token" (
@@ -268,10 +302,9 @@ CREATE INDEX idx_token_symbol ON "token" USING gin("symbol" gin_trgm_ops);
 CREATE INDEX idx_token_contract_id ON token(contract_id);
 
 
-
 -- M2M relationship between tokens and protocol 
 CREATE TABLE protocol_holds_token (
-    "protocol_id" BIGINT REFERENCES protocol(id) not null,
+    "protocol_component_id" BIGINT REFERENCES protocol_component(id) not null,
     
     "token_id" BIGINT REFERENCES "token"(id) not null,
     -- Timestamp this entry was inserted into this table.
@@ -280,7 +313,7 @@ CREATE TABLE protocol_holds_token (
 	-- Timestamp this entry was inserted into this table.
 	"modified_ts" timestamptz not null default current_timestamp,
 	
-    PRIMARY KEY("protocol_id", "token_id")
+    PRIMARY KEY("protocol_component_id", "token_id")
 );
 
 -- Versioned contract balance.
@@ -310,8 +343,8 @@ create table contract_balance(
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX contract_balance_contract_id_idx ON contract_balance (contract_id);
-CREATE INDEX contract_balance_valid_to_idx ON contract_balance (valid_to);
+CREATE INDEX idx_contract_balance_contract_id ON contract_balance (contract_id);
+CREATE INDEX idx_contract_balance_valid_to ON contract_balance (valid_to);
 
 -- Versioned contract code.
 create table contract_code(
@@ -343,18 +376,18 @@ create table contract_code(
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX contract_code_contract_id_idx ON contract_code (contract_id);
-CREATE INDEX contract_code_valid_to_idx ON contract_code (valid_to);
+CREATE INDEX idx_contract_code_contract_id ON contract_code (contract_id);
+CREATE INDEX idx_contract_code_valid_to ON contract_code (valid_to);
 
 -- Versioned contract storage.
 create table contract_storage (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- the preimage/slot for this entry. 
-	"slot" char(32) not null,
+	"slot" bytea not null,
 	
 	-- the value of the storage slot.
-	"value" char(32) not null,
+	"value" bytea not null,
 	
 	-- the contract this entry refers to.
 	"contract_id" bigint references contract(id) not null,
@@ -376,14 +409,14 @@ create table contract_storage (
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX contract_storage_contract_id_idx ON contract_storage (contract_id);
-CREATE INDEX contract_storage_valid_to_idx ON contract_storage (valid_to);
+CREATE INDEX idx_contract_storage_contract_id ON contract_storage (contract_id);
+CREATE INDEX idx_contract_storage_valid_to ON contract_storage (valid_to);
 
 -- Relationship between protocols and contract(s).
 CREATE TABLE protocol_calls_contract (
 	"id" BIGSERIAL PRIMARY KEY,
 
-    "protocol_id" BIGINT REFERENCES protocol(id) not null,
+    "protocol_component_id" BIGINT REFERENCES protocol_component(id) not null,
     
     "contract_id" BIGINT REFERENCES contract(id) not null,
     
@@ -401,13 +434,13 @@ CREATE TABLE protocol_calls_contract (
 	-- Timestamp this entry was inserted into this table.
 	"modified_ts" timestamptz not null default current_timestamp,
     
-    UNIQUE("protocol_id", "contract_id", "valid_from"),
-    UNIQUE("protocol_id", "contract_id", "valid_to")
+    UNIQUE("protocol_component_id", "contract_id", "valid_from"),
+    UNIQUE("protocol_component_id", "contract_id", "valid_to")
 );
 
-CREATE INDEX protocol_calls_contract_protocol_id_idx ON protocol_calls_contract(protocol_id);
-CREATE INDEX protocol_calls_contract_contract_id_idx ON protocol_calls_contract(contract_id);
-CREATE INDEX protocol_calls_contract_valid_to_idx ON protocol_calls_contract(valid_to);
+CREATE INDEX idx_protocol_calls_contract_protocol_component_id ON protocol_calls_contract(protocol_component_id);
+CREATE INDEX idx_protocol_calls_contract_contract_id ON protocol_calls_contract(contract_id);
+CREATE INDEX idx_protocol_calls_contract_valid_to ON protocol_calls_contract(valid_to);
 
 CREATE EXTENSION IF NOT EXISTS hstore;
 -- keeps track of what we did.
@@ -447,13 +480,13 @@ BEGIN
 
     _query := format('
        UPDATE %I 
-       SET valid_to = NEW.valid_from 
+       SET valid_to = $1.valid_from 
        WHERE id = (
            SELECT id FROM %I 
-           WHERE valid_to IS NULL AND %I = NEW.%I 
+           WHERE valid_to IS NULL AND %I = ($1).%I 
        );', _tbl_name, _tbl_name, _identity_col, _identity_col);
 
-    EXECUTE _query;
+    EXECUTE _query USING NEW;
 
     RETURN NEW;
 
@@ -463,7 +496,7 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER invalidate_previous_protocol_state
 BEFORE INSERT ON protocol_state 
-FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('protocol_state', 'protocol_id');
+FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('protocol_state', 'protocol_component_id');
 
 CREATE TRIGGER invalidate_previous_contract_balance
 BEFORE INSERT ON contract_balance 
@@ -483,7 +516,7 @@ BEGIN
 -- Update the 'valid_to' field of the last valid entry when a new one is inserted.
     UPDATE protocol_calls_contract 
     SET valid_to = NEW.valid_from 
-    WHERE valid_to IS NULL AND protocol_id = NEW.protocol_id and contract_id = NEW.contract_id;
+    WHERE valid_to IS NULL AND protocol_component_id = NEW.protocol_component_id and contract_id = NEW.contract_id;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -533,8 +566,8 @@ BEFORE UPDATE ON "protocol_state"
 FOR EACH ROW
 EXECUTE PROCEDURE update_modified_column();
 
-CREATE TRIGGER update_modtime_protocol
-BEFORE UPDATE ON "protocol"
+CREATE TRIGGER update_modtime_protocol_component
+BEFORE UPDATE ON "protocol_component"
 FOR EACH ROW
 EXECUTE PROCEDURE update_modified_column();
 
@@ -622,8 +655,8 @@ BEFORE UPDATE ON "protocol_state"
 FOR EACH ROW
 EXECUTE PROCEDURE audit_trigger();
 
-CREATE TRIGGER audit_table_protocol
-BEFORE UPDATE ON "protocol"
+CREATE TRIGGER audit_table_protocol_component
+BEFORE UPDATE ON "protocol_component"
 FOR EACH ROW
 EXECUTE PROCEDURE audit_trigger();
 
