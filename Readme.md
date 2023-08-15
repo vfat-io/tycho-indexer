@@ -58,6 +58,8 @@ For on-chain data sources, Tycho utilizes [substreams](https://thegraph.com/docs
 
 Substream handlers, which extract the actual information for each block are implemented in Rust, compiled to WebAssembly and sent to a Firehose node where execution takes place near the data. Handlers emit messages that are streamed back to the client.
 
+A very early example of how a substream package is implemented can be seen [here](./substreams/ethereum-ambient/). In this example all storage changes for the Ambient protocol are extracted.
+
 ## Extractors
 
 Extractors are tasked with archiving states and providing normalized change streams: They receive fork-aware messages from substreams and must apply these to the current state. If necessary, they create a corresponding delta message and then immediately forward it to any subscriptions.
