@@ -1,3 +1,4 @@
+pub mod stream;
 use std::{fmt::Display, sync::Arc, time::Duration};
 
 use http::{uri::Scheme, Uri};

@@ -5,12 +5,13 @@ use pb::sf::substreams::v1::Package;
 
 use prost::Message;
 use std::{env, process::exit, sync::Arc};
+use substreams::stream::{BlockResponse, SubstreamsStream};
 use substreams::SubstreamsEndpoint;
-use substreams_stream::{BlockResponse, SubstreamsStream};
 
+mod extractor;
+mod models;
 mod pb;
 mod substreams;
-mod substreams_stream;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
