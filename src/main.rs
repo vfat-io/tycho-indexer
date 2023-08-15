@@ -11,6 +11,7 @@ use substreams::SubstreamsEndpoint;
 mod extractor;
 mod models;
 mod pb;
+mod storage;
 mod substreams;
 
 #[tokio::main]

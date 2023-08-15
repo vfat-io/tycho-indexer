@@ -32,10 +32,8 @@ diesel::table! {
 diesel::table! {
     block (id) {
         id -> Int8,
-        #[max_length = 32]
-        hash -> Bpchar,
-        #[max_length = 32]
-        parent_hash -> Bpchar,
+        hash -> Bytea,
+        parent_hash -> Bytea,
         main -> Bool,
         number -> Int8,
         ts -> Timestamptz,
@@ -62,7 +60,7 @@ diesel::table! {
         #[max_length = 255]
         title -> Varchar,
         address -> Bytea,
-        creation_tx -> Int8,
+        creation_tx -> Nullable<Int8>,
         created_at -> Nullable<Timestamptz>,
         deleted_at -> Nullable<Timestamptz>,
         inserted_ts -> Timestamptz,
@@ -73,10 +71,9 @@ diesel::table! {
 diesel::table! {
     contract_balance (id) {
         id -> Int8,
-        #[max_length = 32]
-        balance -> Nullable<Bpchar>,
+        balance -> Bytea,
         contract_id -> Int8,
-        modify_tx -> Nullable<Int8>,
+        modify_tx -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
         inserted_ts -> Timestamptz,
@@ -90,7 +87,7 @@ diesel::table! {
         code -> Bytea,
         hash -> Bytea,
         contract_id -> Int8,
-        modify_tx -> Nullable<Int8>,
+        modify_tx -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
         inserted_ts -> Timestamptz,
@@ -104,7 +101,7 @@ diesel::table! {
         slot -> Bytea,
         value -> Bytea,
         contract_id -> Int8,
-        modify_tx -> Nullable<Int8>,
+        modify_tx -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
         inserted_ts -> Timestamptz,
@@ -198,8 +195,7 @@ diesel::table! {
         id -> Int8,
         #[max_length = 255]
         name -> Varchar,
-        #[sql_name = "type"]
-        type_ -> FinancialProtocolType,
+        financial_type -> FinancialProtocolType,
         attribute_schema -> Nullable<Jsonb>,
         implementation -> ProtocolImplementationType,
         inserted_ts -> Timestamptz,
@@ -214,8 +210,8 @@ diesel::table! {
         #[max_length = 255]
         symbol -> Varchar,
         decimals -> Int4,
-        tax -> Nullable<Int8>,
-        gas -> Nullable<Array<Nullable<Int8>>>,
+        tax -> Int8,
+        gas -> Array<Nullable<Int8>>,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
     }
@@ -224,8 +220,7 @@ diesel::table! {
 diesel::table! {
     transaction (id) {
         id -> Int8,
-        #[max_length = 32]
-        hash -> Bpchar,
+        hash -> Bytea,
         from -> Bytea,
         to -> Bytea,
         index -> Int8,

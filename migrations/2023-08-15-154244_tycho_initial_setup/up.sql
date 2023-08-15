@@ -23,10 +23,10 @@ create table if not exists "block" (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- The unique hash of this block.
-	"hash" char(32) unique not null,
+	"hash" bytea unique not null,
 	
 	-- The ancestor hash of this block. Used to trace forked blocks.
-	"parent_hash" char(32) unique not null,
+	"parent_hash" bytea unique not null,
 	
 	-- Whether this block is part of the canonical chain.
 	"main" bool not null default true,
@@ -58,7 +58,7 @@ create table if not exists "transaction" (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- The unique hash of this transaction.
-	"hash" char(32) unique not null,
+	"hash" bytea unique not null,
 	
 	-- sender of the transaction.
 	"from" bytea not null,
@@ -108,7 +108,7 @@ CREATE TABLE if not exists protocol_type (
     "name" VARCHAR(255) not null,
     
     -- The actual type of the protocol.
-    "type" financial_protocol_type not null,
+    "financial_type" financial_protocol_type not null,
     
     -- The jsonschema to evaluate the attribute json for pools of this type.
     "attribute_schema" JSONB,
@@ -253,7 +253,7 @@ create table if not exists "contract" (
 	"address" bytea not null,
 	
 	-- transaction that created this contract.
-	"creation_tx" bigint references transaction(id) not null,
+	"creation_tx" bigint references transaction(id),
 	
 	-- The ts this contract was created. While inserting tokens 
 	--	we might not know who created it, so it is nullable.
@@ -288,10 +288,10 @@ create table if not exists "token" (
 	"decimals" int not null,
 	
 	-- The tax this token charges on transfer.
-	"tax" bigint,
+	"tax" bigint not null default 0,
 	
 	-- The estimated amount of gas used per transfer.
-	"gas" bigint[],
+	"gas" bigint[] not null,
 	
 	-- Timestamp this entry was inserted into this table.
 	"inserted_ts" timestamptz not null default current_timestamp,
@@ -323,13 +323,13 @@ create table contract_balance(
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- The balance of the contract.
-	"balance" char(32),
+	"balance" bytea not null,
 	
 	-- the contract this entry refers to.
 	"contract_id" bigint references contract(id) not null,
 	
 	-- the transaction that modified the state to this entry.
-	"modify_tx" bigint references "transaction"(id),
+	"modify_tx" bigint references "transaction"(id) not null,
 	
 	-- The ts at which this state became valid at.
 	"valid_from" timestamptz not null,
@@ -362,7 +362,7 @@ create table contract_code(
 	"contract_id" bigint references contract(id) not null,
 	
 	-- the transaction that modified the code to this entry.
-	"modify_tx" bigint references "transaction"(id),
+	"modify_tx" bigint references "transaction"(id) not null,
 	
 	-- The ts at which this copde became valid at.
 	"valid_from" timestamptz not null,
@@ -395,7 +395,7 @@ create table if not exists contract_storage (
 	"contract_id" bigint references contract(id) not null,
 	
 	-- the transaction that modified the slot to this entry.
-	"modify_tx" bigint references "transaction"(id),
+	"modify_tx" bigint references "transaction"(id) not null,
 	
 	-- The ts at which this slot became valid at.
 	"valid_from" timestamptz not null,
