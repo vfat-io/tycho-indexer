@@ -51,14 +51,14 @@ VALUES
     ('0x0016', '\x59', '\x60', 2, 12);
 
 
-INSERT INTO protocol_system ("name", "created_at")
+INSERT INTO protocol_system ("name")
 VALUES
-    ('uniswap-v2', '2022-01-02 00:00:00'),
-    ('ambient', '2022-01-03 00:00:00'),   
-    ('sithswap', '2022-01-05 00:00:00'),  
-    ('jediswap', '2022-01-06 00:00:00'),  
-    ('syncswap', '2022-01-08 00:00:00'), 
-    ('mute', '2022-01-09 00:00:00');
+    ('uniswap-v2'),
+    ('ambient'),   
+    ('sithswap'),  
+    ('jediswap'),  
+    ('syncswap'), 
+    ('mute');
 
 
 INSERT INTO protocol_type ("name", "type", "implementation", "attribute_schema")

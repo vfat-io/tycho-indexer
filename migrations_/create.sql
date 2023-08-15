@@ -1,5 +1,10 @@
+CREATE EXTENSION IF NOT EXISTS hstore;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE TYPE financial_protocol_type AS ENUM ('swap', 'psm', 'debt', 'leverage');
+CREATE TYPE protocol_implementation_type AS ENUM ('custom', 'vm');
+
 -- Enumeration of supported blockchains
-create table "chain" (
+create table if not exists "chain" (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- The name of the blockchain
@@ -13,7 +18,7 @@ create table "chain" (
 );
 
 -- This table stores block at which relevant changes occured.
-create table block (
+create table if not exists block (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- The unique hash of this block.
@@ -44,11 +49,11 @@ create table block (
 	unique(chain_id, "hash")
 );
 
-create index idx_block_number_identity on block("number", "chain_id");
-create index idx_block_hash_identity on block("hash", "chain_id");
+create index if not exists idx_block_number_identity on block("number", "chain_id");
+create index if not exists idx_block_hash_identity on block("hash", "chain_id");
 
 
-create table "transaction" (
+create table if not exists "transaction" (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- The unique hash of this transaction.
@@ -76,12 +81,12 @@ create table "transaction" (
 	unique("hash", block_id)
 );
 
-create index idx_transaction_block_id on transaction(block_id);
+create index if not exists idx_transaction_block_id on transaction(block_id);
 
 
 -- ProtocolSystem table group functional components (protocols) that 
 --	belong to the same logical system.
-create table protocol_system (
+create table if not exists protocol_system (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- The name of the procotol system, e.g. uniswap-v2, ambient, etc.
@@ -94,11 +99,8 @@ create table protocol_system (
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE TYPE financial_protocol_type AS ENUM ('swap', 'psm', 'debt', 'leverage');
-CREATE TYPE protocol_implementation_type AS ENUM ('custom', 'vm');
-
 -- Table describing the different protocol types available in the system.
-CREATE TABLE protocol_type (
+CREATE TABLE if not exists protocol_type (
     "id" BIGSERIAL PRIMARY KEY,
     
     -- The name of the type e.g. uniswap-v2:pool
@@ -125,7 +127,7 @@ CREATE TABLE protocol_type (
 -- 	are usually defined through infrastructure configuration tools e.g. 
 --	terraform. So this table only maintains dynamic state that changes during
 --	runtime and has to be persisted between restarts.
-CREATE TABLE extractor_instance_state (
+CREATE TABLE if not exists extractor_instance_state (
 	"id" BIGSERIAL PRIMARY KEY,
 	-- name of the extractor
 	"name" varchar(255) not null,
@@ -134,7 +136,7 @@ CREATE TABLE extractor_instance_state (
 	"version" varchar(255) not null,
 
 	-- last fully extracted cursor for the corresponding substream
-	"cursor" bytesa null,
+	"cursor" bytea null,
 
 	-- Extractor instances are scoped to a specific chain.
     "chain_id" bigint references "chain"(id) not null,
@@ -150,12 +152,12 @@ CREATE TABLE extractor_instance_state (
 
 	-- only allow a single extractor state instance per chain.
 	unique(chain_id, "name")
-)
+);
 
 -- Describes the static attributes of a protocol (component). A protocol is usually
 --	a single component of a protocol system. E.g. uniswap-v2 is the system
 --	that creates and operates swap components (aka pools).
-create table protocol_component (
+create table if not exists protocol_component (
     "id" BIGSERIAL PRIMARY KEY,
     
     -- Protocols are scoped to a specific chain.
@@ -192,10 +194,10 @@ create table protocol_component (
     unique("chain_id", "protocol_system_id", "external_id")
 );
 
-create index idx_protocol_identity on protocol_component(external_id, protocol_system_id, chain_id);
+create index if not exists idx_protocol_identity on protocol_component(external_id, protocol_system_id, chain_id);
 
 -- Describes the mutable state of a component. Versioned by blocks.
-create table protocol_state (
+create table if not exists protocol_state (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- The total value locked within the protocol. Might not always apply.
@@ -231,13 +233,13 @@ create table protocol_state (
     
 );
 
-create index idx_protocol_state_tx on protocol_state(modify_tx);
-create index idx_protocol_state_valid_to on protocol_state(valid_to);
-create index idx_protocol_state_valid_protocol_component_id on protocol_state(protocol_component_id);
+create index if not exists idx_protocol_state_tx on protocol_state(modify_tx);
+create index if not exists idx_protocol_state_valid_to on protocol_state(valid_to);
+create index if not exists idx_protocol_state_valid_protocol_component_id on protocol_state(protocol_component_id);
 
 
 -- Describes a single contract.
-create table contract (
+create table if not exists contract (
     "id" BIGSERIAL PRIMARY KEY,
     
     -- Contracts are scoped to a single chain.
@@ -269,10 +271,10 @@ create table contract (
     UNIQUE ("chain_id", "address")
 );
 
-create index idx_contract_chain_id on contract(chain_id);
+create index if not exists idx_contract_chain_id on contract(chain_id);
 
 -- Describes tokens e.g. ERC20 on evm chains.
-create table "token" (
+create table if not exists "token" (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- The contract that implements this token.
@@ -297,13 +299,12 @@ create table "token" (
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX idx_token_symbol ON "token" USING gin("symbol" gin_trgm_ops);
-CREATE INDEX idx_token_contract_id ON token(contract_id);
+CREATE INDEX if not exists idx_token_symbol ON "token" USING gin("symbol" gin_trgm_ops);
+CREATE INDEX if not exists idx_token_contract_id ON token(contract_id);
 
 
 -- M2M relationship between tokens and protocol 
-CREATE TABLE protocol_holds_token (
+CREATE TABLE if not exists protocol_holds_token (
     "protocol_component_id" BIGINT REFERENCES protocol_component(id) not null,
     
     "token_id" BIGINT REFERENCES "token"(id) not null,
@@ -343,8 +344,8 @@ create table contract_balance(
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX idx_contract_balance_contract_id ON contract_balance (contract_id);
-CREATE INDEX idx_contract_balance_valid_to ON contract_balance (valid_to);
+CREATE INDEX if not exists idx_contract_balance_contract_id ON contract_balance (contract_id);
+CREATE INDEX if not exists idx_contract_balance_valid_to ON contract_balance (valid_to);
 
 -- Versioned contract code.
 create table contract_code(
@@ -376,11 +377,11 @@ create table contract_code(
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX idx_contract_code_contract_id ON contract_code (contract_id);
-CREATE INDEX idx_contract_code_valid_to ON contract_code (valid_to);
+CREATE INDEX if not exists idx_contract_code_contract_id ON contract_code (contract_id);
+CREATE INDEX if not exists idx_contract_code_valid_to ON contract_code (valid_to);
 
 -- Versioned contract storage.
-create table contract_storage (
+create table if not exists contract_storage (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- the preimage/slot for this entry. 
@@ -409,11 +410,11 @@ create table contract_storage (
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX idx_contract_storage_contract_id ON contract_storage (contract_id);
-CREATE INDEX idx_contract_storage_valid_to ON contract_storage (valid_to);
+CREATE INDEX if not exists idx_contract_storage_contract_id ON contract_storage (contract_id);
+CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (valid_to);
 
 -- Relationship between protocols and contract(s).
-CREATE TABLE protocol_calls_contract (
+CREATE TABLE if not exists protocol_calls_contract (
 	"id" BIGSERIAL PRIMARY KEY,
 
     "protocol_component_id" BIGINT REFERENCES protocol_component(id) not null,
@@ -438,13 +439,12 @@ CREATE TABLE protocol_calls_contract (
     UNIQUE("protocol_component_id", "contract_id", "valid_to")
 );
 
-CREATE INDEX idx_protocol_calls_contract_protocol_component_id ON protocol_calls_contract(protocol_component_id);
-CREATE INDEX idx_protocol_calls_contract_contract_id ON protocol_calls_contract(contract_id);
-CREATE INDEX idx_protocol_calls_contract_valid_to ON protocol_calls_contract(valid_to);
+CREATE INDEX if not exists idx_protocol_calls_contract_protocol_component_id ON protocol_calls_contract(protocol_component_id);
+CREATE INDEX if not exists idx_protocol_calls_contract_contract_id ON protocol_calls_contract(contract_id);
+CREATE INDEX if not exists idx_protocol_calls_contract_valid_to ON protocol_calls_contract(valid_to);
 
-CREATE EXTENSION IF NOT EXISTS hstore;
 -- keeps track of what we did.
-CREATE TABLE audit_log (
+CREATE TABLE if not exists audit_log (
     operation         CHAR(1)   	NOT NULL,
     ts             	  TIMESTAMPTZ 	NOT NULL,
     userid            TEXT      	NOT NULL,
