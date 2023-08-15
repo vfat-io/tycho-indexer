@@ -83,10 +83,18 @@ You will need to have rust, rustup, docker and docker-compose installed before g
     ```
     export DATABASE_URL=postgres://postgres:mypassword@localhost:5432/tycho_indexer_0
     ```
-    5. Set up migrations and cerate the database if not existent yet:
+    5. Setup/update the database:
+    ```bash
+    diesel migration run
     ```
-    diesel setup
-    ```
+
+
+### Migrations
+
+If you have to change the database schema, please make sure the down migration is included and test it by executing:
+```bash
+diesel migration redo
+```
 
 # Architecture
 
