@@ -46,6 +46,48 @@ To achieve the previously mentioned functionalities, Tycho uses the following me
 - **ComponentChange:** This message type is emitted whenever a new protocol component is added or removed. This allows clients to update their state as required.
 
 
+# Development
+
+## Getting started
+You will need to have rust, rustup, docker and docker-compose installed before getting started.
+
+1. Substreams 
+    1. Install [substreams-cli](https://thegraph.com/docs/en/substreams/getting-started/installing-the-cli/)
+    2. Retrieve an API key from https://app.streamingfast.io/
+    3. Set the api key as described below:
+    ```bash
+    export STREAMINGFAST_KEY=server_123123 # Use your own API key
+    export SUBSTREAMS_API_TOKEN=$(curl https://auth.streamingfast.io/v1/auth/issue -s --data-binary '{"api_key":"'$STREAMINGFAST_KEY'"}' | jq -r .token)
+    ```
+    4. Substreams compiles to wasm, so you need the corresponding toolchain:
+    ```bash
+    rustup target add wasm32-unknown-unknown
+    ```
+    5. To compile protobuf files please install [buf](https://docs.buf.build/installation)
+2. Postgres & Diesel
+    1. If you are on a mac, you might need to install postgres library first and add it to the library path:
+    ```bash
+    brew install libpq
+    # PATH-TO-LIB looks somewhat like this: /opt/homebrew/Cellar/libpq/15.4/lib
+    export LIBRARY_PATH=<PATH-TO-LIB>:$LIBRARY_PATH
+    ```
+    2. Install the diesel-cli:
+    ```bash
+    cargo install diesel_cli --no-default-features --features postgres
+    ```
+    3. Start up a the postgres db service
+    ```bash
+    docker-compose up -d
+    ```
+    4. Set the env var for the DB connection:
+    ```
+    export DATABASE_URL=postgres://postgres:mypassword@localhost:5432/tycho_indexer_0
+    ```
+    5. Set up migrations and cerate the database if not existent yet:
+    ```
+    diesel setup
+    ```
+
 # Architecture
 
 The logical diagram below illustrates the architecture of the system. Each component will be discussed individually:
