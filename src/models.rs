@@ -4,7 +4,7 @@ pub enum Chain {
     ZkSync,
 }
 
-pub enum ProtocolSystem{
+pub enum ProtocolSystem {
     Ambient,
 }
 

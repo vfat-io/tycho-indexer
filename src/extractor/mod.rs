@@ -1,4 +1,4 @@
-pub mod ambient;
+pub mod evm;
 
 use crate::storage::{
     ChainGateway, ContractStateGateway, ExtractorInstanceGateway, ProtocolGateway,
@@ -9,26 +9,28 @@ use crate::{
 };
 use async_trait::async_trait;
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ExtractionError {}
 
 trait VMStateGateway:
-    ExtractorInstanceGateway + ChainGateway + ProtocolGateway + ContractStateGateway
+    ExtractorInstanceGateway + ChainGateway + ProtocolGateway + ContractStateGateway + Send
 {
 }
 
 type VMStateGatewayType<B, TX, T, P, C, S, V> = Arc<
-    dyn VMStateGateway<
-        Block = B,
-        Transaction = TX,
-        Token = T,
-        ProtocolComponent = P,
-        ContractState = C,
-        Slot = S,
-        Value = V,
+    Mutex<
+        dyn VMStateGateway<
+            Block = B,
+            Transaction = TX,
+            Token = T,
+            ProtocolComponent = P,
+            ContractState = C,
+            Slot = S,
+            Value = V,
+        >,
     >,
 >;
 
@@ -58,14 +60,14 @@ trait Extractor {
     ) -> Result<Box<Self>, Box<dyn Error>>;
 
     async fn handle_tick_scoped_data(
-        &mut self,
+        &self,
         inp: BlockScopedData,
     ) -> Result<Option<Self::Message>, ExtractionError>;
 
     async fn handle_revert(
-        &mut self,
+        &self,
         inp: BlockUndoSignal,
     ) -> Result<Option<Self::Message>, ExtractionError>;
 
-    async fn handle_progress(&mut self, inp: ModulesProgress) -> Result<(), ExtractionError>;
+    async fn handle_progress(&self, inp: ModulesProgress) -> Result<(), ExtractionError>;
 }

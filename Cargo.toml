@@ -34,3 +34,4 @@ diesel = { version = "2.1.0", features = ["postgres", "chrono", "serde_json"] }
 diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 serde_json = "1.0.105"
 chrono = "0.4.26"
+ethers = "^2.0.2"
