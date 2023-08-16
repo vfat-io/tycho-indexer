@@ -15,6 +15,8 @@ trait Extractor {
 
     fn get_id(&self) -> ExtractorIdentity;
 
+    async fn setup() -> Self;
+
     async fn handle_tick_scoped_data(
         &mut self,
         inp: BlockScopedData,
