@@ -13,7 +13,7 @@ pub enum BlockIdentifier<'a> {
 }
 
 #[async_trait]
-trait ChainGateway {
+pub trait ChainGateway {
     type Block;
     type Transaction;
 
@@ -24,7 +24,7 @@ trait ChainGateway {
 }
 
 #[async_trait]
-trait ExtractorInstanceGateway {
+pub trait ExtractorInstanceGateway {
     async fn get_state(
         &mut self,
         name: &str,
@@ -35,7 +35,7 @@ trait ExtractorInstanceGateway {
 }
 
 #[async_trait]
-trait ProtocolGateway {
+pub trait ProtocolGateway {
     type Token;
     type ProtocolComponent;
 
@@ -61,7 +61,7 @@ trait ProtocolGateway {
 }
 
 #[async_trait]
-trait ContractStateGateway {
+pub trait ContractStateGateway {
     type ContractState;
     type Slot;
     type Value;
