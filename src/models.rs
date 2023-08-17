@@ -1,7 +1,28 @@
+#[derive(Debug, Clone, Copy)]
 pub enum Chain {
     Ethereum,
     Starknet,
     ZkSync,
+}
+
+impl From<String> for Chain {
+    fn from(value: String) -> Self {
+        if value == "ethereum" {
+            Chain::Ethereum
+        } else if value == "starknet" {
+            Chain::Starknet
+        } else if value == "zksync" {
+            Chain::ZkSync
+        } else {
+            panic!("Can't interpret {} as chain!", value);
+        }
+    }
+}
+
+impl From<Chain> for String {
+    fn from(val: Chain) -> Self {
+        format!("{:?}", val)
+    }
 }
 
 pub enum ProtocolSystem {

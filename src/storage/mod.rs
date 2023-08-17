@@ -1,14 +1,15 @@
+pub mod orm;
+pub mod postgres;
+pub mod schema;
+
 use std::{collections::HashMap, error::Error};
 
 use async_trait::async_trait;
 
 use crate::models::{Chain, ExtractorInstance, ProtocolSystem};
 
-pub mod orm;
-pub mod schema;
-
 pub enum BlockIdentifier<'a> {
-    Number(u64),
+    Number(i64),
     Hash(&'a [u8]),
 }
 
@@ -17,10 +18,10 @@ pub trait ChainGateway {
     type Block;
     type Transaction;
 
-    async fn add_block(&mut self, new: Self::Block) -> Result<(), Box<dyn Error>>;
-    async fn get_block(&mut self, id: BlockIdentifier) -> Result<Self::Block, Box<dyn Error>>;
-    async fn add_tx(&mut self, new: Self::Transaction) -> Result<(), Box<dyn Error>>;
-    async fn get_tx(&mut self, hash: &[u8]) -> Result<Self::Transaction, Box<dyn Error>>;
+    async fn add_block(&self, new: Self::Block) -> Result<(), Box<dyn Error>>;
+    async fn get_block(&self, id: BlockIdentifier<'_>) -> Result<Self::Block, Box<dyn Error>>;
+    async fn add_tx(&self, new: Self::Transaction) -> Result<(), Box<dyn Error>>;
+    async fn get_tx(&self, hash: &[u8]) -> Result<Self::Transaction, Box<dyn Error>>;
 }
 
 #[async_trait]
