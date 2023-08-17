@@ -1,5 +1,6 @@
 pub mod evm;
 
+use crate::models::Chain;
 use crate::storage::{
     ChainGateway, ContractStateGateway, ExtractorInstanceGateway, ProtocolGateway,
 };
@@ -16,21 +17,19 @@ use thiserror::Error;
 pub enum ExtractionError {}
 
 trait VMStateGateway:
-    ExtractorInstanceGateway + ChainGateway + ProtocolGateway + ContractStateGateway + Send
+    ExtractorInstanceGateway + ChainGateway + ProtocolGateway + ContractStateGateway + Send + Sync
 {
 }
 
 type VMStateGatewayType<B, TX, T, P, C, S, V> = Arc<
-    Mutex<
-        dyn VMStateGateway<
-            Block = B,
-            Transaction = TX,
-            Token = T,
-            ProtocolComponent = P,
-            ContractState = C,
-            Slot = S,
-            Value = V,
-        >,
+    dyn VMStateGateway<
+        Block = B,
+        Transaction = TX,
+        Token = T,
+        ProtocolComponent = P,
+        ContractState = C,
+        Slot = S,
+        Value = V,
     >,
 >;
 
@@ -48,6 +47,8 @@ trait Extractor {
     fn get_id(&self) -> ExtractorIdentity;
 
     async fn setup(
+        name: &str,
+        chain: Chain,
         gateway: VMStateGatewayType<
             Self::Block,
             Self::Transaction,

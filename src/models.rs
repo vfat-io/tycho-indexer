@@ -17,7 +17,7 @@ pub struct ExtractorInstance {
     pub name: String,
     pub chain: Chain,
     pub attributes: serde_json::Value,
-    pub cursos: Vec<u8>,
+    pub cursor: Vec<u8>,
 }
 
 pub trait NormalisedMessage {
