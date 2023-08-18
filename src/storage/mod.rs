@@ -6,7 +6,7 @@ use std::{collections::HashMap, error::Error};
 
 use async_trait::async_trait;
 
-use crate::models::{Chain, ChainScoped, ExtractorInstance, ProtocolSystem};
+use crate::models::{Chain, ExtractorInstance, ProtocolSystem};
 
 pub enum BlockIdentifier<'a> {
     Number((Chain, i64)),

@@ -46,7 +46,3 @@ pub struct ExtractorInstance {
 pub trait NormalisedMessage {
     fn source(&self) -> ExtractorIdentity;
 }
-
-pub trait ChainScoped {
-    fn chain(&self) -> Chain;
-}

@@ -1,5 +1,7 @@
 use std::error::Error;
 
+use crate::models;
+
 use super::schema::{
     block, chain, contract, contract_balance, contract_code, contract_storage,
     extractor_instance_state, protocol_component, protocol_holds_token, protocol_system,
@@ -48,6 +50,35 @@ pub struct Block {
     pub modified_ts: NaiveDateTime,
 }
 
+impl Block {
+    pub fn by_id(id: i64, conn: &mut PgConnection) -> QueryResult<Block> {
+        block::table
+            .filter(block::id.eq(id))
+            .select(Block::as_select())
+            .first::<Block>(conn)
+    }
+
+    pub fn by_number(
+        chain: models::Chain,
+        number: i64,
+        conn: &mut PgConnection,
+    ) -> QueryResult<Block> {
+        block::table
+            .inner_join(chain::table)
+            .filter(block::id.eq(number))
+            .filter(chain::name.eq(chain.to_string()))
+            .select(Block::as_select())
+            .first::<Block>(conn)
+    }
+
+    pub fn by_hash(block_hash: &[u8], conn: &mut PgConnection) -> QueryResult<Block> {
+        block::table
+            .filter(block::hash.eq(block_hash))
+            .select(Block::as_select())
+            .first::<Block>(conn)
+    }
+}
+
 #[derive(Insertable)]
 #[diesel(table_name=block)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -60,7 +91,7 @@ pub struct NewBlock {
     pub ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Block))]
 #[diesel(table_name=transaction)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -73,6 +104,15 @@ pub struct Transaction {
     pub index: i64,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+impl Transaction {
+    pub fn by_hash(hash: &[u8], conn: &mut PgConnection) -> QueryResult<Self> {
+        transaction::table
+            .filter(transaction::hash.eq(hash))
+            .select(Transaction::as_select())
+            .first(conn)
+    }
 }
 
 #[derive(Insertable)]

@@ -26,7 +26,7 @@ create table if not exists "block" (
 	"hash" bytea unique not null,
 	
 	-- The ancestor hash of this block. Used to trace forked blocks.
-	"parent_hash" bytea unique not null,
+	"parent_hash" bytea not null,
 	
 	-- Whether this block is part of the canonical chain.
 	"main" bool not null default true,

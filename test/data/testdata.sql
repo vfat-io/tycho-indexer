@@ -29,7 +29,7 @@ VALUES
 INSERT INTO "transaction" ("hash", "from", "to", "index", "block_id")
 VALUES
     -- ethereum
-    ('0x001', '\x31', '\x32', 1, 1), 
+    (E'\\xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945', E'\\x4648451b5F87FF8F0F7D622bD40574bb97E25980', E'\\x6B175474E89094C44Da98b954EedeAC495271d0F', 1, 1), 
     ('0x002', '\x33', '\x34', 2, 1), 
     ('0x003', '\x35', '\x36', 1, 2),
     ('0x004', '\x37', '\x38', 1, 3),

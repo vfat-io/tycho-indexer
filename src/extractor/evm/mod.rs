@@ -10,7 +10,7 @@ pub struct SwapPool {}
 
 pub struct ERC20Token {}
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Block {
     pub number: u64,
     pub hash: H256,
@@ -19,10 +19,10 @@ pub struct Block {
     pub ts: NaiveDateTime,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Transaction {
     pub hash: H256,
-    pub block_id: i64,
+    pub block_hash: H256,
     pub from: H160,
     pub to: H160,
     pub index: u64,
