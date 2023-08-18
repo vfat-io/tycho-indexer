@@ -48,6 +48,18 @@ pub struct Block {
     pub modified_ts: NaiveDateTime,
 }
 
+#[derive(Insertable)]
+#[diesel(table_name=block)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewBlock {
+    pub hash: Vec<u8>,
+    pub parent_hash: Vec<u8>,
+    pub chain_id: i64,
+    pub main: bool,
+    pub number: i64,
+    pub ts: NaiveDateTime,
+}
+
 #[derive(Identifiable, Queryable, Associations, Selectable)]
 #[diesel(belongs_to(Block))]
 #[diesel(table_name=transaction)]
@@ -61,6 +73,17 @@ pub struct Transaction {
     pub index: i64,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name=transaction)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewTransaction {
+    pub hash: Vec<u8>,
+    pub block_id: i64,
+    pub from: Vec<u8>,
+    pub to: Vec<u8>,
+    pub index: i64,
 }
 
 #[derive(Identifiable, Queryable, Selectable)]

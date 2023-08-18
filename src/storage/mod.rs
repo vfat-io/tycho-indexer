@@ -6,11 +6,30 @@ use std::{collections::HashMap, error::Error};
 
 use async_trait::async_trait;
 
-use crate::models::{Chain, ExtractorInstance, ProtocolSystem};
+use crate::models::{Chain, ChainScoped, ExtractorInstance, ProtocolSystem};
 
 pub enum BlockIdentifier<'a> {
-    Number(i64),
+    Number((Chain, i64)),
     Hash(&'a [u8]),
+}
+
+pub trait StorableBlock<S, N> {
+    fn from_storage(val: S, chain: Chain) -> Self;
+
+    fn to_storage(&self, chain_id: i64) -> N;
+
+    fn chain(&self) -> Chain;
+}
+
+pub trait StorableTransaction<S, N, BH, DbId>
+where
+    BH: From<Vec<u8>> + Into<Vec<u8>>,
+{
+    fn from_storage(val: S, block_hash: BH) -> Self;
+
+    fn to_storage(&self, block_id: DbId) -> N;
+
+    fn block_hash(&self) -> BH;
 }
 
 #[async_trait]

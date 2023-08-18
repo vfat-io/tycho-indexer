@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Copy)]
+use crate::storage::BlockIdentifier;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Chain {
     Ethereum,
     Starknet,
@@ -19,9 +21,9 @@ impl From<String> for Chain {
     }
 }
 
-impl From<Chain> for String {
-    fn from(val: Chain) -> Self {
-        format!("{:?}", val)
+impl ToString for Chain {
+    fn to_string(&self) -> String {
+        format!("{:?}", self).to_lowercase()
     }
 }
 
@@ -43,4 +45,8 @@ pub struct ExtractorInstance {
 
 pub trait NormalisedMessage {
     fn source(&self) -> ExtractorIdentity;
+}
+
+pub trait ChainScoped {
+    fn chain(&self) -> Chain;
 }

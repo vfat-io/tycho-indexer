@@ -3,15 +3,30 @@ pub mod ambient;
 use crate::models::{Chain, ExtractorIdentity, NormalisedMessage};
 use std::collections::HashMap;
 
-use ethers::types::{H256, U256};
+use chrono::NaiveDateTime;
+use ethers::types::{H160, H256, U256};
 
 pub struct SwapPool {}
 
 pub struct ERC20Token {}
 
-pub struct Block {}
+#[derive(Debug, PartialEq)]
+pub struct Block {
+    pub number: u64,
+    pub hash: H256,
+    pub parent_hash: H256,
+    pub chain: Chain,
+    pub ts: NaiveDateTime,
+}
 
-pub struct Transaction {}
+#[derive(Debug, PartialEq)]
+pub struct Transaction {
+    pub hash: H256,
+    pub block_id: i64,
+    pub from: H160,
+    pub to: H160,
+    pub index: u64,
+}
 
 pub struct Account {}
 
