@@ -69,7 +69,7 @@ impl Extractor for AmbientContractExtractor {
         >,
     ) -> Result<Box<Self>, Box<dyn Error>> {
         // check if this extractor has state
-        let mut gw_ref = gateway.as_ref();
+        let gw_ref = gateway.as_ref();
         let res = gw_ref.get_state(name, chain).await?;
 
         let res = if let Some(state) = res {
@@ -92,7 +92,7 @@ impl Extractor for AmbientContractExtractor {
         &self,
         inp: BlockScopedData,
     ) -> Result<Option<Self::Message>, ExtractionError> {
-        let data = inp.output.as_ref().unwrap().map_output.as_ref().unwrap();
+        let _data = inp.output.as_ref().unwrap().map_output.as_ref().unwrap();
         // let msg = Message::decode::<Changes>(data.value.as_slice()).unwrap();
         self.update_cursor(inp.cursor).await;
         todo!()

@@ -9,16 +9,11 @@ use diesel::prelude::*;
 use diesel_async::pooled_connection::bb8::{Pool, PooledConnection};
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 use diesel_async::scoped_futures::ScopedFutureExt;
-use diesel_async::RunQueryDsl;
-use diesel_async::{AsyncConnection, AsyncPgConnection};
-use ethers::types::H160;
-use ethers::types::H256;
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
+use ethers::types::{H160, H256};
 use tokio::sync::RwLock;
 
-use super::BlockIdentifier;
-use super::ChainGateway;
-use super::StorableBlock;
-use super::StorableTransaction;
+use super::{BlockIdentifier, ChainGateway, StorableBlock, StorableTransaction};
 use crate::extractor::evm;
 use crate::models::Chain;
 use crate::storage::orm;
@@ -59,10 +54,6 @@ impl ChainIdCache {
             self.map_id_chain.insert(id_, chain_);
         }
     }
-
-    fn initialised(&self) -> bool {
-        !self.map_chain_id.is_empty()
-    }
 }
 
 pub struct PostgresGateway<B, TX> {
@@ -98,11 +89,22 @@ where
             _phantom_block: PhantomData,
             _phantom_tx: PhantomData,
         };
-        gw.init_cache(None).await;
+        gw.init_chain_id_cache(None).await;
         gw
     }
 
-    async fn init_cache(&self, conn: Option<&mut AsyncPgConnection>) {
+    #[cfg(test)]
+    async fn with_mocked_connection(
+        connection_string: &str,
+        connection: &mut AsyncPgConnection,
+    ) -> Self {
+        let gw = Self::new(connection_string).await;
+        // init chain id cache (again) using a mocked connection
+        gw.init_chain_id_cache(Some(connection)).await;
+        gw
+    }
+
+    async fn init_chain_id_cache(&self, conn: Option<&mut AsyncPgConnection>) {
         if let Some(conn) = conn {
             self.chain_id_cache.write().await.init(conn).await;
         } else {
@@ -427,12 +429,11 @@ mod test {
     #[tokio::test]
     async fn test_get_block() {
         let mut conn = setup_db().await;
-        // TODO can we make the init nicer?
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::new(
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::with_mocked_connection(
             "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0",
+            &mut conn,
         )
         .await;
-        gw.init_cache(Some(&mut conn)).await;
         let exp = block("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9");
         let block_id = BlockIdentifier::Number((Chain::Ethereum, 2));
 
@@ -444,12 +445,11 @@ mod test {
     #[tokio::test]
     async fn test_add_block() {
         let mut conn = setup_db().await;
-        // TODO can we make the init nicer?
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::new(
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::with_mocked_connection(
             "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0",
+            &mut conn,
         )
         .await;
-        gw.init_cache(Some(&mut conn)).await;
         let block = block("0xbadbabe000000000000000000000000000000000000000000000000000000000");
 
         gw.insert_one_block(block, &mut conn).await.unwrap();
@@ -480,12 +480,11 @@ mod test {
     #[tokio::test]
     async fn test_get_tx() {
         let mut conn = setup_db().await;
-        // TODO can we make the init nicer?
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::new(
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::with_mocked_connection(
             "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0",
+            &mut conn,
         )
         .await;
-        gw.init_cache(Some(&mut conn)).await;
         let exp = transaction("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945");
 
         let tx = gw
@@ -499,11 +498,11 @@ mod test {
     #[tokio::test]
     async fn test_add_tx() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::new(
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::with_mocked_connection(
             "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0",
+            &mut conn,
         )
         .await;
-        gw.init_cache(Some(&mut conn)).await;
         let mut tx =
             transaction("0xbadbabe000000000000000000000000000000000000000000000000000000000");
         tx.block_hash =
