@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::models::{Chain, ExtractorInstance, ProtocolSystem};
 
-pub enum BlockIdentifier<'a> {
+pub enum BlockIdentifier {
     Number((Chain, i64)),
-    Hash(&'a [u8]),
+    Hash(Vec<u8>),
 }
 
 pub trait StorableBlock<S, N> {
@@ -38,7 +38,7 @@ pub trait ChainGateway {
     type Transaction;
 
     async fn add_block(&self, new: Self::Block) -> Result<(), Box<dyn Error>>;
-    async fn get_block(&self, id: BlockIdentifier<'_>) -> Result<Self::Block, Box<dyn Error>>;
+    async fn get_block(&self, id: BlockIdentifier) -> Result<Self::Block, Box<dyn Error>>;
     async fn add_tx(&self, new: Self::Transaction) -> Result<(), Box<dyn Error>>;
     async fn get_tx(&self, hash: &[u8]) -> Result<Self::Transaction, Box<dyn Error>>;
 }

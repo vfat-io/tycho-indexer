@@ -1,5 +1,3 @@
-use crate::storage::BlockIdentifier;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Chain {
     Ethereum,

@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use crate::models;
 
 use super::schema::{
@@ -9,6 +7,8 @@ use super::schema::{
 };
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
+use diesel_async::AsyncPgConnection;
+use diesel_async::RunQueryDsl;
 use diesel_derive_enum::DbEnum;
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -51,31 +51,26 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn by_id(id: i64, conn: &mut PgConnection) -> QueryResult<Block> {
-        block::table
-            .filter(block::id.eq(id))
-            .select(Block::as_select())
-            .first::<Block>(conn)
-    }
-
-    pub fn by_number(
+    pub async fn by_number(
         chain: models::Chain,
         number: i64,
-        conn: &mut PgConnection,
+        conn: &mut AsyncPgConnection,
     ) -> QueryResult<Block> {
         block::table
             .inner_join(chain::table)
-            .filter(block::id.eq(number))
+            .filter(block::number.eq(number))
             .filter(chain::name.eq(chain.to_string()))
             .select(Block::as_select())
             .first::<Block>(conn)
+            .await
     }
 
-    pub fn by_hash(block_hash: &[u8], conn: &mut PgConnection) -> QueryResult<Block> {
+    pub async fn by_hash(block_hash: &[u8], conn: &mut AsyncPgConnection) -> QueryResult<Block> {
         block::table
             .filter(block::hash.eq(block_hash))
             .select(Block::as_select())
             .first::<Block>(conn)
+            .await
     }
 }
 
@@ -104,15 +99,6 @@ pub struct Transaction {
     pub index: i64,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
-}
-
-impl Transaction {
-    pub fn by_hash(hash: &[u8], conn: &mut PgConnection) -> QueryResult<Self> {
-        transaction::table
-            .filter(transaction::hash.eq(hash))
-            .select(Transaction::as_select())
-            .first(conn)
-    }
 }
 
 #[derive(Insertable)]
@@ -275,7 +261,7 @@ pub struct ProtocolHoldsToken {
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
-
+/*
 pub fn get_tokens(protocol: &ProtocolComponent, conn: &mut PgConnection) -> Vec<Token> {
     let token_ids = ProtocolHoldsToken::belonging_to(protocol)
         .select(protocol_holds_token::token_id)
@@ -311,3 +297,4 @@ pub fn add_tokens(
         .collect();
     Ok(res)
 }
+ */
