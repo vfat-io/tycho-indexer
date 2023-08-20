@@ -1,9 +1,24 @@
+//! Postgres based storage backend
+//!
+//! Provides implementation for the traits defined in storage.
+//!
+//! # Design Decisions
+//!
+//! Some enums are represented as tables. E.g. Chain. It is easy to extend the
+//! rust codebase to include more enums, but changing a type of a sql column is
+//! more involved. To avoid unnecessary migrations when modifying Chain or
+//! ProtocolSystem enums, these are modelled as tables.
+//!
+//! As these are modeled as tables we need to sync them at the startup of the system
+//! this is done as soon as the gateway is initialised.
+//!
+//! A removed enum can simply be ignored - it might trigger a panic if an associated
+//! entity is still present in the database and retrieved with a codebase that does
+//! not have the enum value present anymore.
 use std::collections::HashMap;
-use std::error::Error;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 use diesel::prelude::*;
 use diesel_async::pooled_connection::bb8::{Pool, PooledConnection};
@@ -19,6 +34,7 @@ use crate::models::Chain;
 use crate::storage::schema;
 use crate::storage::{orm, StorageError};
 
+// TODO: Make this generic over enums
 struct ChainIdCache {
     map_chain_id: HashMap<Chain, i64>,
     map_id_chain: HashMap<i64, Chain>,

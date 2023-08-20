@@ -29,6 +29,25 @@ pub enum ProtocolSystem {
     Ambient,
 }
 
+pub enum ImplementationType {
+    Vm,
+    Custom,
+}
+
+pub enum FinancialType {
+    Swap,
+    Lend,
+    Leverage,
+    Psm,
+}
+
+pub struct ProtocolType {
+    name: String,
+    attribute_schema: serde_json::Value,
+    financial_type: FinancialType,
+    implementation_type: ImplementationType,
+}
+
 pub struct ExtractorIdentity {
     pub chain: Chain,
     pub name: String,
