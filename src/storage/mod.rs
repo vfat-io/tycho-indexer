@@ -1,40 +1,44 @@
-//! Storage traits
+//! # Storage Traits
 //!
-//! This module contains traits and structs that concern themselves with
-//! the retrieval, addition and deletion of protocol state.
+//! This module encapsulates the traits and structs meant for handling
+//! operations such as retrieval, addition, and deletion pertaining to protocol
+//! state.
 //!
-//! # Versioning
+//! ## Versioning
 //!
-//! All state in Tycho is versioned by timestamp. This allows retrieving
-//! state across protocols that uses different clock mechanisms (e.g. blocks).
+//! The core of Tycho keeps track of all states by timestamp versioning. This
+//! strategy allows us to maintain and retrieve state across different
+//! protocols, including those that rely on various clock mechanisms (e.g.,
+//! blockchains).
 //!
-//! Blockchain state is additionally versioned by transactions. As a block only
-//! has a single timestamp, from a timestamp versioned view, a block's
-//! timestamps might correspond to more than a single state. In such situations,
-//! the user has to express more clearly what they are interested in. E.g. A
-//! user might be interested in all states of a block or just in the latest one.
-//! As each onchain state modification has a transaction with an index, the
-//! original sequence of state modification remains known.
+//! In addition to timestamps, blockchain state is further versioned using
+//! transactions. Since a block carries a single timestamp only, there can be
+//! instances where one block's timestamp might overlap with multiple states. In
+//! these cases, an explicit input is required from the user. For example, a
+//! user may want to track all states within a block or just the most recent
+//! one. As every onchain state modification associates with a transaction
+//! having an index, the original sequence of state modifications stays
+//! preserved.
 //!
-//! # Implementations
+//! ## Implementations
 //!
-//! To implement a storage system, implement all the below traits. Next, the
-//! entities that you wish to store, need to implement the respective
-//! `Storable*` trait.
+//! To set up a storage system, you need to implement all the traits defined
+//! below. Additionally, the entities you aim to store must also implement the
+//! respective `Storable*` trait.
 //!
-//! Often you will have different entities based on the blockchain you are
-//! dealing with. E.g. EVM and Starknet entities are different!
+//! Note: that you will have different entities based on the specific blockchain
+//! under consideration. For instance, entities for EVM and Starknet will vary!
 //!
-//! The gateways are not chain scoped, but generic overt certain entity types.
-//! So a gateway that deals with EVM entities, can deal with multiple EVM
-//! based chains, e.g. mainnet & arbitrum.
+//! The gateways are not confined to a certain chain scope but are universally
+//! applicable over a range of entity types. So, a gateway designed for EVM
+//! entities can handle multiple EVM-based chains, like mainnet & arbitrum.
 //!
-//! If the entities of the chains are different though, you might have to use
-//! separate instances of the gateway. Alternatively, you could create an enum
-//! that ecompasses all different entity types and implement the specific traits
-//! for these enums, this way you can instantiate a truly cross chain compatible
-//! gateway (e.g. [enum_dispatch](https://docs.rs/enum_dispatch/latest/enum_dispatch/)
-//! crate).
+//! However, if the entities for the chains differ, you may need to resort to
+//! separate gateway instances. Alternatively, you can create an enum that
+//! houses all different entity types and then implement the respective traits
+//! for these enums. Following this approach paves the way for initializing a
+//! cross-chain compatible gateway (For instance, refer
+//! [enum_dispatch](https://docs.rs/enum_dispatch/latest/enum_dispatch/) crate).
 pub mod orm;
 pub mod postgres;
 pub mod schema;
@@ -165,6 +169,7 @@ pub enum StorageError {
 /// * `Transaction`: represents a transaction within a block.
 #[async_trait]
 pub trait ChainGateway {
+    type DB;
     type Block;
     type Transaction;
 
@@ -177,7 +182,7 @@ pub trait ChainGateway {
     /// # Returns
     /// - Empty ok result indicates success. Failure might occur if the block is
     ///   already present.
-    async fn add_block(&self, new: Self::Block) -> Result<(), StorageError>;
+    async fn add_block(&self, new: Self::Block, db: &mut Self::DB) -> Result<(), StorageError>;
     /// Retrieves a block from storage.
     ///
     /// # Parameters
@@ -186,7 +191,11 @@ pub trait ChainGateway {
     /// # Returns
     /// - An Ok result containing the block. Might fail if the block does not
     ///   exist yet.
-    async fn get_block(&self, id: BlockIdentifier) -> Result<Self::Block, StorageError>;
+    async fn get_block(
+        &self,
+        id: BlockIdentifier,
+        db: &mut Self::DB,
+    ) -> Result<Self::Block, StorageError>;
     /// Adds a new transaction to storage.
     ///
     /// # Parameters
@@ -197,7 +206,7 @@ pub trait ChainGateway {
     /// - Empty ok result indicates success. Failure might occur if the
     /// corresponding block does not exists yet, or if the transaction already
     /// exists.
-    async fn add_tx(&self, new: Self::Transaction) -> Result<(), StorageError>;
+    async fn add_tx(&self, new: Self::Transaction, db: &mut Self::DB) -> Result<(), StorageError>;
 
     /// Tries to retrieve a transaction from the blockchain's storage using its
     /// hash.
@@ -209,7 +218,11 @@ pub trait ChainGateway {
     /// # Returns
     /// - An Ok result containing the transaction. Might fail if the transaction
     ///   does not exist yet.
-    async fn get_tx(&self, hash: &[u8]) -> Result<Self::Transaction, StorageError>;
+    async fn get_tx(
+        &self,
+        hash: &[u8],
+        db: &mut Self::DB,
+    ) -> Result<Self::Transaction, StorageError>;
 }
 
 /// Store and retrieve state for Extractors.
@@ -222,6 +235,8 @@ pub trait ChainGateway {
 /// they are indexing.
 #[async_trait]
 pub trait ExtractorInstanceGateway {
+    type DB;
+
     /// Retrieves the state of an extractor instance from a storage.
     ///
     /// # Parameters
@@ -235,6 +250,7 @@ pub trait ExtractorInstanceGateway {
         &self,
         name: &str,
         chain: Chain,
+        db: &Self::DB,
     ) -> Result<Option<ExtractorInstance>, StorageError>;
 
     /// Saves the state of an extractor instance to a storage.
@@ -312,6 +328,7 @@ pub trait StorableProtocolComponent<S, N, T, DbId> {
 /// tokens from storage.
 #[async_trait]
 pub trait ProtocolGateway {
+    type DB;
     type Token;
     type ProtocolComponent;
     // TODO: at this later type ProtocolState;
@@ -414,6 +431,7 @@ pub trait StorableContract<S, N, DbId> {
 /// Specifies how to retrieve, add and update contracts in storage.
 #[async_trait]
 pub trait ContractStateGateway {
+    type DB;
     type ContractState;
     type Slot;
     type Value;

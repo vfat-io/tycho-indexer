@@ -16,13 +16,19 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum ExtractionError {}
 
-trait VMStateGateway:
-    ExtractorInstanceGateway + ChainGateway + ProtocolGateway + ContractStateGateway + Send + Sync
+trait VMStateGateway<DB>:
+    ExtractorInstanceGateway<DB = DB>
+    + ChainGateway<DB = DB>
+    + ProtocolGateway<DB = DB>
+    + ContractStateGateway<DB = DB>
+    + Send
+    + Sync
 {
 }
 
-type VMStateGatewayType<B, TX, T, P, C, S, V> = Arc<
+type VMStateGatewayType<DB, B, TX, T, P, C, S, V> = Arc<
     dyn VMStateGateway<
+        DB,
         Block = B,
         Transaction = TX,
         Token = T,
@@ -34,7 +40,7 @@ type VMStateGatewayType<B, TX, T, P, C, S, V> = Arc<
 >;
 
 #[async_trait]
-trait Extractor {
+trait Extractor<DB> {
     type Message: NormalisedMessage;
     type Block;
     type Transaction;
@@ -50,6 +56,7 @@ trait Extractor {
         name: &str,
         chain: Chain,
         gateway: VMStateGatewayType<
+            DB,
             Self::Block,
             Self::Transaction,
             Self::Token,

@@ -1,29 +1,46 @@
-//! Postgres based storage backend
+//! # Postgres based storage backend
 //!
-//! Provides implementation for the traits defined in storage.
+//! This postgres-based storage backend provides implementations for the
+//! traits defined in the storage module.
 //!
-//! # Design Decisions
+//! ## Design Decisions
 //!
-//! Some enums are represented as tables. E.g. Chain. It is easy to extend the
-//! rust codebase to include more enums, but changing a type of a sql column is
-//! more involved. To avoid unnecessary migrations when modifying Chain or
-//! ProtocolSystem enums, these are modelled as tables.
+//! ### Representation of Enums as Tables
 //!
-//! As these are modeled as tables we need to sync them at the startup of the system
-//! this is done as soon as the gateway is initialised.
+//! Certain enums such as 'Chain' are modelled as tables in our implementation.
+//! This decision stems from an understanding that while extending the Rust
+//! codebase to include more enums is a straightforward task, modifying the type
+//! of a SQL column can be an intricate process. By representing enums as
+//! tables, we circumvent unnecessary migrations when modifying Chain or
+//! ProtocolSystem enums.
 //!
-//! A removed enum can simply be ignored - it might trigger a panic if an associated
-//! entity is still present in the database and retrieved with a codebase that does
-//! not have the enum value present anymore.
+//! With this representation, it's important to synchronize them whenever the
+//! enums members changed. This can be done automatically once at system
+//! startup.
+//!
+//!
+//! Note: A removed enum can be ignored safely even though it might instigate a
+//! panic if an associated entity still exists in the database and retrieved
+//! with a codebase which no longer presents the enum value.
+//!
+//! ### Atomic Transactions
+//!
+//! In our design, direct connection to the database and consequently beginning,
+//! committing, or rolling back transactions isn't handled within these
+//! common-purpose implementations. Rather, each operation receives a connection
+//! reference which can either be a simple DB connection, or a DB connection
+//! within a transactional context.
+//!
+//! This approach enables us to chain multiple common-purpose CRUD operations
+//! into a single transaction. This guarantees preservation of valid state
+//! throughout the application lifetime, even if the process panics during
+//! database operations.
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use diesel::prelude::*;
-use diesel_async::pooled_connection::bb8::{Pool, PooledConnection};
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use ethers::types::{H160, H256};
 use tokio::sync::RwLock;
@@ -35,12 +52,19 @@ use crate::storage::schema;
 use crate::storage::{orm, StorageError};
 
 // TODO: Make this generic over enums
-struct ChainIdCache {
+pub struct ChainIdCache {
     map_chain_id: HashMap<Chain, i64>,
     map_id_chain: HashMap<i64, Chain>,
 }
 
 impl ChainIdCache {
+    pub fn new() -> Self {
+        Self {
+            map_chain_id: HashMap::new(),
+            map_id_chain: HashMap::new(),
+        }
+    }
+
     fn get_id(&self, chain: Chain) -> i64 {
         *self
             .map_chain_id
@@ -57,7 +81,7 @@ impl ChainIdCache {
         })
     }
 
-    async fn init(&mut self, conn: &mut AsyncPgConnection) {
+    pub async fn init(&mut self, conn: &mut AsyncPgConnection) {
         use super::schema::chain::dsl::*;
         let results: Vec<(i64, String)> = chain
             .select((id, name))
@@ -115,60 +139,25 @@ impl StorageError {
 }
 
 pub struct PostgresGateway<B, TX> {
-    pool: Pool<AsyncPgConnection>,
     chain_id_cache: Arc<RwLock<ChainIdCache>>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
 }
 
-impl<B, TX> PostgresGateway<B, TX>
-where
-    B: StorableBlock<orm::Block, orm::NewBlock> + Send + Sync + 'static,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, Vec<u8>, i64>
-        + Send
-        + Sync
-        + 'static,
-{
-    pub async fn new(connection_string: &str) -> Self {
-        let config =
-            AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(connection_string);
-        let pool = Pool::builder()
-            .build(config)
-            .await
-            .expect("Failed to build connection pool!");
-        let cache = ChainIdCache {
-            map_chain_id: HashMap::new(),
-            map_id_chain: HashMap::new(),
-        };
-
-        let gw = Self {
-            pool,
-            chain_id_cache: Arc::new(RwLock::new(cache)),
+impl<B, TX> PostgresGateway<B, TX> {
+    pub fn new(cache: Arc<RwLock<ChainIdCache>>) -> Self {
+        Self {
+            chain_id_cache: cache,
             _phantom_block: PhantomData,
             _phantom_tx: PhantomData,
-        };
-        gw.init_chain_id_cache(None).await;
-        gw
+        }
     }
 
     #[cfg(test)]
-    async fn with_mocked_connection(
-        connection_string: &str,
-        connection: &mut AsyncPgConnection,
-    ) -> Self {
-        let gw = Self::new(connection_string).await;
-        // init chain id cache (again) using a mocked connection
-        gw.init_chain_id_cache(Some(connection)).await;
-        gw
-    }
-
-    async fn init_chain_id_cache(&self, conn: Option<&mut AsyncPgConnection>) {
-        if let Some(conn) = conn {
-            self.chain_id_cache.write().await.init(conn).await;
-        } else {
-            let mut conn = self.get_connection().await;
-            self.chain_id_cache.write().await.init(&mut conn).await;
-        };
+    async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
+        let cache = Arc::new(RwLock::new(ChainIdCache::new()));
+        cache.write().await.init(conn).await;
+        Self::new(cache)
     }
 
     async fn get_chain_id(&self, chain: Chain) -> i64 {
@@ -177,135 +166,6 @@ where
 
     async fn get_chain(&self, id: i64) -> Chain {
         self.chain_id_cache.read().await.get_chain(id)
-    }
-
-    async fn get_connection(&self) -> PooledConnection<AsyncPgConnection> {
-        self.pool
-            .get()
-            .await
-            .expect("Failed to get connection from pool!")
-    }
-
-    async fn insert_one_block(
-        &self,
-        new: B,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<(), StorageError> {
-        use super::schema::block::dsl::*;
-        let block_chain_id = self.get_chain_id(new.chain()).await;
-        let new_block = new.to_storage(block_chain_id);
-        conn.transaction(|conn| {
-            async move {
-                diesel::insert_into(block)
-                    .values(&new_block)
-                    .execute(conn)
-                    .await
-                    .map_err(|err| {
-                        StorageError::from_diesel(err, "Block", &hex::encode(new_block.hash), None)
-                    })
-            }
-            .scope_boxed()
-        })
-        .await?;
-        Ok(())
-    }
-
-    async fn fetch_one_block(
-        &self,
-        block_id: BlockIdentifier,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<B, StorageError> {
-        conn.transaction::<_, StorageError, _>(|conn| {
-            async move {
-                // taking a reference here is necessary, to not move block_id
-                // so it can be used in the map_err closure later on. It would
-                // be better if BlockIdentifier was copy though (complicates lifetimes).
-                let orm_block = match &block_id {
-                    BlockIdentifier::Number((chain, number)) => {
-                        orm::Block::by_number(*chain, *number, conn).await
-                    }
-
-                    BlockIdentifier::Hash(block_hash) => {
-                        orm::Block::by_hash(block_hash.as_slice(), conn).await
-                    }
-                }
-                .map_err(|err| {
-                    StorageError::from_diesel(err, "Block", &block_id.to_string(), None)
-                })?;
-                let chain = self.get_chain(orm_block.chain_id).await;
-                Ok(B::from_storage(orm_block, chain))
-            }
-            .scope_boxed()
-        })
-        .await
-    }
-
-    async fn insert_one_tx(
-        &self,
-        new: TX,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<(), StorageError> {
-        use super::schema::transaction::dsl::*;
-        conn.transaction::<_, StorageError, _>(|conn| {
-            async move {
-                let block_hash = new.block_hash();
-                let parent_block = schema::block::table
-                    .filter(schema::block::hash.eq(&block_hash))
-                    .select(schema::block::id)
-                    .first::<i64>(conn)
-                    .await
-                    .map_err(|err| {
-                        StorageError::from_diesel(
-                            err,
-                            "Transaction",
-                            &hex::encode(block_hash.as_slice()),
-                            Some("Block".to_owned()),
-                        )
-                    })?;
-
-                let orm_new: orm::NewTransaction = new.to_storage(parent_block);
-
-                diesel::insert_into(transaction)
-                    .values(&orm_new)
-                    .execute(conn)
-                    .await
-                    .map_err(|err| {
-                        StorageError::from_diesel(
-                            err,
-                            "Transaction",
-                            &hex::encode(orm_new.hash),
-                            None,
-                        )
-                    })
-            }
-            .scope_boxed()
-        })
-        .await?;
-        Ok(())
-    }
-
-    async fn fetch_one_tx(
-        &self,
-        hash: &[u8],
-        conn: &mut AsyncPgConnection,
-    ) -> Result<TX, StorageError> {
-        let hash = Vec::from(hash);
-        conn.transaction(|conn| {
-            async move {
-                schema::transaction::table
-                    .inner_join(schema::block::table)
-                    .filter(schema::transaction::hash.eq(&hash))
-                    .select((orm::Transaction::as_select(), orm::Block::as_select()))
-                    .first::<(orm::Transaction, orm::Block)>(conn)
-                    .await
-                    .map(|(orm_tx, block)| TX::from_storage(orm_tx, block.hash))
-                    .map_err(|err| {
-                        StorageError::from_diesel(err, "Transaction", &hex::encode(&hash), None)
-                    })
-            }
-            .scope_boxed()
-        })
-        .await
     }
 }
 
@@ -318,28 +178,94 @@ where
         + Sync
         + 'static,
 {
+    type DB = AsyncPgConnection;
     type Block = B;
     type Transaction = TX;
 
-    async fn add_block(&self, new: Self::Block) -> Result<(), StorageError> {
-        let mut conn = self.get_connection().await;
-        self.insert_one_block(new, &mut conn).await
+    async fn add_block(&self, new: Self::Block, conn: &mut Self::DB) -> Result<(), StorageError> {
+        use super::schema::block::dsl::*;
+        let block_chain_id = self.get_chain_id(new.chain()).await;
+        let new_block = new.to_storage(block_chain_id);
+        diesel::insert_into(block)
+            .values(&new_block)
+            .execute(conn)
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(err, "Block", &hex::encode(new_block.hash), None)
+            })?;
+        Ok(())
     }
 
-    async fn get_block(&self, block_id: BlockIdentifier) -> Result<Self::Block, StorageError> {
-        let mut conn = self.get_connection().await;
-        self.fetch_one_block(block_id, &mut conn).await
+    async fn get_block(
+        &self,
+        block_id: BlockIdentifier,
+        conn: &mut Self::DB,
+    ) -> Result<Self::Block, StorageError> {
+        // taking a reference here is necessary, to not move block_id
+        // so it can be used in the map_err closure later on. It would
+        // be better if BlockIdentifier was copy though (complicates lifetimes).
+        let orm_block = match &block_id {
+            BlockIdentifier::Number((chain, number)) => {
+                orm::Block::by_number(*chain, *number, conn).await
+            }
+
+            BlockIdentifier::Hash(block_hash) => {
+                orm::Block::by_hash(block_hash.as_slice(), conn).await
+            }
+        }
+        .map_err(|err| StorageError::from_diesel(err, "Block", &block_id.to_string(), None))?;
+        let chain = self.get_chain(orm_block.chain_id).await;
+        Ok(B::from_storage(orm_block, chain))
     }
 
-    async fn add_tx(&self, new: Self::Transaction) -> Result<(), StorageError> {
-        let mut conn = self.get_connection().await;
+    async fn add_tx(
+        &self,
+        new: Self::Transaction,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        use super::schema::transaction::dsl::*;
 
-        self.insert_one_tx(new, &mut conn).await
+        let block_hash = new.block_hash();
+        let parent_block = schema::block::table
+            .filter(schema::block::hash.eq(&block_hash))
+            .select(schema::block::id)
+            .first::<i64>(conn)
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(
+                    err,
+                    "Transaction",
+                    &hex::encode(block_hash.as_slice()),
+                    Some("Block".to_owned()),
+                )
+            })?;
+
+        let orm_new: orm::NewTransaction = new.to_storage(parent_block);
+
+        diesel::insert_into(transaction)
+            .values(&orm_new)
+            .execute(conn)
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(err, "Transaction", &hex::encode(orm_new.hash), None)
+            })?;
+        Ok(())
     }
 
-    async fn get_tx(&self, hash: &[u8]) -> Result<Self::Transaction, StorageError> {
-        let mut conn = self.get_connection().await;
-        self.fetch_one_tx(hash, &mut conn).await
+    async fn get_tx(
+        &self,
+        hash: &[u8],
+        conn: &mut Self::DB,
+    ) -> Result<Self::Transaction, StorageError> {
+        let hash = Vec::from(hash);
+        schema::transaction::table
+            .inner_join(schema::block::table)
+            .filter(schema::transaction::hash.eq(&hash))
+            .select((orm::Transaction::as_select(), orm::Block::as_select()))
+            .first::<(orm::Transaction, orm::Block)>(conn)
+            .await
+            .map(|(orm_tx, block)| TX::from_storage(orm_tx, block.hash))
+            .map_err(|err| StorageError::from_diesel(err, "Transaction", &hex::encode(&hash), None))
     }
 }
 
@@ -511,15 +437,11 @@ mod test {
     #[tokio::test]
     async fn test_get_block() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::with_mocked_connection(
-            "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0",
-            &mut conn,
-        )
-        .await;
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let exp = block("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9");
         let block_id = BlockIdentifier::Number((Chain::Ethereum, 2));
 
-        let block = gw.fetch_one_block(block_id, &mut conn).await.unwrap();
+        let block = gw.get_block(block_id, &mut conn).await.unwrap();
 
         assert_eq!(block, exp);
     }
@@ -527,16 +449,12 @@ mod test {
     #[tokio::test]
     async fn test_add_block() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::with_mocked_connection(
-            "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0",
-            &mut conn,
-        )
-        .await;
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let block = block("0xbadbabe000000000000000000000000000000000000000000000000000000000");
 
-        gw.insert_one_block(block, &mut conn).await.unwrap();
+        gw.add_block(block, &mut conn).await.unwrap();
         let retrieved_block = gw
-            .fetch_one_block(
+            .get_block(
                 BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())),
                 &mut conn,
             )
@@ -562,17 +480,10 @@ mod test {
     #[tokio::test]
     async fn test_get_tx() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::with_mocked_connection(
-            "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0",
-            &mut conn,
-        )
-        .await;
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let exp = transaction("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945");
 
-        let tx = gw
-            .fetch_one_tx(exp.hash.as_bytes(), &mut conn)
-            .await
-            .unwrap();
+        let tx = gw.get_tx(exp.hash.as_bytes(), &mut conn).await.unwrap();
 
         assert_eq!(tx, exp);
     }
@@ -580,22 +491,15 @@ mod test {
     #[tokio::test]
     async fn test_add_tx() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::with_mocked_connection(
-            "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0",
-            &mut conn,
-        )
-        .await;
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let mut tx =
             transaction("0xbadbabe000000000000000000000000000000000000000000000000000000000");
         tx.block_hash =
             H256::from_str("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9")
                 .unwrap();
 
-        gw.insert_one_tx(tx, &mut conn).await.unwrap();
-        let retrieved_tx = gw
-            .fetch_one_tx(tx.hash.as_bytes(), &mut conn)
-            .await
-            .unwrap();
+        gw.add_tx(tx, &mut conn).await.unwrap();
+        let retrieved_tx = gw.get_tx(tx.hash.as_bytes(), &mut conn).await.unwrap();
 
         assert_eq!(tx, retrieved_tx);
     }

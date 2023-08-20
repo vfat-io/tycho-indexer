@@ -19,8 +19,9 @@ struct Inner {
     cursor: Vec<u8>,
 }
 
-pub struct AmbientContractExtractor {
+pub struct AmbientContractExtractor<DB> {
     gateway: VMStateGatewayType<
+        DB,
         evm::Block,
         evm::Transaction,
         evm::ERC20Token,
@@ -32,7 +33,7 @@ pub struct AmbientContractExtractor {
     inner: Arc<Mutex<Inner>>,
 }
 
-impl AmbientContractExtractor {
+impl<DB> AmbientContractExtractor<DB> {
     async fn update_cursor(&self, cursor: String) {
         let cursor_bytes: Vec<u8> = cursor.into();
         let mut state = self.inner.lock().await;
@@ -41,7 +42,7 @@ impl AmbientContractExtractor {
 }
 
 #[async_trait]
-impl Extractor for AmbientContractExtractor {
+impl<DB> Extractor<DB> for AmbientContractExtractor<DB> {
     type Message = evm::AccountUpdate;
     type Block = evm::Block;
     type Transaction = evm::Transaction;
@@ -59,6 +60,7 @@ impl Extractor for AmbientContractExtractor {
         name: &str,
         chain: Chain,
         gateway: VMStateGatewayType<
+            DB,
             Self::Block,
             Self::Transaction,
             Self::Token,
@@ -69,23 +71,7 @@ impl Extractor for AmbientContractExtractor {
         >,
     ) -> Result<Box<Self>, Box<dyn Error>> {
         // check if this extractor has state
-        let gw_ref = gateway.as_ref();
-        let res = gw_ref.get_state(name, chain).await?;
-
-        let res = if let Some(state) = res {
-            AmbientContractExtractor {
-                gateway,
-                inner: Arc::new(Mutex::new(Inner {
-                    cursor: state.cursor,
-                })),
-            }
-        } else {
-            AmbientContractExtractor {
-                gateway,
-                inner: Arc::new(Mutex::new(Inner { cursor: Vec::new() })),
-            }
-        };
-        Ok(Box::new(res))
+        todo!()
     }
 
     async fn handle_tick_scoped_data(
