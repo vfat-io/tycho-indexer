@@ -15,6 +15,7 @@ anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1.73"
 futures03 = { version = "0.3.1", package = "futures", features = ["compat"] }
+hex = "0.4.3"
 reqwest = "0.11"
 tokio = { version = "1.27", features = [
     "time",

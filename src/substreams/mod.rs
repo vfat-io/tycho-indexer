@@ -1,3 +1,7 @@
+//! Substreams Client
+//!
+//! This module contains a substreams client. Taken from the
+//! Rust Sink template repo.
 pub mod stream;
 use std::{fmt::Display, sync::Arc, time::Duration};
 

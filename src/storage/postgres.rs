@@ -16,8 +16,8 @@ use tokio::sync::RwLock;
 use super::{BlockIdentifier, ChainGateway, StorableBlock, StorableTransaction};
 use crate::extractor::evm;
 use crate::models::Chain;
-use crate::storage::orm;
 use crate::storage::schema;
+use crate::storage::{orm, StorageError};
 
 struct ChainIdCache {
     map_chain_id: HashMap<Chain, i64>,
@@ -52,6 +52,48 @@ impl ChainIdCache {
             let chain_ = Chain::from(name_);
             self.map_chain_id.insert(chain_, id_);
             self.map_id_chain.insert(id_, chain_);
+        }
+    }
+}
+
+impl From<diesel::result::Error> for StorageError {
+    fn from(value: diesel::result::Error) -> Self {
+        // Only rollback errors should arrive here
+        // we never expect these.
+        StorageError::Unexpected(format!("DieselRollbackError: {}", value))
+    }
+}
+impl StorageError {
+    fn from_diesel(
+        err: diesel::result::Error,
+        entity: &str,
+        id: &str,
+        fetch_args: Option<String>,
+    ) -> StorageError {
+        let err_string = err.to_string();
+        match err {
+            diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                details,
+            ) => {
+                if let Some(col) = details.column_name() {
+                    if col == "id" {
+                        return StorageError::DuplicateEntry(entity.to_owned(), id.to_owned());
+                    }
+                }
+                StorageError::Unexpected(err_string)
+            }
+            diesel::result::Error::NotFound => {
+                if let Some(related_entitiy) = fetch_args {
+                    return StorageError::NoRelatedEntity(
+                        entity.to_owned(),
+                        id.to_owned(),
+                        related_entitiy,
+                    );
+                }
+                StorageError::NotFound(entity.to_owned(), id.to_owned())
+            }
+            _ => StorageError::Unexpected(err_string),
         }
     }
 }
@@ -132,7 +174,7 @@ where
         &self,
         new: B,
         conn: &mut AsyncPgConnection,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), StorageError> {
         use super::schema::block::dsl::*;
         let block_chain_id = self.get_chain_id(new.chain()).await;
         let new_block = new.to_storage(block_chain_id);
@@ -142,11 +184,13 @@ where
                     .values(&new_block)
                     .execute(conn)
                     .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(err, "Block", &hex::encode(new_block.hash), None)
+                    })
             }
             .scope_boxed()
         })
-        .await
-        .map_err(|err| -> Box<dyn std::error::Error> { anyhow!(err.to_string()).into() })?;
+        .await?;
         Ok(())
     }
 
@@ -154,41 +198,54 @@ where
         &self,
         block_id: BlockIdentifier,
         conn: &mut AsyncPgConnection,
-    ) -> Result<B, Box<dyn Error>> {
-        conn.transaction::<_, diesel::result::Error, _>(|conn| {
+    ) -> Result<B, StorageError> {
+        conn.transaction::<_, StorageError, _>(|conn| {
             async move {
-                let orm_block = match block_id {
+                // taking a reference here is necessary, to not move block_id
+                // so it can be used in the map_err closure later on. It would
+                // be better if BlockIdentifier was copy though (complicates lifetimes).
+                let orm_block = match &block_id {
                     BlockIdentifier::Number((chain, number)) => {
-                        orm::Block::by_number(chain, number, conn).await
+                        orm::Block::by_number(*chain, *number, conn).await
                     }
 
                     BlockIdentifier::Hash(block_hash) => {
                         orm::Block::by_hash(block_hash.as_slice(), conn).await
                     }
-                }?;
+                }
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "Block", &block_id.to_string(), None)
+                })?;
                 let chain = self.get_chain(orm_block.chain_id).await;
                 Ok(B::from_storage(orm_block, chain))
             }
             .scope_boxed()
         })
         .await
-        .map_err(|err| anyhow!(err).into())
     }
 
     async fn insert_one_tx(
         &self,
         new: TX,
         conn: &mut AsyncPgConnection,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), StorageError> {
         use super::schema::transaction::dsl::*;
-        conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        conn.transaction::<_, StorageError, _>(|conn| {
             async move {
                 let block_hash = new.block_hash();
                 let parent_block = schema::block::table
                     .filter(schema::block::hash.eq(&block_hash))
                     .select(schema::block::id)
                     .first::<i64>(conn)
-                    .await?;
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(
+                            err,
+                            "Transaction",
+                            &hex::encode(block_hash.as_slice()),
+                            Some("Block".to_owned()),
+                        )
+                    })?;
 
                 let orm_new: orm::NewTransaction = new.to_storage(parent_block);
 
@@ -196,11 +253,18 @@ where
                     .values(&orm_new)
                     .execute(conn)
                     .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(
+                            err,
+                            "Transaction",
+                            &hex::encode(orm_new.hash),
+                            None,
+                        )
+                    })
             }
             .scope_boxed()
         })
-        .await
-        .map_err(|err| -> Box<dyn Error> { anyhow!(err.to_string()).into() })?;
+        .await?;
         Ok(())
     }
 
@@ -208,22 +272,24 @@ where
         &self,
         hash: &[u8],
         conn: &mut AsyncPgConnection,
-    ) -> Result<TX, Box<dyn Error>> {
+    ) -> Result<TX, StorageError> {
         let hash = Vec::from(hash);
         conn.transaction(|conn| {
             async move {
                 schema::transaction::table
                     .inner_join(schema::block::table)
-                    .filter(schema::transaction::hash.eq(hash))
+                    .filter(schema::transaction::hash.eq(&hash))
                     .select((orm::Transaction::as_select(), orm::Block::as_select()))
                     .first::<(orm::Transaction, orm::Block)>(conn)
                     .await
                     .map(|(orm_tx, block)| TX::from_storage(orm_tx, block.hash))
+                    .map_err(|err| {
+                        StorageError::from_diesel(err, "Transaction", &hex::encode(&hash), None)
+                    })
             }
             .scope_boxed()
         })
         .await
-        .map_err(|err| -> Box<dyn Error> { anyhow!(err).into() })
     }
 }
 
@@ -239,23 +305,23 @@ where
     type Block = B;
     type Transaction = TX;
 
-    async fn add_block(&self, new: Self::Block) -> Result<(), Box<dyn Error>> {
+    async fn add_block(&self, new: Self::Block) -> Result<(), StorageError> {
         let mut conn = self.get_connection().await;
         self.insert_one_block(new, &mut conn).await
     }
 
-    async fn get_block(&self, block_id: BlockIdentifier) -> Result<Self::Block, Box<dyn Error>> {
+    async fn get_block(&self, block_id: BlockIdentifier) -> Result<Self::Block, StorageError> {
         let mut conn = self.get_connection().await;
         self.fetch_one_block(block_id, &mut conn).await
     }
 
-    async fn add_tx(&self, new: Self::Transaction) -> Result<(), Box<dyn Error>> {
+    async fn add_tx(&self, new: Self::Transaction) -> Result<(), StorageError> {
         let mut conn = self.get_connection().await;
 
         self.insert_one_tx(new, &mut conn).await
     }
 
-    async fn get_tx(&self, hash: &[u8]) -> Result<Self::Transaction, Box<dyn Error>> {
+    async fn get_tx(&self, hash: &[u8]) -> Result<Self::Transaction, StorageError> {
         let mut conn = self.get_connection().await;
         self.fetch_one_tx(hash, &mut conn).await
     }
