@@ -1,12 +1,9 @@
 use diesel_async::pooled_connection::bb8::Pool;
 use diesel_async::AsyncPgConnection;
-use ethers::types::AccountState;
-use ethers::types::U256;
-use futures03::lock::Mutex;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tokio::sync::Mutex;
 
 use super::EVMStateGateway;
 use crate::extractor::evm;
@@ -60,13 +57,10 @@ trait AmbientGateway: Send + Sync {
 }
 
 #[async_trait]
-impl<G> Extractor for AmbientContractExtractor<G>
+impl<G> Extractor<G, evm::AccountUpdate> for AmbientContractExtractor<G>
 where
     G: AmbientGateway,
 {
-    type Message = evm::AccountUpdate;
-    type Gateway = G;
-
     fn get_id(&self) -> ExtractorIdentity {
         ExtractorIdentity {
             chain: self.chain,
@@ -74,30 +68,10 @@ where
         }
     }
 
-    async fn setup(name: &str, chain: Chain, gateway: G) -> Result<Self, ExtractionError> {
-        // check if this extractor has state
-        let res = match gateway.get_cursor(name, chain).await {
-            Err(StorageError::NotFound(_, _)) => Self {
-                gateway,
-                name: name.to_owned(),
-                chain,
-                inner: Arc::new(Mutex::new(Inner { cursor: Vec::new() })),
-            },
-            Ok(cursor) => Self {
-                gateway,
-                name: name.to_owned(),
-                chain,
-                inner: Arc::new(Mutex::new(Inner { cursor })),
-            },
-            Err(err) => return Err(ExtractionError::Setup(err.to_string())),
-        };
-        Ok(res)
-    }
-
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
-    ) -> Result<Option<Self::Message>, ExtractionError> {
+    ) -> Result<Option<evm::AccountUpdate>, ExtractionError> {
         let _data = inp.output.as_ref().unwrap().map_output.as_ref().unwrap();
         // let msg = Message::decode::<Changes>(data.value.as_slice()).unwrap();
         self.update_cursor(inp.cursor).await;
@@ -107,7 +81,7 @@ where
     async fn handle_revert(
         &self,
         inp: BlockUndoSignal,
-    ) -> Result<Option<Self::Message>, ExtractionError> {
+    ) -> Result<Option<evm::AccountUpdate>, ExtractionError> {
         self.update_cursor(inp.last_valid_cursor).await;
         todo!()
     }
@@ -115,4 +89,28 @@ where
     async fn handle_progress(&self, inp: ModulesProgress) -> Result<(), ExtractionError> {
         todo!()
     }
+}
+
+async fn setup<G: AmbientGateway>(
+    name: &str,
+    chain: Chain,
+    gateway: G,
+) -> Result<AmbientContractExtractor<G>, ExtractionError> {
+    // check if this extractor has state
+    let res = match gateway.get_cursor(name, chain).await {
+        Err(StorageError::NotFound(_, _)) => AmbientContractExtractor {
+            gateway,
+            name: name.to_owned(),
+            chain,
+            inner: Arc::new(Mutex::new(Inner { cursor: Vec::new() })),
+        },
+        Ok(cursor) => AmbientContractExtractor {
+            gateway,
+            name: name.to_owned(),
+            chain,
+            inner: Arc::new(Mutex::new(Inner { cursor })),
+        },
+        Err(err) => return Err(ExtractionError::Setup(err.to_string())),
+    };
+    Ok(res)
 }

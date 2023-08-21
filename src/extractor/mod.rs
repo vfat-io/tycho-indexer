@@ -1,4 +1,5 @@
 pub mod evm;
+pub mod runner;
 
 use crate::models::Chain;
 use crate::storage::{
@@ -21,27 +22,19 @@ pub enum ExtractionError {
 }
 
 #[async_trait]
-trait Extractor: Sized {
-    type Message: NormalisedMessage;
-    type Gateway: Send + Sync;
-
+pub trait Extractor<G, M>: Send + Sync
+where
+    G: Send + Sync,
+    M: NormalisedMessage,
+{
     fn get_id(&self) -> ExtractorIdentity;
-
-    async fn setup(
-        name: &str,
-        chain: Chain,
-        gateway: Self::Gateway,
-    ) -> Result<Self, ExtractionError>;
 
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
-    ) -> Result<Option<Self::Message>, ExtractionError>;
+    ) -> Result<Option<M>, ExtractionError>;
 
-    async fn handle_revert(
-        &self,
-        inp: BlockUndoSignal,
-    ) -> Result<Option<Self::Message>, ExtractionError>;
+    async fn handle_revert(&self, inp: BlockUndoSignal) -> Result<Option<M>, ExtractionError>;
 
     async fn handle_progress(&self, inp: ModulesProgress) -> Result<(), ExtractionError>;
 }
