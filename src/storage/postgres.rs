@@ -36,6 +36,8 @@
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
 use std::collections::HashMap;
+use std::fmt::Display;
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -43,7 +45,6 @@ use async_trait::async_trait;
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use ethers::types::{H160, H256};
-use tokio::sync::RwLock;
 
 use super::{BlockIdentifier, ChainGateway, StorableBlock, StorableTransaction};
 use crate::extractor::evm;
@@ -51,50 +52,67 @@ use crate::models::Chain;
 use crate::storage::schema;
 use crate::storage::{orm, StorageError};
 
-// TODO: Make this generic over enums
-pub struct ChainIdCache {
-    map_chain_id: HashMap<Chain, i64>,
-    map_id_chain: HashMap<i64, Chain>,
+pub struct EnumTableCache<E> {
+    map_id: HashMap<E, i64>,
+    map_enum: HashMap<i64, E>,
 }
 
-impl ChainIdCache {
-    pub fn new() -> Self {
-        Self {
-            map_chain_id: HashMap::new(),
-            map_id_chain: HashMap::new(),
+/// Provides caching for enum and its database ID relationships.
+///
+/// Uses a double sided hash map to provide quick lookups in both directions.
+impl<E> EnumTableCache<E>
+where
+    E: Eq + Hash + Copy + From<String> + std::fmt::Debug,
+{
+    /// Creates a new cache from a slice of tuples.
+    ///
+    /// # Arguments
+    ///
+    /// * `entries` - A slice of tuples ideally obtained from a database query.
+    pub fn from_tuples(entries: &[(i64, String)]) -> Self {
+        let mut cache = Self {
+            map_id: HashMap::new(),
+            map_enum: HashMap::new(),
+        };
+        for (id_, name_) in entries {
+            let val = E::from(name_.to_owned());
+            cache.map_id.insert(val, *id_);
+            cache.map_enum.insert(*id_, val);
         }
+        cache
     }
-
-    fn get_id(&self, chain: Chain) -> i64 {
-        *self
-            .map_chain_id
-            .get(&chain)
-            .unwrap_or_else(|| panic!("Unexpected cache miss for chain {}", chain.to_string()))
-    }
-
-    fn get_chain(&self, id: i64) -> Chain {
-        *self.map_id_chain.get(&id).unwrap_or_else(|| {
+    /// Fetches the associated database ID for an enum variant. Panics on cache
+    /// miss.
+    ///
+    /// # Arguments
+    ///
+    /// * `val` - The enum variant to lookup.
+    fn get_id(&self, val: E) -> i64 {
+        *self.map_id.get(&val).unwrap_or_else(|| {
             panic!(
-                "Unexpected cache miss for id {}, {:?}",
-                id, self.map_id_chain
+                "Unexpected cache miss for enum {:?}, entries: {:?}",
+                val, self.map_id
             )
         })
     }
 
-    pub async fn init(&mut self, conn: &mut AsyncPgConnection) {
-        use super::schema::chain::dsl::*;
-        let results: Vec<(i64, String)> = chain
-            .select((id, name))
-            .load(conn)
-            .await
-            .expect("Failed to load chain ids!");
-        for (id_, name_) in results {
-            let chain_ = Chain::from(name_);
-            self.map_chain_id.insert(chain_, id_);
-            self.map_id_chain.insert(id_, chain_);
-        }
+    /// Retrieves the corresponding enum variant for a database ID. Panics on
+    /// cache miss.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The database ID to lookup.
+    fn get_chain(&self, id: i64) -> E {
+        *self.map_enum.get(&id).unwrap_or_else(|| {
+            panic!(
+                "Unexpected cache miss for id {}, entries: {:?}",
+                id, self.map_enum
+            )
+        })
     }
 }
+
+type ChainEnumCache = EnumTableCache<Chain>;
 
 impl From<diesel::result::Error> for StorageError {
     fn from(value: diesel::result::Error) -> Self {
@@ -103,6 +121,7 @@ impl From<diesel::result::Error> for StorageError {
         StorageError::Unexpected(format!("DieselRollbackError: {}", value))
     }
 }
+
 impl StorageError {
     fn from_diesel(
         err: diesel::result::Error,
@@ -139,13 +158,13 @@ impl StorageError {
 }
 
 pub struct PostgresGateway<B, TX> {
-    chain_id_cache: Arc<RwLock<ChainIdCache>>,
+    chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
 }
 
 impl<B, TX> PostgresGateway<B, TX> {
-    pub fn new(cache: Arc<RwLock<ChainIdCache>>) -> Self {
+    pub fn new(cache: Arc<ChainEnumCache>) -> Self {
         Self {
             chain_id_cache: cache,
             _phantom_block: PhantomData,
@@ -155,17 +174,25 @@ impl<B, TX> PostgresGateway<B, TX> {
 
     #[cfg(test)]
     async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
-        let cache = Arc::new(RwLock::new(ChainIdCache::new()));
-        cache.write().await.init(conn).await;
+        let results: Vec<(i64, String)> = async {
+            use super::schema::chain::dsl::*;
+            chain
+                .select((id, name))
+                .load(conn)
+                .await
+                .expect("Failed to load chain ids!")
+        }
+        .await;
+        let cache = Arc::new(ChainEnumCache::from_tuples(&results));
         Self::new(cache)
     }
 
-    async fn get_chain_id(&self, chain: Chain) -> i64 {
-        self.chain_id_cache.read().await.get_id(chain)
+    fn get_chain_id(&self, chain: Chain) -> i64 {
+        self.chain_id_cache.get_id(chain)
     }
 
-    async fn get_chain(&self, id: i64) -> Chain {
-        self.chain_id_cache.read().await.get_chain(id)
+    fn get_chain(&self, id: i64) -> Chain {
+        self.chain_id_cache.get_chain(id)
     }
 }
 
@@ -184,7 +211,7 @@ where
 
     async fn add_block(&self, new: Self::Block, conn: &mut Self::DB) -> Result<(), StorageError> {
         use super::schema::block::dsl::*;
-        let block_chain_id = self.get_chain_id(new.chain()).await;
+        let block_chain_id = self.get_chain_id(new.chain());
         let new_block = new.to_storage(block_chain_id);
         diesel::insert_into(block)
             .values(&new_block)
@@ -214,7 +241,7 @@ where
             }
         }
         .map_err(|err| StorageError::from_diesel(err, "Block", &block_id.to_string(), None))?;
-        let chain = self.get_chain(orm_block.chain_id).await;
+        let chain = self.get_chain(orm_block.chain_id);
         Ok(B::from_storage(orm_block, chain))
     }
 
