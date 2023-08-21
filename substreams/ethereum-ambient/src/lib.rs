@@ -3,72 +3,235 @@ mod pb;
 use std::collections::{hash_map::Entry, HashMap};
 
 use hex_literal::hex;
-use pb::protosim::evm::state::v1::{BlockStorageChanges, Changes, ContractStorageChange};
-use substreams::{log, Hex};
+use pb::tycho::evm::state::v1::{self as tycho};
 use substreams_ethereum::pb::eth::{self};
 
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
+struct SlotValue {
+    new_value: Vec<u8>,
+    start_value: Vec<u8>,
+}
+
+impl SlotValue {
+    fn has_changed(&self) -> bool {
+        self.start_value != self.new_value
+    }
+}
+
+// uses a map for slots, protobug does not
+// allow bytes in hashmap keys
+struct InterimContractChange {
+    address: Vec<u8>,
+    balance: Vec<u8>,
+    code: Vec<u8>,
+    slots: HashMap<Vec<u8>, SlotValue>,
+}
+
+impl From<InterimContractChange> for tycho::ContractChange {
+    fn from(value: InterimContractChange) -> Self {
+        tycho::ContractChange {
+            address: value.address,
+            balance: value.balance,
+            code: value.code,
+            slots: value
+                .slots
+                .into_iter()
+                .filter(|(_, value)| value.has_changed())
+                .map(|(slot, value)| tycho::ContractSlot {
+                    slot,
+                    value: value.new_value,
+                })
+                .collect(),
+        }
+    }
+}
+
 #[substreams::handlers::map]
-fn map_changes(block: eth::v2::Block) -> Result<Changes, substreams::errors::Error> {
-    let mut state = BlockStorageChanges {
-        number: block.number,
-        hash: block.hash.clone(),
+fn map_changes(
+    block: eth::v2::Block,
+) -> Result<tycho::BlockContractChanges, substreams::errors::Error> {
+    let mut block_changes = tycho::BlockContractChanges {
+        block: None,
         changes: Vec::new(),
     };
 
-    // aggregate block changes
-    let mut block_changes = HashMap::new();
+    let mut tx_change = tycho::TransactionChanges {
+        tx: None,
+        contract_changes: Vec::new(),
+    };
 
-    let mut relevant_changes: Vec<_> = block
-        .calls()
-        .flat_map(|v| {
-            v.call
-                .storage_changes
-                .iter()
-                .filter(|change| change.address == AMBIENT_CONTRACT)
-        })
-        .collect();
+    let mut changed_contracts: HashMap<Vec<u8>, InterimContractChange> = HashMap::new();
 
-    relevant_changes.sort_unstable_by_key(|change| change.ordinal);
+    for block_tx in block.transactions() {
+        // extract storage changes
+        let mut storage_changes = block_tx
+            .calls
+            .iter()
+            .filter(|call| !call.state_reverted)
+            .flat_map(|call| {
+                call.storage_changes
+                    .iter()
+                    .filter(|c| c.address == AMBIENT_CONTRACT)
+            })
+            .collect::<Vec<_>>();
+        storage_changes.sort_unstable_by_key(|change| change.ordinal);
 
-    for change in relevant_changes.into_iter() {
-        let key = Hex(&change.key).to_string();
-        let new_value = Hex(&change.new_value).to_string();
-        let ordinal = change.ordinal;
-        log::println(format!("ordinal={ordinal} Key={key} NewValue={new_value} "));
-        match block_changes.entry(&change.address) {
-            Entry::Vacant(e) => {
-                let mut slots = HashMap::new();
-                slots.insert(change.key.clone(), change.new_value.clone());
-                e.insert(slots);
-            }
-            Entry::Occupied(mut e) => {
-                let slots = e.get_mut();
-                slots.insert(change.key.clone(), change.new_value.clone());
+        // Note: some contracts change slot values and change them back to their
+        //  original value before the transactions ends we remember the initial
+        //  value before the first change and in the end filter found deltas
+        //  that ended up not actually changing anything.
+        for storage_change in storage_changes.iter() {
+            match changed_contracts.entry(storage_change.address.clone()) {
+                // We have already an entry recording a change about this contract
+                //  only append the change about this storage slot
+                Entry::Occupied(mut e) => {
+                    let contract_change = e.get_mut();
+                    match contract_change.slots.entry(storage_change.key.clone()) {
+                        // The storage slot was already changed before, simply
+                        //  update new_value
+                        Entry::Occupied(mut v) => {
+                            let slot_value = v.get_mut();
+                            slot_value
+                                .new_value
+                                .copy_from_slice(&storage_change.new_value);
+                        }
+                        // The storage slots is being initialised for the first time
+                        Entry::Vacant(v) => {
+                            v.insert(SlotValue {
+                                new_value: storage_change.new_value.clone(),
+                                start_value: storage_change.old_value.clone(),
+                            });
+                        }
+                    }
+                }
+                // Intialise a new contract change after obsering a storage change
+                Entry::Vacant(e) => {
+                    let mut slots = HashMap::new();
+                    slots.insert(
+                        storage_change.key.clone(),
+                        SlotValue {
+                            new_value: storage_change.new_value.clone(),
+                            start_value: storage_change.old_value.clone(),
+                        },
+                    );
+                    e.insert(InterimContractChange {
+                        address: storage_change.address.clone(),
+                        balance: Vec::new(),
+                        code: Vec::new(),
+                        slots,
+                    });
+                }
             }
         }
+
+        // extract balance changes
+        let mut balance_changes = block_tx
+            .calls
+            .iter()
+            .filter(|call| !call.state_reverted)
+            .flat_map(|call| {
+                call.balance_changes
+                    .iter()
+                    .filter(|c| c.address == AMBIENT_CONTRACT)
+            })
+            .collect::<Vec<_>>();
+        balance_changes.sort_unstable_by_key(|change| change.ordinal);
+
+        for balance_change in balance_changes.iter() {
+            match changed_contracts.entry(balance_change.address.clone()) {
+                Entry::Occupied(mut e) => {
+                    let contract_change = e.get_mut();
+                    if let Some(new_balance) = &balance_change.new_value {
+                        contract_change.balance.clear();
+                        contract_change
+                            .balance
+                            .extend_from_slice(&new_balance.bytes);
+                    }
+                }
+                Entry::Vacant(e) => {
+                    if let Some(new_balance) = &balance_change.new_value {
+                        e.insert(InterimContractChange {
+                            address: balance_change.address.clone(),
+                            balance: new_balance.bytes.clone(),
+                            code: Vec::new(),
+                            slots: HashMap::new(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // extract code changes
+        let mut code_changes = block_tx
+            .calls
+            .iter()
+            .filter(|call| !call.state_reverted)
+            .flat_map(|call| {
+                call.code_changes
+                    .iter()
+                    .filter(|c| c.address == AMBIENT_CONTRACT)
+            })
+            .collect::<Vec<_>>();
+        code_changes.sort_unstable_by_key(|change| change.ordinal);
+
+        for code_change in code_changes.iter() {
+            match changed_contracts.entry(code_change.address.clone()) {
+                Entry::Occupied(mut e) => {
+                    let contract_change = e.get_mut();
+                    contract_change.code.clear();
+                    contract_change
+                        .code
+                        .extend_from_slice(&code_change.new_code);
+                }
+                Entry::Vacant(e) => {
+                    e.insert(InterimContractChange {
+                        address: code_change.address.clone(),
+                        balance: Vec::new(),
+                        code: code_change.new_code.clone(),
+                        slots: HashMap::new(),
+                    });
+                }
+            }
+        }
+
+        // if there were any changes, add transaction and push the changes
+        if !storage_changes.is_empty() || !balance_changes.is_empty() || !code_changes.is_empty() {
+            tx_change.tx = Some(tycho::Transaction {
+                hash: block_tx.hash.clone(),
+                from: block_tx.from.clone(),
+                to: block_tx.to.clone(),
+                index: block_tx.index as u64,
+            });
+
+            // reuse changed_contracts hash map by draining it, next iteration
+            // will start empty. This avoids a costly realliocation
+            for (_, change) in changed_contracts.drain() {
+                tx_change.contract_changes.push(change.into())
+            }
+
+            block_changes.changes.push(tx_change.clone());
+
+            // clear out the interim contract changes after we pushed those.
+            tx_change.tx = None;
+            tx_change.contract_changes.clear();
+        }
+    }
+    // if there were some changes set the block, if not transferring save some
+    // unnecessary bytes
+    if !block_changes.changes.is_empty() {
+        block_changes.block = Some(tycho::Block {
+            number: block.number,
+            hash: block.hash.clone(),
+            parent_hash: block
+                .header
+                .as_ref()
+                .expect("Block header not present")
+                .parent_hash
+                .clone(),
+            ts: block.timestamp_seconds(),
+        });
     }
 
-    state.changes = block_changes
-        .into_iter()
-        .flat_map(|(address, slots)| {
-            slots
-                .into_iter()
-                .map(move |(slot, value)| ContractStorageChange {
-                    address: address.clone(),
-                    slot,
-                    value,
-                    log_ordinal: 0,
-                })
-        })
-        .collect();
-
-    if state.changes.is_empty() {
-        Ok(Changes { changes: vec![] })
-    } else {
-        Ok(Changes {
-            changes: vec![state],
-        })
-    }
+    Ok(block_changes)
 }
