@@ -9,63 +9,29 @@ use crate::{
     pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
 };
 use async_trait::async_trait;
-use std::error::Error;
 use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum ExtractionError {}
-
-trait VMStateGateway<DB>:
-    ExtractorInstanceGateway<DB = DB>
-    + ChainGateway<DB = DB>
-    + ProtocolGateway<DB = DB>
-    + ContractStateGateway<DB = DB>
-    + Send
-    + Sync
-{
+pub enum ExtractionError {
+    #[error("Extractor setup failed: {0}")]
+    Setup(String),
+    #[error("Unexpected extraction error: {0}")]
+    Unkown(String),
 }
 
-type VMStateGatewayType<DB, B, TX, T, P, C, S, V> = Arc<
-    dyn VMStateGateway<
-        DB,
-        Block = B,
-        Transaction = TX,
-        Token = T,
-        ProtocolComponent = P,
-        ContractState = C,
-        Slot = S,
-        Value = V,
-    >,
->;
-
 #[async_trait]
-trait Extractor<DB> {
+trait Extractor: Sized {
     type Message: NormalisedMessage;
-    type Block;
-    type Transaction;
-    type Token;
-    type ProtocolComponent;
-    type ContractState;
-    type Slot;
-    type Value;
+    type Gateway: Send + Sync;
 
     fn get_id(&self) -> ExtractorIdentity;
 
     async fn setup(
         name: &str,
         chain: Chain,
-        gateway: VMStateGatewayType<
-            DB,
-            Self::Block,
-            Self::Transaction,
-            Self::Token,
-            Self::ProtocolComponent,
-            Self::ContractState,
-            Self::Slot,
-            Self::Value,
-        >,
-    ) -> Result<Box<Self>, Box<dyn Error>>;
+        gateway: Self::Gateway,
+    ) -> Result<Self, ExtractionError>;
 
     async fn handle_tick_scoped_data(
         &self,
