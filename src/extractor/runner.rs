@@ -1,5 +1,6 @@
-use std::{collections::HashMap, error::Error, sync::Arc};
-
+use anyhow::{format_err, Context};
+use prost::Message;
+use std::{collections::HashMap, env, error::Error, sync::Arc};
 use tokio::{
     sync::mpsc::{self, error::SendError, Receiver, Sender},
     task::JoinHandle,
@@ -9,7 +10,11 @@ use tokio_stream::StreamExt;
 use super::Extractor;
 use crate::{
     models::NormalisedMessage,
-    substreams::stream::{BlockResponse, SubstreamsStream},
+    pb::sf::substreams::v1::Package,
+    substreams::{
+        stream::{BlockResponse, SubstreamsStream},
+        SubstreamsEndpoint,
+    },
 };
 
 pub enum ControlMessage<M> {
@@ -113,24 +118,78 @@ where
     }
 }
 
-pub fn start_extractor<G, M>(
+struct ExtractorRunnerBuilder<G, M> {
+    spkg_file: String,
+    endpoint_url: String,
+    module_name: String,
+    start_block: i64,
+    token: String,
     extractor: Arc<dyn Extractor<G, M>>,
-    substreams: SubstreamsStream,
-) -> ExtractorHandle<M>
+}
+
+impl<G, M> ExtractorRunnerBuilder<G, M>
 where
     M: NormalisedMessage + Sync + Send + 'static,
     G: Sync + Send + 'static,
 {
-    let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
-    let runner = ExtractorRunner {
-        extractor,
-        substreams,
-        subscriptions: HashMap::new(),
-        control_rx: ctrl_rx,
-    };
+    pub fn new(spkg: &str, extractor: Arc<dyn Extractor<G, M>>) -> Self {
+        Self {
+            spkg_file: spkg.to_owned(),
+            endpoint_url: "https://mainnet.eth.streamingfast.io:443".to_owned(),
+            module_name: "map_changes".to_owned(),
+            start_block: 0,
+            token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
+            extractor,
+        }
+    }
 
-    ExtractorHandle {
-        handle: runner.run(),
-        control_tx: ctrl_tx,
+    pub fn endpoint_url(mut self, val: &str) -> Self {
+        self.endpoint_url = val.to_owned();
+        self
+    }
+
+    pub fn module_name(mut self, val: &str) -> Self {
+        self.module_name = val.to_owned();
+        self
+    }
+
+    pub fn start_block(mut self, val: i64) -> Self {
+        self.start_block = val;
+        self
+    }
+
+    pub fn token(mut self, val: &str) -> Self {
+        self.token = val.to_owned();
+        self
+    }
+
+    pub async fn run(self) -> Result<ExtractorHandle<M>, anyhow::Error> {
+        let content = std::fs::read(&self.spkg_file)
+            .context(format_err!("read package from file '{}'", self.spkg_file))?;
+        let spkg = Package::decode(content.as_ref()).context("decode command")?;
+        let endpoint =
+            Arc::new(SubstreamsEndpoint::new(&self.endpoint_url, Some(self.token)).await?);
+        let cursor = self.extractor.get_cursor().await;
+        let stream = SubstreamsStream::new(
+            endpoint,
+            Some(cursor),
+            spkg.modules.clone(),
+            self.module_name,
+            self.start_block,
+            0,
+        );
+
+        let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
+        let runner = ExtractorRunner {
+            extractor: self.extractor,
+            substreams: stream,
+            subscriptions: HashMap::new(),
+            control_rx: ctrl_rx,
+        };
+
+        Ok(ExtractorHandle {
+            handle: runner.run(),
+            control_tx: ctrl_tx,
+        })
     }
 }

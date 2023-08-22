@@ -29,6 +29,8 @@ where
 {
     fn get_id(&self) -> ExtractorIdentity;
 
+    async fn get_cursor(&self) -> String;
+
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,

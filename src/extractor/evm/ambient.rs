@@ -68,6 +68,10 @@ where
         }
     }
 
+    async fn get_cursor(&self) -> String {
+        String::from_utf8(self.inner.lock().await.cursor.clone()).expect("Cursor is utf8")
+    }
+
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,

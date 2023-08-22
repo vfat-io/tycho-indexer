@@ -147,3 +147,26 @@ async fn read_http_package(input: &str) -> Result<Package, anyhow::Error> {
 
     Package::decode(body).context("decode command")
 }
+
+async fn create_stream(
+    spkg_file: &str,
+    cursor: Option<&str>,
+    endpoint_url: &str,
+    module_name: &str,
+    start_block: i64,
+    token: &str,
+) -> Result<SubstreamsStream, anyhow::Error> {
+    let content =
+        std::fs::read(spkg_file).context(format_err!("read package from file '{}'", spkg_file))?;
+    let spkg = Package::decode(content.as_ref()).context("decode command")?;
+    let endpoint = Arc::new(SubstreamsEndpoint::new(&endpoint_url, Some(token.to_owned())).await?);
+
+    Ok(SubstreamsStream::new(
+        endpoint,
+        cursor.map(|s| s.to_owned()),
+        spkg.modules.clone(),
+        module_name.to_string(),
+        start_block,
+        0,
+    ))
+}
