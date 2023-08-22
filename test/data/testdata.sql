@@ -8,10 +8,10 @@ VALUES
 INSERT INTO block ("hash", "parent_hash", "number", "ts", "chain_id") 
 VALUES 
     -- ethereum blocks
-    ('0x123abc', '0x000001', 1, TIMESTAMP '2022-11-01 08:00:00', 1),  
-    ('0x456def', '0x123abc', 2, TIMESTAMP '2022-11-01 09:00:00', 1),
-    ('0x789jkl', '0x456def', 3, TIMESTAMP '2022-11-01 10:00:00', 1), 
-    ('0x012mno', '0x789jkl', 4, TIMESTAMP '2022-11-01 11:00:00', 1), 
+    (E'\\x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6', E'\\xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3', 1, TIMESTAMP '2022-11-01 08:00:00', 1),
+    (E'\\xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9', E'\\x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6', 2, TIMESTAMP '2022-11-01 09:00:00', 1),
+    (E'\\x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741', E'\\xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9', 3, TIMESTAMP '2022-11-01 10:00:00', 1), 
+    (E'\\x23adf5a3be0f5235b36941bcb29b62504278ec5b9cdfa277b992ba4a7a3cd3a2', E'\\x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741', 4, TIMESTAMP '2022-11-01 11:00:00', 1), 
 
     -- starknet blocks
     ('0x345pqr', '0x000002', 1, TIMESTAMP '2022-11-01 12:00:00', 2),
@@ -29,7 +29,7 @@ VALUES
 INSERT INTO "transaction" ("hash", "from", "to", "index", "block_id")
 VALUES
     -- ethereum
-    ('0x001', '\x31', '\x32', 1, 1), 
+    (E'\\xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945', E'\\x4648451b5F87FF8F0F7D622bD40574bb97E25980', E'\\x6B175474E89094C44Da98b954EedeAC495271d0F', 1, 1), 
     ('0x002', '\x33', '\x34', 2, 1), 
     ('0x003', '\x35', '\x36', 1, 2),
     ('0x004', '\x37', '\x38', 1, 3),
@@ -51,14 +51,14 @@ VALUES
     ('0x0016', '\x59', '\x60', 2, 12);
 
 
-INSERT INTO protocol_system ("name", "created_at")
+INSERT INTO protocol_system ("name")
 VALUES
-    ('uniswap-v2', '2022-01-02 00:00:00'),
-    ('ambient', '2022-01-03 00:00:00'),   
-    ('sithswap', '2022-01-05 00:00:00'),  
-    ('jediswap', '2022-01-06 00:00:00'),  
-    ('syncswap', '2022-01-08 00:00:00'), 
-    ('mute', '2022-01-09 00:00:00');
+    ('uniswap-v2'),
+    ('ambient'),   
+    ('sithswap'),  
+    ('jediswap'),  
+    ('syncswap'), 
+    ('mute');
 
 
 INSERT INTO protocol_type ("name", "type", "implementation", "attribute_schema")

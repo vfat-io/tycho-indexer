@@ -1,3 +1,7 @@
+//! # Substreams Rust Sink Boilerplate
+//!
+//! Currently this module only contains the raw boilerplate code to
+//! connect to a substream from within rust.
 use anyhow::{format_err, Context, Error};
 use futures03::StreamExt;
 use pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal};
@@ -11,6 +15,7 @@ use substreams::SubstreamsEndpoint;
 mod extractor;
 mod models;
 mod pb;
+mod storage;
 mod substreams;
 
 #[tokio::main]

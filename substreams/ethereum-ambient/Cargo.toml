@@ -1,10 +1,10 @@
 [package]
 name = "substreams-ethereum-ambient"
-version = "1.0.0"
+version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "substreams"
+name = "substreams_ethereum_ambient"
 crate-type = ["cdylib"]
 
 [dependencies]
