@@ -1,4 +1,5 @@
 pub mod evm;
+pub mod runner;
 
 use crate::models::Chain;
 use crate::storage::{
@@ -9,73 +10,33 @@ use crate::{
     pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
 };
 use async_trait::async_trait;
-use std::error::Error;
 use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum ExtractionError {}
-
-trait VMStateGateway<DB>:
-    ExtractorInstanceGateway<DB = DB>
-    + ChainGateway<DB = DB>
-    + ProtocolGateway<DB = DB>
-    + ContractStateGateway<DB = DB>
-    + Send
-    + Sync
-{
+pub enum ExtractionError {
+    #[error("Extractor setup failed: {0}")]
+    Setup(String),
+    #[error("Unexpected extraction error: {0}")]
+    Unkown(String),
 }
 
-type VMStateGatewayType<DB, B, TX, T, P, C, S, V> = Arc<
-    dyn VMStateGateway<
-        DB,
-        Block = B,
-        Transaction = TX,
-        Token = T,
-        ProtocolComponent = P,
-        ContractState = C,
-        Slot = S,
-        Value = V,
-    >,
->;
-
 #[async_trait]
-trait Extractor<DB> {
-    type Message: NormalisedMessage;
-    type Block;
-    type Transaction;
-    type Token;
-    type ProtocolComponent;
-    type ContractState;
-    type Slot;
-    type Value;
-
+pub trait Extractor<G, M>: Send + Sync
+where
+    G: Send + Sync,
+    M: NormalisedMessage,
+{
     fn get_id(&self) -> ExtractorIdentity;
 
-    async fn setup(
-        name: &str,
-        chain: Chain,
-        gateway: VMStateGatewayType<
-            DB,
-            Self::Block,
-            Self::Transaction,
-            Self::Token,
-            Self::ProtocolComponent,
-            Self::ContractState,
-            Self::Slot,
-            Self::Value,
-        >,
-    ) -> Result<Box<Self>, Box<dyn Error>>;
+    async fn get_cursor(&self) -> String;
 
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
-    ) -> Result<Option<Self::Message>, ExtractionError>;
+    ) -> Result<Option<M>, ExtractionError>;
 
-    async fn handle_revert(
-        &self,
-        inp: BlockUndoSignal,
-    ) -> Result<Option<Self::Message>, ExtractionError>;
+    async fn handle_revert(&self, inp: BlockUndoSignal) -> Result<Option<M>, ExtractionError>;
 
     async fn handle_progress(&self, inp: ModulesProgress) -> Result<(), ExtractionError>;
 }

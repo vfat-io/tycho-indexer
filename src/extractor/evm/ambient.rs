@@ -1,35 +1,30 @@
-use futures03::lock::Mutex;
-use std::error::Error;
+use diesel_async::pooled_connection::bb8::Pool;
+use diesel_async::AsyncPgConnection;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ethers::types::U256;
+use tokio::sync::Mutex;
 
+use super::EVMStateGateway;
 use crate::extractor::evm;
 use crate::extractor::ExtractionError;
 use crate::extractor::Extractor;
-use crate::extractor::VMStateGatewayType;
 use crate::models::Chain;
 use crate::models::ExtractorIdentity;
 use crate::pb::sf::substreams::rpc::v2::BlockScopedData;
 use crate::pb::sf::substreams::rpc::v2::BlockUndoSignal;
 use crate::pb::sf::substreams::rpc::v2::ModulesProgress;
+use crate::storage::BlockIdentifier;
+use crate::storage::StorageError;
 
 struct Inner {
     cursor: Vec<u8>,
 }
 
-pub struct AmbientContractExtractor<DB> {
-    gateway: VMStateGatewayType<
-        DB,
-        evm::Block,
-        evm::Transaction,
-        evm::ERC20Token,
-        evm::SwapPool,
-        evm::Account,
-        U256,
-        U256,
-    >,
+pub struct AmbientContractExtractor<G> {
+    gateway: G,
+    name: String,
+    chain: Chain,
     inner: Arc<Mutex<Inner>>,
 }
 
@@ -41,43 +36,46 @@ impl<DB> AmbientContractExtractor<DB> {
     }
 }
 
-#[async_trait]
-impl<DB> Extractor<DB> for AmbientContractExtractor<DB> {
-    type Message = evm::AccountUpdate;
-    type Block = evm::Block;
-    type Transaction = evm::Transaction;
-    type Token = evm::ERC20Token;
-    type ProtocolComponent = evm::SwapPool;
-    type ContractState = evm::Account;
-    type Slot = U256;
-    type Value = U256;
+struct AmbientPgGateway {
+    pool: Pool<AsyncPgConnection>,
+    state_gateway: EVMStateGateway<AsyncPgConnection>,
+}
 
+#[async_trait]
+trait AmbientGateway: Send + Sync {
+    async fn get_cursor(&self, name: &str, chain: Chain) -> Result<Vec<u8>, StorageError>;
+    async fn upsert_contract(
+        &self,
+        changes: evm::BlockStateChanges,
+        new_cursor: &[u8],
+    ) -> Result<(), StorageError>;
+    async fn revert_contract(
+        &self,
+        to: BlockIdentifier,
+        new_cursor: &[u8],
+    ) -> Result<evm::AccountUpdate, StorageError>;
+}
+
+#[async_trait]
+impl<G> Extractor<G, evm::AccountUpdate> for AmbientContractExtractor<G>
+where
+    G: AmbientGateway,
+{
     fn get_id(&self) -> ExtractorIdentity {
-        todo!()
+        ExtractorIdentity {
+            chain: self.chain,
+            name: self.name.to_owned(),
+        }
     }
 
-    async fn setup(
-        name: &str,
-        chain: Chain,
-        gateway: VMStateGatewayType<
-            DB,
-            Self::Block,
-            Self::Transaction,
-            Self::Token,
-            Self::ProtocolComponent,
-            Self::ContractState,
-            Self::Slot,
-            Self::Value,
-        >,
-    ) -> Result<Box<Self>, Box<dyn Error>> {
-        // check if this extractor has state
-        todo!()
+    async fn get_cursor(&self) -> String {
+        String::from_utf8(self.inner.lock().await.cursor.clone()).expect("Cursor is utf8")
     }
 
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
-    ) -> Result<Option<Self::Message>, ExtractionError> {
+    ) -> Result<Option<evm::AccountUpdate>, ExtractionError> {
         let _data = inp.output.as_ref().unwrap().map_output.as_ref().unwrap();
         // let msg = Message::decode::<Changes>(data.value.as_slice()).unwrap();
         self.update_cursor(inp.cursor).await;
@@ -87,7 +85,7 @@ impl<DB> Extractor<DB> for AmbientContractExtractor<DB> {
     async fn handle_revert(
         &self,
         inp: BlockUndoSignal,
-    ) -> Result<Option<Self::Message>, ExtractionError> {
+    ) -> Result<Option<evm::AccountUpdate>, ExtractionError> {
         self.update_cursor(inp.last_valid_cursor).await;
         todo!()
     }
@@ -95,4 +93,28 @@ impl<DB> Extractor<DB> for AmbientContractExtractor<DB> {
     async fn handle_progress(&self, inp: ModulesProgress) -> Result<(), ExtractionError> {
         todo!()
     }
+}
+
+async fn setup<G: AmbientGateway>(
+    name: &str,
+    chain: Chain,
+    gateway: G,
+) -> Result<AmbientContractExtractor<G>, ExtractionError> {
+    // check if this extractor has state
+    let res = match gateway.get_cursor(name, chain).await {
+        Err(StorageError::NotFound(_, _)) => AmbientContractExtractor {
+            gateway,
+            name: name.to_owned(),
+            chain,
+            inner: Arc::new(Mutex::new(Inner { cursor: Vec::new() })),
+        },
+        Ok(cursor) => AmbientContractExtractor {
+            gateway,
+            name: name.to_owned(),
+            chain,
+            inner: Arc::new(Mutex::new(Inner { cursor })),
+        },
+        Err(err) => return Err(ExtractionError::Setup(err.to_string())),
+    };
+    Ok(res)
 }

@@ -43,7 +43,7 @@ pub mod orm;
 pub mod postgres;
 pub mod schema;
 
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
@@ -556,3 +556,26 @@ pub trait ContractStateGateway {
         to: BlockOrTimestamp,
     ) -> Result<(), StorageError>;
 }
+
+pub trait StateGateway<DB>:
+    ExtractorInstanceGateway<DB = DB>
+    + ChainGateway<DB = DB>
+    + ProtocolGateway<DB = DB>
+    + ContractStateGateway<DB = DB>
+    + Send
+    + Sync
+{
+}
+
+pub type StateGatewayType<DB, B, TX, T, P, C, S, V> = Arc<
+    dyn StateGateway<
+        DB,
+        Block = B,
+        Transaction = TX,
+        Token = T,
+        ProtocolComponent = P,
+        ContractState = C,
+        Slot = S,
+        Value = V,
+    >,
+>;

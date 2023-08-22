@@ -1,6 +1,9 @@
 pub mod ambient;
 
-use crate::models::{Chain, ExtractorIdentity, NormalisedMessage};
+use crate::{
+    models::{Chain, ExtractorIdentity, NormalisedMessage},
+    storage::StateGatewayType,
+};
 use std::collections::HashMap;
 
 use chrono::NaiveDateTime;
@@ -32,17 +35,30 @@ pub struct Account {}
 
 pub struct AccountUpdate {
     extractor: String,
+    chain: Chain,
+    pub address: H160,
     pub slots: HashMap<U256, U256>,
     pub balance: Option<U256>,
     pub code: Option<Vec<u8>>,
     pub code_hash: Option<H256>,
 }
 
+struct UpdateWithTransaction(Transaction, AccountUpdate);
+
+struct BlockStateChanges {
+    block: Block,
+    account_updates: HashMap<H256, UpdateWithTransaction>,
+    new_pools: HashMap<H160, SwapPool>,
+}
+
 impl NormalisedMessage for AccountUpdate {
     fn source(&self) -> ExtractorIdentity {
-        return ExtractorIdentity {
-            chain: Chain::Ethereum,
+        ExtractorIdentity {
+            chain: self.chain,
             name: self.extractor.clone(),
-        };
+        }
     }
 }
+
+pub type EVMStateGateway<DB> =
+    StateGatewayType<DB, Block, Transaction, ERC20Token, SwapPool, Account, U256, U256>;
