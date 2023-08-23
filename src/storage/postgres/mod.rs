@@ -36,6 +36,7 @@
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
 pub mod chain_gateway;
+pub mod extraction_state_gateway;
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -47,7 +48,7 @@ use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use ethers::types::{H160, H256};
 
-use super::{BlockIdentifier, ChainGateway, StorableBlock, StorableTransaction};
+use super::*;
 use crate::extractor::evm;
 use crate::models::Chain;
 use crate::storage::schema;
