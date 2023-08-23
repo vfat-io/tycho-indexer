@@ -128,7 +128,7 @@ CREATE TABLE if not exists protocol_type (
 -- 	are usually defined through infrastructure configuration tools e.g. 
 --	terraform. So this table only maintains dynamic state that changes during
 --	runtime and has to be persisted between restarts.
-CREATE TABLE if not exists extractor_instance_state (
+CREATE TABLE if not exists extraction_state (
 	"id" BIGSERIAL PRIMARY KEY,
 	-- name of the extractor
 	"name" varchar(255) not null,
@@ -608,8 +608,8 @@ BEFORE UPDATE ON "protocol_calls_contract"
 FOR EACH ROW
 EXECUTE PROCEDURE update_modified_column();
 
-CREATE TRIGGER update_modtime_extractor_instance_state
-BEFORE UPDATE ON "extractor_instance_state"
+CREATE TRIGGER update_modtime_extraction_state
+BEFORE UPDATE ON "extraction_state"
 FOR EACH ROW
 EXECUTE PROCEDURE update_modified_column();
 
@@ -703,7 +703,7 @@ FOR EACH ROW
 EXECUTE PROCEDURE audit_trigger();
 
 
-CREATE TRIGGER audit_table_extractor_instance_state
-BEFORE UPDATE ON "extractor_instance_state"
+CREATE TRIGGER audit_table_extraction_state
+BEFORE UPDATE ON "extraction_state"
 FOR EACH ROW
 EXECUTE PROCEDURE audit_trigger();

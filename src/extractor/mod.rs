@@ -2,9 +2,7 @@ pub mod evm;
 pub mod runner;
 
 use crate::models::Chain;
-use crate::storage::{
-    ChainGateway, ContractStateGateway, ExtractorInstanceGateway, ProtocolGateway,
-};
+use crate::storage::{ChainGateway, ContractStateGateway, ExtractionStateGateway, ProtocolGateway};
 use crate::{
     models::{ExtractorIdentity, NormalisedMessage},
     pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},

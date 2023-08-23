@@ -110,7 +110,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    extractor_instance_state (id) {
+    extraction_state (id) {
         id -> Int8,
         #[max_length = 255]
         name -> Varchar,
@@ -239,7 +239,7 @@ diesel::joinable!(contract_code -> contract (contract_id));
 diesel::joinable!(contract_code -> transaction (modify_tx));
 diesel::joinable!(contract_storage -> contract (contract_id));
 diesel::joinable!(contract_storage -> transaction (modify_tx));
-diesel::joinable!(extractor_instance_state -> chain (chain_id));
+diesel::joinable!(extraction_state -> chain (chain_id));
 diesel::joinable!(protocol_calls_contract -> contract (contract_id));
 diesel::joinable!(protocol_calls_contract -> protocol_component (protocol_component_id));
 diesel::joinable!(protocol_component -> chain (chain_id));
@@ -260,7 +260,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     contract_balance,
     contract_code,
     contract_storage,
-    extractor_instance_state,
+    extraction_state,
     protocol_calls_contract,
     protocol_component,
     protocol_holds_token,

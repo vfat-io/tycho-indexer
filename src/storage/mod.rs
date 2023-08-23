@@ -49,7 +49,7 @@ use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use thiserror::Error;
 
-use crate::models::{Chain, ExtractorInstance, ProtocolSystem, ProtocolType};
+use crate::models::{Chain, ExtractionState, ProtocolSystem, ProtocolType};
 
 /// Identifies a block in storage.
 #[derive(Debug)]
@@ -234,7 +234,7 @@ pub trait ChainGateway {
 /// Extractors are uniquely identified by a name and the respective chain which
 /// they are indexing.
 #[async_trait]
-pub trait ExtractorInstanceGateway {
+pub trait ExtractionStateGateway {
     type DB;
 
     /// Retrieves the state of an extractor instance from a storage.
@@ -250,8 +250,8 @@ pub trait ExtractorInstanceGateway {
         &self,
         name: &str,
         chain: Chain,
-        db: &Self::DB,
-    ) -> Result<Option<ExtractorInstance>, StorageError>;
+        conn: &mut Self::DB,
+    ) -> Result<Option<ExtractionState>, StorageError>;
 
     /// Saves the state of an extractor instance to a storage.
     ///
@@ -263,7 +263,11 @@ pub trait ExtractorInstanceGateway {
     ///
     /// # Returns
     /// Ok, if state was stored successfully, Err if the state is not valid.
-    async fn save_state(&self, state: ExtractorInstance) -> Result<(), StorageError>;
+    async fn save_state(
+        &self,
+        state: &ExtractionState,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 }
 
 pub enum BlockOrTimestamp {
@@ -558,7 +562,7 @@ pub trait ContractStateGateway {
 }
 
 pub trait StateGateway<DB>:
-    ExtractorInstanceGateway<DB = DB>
+    ExtractionStateGateway<DB = DB>
     + ChainGateway<DB = DB>
     + ProtocolGateway<DB = DB>
     + ContractStateGateway<DB = DB>

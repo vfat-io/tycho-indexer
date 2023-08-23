@@ -53,7 +53,7 @@ pub struct ExtractorIdentity {
     pub name: String,
 }
 
-pub struct ExtractorInstance {
+pub struct ExtractionState {
     pub name: String,
     pub chain: Chain,
     pub attributes: serde_json::Value,
