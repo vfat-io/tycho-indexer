@@ -1,9 +1,8 @@
 use crate::models;
 
 use super::schema::{
-    block, chain, contract, contract_balance, contract_code, contract_storage,
-    extractor_instance_state, protocol_component, protocol_holds_token, protocol_system,
-    protocol_type, token, transaction,
+    block, chain, contract, contract_balance, contract_code, contract_storage, extraction_state,
+    protocol_component, protocol_holds_token, protocol_system, protocol_type, token, transaction,
 };
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -21,16 +20,93 @@ pub struct Chain {
     pub modified_ts: NaiveDateTime,
 }
 
+/// Represents the state of an extractor.
+///
+/// Note that static extraction parameters are usually defined through
+/// infrastructure configuration tools (e.g., terraform). This struct only
+/// maintains dynamic state that changes during runtime and has to be persisted
+/// between restarts.
 #[derive(Identifiable, Queryable, Associations, Selectable)]
 #[diesel(belongs_to(Chain))]
-#[diesel(table_name=extractor_instance_state)]
+#[diesel(table_name = extraction_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct ExtractorInstanceState {
+pub struct ExtractionState {
+    /// Unique identifier for the extraction state.
     pub id: i64,
+
+    /// Name of the extractor.
     pub name: String,
+
+    // Version of the extractor.
+    pub version: String,
+
+    /// Chain identifier that the extractor instance is scoped to.
     pub chain_id: i64,
+
+    /// Last fully extracted cursor for the corresponding substream.
+    /// Can be null, indicating no cursor has been extracted yet.
     pub cursor: Option<Vec<u8>>,
+
+    /// Additional attributes that the extractor needs to persist.
+    /// Stored as a JSON binary object.
+    pub attributes: Option<serde_json::Value>,
+
+    /// Timestamp when this entry was inserted into the table.
     pub inserted_ts: NaiveDateTime,
+
+    /// Timestamp when this entry was last modified.
+    pub modified_ts: NaiveDateTime,
+}
+
+impl ExtractionState {
+    /// Retrieves an `ExtractionState` based on the provided extractor name and chain ID.
+    ///
+    /// This method performs a join operation with the `chain` table and filters the results
+    /// based on the given extractor name and chain ID. It then selects the matching
+    /// `ExtractionState` and fetches the first result.
+    ///
+    /// # Parameters
+    /// - `extractor`: The name of the extractor to filter by.
+    /// - `chain_id`: The ID of the chain to filter by.
+    /// - `conn`: A mutable reference to an asynchronous PostgreSQL connection.
+    ///
+    /// # Returns
+    /// - `Ok(Some(ExtractionState))` if a matching `ExtractionState` is found.
+    /// - `Ok(None)` if no matching entry is found in the database.
+    /// - `Err(DieselError)` if a Diesel error occurs during the query.
+    pub async fn get_for_extractor(
+        extractor: &str,
+        chain_id: i64,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Option<ExtractionState>> {
+        extraction_state::table
+            .inner_join(chain::table)
+            .filter(extraction_state::name.eq(extractor))
+            .filter(chain::id.eq(chain_id))
+            .select(ExtractionState::as_select())
+            .first::<ExtractionState>(conn)
+            .await
+            .optional()
+    }
+}
+
+#[derive(Insertable)]
+#[diesel(table_name=extraction_state)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewExtractionState<'a> {
+    pub name: &'a str,
+    pub version: &'a str,
+    pub chain_id: i64,
+    pub cursor: Option<&'a [u8]>,
+    pub attributes: Option<&'a serde_json::Value>,
+    pub modified_ts: NaiveDateTime,
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = extraction_state)]
+pub struct ExtractionStateForm<'a> {
+    pub cursor: Option<&'a [u8]>,
+    pub attributes: Option<&'a serde_json::Value>,
     pub modified_ts: NaiveDateTime,
 }
 
