@@ -26,7 +26,7 @@
 //! below. Additionally, the entities you aim to store must also implement the
 //! respective `Storable*` trait.
 //!
-//! Note: that you will have different entities based on the specific blockchain
+//! Note that you will have different entities based on the specific blockchain
 //! under consideration. For instance, entities for EVM and Starknet will vary!
 //!
 //! The gateways are not confined to a certain chain scope but are universally
@@ -61,7 +61,8 @@ pub enum BlockIdentifier {
     /// finalised, there exists a possibility of forks occurring. As a result,
     /// the same number could refer to different blocks on different forks.
     Number((Chain, i64)),
-    /// Identifies a block by it's hash.
+
+    /// Identifies a block by its hash.
     ///
     /// The hash should be unique across multiple chains. Preferred method if
     /// the block is very recent.
@@ -142,11 +143,11 @@ where
 
 #[derive(Error, Debug)]
 pub enum StorageError {
-    #[error("Could not find {0} with id: `{1}`!")]
+    #[error("Could not find {0} with id `{1}`!")]
     NotFound(String, String),
-    #[error("The entity {0} with id: {1} was already present!")]
+    #[error("The entity {0} with id {1} was already present!")]
     DuplicateEntry(String, String),
-    #[error("Could not find related {0} for {1} with id: `{2}`!")]
+    #[error("Could not find related {0} for {1} with id `{2}`!")]
     NoRelatedEntity(String, String, String),
     #[error("Unexpected storage error: {0}")]
     Unexpected(String),
@@ -225,9 +226,9 @@ pub trait ChainGateway {
     ) -> Result<Self::Transaction, StorageError>;
 }
 
-/// Store and retrieve state for Extractors.
+/// Store and retrieve state of Extractors.
 ///
-/// Sometimes extractors may wish to persist some state across restart. E.g.
+/// Sometimes extractors may wish to persist their state across restart. E.g.
 /// substreams based extractors need to store the cursor, so they can continue
 /// processing where they left off.
 ///
@@ -244,7 +245,7 @@ pub trait ExtractorInstanceGateway {
     /// - `chain` The chain this extractor is indexing.
     ///
     /// # Returns
-    /// Ok, if state the corrsponding state was retrieved successfully, Err in
+    /// Ok if the corrsponding state was retrieved successfully, Err in
     /// case the state was not found.
     async fn get_state(
         &self,
