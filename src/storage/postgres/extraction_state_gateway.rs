@@ -120,7 +120,6 @@ mod test {
             .unwrap();
         let extractor_name = "setup_extractor";
 
-        let gateway = get_dgw(&mut conn).await;
         let cursor = Some("10".as_bytes());
         let attributes = serde_json::json!({"test": "test"});
         let orm_state = orm::NewExtractionState {
@@ -138,7 +137,6 @@ mod test {
             .await
             .unwrap();
 
-        // gateway.save_state(&state, &mut conn).await.unwrap();
         conn
     }
 
