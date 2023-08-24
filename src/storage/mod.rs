@@ -251,7 +251,7 @@ pub trait ExtractionStateGateway {
         name: &str,
         chain: Chain,
         conn: &mut Self::DB,
-    ) -> Result<Option<ExtractionState>, StorageError>;
+    ) -> Result<ExtractionState, StorageError>;
 
     /// Saves the state of an extractor instance to a storage.
     ///

@@ -25,10 +25,10 @@ where
         name: &str,
         chain: Chain,
         conn: &mut Self::DB,
-    ) -> Result<Option<ExtractionState>, StorageError> {
+    ) -> Result<ExtractionState, StorageError> {
         let block_chain_id = self.get_chain_id(chain);
 
-        match orm::ExtractionState::get_for_extractor(name, block_chain_id, conn).await {
+        match orm::ExtractionState::by_name(name, block_chain_id, conn).await {
             Ok(Some(orm_state)) => {
                 let state = ExtractionState {
                     name: orm_state.name,
@@ -36,9 +36,12 @@ where
                     attributes: orm_state.attributes.into(),
                     cursor: orm_state.cursor.unwrap_or_default(),
                 };
-                Ok(Some(state))
+                Ok(state)
             }
-            Ok(None) => Ok(None), // No matching entry in the DB
+            Ok(None) => Err(StorageError::NotFound(
+                "ExtractionState".to_owned(),
+                name.to_owned(),
+            )),
             Err(err) => Err(StorageError::from_diesel(
                 err,
                 "ExtractionState",
@@ -54,7 +57,7 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let block_chain_id = self.get_chain_id(state.chain);
-        match orm::ExtractionState::get_for_extractor(&state.name, block_chain_id, conn).await {
+        match orm::ExtractionState::by_name(&state.name, block_chain_id, conn).await {
             Ok(Some(_)) => {
                 let update_form = orm::ExtractionStateForm {
                     attributes: Some(&state.attributes),
@@ -126,7 +129,7 @@ mod test {
             name: extractor_name.to_owned(),
             chain: Chain::Ethereum,
             attributes: serde_json::json!({"test": "test"}),
-            cursor: Vec::new(),
+            cursor: "10".to_owned().into_bytes(),
         };
 
         gateway.save_state(&state, &mut conn).await.unwrap();
@@ -141,6 +144,7 @@ mod test {
 
     #[tokio::test]
     async fn test_save_new_state() {
+        // Adds a ExtractionState to the DB named "test_extractor" and asserts for it
         let mut conn = setup_db().await;
         let extractor_name = "test_extractor";
 
@@ -149,7 +153,7 @@ mod test {
             name: extractor_name.to_owned(),
             chain: Chain::Ethereum,
             attributes: serde_json::json!({"test": "test"}),
-            cursor: "10".as_bytes().to_vec(),
+            cursor: "10".to_owned().into_bytes(),
         };
 
         // Save the state using the gateway
@@ -157,13 +161,9 @@ mod test {
 
         let query_res: orm::ExtractionState = schema::extraction_state::table
             .filter(schema::extraction_state::name.eq(extractor_name))
-            .limit(1)
             .select(orm::ExtractionState::as_select())
-            .load(&mut conn)
+            .first(&mut conn)
             .await
-            .unwrap()
-            .into_iter()
-            .next()
             .unwrap();
 
         assert_eq!(&query_res.name, extractor_name);
@@ -173,62 +173,28 @@ mod test {
 
     #[tokio::test]
     async fn test_update_state() {
-        // Adds a ExtractionState to the DB
-        let mut conn = setup_db().await;
-        let gateway = get_dgw(&mut conn).await;
-        let extractor_name = "updating_extractor";
-
-        // Update the state using the gateway
-        let mut state = ExtractionState {
-            name: extractor_name.to_owned(),
-            chain: Chain::Ethereum,
-            attributes: serde_json::json!({"test": "test"}),
-            cursor: "10".as_bytes().to_vec(),
-        };
-        gateway.save_state(&state, &mut conn).await.unwrap();
-        assert_eq!(
-            gateway
-                .get_state(extractor_name, Chain::Ethereum, &mut conn)
-                .await
-                .unwrap()
-                .unwrap()
-                .cursor,
-            "10".as_bytes().to_vec()
-        );
-
-        state = ExtractionState {
-            name: extractor_name.to_owned(),
-            chain: Chain::Ethereum,
-            attributes: serde_json::json!({"test": "test"}),
-            cursor: "20".as_bytes().to_vec(),
-        };
-        gateway.save_state(&state, &mut conn).await.unwrap();
-        assert_eq!(
-            gateway
-                .get_state(extractor_name, Chain::Ethereum, &mut conn)
-                .await
-                .unwrap()
-                .unwrap()
-                .cursor,
-            "20".as_bytes().to_vec()
-        );
-    }
-
-    #[tokio::test]
-    async fn test_get_state() {
-        // Adds a ExtractionState to the DB
         let mut conn = setup_db().await;
         let gateway = get_dgw(&mut conn).await;
         let extractor_name = "setup_extractor";
 
-        // Get the state using the gateway
-        let state = gateway
-            .get_state(extractor_name, Chain::Ethereum, &mut conn)
-            .await
-            .unwrap()
-            .unwrap();
+        let state = ExtractionState {
+            name: extractor_name.to_owned(),
+            chain: Chain::Ethereum,
+            attributes: serde_json::json!({"test": "test"}),
+            cursor: "20".to_owned().into_bytes(),
+        };
 
-        assert_eq!(state.name, extractor_name);
-        assert_eq!(state.chain, Chain::Ethereum);
+            gateway
+            .save_state(&state, &mut conn)
+                .await
+            .expect("Failed to save state!");
+        assert_eq!(
+            gateway
+                .get_state(extractor_name, Chain::Ethereum, &mut conn)
+                .await
+                .unwrap()
+                .cursor,
+            "20".to_owned().into_bytes()
+        );
     }
 }

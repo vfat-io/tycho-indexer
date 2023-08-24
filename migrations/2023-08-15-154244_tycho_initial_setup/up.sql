@@ -617,17 +617,16 @@ EXECUTE PROCEDURE update_modified_column();
 CREATE OR REPLACE FUNCTION audit_trigger() RETURNS TRIGGER AS $audit_trigger$
 BEGIN
     IF (TG_OP = 'DELETE') THEN
-        INSERT INTO audit_log SELECT 'D', now(), user, hstore(OLD.*), NULL;
+        INSERT INTO audit_log(operation, ts, userid, original_data) SELECT 'D', now(), user, hstore(OLD.*);
         RETURN OLD;
     ELSIF (TG_OP = 'UPDATE') THEN
-        INSERT INTO audit_log SELECT 'U', now(), user, hstore(OLD.*), hstore(NEW.*);
+        INSERT INTO audit_log(operation, ts, userid, original_data, new_data) SELECT 'U', now(), user, hstore(OLD.*), hstore(NEW.*);
         RETURN NEW;
     ELSIF (TG_OP = 'INSERT') THEN
-        INSERT INTO audit_log SELECT 'I', now(), user, NULL, hstore(NEW.*);
+        INSERT INTO audit_log(operation, ts, userid, new_data) SELECT 'I', now(), user, hstore(NEW.*);
         RETURN NEW;
     END IF;
-
-    RETURN NULL; -- result is ignored since this is an AFTER trigger
+RETURN NULL;
 END;
 $audit_trigger$ LANGUAGE plpgsql;
 

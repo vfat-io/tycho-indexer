@@ -53,6 +53,7 @@ pub struct ExtractorIdentity {
     pub name: String,
 }
 
+#[derive(Debug)]
 pub struct ExtractionState {
     pub name: String,
     pub chain: Chain,

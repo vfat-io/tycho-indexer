@@ -74,7 +74,7 @@ impl ExtractionState {
     /// - `Ok(Some(ExtractionState))` if a matching `ExtractionState` is found.
     /// - `Ok(None)` if no matching entry is found in the database.
     /// - `Err(DieselError)` if a Diesel error occurs during the query.
-    pub async fn get_for_extractor(
+    pub async fn by_name(
         extractor: &str,
         chain_id: i64,
         conn: &mut AsyncPgConnection,
@@ -102,12 +102,12 @@ pub struct NewExtractionState<'a> {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(AsChangeset)]
+#[derive(AsChangeset, Debug)]
 #[diesel(table_name = extraction_state)]
 pub struct ExtractionStateForm<'a> {
     pub cursor: Option<&'a [u8]>,
     pub attributes: Option<&'a serde_json::Value>,
-    pub modified_ts: NaiveDateTime,
+    pub modified_ts: Option<NaiveDateTime>,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
