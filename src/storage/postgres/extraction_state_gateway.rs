@@ -121,14 +121,24 @@ mod test {
         let extractor_name = "setup_extractor";
 
         let gateway = get_dgw(&mut conn).await;
-        let state = ExtractionState {
-            name: extractor_name.to_owned(),
-            chain: Chain::Ethereum,
-            attributes: serde_json::json!({"test": "test"}),
-            cursor: "10".to_owned().into_bytes(),
+        let cursor = Some("10".as_bytes());
+        let attributes = serde_json::json!({"test": "test"});
+        let orm_state = orm::NewExtractionState {
+            name: extractor_name,
+            chain_id: chain_id,
+            attributes: Some(&attributes),
+            cursor: cursor,
+            version: "0.1.0",
+            modified_ts: chrono::Utc::now().naive_utc(),
         };
 
-        gateway.save_state(&state, &mut conn).await.unwrap();
+        diesel::insert_into(schema::extraction_state::table)
+            .values(&orm_state)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        // gateway.save_state(&state, &mut conn).await.unwrap();
         conn
     }
 
