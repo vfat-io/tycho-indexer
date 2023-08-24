@@ -172,7 +172,10 @@ pub trait ChainGateway {
     type Block;
     type Transaction;
 
-    /// Tries to add a new block to the blockchain's storage.
+    /// Upserts a new block to the blockchain's storage.
+    ///
+    /// Ignores any existing tx, if the new entry has different attributes
+    /// no error is raised and the old entry is kept.
     ///
     /// # Parameters
     /// - `new`: An instance of `Self::Block`, representing the new block to be
@@ -181,7 +184,7 @@ pub trait ChainGateway {
     /// # Returns
     /// - Empty ok result indicates success. Failure might occur if the block is
     ///   already present.
-    async fn add_block(&self, new: Self::Block, db: &mut Self::DB) -> Result<(), StorageError>;
+    async fn upsert_block(&self, new: Self::Block, db: &mut Self::DB) -> Result<(), StorageError>;
     /// Retrieves a block from storage.
     ///
     /// # Parameters
@@ -195,7 +198,10 @@ pub trait ChainGateway {
         id: BlockIdentifier,
         db: &mut Self::DB,
     ) -> Result<Self::Block, StorageError>;
-    /// Adds a new transaction to storage.
+    /// Upserts a transaction to storage.
+    ///
+    /// Ignores any existing tx, if the new entry has different attributes
+    /// no error is raised and the old entry is kept.
     ///
     /// # Parameters
     /// - `new`: An instance of `Self::Transaction`, representing the new
@@ -205,7 +211,11 @@ pub trait ChainGateway {
     /// - Empty ok result indicates success. Failure might occur if the
     /// corresponding block does not exists yet, or if the transaction already
     /// exists.
-    async fn add_tx(&self, new: Self::Transaction, db: &mut Self::DB) -> Result<(), StorageError>;
+    async fn upsert_tx(
+        &self,
+        new: Self::Transaction,
+        db: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 
     /// Tries to retrieve a transaction from the blockchain's storage using its
     /// hash.
