@@ -9,7 +9,7 @@ DROP TABLE "token";
 DROP TABLE "contract";
 DROP TABLE protocol_state;
 DROP TABLE protocol_component;
-DROP TABLE extractor_instance_state;
+DROP TABLE extraction_state;
 DROP TABLE protocol_type;
 DROP TABLE protocol_system;
 DROP TABLE "transaction";

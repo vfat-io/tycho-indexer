@@ -128,7 +128,7 @@ CREATE TABLE if not exists protocol_type (
 -- 	are usually defined through infrastructure configuration tools e.g. 
 --	terraform. So this table only maintains dynamic state that changes during
 --	runtime and has to be persisted between restarts.
-CREATE TABLE if not exists extractor_instance_state (
+CREATE TABLE if not exists extraction_state (
 	"id" BIGSERIAL PRIMARY KEY,
 	-- name of the extractor
 	"name" varchar(255) not null,
@@ -608,8 +608,8 @@ BEFORE UPDATE ON "protocol_calls_contract"
 FOR EACH ROW
 EXECUTE PROCEDURE update_modified_column();
 
-CREATE TRIGGER update_modtime_extractor_instance_state
-BEFORE UPDATE ON "extractor_instance_state"
+CREATE TRIGGER update_modtime_extraction_state
+BEFORE UPDATE ON "extraction_state"
 FOR EACH ROW
 EXECUTE PROCEDURE update_modified_column();
 
@@ -617,17 +617,16 @@ EXECUTE PROCEDURE update_modified_column();
 CREATE OR REPLACE FUNCTION audit_trigger() RETURNS TRIGGER AS $audit_trigger$
 BEGIN
     IF (TG_OP = 'DELETE') THEN
-        INSERT INTO audit_log SELECT 'D', now(), user, hstore(OLD.*), NULL;
+        INSERT INTO audit_log(operation, ts, userid, original_data) SELECT 'D', now(), user, hstore(OLD.*);
         RETURN OLD;
     ELSIF (TG_OP = 'UPDATE') THEN
-        INSERT INTO audit_log SELECT 'U', now(), user, hstore(OLD.*), hstore(NEW.*);
+        INSERT INTO audit_log(operation, ts, userid, original_data, new_data) SELECT 'U', now(), user, hstore(OLD.*), hstore(NEW.*);
         RETURN NEW;
     ELSIF (TG_OP = 'INSERT') THEN
-        INSERT INTO audit_log SELECT 'I', now(), user, NULL, hstore(NEW.*);
+        INSERT INTO audit_log(operation, ts, userid, new_data) SELECT 'I', now(), user, hstore(NEW.*);
         RETURN NEW;
     END IF;
-
-    RETURN NULL; -- result is ignored since this is an AFTER trigger
+RETURN NULL;
 END;
 $audit_trigger$ LANGUAGE plpgsql;
 
@@ -703,7 +702,7 @@ FOR EACH ROW
 EXECUTE PROCEDURE audit_trigger();
 
 
-CREATE TRIGGER audit_table_extractor_instance_state
-BEFORE UPDATE ON "extractor_instance_state"
+CREATE TRIGGER audit_table_extraction_state
+BEFORE UPDATE ON "extraction_state"
 FOR EACH ROW
 EXECUTE PROCEDURE audit_trigger();
