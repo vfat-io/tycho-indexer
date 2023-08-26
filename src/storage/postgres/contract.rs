@@ -9,9 +9,6 @@ use crate::storage::{orm, schema, BlockIdentifier, BlockOrTimestamp, ContractId,
 
 use super::PostgresGateway;
 
-diesel::alias!(schema::contract_storage as contract_storage1);
-diesel::alias!(schema::transaction as transaction1);
-
 impl<B, TX> PostgresGateway<B, TX> {
     async fn get_slots_delta(
         &self,
@@ -38,6 +35,11 @@ impl<B, TX> PostgresGateway<B, TX> {
 
         dbg!(&contract_id);
 
+        let (storage_alias, tx_alias) = diesel::alias!(
+            schema::contract_storage as storage_alias,
+            schema::transaction as tx_alias
+        );
+
         // TODO: We need to use joins here there is no easy way to handle
         // insertion or deletions
         if start_version_ts <= target_version_ts {
@@ -46,29 +48,37 @@ impl<B, TX> PostgresGateway<B, TX> {
             // slots at target_version. Additionally we need to find any deleted
             // slots and emit them with value 0.
 
-            // This query gives us the latest slot for our contract, which were
-            // inserted or updated within start_version_ts (exclusive) and
-            // target_version_ts (inclusive)
-            let changed_slots: Vec<(Vec<u8>, Vec<u8>)> = schema::contract_storage::table
+            let changed_slots = schema::contract_storage::table
                 .inner_join(schema::transaction::table)
                 .filter(schema::contract_storage::contract_id.eq(contract_id))
-                // Filters what changed between two versions when going
-                // forward. We include changes on target version but not
-                // from start version we ignore deletions (detectable via
-                // valid_to column) as these are modeled as updates to 0.
-                .filter(schema::contract_storage::valid_from.gt(start_version_ts))
+                .filter(
+                    schema::contract_storage::valid_from
+                        .gt(start_version_ts)
+                        .and(schema::contract_storage::valid_from.le(target_version_ts))
+                        .or(schema::contract_storage::valid_to
+                            .gt(start_version_ts)
+                            .and(schema::contract_storage::valid_to.le(target_version_ts))),
+                )
+                .select(schema::contract_storage::slot)
+                .distinct_on(schema::contract_storage::slot)
+                .get_results::<Vec<u8>>(conn)
+                .await?;
+
+            let changed_values: Vec<(Vec<u8>, Vec<u8>)> = schema::contract_storage::table
+                .inner_join(schema::transaction::table)
+                .filter(schema::contract_storage::contract_id.eq(contract_id))
+                .filter(schema::contract_storage::slot.eq_any(changed_slots))
                 .filter(schema::contract_storage::valid_from.le(target_version_ts))
-                // Correct value row selection filters:
-                //`valid_from <= target_version_ts` is part of value
-                // selection but already covered above
                 .filter(
                     schema::contract_storage::valid_to
                         .is_null()
                         .or(schema::contract_storage::valid_to.gt(target_version_ts)),
                 )
-                // group by max(transaction.index), selects the row with the max index
-                // in case multiple transactions happened at the same time
-                .order_by((schema::contract_storage::slot, schema::transaction::index))
+                // select max tx_index row
+                .order_by((
+                    schema::contract_storage::slot,
+                    schema::transaction::index.desc(),
+                ))
                 .select((
                     schema::contract_storage::slot,
                     schema::contract_storage::value,
@@ -77,7 +87,9 @@ impl<B, TX> PostgresGateway<B, TX> {
                 .get_results::<(Vec<u8>, Vec<u8>)>(conn)
                 .await?;
 
-            Ok(HashMap::from_iter(changed_slots.iter().map(|(rk, rv)| {
+            // TODO any changed slots that do not have values here were deleted
+
+            Ok(HashMap::from_iter(changed_values.iter().map(|(rk, rv)| {
                 // TODO: don't panic, use error if bytes are too short
                 (U256::from_big_endian(rk), U256::from_big_endian(rv))
             })))
