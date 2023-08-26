@@ -5,7 +5,9 @@ use diesel::{pg::Pg, prelude::*, sql_types::BigInt};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use ethers::types::U256;
 
-use crate::storage::{orm, schema, BlockIdentifier, BlockOrTimestamp, ContractId, StorageError};
+use crate::storage::{
+    self, orm, schema, BlockIdentifier, BlockOrTimestamp, ContractId, StorageError,
+};
 
 use super::PostgresGateway;
 
@@ -47,22 +49,23 @@ impl<B, TX> PostgresGateway<B, TX> {
             // changes made to them, finally find the respective value of these
             // slots at target_version. Additionally we need to find any deleted
             // slots and emit them with value 0.
-
-            let changed_slots = schema::contract_storage::table
-                .inner_join(schema::transaction::table)
-                .filter(schema::contract_storage::contract_id.eq(contract_id))
+            let valid_from_alias = storage_alias.fields(schema::contract_storage::valid_from);
+            let valid_to_alias = storage_alias.fields(schema::contract_storage::valid_to);
+            let slot_alias = storage_alias.fields(schema::contract_storage::slot);
+            let cid_alias = storage_alias.fields(schema::contract_storage::contract_id);
+            let changed_slots = storage_alias
+                .inner_join(tx_alias)
+                .filter(cid_alias.eq(contract_id))
                 .filter(
-                    schema::contract_storage::valid_from
+                    valid_from_alias
                         .gt(start_version_ts)
-                        .and(schema::contract_storage::valid_from.le(target_version_ts))
-                        .or(schema::contract_storage::valid_to
+                        .and(valid_from_alias.le(target_version_ts))
+                        .or(valid_to_alias
                             .gt(start_version_ts)
-                            .and(schema::contract_storage::valid_to.le(target_version_ts))),
+                            .and(valid_to_alias.le(target_version_ts))),
                 )
-                .select(schema::contract_storage::slot)
-                .distinct_on(schema::contract_storage::slot)
-                .get_results::<Vec<u8>>(conn)
-                .await?;
+                .select(slot_alias)
+                .distinct_on(slot_alias);
 
             let changed_values: Vec<(Vec<u8>, Vec<u8>)> = schema::contract_storage::table
                 .inner_join(schema::transaction::table)
