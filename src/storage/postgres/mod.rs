@@ -36,6 +36,7 @@
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
 pub mod chain;
+pub mod contract;
 pub mod contract_state;
 pub mod extraction_state;
 pub mod orm;
@@ -196,5 +197,164 @@ impl<B, TX> PostgresGateway<B, TX> {
 
     fn get_chain(&self, id: i64) -> Chain {
         self.chain_id_cache.get_chain(id)
+    }
+}
+
+#[cfg(test)]
+mod fixtures {
+    use std::str::FromStr;
+
+    use diesel::prelude::*;
+    use diesel_async::{AsyncPgConnection, RunQueryDsl};
+    use ethers::types::{H160, H256, U256};
+
+    use crate::storage::schema;
+
+    // Insert a new chain
+    pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
+        diesel::insert_into(schema::chain::table)
+            .values(schema::chain::name.eq(name))
+            .returning(schema::chain::id)
+            .get_result(conn)
+            .await
+            .unwrap()
+    }
+
+    /// Inserts two sequential blocks
+    pub async fn insert_blocks(conn: &mut AsyncPgConnection, chain_id: i64) -> Vec<i64> {
+        let block_records = vec![
+            (
+                schema::block::hash.eq(Vec::from(
+                    H256::from_str(
+                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                    )
+                    .unwrap()
+                    .as_bytes(),
+                )),
+                schema::block::parent_hash.eq(Vec::from(
+                    H256::from_str(
+                        "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+                    )
+                    .unwrap()
+                    .as_bytes(),
+                )),
+                schema::block::number.eq(1),
+                schema::block::ts.eq("2022-11-01T08:00:00"
+                    .parse::<chrono::NaiveDateTime>()
+                    .expect("timestamp")),
+                schema::block::chain_id.eq(chain_id),
+            ),
+            (
+                schema::block::hash.eq(Vec::from(
+                    H256::from_str(
+                        "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
+                    )
+                    .unwrap()
+                    .as_bytes(),
+                )),
+                schema::block::parent_hash.eq(Vec::from(
+                    H256::from_str(
+                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                    )
+                    .unwrap()
+                    .as_bytes(),
+                )),
+                schema::block::number.eq(2),
+                schema::block::ts.eq("2022-11-01T09:00:00"
+                    .parse::<chrono::NaiveDateTime>()
+                    .unwrap()),
+                schema::block::chain_id.eq(chain_id),
+            ),
+        ];
+        diesel::insert_into(schema::block::table)
+            .values(&block_records)
+            .returning(schema::block::id)
+            .get_results(conn)
+            .await
+            .unwrap()
+    }
+
+    /// Insert a bunch of transactions using (block_id, index, hash)
+    pub async fn insert_txns(conn: &mut AsyncPgConnection, txns: &[(i64, i64, &str)]) -> Vec<i64> {
+        let from_val = H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980").unwrap();
+        let to_val = H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
+        let data: Vec<_> = txns
+            .iter()
+            .map(|(b, i, h)| {
+                use schema::transaction::dsl::*;
+                (
+                    block_id.eq(b),
+                    index.eq(i),
+                    hash.eq(H256::from_str(h)
+                        .expect("valid txhash")
+                        .as_bytes()
+                        .to_owned()),
+                    from.eq(from_val.as_bytes()),
+                    to.eq(to_val.as_bytes()),
+                )
+            })
+            .collect();
+        diesel::insert_into(schema::transaction::table)
+            .values(&data)
+            .returning(schema::transaction::id)
+            .get_results(conn)
+            .await
+            .unwrap()
+    }
+
+    pub async fn insert_contract(
+        conn: &mut AsyncPgConnection,
+        address: &str,
+        title: &str,
+        chain_id: i64,
+    ) -> i64 {
+        diesel::insert_into(schema::contract::table)
+            .values((
+                schema::contract::title.eq(title),
+                schema::contract::chain_id.eq(chain_id),
+                schema::contract::address
+                    .eq(hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap()),
+            ))
+            .returning(schema::contract::id)
+            .get_result(conn)
+            .await
+            .unwrap()
+    }
+
+    pub async fn insert_slots(
+        conn: &mut AsyncPgConnection,
+        contract_id: i64,
+        modify_tx: i64,
+        valid_from: &str,
+        slots: &[(u64, u64)],
+    ) -> Vec<i64> {
+        let ts = valid_from.parse::<chrono::NaiveDateTime>().unwrap();
+        let data = slots
+            .iter()
+            .map(|(k, v)| {
+                (
+                    schema::contract_storage::slot.eq(hex::decode(format!(
+                        "{:064x}",
+                        U256::from(*k)
+                    ))
+                    .unwrap()),
+                    schema::contract_storage::value.eq(hex::decode(format!(
+                        "{:064x}",
+                        U256::from(*v)
+                    ))
+                    .unwrap()),
+                    schema::contract_storage::contract_id.eq(contract_id),
+                    schema::contract_storage::modify_tx.eq(modify_tx),
+                    schema::contract_storage::valid_from.eq(ts),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        diesel::insert_into(schema::contract_storage::table)
+            .values(&data)
+            .returning(schema::contract_storage::id)
+            .get_results(conn)
+            .await
+            .unwrap()
     }
 }

@@ -309,7 +309,7 @@ pub struct ContractCode {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name=contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]

@@ -268,6 +268,7 @@ pub trait ExtractionStateGateway {
     ) -> Result<(), StorageError>;
 }
 
+#[derive(Debug)]
 pub enum BlockOrTimestamp {
     Block(BlockIdentifier),
     Timestamp(NaiveDateTime),
@@ -286,6 +287,12 @@ pub enum VersionedResult<T> {
 }
 
 pub struct ContractId(Chain, Vec<u8>);
+
+impl Display for ContractId<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}: 0x{}", self.0, hex::encode(self.1))
+    }
+}
 
 pub struct Version(BlockOrTimestamp, VersionKind);
 

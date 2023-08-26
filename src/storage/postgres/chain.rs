@@ -171,96 +171,26 @@ mod test {
 
     use chrono::NaiveDateTime;
 
+    use crate::storage::postgres::fixtures;
+
     use super::*;
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
         let mut conn = AsyncPgConnection::establish(&db_url).await.unwrap();
         conn.begin_test_transaction().await.unwrap();
-        let chain_id: i64 = diesel::insert_into(schema::chain::table)
-            .values(schema::chain::name.eq("ethereum"))
-            .returning(schema::chain::id)
-            .get_result(&mut conn)
-            .await
-            .unwrap();
 
-        let block_records = vec![
-            (
-                schema::block::hash.eq(Vec::from(
-                    H256::from_str(
-                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-                    )
-                    .unwrap()
-                    .as_bytes(),
-                )),
-                schema::block::parent_hash.eq(Vec::from(
-                    H256::from_str(
-                        "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
-                    )
-                    .unwrap()
-                    .as_bytes(),
-                )),
-                schema::block::number.eq(1),
-                schema::block::ts.eq("2022-11-01T08:00:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .expect("timestamp")),
-                schema::block::chain_id.eq(chain_id),
-            ),
-            (
-                schema::block::hash.eq(Vec::from(
-                    H256::from_str(
-                        "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
-                    )
-                    .unwrap()
-                    .as_bytes(),
-                )),
-                schema::block::parent_hash.eq(Vec::from(
-                    H256::from_str(
-                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-                    )
-                    .unwrap()
-                    .as_bytes(),
-                )),
-                schema::block::number.eq(2),
-                schema::block::ts.eq("2022-11-01T09:00:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .unwrap()),
-                schema::block::chain_id.eq(chain_id),
-            ),
-        ];
-        let block_ids: Vec<i64> = diesel::insert_into(schema::block::table)
-            .values(&block_records)
-            .returning(schema::block::id)
-            .get_results(&mut conn)
-            .await
-            .unwrap();
-
-        let tx_data = vec![(
-            schema::transaction::hash.eq(Vec::from(
-                H256::from_str(
-                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-                )
-                .unwrap()
-                .as_bytes(),
-            )),
-            schema::transaction::from.eq(Vec::from(
-                H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980")
-                    .unwrap()
-                    .as_bytes(),
-            )),
-            schema::transaction::to.eq(Vec::from(
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                    .unwrap()
-                    .as_bytes(),
-            )),
-            schema::transaction::index.eq(1),
-            schema::transaction::block_id.eq(block_ids[0]),
-        )];
-        diesel::insert_into(schema::transaction::table)
-            .values(&tx_data)
-            .execute(&mut conn)
-            .await
-            .unwrap();
+        let chain_id: i64 = fixtures::insert_chain(&mut conn, "ethereum").await;
+        let block_ids = fixtures::insert_blocks(&mut conn, chain_id).await;
+        fixtures::insert_txns(
+            &mut conn,
+            &[(
+                block_ids[0],
+                1i64,
+                "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+            )],
+        )
+        .await;
         conn
     }
 

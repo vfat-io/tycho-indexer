@@ -411,7 +411,10 @@ create table if not exists contract_storage (
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX if not exists idx_contract_storage_account_id ON contract_storage (account_id);
+CREATE INDEX if not exists idx_contract_storage_contract_id ON contract_storage (contract_id);
+CREATE INDEX if not exists idx_contract_storage_contract_id ON contract_storage (contract_id, slot);
+CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (modify_tx);
+CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (valid_from);
 CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (valid_to);
 
 -- Relationship between protocols and contract(s).
@@ -508,9 +511,21 @@ CREATE TRIGGER invalidate_previous_contract_code
 BEFORE INSERT ON contract_code
 FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('contract_code', 'account_id');
 
+
+CREATE OR REPLACE FUNCTION invalidate_previous_entry_contract_storage() RETURNS TRIGGER AS $$
+BEGIN
+-- Update the 'valid_to' field of the last valid entry when a new one is inserted.
+    UPDATE contract_storage 
+    SET valid_to = NEW.valid_from 
+    WHERE valid_to IS NULL AND contract_id = NEW.contract_id and slot = NEW.slot;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
 CREATE TRIGGER invalidate_previous_contract_storage
 BEFORE INSERT ON contract_storage
-FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('contract_storage', 'account_id');
+FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry_contract_storage();
 
 
 CREATE OR REPLACE FUNCTION invalidate_previous_entry_protocol_calls_contract() RETURNS TRIGGER AS $$
