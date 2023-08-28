@@ -35,9 +35,9 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-pub mod chain_gateway;
-pub mod contract_state_gateway;
-pub mod extraction_state_gateway;
+pub mod chain;
+pub mod contract_state;
+pub mod extraction_state;
 
 use std::collections::HashMap;
 use std::hash::Hash;
