@@ -206,7 +206,7 @@ mod fixtures {
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
 
-    use crate::storage::schema;
+    use super::schema;
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -300,20 +300,19 @@ mod fixtures {
             .unwrap()
     }
 
-    pub async fn insert_contract(
+    pub async fn insert_account(
         conn: &mut AsyncPgConnection,
         address: &str,
         title: &str,
         chain_id: i64,
     ) -> i64 {
-        diesel::insert_into(schema::contract::table)
+        diesel::insert_into(schema::account::table)
             .values((
-                schema::contract::title.eq(title),
-                schema::contract::chain_id.eq(chain_id),
-                schema::contract::address
-                    .eq(hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap()),
+                schema::account::title.eq(title),
+                schema::account::chain_id.eq(chain_id),
+                schema::account::address.eq(hex::decode(address).unwrap()),
             ))
-            .returning(schema::contract::id)
+            .returning(schema::account::id)
             .get_result(conn)
             .await
             .unwrap()
@@ -342,7 +341,7 @@ mod fixtures {
                         U256::from(*v)
                     ))
                     .unwrap()),
-                    schema::contract_storage::contract_id.eq(contract_id),
+                    schema::contract_storage::account_id.eq(contract_id),
                     schema::contract_storage::modify_tx.eq(modify_tx),
                     schema::contract_storage::valid_from.eq(ts),
                     schema::contract_storage::ordinal.eq(idx as i64),

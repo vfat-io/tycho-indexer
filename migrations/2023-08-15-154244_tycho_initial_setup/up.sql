@@ -419,8 +419,8 @@ create table if not exists contract_storage (
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX if not exists idx_contract_storage_contract_id ON contract_storage (contract_id);
-CREATE INDEX if not exists idx_contract_storage_contract_id ON contract_storage (contract_id, slot);
+CREATE INDEX if not exists idx_contract_storage_account_id ON contract_storage (account_id);
+CREATE INDEX if not exists idx_contract_storage_account_id ON contract_storage (account_id, slot);
 CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (modify_tx);
 CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (valid_from);
 CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (valid_to);
@@ -525,8 +525,8 @@ BEGIN
 -- Update the 'valid_to' field of the last valid entry when a new one is inserted.
     UPDATE contract_storage 
     SET valid_to = NEW.valid_from 
-    WHERE valid_to IS NULL AND contract_id = NEW.contract_id and slot = NEW.slot;
-	NEW.previous_value = (SELECT value FROM contract_storage WHERE contract_id = NEW.contract_id and slot = NEW.slot LIMIT 1);
+    WHERE valid_to IS NULL AND account_id = NEW.account_id and slot = NEW.slot;
+	NEW.previous_value = (SELECT value FROM contract_storage WHERE account_id = NEW.account_id and slot = NEW.slot LIMIT 1);
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

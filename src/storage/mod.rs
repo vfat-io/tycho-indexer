@@ -290,9 +290,9 @@ pub enum VersionedResult<T> {
 
 pub struct ContractId(Chain, Vec<u8>);
 
-impl Display for ContractId<'_> {
+impl Display for ContractId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}: 0x{}", self.0, hex::encode(self.1))
+        write!(f, "{:?}: 0x{}", self.0, hex::encode(&self.1))
     }
 }
 
