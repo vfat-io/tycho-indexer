@@ -36,7 +36,6 @@
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
 pub mod chain;
-pub mod contract;
 pub mod contract_state;
 pub mod extraction_state;
 pub mod orm;
@@ -47,13 +46,10 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use diesel::prelude::*;
-use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
-use ethers::types::{H160, H256};
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use super::StorageError;
-use crate::extractor::evm;
 use crate::models::Chain;
 
 pub struct EnumTableCache<E> {

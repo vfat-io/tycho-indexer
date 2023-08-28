@@ -84,4 +84,4 @@ impl NormalisedMessage for AccountUpdate {
 }
 
 pub type EVMStateGateway<DB> =
-    StateGatewayType<DB, Block, Transaction, ERC20Token, SwapPool, Account, U256, U256>;
+    StateGatewayType<DB, Block, Transaction, ERC20Token, SwapPool, Account, H160, U256, U256>;

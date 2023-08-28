@@ -444,6 +444,7 @@ pub trait StorableContract<S, N, DbId> {
 pub trait ContractStateGateway {
     type DB;
     type ContractState;
+    type Address;
     type Slot;
     type Value;
 
@@ -547,10 +548,11 @@ pub trait ContractStateGateway {
     ///     can't be located in storage.
     async fn get_slots_delta(
         &self,
-        id: ContractId,
+        id: Chain,
         start_version: Option<BlockOrTimestamp>,
         end_version: Option<BlockOrTimestamp>,
-    ) -> Result<HashMap<Self::Slot, Self::Value>, StorageError>;
+        db: &mut Self::DB,
+    ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError>;
 
     /// Reverts the contract in storage to a previous version.
     ///
@@ -578,7 +580,7 @@ pub trait StateGateway<DB>:
 {
 }
 
-pub type StateGatewayType<DB, B, TX, T, P, C, S, V> = Arc<
+pub type StateGatewayType<DB, B, TX, T, P, C, A, S, V> = Arc<
     dyn StateGateway<
         DB,
         Block = B,
@@ -586,6 +588,7 @@ pub type StateGatewayType<DB, B, TX, T, P, C, S, V> = Arc<
         Token = T,
         ProtocolComponent = P,
         ContractState = C,
+        Address = A,
         Slot = S,
         Value = V,
     >,
