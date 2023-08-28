@@ -25,12 +25,19 @@ where
     type Block = B;
     type Transaction = TX;
 
-    async fn add_block(&self, new: Self::Block, conn: &mut Self::DB) -> Result<(), StorageError> {
+    async fn upsert_block(
+        &self,
+        new: Self::Block,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
         use super::schema::block::dsl::*;
         let block_chain_id = self.get_chain_id(new.chain());
         let new_block = new.to_storage(block_chain_id);
+
+        // assumes that block with the same hash will not appear with different values
         diesel::insert_into(block)
             .values(&new_block)
+            .on_conflict_do_nothing()
             .execute(conn)
             .await
             .map_err(|err| {
@@ -61,7 +68,7 @@ where
         Ok(B::from_storage(orm_block, chain))
     }
 
-    async fn add_tx(
+    async fn upsert_tx(
         &self,
         new: Self::Transaction,
         conn: &mut Self::DB,
@@ -85,8 +92,10 @@ where
 
         let orm_new: orm::NewTransaction = new.to_storage(parent_block);
 
+        // assumes that tx with the same hash will not appear with different values
         diesel::insert_into(transaction)
             .values(&orm_new)
+            .on_conflict_do_nothing()
             .execute(conn)
             .await
             .map_err(|err| {
@@ -295,7 +304,37 @@ mod test {
         let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let block = block("0xbadbabe000000000000000000000000000000000000000000000000000000000");
 
-        gw.add_block(block, &mut conn).await.unwrap();
+        gw.upsert_block(block, &mut conn).await.unwrap();
+        let retrieved_block = gw
+            .get_block(
+                BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(retrieved_block, block);
+    }
+
+    #[tokio::test]
+    async fn test_upsert_block() {
+        let mut conn = setup_db().await;
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let block = evm::Block {
+            number: 1,
+            hash: H256::from_str(
+                "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+            )
+            .unwrap(),
+            parent_hash: H256::from_str(
+                "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+            )
+            .unwrap(),
+            chain: Chain::Ethereum,
+            ts: NaiveDateTime::parse_from_str("2022-11-01T08:00:00", "%Y-%m-%dT%H:%M:%S").unwrap(),
+        };
+
+        gw.upsert_block(block, &mut conn).await.unwrap();
         let retrieved_block = gw
             .get_block(
                 BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())),
@@ -341,7 +380,31 @@ mod test {
             H256::from_str("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9")
                 .unwrap();
 
-        gw.add_tx(tx, &mut conn).await.unwrap();
+        gw.upsert_tx(tx, &mut conn).await.unwrap();
+        let retrieved_tx = gw.get_tx(tx.hash.as_bytes(), &mut conn).await.unwrap();
+
+        assert_eq!(tx, retrieved_tx);
+    }
+
+    #[tokio::test]
+    async fn test_upsert_tx() {
+        let mut conn = setup_db().await;
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let tx = evm::Transaction {
+            hash: H256::from_str(
+                "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+            )
+            .expect("tx hash ok"),
+            block_hash: H256::from_str(
+                "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+            )
+            .expect("block hash ok"),
+            from: H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980").expect("from ok"),
+            to: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").expect("to ok"),
+            index: 1,
+        };
+
+        gw.upsert_tx(tx, &mut conn).await.unwrap();
         let retrieved_tx = gw.get_tx(tx.hash.as_bytes(), &mut conn).await.unwrap();
 
         assert_eq!(tx, retrieved_tx);
