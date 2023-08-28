@@ -54,7 +54,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    contract (id) {
+    account (id) {
         id -> Int8,
         chain_id -> Int8,
         #[max_length = 255]
@@ -69,10 +69,10 @@ diesel::table! {
 }
 
 diesel::table! {
-    contract_balance (id) {
+    account_balance (id) {
         id -> Int8,
         balance -> Bytea,
-        contract_id -> Int8,
+        account_id -> Int8,
         modify_tx -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
@@ -86,7 +86,7 @@ diesel::table! {
         id -> Int8,
         code -> Bytea,
         hash -> Bytea,
-        contract_id -> Int8,
+        account_id -> Int8,
         modify_tx -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
@@ -100,7 +100,7 @@ diesel::table! {
         id -> Int8,
         slot -> Bytea,
         value -> Bytea,
-        contract_id -> Int8,
+        account_id -> Int8,
         modify_tx -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
@@ -128,7 +128,7 @@ diesel::table! {
     protocol_calls_contract (id) {
         id -> Int8,
         protocol_component_id -> Int8,
-        contract_id -> Int8,
+        account_id -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
         inserted_ts -> Timestamptz,
@@ -206,7 +206,7 @@ diesel::table! {
 diesel::table! {
     token (id) {
         id -> Int8,
-        contract_id -> Int8,
+        account_id -> Int8,
         #[max_length = 255]
         symbol -> Varchar,
         decimals -> Int4,
@@ -231,16 +231,16 @@ diesel::table! {
 }
 
 diesel::joinable!(block -> chain (chain_id));
-diesel::joinable!(contract -> chain (chain_id));
-diesel::joinable!(contract -> transaction (creation_tx));
-diesel::joinable!(contract_balance -> contract (contract_id));
-diesel::joinable!(contract_balance -> transaction (modify_tx));
-diesel::joinable!(contract_code -> contract (contract_id));
+diesel::joinable!(account -> chain (chain_id));
+diesel::joinable!(account -> transaction (creation_tx));
+diesel::joinable!(account_balance -> account (account_id));
+diesel::joinable!(account_balance -> transaction (modify_tx));
+diesel::joinable!(contract_code -> account (account_id));
 diesel::joinable!(contract_code -> transaction (modify_tx));
-diesel::joinable!(contract_storage -> contract (contract_id));
+diesel::joinable!(contract_storage -> account (account_id));
 diesel::joinable!(contract_storage -> transaction (modify_tx));
 diesel::joinable!(extraction_state -> chain (chain_id));
-diesel::joinable!(protocol_calls_contract -> contract (contract_id));
+diesel::joinable!(protocol_calls_contract -> account (account_id));
 diesel::joinable!(protocol_calls_contract -> protocol_component (protocol_component_id));
 diesel::joinable!(protocol_component -> chain (chain_id));
 diesel::joinable!(protocol_component -> protocol_system (protocol_system_id));
@@ -249,15 +249,15 @@ diesel::joinable!(protocol_holds_token -> protocol_component (protocol_component
 diesel::joinable!(protocol_holds_token -> token (token_id));
 diesel::joinable!(protocol_state -> protocol_component (protocol_component_id));
 diesel::joinable!(protocol_state -> transaction (modify_tx));
-diesel::joinable!(token -> contract (contract_id));
+diesel::joinable!(token -> account (account_id));
 diesel::joinable!(transaction -> block (block_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     audit_log,
     block,
     chain,
-    contract,
-    contract_balance,
+    account,
+    account_balance,
     contract_code,
     contract_storage,
     extraction_state,

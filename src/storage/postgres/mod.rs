@@ -35,8 +35,11 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-pub mod chain_gateway;
-pub mod extraction_state_gateway;
+pub mod chain;
+pub mod contract_state;
+pub mod extraction_state;
+pub mod orm;
+pub mod schema;
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -48,11 +51,9 @@ use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use ethers::types::{H160, H256};
 
-use super::*;
+use super::StorageError;
 use crate::extractor::evm;
 use crate::models::Chain;
-use crate::storage::schema;
-use crate::storage::{orm, StorageError};
 
 pub struct EnumTableCache<E> {
     map_id: HashMap<E, i64>,
@@ -177,7 +178,7 @@ impl<B, TX> PostgresGateway<B, TX> {
     #[cfg(test)]
     async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
         let results: Vec<(i64, String)> = async {
-            use super::schema::chain::dsl::*;
+            use schema::chain::dsl::*;
             chain
                 .select((id, name))
                 .load(conn)

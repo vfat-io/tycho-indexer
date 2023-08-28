@@ -239,17 +239,17 @@ create index if not exists idx_protocol_state_valid_to on protocol_state(valid_t
 create index if not exists idx_protocol_state_valid_protocol_component_id on protocol_state(protocol_component_id);
 
 
--- Describes a single contract.
-create table if not exists "contract" (
+-- Describes a single account.
+create table if not exists "account" (
     "id" BIGSERIAL PRIMARY KEY,
     
-    -- Contracts are scoped to a single chain.
+    -- Accounts are scoped to a single chain.
     "chain_id" bigint references "chain"(id) not null,
     
-    -- Succinct title of this contract e.g. "maker psm"
+    -- Succinct title of this account e.g. "maker psm"
     "title" varchar(255) not null,
     
-    -- The address of this contract.
+    -- The address of this account.
 	"address" bytea not null,
 	
 	-- transaction that created this contract.
@@ -272,14 +272,14 @@ create table if not exists "contract" (
     UNIQUE ("chain_id", "address")
 );
 
-create index if not exists idx_contract_chain_id on contract(chain_id);
+create index if not exists idx_account_chain_id on account(chain_id);
 
 -- Describes tokens e.g. ERC20 on evm chains.
 create table if not exists "token" (
 	"id" BIGSERIAL PRIMARY KEY,
 	
-	-- The contract that implements this token.
-	"contract_id" bigint references contract(id) not null,
+	-- The account that implements this token.
+	"account_id" bigint references account(id) not null,
 	
 	-- The symbol/ticker for this token.
 	"symbol" VARCHAR(255) not null,
@@ -301,7 +301,7 @@ create table if not exists "token" (
 );
 
 CREATE INDEX if not exists idx_token_symbol ON "token" USING gin("symbol" gin_trgm_ops);
-CREATE INDEX if not exists idx_token_contract_id ON token(contract_id);
+CREATE INDEX if not exists idx_token_account_id ON token(account_id);
 
 
 -- M2M relationship between tokens and protocol 
@@ -318,15 +318,15 @@ CREATE TABLE if not exists protocol_holds_token (
     PRIMARY KEY("protocol_component_id", "token_id")
 );
 
--- Versioned contract balance.
-create table contract_balance(
+-- Versioned account balance.
+create table account_balance(
 	"id" BIGSERIAL PRIMARY KEY,
 	
-	-- The balance of the contract.
+	-- The balance of the account.
 	"balance" bytea not null,
 	
-	-- the contract this entry refers to.
-	"contract_id" bigint references contract(id) not null,
+	-- the account this entry refers to.
+	"account_id" bigint references account(id) not null,
 	
 	-- the transaction that modified the state to this entry.
 	"modify_tx" bigint references "transaction"(id) not null,
@@ -345,8 +345,8 @@ create table contract_balance(
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX if not exists idx_contract_balance_contract_id ON contract_balance (contract_id);
-CREATE INDEX if not exists idx_contract_balance_valid_to ON contract_balance (valid_to);
+CREATE INDEX if not exists idx_account_balance_account_id ON account_balance (account_id);
+CREATE INDEX if not exists idx_account_balance_valid_to ON account_balance (valid_to);
 
 -- Versioned contract code.
 create table contract_code(
@@ -359,7 +359,7 @@ create table contract_code(
 	"hash" bytea not null,
 	
 	-- the contract this entry refers to.
-	"contract_id" bigint references contract(id) not null,
+	"account_id" bigint references account(id) not null,
 	
 	-- the transaction that modified the code to this entry.
 	"modify_tx" bigint references "transaction"(id) not null,
@@ -378,7 +378,7 @@ create table contract_code(
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX if not exists idx_contract_code_contract_id ON contract_code (contract_id);
+CREATE INDEX if not exists idx_contract_code_account_id ON contract_code (account_id);
 CREATE INDEX if not exists idx_contract_code_valid_to ON contract_code (valid_to);
 
 -- Versioned contract storage.
@@ -392,7 +392,7 @@ create table if not exists contract_storage (
 	"value" bytea not null,
 	
 	-- the contract this entry refers to.
-	"contract_id" bigint references contract(id) not null,
+	"account_id" bigint references account(id) not null,
 	
 	-- the transaction that modified the slot to this entry.
 	"modify_tx" bigint references "transaction"(id) not null,
@@ -411,7 +411,7 @@ create table if not exists contract_storage (
 	"modified_ts" timestamptz not null default current_timestamp
 );
 
-CREATE INDEX if not exists idx_contract_storage_contract_id ON contract_storage (contract_id);
+CREATE INDEX if not exists idx_contract_storage_account_id ON contract_storage (account_id);
 CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (valid_to);
 
 -- Relationship between protocols and contract(s).
@@ -420,7 +420,7 @@ CREATE TABLE if not exists protocol_calls_contract (
 
     "protocol_component_id" BIGINT REFERENCES protocol_component(id) not null,
     
-    "contract_id" BIGINT REFERENCES contract(id) not null,
+    "account_id" BIGINT REFERENCES account(id) not null,
     
     -- Tx this assocuation became valud, versioned association between contracts, 
     -- allows to track updates of e.g. price feeds. 
@@ -436,12 +436,12 @@ CREATE TABLE if not exists protocol_calls_contract (
 	-- Timestamp this entry was inserted into this table.
 	"modified_ts" timestamptz not null default current_timestamp,
     
-    UNIQUE("protocol_component_id", "contract_id", "valid_from"),
-    UNIQUE("protocol_component_id", "contract_id", "valid_to")
+    UNIQUE("protocol_component_id", "account_id", "valid_from"),
+    UNIQUE("protocol_component_id", "account_id", "valid_to")
 );
 
 CREATE INDEX if not exists idx_protocol_calls_contract_protocol_component_id ON protocol_calls_contract(protocol_component_id);
-CREATE INDEX if not exists idx_protocol_calls_contract_contract_id ON protocol_calls_contract(contract_id);
+CREATE INDEX if not exists idx_protocol_calls_contract_account_id ON protocol_calls_contract(account_id);
 CREATE INDEX if not exists idx_protocol_calls_contract_valid_to ON protocol_calls_contract(valid_to);
 
 -- keeps track of what we did.
@@ -500,17 +500,17 @@ CREATE TRIGGER invalidate_previous_protocol_state
 BEFORE INSERT ON protocol_state 
 FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('protocol_state', 'protocol_component_id');
 
-CREATE TRIGGER invalidate_previous_contract_balance
-BEFORE INSERT ON contract_balance 
-FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('contract_balance', 'contract_id');
+CREATE TRIGGER invalidate_previous_account_balance
+BEFORE INSERT ON account_balance 
+FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('account_balance', 'account_id');
 
 CREATE TRIGGER invalidate_previous_contract_code
 BEFORE INSERT ON contract_code
-FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('contract_code', 'contract_id');
+FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('contract_code', 'account_id');
 
 CREATE TRIGGER invalidate_previous_contract_storage
 BEFORE INSERT ON contract_storage
-FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('contract_storage', 'contract_id');
+FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('contract_storage', 'account_id');
 
 
 CREATE OR REPLACE FUNCTION invalidate_previous_entry_protocol_calls_contract() RETURNS TRIGGER AS $$
@@ -518,7 +518,7 @@ BEGIN
 -- Update the 'valid_to' field of the last valid entry when a new one is inserted.
     UPDATE protocol_calls_contract 
     SET valid_to = NEW.valid_from 
-    WHERE valid_to IS NULL AND protocol_component_id = NEW.protocol_component_id and contract_id = NEW.contract_id;
+    WHERE valid_to IS NULL AND protocol_component_id = NEW.protocol_component_id and account_id = NEW.account_id;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -573,8 +573,8 @@ BEFORE UPDATE ON "protocol_component"
 FOR EACH ROW
 EXECUTE PROCEDURE update_modified_column();
 
-CREATE TRIGGER update_modtime_contract
-BEFORE UPDATE ON "contract"
+CREATE TRIGGER update_modtime_account
+BEFORE UPDATE ON "account"
 FOR EACH ROW
 EXECUTE PROCEDURE update_modified_column();
 
@@ -593,8 +593,8 @@ BEFORE UPDATE ON "contract_storage"
 FOR EACH ROW
 EXECUTE PROCEDURE update_modified_column();
 
-CREATE TRIGGER update_modtime_contract_balance
-BEFORE UPDATE ON "contract_balance"
+CREATE TRIGGER update_modtime_account_balance
+BEFORE UPDATE ON "account_balance"
 FOR EACH ROW
 EXECUTE PROCEDURE update_modified_column();
 
@@ -666,8 +666,8 @@ BEFORE UPDATE ON "protocol_component"
 FOR EACH ROW
 EXECUTE PROCEDURE audit_trigger();
 
-CREATE TRIGGER audit_table_contract
-BEFORE UPDATE ON "contract"
+CREATE TRIGGER audit_table_account
+BEFORE UPDATE ON "account"
 FOR EACH ROW
 EXECUTE PROCEDURE audit_trigger();
 
@@ -686,8 +686,8 @@ BEFORE UPDATE ON "contract_storage"
 FOR EACH ROW
 EXECUTE PROCEDURE audit_trigger();
 
-CREATE TRIGGER audit_table_contract_balance
-BEFORE UPDATE ON "contract_balance"
+CREATE TRIGGER audit_table_account_balance
+BEFORE UPDATE ON "account_balance"
 FOR EACH ROW
 EXECUTE PROCEDURE audit_trigger();
 

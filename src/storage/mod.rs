@@ -39,9 +39,7 @@
 //! for these enums. Following this approach paves the way for initializing a
 //! cross-chain compatible gateway (For instance, refer
 //! [enum_dispatch](https://docs.rs/enum_dispatch/latest/enum_dispatch/) crate).
-pub mod orm;
 pub mod postgres;
-pub mod schema;
 
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
@@ -288,7 +286,7 @@ pub enum VersionedResult<T> {
     Last(T),
 }
 
-pub struct ContractId<'a>(Chain, &'a [u8]);
+pub struct ContractId(Chain, Vec<u8>);
 
 pub struct Version(BlockOrTimestamp, VersionKind);
 
