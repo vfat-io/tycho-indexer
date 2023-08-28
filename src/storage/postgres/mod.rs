@@ -120,9 +120,7 @@ type ChainEnumCache = EnumTableCache<Chain>;
 
 impl From<diesel::result::Error> for StorageError {
     fn from(value: diesel::result::Error) -> Self {
-        // Only rollback errors should arrive here
-        // we never expect these.
-        StorageError::Unexpected(format!("DieselRollbackError: {}", value))
+        StorageError::Unexpected(format!("DieselError: {}", value))
     }
 }
 

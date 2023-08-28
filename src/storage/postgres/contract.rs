@@ -1,104 +1,179 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use ethers::types::U256;
+use ethers::types::{H160, U256};
 
-use crate::storage::{orm, schema, BlockIdentifier, BlockOrTimestamp, ContractId, StorageError};
+use crate::{
+    models::Chain,
+    storage::{orm, schema, BlockIdentifier, BlockOrTimestamp, ContractId, StorageError},
+};
 
 use super::PostgresGateway;
 
 impl<B, TX> PostgresGateway<B, TX> {
     async fn get_slots_delta(
         &self,
-        id: ContractId<'_>,
-        current_version: Option<BlockOrTimestamp>,
+        chain: Chain,
+        start_version: Option<BlockOrTimestamp>,
         target_version: Option<BlockOrTimestamp>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<HashMap<U256, U256>, StorageError> {
-        let chain_id = self.get_chain_id(id.0);
-        let start_version_ts = version_to_ts(&current_version, conn).await?;
+    ) -> Result<HashMap<H160, HashMap<U256, U256>>, StorageError> {
+        let chain_id = self.get_chain_id(chain);
+        // To support blocks as versions, we need to ingest all blocks, else the
+        // below method can error for any blocks that are not present.
+        let start_version_ts = version_to_ts(&start_version, conn).await?;
         let target_version_ts = version_to_ts(&target_version, conn).await?;
 
-        let contract_id = schema::contract::table
-            .inner_join(schema::chain::table)
-            .filter(schema::chain::id.eq(chain_id))
-            .filter(schema::contract::address.eq(id.1))
-            .select(schema::contract::id)
-            .first::<i64>(conn)
-            .await
-            .unwrap();
-
         let changed_values = if start_version_ts <= target_version_ts {
+            // Going forward
+            //                  ]     relevant changes     ]
+            // -----------------|--------------------------|
+            //                start                     target
+            // We query for changes between start and target version. Then sort
+            // these by contract and slot by change time in a desending matter
+            // (latest change first). Next we deduplicate by contract and slot.
+            // Finally we select the value column to give us the latest value
+            // within the version range.
             schema::contract_storage::table
-                .filter(schema::contract_storage::contract_id.eq(contract_id))
+                .inner_join(schema::contract::table.inner_join(schema::chain::table))
+                .filter(schema::chain::id.eq(chain_id))
                 .filter(schema::contract_storage::valid_from.gt(start_version_ts))
                 .filter(schema::contract_storage::valid_from.le(target_version_ts))
                 .order_by((
+                    schema::contract::id,
                     schema::contract_storage::slot,
                     schema::contract_storage::valid_from.desc(),
                     schema::contract_storage::ordinal.desc(),
                 ))
                 .select((
+                    schema::contract::id,
                     schema::contract_storage::slot,
                     schema::contract_storage::value,
                 ))
-                .distinct_on(schema::contract_storage::slot)
-                .get_results::<(Vec<u8>, Option<Vec<u8>>)>(conn)
+                .distinct_on((schema::contract::id, schema::contract_storage::slot))
+                .get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
                 .await
                 .unwrap()
         } else {
-            // we are going backwards, so we'll include data to revert from the
-            // current version. Assume the target version changes were applied
-            // previously already
+            // Going backwards
+            //                  ]     relevant changes     ]
+            // -----------------|--------------------------|
+            //                target                     start
+            // We query for changes between target and start version. Then sort
+            // these for each contract and slot by change time in an ascending
+            // manner. Next, we deduplicate by taking the first row for each
+            // contract and slot. Finally we select the previous_value column to
+            // give us the value before this first change within the version
+            // range.
             schema::contract_storage::table
-                .filter(schema::contract_storage::contract_id.eq(contract_id))
+                .inner_join(schema::contract::table.inner_join(schema::chain::table))
+                .filter(schema::chain::id.eq(chain_id))
                 .filter(schema::contract_storage::valid_from.gt(target_version_ts))
                 .filter(schema::contract_storage::valid_from.le(start_version_ts))
                 .order_by((
-                    schema::contract_storage::slot,
+                    schema::contract::id.asc(),
+                    schema::contract_storage::slot.asc(),
                     schema::contract_storage::valid_from.asc(),
                     schema::contract_storage::ordinal.asc(),
                 ))
                 .select((
+                    schema::contract::id,
                     schema::contract_storage::slot,
                     schema::contract_storage::previous_value,
                 ))
-                .distinct_on(schema::contract_storage::slot)
-                .get_results::<(Vec<u8>, Option<Vec<u8>>)>(conn)
+                .distinct_on((schema::contract::id, schema::contract_storage::slot))
+                .get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
                 .await
                 .unwrap()
         };
 
-        changed_values
+        // We retrieve contract addresses separately because this is more
+        // efficient for the most common cases. In the most common case, only a
+        // handful of contracts that we are interested in will have had changes
+        // that need to be reverted. The previous query only returns duplicated
+        // contract ids, which are lighweight (8 byte vs 20 for addresses), once
+        // deduplicated we only fetch the associated addresses. These addresses
+        // are considered immutable so if necessary we could event cache these
+        // locally.
+        // In the worst case each changed slot is only changed on a different
+        // contract. On mainnet that would be at max 300 contracts/slots, which
+        // although not ideal is still bearable.
+        let contract_addresses = schema::contract::table
+            .filter(schema::contract::id.eq_any(changed_values.iter().map(|(cid, _, _)| cid)))
+            .select((schema::contract::id, schema::contract::address))
+            .get_results::<(i64, Vec<u8>)>(conn)
+            .await
+            .map_err(StorageError::from)?
             .iter()
-            .map(|(raw_key, raw_val)| {
-                if raw_key.len() != 32 {
+            .map(|(k, v)| {
+                if v.len() != 20 {
                     return Err(StorageError::DecodeError(format!(
-                        "Invalid byte length for U256 in slot key! Found: 0x{}",
-                        hex::encode(raw_key)
+                        "Invalid contract address found for contract with id: {}, address: {}",
+                        k,
+                        hex::encode(v)
                     )));
                 }
-                if let Some(val) = raw_val {
-                    if val.len() != 32 {
-                        return Err(StorageError::DecodeError(format!(
-                            "Invalid byte length for U256 in slot value! Found: 0x{}",
-                            hex::encode(val)
-                        )));
-                    }
-                }
-                let v: U256 = raw_val
-                    .as_ref()
-                    .map(|rv| U256::from_big_endian(rv))
-                    .unwrap_or_else(U256::zero);
-
-                Ok((U256::from_big_endian(raw_key), v))
+                Ok((*k, H160::from_slice(v)))
             })
-            .collect()
+            .collect::<Result<HashMap<i64, H160>, StorageError>>()?;
+
+        let mut result: HashMap<H160, HashMap<U256, U256>> =
+            HashMap::with_capacity(contract_addresses.len());
+        for (cid, raw_key, raw_val) in changed_values.into_iter() {
+            // note this can theoretically happen (only if there is some really
+            // bad database inconsistency) because the call above simply filters
+            // for contracts ids, but won't error or give any inidication of a
+            // missing contract id.
+            let contract_address = contract_addresses.get(&cid).ok_or_else(|| {
+                StorageError::DecodeError(format!("Failed to find contract address for id {}", cid))
+            })?;
+
+            if raw_key.len() != 32 {
+                return Err(StorageError::DecodeError(format!(
+                    "Invalid byte length for U256 in slot key! Found: 0x{}",
+                    hex::encode(raw_key)
+                )));
+            }
+            let v = if let Some(val) = raw_val {
+                if val.len() != 32 {
+                    return Err(StorageError::DecodeError(format!(
+                        "Invalid byte length for U256 in slot value! Found: 0x{}",
+                        hex::encode(val)
+                    )));
+                }
+                U256::from_big_endian(&val)
+            } else {
+                U256::zero()
+            };
+
+            let k = U256::from_big_endian(&raw_key);
+
+            match result.entry(*contract_address) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().insert(k, v);
+                }
+                Entry::Vacant(e) => {
+                    let mut contract_storage = HashMap::new();
+                    contract_storage.insert(k, v);
+                    e.insert(contract_storage);
+                }
+            }
+        }
+        Ok(result)
     }
 }
 
+/// Given a version find the corresponding timestamp.
+///
+/// If the version is a block, it will query the database for that block and
+/// return its timestamp.
+///
+/// ## Note:
+/// This can fail if there is no block present in the db. With the current table
+/// schema this means, that there were no changes detected at that block, but
+/// there might have been on previous or in later blocks.
 async fn version_to_ts(
     start_version: &Option<BlockOrTimestamp>,
     conn: &mut AsyncPgConnection,
@@ -123,23 +198,13 @@ async fn version_to_ts(
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::str::FromStr;
 
-    use chrono::NaiveDateTime;
-    use diesel::prelude::*;
-    use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
-    use ethers::types::H160;
-    use ethers::types::U256;
+    use diesel_async::AsyncConnection;
 
-    use crate::extractor::evm;
-    use crate::models::Chain;
-    use crate::storage::orm;
-    use crate::storage::postgres::fixtures;
-    use crate::storage::postgres::PostgresGateway;
-    use crate::storage::schema;
-    use crate::storage::BlockOrTimestamp;
-    use crate::storage::ContractId;
+    use crate::{extractor::evm, storage::postgres::fixtures};
+
+    use super::*;
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -223,19 +288,17 @@ mod test {
         let mut conn = setup_db().await;
         setup_slots_delta(&mut conn).await;
         let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
-        let exp: HashMap<U256, U256> = vec![(0, 2), (1, 3), (5, 25), (6, 30)]
+        let storage: HashMap<U256, U256> = vec![(0, 2), (1, 3), (5, 25), (6, 30)]
             .iter()
             .map(|(k, v)| (U256::from(*k), U256::from(*v)))
             .collect();
+        let mut exp = HashMap::new();
+        let addr = H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
+        exp.insert(addr, storage);
 
         let res = gw
             .get_slots_delta(
-                ContractId(
-                    Chain::Ethereum,
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                        .unwrap()
-                        .as_bytes(),
-                ),
+                Chain::Ethereum,
                 Some(BlockOrTimestamp::Timestamp(
                     "2020-01-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
                 )),
@@ -255,20 +318,17 @@ mod test {
         let mut conn = setup_db().await;
         setup_slots_delta(&mut conn).await;
         let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
-        print_slots(&mut conn).await;
-        let exp: HashMap<U256, U256> = vec![(0, 1), (1, 5), (5, 0), (6, 0)]
+        let storage: HashMap<U256, U256> = vec![(0, 1), (1, 5), (5, 0), (6, 0)]
             .iter()
             .map(|(k, v)| (U256::from(*k), U256::from(*v)))
             .collect();
+        let mut exp = HashMap::new();
+        let addr = H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
+        exp.insert(addr, storage);
 
         let res = gw
             .get_slots_delta(
-                ContractId(
-                    Chain::Ethereum,
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                        .unwrap()
-                        .as_bytes(),
-                ),
+                Chain::Ethereum,
                 Some(BlockOrTimestamp::Timestamp(
                     "2020-01-01T02:00:00".parse::<NaiveDateTime>().unwrap(),
                 )),
