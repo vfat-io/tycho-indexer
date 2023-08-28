@@ -23,6 +23,56 @@
 //! panic if an associated entity still exists in the database and retrieved
 //! with a codebase which no longer presents the enum value.
 //!
+//!
+//! ### Versioning
+//!
+//! This implementation utilizes temporal tables for recording the changes in
+//! entities over time. In this model, `valid_from` and `valid_to` determine the
+//! timeframe during which the facts provided by the record are regarded as
+//! accurate (validity period). Typically, in temporal tables, a valid version
+//! for a specific timestamp is found using the following predicate:
+//!
+//! ```sql
+//! valid_from < version_ts AND (version_ts <= valid_to OR valid_to is NULL)
+//! ```
+//!
+//! The `valid_to` can be set to null, signifying that the version remains
+//! valid. However, as all alterations within a block happen simultaneously,
+//! this predicate might yield multiple valid versions for a single entity.
+//!
+//! To further assign a temporal sequence to these entities, the transaction
+//! index within the block is recorded, usually through a `modify_tx` foreign
+//! key.
+//!
+//! ```sql
+//! SELECT * FROM table
+//! JOIN transaction
+//! WHERE valid_from < version_ts
+//!     AND (version_ts <= valid_to OR valid_to is NULL)
+//! ORDER BY entity_id, transaction.index DESC
+//! DISTINCT ON entity_id
+//! ```
+//!
+//! Here we select a set of versions by timestamp, then arrange rows by their
+//! transaction index (descending) and choose the first row, thus obtaining the
+//! latest version within the block (aka version at end of block).
+//!
+//! #### Contract Storage Table
+//!
+//! Special attention must be given to the contract_storage table, which also
+//! records the previous value with each modification. This simplifies the
+//! generation of a delta change structure utilized during reorgs for informing
+//! clients about the necessary updates. Deletions in this table are modeled
+//! as simple updates; in the case of deletion, it's value is updated to null.
+//! This technique simplifies querying for delta changes while maintaining
+//! efficiency at the cost of requiring additional storage space. As
+//! `valid_from` and `valid_to` are not entirely sufficient to find a single
+//! valid state within blockchain systems, the contract_storage table
+//! additionally maintains an `ordinal` column. This column is redundant with
+//! the transaction's index that produced the respective changes. This
+//! redundancy is to avoid additional joins and further optimize query
+//! performance.
+//!
 //! ### Atomic Transactions
 //!
 //! In our design, direct connection to the database and consequently beginning,
