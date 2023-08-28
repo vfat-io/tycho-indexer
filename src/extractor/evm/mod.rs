@@ -33,6 +33,7 @@ pub struct Transaction {
 
 pub struct Account {}
 
+#[derive(PartialEq, Debug)]
 pub struct AccountUpdate {
     extractor: String,
     chain: Chain,

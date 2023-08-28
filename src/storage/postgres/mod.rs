@@ -36,6 +36,7 @@
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
 pub mod chain_gateway;
+pub mod contract_state_gateway;
 pub mod extraction_state_gateway;
 
 use std::collections::HashMap;

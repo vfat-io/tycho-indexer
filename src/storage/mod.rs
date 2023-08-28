@@ -287,7 +287,7 @@ pub enum VersionedResult<T> {
     Last(T),
 }
 
-pub struct ContractId<'a>(Chain, &'a [u8]);
+pub struct ContractId(Chain, Vec<u8>);
 
 pub struct Version(BlockOrTimestamp, VersionKind);
 
