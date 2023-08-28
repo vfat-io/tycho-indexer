@@ -1,7 +1,7 @@
 use crate::models;
 
 use super::schema::{
-    block, chain, contract, contract_balance, contract_code, contract_storage, extraction_state,
+    account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
     protocol_component, protocol_holds_token, protocol_system, protocol_type, token, transaction,
 };
 use chrono::NaiveDateTime;
@@ -249,9 +249,9 @@ pub struct ProtocolComponent {
 #[derive(Identifiable, Queryable, Associations, Selectable)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(Transaction, foreign_key = creation_tx))]
-#[diesel(table_name=contract)]
+#[diesel(table_name=account)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct Contract {
+pub struct Account {
     pub id: i64,
     pub title: String,
     pub address: Vec<u8>,
@@ -264,12 +264,12 @@ pub struct Contract {
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
-#[diesel(belongs_to(Contract))]
+#[diesel(belongs_to(Account))]
 #[diesel(table_name=token)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Token {
     pub id: i64,
-    pub contract_id: i64,
+    pub account_id: i64,
     pub symbol: String,
     pub decimals: i32,
     pub tax: i64,
@@ -279,13 +279,13 @@ pub struct Token {
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
-#[diesel(belongs_to(Contract))]
-#[diesel(table_name=contract_balance)]
+#[diesel(belongs_to(Account))]
+#[diesel(table_name=account_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct ContractBalance {
+pub struct AccountBalance {
     pub id: i64,
     pub balance: Vec<u8>,
-    pub contract_id: i64,
+    pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
@@ -294,14 +294,14 @@ pub struct ContractBalance {
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
-#[diesel(belongs_to(Contract))]
+#[diesel(belongs_to(Account))]
 #[diesel(table_name=contract_code)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ContractCode {
     pub id: i64,
     pub code: Vec<u8>,
     pub hash: Vec<u8>,
-    pub contract_id: i64,
+    pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
@@ -310,14 +310,14 @@ pub struct ContractCode {
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
-#[diesel(belongs_to(Contract))]
+#[diesel(belongs_to(Account))]
 #[diesel(table_name=contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ContractStorage {
     pub id: i64,
     pub slot: Vec<u8>,
     pub value: Vec<u8>,
-    pub contract_id: i64,
+    pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
