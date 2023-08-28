@@ -3,13 +3,14 @@ use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use ethers::types::{H160, H256};
 
+use super::orm;
+use super::schema;
 use super::PostgresGateway;
-
-use super::{BlockIdentifier, ChainGateway, StorableBlock, StorableTransaction};
 use crate::extractor::evm;
 use crate::models::Chain;
-use crate::storage::schema;
-use crate::storage::{orm, StorageError};
+use crate::storage::{
+    BlockIdentifier, ChainGateway, StorableBlock, StorableTransaction, StorageError,
+};
 
 #[async_trait]
 impl<B, TX> ChainGateway for PostgresGateway<B, TX>

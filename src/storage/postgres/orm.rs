@@ -199,7 +199,7 @@ pub struct ProtocolSystem {
 }
 
 #[derive(Debug, DbEnum)]
-#[ExistingTypePath = "crate::storage::schema::sql_types::FinancialProtocolType"]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialProtocolType"]
 pub enum FinancialProtocolType {
     Swap,
     Psm,
@@ -208,7 +208,7 @@ pub enum FinancialProtocolType {
 }
 
 #[derive(Debug, DbEnum)]
-#[ExistingTypePath = "crate::storage::schema::sql_types::ProtocolImplementationType"]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolImplementationType"]
 pub enum ProtocolImplementationType {
     Custom,
     Vm,

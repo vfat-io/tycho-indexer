@@ -1,9 +1,8 @@
-use super::{
-    Chain, ExtractionState, ExtractionStateGateway, PostgresGateway, StorableBlock,
-    StorableTransaction, StorageError,
-};
-use crate::storage::orm;
-use crate::storage::schema;
+use crate::storage::{ExtractionState, ExtractionStateGateway, StorableBlock, StorableTransaction};
+
+use super::orm;
+use super::schema;
+use super::{Chain, PostgresGateway, StorageError};
 use async_trait::async_trait;
 use diesel::prelude::*;
 use diesel::ExpressionMethods;
@@ -124,9 +123,9 @@ mod test {
         let attributes = serde_json::json!({"test": "test"});
         let orm_state = orm::NewExtractionState {
             name: extractor_name,
-            chain_id: chain_id,
+            chain_id,
             attributes: Some(&attributes),
-            cursor: cursor,
+            cursor,
             version: "0.1.0",
             modified_ts: chrono::Utc::now().naive_utc(),
         };
