@@ -331,7 +331,8 @@ mod fixtures {
         let ts = valid_from.parse::<chrono::NaiveDateTime>().unwrap();
         let data = slots
             .iter()
-            .map(|(k, v)| {
+            .enumerate()
+            .map(|(idx, (k, v))| {
                 (
                     schema::contract_storage::slot.eq(hex::decode(format!(
                         "{:064x}",
@@ -346,6 +347,7 @@ mod fixtures {
                     schema::contract_storage::contract_id.eq(contract_id),
                     schema::contract_storage::modify_tx.eq(modify_tx),
                     schema::contract_storage::valid_from.eq(ts),
+                    schema::contract_storage::ordinal.eq(idx as i64),
                 )
             })
             .collect::<Vec<_>>();

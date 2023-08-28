@@ -1,13 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use chrono::{NaiveDateTime, Utc};
-use diesel::{pg::Pg, prelude::*, sql_types::BigInt};
+use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use ethers::types::U256;
 
-use crate::storage::{
-    self, orm, schema, BlockIdentifier, BlockOrTimestamp, ContractId, StorageError,
-};
+use crate::storage::{orm, schema, BlockIdentifier, BlockOrTimestamp, ContractId, StorageError};
 
 use super::PostgresGateway;
 
@@ -23,9 +21,6 @@ impl<B, TX> PostgresGateway<B, TX> {
         let start_version_ts = version_to_ts(&current_version, conn).await?;
         let target_version_ts = version_to_ts(&target_version, conn).await?;
 
-        dbg!(&start_version_ts);
-        dbg!(&target_version_ts);
-
         let contract_id = schema::contract::table
             .inner_join(schema::chain::table)
             .filter(schema::chain::id.eq(chain_id))
@@ -35,73 +30,72 @@ impl<B, TX> PostgresGateway<B, TX> {
             .await
             .unwrap();
 
-        dbg!(&contract_id);
-
-        let (storage_alias, tx_alias) = diesel::alias!(
-            schema::contract_storage as storage_alias,
-            schema::transaction as tx_alias
-        );
-
-        // TODO: We need to use joins here there is no easy way to handle
-        // insertion or deletions
-        if start_version_ts <= target_version_ts {
-            // We are going forward, we need to find all slots that had any
-            // changes made to them, finally find the respective value of these
-            // slots at target_version. Additionally we need to find any deleted
-            // slots and emit them with value 0.
-            let valid_from_alias = storage_alias.fields(schema::contract_storage::valid_from);
-            let valid_to_alias = storage_alias.fields(schema::contract_storage::valid_to);
-            let slot_alias = storage_alias.fields(schema::contract_storage::slot);
-            let cid_alias = storage_alias.fields(schema::contract_storage::contract_id);
-            let changed_slots = storage_alias
-                .inner_join(tx_alias)
-                .filter(cid_alias.eq(contract_id))
-                .filter(
-                    valid_from_alias
-                        .gt(start_version_ts)
-                        .and(valid_from_alias.le(target_version_ts))
-                        .or(valid_to_alias
-                            .gt(start_version_ts)
-                            .and(valid_to_alias.le(target_version_ts))),
-                )
-                .select(slot_alias)
-                .distinct_on(slot_alias);
-
-            let changed_values: Vec<(Vec<u8>, Vec<u8>)> = schema::contract_storage::table
-                .inner_join(schema::transaction::table)
+        let changed_values = if start_version_ts <= target_version_ts {
+            schema::contract_storage::table
                 .filter(schema::contract_storage::contract_id.eq(contract_id))
-                .filter(schema::contract_storage::slot.eq_any(changed_slots))
+                .filter(schema::contract_storage::valid_from.gt(start_version_ts))
                 .filter(schema::contract_storage::valid_from.le(target_version_ts))
-                .filter(
-                    schema::contract_storage::valid_to
-                        .is_null()
-                        .or(schema::contract_storage::valid_to.gt(target_version_ts)),
-                )
-                // select max tx_index row
                 .order_by((
                     schema::contract_storage::slot,
-                    schema::transaction::index.desc(),
+                    schema::contract_storage::valid_from.desc(),
+                    schema::contract_storage::ordinal.desc(),
                 ))
                 .select((
                     schema::contract_storage::slot,
                     schema::contract_storage::value,
                 ))
                 .distinct_on(schema::contract_storage::slot)
-                .get_results::<(Vec<u8>, Vec<u8>)>(conn)
-                .await?;
-
-            // TODO any changed slots that do not have values here were deleted
-
-            Ok(HashMap::from_iter(changed_values.iter().map(|(rk, rv)| {
-                // TODO: don't panic, use error if bytes are too short
-                (U256::from_big_endian(rk), U256::from_big_endian(rv))
-            })))
+                .get_results::<(Vec<u8>, Option<Vec<u8>>)>(conn)
+                .await
+                .unwrap()
         } else {
             // we are going backwards, so we'll include data to revert from the
             // current version. Assume the target version changes were applied
             // previously already
-            Ok(HashMap::new())
-        }
+            schema::contract_storage::table
+                .filter(schema::contract_storage::contract_id.eq(contract_id))
+                .filter(schema::contract_storage::valid_from.gt(target_version_ts))
+                .filter(schema::contract_storage::valid_from.le(start_version_ts))
+                .order_by((
+                    schema::contract_storage::slot,
+                    schema::contract_storage::valid_from.asc(),
+                    schema::contract_storage::ordinal.asc(),
+                ))
+                .select((
+                    schema::contract_storage::slot,
+                    schema::contract_storage::previous_value,
+                ))
+                .distinct_on(schema::contract_storage::slot)
+                .get_results::<(Vec<u8>, Option<Vec<u8>>)>(conn)
+                .await
+                .unwrap()
+        };
+
+        changed_values
+            .iter()
+            .map(|(raw_key, raw_val)| {
+                if raw_key.len() != 32 {
+                    return Err(StorageError::DecodeError(format!(
+                        "Invalid byte length for U256 in slot key! Found: 0x{}",
+                        hex::encode(raw_key)
+                    )));
+                }
+                if let Some(val) = raw_val {
+                    if val.len() != 32 {
+                        return Err(StorageError::DecodeError(format!(
+                            "Invalid byte length for U256 in slot value! Found: 0x{}",
+                            hex::encode(val)
+                        )));
+                    }
+                }
+                let v: U256 = raw_val
+                    .as_ref()
+                    .map(|rv| U256::from_big_endian(rv))
+                    .unwrap_or_else(U256::zero);
+
+                Ok((U256::from_big_endian(raw_key), v))
+            })
+            .collect()
     }
 }
 
@@ -129,6 +123,7 @@ async fn version_to_ts(
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use std::str::FromStr;
 
     use chrono::NaiveDateTime;
@@ -184,36 +179,56 @@ mod test {
             c0,
             txn[0],
             "2020-01-01T00:00:00",
-            &[(0, 1), (1, 1), (2, 1)],
+            &[(0, 1), (1, 5), (2, 1)],
         )
         .await;
-        fixtures::insert_slots(conn, c0, txn[1], "2020-01-01T01:00:00", &[(0, 2), (1, 3)]).await;
+        fixtures::insert_slots(
+            conn,
+            c0,
+            txn[1],
+            "2020-01-01T01:00:00",
+            &[(0, 2), (1, 3), (5, 25), (6, 30)],
+        )
+        .await;
     }
 
-    #[tokio::test]
-    async fn get_slots_delta() {
-        let mut conn = setup_db().await;
-        setup_slots_delta(&mut conn).await;
-
+    async fn print_slots(conn: &mut AsyncPgConnection) {
         let all_slots: Vec<orm::ContractStorage> = schema::contract_storage::table
             .select(orm::ContractStorage::as_select())
-            .get_results(&mut conn)
+            .get_results(conn)
             .await
             .unwrap();
 
         dbg!(all_slots
             .iter()
             .map(|s| (
+                s.contract_id,
                 U256::from_big_endian(&s.slot),
-                U256::from_big_endian(&s.value),
+                s.previous_value
+                    .clone()
+                    .map(|v| U256::from_big_endian(&v))
+                    .unwrap_or_else(U256::zero),
+                s.value
+                    .clone()
+                    .map(|v| U256::from_big_endian(&v))
+                    .unwrap_or_else(U256::zero),
                 s.valid_from,
                 s.valid_to
             ))
             .collect::<Vec<_>>());
+    }
 
+    #[tokio::test]
+    async fn get_slots_delta_forward() {
+        let mut conn = setup_db().await;
+        setup_slots_delta(&mut conn).await;
         let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let exp: HashMap<U256, U256> = vec![(0, 2), (1, 3), (5, 25), (6, 30)]
+            .iter()
+            .map(|(k, v)| (U256::from(*k), U256::from(*v)))
+            .collect();
 
-        let tmp = gw
+        let res = gw
             .get_slots_delta(
                 ContractId(
                     Chain::Ethereum,
@@ -229,7 +244,42 @@ mod test {
                 )),
                 &mut conn,
             )
-            .await;
-        dbg!(tmp);
+            .await
+            .unwrap();
+
+        assert_eq!(res, exp);
+    }
+
+    #[tokio::test]
+    async fn get_slots_delta_backward() {
+        let mut conn = setup_db().await;
+        setup_slots_delta(&mut conn).await;
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        print_slots(&mut conn).await;
+        let exp: HashMap<U256, U256> = vec![(0, 1), (1, 5), (5, 0), (6, 0)]
+            .iter()
+            .map(|(k, v)| (U256::from(*k), U256::from(*v)))
+            .collect();
+
+        let res = gw
+            .get_slots_delta(
+                ContractId(
+                    Chain::Ethereum,
+                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                        .unwrap()
+                        .as_bytes(),
+                ),
+                Some(BlockOrTimestamp::Timestamp(
+                    "2020-01-01T02:00:00".parse::<NaiveDateTime>().unwrap(),
+                )),
+                Some(BlockOrTimestamp::Timestamp(
+                    "2020-01-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
+                )),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res, exp);
     }
 }

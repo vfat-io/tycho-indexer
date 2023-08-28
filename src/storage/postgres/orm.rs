@@ -316,7 +316,8 @@ pub struct ContractCode {
 pub struct ContractStorage {
     pub id: i64,
     pub slot: Vec<u8>,
-    pub value: Vec<u8>,
+    pub value: Option<Vec<u8>>,
+    pub previous_value: Option<Vec<u8>>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,

@@ -146,6 +146,8 @@ pub enum StorageError {
     DuplicateEntry(String, String),
     #[error("Could not find related {0} for {1} with id: `{2}`!")]
     NoRelatedEntity(String, String, String),
+    #[error("DecodeError: {0}")]
+    DecodeError(String),
     #[error("Unexpected storage error: {0}")]
     Unexpected(String),
 }

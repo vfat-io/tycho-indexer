@@ -387,15 +387,23 @@ create table if not exists contract_storage (
 	
 	-- the preimage/slot for this entry. 
 	"slot" bytea not null,
-	
-	-- the value of the storage slot.
-	"value" bytea not null,
+
+	-- the value of the storage slot at this verion.
+	"value" bytea,
+
+	-- the previous versions value, null if first insertion.
+	"previous_value" bytea,
 	
 	-- the contract this entry refers to.
 	"account_id" bigint references account(id) not null,
 	
 	-- the transaction that modified the slot to this entry.
 	"modify_tx" bigint references "transaction"(id) not null,
+
+	-- this is redundant with transaction.index, but included 
+	--	for performance reasons. Orders entries that are valid 
+	--	within the same version.
+	"ordinal" bigint not null,
 	
 	-- The ts at which this slot became valid at.
 	"valid_from" timestamptz not null,
@@ -518,6 +526,7 @@ BEGIN
     UPDATE contract_storage 
     SET valid_to = NEW.valid_from 
     WHERE valid_to IS NULL AND contract_id = NEW.contract_id and slot = NEW.slot;
+	NEW.previous_value = (SELECT value FROM contract_storage WHERE contract_id = NEW.contract_id and slot = NEW.slot LIMIT 1);
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

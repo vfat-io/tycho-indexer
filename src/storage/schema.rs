@@ -99,9 +99,11 @@ diesel::table! {
     contract_storage (id) {
         id -> Int8,
         slot -> Bytea,
-        value -> Bytea,
-        account_id -> Int8,
+        value -> Nullable<Bytea>,
+        previous_value -> Nullable<Bytea>,
+        contract_id -> Int8,
         modify_tx -> Int8,
+        ordinal -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
         inserted_ts -> Timestamptz,
