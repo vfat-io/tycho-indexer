@@ -1,7 +1,13 @@
 use async_trait::async_trait;
 use ethers::types::U256;
 
-use crate::extractor::evm::AccountUpdate;
+use crate::{
+    extractor::evm::AccountUpdate,
+    storage::{
+        BlockOrTimestamp, ContractId, ContractStateGateway, StorableBlock, StorableTransaction,
+        Version,
+    },
+};
 
 use super::*;
 
@@ -109,17 +115,19 @@ mod test {
 
     #[tokio::test]
     async fn test_get_contract() {
-        let expected = AccountUpdate {
-            extractor: "setup_extractor".to_owned(),
-            chain: Chain::Ethereum,
-            address: H160::zero(),
-            slots: HashMap::new(),
-            balance: Some(U256::zero()),
-            code: None,
-            code_hash: None,
-        };
+        let expected = AccountUpdate::new(
+            "setup_extractor".to_owned(),
+            Chain::Ethereum,
+            H160::zero(),
+            HashMap::new(),
+            Some(U256::zero()),
+            None,
+            None,
+        );
+
         let mut conn = setup_db().await;
-        let mut gateway = PostgresGateway::<evm::Block, evm::Transaction>::new(&mut conn);
+        let mut gateway =
+            PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let id = ContractId(Chain::Ethereum, vec![]);
         let actual = gateway.get_contract(id, None).await.unwrap();
 
@@ -129,16 +137,17 @@ mod test {
     #[tokio::test]
     async fn test_add_contract() {
         let mut conn = setup_db().await;
-        let mut gateway = PostgresGateway::<evm::Block, evm::Transaction>::new(&mut conn);
-        let new = AccountUpdate {
-            extractor: "setup_extractor".to_owned(),
-            chain: Chain::Ethereum,
-            address: H160::random(),
-            slots: HashMap::new(),
-            balance: Some(U256::zero()),
-            code: None,
-            code_hash: None,
-        };
+        let mut gateway =
+            PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let new = AccountUpdate::new(
+            "setup_extractor".to_owned(),
+            Chain::Ethereum,
+            H160::random(),
+            HashMap::new(),
+            Some(U256::zero()),
+            None,
+            None,
+        );
 
         let res = gateway
             .add_contract(new)

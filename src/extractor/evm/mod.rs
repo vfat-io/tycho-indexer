@@ -44,6 +44,28 @@ pub struct AccountUpdate {
     pub code_hash: Option<H256>,
 }
 
+impl AccountUpdate {
+    pub fn new(
+        extractor: String,
+        chain: Chain,
+        address: H160,
+        slots: HashMap<U256, U256>,
+        balance: Option<U256>,
+        code: Option<Vec<u8>>,
+        code_hash: Option<H256>,
+    ) -> Self {
+        Self {
+            extractor,
+            chain,
+            address,
+            slots,
+            balance,
+            code,
+            code_hash,
+        }
+    }
+}
+
 struct UpdateWithTransaction(Transaction, AccountUpdate);
 
 struct BlockStateChanges {
