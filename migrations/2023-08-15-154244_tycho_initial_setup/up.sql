@@ -387,15 +387,23 @@ create table if not exists contract_storage (
 	
 	-- the preimage/slot for this entry. 
 	"slot" bytea not null,
-	
-	-- the value of the storage slot.
-	"value" bytea not null,
+
+	-- the value of the storage slot at this verion.
+	"value" bytea,
+
+	-- the previous versions value, null if first insertion.
+	"previous_value" bytea,
 	
 	-- the contract this entry refers to.
 	"account_id" bigint references account(id) not null,
 	
 	-- the transaction that modified the slot to this entry.
 	"modify_tx" bigint references "transaction"(id) not null,
+
+	-- this is redundant with transaction.index, but included 
+	--	for performance reasons. Orders entries that are valid 
+	--	within the same version.
+	"ordinal" bigint not null,
 	
 	-- The ts at which this slot became valid at.
 	"valid_from" timestamptz not null,
@@ -412,6 +420,9 @@ create table if not exists contract_storage (
 );
 
 CREATE INDEX if not exists idx_contract_storage_account_id ON contract_storage (account_id);
+CREATE INDEX if not exists idx_contract_storage_account_id ON contract_storage (account_id, slot);
+CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (modify_tx);
+CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (valid_from);
 CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (valid_to);
 
 -- Relationship between protocols and contract(s).
@@ -508,9 +519,22 @@ CREATE TRIGGER invalidate_previous_contract_code
 BEFORE INSERT ON contract_code
 FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('contract_code', 'account_id');
 
+
+CREATE OR REPLACE FUNCTION invalidate_previous_entry_contract_storage() RETURNS TRIGGER AS $$
+BEGIN
+-- Update the 'valid_to' field of the last valid entry when a new one is inserted.
+    UPDATE contract_storage 
+    SET valid_to = NEW.valid_from 
+    WHERE valid_to IS NULL AND account_id = NEW.account_id and slot = NEW.slot;
+	NEW.previous_value = (SELECT value FROM contract_storage WHERE account_id = NEW.account_id and slot = NEW.slot LIMIT 1);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
 CREATE TRIGGER invalidate_previous_contract_storage
 BEFORE INSERT ON contract_storage
-FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry('contract_storage', 'account_id');
+FOR EACH ROW EXECUTE PROCEDURE invalidate_previous_entry_contract_storage();
 
 
 CREATE OR REPLACE FUNCTION invalidate_previous_entry_protocol_calls_contract() RETURNS TRIGGER AS $$

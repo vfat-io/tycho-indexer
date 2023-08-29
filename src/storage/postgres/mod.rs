@@ -23,6 +23,56 @@
 //! panic if an associated entity still exists in the database and retrieved
 //! with a codebase which no longer presents the enum value.
 //!
+//!
+//! ### Versioning
+//!
+//! This implementation utilizes temporal tables for recording the changes in
+//! entities over time. In this model, `valid_from` and `valid_to` determine the
+//! timeframe during which the facts provided by the record are regarded as
+//! accurate (validity period). Typically, in temporal tables, a valid version
+//! for a specific timestamp is found using the following predicate:
+//!
+//! ```sql
+//! valid_from < version_ts AND (version_ts <= valid_to OR valid_to is NULL)
+//! ```
+//!
+//! The `valid_to` can be set to null, signifying that the version remains
+//! valid. However, as all alterations within a block happen simultaneously,
+//! this predicate might yield multiple valid versions for a single entity.
+//!
+//! To further assign a temporal sequence to these entities, the transaction
+//! index within the block is recorded, usually through a `modify_tx` foreign
+//! key.
+//!
+//! ```sql
+//! SELECT * FROM table
+//! JOIN transaction
+//! WHERE valid_from < version_ts
+//!     AND (version_ts <= valid_to OR valid_to is NULL)
+//! ORDER BY entity_id, transaction.index DESC
+//! DISTINCT ON entity_id
+//! ```
+//!
+//! Here we select a set of versions by timestamp, then arrange rows by their
+//! transaction index (descending) and choose the first row, thus obtaining the
+//! latest version within the block (aka version at end of block).
+//!
+//! #### Contract Storage Table
+//!
+//! Special attention must be given to the contract_storage table, which also
+//! records the previous value with each modification. This simplifies the
+//! generation of a delta change structure utilized during reorgs for informing
+//! clients about the necessary updates. Deletions in this table are modeled
+//! as simple updates; in the case of deletion, it's value is updated to null.
+//! This technique simplifies querying for delta changes while maintaining
+//! efficiency at the cost of requiring additional storage space. As
+//! `valid_from` and `valid_to` are not entirely sufficient to find a single
+//! valid state within blockchain systems, the contract_storage table
+//! additionally maintains an `ordinal` column. This column is redundant with
+//! the transaction's index that produced the respective changes. This
+//! redundancy is to avoid additional joins and further optimize query
+//! performance.
+//!
 //! ### Atomic Transactions
 //!
 //! In our design, direct connection to the database and consequently beginning,
@@ -46,13 +96,10 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use diesel::prelude::*;
-use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
-use ethers::types::{H160, H256};
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use super::StorageError;
-use crate::extractor::evm;
 use crate::models::Chain;
 
 pub struct EnumTableCache<E> {
@@ -119,9 +166,7 @@ type ChainEnumCache = EnumTableCache<Chain>;
 
 impl From<diesel::result::Error> for StorageError {
     fn from(value: diesel::result::Error) -> Self {
-        // Only rollback errors should arrive here
-        // we never expect these.
-        StorageError::Unexpected(format!("DieselRollbackError: {}", value))
+        StorageError::Unexpected(format!("DieselError: {}", value))
     }
 }
 
@@ -196,5 +241,165 @@ impl<B, TX> PostgresGateway<B, TX> {
 
     fn get_chain(&self, id: i64) -> Chain {
         self.chain_id_cache.get_chain(id)
+    }
+}
+
+#[cfg(test)]
+mod fixtures {
+    use std::str::FromStr;
+
+    use diesel::prelude::*;
+    use diesel_async::{AsyncPgConnection, RunQueryDsl};
+    use ethers::types::{H160, H256, U256};
+
+    use super::schema;
+
+    // Insert a new chain
+    pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
+        diesel::insert_into(schema::chain::table)
+            .values(schema::chain::name.eq(name))
+            .returning(schema::chain::id)
+            .get_result(conn)
+            .await
+            .unwrap()
+    }
+
+    /// Inserts two sequential blocks
+    pub async fn insert_blocks(conn: &mut AsyncPgConnection, chain_id: i64) -> Vec<i64> {
+        let block_records = vec![
+            (
+                schema::block::hash.eq(Vec::from(
+                    H256::from_str(
+                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                    )
+                    .unwrap()
+                    .as_bytes(),
+                )),
+                schema::block::parent_hash.eq(Vec::from(
+                    H256::from_str(
+                        "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+                    )
+                    .unwrap()
+                    .as_bytes(),
+                )),
+                schema::block::number.eq(1),
+                schema::block::ts.eq("2022-11-01T08:00:00"
+                    .parse::<chrono::NaiveDateTime>()
+                    .expect("timestamp")),
+                schema::block::chain_id.eq(chain_id),
+            ),
+            (
+                schema::block::hash.eq(Vec::from(
+                    H256::from_str(
+                        "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
+                    )
+                    .unwrap()
+                    .as_bytes(),
+                )),
+                schema::block::parent_hash.eq(Vec::from(
+                    H256::from_str(
+                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                    )
+                    .unwrap()
+                    .as_bytes(),
+                )),
+                schema::block::number.eq(2),
+                schema::block::ts.eq("2022-11-01T09:00:00"
+                    .parse::<chrono::NaiveDateTime>()
+                    .unwrap()),
+                schema::block::chain_id.eq(chain_id),
+            ),
+        ];
+        diesel::insert_into(schema::block::table)
+            .values(&block_records)
+            .returning(schema::block::id)
+            .get_results(conn)
+            .await
+            .unwrap()
+    }
+
+    /// Insert a bunch of transactions using (block_id, index, hash)
+    pub async fn insert_txns(conn: &mut AsyncPgConnection, txns: &[(i64, i64, &str)]) -> Vec<i64> {
+        let from_val = H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980").unwrap();
+        let to_val = H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
+        let data: Vec<_> = txns
+            .iter()
+            .map(|(b, i, h)| {
+                use schema::transaction::dsl::*;
+                (
+                    block_id.eq(b),
+                    index.eq(i),
+                    hash.eq(H256::from_str(h)
+                        .expect("valid txhash")
+                        .as_bytes()
+                        .to_owned()),
+                    from.eq(from_val.as_bytes()),
+                    to.eq(to_val.as_bytes()),
+                )
+            })
+            .collect();
+        diesel::insert_into(schema::transaction::table)
+            .values(&data)
+            .returning(schema::transaction::id)
+            .get_results(conn)
+            .await
+            .unwrap()
+    }
+
+    pub async fn insert_account(
+        conn: &mut AsyncPgConnection,
+        address: &str,
+        title: &str,
+        chain_id: i64,
+    ) -> i64 {
+        diesel::insert_into(schema::account::table)
+            .values((
+                schema::account::title.eq(title),
+                schema::account::chain_id.eq(chain_id),
+                schema::account::address.eq(hex::decode(address).unwrap()),
+            ))
+            .returning(schema::account::id)
+            .get_result(conn)
+            .await
+            .unwrap()
+    }
+
+    pub async fn insert_slots(
+        conn: &mut AsyncPgConnection,
+        contract_id: i64,
+        modify_tx: i64,
+        valid_from: &str,
+        slots: &[(u64, u64)],
+    ) -> Vec<i64> {
+        let ts = valid_from.parse::<chrono::NaiveDateTime>().unwrap();
+        let data = slots
+            .iter()
+            .enumerate()
+            .map(|(idx, (k, v))| {
+                (
+                    schema::contract_storage::slot.eq(hex::decode(format!(
+                        "{:064x}",
+                        U256::from(*k)
+                    ))
+                    .unwrap()),
+                    schema::contract_storage::value.eq(hex::decode(format!(
+                        "{:064x}",
+                        U256::from(*v)
+                    ))
+                    .unwrap()),
+                    schema::contract_storage::account_id.eq(contract_id),
+                    schema::contract_storage::modify_tx.eq(modify_tx),
+                    schema::contract_storage::valid_from.eq(ts),
+                    schema::contract_storage::ordinal.eq(idx as i64),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        diesel::insert_into(schema::contract_storage::table)
+            .values(&data)
+            .returning(schema::contract_storage::id)
+            .get_results(conn)
+            .await
+            .unwrap()
     }
 }

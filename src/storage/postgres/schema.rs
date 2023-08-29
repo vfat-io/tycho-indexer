@@ -15,6 +15,34 @@ pub mod sql_types {
 }
 
 diesel::table! {
+    account (id) {
+        id -> Int8,
+        chain_id -> Int8,
+        #[max_length = 255]
+        title -> Varchar,
+        address -> Bytea,
+        creation_tx -> Nullable<Int8>,
+        created_at -> Nullable<Timestamptz>,
+        deleted_at -> Nullable<Timestamptz>,
+        inserted_ts -> Timestamptz,
+        modified_ts -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    account_balance (id) {
+        id -> Int8,
+        balance -> Bytea,
+        account_id -> Int8,
+        modify_tx -> Int8,
+        valid_from -> Timestamptz,
+        valid_to -> Nullable<Timestamptz>,
+        inserted_ts -> Timestamptz,
+        modified_ts -> Timestamptz,
+    }
+}
+
+diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::Hstore;
 
@@ -54,34 +82,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    account (id) {
-        id -> Int8,
-        chain_id -> Int8,
-        #[max_length = 255]
-        title -> Varchar,
-        address -> Bytea,
-        creation_tx -> Nullable<Int8>,
-        created_at -> Nullable<Timestamptz>,
-        deleted_at -> Nullable<Timestamptz>,
-        inserted_ts -> Timestamptz,
-        modified_ts -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    account_balance (id) {
-        id -> Int8,
-        balance -> Bytea,
-        account_id -> Int8,
-        modify_tx -> Int8,
-        valid_from -> Timestamptz,
-        valid_to -> Nullable<Timestamptz>,
-        inserted_ts -> Timestamptz,
-        modified_ts -> Timestamptz,
-    }
-}
-
-diesel::table! {
     contract_code (id) {
         id -> Int8,
         code -> Bytea,
@@ -99,9 +99,11 @@ diesel::table! {
     contract_storage (id) {
         id -> Int8,
         slot -> Bytea,
-        value -> Bytea,
+        value -> Nullable<Bytea>,
+        previous_value -> Nullable<Bytea>,
         account_id -> Int8,
         modify_tx -> Int8,
+        ordinal -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
         inserted_ts -> Timestamptz,
@@ -230,11 +232,11 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(block -> chain (chain_id));
 diesel::joinable!(account -> chain (chain_id));
 diesel::joinable!(account -> transaction (creation_tx));
 diesel::joinable!(account_balance -> account (account_id));
 diesel::joinable!(account_balance -> transaction (modify_tx));
+diesel::joinable!(block -> chain (chain_id));
 diesel::joinable!(contract_code -> account (account_id));
 diesel::joinable!(contract_code -> transaction (modify_tx));
 diesel::joinable!(contract_storage -> account (account_id));
@@ -253,11 +255,11 @@ diesel::joinable!(token -> account (account_id));
 diesel::joinable!(transaction -> block (block_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    account,
+    account_balance,
     audit_log,
     block,
     chain,
-    account,
-    account_balance,
     contract_code,
     contract_storage,
     extraction_state,
