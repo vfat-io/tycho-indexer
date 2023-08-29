@@ -70,7 +70,7 @@ create table if not exists "transaction" (
 	"index" bigint not null,
 		
 	-- transactions are block scoped and thus also chain scoped.
-	"block_id" bigint references block(id) not null,
+	"block_id" bigint references block(id) on delete cascade not null,
 	
 	-- Timestamp this entry was inserted into this table.
 	"inserted_ts" timestamptz not null default current_timestamp,
@@ -176,6 +176,11 @@ create table if not exists protocol_component (
     --	it could be inferred from related contracts but it might not be clear
     --	in case the protocol relates or more than one contract.
     "created_at" timestamptz not null,
+
+	-- This is reference makes it easy to revert to a previous state by 
+	--	simply deleting the corresponding blocks. Once again somewhat 
+	--	redundant but makes bookkeeping much easier.
+	"creation_tx" bigint references "transaction"(id) on delete cascade not null,
     
     -- The ts at which this protocol ceased to exist.
     "deleted_at" timestamptz,
@@ -214,7 +219,7 @@ create table if not exists protocol_state (
 	"state" JSONB,
 		
 	-- the transaction that modified the state to this entry.
-	"modify_tx" bigint references "transaction"(id) not null,
+	"modify_tx" bigint references "transaction"(id) on delete cascade not null,
 	
 	-- The ts at which this state became valid at.
 	"valid_from" timestamptz not null,
@@ -253,7 +258,7 @@ create table if not exists "account" (
 	"address" bytea not null,
 	
 	-- transaction that created this contract.
-	"creation_tx" bigint references transaction(id),
+	"creation_tx" bigint references transaction(id) on delete cascade,
 	
 	-- The ts this contract was created. While inserting tokens 
 	--	we might not know who created it, so it is nullable.
@@ -279,7 +284,7 @@ create table if not exists "token" (
 	"id" BIGSERIAL PRIMARY KEY,
 	
 	-- The account that implements this token.
-	"account_id" bigint references account(id) not null,
+	"account_id" bigint references account(id) on delete cascade not null,
 	
 	-- The symbol/ticker for this token.
 	"symbol" VARCHAR(255) not null,
@@ -306,10 +311,12 @@ CREATE INDEX if not exists idx_token_account_id ON token(account_id);
 
 -- M2M relationship between tokens and protocol 
 CREATE TABLE if not exists protocol_holds_token (
-    "protocol_component_id" BIGINT REFERENCES protocol_component(id) not null,
-    
+    "protocol_component_id" BIGINT REFERENCES protocol_component(id) on delete cascade not null,
+	
+	-- we don't allow a token to be deleted unless the protocol component was removed
     "token_id" BIGINT REFERENCES "token"(id) not null,
-    -- Timestamp this entry was inserted into this table.
+    
+	-- Timestamp this entry was inserted into this table.
 	"inserted_ts" timestamptz not null default current_timestamp,
 	
 	-- Timestamp this entry was inserted into this table.
@@ -326,10 +333,10 @@ create table account_balance(
 	"balance" bytea not null,
 	
 	-- the account this entry refers to.
-	"account_id" bigint references account(id) not null,
+	"account_id" bigint references account(id) on delete cascade not null,
 	
 	-- the transaction that modified the state to this entry.
-	"modify_tx" bigint references "transaction"(id) not null,
+	"modify_tx" bigint references "transaction"(id) on delete cascade not null,
 	
 	-- The ts at which this state became valid at.
 	"valid_from" timestamptz not null,
@@ -359,10 +366,10 @@ create table contract_code(
 	"hash" bytea not null,
 	
 	-- the contract this entry refers to.
-	"account_id" bigint references account(id) not null,
+	"account_id" bigint references account(id) on delete cascade not null,
 	
 	-- the transaction that modified the code to this entry.
-	"modify_tx" bigint references "transaction"(id) not null,
+	"modify_tx" bigint references "transaction"(id) on delete cascade not null,
 	
 	-- The ts at which this copde became valid at.
 	"valid_from" timestamptz not null,
@@ -395,10 +402,10 @@ create table if not exists contract_storage (
 	"previous_value" bytea,
 	
 	-- the contract this entry refers to.
-	"account_id" bigint references account(id) not null,
+	"account_id" bigint references account(id) on delete cascade not null,
 	
 	-- the transaction that modified the slot to this entry.
-	"modify_tx" bigint references "transaction"(id) not null,
+	"modify_tx" bigint references "transaction"(id) on delete cascade not null,
 
 	-- this is redundant with transaction.index, but included 
 	--	for performance reasons. Orders entries that are valid 
@@ -429,9 +436,9 @@ CREATE INDEX if not exists idx_contract_storage_valid_to ON contract_storage (va
 CREATE TABLE if not exists protocol_calls_contract (
 	"id" BIGSERIAL PRIMARY KEY,
 
-    "protocol_component_id" BIGINT REFERENCES protocol_component(id) not null,
+    "protocol_component_id" BIGINT REFERENCES protocol_component(id) on delete cascade not null,
     
-    "account_id" BIGINT REFERENCES account(id) not null,
+    "account_id" BIGINT REFERENCES account(id) on delete cascade not null,
     
     -- Tx this assocuation became valud, versioned association between contracts, 
     -- allows to track updates of e.g. price feeds. 

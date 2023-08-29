@@ -73,6 +73,15 @@
 //! redundancy is to avoid additional joins and further optimize query
 //! performance.
 //!
+//! ### Reverts
+//! If a reorg is observed, we will be asked by the stream to revert to a previous
+//! block number. This is handled using the `ON DELETE CASCADE` feature provided by
+//! postgres. Each state change is tracked by a creation or modification transaction
+//! if the parent transaction is deleted, postgres will delete the corresponding
+//! entry in the child table for us.
+//! Now all we have to do is to unset valid_to columns that point directly to our
+//! last reverted block.
+//!
 //! ### Atomic Transactions
 //!
 //! In our design, direct connection to the database and consequently beginning,
@@ -351,11 +360,13 @@ mod fixtures {
         address: &str,
         title: &str,
         chain_id: i64,
+        tx_id: Option<i64>,
     ) -> i64 {
         diesel::insert_into(schema::account::table)
             .values((
                 schema::account::title.eq(title),
                 schema::account::chain_id.eq(chain_id),
+                schema::account::creation_tx.eq(tx_id),
                 schema::account::address.eq(hex::decode(address).unwrap()),
             ))
             .returning(schema::account::id)

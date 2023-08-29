@@ -576,8 +576,8 @@ pub trait ContractStateGateway {
     ///   behaviour.
     async fn revert_contract_state(
         &self,
-        id: ContractId,
-        to: BlockOrTimestamp,
+        to: BlockIdentifier,
+        db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 }
 
