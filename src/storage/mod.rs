@@ -468,7 +468,7 @@ pub trait ContractStateGateway {
     /// - `version` Version at which to retrieve state for. None retrieves the latest
     ///   state.
     async fn get_contract(
-        &mut self,
+        &self,
         id: &ContractId,
         version: Option<BlockOrTimestamp>,
         db: &mut Self::DB,
@@ -480,7 +480,11 @@ pub trait ContractStateGateway {
     ///
     /// # Parameters
     /// - `new` the new contract state to be saved.
-    async fn add_contract(&mut self, new: Self::ContractState) -> Result<(), StorageError>;
+    async fn add_contract(
+        &self,
+        new: &Self::ContractState,
+        db: &mut Self::DB,
+    ) -> Result<i64, StorageError>;
 
     /// Mark a contract as deleted
     ///
@@ -534,7 +538,7 @@ pub trait ContractStateGateway {
         &self,
         id: ContractId,
         modify_tx: &[u8],
-        slots: HashMap<Self::Slot, Self::Value>,
+        slots: &HashMap<Self::Slot, Self::Value>,
     ) -> Result<(), StorageError>;
 
     /// Retrieve a slot delta between two versions
