@@ -225,9 +225,65 @@ where
 
     async fn revert_contract_state(
         &self,
-        id: ContractId,
-        to: BlockOrTimestamp,
+        to: BlockIdentifier,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
+        // To revert all changes of a chain, we need to delete & modify entries
+        // from a big number of tables. Reverting state, signifies deleting
+        // history. We will not keep any branches in the db only the main branch
+        // will be kept.
+        let block = orm::Block::by_id(to, conn).await?;
+
+        // All entities and version updates are connected to the block via a
+        // cascade delete, this ensures that the state is reverted by simply
+        // deleting the correct blocks, which then triggers cascading deletes on
+        // child entries.
+        diesel::delete(
+            schema::block::table
+                .filter(schema::block::number.gt(block.number))
+                .filter(schema::block::chain_id.eq(block.chain_id)),
+        )
+        .execute(conn)
+        .await?;
+
+        // Any versioned table's rows, which have `valid_to` set to "> block.ts"
+        // need, to be updated to be valid again (thus, valid_to = NULL).
+        diesel::update(
+            schema::contract_storage::table.filter(schema::contract_storage::valid_to.gt(block.ts)),
+        )
+        .set(schema::contract_storage::valid_to.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
+        diesel::update(
+            schema::account_balance::table.filter(schema::account_balance::valid_to.gt(block.ts)),
+        )
+        .set(schema::account_balance::valid_to.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
+        diesel::update(
+            schema::contract_code::table.filter(schema::contract_code::valid_to.gt(block.ts)),
+        )
+        .set(schema::contract_code::valid_to.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
+        diesel::update(
+            schema::protocol_state::table.filter(schema::protocol_state::valid_to.gt(block.ts)),
+        )
+        .set(schema::protocol_state::valid_to.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
+        diesel::update(
+            schema::protocol_calls_contract::table
+                .filter(schema::protocol_calls_contract::valid_to.gt(block.ts)),
+        )
+        .set(schema::protocol_calls_contract::valid_to.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
         Ok(())
     }
 }
@@ -267,7 +323,8 @@ async fn version_to_ts(
 mod test {
     use std::str::FromStr;
 
-    use diesel_async::AsyncConnection;
+    use diesel_async::{AsyncConnection, RunQueryDsl};
+    use ethers::types::H256;
 
     use super::*;
     use crate::extractor::evm;
@@ -352,6 +409,7 @@ mod test {
             "6B175474E89094C44Da98b954EedeAC495271d0F",
             "c0",
             chain_id,
+            Some(txn[0]),
         )
         .await;
         fixtures::insert_slots(
@@ -370,32 +428,6 @@ mod test {
             &[(0, 2), (1, 3), (5, 25), (6, 30)],
         )
         .await;
-    }
-
-    async fn print_slots(conn: &mut AsyncPgConnection) {
-        let all_slots: Vec<orm::ContractStorage> = schema::contract_storage::table
-            .select(orm::ContractStorage::as_select())
-            .get_results(conn)
-            .await
-            .unwrap();
-
-        dbg!(all_slots
-            .iter()
-            .map(|s| (
-                s.account_id,
-                U256::from_big_endian(&s.slot),
-                s.previous_value
-                    .clone()
-                    .map(|v| U256::from_big_endian(&v))
-                    .unwrap_or_else(U256::zero),
-                s.value
-                    .clone()
-                    .map(|v| U256::from_big_endian(&v))
-                    .unwrap_or_else(U256::zero),
-                s.valid_from,
-                s.valid_to
-            ))
-            .collect::<Vec<_>>());
     }
 
     #[tokio::test]
@@ -456,5 +488,131 @@ mod test {
             .unwrap();
 
         assert_eq!(res, exp);
+    }
+
+    async fn setup_revert(conn: &mut AsyncPgConnection) {
+        let chain_id = fixtures::insert_chain(conn, "ethereum").await;
+        let blk = fixtures::insert_blocks(conn, chain_id).await;
+        let txn = fixtures::insert_txns(
+            conn,
+            &[
+                (
+                    // deploy c0
+                    blk[0],
+                    1i64,
+                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+                ),
+                (
+                    // change c0 state
+                    blk[0],
+                    2i64,
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                ),
+                (
+                    // deploy c1
+                    blk[1],
+                    1i64,
+                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
+                ),
+                (
+                    // change c0 and c1 state
+                    blk[1],
+                    2i64,
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                ),
+            ],
+        )
+        .await;
+        let c0 = fixtures::insert_account(
+            conn,
+            "6B175474E89094C44Da98b954EedeAC495271d0F",
+            "c0",
+            chain_id,
+            Some(txn[0]),
+        )
+        .await;
+        let c1 = fixtures::insert_account(
+            conn,
+            "73BcE791c239c8010Cd3C857d96580037CCdd0EE",
+            "c1",
+            chain_id,
+            Some(txn[2]),
+        )
+        .await;
+        fixtures::insert_slots(
+            conn,
+            c0,
+            txn[1],
+            "2020-01-01T00:00:00",
+            &[(0, 1), (1, 5), (2, 1)],
+        )
+        .await;
+        fixtures::insert_slots(
+            conn,
+            c0,
+            txn[3],
+            "2020-01-01T01:00:00",
+            &[(0, 2), (1, 3), (5, 25), (6, 30)],
+        )
+        .await;
+        fixtures::insert_slots(
+            conn,
+            c1,
+            txn[3],
+            "2020-01-01T01:00:00",
+            &[(0, 128), (1, 256)],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_revert() {
+        let mut conn = setup_db().await;
+        setup_revert(&mut conn).await;
+        let block1_hash =
+            H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
+                .unwrap()
+                .as_bytes()
+                .into();
+        let exp_slots: HashMap<U256, U256> = vec![
+            (U256::from(0), U256::from(1)),
+            (U256::from(1), U256::from(5)),
+            (U256::from(2), U256::from(1)),
+        ]
+        .into_iter()
+        .collect();
+        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+
+        gw.revert_contract_state(BlockIdentifier::Hash(block1_hash), &mut conn)
+            .await
+            .unwrap();
+
+        let slots: HashMap<U256, U256> = schema::contract_storage::table
+            .select((
+                schema::contract_storage::slot,
+                schema::contract_storage::value,
+            ))
+            .get_results::<(Vec<u8>, Option<Vec<u8>>)>(&mut conn)
+            .await
+            .unwrap()
+            .iter()
+            .map(|(k, v)| {
+                (
+                    U256::from_big_endian(k),
+                    v.as_ref()
+                        .map(|rv| U256::from_big_endian(rv))
+                        .unwrap_or_else(U256::zero),
+                )
+            })
+            .collect();
+        assert_eq!(slots, exp_slots);
+
+        let c1 = schema::account::table
+            .filter(schema::account::title.eq("c1"))
+            .select(schema::account::id)
+            .get_results::<i64>(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(c1.len(), 0);
     }
 }

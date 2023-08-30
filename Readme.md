@@ -87,6 +87,7 @@ You will need to have rust, rustup, docker and docker-compose installed before g
     ```bash
     diesel migration run
     ```
+    6. We use [pgFormatter](https://github.com/darold/pgFormatter) to keep SQL files consistently formatted.
 
 
 ### Migrations
