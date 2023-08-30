@@ -31,72 +31,64 @@ where
 
     async fn get_contract(
         &mut self,
-        id: ContractId,
+        id: &ContractId,
         version: Option<BlockOrTimestamp>,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError> {
         let h160_address = H160::from_slice(&id.1);
-        let account_orm = orm::Account::by_id(id, db).await;
+        let account_orm: orm::Account = orm::Account::by_id(id, db).await.map_err(|err| {
+            StorageError::from_diesel(err, "Account", &h160_address.to_string(), None)
+        })?;
         let version_ts = version_to_ts(&version, db).await?;
 
-        match account_orm {
-            Ok(account_orm) => {
-                let balance_query = schema::account_balance::table
-                    .filter(schema::account_balance::account_id.eq(account_orm.id))
-                    .select(schema::account_balance::balance)
-                    .filter(schema::account_balance::valid_from.le(version_ts))
-                    .filter(
-                        schema::account_balance::valid_to
-                            .gt(Some(version_ts))
-                            .or(schema::account_balance::valid_to.is_null()),
-                    );
+        let balance_query = schema::account_balance::table
+            .filter(schema::account_balance::account_id.eq(account_orm.id))
+            .select(schema::account_balance::balance)
+            .filter(schema::account_balance::valid_from.le(version_ts))
+            .filter(
+                schema::account_balance::valid_to
+                    .gt(Some(version_ts))
+                    .or(schema::account_balance::valid_to.is_null()),
+            );
 
-                let balance = balance_query.first::<Vec<u8>>(db).await?;
-                let (code, code_hash) = schema::contract_code::table
-                    .filter(schema::contract_code::account_id.eq(account_orm.id))
-                    .select((schema::contract_code::code, schema::contract_code::hash))
-                    .filter(schema::contract_code::valid_from.le(version_ts))
-                    .filter(
-                        schema::contract_code::valid_to
-                            .gt(Some(version_ts))
-                            .or(schema::contract_code::valid_to.is_null()),
-                    )
-                    .first::<(Vec<u8>, Vec<u8>)>(db)
-                    .await?;
+        let balance = balance_query.first::<Vec<u8>>(db).await?;
+        let (code, code_hash) = schema::contract_code::table
+            .filter(schema::contract_code::account_id.eq(account_orm.id))
+            .select((schema::contract_code::code, schema::contract_code::hash))
+            .filter(schema::contract_code::valid_from.le(version_ts))
+            .filter(
+                schema::contract_code::valid_to
+                    .gt(Some(version_ts))
+                    .or(schema::contract_code::valid_to.is_null()),
+            )
+            .first::<(Vec<u8>, Vec<u8>)>(db)
+            .await?;
 
-                let code_h256 = H256::from_slice(&code_hash);
+        let code_h256 = H256::from_slice(&code_hash);
 
-                let creation_tx = match account_orm.creation_tx {
-                    Some(tx) => schema::transaction::table
-                        .filter(schema::transaction::id.eq(tx))
-                        .select(schema::transaction::hash)
-                        .first::<Vec<u8>>(db)
-                        .await
-                        .ok()
-                        .map(|hash| H256::from_slice(&hash)),
-                    None => None,
-                };
+        let creation_tx = match account_orm.creation_tx {
+            Some(tx) => schema::transaction::table
+                .filter(schema::transaction::id.eq(tx))
+                .select(schema::transaction::hash)
+                .first::<Vec<u8>>(db)
+                .await
+                .ok()
+                .map(|hash| H256::from_slice(&hash)),
+            None => None,
+        };
 
-                let account = Account::new(
-                    Chain::Ethereum,
-                    h160_address,
-                    account_orm.title,
-                    HashMap::new(),
-                    U256::from_big_endian(&balance),
-                    code,
-                    code_h256,
-                    H256::zero(),
-                    creation_tx,
-                );
-                Ok(account)
-            }
-            Err(err) => Err(StorageError::from_diesel(
-                err,
-                "Account",
-                &h160_address.to_string(),
-                None,
-            )),
-        }
+        let account = Account::new(
+            Chain::Ethereum,
+            h160_address,
+            account_orm.title,
+            HashMap::new(),
+            U256::from_big_endian(&balance),
+            code,
+            code_h256,
+            H256::zero(),
+            creation_tx,
+        );
+        Ok(account)
     }
 
     async fn add_contract(&mut self, new: Self::ContractState) -> Result<(), StorageError> {
@@ -417,13 +409,28 @@ mod test {
         let mut gateway =
             PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let id = ContractId(Chain::Ethereum, hex::decode(acc_address).unwrap());
-        let actual = gateway.get_contract(id, None, &mut conn).await.unwrap();
+        let actual = gateway.get_contract(&id, None, &mut conn).await.unwrap();
 
         assert_eq!(expected, actual);
     }
 
     #[tokio::test]
-    async fn test_get_missing_account() {}
+    async fn test_get_missing_account() {
+        let mut conn = setup_db().await;
+        let mut gateway =
+            PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let contract_id = ContractId(
+            Chain::Ethereum,
+            hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+        );
+        let result = gateway.get_contract(&contract_id, None, &mut conn).await;
+        if let Err(StorageError::NotFound(entity, id)) = result {
+            assert_eq!(entity, "Account");
+            assert_eq!(id, H160::from_slice(&contract_id.1).to_string());
+        } else {
+            panic!("Expected NotFound error");
+        }
+    }
 
     #[tokio::test]
     async fn test_add_contract() {}

@@ -469,7 +469,7 @@ pub trait ContractStateGateway {
     ///   state.
     async fn get_contract(
         &mut self,
-        id: ContractId,
+        id: &ContractId,
         version: Option<BlockOrTimestamp>,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError>;

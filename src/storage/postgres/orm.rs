@@ -274,12 +274,12 @@ pub struct Account {
 
 impl Account {
     pub async fn by_id(
-        account_id: ContractId,
+        account_id: &ContractId,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Account> {
         account::table
             .inner_join(chain::table)
-            .filter(account::address.eq(account_id.1))
+            .filter(account::address.eq(&account_id.1))
             .filter(chain::name.eq(account_id.0.to_string()))
             .select(Account::as_select())
             .first::<Account>(conn)
