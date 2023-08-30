@@ -266,7 +266,7 @@ CREATE TABLE account_balance(
     -- the account this entry refers to.
     "account_id" bigint REFERENCES account(id) ON DELETE CASCADE NOT NULL,
     -- the transaction that modified the state to this entry.
-    "modify_tx" bigint REFERENCES "transaction"(id) ON DELETE CASCADE NOT NULL,
+    "modify_tx" bigint REFERENCES "transaction"(id) ON DELETE CASCADE,
     -- The ts at which this state became valid at.
     "valid_from" timestamptz NOT NULL,
     -- The ts at which this state stopped being valid at. Null if this

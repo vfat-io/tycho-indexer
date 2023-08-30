@@ -1,5 +1,6 @@
 use crate::models;
 use crate::storage::BlockIdentifier;
+use crate::storage::ContractId;
 
 use super::schema::{
     account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
@@ -271,6 +272,33 @@ pub struct Account {
     pub modified_ts: NaiveDateTime,
 }
 
+impl Account {
+    pub async fn by_id(
+        account_id: ContractId,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Account> {
+        account::table
+            .inner_join(chain::table)
+            .filter(account::address.eq(account_id.1))
+            .filter(chain::name.eq(account_id.0.to_string()))
+            .select(Account::as_select())
+            .first::<Account>(conn)
+            .await
+    }
+}
+
+#[derive(Insertable)]
+#[diesel(table_name=account)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewAccount {
+    pub title: String,
+    pub address: Vec<u8>,
+    pub chain_id: i64,
+    pub creation_tx: Option<i64>,
+    pub created_at: Option<NaiveDateTime>,
+    pub deleted_at: Option<NaiveDateTime>,
+}
+
 #[derive(Identifiable, Queryable, Associations, Selectable)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name=token)]
@@ -294,11 +322,22 @@ pub struct AccountBalance {
     pub id: i64,
     pub balance: Vec<u8>,
     pub account_id: i64,
-    pub modify_tx: i64,
+    pub modify_tx: Option<i64>,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name=account_balance)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewAccountBalance {
+    pub balance: Vec<u8>,
+    pub account_id: i64,
+    pub modify_tx: Option<i64>,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
