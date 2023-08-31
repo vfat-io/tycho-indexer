@@ -119,14 +119,11 @@ pub trait StorableBlock<S, N> {
 /// represents the storage specific type for a new transaction,. `BH`
 /// corresponds to the block hash type that uniquely identifies a block. `DbId`
 /// is the ID used to refer to each transaction in the database.
-pub trait StorableTransaction<S, N, BH, DbId>
-where
-    BH: From<Vec<u8>> + Into<Vec<u8>>,
-{
+pub trait StorableTransaction<S, N, DbId> {
     /// Converts a transaction from storage representation (`S`) to transaction
     /// form. This function uses the original block hash (`BH`), where the
     /// transaction resides, for this conversion.
-    fn from_storage(val: S, block_hash: BH) -> Self;
+    fn from_storage(val: S, block_hash: &[u8]) -> Self;
 
     /// Converts a transaction object to its storable representation (`N`),
     /// while also associating it with a specific block through a database ID
@@ -136,7 +133,7 @@ where
     /// Returns the block hash (`BH`) associated with a transaction. This is
     /// necessary to ensure that transactions can be traced back to the blocks
     /// from which they originated.
-    fn block_hash(&self) -> BH;
+    fn block_hash(&self) -> &[u8];
 
     /// Returns the transaction hash (`BH`) associated with a transaction. This
     /// is necessary to uniquely identify this transaction.

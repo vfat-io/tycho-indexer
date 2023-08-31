@@ -16,10 +16,7 @@ use crate::storage::{
 impl<B, TX> ChainGateway for PostgresGateway<B, TX>
 where
     B: StorableBlock<orm::Block, orm::NewBlock> + Send + Sync + 'static,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, Vec<u8>, i64>
-        + Send
-        + Sync
-        + 'static,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64> + Send + Sync + 'static,
 {
     type DB = AsyncPgConnection;
     type Block = B;
@@ -85,7 +82,7 @@ where
                 StorageError::from_diesel(
                     err,
                     "Transaction",
-                    &hex::encode(block_hash.as_slice()),
+                    &hex::encode(block_hash),
                     Some("Block".to_owned()),
                 )
             })?;
@@ -113,10 +110,10 @@ where
         schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::hash.eq(&hash))
-            .select((orm::Transaction::as_select(), orm::Block::as_select()))
-            .first::<(orm::Transaction, orm::Block)>(conn)
+            .select((orm::Transaction::as_select(), schema::block::hash))
+            .first::<(orm::Transaction, Vec<u8>)>(conn)
             .await
-            .map(|(orm_tx, block)| TX::from_storage(orm_tx, block.hash))
+            .map(|(orm_tx, block_hash)| TX::from_storage(orm_tx, &block_hash))
             .map_err(|err| StorageError::from_diesel(err, "Transaction", &hex::encode(&hash), None))
     }
 }
@@ -148,11 +145,11 @@ impl StorableBlock<orm::Block, orm::NewBlock> for evm::Block {
     }
 }
 
-impl StorableTransaction<orm::Transaction, orm::NewTransaction, Vec<u8>, i64> for evm::Transaction {
-    fn from_storage(val: orm::Transaction, block_hash: Vec<u8>) -> Self {
+impl StorableTransaction<orm::Transaction, orm::NewTransaction, i64> for evm::Transaction {
+    fn from_storage(val: orm::Transaction, block_hash: &[u8]) -> Self {
         Self {
             hash: H256::from_slice(&val.hash),
-            block_hash: H256::from_slice(&block_hash),
+            block_hash: H256::from_slice(block_hash),
             from: H160::from_slice(&val.from),
             to: H160::from_slice(&val.to),
             index: val.index as u64,
@@ -169,8 +166,8 @@ impl StorableTransaction<orm::Transaction, orm::NewTransaction, Vec<u8>, i64> fo
         }
     }
 
-    fn block_hash(&self) -> Vec<u8> {
-        Vec::from(self.block_hash.as_bytes())
+    fn block_hash(&self) -> &[u8] {
+        self.block_hash.as_bytes()
     }
 
     fn hash(&self) -> &[u8] {
