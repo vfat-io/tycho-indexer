@@ -367,10 +367,23 @@ pub struct ContractStorage {
     pub previous_value: Option<Vec<u8>>,
     pub account_id: i64,
     pub modify_tx: i64,
+    pub ordinal: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name=contract_storage)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewSlot {
+    pub slot: Vec<u8>,
+    pub value: Option<Vec<u8>>,
+    pub account_id: i64,
+    pub modify_tx: i64,
+    pub ordinal: i64,
+    pub valid_from: NaiveDateTime,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]

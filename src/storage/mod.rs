@@ -526,21 +526,25 @@ pub trait ContractStateGateway {
 
     /// Upserts slots for a given contract.
     ///
-    /// Creates a new version and then add the new/updated slots accordingly.
+    /// Upserts slots from multiple accounts. To correctly track changes, it is
+    /// necessary that each slot modification has a corresponding transaction
+    /// assigned.
     ///
     /// # Parameters
-    /// - `id` The identifier for the contract.
-    /// - `modify_tx` Transaction hash that modified the contract. Assumed to be
-    ///     already present in storage.
     /// - `slots` A map containing only the changed slots. Including slots that
-    ///     were changed to 0.
+    ///     were changed to 0. The outer hash map contains the transaction id as
+    ///     index the inner map then contains changes slots per account, and the
+    ///     most inner map finally contains the actual changed slots.
+    ///
+    /// # Returns
+    /// An empty `Ok(())` if the operation succeeded. Will raise an error if any
+    /// of the related entities can not be found: e.g. one of the references
+    /// transactions or accounts is not or not yet persisted.
     async fn upsert_slots(
         &self,
-        id: ContractId,
-        modify_tx: &[u8],
-        slots: &HashMap<Self::Slot, Self::Value>,
+        slots: &HashMap<Vec<u8>, HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>>,
+        db: &mut Self::DB,
     ) -> Result<(), StorageError>;
-
     /// Retrieve a slot delta between two versions
     ///
     /// Given start version V1 and end version V2, this method will return the
