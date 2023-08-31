@@ -90,7 +90,7 @@ where
         todo!()
     }
 
-    async fn handle_progress(&self, inp: ModulesProgress) -> Result<(), ExtractionError> {
+    async fn handle_progress(&self, _inp: ModulesProgress) -> Result<(), ExtractionError> {
         todo!()
     }
 }

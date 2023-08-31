@@ -1,14 +1,11 @@
 pub mod evm;
 pub mod runner;
 
-use crate::models::Chain;
-use crate::storage::{ChainGateway, ContractStateGateway, ExtractionStateGateway, ProtocolGateway};
 use crate::{
     models::{ExtractorIdentity, NormalisedMessage},
     pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
 };
 use async_trait::async_trait;
-use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

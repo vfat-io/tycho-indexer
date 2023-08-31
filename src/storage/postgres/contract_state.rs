@@ -178,16 +178,16 @@ where
 
     async fn delete_contract(
         &self,
-        id: ContractId,
-        at_tx: Option<&[u8]>,
+        _id: ContractId,
+        _at_tx: Option<&[u8]>,
     ) -> Result<(), StorageError> {
         Ok(())
     }
 
     async fn get_contract_slots(
         &self,
-        id: ContractId,
-        at: Option<Version>,
+        _id: ContractId,
+        _at: Option<Version>,
     ) -> Result<HashMap<Self::Slot, Self::Value>, StorageError> {
         Err(StorageError::NotFound(
             "ContractState".to_owned(),
@@ -732,7 +732,7 @@ mod test {
         let acc_address = "6B175474E89094C44Da98b954EedeAC495271d0F";
         let chain_id = fixtures::insert_chain(conn, "ethereum").await;
         let blk = fixtures::insert_blocks(conn, chain_id).await;
-        let txn = fixtures::insert_txns(
+        fixtures::insert_txns(
             conn,
             &[
                 (
@@ -756,7 +756,7 @@ mod test {
         // Insert account and balances
         let acc_id = fixtures::insert_account(conn, acc_address, "account0", chain_id, None).await;
 
-        let acc_balance = fixtures::insert_account_balances(conn, tid[0], acc_id).await;
+        fixtures::insert_account_balances(conn, tid[0], acc_id).await;
         let contract_code = hex::decode("1234").unwrap();
         fixtures::insert_contract_code(conn, acc_id, tid[0], contract_code).await;
         acc_address.to_string()
