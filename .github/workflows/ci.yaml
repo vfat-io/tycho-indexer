@@ -54,10 +54,12 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-check
           level: warning
+      - name: Install cargo-sort from git
+        uses: baptiste0928/cargo-install@v2
+        with:
+          crate: diesel_cli
+          features: postgres
       - name: DB Setup
-        run: |
-            sudo apt-get update && sudo apt-get install -y libpq-dev
-            cargo install diesel_cli --no-default-features --features postgres
-            diesel migrations run
+        run: diesel migration run
       - name: Test 
-        run: cargo test --verbose
+        run: cargo test
