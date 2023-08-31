@@ -172,6 +172,10 @@ impl StorableTransaction<orm::Transaction, orm::NewTransaction, Vec<u8>, i64> fo
     fn block_hash(&self) -> Vec<u8> {
         Vec::from(self.block_hash.as_bytes())
     }
+
+    fn hash(&self) -> &[u8] {
+        self.hash.as_bytes()
+    }
 }
 
 #[cfg(test)]

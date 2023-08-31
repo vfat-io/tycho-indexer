@@ -25,6 +25,7 @@ where
         + 'static,
 {
     type DB = AsyncPgConnection;
+    type Transaction = TX;
     type ContractState = Account;
     type Address = H160;
     type Slot = U256;
@@ -199,12 +200,16 @@ where
 
     async fn upsert_slots(
         &self,
-        slots: &HashMap<Vec<u8>, HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>>,
-        conn: &mut AsyncPgConnection,
+        slots: &[(
+            Self::Transaction,
+            HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>,
+        )],
+        conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
+        let txns: HashSet<_> = slots.iter().map(|(tx, _)| tx.hash()).collect();
         let tx_ids: HashMap<Vec<u8>, (i64, i64, NaiveDateTime)> = schema::transaction::table
             .inner_join(schema::block::table)
-            .filter(schema::transaction::hash.eq_any(slots.keys()))
+            .filter(schema::transaction::hash.eq_any(txns))
             .select((
                 schema::transaction::hash,
                 (
@@ -218,8 +223,8 @@ where
             .into_iter()
             .collect();
         let accounts: HashSet<_> = slots
-            .values()
-            .flat_map(|contract_slots| contract_slots.keys().map(|addr| addr.as_bytes()))
+            .iter()
+            .flat_map(|(_, contract_slots)| contract_slots.keys().map(|addr| addr.as_bytes()))
             .collect();
         let account_ids: HashMap<Vec<u8>, i64> = schema::account::table
             .filter(schema::account::address.eq_any(accounts))
@@ -231,7 +236,8 @@ where
 
         let mut new_entries = Vec::new();
         let mut bytes_buffer32 = [0u8; 32];
-        for (txhash, contract_storage) in slots.iter() {
+        for (tx, contract_storage) in slots.iter() {
+            let txhash = tx.hash();
             let (modify_tx, tx_index, block_ts) = tx_ids.get(txhash).ok_or_else(|| {
                 StorageError::NoRelatedEntity(
                     "Transaction".into(),
@@ -682,9 +688,14 @@ mod test {
         ]
         .into_iter()
         .collect();
-        let input_slots: HashMap<Vec<u8>, HashMap<H160, HashMap<U256, U256>>> = vec![(
-            hex::decode("bb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")
-                .expect("txhash ok"),
+        let input_slots = vec![(
+            evm::Transaction {
+                hash: H256::from_str(
+                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+                )
+                .expect("hash ok"),
+                ..Default::default()
+            },
             vec![(
                 H160::from_str("6B175474E89094C44Da98b954EedeAC495271d0F")
                     .expect("account address ok"),
@@ -692,9 +703,8 @@ mod test {
             )]
             .into_iter()
             .collect(),
-        )]
-        .into_iter()
-        .collect();
+        )];
+
         let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
 
         gw.upsert_slots(&input_slots, &mut conn).await.unwrap();

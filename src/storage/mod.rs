@@ -137,6 +137,10 @@ where
     /// necessary to ensure that transactions can be traced back to the blocks
     /// from which they originated.
     fn block_hash(&self) -> BH;
+
+    /// Returns the transaction hash (`BH`) associated with a transaction. This
+    /// is necessary to uniquely identify this transaction.
+    fn hash(&self) -> &[u8];
 }
 
 #[derive(Error, Debug)]
@@ -454,6 +458,7 @@ pub trait StorableContract<S, N, DbId> {
 #[async_trait]
 pub trait ContractStateGateway {
     type DB;
+    type Transaction;
     type ContractState;
     type Address;
     type Slot;
@@ -531,18 +536,21 @@ pub trait ContractStateGateway {
     /// assigned.
     ///
     /// # Parameters
-    /// - `slots` A map containing only the changed slots. Including slots that
-    ///     were changed to 0. The outer hash map contains the transaction id as
-    ///     index the inner map then contains changes slots per account, and the
-    ///     most inner map finally contains the actual changed slots.
+    /// - `slots` A slice containing only the changed slots. Including slots
+    ///     that were changed to 0. Must come with a corresponding transaction
+    ///     that modified the slots, as well as the account identifier the slots
+    ///     belong to.
     ///
     /// # Returns
     /// An empty `Ok(())` if the operation succeeded. Will raise an error if any
-    /// of the related entities can not be found: e.g. one of the references
+    /// of the related entities can not be found: e.g. one of the referenced
     /// transactions or accounts is not or not yet persisted.
     async fn upsert_slots(
         &self,
-        slots: &HashMap<Vec<u8>, HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>>,
+        slots: &[(
+            Self::Transaction,
+            HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>,
+        )],
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
     /// Retrieve a slot delta between two versions
@@ -590,11 +598,11 @@ pub trait ContractStateGateway {
     ) -> Result<(), StorageError>;
 }
 
-pub trait StateGateway<DB>:
+pub trait StateGateway<DB, TX>:
     ExtractionStateGateway<DB = DB>
-    + ChainGateway<DB = DB>
+    + ChainGateway<DB = DB, Transaction = TX>
     + ProtocolGateway<DB = DB>
-    + ContractStateGateway<DB = DB>
+    + ContractStateGateway<DB = DB, Transaction = TX>
     + Send
     + Sync
 {
@@ -603,8 +611,8 @@ pub trait StateGateway<DB>:
 pub type StateGatewayType<DB, B, TX, T, P, C, A, S, V> = Arc<
     dyn StateGateway<
         DB,
+        TX,
         Block = B,
-        Transaction = TX,
         Token = T,
         ProtocolComponent = P,
         ContractState = C,
