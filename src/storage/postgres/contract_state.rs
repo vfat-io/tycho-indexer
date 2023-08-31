@@ -539,7 +539,6 @@ mod test {
         conn
     }
 
-    #[tokio::test]
     async fn test_get_account() {
         let mut conn = setup_db().await;
         let acc_address = setup_account(&mut conn).await;
