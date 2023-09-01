@@ -285,6 +285,17 @@ impl Account {
             .first::<Account>(conn)
             .await
     }
+
+    pub async fn get_addresses_by_id(
+        ids: impl Iterator<Item = &i64>,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(i64, Vec<u8>)>> {
+        account::table
+            .filter(account::id.eq_any(ids))
+            .select((account::id, account::address))
+            .get_results::<(i64, Vec<u8>)>(conn)
+            .await
+    }
 }
 
 #[derive(Insertable)]

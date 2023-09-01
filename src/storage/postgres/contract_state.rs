@@ -2,6 +2,7 @@ use std::collections::{hash_map::Entry, HashSet};
 
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
+use diesel::pg::Pg;
 use diesel_async::RunQueryDsl;
 use ethers::types::{H160, H256, U256};
 
@@ -9,7 +10,7 @@ use crate::{
     extractor::evm::Account,
     storage::{
         BlockIdentifier, BlockOrTimestamp, ContractId, ContractStateGateway, StorableBlock,
-        StorableTransaction, Version,
+        StorableTransaction, Version, VersionKind,
     },
 };
 
@@ -185,13 +186,48 @@ where
 
     async fn get_contract_slots(
         &self,
-        _id: ContractId,
-        _at: Option<Version>,
-    ) -> Result<HashMap<Self::Slot, Self::Value>, StorageError> {
-        Err(StorageError::NotFound(
-            "ContractState".to_owned(),
-            "id".to_owned(),
-        ))
+        chain: Chain,
+        contracts: Option<&[Self::Address]>,
+        at: Option<Version>,
+        conn: &mut Self::DB,
+    ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError> {
+        let version_ts = if let Some(Version(version, kind)) = at {
+            if matches!(kind, VersionKind::All) {
+                return Err(StorageError::Unsupported("Version:ALL".into()));
+            }
+            version_to_ts(&Some(version), conn).await?
+        } else {
+            Utc::now().naive_utc()
+        };
+
+        let slots = {
+            use schema::contract_storage::dsl::*;
+            let chain_id = self.get_chain_id(chain);
+            let mut q = contract_storage
+                .inner_join(schema::account::table)
+                .filter(schema::account::deleted_at.gt(version_ts))
+                .filter(schema::account::chain_id.eq(chain_id))
+                .into_boxed();
+            if let Some(addresses) = contracts {
+                let filter_val: HashSet<_> = addresses.iter().map(|a| a.as_bytes()).collect();
+                q = q.filter(schema::account::address.eq_any(filter_val));
+            }
+            q.filter(
+                valid_from
+                    .lt(version_ts)
+                    .and(valid_to.ge(version_ts).or(valid_to.is_null())),
+            )
+            .select((id, slot, value))
+            .get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
+            .await?
+        };
+        let accounts = orm::Account::get_addresses_by_id(slots.iter().map(|(cid, _, _)| cid), conn)
+            .await?
+            .iter()
+            .map(|(k, v)| parse_id_h160(k, v))
+            .collect::<Result<HashMap<i64, H160>, StorageError>>()?;
+
+        construct_contract_storage(slots.into_iter(), &accounts)
     }
 
     async fn upsert_slots(
@@ -379,49 +415,7 @@ where
             })
             .collect::<Result<HashMap<i64, H160>, StorageError>>()?;
 
-        let mut result: HashMap<H160, HashMap<U256, U256>> =
-            HashMap::with_capacity(account_addresses.len());
-        for (cid, raw_key, raw_val) in changed_values.into_iter() {
-            // note this can theoretically happen (only if there is some really
-            // bad database inconsistency) because the call above simply filters
-            // for account ids, but won't error or give any inidication of a
-            // missing contract id.
-            let account_address = account_addresses.get(&cid).ok_or_else(|| {
-                StorageError::DecodeError(format!("Failed to find contract address for id {}", cid))
-            })?;
-
-            if raw_key.len() != 32 {
-                return Err(StorageError::DecodeError(format!(
-                    "Invalid byte length for U256 in slot key! Found: 0x{}",
-                    hex::encode(raw_key)
-                )));
-            }
-            let v = if let Some(val) = raw_val {
-                if val.len() != 32 {
-                    return Err(StorageError::DecodeError(format!(
-                        "Invalid byte length for U256 in slot value! Found: 0x{}",
-                        hex::encode(val)
-                    )));
-                }
-                U256::from_big_endian(&val)
-            } else {
-                U256::zero()
-            };
-
-            let k = U256::from_big_endian(&raw_key);
-
-            match result.entry(*account_address) {
-                Entry::Occupied(mut e) => {
-                    e.get_mut().insert(k, v);
-                }
-                Entry::Vacant(e) => {
-                    let mut contract_storage = HashMap::new();
-                    contract_storage.insert(k, v);
-                    e.insert(contract_storage);
-                }
-            }
-        }
-        Ok(result)
+        construct_contract_storage(changed_values.into_iter(), &account_addresses)
     }
 
     async fn revert_contract_state(
@@ -487,6 +481,73 @@ where
 
         Ok(())
     }
+}
+
+fn parse_id_h160(db_id: &i64, v: &[u8]) -> Result<(i64, H160), StorageError> {
+    if v.len() != 20 {
+        return Err(StorageError::DecodeError(format!(
+            "Invalid contract address found for contract with id: {}, address: {}",
+            db_id,
+            hex::encode(v)
+        )));
+    }
+    Ok((*db_id, H160::from_slice(v)))
+}
+
+fn construct_contract_storage(
+    slot_values: impl Iterator<Item = (i64, Vec<u8>, Option<Vec<u8>>)>,
+    addresses: &HashMap<i64, H160>,
+) -> Result<HashMap<H160, HashMap<U256, U256>>, StorageError> {
+    let mut result: HashMap<H160, HashMap<U256, U256>> = HashMap::with_capacity(addresses.len());
+    for (cid, raw_key, raw_val) in slot_values.into_iter() {
+        // note this can theoretically happen (only if there is some really
+        // bad database inconsistency) because the call above simply filters
+        // for account ids, but won't error or give any inidication of a
+        // missing contract id.
+        let account_address = addresses.get(&cid).ok_or_else(|| {
+            StorageError::DecodeError(format!("Failed to find contract address for id {}", cid))
+        })?;
+
+        let (k, v) = parse_u256_slot_entry(&raw_key, raw_val.as_deref())?;
+
+        match result.entry(*account_address) {
+            Entry::Occupied(mut e) => {
+                e.get_mut().insert(k, v);
+            }
+            Entry::Vacant(e) => {
+                let mut contract_storage = HashMap::new();
+                contract_storage.insert(k, v);
+                e.insert(contract_storage);
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn parse_u256_slot_entry(
+    raw_key: &[u8],
+    raw_val: Option<&[u8]>,
+) -> Result<(U256, U256), StorageError> {
+    if raw_key.len() != 32 {
+        return Err(StorageError::DecodeError(format!(
+            "Invalid byte length for U256 in slot key! Found: 0x{}",
+            hex::encode(raw_key)
+        )));
+    }
+    let v = if let Some(val) = raw_val {
+        if val.len() != 32 {
+            return Err(StorageError::DecodeError(format!(
+                "Invalid byte length for U256 in slot value! Found: 0x{}",
+                hex::encode(val)
+            )));
+        }
+        U256::from_big_endian(&val)
+    } else {
+        U256::zero()
+    };
+
+    let k = U256::from_big_endian(&raw_key);
+    Ok((k, v))
 }
 
 /// Given a version find the corresponding timestamp.

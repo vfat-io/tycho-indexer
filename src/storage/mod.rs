@@ -152,6 +152,8 @@ pub enum StorageError {
     DecodeError(String),
     #[error("Unexpected storage error: {0}")]
     Unexpected(String),
+    #[error("Currently unsupported operation: {0}")]
+    Unsupported(String),
 }
 
 /// Storage methods for chain specific objects.
@@ -522,9 +524,11 @@ pub trait ContractStateGateway {
     ///   state.
     async fn get_contract_slots(
         &self,
-        id: ContractId,
+        chain: Chain,
+        contracts: Option<&[Self::Address]>,
         at: Option<Version>,
-    ) -> Result<HashMap<Self::Slot, Self::Value>, StorageError>;
+        conn: &mut Self::DB,
+    ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError>;
 
     /// Upserts slots for a given contract.
     ///
