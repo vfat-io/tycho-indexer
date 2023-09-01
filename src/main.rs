@@ -15,6 +15,7 @@ use substreams::SubstreamsEndpoint;
 mod extractor;
 mod models;
 mod pb;
+mod rpc;
 mod storage;
 mod substreams;
 
