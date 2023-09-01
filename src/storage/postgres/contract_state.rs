@@ -179,7 +179,8 @@ where
     async fn delete_contract(
         &self,
         _id: ContractId,
-        _at_tx: Option<&[u8]>,
+        _at_tx: Option<&Self::Transaction>,
+        _conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         Ok(())
     }
@@ -313,14 +314,14 @@ where
         &self,
         chain: Chain,
         start_version: Option<BlockOrTimestamp>,
-        target_version: Option<BlockOrTimestamp>,
+        target_version: BlockOrTimestamp,
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError> {
         let chain_id = self.get_chain_id(chain);
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
         let start_version_ts = version_to_ts(&start_version, conn).await?;
-        let target_version_ts = version_to_ts(&target_version, conn).await?;
+        let target_version_ts = version_to_ts(&Some(target_version), conn).await?;
 
         let changed_values = if start_version_ts <= target_version_ts {
             // Going forward
@@ -350,8 +351,7 @@ where
                 ))
                 .distinct_on((schema::account::id, schema::contract_storage::slot))
                 .get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
-                .await
-                .unwrap()
+                .await?
         } else {
             // Going backwards
             //                  ]     relevant changes     ]
@@ -381,8 +381,7 @@ where
                 ))
                 .distinct_on((schema::account::id, schema::contract_storage::slot))
                 .get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
-                .await
-                .unwrap()
+                .await?
         };
 
         // We retrieve account addresses separately because this is more
@@ -885,9 +884,9 @@ mod test {
                 Some(BlockOrTimestamp::Timestamp(
                     "2020-01-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
                 )),
-                Some(BlockOrTimestamp::Timestamp(
+                BlockOrTimestamp::Timestamp(
                     "2020-01-01T02:00:00".parse::<NaiveDateTime>().unwrap(),
-                )),
+                ),
                 &mut conn,
             )
             .await
@@ -915,9 +914,9 @@ mod test {
                 Some(BlockOrTimestamp::Timestamp(
                     "2020-01-01T02:00:00".parse::<NaiveDateTime>().unwrap(),
                 )),
-                Some(BlockOrTimestamp::Timestamp(
+                BlockOrTimestamp::Timestamp(
                     "2020-01-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
-                )),
+                ),
                 &mut conn,
             )
             .await
