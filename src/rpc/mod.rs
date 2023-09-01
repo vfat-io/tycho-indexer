@@ -51,3 +51,51 @@ fn parse_state_request(json_str: &str) -> Result<StateRequestBody, RpcError> {
 
     Ok(request_body)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_state_request() {
+        let json_str = r#"
+        {
+            "contract_ids": [
+                {
+                    "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
+                    "chain": "ethereum"
+                }
+            ],
+            "version": {
+                "timestamp": "2069-01-01T04:20:00",
+                "block": {
+                    "hash": "0xd76628379905b342fe3f40a4aa2ef60747fb61e3f10e1c0052313aafc0a73566",
+                    "number": {
+                        "chain": "ethereum",
+                        "number": 213
+                    }
+                }
+            }
+        }
+        "#;
+
+        let result = parse_state_request(json_str);
+
+        match result {
+            Ok(body) => {
+                assert_eq!(
+                    body.contract_ids[0].address,
+                    "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092"
+                );
+                assert_eq!(body.contract_ids[0].chain, "ethereum");
+                assert_eq!(
+                    body.version.block.hash,
+                    "0xd76628379905b342fe3f40a4aa2ef60747fb61e3f10e1c0052313aafc0a73566"
+                );
+                assert_eq!(body.version.block.number.chain, "ethereum");
+                assert_eq!(body.version.block.number.number, 213);
+            }
+            Err(err) => panic!("Parsing failed: {}", err),
+        }
+    }
+}
