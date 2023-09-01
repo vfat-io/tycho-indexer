@@ -37,11 +37,6 @@ struct Version {
 #[derive(Debug, Serialize, Deserialize)]
 struct Block {
     hash: String,
-    number: BlockNumber,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BlockNumber {
     chain: String,
     number: i64,
 }
@@ -70,10 +65,8 @@ mod tests {
                 "timestamp": "2069-01-01T04:20:00",
                 "block": {
                     "hash": "0xd76628379905b342fe3f40a4aa2ef60747fb61e3f10e1c0052313aafc0a73566",
-                    "number": {
-                        "chain": "ethereum",
-                        "number": 213
-                    }
+                    "number": 213,
+                    "chain": "ethereum"
                 }
             }
         }
@@ -92,8 +85,8 @@ mod tests {
                     body.version.block.hash,
                     "0xd76628379905b342fe3f40a4aa2ef60747fb61e3f10e1c0052313aafc0a73566"
                 );
-                assert_eq!(body.version.block.number.chain, "ethereum");
-                assert_eq!(body.version.block.number.number, 213);
+                assert_eq!(body.version.block.chain, "ethereum");
+                assert_eq!(body.version.block.number, 213);
             }
             Err(err) => panic!("Parsing failed: {}", err),
         }
