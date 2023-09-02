@@ -179,8 +179,6 @@ impl StorableTransaction<orm::Transaction, orm::NewTransaction, i64> for evm::Tr
 mod test {
     use std::str::FromStr;
 
-    use chrono::NaiveDateTime;
-
     use crate::storage::postgres::fixtures;
 
     use super::*;
@@ -213,7 +211,7 @@ mod test {
             )
             .unwrap(),
             chain: Chain::Ethereum,
-            ts: NaiveDateTime::parse_from_str("2022-11-01T09:00:00", "%Y-%m-%dT%H:%M:%S").unwrap(),
+            ts: "2020-01-01T01:00:00".parse().unwrap(),
         }
     }
 
@@ -262,7 +260,7 @@ mod test {
             )
             .unwrap(),
             chain: Chain::Ethereum,
-            ts: NaiveDateTime::parse_from_str("2022-11-01T08:00:00", "%Y-%m-%dT%H:%M:%S").unwrap(),
+            ts: "2020-01-01T00:00:00".parse().unwrap(),
         };
 
         gw.upsert_block(block, &mut conn).await.unwrap();

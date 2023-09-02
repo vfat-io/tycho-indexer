@@ -192,50 +192,31 @@ where
         conn: &mut Self::DB,
     ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError> {
         let version_ts = if let Some(Version(version, kind)) = at {
-            if matches!(kind, VersionKind::All) {
-                return Err(StorageError::Unsupported("Version:ALL".into()));
+            if !matches!(kind, VersionKind::Last) {
+                return Err(StorageError::Unsupported(format!(
+                    "Unsupported version kind: {:?}",
+                    kind
+                )));
             }
             version_to_ts(&Some(version), conn).await?
         } else {
             Utc::now().naive_utc()
         };
 
+        dbg!(&version_ts);
+
         let slots = {
             use schema::account;
             use schema::contract_storage::dsl::*;
 
-            let data: Vec<_> = contract_storage
-                .select((valid_from, valid_to, account_id, slot, value))
-                .order_by((account_id, slot, valid_from))
-                .get_results::<(
-                    NaiveDateTime,
-                    Option<NaiveDateTime>,
-                    i64,
-                    Vec<u8>,
-                    Option<Vec<u8>>,
-                )>(conn)
-                .await?
-                .into_iter()
-                .map(|(f, t, cid, rs, rv)| {
-                    let (s, v) = parse_u256_slot_entry(&rs, rv.as_deref()).expect("u256 format ok");
-                    (f, t, cid, s, v)
-                })
-                .collect();
-            dbg!(&data);
-
             let chain_id = self.get_chain_id(chain);
             let mut q = contract_storage
                 .inner_join(account::table)
-                .filter(
-                    account::deleted_at
-                        .is_null()
-                        .or(account::deleted_at.gt(version_ts)),
-                )
                 .filter(account::chain_id.eq(chain_id))
                 .filter(
                     valid_from
-                        .lt(version_ts)
-                        .and(valid_to.ge(version_ts).or(valid_to.is_null())),
+                        .le(version_ts)
+                        .and(valid_to.gt(version_ts).or(valid_to.is_null())),
                 )
                 .order_by((account::id, slot, valid_from.desc(), ordinal.desc()))
                 .select((account::id, slot, value))
@@ -245,7 +226,6 @@ where
                 let filter_val: HashSet<_> = addresses.iter().map(|a| a.as_bytes()).collect();
                 q = q.filter(account::address.eq_any(filter_val));
             }
-            println!("{}", diesel::debug_query(&q));
             q.get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
                 .await?
         };
@@ -351,7 +331,7 @@ where
 
         let changed_values = if start_version_ts <= target_version_ts {
             // Going forward
-            //                  ]     relevant changes     ]
+            //                  ]     changes to revert    ]
             // -----------------|--------------------------|
             //                start                     target
             // We query for changes between start and target version. Then sort
@@ -380,7 +360,7 @@ where
                 .await?
         } else {
             // Going backwards
-            //                  ]     relevant changes     ]
+            //                  ]     changes to revert    ]
             // -----------------|--------------------------|
             //                target                     start
             // We query for changes between target and start version. Then sort
@@ -756,8 +736,10 @@ mod test {
     async fn test_upsert_contract() {}
 
     #[rstest]
-    #[case::latest(None, None, [
-        (
+    #[case::latest(
+        None, 
+        None, 
+        [(
             "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
                 .parse()
                 .unwrap(),
@@ -781,12 +763,14 @@ mod test {
             ]
             .into_iter()
             .collect(),
-        ),
+        )]
+        .into_iter()
+        .collect())
     ]
-    .into_iter()
-    .collect())]
-    #[case::latest_c0(None, Some(vec!["0x73bce791c239c8010cd3c857d96580037ccdd0ee".parse().unwrap()]), [
-        (
+    #[case::latest_only_c0(
+        None, 
+        Some(vec!["0x73bce791c239c8010cd3c857d96580037ccdd0ee".parse().unwrap()]), 
+        [(
             "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
                 .parse()
                 .unwrap(),
@@ -796,12 +780,14 @@ mod test {
             ]
             .into_iter()
             .collect(),
-        ),
+        )]
+        .into_iter()
+        .collect())
     ]
-    .into_iter()
-    .collect())]
-    #[case::at_block_one(Some(Version(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))), VersionKind::Last)), None, [
-        (
+    #[case::at_block_one(
+        Some(Version(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))), VersionKind::Last)), 
+        None, 
+        [(
             "0x6b175474e89094c44da98b954eedeac495271d0f"
                 .parse()
                 .unwrap(),
@@ -813,9 +799,23 @@ mod test {
             .into_iter()
             .collect(),
         ),
+        (
+            "0x94a3F312366b8D0a32A00986194053C0ed0CdDb1".parse().unwrap(), 
+            vec![
+                (U256::from(1), U256::from(2)),
+                (U256::from(2), U256::from(4))
+            ]
+            .into_iter()
+            .collect(),
+        )]
+        .into_iter()
+        .collect()
+    )]
+    #[case::before_block_one(
+        Some(Version(BlockOrTimestamp::Timestamp("2019-01-01T00:00:00".parse().unwrap()), VersionKind::Last)), 
+        None, 
+        HashMap::new())
     ]
-    .into_iter()
-    .collect())]
     #[tokio::test]
     async fn test_get_slots(
         #[case] version: Option<Version>,
@@ -1058,13 +1058,13 @@ mod test {
                     "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
                 ),
                 (
-                    // change c0 state
+                    // change c0 state, deploy c2
                     blk[0],
                     2i64,
                     "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
                 ),
                 (
-                    // deploy c1
+                    // deploy c1, delete c2
                     blk[1],
                     1i64,
                     "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
@@ -1094,6 +1094,13 @@ mod test {
             Some(txn[2]),
         )
         .await;
+        let c2 = fixtures::insert_account(
+            conn,
+            "94a3F312366b8D0a32A00986194053C0ed0CdDb1",
+            "c2",
+            chain_id,
+            Some(txn[1]),
+        ).await;
         fixtures::insert_slots(
             conn,
             c0,
@@ -1102,6 +1109,15 @@ mod test {
             &[(0, 1), (1, 5), (2, 1)],
         )
         .await;
+        fixtures::insert_slots(
+            conn,
+            c2,
+            txn[1],
+            "2020-01-01T00:00:00",
+            &[(1, 2), (2, 4)],
+        )
+        .await;
+        fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
         fixtures::insert_slots(
             conn,
             c0,

@@ -257,8 +257,10 @@ impl<B, TX> PostgresGateway<B, TX> {
 mod fixtures {
     use std::str::FromStr;
 
+    use chrono::NaiveDateTime;
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
+    use ethers::etherscan::contract;
     use ethers::types::{H160, H256, U256};
 
     use super::orm;
@@ -293,7 +295,7 @@ mod fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(1),
-                schema::block::ts.eq("2022-11-01T00:00:00"
+                schema::block::ts.eq("2020-01-01T00:00:00"
                     .parse::<chrono::NaiveDateTime>()
                     .expect("timestamp")),
                 schema::block::chain_id.eq(chain_id),
@@ -314,7 +316,7 @@ mod fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(2),
-                schema::block::ts.eq("2022-11-01T01:00:00"
+                schema::block::ts.eq("2020-01-01T01:00:00"
                     .parse::<chrono::NaiveDateTime>()
                     .unwrap()),
                 schema::block::chain_id.eq(chain_id),
@@ -488,5 +490,25 @@ mod fixtures {
             .get_result(conn)
             .await
             .unwrap()
+    }
+
+    pub async fn delete_account(conn: &mut AsyncPgConnection, target_id: i64, ts: &str) {
+        let ts = ts.parse::<NaiveDateTime>().expect("timestamp valid");
+        {
+            use schema::account::dsl::*;
+            diesel::update(account.filter(id.eq(target_id)))
+                .set(deleted_at.eq(ts))
+                .execute(conn)
+                .await
+                .expect("delete succeeded");
+        }
+        {
+            use schema::contract_storage::dsl::*;
+            diesel::update(contract_storage.filter(account_id.eq(target_id)))
+                .set(valid_to.eq(ts))
+                .execute(conn)
+                .await
+                .unwrap();
+        }
     }
 }

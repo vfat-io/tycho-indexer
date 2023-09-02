@@ -284,22 +284,34 @@ pub trait ExtractionStateGateway {
     ) -> Result<(), StorageError>;
 }
 
+/// Point in time as either block or timestamp. If a block is chosen it
+/// timestamp attribute is used.
 #[derive(Debug)]
 pub enum BlockOrTimestamp {
     Block(BlockIdentifier),
     Timestamp(NaiveDateTime),
 }
 
+/// References certain states within a single block.
+///
+/// **Note:** Not all methods that take a version will support all version kinds,
+/// the versions here are included for completeness and to document the
+/// retrieval behaviour that is possible with the storage layout. Please refer
+/// to the individual implementation for information about which version kinds
+/// it supports.
+#[derive(Debug, Default)]
 pub enum VersionKind {
-    /// Get all states within a given block.
-    All,
-    /// Get the latest state within a given block.
+    /// Represents the final state within a specific block. Essentially, it
+    /// retrieves the state subsequent to the execution of the last transaction
+    /// executed in that block.
+    #[default]
     Last,
-}
-
-pub enum VersionedResult<T> {
-    All(Vec<T>),
-    Last(T),
+    /// Represents the initial state of a specific block. In other words,
+    /// it is the state before any transaction has been executed within that block.
+    First,
+    /// Represents a specific transactions indexed position within a block.
+    /// It includes the state after executing the transaction at that index.
+    Index(i64),
 }
 
 pub struct ContractId(Chain, Vec<u8>);
