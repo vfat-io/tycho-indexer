@@ -293,7 +293,7 @@ mod fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(1),
-                schema::block::ts.eq("2022-11-01T08:00:00"
+                schema::block::ts.eq("2022-11-01T00:00:00"
                     .parse::<chrono::NaiveDateTime>()
                     .expect("timestamp")),
                 schema::block::chain_id.eq(chain_id),
@@ -314,7 +314,7 @@ mod fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(2),
-                schema::block::ts.eq("2022-11-01T09:00:00"
+                schema::block::ts.eq("2022-11-01T01:00:00"
                     .parse::<chrono::NaiveDateTime>()
                     .unwrap()),
                 schema::block::chain_id.eq(chain_id),

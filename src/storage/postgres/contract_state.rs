@@ -2,7 +2,6 @@ use std::collections::{hash_map::Entry, HashSet};
 
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
-use diesel::pg::Pg;
 use diesel_async::RunQueryDsl;
 use ethers::types::{H160, H256, U256};
 
@@ -202,32 +201,59 @@ where
         };
 
         let slots = {
+            use schema::account;
             use schema::contract_storage::dsl::*;
+
+            let data: Vec<_> = contract_storage
+                .select((valid_from, valid_to, account_id, slot, value))
+                .order_by((account_id, slot, valid_from))
+                .get_results::<(
+                    NaiveDateTime,
+                    Option<NaiveDateTime>,
+                    i64,
+                    Vec<u8>,
+                    Option<Vec<u8>>,
+                )>(conn)
+                .await?
+                .into_iter()
+                .map(|(f, t, cid, rs, rv)| {
+                    let (s, v) = parse_u256_slot_entry(&rs, rv.as_deref()).expect("u256 format ok");
+                    (f, t, cid, s, v)
+                })
+                .collect();
+            dbg!(&data);
+
             let chain_id = self.get_chain_id(chain);
             let mut q = contract_storage
-                .inner_join(schema::account::table)
-                .filter(schema::account::deleted_at.gt(version_ts))
-                .filter(schema::account::chain_id.eq(chain_id))
+                .inner_join(account::table)
+                .filter(
+                    account::deleted_at
+                        .is_null()
+                        .or(account::deleted_at.gt(version_ts)),
+                )
+                .filter(account::chain_id.eq(chain_id))
+                .filter(
+                    valid_from
+                        .lt(version_ts)
+                        .and(valid_to.ge(version_ts).or(valid_to.is_null())),
+                )
+                .order_by((account::id, slot, valid_from.desc(), ordinal.desc()))
+                .select((account::id, slot, value))
+                .distinct_on((account::id, slot))
                 .into_boxed();
             if let Some(addresses) = contracts {
                 let filter_val: HashSet<_> = addresses.iter().map(|a| a.as_bytes()).collect();
-                q = q.filter(schema::account::address.eq_any(filter_val));
+                q = q.filter(account::address.eq_any(filter_val));
             }
-            q.filter(
-                valid_from
-                    .lt(version_ts)
-                    .and(valid_to.ge(version_ts).or(valid_to.is_null())),
-            )
-            .select((id, slot, value))
-            .get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
-            .await?
+            println!("{}", diesel::debug_query(&q));
+            q.get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
+                .await?
         };
         let accounts = orm::Account::get_addresses_by_id(slots.iter().map(|(cid, _, _)| cid), conn)
             .await?
             .iter()
             .map(|(k, v)| parse_id_h160(k, v))
             .collect::<Result<HashMap<i64, H160>, StorageError>>()?;
-
         construct_contract_storage(slots.into_iter(), &accounts)
     }
 
@@ -482,6 +508,10 @@ where
     }
 }
 
+/// Parses an evm address hash from the db
+///
+/// The db id is required to provide additional error context in case the
+/// parsing fails.
 fn parse_id_h160(db_id: &i64, v: &[u8]) -> Result<(i64, H160), StorageError> {
     if v.len() != 20 {
         return Err(StorageError::DecodeError(format!(
@@ -493,6 +523,11 @@ fn parse_id_h160(db_id: &i64, v: &[u8]) -> Result<(i64, H160), StorageError> {
     Ok((*db_id, H160::from_slice(v)))
 }
 
+/// Given an iterator of slot data construct an evm specific hash map
+///
+/// Will contruct a hashmap representing contract storage of several contracts.
+/// It does so by combining a query result and a mapping between database id and
+/// account addresses.
 fn construct_contract_storage(
     slot_values: impl Iterator<Item = (i64, Vec<u8>, Option<Vec<u8>>)>,
     addresses: &HashMap<i64, H160>,
@@ -523,6 +558,9 @@ fn construct_contract_storage(
     Ok(result)
 }
 
+/// Parses a tuple of U256 representing an slot entry
+///
+/// In case the value is None it will assume a value of zero.
 fn parse_u256_slot_entry(
     raw_key: &[u8],
     raw_val: Option<&[u8]>,
@@ -586,10 +624,13 @@ mod test {
 
     use diesel_async::{AsyncConnection, RunQueryDsl};
     use ethers::types::H256;
+    use rstest::rstest;
 
     use super::*;
     use crate::extractor::evm::{self, Account};
     use crate::storage::postgres::fixtures;
+
+    type EvmGateway = PostgresGateway<evm::Block, evm::Transaction>;
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -714,6 +755,85 @@ mod test {
     #[tokio::test]
     async fn test_upsert_contract() {}
 
+    #[rstest]
+    #[case::latest(None, None, [
+        (
+            "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
+                .parse()
+                .unwrap(),
+            vec![
+                (U256::from(1), U256::from(256)),
+                (U256::from(0), U256::from(128)),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+        (
+            "0x6b175474e89094c44da98b954eedeac495271d0f"
+                .parse()
+                .unwrap(),
+            vec![
+                (U256::from(1), U256::from(3)),
+                (U256::from(5), U256::from(25)),
+                (U256::from(2), U256::from(1)),
+                (U256::from(6), U256::from(30)),
+                (U256::from(0), U256::from(2)),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+    ]
+    .into_iter()
+    .collect())]
+    #[case::latest_c0(None, Some(vec!["0x73bce791c239c8010cd3c857d96580037ccdd0ee".parse().unwrap()]), [
+        (
+            "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
+                .parse()
+                .unwrap(),
+            vec![
+                (U256::from(1), U256::from(256)),
+                (U256::from(0), U256::from(128)),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+    ]
+    .into_iter()
+    .collect())]
+    #[case::at_block_one(Some(Version(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))), VersionKind::Last)), None, [
+        (
+            "0x6b175474e89094c44da98b954eedeac495271d0f"
+                .parse()
+                .unwrap(),
+            vec![
+                (U256::from(1), U256::from(5)),
+                (U256::from(2), U256::from(1)),
+                (U256::from(0), U256::from(1)),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+    ]
+    .into_iter()
+    .collect())]
+    #[tokio::test]
+    async fn test_get_slots(
+        #[case] version: Option<Version>,
+        #[case] addresses: Option<Vec<H160>>,
+        #[case] exp: HashMap<H160, HashMap<U256, U256>>,
+    ) {
+        let mut conn = setup_db().await;
+        setup_revert(&mut conn).await;
+        let gw = EvmGateway::from_connection(&mut conn).await;
+
+        let res = gw
+            .get_contract_slots(Chain::Ethereum, addresses.as_deref(), version, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(res, exp);
+    }
+
     #[tokio::test]
     async fn test_upsert_slots() {
         let mut conn = setup_db().await;
@@ -760,7 +880,7 @@ mod test {
             .collect(),
         )];
 
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let gw = EvmGateway::from_connection(&mut conn).await;
 
         gw.upsert_slots(&input_slots, &mut conn).await.unwrap();
 
@@ -869,7 +989,7 @@ mod test {
     async fn get_slots_delta_forward() {
         let mut conn = setup_db().await;
         setup_slots_delta(&mut conn).await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let gw = EvmGateway::from_connection(&mut conn).await;
         let storage: HashMap<U256, U256> = vec![(0, 2), (1, 3), (5, 25), (6, 30)]
             .iter()
             .map(|(k, v)| (U256::from(*k), U256::from(*v)))
@@ -899,7 +1019,7 @@ mod test {
     async fn get_slots_delta_backward() {
         let mut conn = setup_db().await;
         setup_slots_delta(&mut conn).await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let gw = EvmGateway::from_connection(&mut conn).await;
         let storage: HashMap<U256, U256> = vec![(0, 1), (1, 5), (5, 0), (6, 0)]
             .iter()
             .map(|(k, v)| (U256::from(*k), U256::from(*v)))
@@ -1016,7 +1136,7 @@ mod test {
         ]
         .into_iter()
         .collect();
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let gw = EvmGateway::from_connection(&mut conn).await;
 
         gw.revert_contract_state(BlockIdentifier::Hash(block1_hash), &mut conn)
             .await
