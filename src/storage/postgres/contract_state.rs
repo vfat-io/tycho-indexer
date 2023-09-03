@@ -737,8 +737,8 @@ mod test {
 
     #[rstest]
     #[case::latest(
-        None, 
-        None, 
+        None,
+        None,
         [(
             "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
                 .parse()
@@ -768,7 +768,7 @@ mod test {
         .collect())
     ]
     #[case::latest_only_c0(
-        None, 
+        None,
         Some(vec!["0x73bce791c239c8010cd3c857d96580037ccdd0ee".parse().unwrap()]), 
         [(
             "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
@@ -785,8 +785,8 @@ mod test {
         .collect())
     ]
     #[case::at_block_one(
-        Some(Version(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))), VersionKind::Last)), 
-        None, 
+        Some(Version(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))), VersionKind::Last)),
+        None,
         [(
             "0x6b175474e89094c44da98b954eedeac495271d0f"
                 .parse()
@@ -812,8 +812,8 @@ mod test {
         .collect()
     )]
     #[case::before_block_one(
-        Some(Version(BlockOrTimestamp::Timestamp("2019-01-01T00:00:00".parse().unwrap()), VersionKind::Last)), 
-        None, 
+        Some(Version(BlockOrTimestamp::Timestamp("2019-01-01T00:00:00".parse().unwrap()), VersionKind::Last)),
+        None,
         HashMap::new())
     ]
     #[tokio::test]
@@ -1100,7 +1100,8 @@ mod test {
             "c2",
             chain_id,
             Some(txn[1]),
-        ).await;
+        )
+        .await;
         fixtures::insert_slots(
             conn,
             c0,
@@ -1109,14 +1110,7 @@ mod test {
             &[(0, 1), (1, 5), (2, 1)],
         )
         .await;
-        fixtures::insert_slots(
-            conn,
-            c2,
-            txn[1],
-            "2020-01-01T00:00:00",
-            &[(1, 2), (2, 4)],
-        )
-        .await;
+        fixtures::insert_slots(conn, c2, txn[1], "2020-01-01T00:00:00", &[(1, 2), (2, 4)]).await;
         fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
         fixtures::insert_slots(
             conn,
