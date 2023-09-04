@@ -18,6 +18,7 @@ impl From<serde_json::Error> for RpcError {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct StateRequestBody {
+    #[serde(rename = "contractIds")]
     contract_ids: Vec<ContractId>,
     version: Version,
 }
@@ -37,6 +38,7 @@ struct Version {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Block {
     hash: String,
+    #[serde(rename = "parentHash")]
     parent_hash: String,
     chain: String,
     number: i64,
@@ -56,7 +58,7 @@ mod tests {
     fn test_parse_state_request() {
         let json_str = r#"
         {
-            "contract_ids": [
+            "contractIds": [
                 {
                     "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
                     "chain": "ethereum"
