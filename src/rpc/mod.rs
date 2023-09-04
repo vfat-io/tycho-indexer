@@ -1,7 +1,18 @@
 //! This module contains Tycho RPC implementation
 
+use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+// This will convert a hex string (with or without 0x) to a Vec<u8>
+fn hex_to_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    let hex_str = s.strip_prefix("0x").unwrap_or(&s);
+    hex::decode(hex_str).map_err(de::Error::custom)
+}
 
 #[derive(Error, Debug)]
 pub enum RpcError {
@@ -24,7 +35,8 @@ struct StateRequestBody {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct ContractId {
-    address: String,
+    #[serde(deserialize_with = "hex_to_bytes")]
+    address: Vec<u8>,
     chain: String,
 }
 
@@ -36,9 +48,10 @@ struct Version {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Block {
-    hash: String,
-    #[serde(rename = "parentHash")]
-    parent_hash: String,
+    #[serde(deserialize_with = "hex_to_bytes")]
+    hash: Vec<u8>,
+    #[serde(rename = "parentHash", deserialize_with = "hex_to_bytes")]
+    parent_hash: Vec<u8>,
     chain: String,
     number: i64,
 }
@@ -77,11 +90,13 @@ mod tests {
 
         let result = parse_state_request(json_str).unwrap();
 
-        let contract0 = "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092".to_string();
+        let contract0 = hex::decode("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap();
         let block_hash =
-            "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".to_string();
+            hex::decode("24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4")
+                .unwrap();
         let parent_block_hash =
-            "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815".to_string();
+            hex::decode("8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815")
+                .unwrap();
         let block_number = 213;
 
         let expected = StateRequestBody {
