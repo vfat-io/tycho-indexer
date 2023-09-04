@@ -7,12 +7,12 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Failed to parse JSON: {0}")]
-    SerdeJsonError(serde_json::Error),
+    ParseError(serde_json::Error),
 }
 
 impl From<serde_json::Error> for RpcError {
     fn from(err: serde_json::Error) -> RpcError {
-        RpcError::SerdeJsonError(err)
+        RpcError::ParseError(err)
     }
 }
 
