@@ -16,25 +16,25 @@ impl From<serde_json::Error> for RpcError {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct StateRequestBody {
     contract_ids: Vec<ContractId>,
     version: Version,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct ContractId {
     address: String,
     chain: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Version {
     timestamp: String,
     block: Block,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Block {
     hash: String,
     parent_hash: String,
@@ -65,6 +65,7 @@ mod tests {
             "version": {
                 "timestamp": "2069-01-01T04:20:00",
                 "block": {
+                    "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
                     "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
                     "number": 213,
                     "chain": "ethereum"
@@ -73,23 +74,31 @@ mod tests {
         }
         "#;
 
-        let result = parse_state_request(json_str);
+        let result = parse_state_request(json_str).unwrap();
 
-        match result {
-            Ok(body) => {
-                assert_eq!(
-                    body.contract_ids[0].address,
-                    "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092"
-                );
-                assert_eq!(body.contract_ids[0].chain, "ethereum");
-                assert_eq!(
-                    body.version.block.hash,
-                    "0xd76628379905b342fe3f40a4aa2ef60747fb61e3f10e1c0052313aafc0a73566"
-                );
-                assert_eq!(body.version.block.chain, "ethereum");
-                assert_eq!(body.version.block.number, 213);
-            }
-            Err(err) => panic!("Parsing failed: {}", err),
-        }
+        let contract0 = "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092".to_string();
+        let block_hash =
+            "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".to_string();
+        let parent_block_hash =
+            "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815".to_string();
+        let block_number = 213;
+
+        let expected = StateRequestBody {
+            contract_ids: vec![ContractId {
+                chain: "ethereum".to_string(),
+                address: contract0,
+            }],
+            version: Version {
+                timestamp: "2069-01-01T04:20:00".to_string(),
+                block: Block {
+                    hash: block_hash,
+                    parent_hash: parent_block_hash,
+                    chain: "ethereum".to_string(),
+                    number: block_number,
+                },
+            },
+        };
+
+        assert_eq!(result, expected);
     }
 }
