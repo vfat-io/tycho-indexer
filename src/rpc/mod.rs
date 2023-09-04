@@ -1,7 +1,6 @@
 //! This module contains Tycho RPC implementation
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
