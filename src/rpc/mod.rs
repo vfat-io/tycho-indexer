@@ -37,6 +37,7 @@ struct Version {
 #[derive(Debug, Serialize, Deserialize)]
 struct Block {
     hash: String,
+    parent_hash: String,
     chain: String,
     number: i64,
 }
@@ -64,7 +65,7 @@ mod tests {
             "version": {
                 "timestamp": "2069-01-01T04:20:00",
                 "block": {
-                    "hash": "0xd76628379905b342fe3f40a4aa2ef60747fb61e3f10e1c0052313aafc0a73566",
+                    "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
                     "number": 213,
                     "chain": "ethereum"
                 }
