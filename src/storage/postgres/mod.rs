@@ -106,6 +106,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use diesel::prelude::*;
+#[allow(unused_imports)] // RunQueryDsl is wrongly marked as unused
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use super::StorageError;
@@ -260,7 +261,6 @@ mod fixtures {
     use chrono::NaiveDateTime;
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
-    use ethers::etherscan::contract;
     use ethers::types::{H160, H256, U256};
 
     use super::orm;

@@ -177,10 +177,68 @@ where
 
     async fn delete_contract(
         &self,
-        _id: ContractId,
-        _at_tx: Option<&Self::Transaction>,
-        _conn: &mut AsyncPgConnection,
+        id: ContractId,
+        at_tx: &Self::Transaction,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
+        let account = orm::Account::by_id(&id, conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Account", &id.to_string(), None))?;
+        let tx = orm::Transaction::by_hash(at_tx.hash(), conn)
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(
+                    err,
+                    "Account",
+                    &hex::encode(at_tx.hash()),
+                    Some("Transaction".to_owned()),
+                )
+            })?;
+        let block_ts = schema::block::table
+            .filter(schema::block::id.eq(tx.block_id))
+            .select(schema::block::ts)
+            .first::<NaiveDateTime>(conn)
+            .await?;
+        if let Some(tx_id) = account.deletion_tx {
+            if tx.id != tx_id {
+                return Err(StorageError::Unexpected(format!(
+                    "Account {} was already deleted at {:?}!",
+                    hex::encode(account.address),
+                    account.deleted_at,
+                )));
+            }
+            // Noop if called twice on deleted contract
+            return Ok(());
+        };
+        diesel::update(schema::account::table.filter(schema::account::id.eq(account.id)))
+            .set((
+                schema::account::deletion_tx.eq(tx.id),
+                schema::account::deleted_at.eq(block_ts),
+            ))
+            .execute(conn)
+            .await?;
+        diesel::update(
+            schema::contract_storage::table
+                .filter(schema::contract_storage::account_id.eq(account.id)),
+        )
+        .set(schema::contract_storage::valid_to.eq(block_ts))
+        .execute(conn)
+        .await?;
+
+        diesel::update(
+            schema::account_balance::table
+                .filter(schema::account_balance::account_id.eq(account.id)),
+        )
+        .set(schema::account_balance::valid_to.eq(block_ts))
+        .execute(conn)
+        .await?;
+
+        diesel::update(
+            schema::contract_code::table.filter(schema::contract_code::account_id.eq(account.id)),
+        )
+        .set(schema::contract_code::valid_to.eq(block_ts))
+        .execute(conn)
+        .await?;
         Ok(())
     }
 
@@ -484,6 +542,19 @@ where
         .execute(conn)
         .await?;
 
+        diesel::update(schema::account::table.filter(schema::account::deleted_at.gt(block.ts)))
+            .set(schema::account::deleted_at.eq(Option::<NaiveDateTime>::None))
+            .execute(conn)
+            .await?;
+
+        diesel::update(
+            schema::protocol_component::table
+                .filter(schema::protocol_component::deleted_at.gt(block.ts)),
+        )
+        .set(schema::protocol_component::deleted_at.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
         Ok(())
     }
 }
@@ -730,10 +801,45 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_delete_contract() {}
+    async fn test_upsert_contract() {}
+
+    type MaybeTS = Option<NaiveDateTime>;
 
     #[tokio::test]
-    async fn test_upsert_contract() {}
+    async fn test_delete_contract() {
+        let mut conn = setup_db().await;
+        let address = setup_account(&mut conn).await;
+        let deletion_txhash = "36984d97c02a98614086c0f9e9c4e97f7e0911f6f136b3c8a76d37d6d524d1e5";
+        let address_bytes = hex::decode(address).expect("address ok");
+        let id = ContractId(Chain::Ethereum, address_bytes.clone());
+        let gw = EvmGateway::from_connection(&mut conn).await;
+        let tx = evm::Transaction {
+            hash: deletion_txhash.parse().expect("txhash ok"),
+            ..Default::default()
+        };
+        let (block_id, block_ts) = schema::block::table
+            .select((schema::block::id, schema::block::ts))
+            .first::<(i64, NaiveDateTime)>(&mut conn)
+            .await
+            .expect("blockquery succeeded");
+        fixtures::insert_txns(&mut conn, &[(block_id, 12, deletion_txhash)]).await;
+
+        gw.delete_contract(id, &tx, &mut conn).await.unwrap();
+
+        let res = schema::account::table
+            .inner_join(schema::account_balance::table)
+            .inner_join(schema::contract_code::table)
+            .filter(schema::account::address.eq(address_bytes))
+            .select((
+                schema::account::deleted_at,
+                schema::account_balance::valid_to,
+                schema::contract_code::valid_to,
+            ))
+            .first::<(MaybeTS, MaybeTS, MaybeTS)>(&mut conn)
+            .await
+            .expect("retrieval query ok");
+        assert_eq!(res, (Some(block_ts), Some(block_ts), Some(block_ts)));
+    }
 
     #[rstest]
     #[case::latest(
