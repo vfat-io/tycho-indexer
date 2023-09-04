@@ -1139,6 +1139,8 @@ mod test {
                 .unwrap()
                 .as_bytes()
                 .into();
+        let c0_address =
+            hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").expect("c0 address valid");
         let exp_slots: HashMap<U256, U256> = vec![
             (U256::from(0), U256::from(1)),
             (U256::from(1), U256::from(5)),
@@ -1153,6 +1155,8 @@ mod test {
             .unwrap();
 
         let slots: HashMap<U256, U256> = schema::contract_storage::table
+            .inner_join(schema::account::table)
+            .filter(schema::account::address.eq(c0_address))
             .select((
                 schema::contract_storage::slot,
                 schema::contract_storage::value,
