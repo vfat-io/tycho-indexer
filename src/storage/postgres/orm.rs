@@ -397,28 +397,53 @@ pub struct NewContract {
     pub creation_tx: Option<i64>,
     pub created_at: Option<NaiveDateTime>,
     pub deleted_at: Option<NaiveDateTime>,
-
     pub balance: Vec<u8>,
-    pub balance_modify_tx: Option<i64>,
-    pub balance_valid_from: NaiveDateTime,
-    pub balance_valid_to: Option<NaiveDateTime>,
-
     pub code: Vec<u8>,
-    pub hash: Vec<u8>,
-    pub code_modify_tx: i64,
-    pub code_valid_from: NaiveDateTime,
-    pub code_valid_to: Option<NaiveDateTime>,
+    pub code_hash: Vec<u8>,
 }
 
 impl NewContract {
     pub fn new_account(&self) -> NewAccount {
-        todo!();
+        // TODO: use references
+        NewAccount {
+            title: self.title.clone(),
+            address: self.address.clone(),
+            chain_id: self.chain_id,
+            creation_tx: self.creation_tx,
+            created_at: self.created_at,
+            deleted_at: None,
+        }
     }
-    pub fn new_balance(&self, account_id: i64) -> NewAccountBalance {
-        todo!();
+    pub fn new_balance(
+        &self,
+        account_id: i64,
+        modify_tx: i64,
+        modify_ts: NaiveDateTime,
+    ) -> NewAccountBalance {
+        // TODO: use references
+        NewAccountBalance {
+            balance: self.balance.clone(),
+            account_id,
+            modify_tx: Some(modify_tx),
+            valid_from: modify_ts,
+            valid_to: None,
+        }
     }
-    pub fn new_code(&self, account_id: i64) -> NewContractCode {
-        todo!();
+    pub fn new_code(
+        &self,
+        account_id: i64,
+        modify_tx: i64,
+        modify_ts: NaiveDateTime,
+    ) -> NewContractCode {
+        // TODO: use references
+        NewContractCode {
+            code: self.code.clone(),
+            hash: self.code_hash.clone(),
+            account_id,
+            modify_tx,
+            valid_from: modify_ts,
+            valid_to: None,
+        }
     }
 }
 

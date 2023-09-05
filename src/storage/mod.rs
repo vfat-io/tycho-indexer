@@ -445,7 +445,13 @@ type AccountToContractStore = HashMap<Vec<u8>, ContractStore>;
 type SlotChangeSet<'a, T> = &'a [(T, AccountToContractStore)];
 
 pub trait StorableContract<S, N, DbId>: Send + Sync + 'static {
-    fn from_storage(val: S, tx_hash: Option<&[u8]>) -> Self;
+    fn from_storage(
+        val: S,
+        chain: Chain,
+        balance_modify_tx: &[u8],
+        code_modify_tx: &[u8],
+        creation_tx: Option<&[u8]>,
+    ) -> Self;
 
     fn to_storage(&self, chain_id: DbId, creation_ts: NaiveDateTime, tx_id: Option<DbId>) -> N;
 
@@ -455,9 +461,13 @@ pub trait StorableContract<S, N, DbId>: Send + Sync + 'static {
 
     fn address(&self) -> &[u8];
 
-    fn store(&self) -> &ContractStore;
+    fn balance_modify_tx(&self) -> &[u8];
 
-    fn set_store(&mut self, store: ContractStore) -> Result<(), StorageError>;
+    fn code_modify_tx(&self) -> &[u8];
+
+    fn store(&self) -> ContractStore;
+
+    fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
 }
 
 /// Manage contracts and their state in storage.

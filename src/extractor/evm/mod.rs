@@ -40,7 +40,8 @@ pub struct Account {
     pub balance: U256,
     pub code: Vec<u8>,
     pub code_hash: H256,
-    pub modify_tx: H256,
+    pub balance_modify_tx: H256,
+    pub code_modify_tx: H256,
     pub creation_tx: Option<H256>,
 }
 
@@ -54,10 +55,22 @@ impl Account {
         balance: U256,
         code: Vec<u8>,
         code_hash: H256,
-        modify_tx: H256,
+        balance_modify_tx: H256,
+        code_modify_tx: H256,
         creation_tx: Option<H256>,
     ) -> Self {
-        Self { chain, address, title, slots, balance, code, code_hash, modify_tx, creation_tx }
+        Self {
+            chain,
+            address,
+            title,
+            slots,
+            balance,
+            code,
+            code_hash,
+            balance_modify_tx,
+            code_modify_tx,
+            creation_tx,
+        }
     }
 }
 
