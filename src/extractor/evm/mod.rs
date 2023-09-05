@@ -22,7 +22,7 @@ pub struct Block {
     pub ts: NaiveDateTime,
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Default)]
 pub struct Transaction {
     pub hash: H256,
     pub block_hash: H256,

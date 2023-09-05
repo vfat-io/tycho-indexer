@@ -119,14 +119,11 @@ pub trait StorableBlock<S, N> {
 /// represents the storage specific type for a new transaction,. `BH`
 /// corresponds to the block hash type that uniquely identifies a block. `DbId`
 /// is the ID used to refer to each transaction in the database.
-pub trait StorableTransaction<S, N, BH, DbId>
-where
-    BH: From<Vec<u8>> + Into<Vec<u8>>,
-{
+pub trait StorableTransaction<S, N, DbId> {
     /// Converts a transaction from storage representation (`S`) to transaction
     /// form. This function uses the original block hash (`BH`), where the
     /// transaction resides, for this conversion.
-    fn from_storage(val: S, block_hash: BH) -> Self;
+    fn from_storage(val: S, block_hash: &[u8]) -> Self;
 
     /// Converts a transaction object to its storable representation (`N`),
     /// while also associating it with a specific block through a database ID
@@ -136,7 +133,11 @@ where
     /// Returns the block hash (`BH`) associated with a transaction. This is
     /// necessary to ensure that transactions can be traced back to the blocks
     /// from which they originated.
-    fn block_hash(&self) -> BH;
+    fn block_hash(&self) -> &[u8];
+
+    /// Returns the transaction hash (`BH`) associated with a transaction. This
+    /// is necessary to uniquely identify this transaction.
+    fn hash(&self) -> &[u8];
 }
 
 #[derive(Error, Debug)]
@@ -454,6 +455,7 @@ pub trait StorableContract<S, N, DbId> {
 #[async_trait]
 pub trait ContractStateGateway {
     type DB;
+    type Transaction;
     type ContractState;
     type Address;
     type Slot;
@@ -526,21 +528,28 @@ pub trait ContractStateGateway {
 
     /// Upserts slots for a given contract.
     ///
-    /// Creates a new version and then add the new/updated slots accordingly.
+    /// Upserts slots from multiple accounts. To correctly track changes, it is
+    /// necessary that each slot modification has a corresponding transaction
+    /// assigned.
     ///
     /// # Parameters
-    /// - `id` The identifier for the contract.
-    /// - `modify_tx` Transaction hash that modified the contract. Assumed to be
-    ///     already present in storage.
-    /// - `slots` A map containing only the changed slots. Including slots that
-    ///     were changed to 0.
+    /// - `slots` A slice containing only the changed slots. Including slots
+    ///     that were changed to 0. Must come with a corresponding transaction
+    ///     that modified the slots, as well as the account identifier the slots
+    ///     belong to.
+    ///
+    /// # Returns
+    /// An empty `Ok(())` if the operation succeeded. Will raise an error if any
+    /// of the related entities can not be found: e.g. one of the referenced
+    /// transactions or accounts is not or not yet persisted.
     async fn upsert_slots(
         &self,
-        id: ContractId,
-        modify_tx: &[u8],
-        slots: &HashMap<Self::Slot, Self::Value>,
+        slots: &[(
+            Self::Transaction,
+            HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>,
+        )],
+        db: &mut Self::DB,
     ) -> Result<(), StorageError>;
-
     /// Retrieve a slot delta between two versions
     ///
     /// Given start version V1 and end version V2, this method will return the
@@ -586,11 +595,11 @@ pub trait ContractStateGateway {
     ) -> Result<(), StorageError>;
 }
 
-pub trait StateGateway<DB>:
+pub trait StateGateway<DB, TX>:
     ExtractionStateGateway<DB = DB>
-    + ChainGateway<DB = DB>
+    + ChainGateway<DB = DB, Transaction = TX>
     + ProtocolGateway<DB = DB>
-    + ContractStateGateway<DB = DB>
+    + ContractStateGateway<DB = DB, Transaction = TX>
     + Send
     + Sync
 {
@@ -599,8 +608,8 @@ pub trait StateGateway<DB>:
 pub type StateGatewayType<DB, B, TX, T, P, C, A, S, V> = Arc<
     dyn StateGateway<
         DB,
+        TX,
         Block = B,
-        Transaction = TX,
         Token = T,
         ProtocolComponent = P,
         ContractState = C,
