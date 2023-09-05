@@ -113,9 +113,9 @@ where
                     .map_err(|err| {
                         StorageError::from_diesel(err, "Transaction", &tx.to_string(), None)
                     })?;
-                (Some(tx_id), Some(_created_ts))
+                (Some(tx_id), _created_ts)
             }
-            None => (None, Some(now)),
+            None => (None, now),
         };
 
         let query = diesel::insert_into(schema::account::table).values((
@@ -140,7 +140,7 @@ where
         let orm_balance = orm::NewAccountBalance {
             account_id: acc_id,
             balance: balance_bytes.to_vec(),
-            valid_from: created_ts.unwrap(),
+            valid_from: created_ts,
             modify_tx: creation_tx_id,
             valid_to: None,
         };
@@ -162,7 +162,7 @@ where
                 schema::contract_code::hash.eq(code_hash),
                 schema::contract_code::account_id.eq(acc_id),
                 schema::contract_code::modify_tx.eq(tx_id),
-                schema::contract_code::valid_from.eq(created_ts.unwrap()),
+                schema::contract_code::valid_from.eq(created_ts),
             );
 
             diesel::insert_into(schema::contract_code::table)
@@ -578,14 +578,15 @@ mod test {
         assert_eq!(expected, actual);
 
         let orm_account = orm::Account::by_id(&contract_id, &mut conn).await.unwrap();
-        let block_ts = schema::transaction::table
+        let (block_ts, tx_ts) = schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::id.eq(txn[1]))
-            .select(schema::block::ts)
-            .first::<NaiveDateTime>(&mut conn)
+            .select((schema::block::ts, schema::transaction::inserted_ts))
+            .first::<(NaiveDateTime, NaiveDateTime)>(&mut conn)
             .await
             .unwrap();
         assert_eq!(block_ts, orm_account.created_at.unwrap());
+        println!("tx_ts: {:?}, block_ts: {:?}", tx_ts, block_ts);
     }
 
     #[tokio::test]

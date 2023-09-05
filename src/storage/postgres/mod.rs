@@ -332,30 +332,22 @@ mod fixtures {
     pub async fn insert_txns(conn: &mut AsyncPgConnection, txns: &[(i64, i64, &str)]) -> Vec<i64> {
         let from_val = H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980").unwrap();
         let to_val = H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
-        let mut data = Vec::new();
-
-        for &(b, i, h) in txns {
-            use schema::transaction::dsl::*;
-
-            let block = schema::block::table
-                .find(b)
-                .select(orm::Block::as_select())
-                .first(conn)
-                .await
-                .unwrap();
-
-            data.push((
-                block_id.eq(b),
-                index.eq(i),
-                hash.eq(H256::from_str(h)
-                    .expect("valid txhash")
-                    .as_bytes()
-                    .to_owned()),
-                from.eq(from_val.as_bytes()),
-                to.eq(to_val.as_bytes()),
-                inserted_ts.eq(block.ts),
-            ));
-        }
+        let data: Vec<_> = txns
+            .iter()
+            .map(|(b, i, h)| {
+                use schema::transaction::dsl::*;
+                (
+                    block_id.eq(b),
+                    index.eq(i),
+                    hash.eq(H256::from_str(h)
+                        .expect("valid txhash")
+                        .as_bytes()
+                        .to_owned()),
+                    from.eq(from_val.as_bytes()),
+                    to.eq(to_val.as_bytes()),
+                )
+            })
+            .collect();
         diesel::insert_into(schema::transaction::table)
             .values(&data)
             .returning(schema::transaction::id)
