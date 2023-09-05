@@ -1,0 +1,58 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  compile_and_test:
+    name: Compile & Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+    services:
+        postgres: 
+            image: postgres
+            env:
+                POSTGRES_PASSWORD: mypassword
+                POSTGRES_DB: tycho_indexer_0
+                POSTGRES_USER: postgres
+            options: >-
+                --health-cmd pg_isready
+                --health-interval 10s
+                --health-timeout 5s
+                --health-retries 5
+            ports:
+                - 5432:5432
+    env:
+        DATABASE_URL: postgres://postgres:mypassword@localhost:5432/tycho_indexer_0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: clippy
+          override: true
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2.2.0
+      - name: Format Check
+        run: cargo fmt --check
+      - name: Install diesel cli
+        uses: baptiste0928/cargo-install@v2
+        with:
+          crate: diesel_cli
+          features: postgres
+      - name: DB Setup
+        run: diesel migration run
+      - name: Test 
+        run: cargo test

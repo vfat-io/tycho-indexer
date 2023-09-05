@@ -186,6 +186,16 @@ pub struct Transaction {
     pub modified_ts: NaiveDateTime,
 }
 
+impl Transaction {
+    pub async fn by_hash(hash: &[u8], conn: &mut AsyncPgConnection) -> QueryResult<Self> {
+        transaction::table
+            .filter(transaction::hash.eq(hash))
+            .select(Self::as_select())
+            .first::<Self>(conn)
+            .await
+    }
+}
+
 #[derive(Insertable)]
 #[diesel(table_name=transaction)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -268,21 +278,33 @@ pub struct Account {
     pub creation_tx: Option<i64>,
     pub created_at: Option<NaiveDateTime>,
     pub deleted_at: Option<NaiveDateTime>,
+    pub deletion_tx: Option<i64>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
 
 impl Account {
     pub async fn by_id(
-        account_id: ContractId,
+        account_id: &ContractId,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Account> {
         account::table
             .inner_join(chain::table)
-            .filter(account::address.eq(account_id.1))
+            .filter(account::address.eq(&account_id.1))
             .filter(chain::name.eq(account_id.0.to_string()))
             .select(Account::as_select())
             .first::<Account>(conn)
+            .await
+    }
+
+    pub async fn get_addresses_by_id(
+        ids: impl Iterator<Item = &i64>,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(i64, Vec<u8>)>> {
+        account::table
+            .filter(account::id.eq_any(ids))
+            .select((account::id, account::address))
+            .get_results::<(i64, Vec<u8>)>(conn)
             .await
     }
 }
@@ -367,10 +389,23 @@ pub struct ContractStorage {
     pub previous_value: Option<Vec<u8>>,
     pub account_id: i64,
     pub modify_tx: i64,
+    pub ordinal: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name=contract_storage)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewSlot {
+    pub slot: Vec<u8>,
+    pub value: Option<Vec<u8>>,
+    pub account_id: i64,
+    pub modify_tx: i64,
+    pub ordinal: i64,
+    pub valid_from: NaiveDateTime,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]

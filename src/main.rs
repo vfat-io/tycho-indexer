@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! # Substreams Rust Sink Boilerplate
 //!
 //! Currently this module only contains the raw boilerplate code to
