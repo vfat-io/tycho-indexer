@@ -261,8 +261,6 @@ where
             Utc::now().naive_utc()
         };
 
-        dbg!(&version_ts);
-
         let slots = {
             use schema::account;
             use schema::contract_storage::dsl::*;
@@ -389,7 +387,7 @@ where
 
         let changed_values = if start_version_ts <= target_version_ts {
             // Going forward
-            //                  ]     changes to revert    ]
+            //                  ]     changes to forward   ]
             // -----------------|--------------------------|
             //                start                     target
             // We query for changes between start and target version. Then sort
