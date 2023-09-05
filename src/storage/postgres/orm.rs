@@ -186,6 +186,16 @@ pub struct Transaction {
     pub modified_ts: NaiveDateTime,
 }
 
+impl Transaction {
+    pub async fn by_hash(hash: &[u8], conn: &mut AsyncPgConnection) -> QueryResult<Self> {
+        transaction::table
+            .filter(transaction::hash.eq(hash))
+            .select(Self::as_select())
+            .first::<Self>(conn)
+            .await
+    }
+}
+
 #[derive(Insertable)]
 #[diesel(table_name=transaction)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -268,6 +278,7 @@ pub struct Account {
     pub creation_tx: Option<i64>,
     pub created_at: Option<NaiveDateTime>,
     pub deleted_at: Option<NaiveDateTime>,
+    pub deletion_tx: Option<i64>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }

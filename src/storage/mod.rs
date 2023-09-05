@@ -524,7 +524,7 @@ pub trait ContractStateGateway {
     async fn delete_contract(
         &self,
         id: ContractId,
-        at_tx: Option<&Self::Transaction>,
+        at_tx: &Self::Transaction,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 

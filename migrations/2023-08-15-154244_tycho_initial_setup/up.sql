@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS protocol_component(
     "creation_tx" bigint REFERENCES "transaction"(id) ON DELETE CASCADE NOT NULL,
     -- The ts at which this protocol ceased to exist.
     "deleted_at" timestamptz,
+    -- The transaction at which the protocol was destructed.
+    "deletion_tx" bigint REFERENCES "transaction"(id) ON DELETE SET NULL,
     -- Timestamp this entry was inserted into this table.
     "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Timestamp this entry was inserted into this table.
@@ -213,6 +215,8 @@ CREATE TABLE IF NOT EXISTS "account"(
     "created_at" timestamptz,
     -- The tx this contract was destroyed. Null in case it is active.
     "deleted_at" timestamptz,
+    -- transaction that destructed this contract.
+    "deletion_tx" bigint REFERENCES "transaction"(id) ON DELETE SET NULL,
     -- Timestamp this entry was inserted into this table.
     "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Timestamp this entry was inserted into this table.

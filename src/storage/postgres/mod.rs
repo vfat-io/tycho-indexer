@@ -23,6 +23,44 @@
 //! panic if an associated entity still exists in the database and retrieved
 //! with a codebase which no longer presents the enum value.
 //!
+//! ### Timestamps
+//!
+//! We use naive timestamps throughout the code as it is assumed that the server
+//! that will be running the application will always use UTC as it's local time.
+//! Thus all naive timestamps on the application are implcitly in UTC. Be aware
+//! that especially tests might run on machines that violate this assumption so
+//! in tests make sure to create a timestamp aware timestamp and convert it to
+//! UTC before using the naive value.
+//!
+//! #### Timestamp fields
+//!
+//! As the are multiple different timestamp columns below is a short summary how
+//! these are used:
+//!
+//! * `inserted` and `modified_ts`: These are pure "book-keeping" values, used
+//!    to track when the record was inserted or updated. They are not used in
+//!    any business logic. These values are automatically set via Postgres
+//!    triggers, so they don't need to be manually set.
+//!
+//! * `valid_from` and `valid_to`: These timestamps enable data versioning aka
+//!   time-travel functionality. Hence, these should always be set correctly.
+//!   `valid_from` must be set to the timestamp at which the entity was created
+//!   - most often that will be the value of the corresponding `block.ts`. Same
+//!   applies for `valid_to`. There are triggers in place to automatically set
+//!   `valid_to` if you insert a new entity with the same identity (not primary
+//!   key). But to delete a record, `valid_to` needs to be manually set as no
+//!   automatic trigger exists for deletes yet.
+//!
+//! * `created_ts`: For entities that are immutable, this timestamp records when
+//!     the entity was created and is used for time-travel functionality. For
+//!     example, for contracts, this timestamp will be the block timestamp of
+//!     its deployment.
+//!
+//! * `deleted_ts`: This serves a similar purpose to `created_ts`, but in
+//!     reverse. It indicates when an entity was deleted.
+//!
+//! * `block.ts`: This is the timestamp attached to the block. Ideally, it
+//!     should coincide with the validation/mining start time.
 //!
 //! ### Versioning
 //!
@@ -106,6 +144,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use diesel::prelude::*;
+#[allow(unused_imports)] // RunQueryDsl is wrongly marked as unused
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use super::StorageError;
@@ -260,7 +299,6 @@ mod fixtures {
     use chrono::NaiveDateTime;
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
-    use ethers::etherscan::contract;
     use ethers::types::{H160, H256, U256};
 
     use super::orm;
