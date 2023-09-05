@@ -31,7 +31,7 @@ pub struct Transaction {
     pub index: u64,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Account {
     pub chain: Chain,
     pub address: H160,
