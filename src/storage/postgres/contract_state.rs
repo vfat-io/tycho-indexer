@@ -98,23 +98,24 @@ where
     ) -> Result<i64, StorageError> {
         let now = chrono::Utc::now().naive_utc();
         let chain_id = self.get_chain_id(new.chain);
-        let mut tx_hash = H256::zero();
-        let mut created_ts = None;
-        let creation_tx_id = match new.creation_tx {
+        let tx_hash = H256::zero();
+        let (creation_tx_id, created_ts) = match new.creation_tx {
+            // If there is a transaction hash assigned to the Account, we load
+            // the transaction ID and the timstamp of the block that this
+            // transaction was mined in.
             Some(tx) => {
-                tx_hash = tx;
                 let (tx_id, _created_ts) = schema::transaction::table
-                    .filter(schema::transaction::hash.eq(tx_hash.as_bytes()))
-                    .select((schema::transaction::id, schema::transaction::inserted_ts))
+                    .inner_join(schema::block::table)
+                    .filter(schema::transaction::hash.eq(tx.as_bytes()))
+                    .select((schema::transaction::id, schema::block::ts))
                     .first::<(i64, NaiveDateTime)>(db)
                     .await
                     .map_err(|err| {
-                        StorageError::from_diesel(err, "Transaction", &tx_hash.to_string(), None)
+                        StorageError::from_diesel(err, "Transaction", &tx.to_string(), None)
                     })?;
-                created_ts = Some(_created_ts);
-                Some(tx_id)
+                (Some(tx_id), Some(_created_ts))
             }
-            None => None,
+            None => (None, Some(now)),
         };
 
         let query = diesel::insert_into(schema::account::table).values((
@@ -139,7 +140,7 @@ where
         let orm_balance = orm::NewAccountBalance {
             account_id: acc_id,
             balance: balance_bytes.to_vec(),
-            valid_from: now,
+            valid_from: created_ts.unwrap(),
             modify_tx: creation_tx_id,
             valid_to: None,
         };
@@ -161,7 +162,7 @@ where
                 schema::contract_code::hash.eq(code_hash),
                 schema::contract_code::account_id.eq(acc_id),
                 schema::contract_code::modify_tx.eq(tx_id),
-                schema::contract_code::valid_from.eq(now),
+                schema::contract_code::valid_from.eq(created_ts.unwrap()),
             );
 
             diesel::insert_into(schema::contract_code::table)
@@ -563,21 +564,28 @@ mod test {
         );
         let gateway =
             PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
-        let id = gateway.add_contract(&expected, &mut conn).await.unwrap();
+        gateway.add_contract(&expected, &mut conn).await.unwrap();
+        let contract_id = ContractId(
+            Chain::Ethereum,
+            hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+        );
 
         let actual = gateway
-            .get_contract(
-                &ContractId(
-                    Chain::Ethereum,
-                    hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                ),
-                None,
-                &mut conn,
-            )
+            .get_contract(&contract_id, None, &mut conn)
             .await
             .unwrap();
 
         assert_eq!(expected, actual);
+
+        let orm_account = orm::Account::by_id(&contract_id, &mut conn).await.unwrap();
+        let block_ts = schema::transaction::table
+            .inner_join(schema::block::table)
+            .filter(schema::transaction::id.eq(txn[1]))
+            .select(schema::block::ts)
+            .first::<NaiveDateTime>(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(block_ts, orm_account.created_at.unwrap());
     }
 
     #[tokio::test]
