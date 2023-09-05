@@ -43,8 +43,10 @@ pub mod postgres;
 
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
+use crate::rpc::deserialization_helpers::{chain_from_str, hex_to_bytes};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
+use serde::Deserialize;
 use thiserror::Error;
 
 use crate::models::{Chain, ExtractionState, ProtocolSystem, ProtocolType};
@@ -313,12 +315,23 @@ pub enum VersionKind {
     /// It includes the state after executing the transaction at that index.
     Index(i64),
 }
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct ContractId {
+    #[serde(deserialize_with = "hex_to_bytes")]
+    address: Vec<u8>,
+    #[serde(deserialize_with = "chain_from_str")]
+    chain: Chain,
+}
 
-pub struct ContractId(Chain, Vec<u8>);
+impl ContractId {
+    pub fn new(chain: Chain, address: Vec<u8>) -> Self {
+        Self { address, chain }
+    }
+}
 
 impl Display for ContractId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}: 0x{}", self.0, hex::encode(&self.1))
+        write!(f, "{:?}: 0x{}", self.chain, hex::encode(&self.address))
     }
 }
 

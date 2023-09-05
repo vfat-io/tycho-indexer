@@ -34,7 +34,7 @@ where
         version: Option<BlockOrTimestamp>,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError> {
-        let h160_address = H160::from_slice(&id.1);
+        let h160_address = H160::from_slice(&id.address);
         let account_orm: orm::Account = orm::Account::by_id(id, db).await.map_err(|err| {
             StorageError::from_diesel(err, "Account", &h160_address.to_string(), None)
         })?;
@@ -707,7 +707,7 @@ mod test {
 
         let gateway =
             PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
-        let id = ContractId(Chain::Ethereum, hex::decode(acc_address).unwrap());
+        let id = ContractId::new(Chain::Ethereum, hex::decode(acc_address).unwrap());
         let actual = gateway.get_contract(&id, None, &mut conn).await.unwrap();
 
         assert_eq!(expected, actual);
@@ -718,14 +718,14 @@ mod test {
         let mut conn = setup_db().await;
         let gateway =
             PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
-        let contract_id = ContractId(
+        let contract_id = ContractId::new(
             Chain::Ethereum,
             hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
         );
         let result = gateway.get_contract(&contract_id, None, &mut conn).await;
         if let Err(StorageError::NotFound(entity, id)) = result {
             assert_eq!(entity, "Account");
-            assert_eq!(id, H160::from_slice(&contract_id.1).to_string());
+            assert_eq!(id, H160::from_slice(&contract_id.address).to_string());
         } else {
             panic!("Expected NotFound error");
         }
@@ -774,7 +774,7 @@ mod test {
         let gateway =
             PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         gateway.add_contract(&expected, &mut conn).await.unwrap();
-        let contract_id = ContractId(
+        let contract_id = ContractId::new(
             Chain::Ethereum,
             hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
         );
@@ -809,7 +809,7 @@ mod test {
         let address = setup_account(&mut conn).await;
         let deletion_txhash = "36984d97c02a98614086c0f9e9c4e97f7e0911f6f136b3c8a76d37d6d524d1e5";
         let address_bytes = hex::decode(address).expect("address ok");
-        let id = ContractId(Chain::Ethereum, address_bytes.clone());
+        let id = ContractId::new(Chain::Ethereum, address_bytes.clone());
         let gw = EvmGateway::from_connection(&mut conn).await;
         let tx = evm::Transaction {
             hash: deletion_txhash.parse().expect("txhash ok"),
