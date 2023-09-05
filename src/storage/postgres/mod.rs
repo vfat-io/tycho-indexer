@@ -226,7 +226,7 @@ impl StorageError {
             ) => {
                 if let Some(col) = details.column_name() {
                     if col == "id" {
-                        return StorageError::DuplicateEntry(entity.to_owned(), id.to_owned())
+                        return StorageError::DuplicateEntry(entity.to_owned(), id.to_owned());
                     }
                 }
                 StorageError::Unexpected(err_string)
@@ -237,7 +237,7 @@ impl StorageError {
                         entity.to_owned(),
                         id.to_owned(),
                         related_entitiy,
-                    )
+                    );
                 }
                 StorageError::NotFound(entity.to_owned(), id.to_owned())
             }
@@ -246,15 +246,21 @@ impl StorageError {
     }
 }
 
-pub struct PostgresGateway<B, TX> {
+pub struct PostgresGateway<B, TX, A> {
     chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
+    _phantom_acc: PhantomData<A>,
 }
 
-impl<B, TX> PostgresGateway<B, TX> {
+impl<B, TX, A> PostgresGateway<B, TX, A> {
     pub fn new(cache: Arc<ChainEnumCache>) -> Self {
-        Self { chain_id_cache: cache, _phantom_block: PhantomData, _phantom_tx: PhantomData }
+        Self {
+            chain_id_cache: cache,
+            _phantom_block: PhantomData,
+            _phantom_tx: PhantomData,
+            _phantom_acc: PhantomData,
+        }
     }
 
     #[allow(clippy::needless_pass_by_ref_mut)]

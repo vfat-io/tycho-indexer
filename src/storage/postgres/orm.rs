@@ -378,6 +378,50 @@ pub struct ContractCode {
     pub modified_ts: NaiveDateTime,
 }
 
+#[derive(Insertable, Debug)]
+#[diesel(table_name=contract_code)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewContractCode {
+    pub code: Vec<u8>,
+    pub hash: Vec<u8>,
+    pub account_id: i64,
+    pub modify_tx: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
+}
+
+pub struct NewContract {
+    pub title: String,
+    pub address: Vec<u8>,
+    pub chain_id: i64,
+    pub creation_tx: Option<i64>,
+    pub created_at: Option<NaiveDateTime>,
+    pub deleted_at: Option<NaiveDateTime>,
+
+    pub balance: Vec<u8>,
+    pub balance_modify_tx: Option<i64>,
+    pub balance_valid_from: NaiveDateTime,
+    pub balance_valid_to: Option<NaiveDateTime>,
+
+    pub code: Vec<u8>,
+    pub hash: Vec<u8>,
+    pub code_modify_tx: i64,
+    pub code_valid_from: NaiveDateTime,
+    pub code_valid_to: Option<NaiveDateTime>,
+}
+
+impl NewContract {
+    pub fn new_account(&self) -> NewAccount {
+        todo!();
+    }
+    pub fn new_balance(&self, account_id: i64) -> NewAccountBalance {
+        todo!();
+    }
+    pub fn new_code(&self, account_id: i64) -> NewContractCode {
+        todo!();
+    }
+}
+
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name=contract_storage)]
@@ -399,13 +443,19 @@ pub struct ContractStorage {
 #[derive(Insertable)]
 #[diesel(table_name=contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewSlot {
-    pub slot: Vec<u8>,
-    pub value: Option<Vec<u8>>,
+pub struct NewSlot<'a> {
+    pub slot: &'a Vec<u8>,
+    pub value: Option<&'a Vec<u8>>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub ordinal: i64,
     pub valid_from: NaiveDateTime,
+}
+
+pub struct Contract {
+    pub account: Account,
+    pub balance: AccountBalance,
+    pub code: ContractCode,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]

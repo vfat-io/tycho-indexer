@@ -71,3 +71,6 @@ pub struct ExtractionState {
 pub trait NormalisedMessage {
     fn source(&self) -> ExtractorIdentity;
 }
+
+// TODO: will require implementing
+pub struct ProtocolComponent {}
