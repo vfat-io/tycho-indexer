@@ -5,16 +5,15 @@ pub enum Chain {
     ZkSync,
 }
 
-impl From<String> for Chain {
-    fn from(value: String) -> Self {
-        if value == "ethereum" {
-            Chain::Ethereum
-        } else if value == "starknet" {
-            Chain::Starknet
-        } else if value == "zksync" {
-            Chain::ZkSync
-        } else {
-            panic!("Can't interpret {} as chain!", value);
+impl TryFrom<String> for Chain {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "ethereum" => Ok(Chain::Ethereum),
+            "starknet" => Ok(Chain::Starknet),
+            "zksync" => Ok(Chain::ZkSync),
+            _ => Err(format!("Can't interpret {} as chain!", value)),
         }
     }
 }

@@ -121,7 +121,8 @@ pub struct EnumTableCache<E> {
 /// Uses a double sided hash map to provide quick lookups in both directions.
 impl<E> EnumTableCache<E>
 where
-    E: Eq + Hash + Copy + From<String> + std::fmt::Debug,
+    E: Eq + Hash + Copy + TryFrom<String> + std::fmt::Debug,
+    <E as TryFrom<String>>::Error: std::fmt::Debug,
 {
     /// Creates a new cache from a slice of tuples.
     ///
@@ -134,7 +135,7 @@ where
             map_enum: HashMap::new(),
         };
         for (id_, name_) in entries {
-            let val = E::from(name_.to_owned());
+            let val = E::try_from(name_.to_owned()).unwrap();
             cache.map_id.insert(val, *id_);
             cache.map_enum.insert(*id_, val);
         }

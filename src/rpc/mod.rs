@@ -1,5 +1,6 @@
 //! This module contains Tycho RPC implementation
 
+use crate::models::Chain;
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -14,6 +15,15 @@ where
     hex::decode(hex_str).map_err(de::Error::custom)
 }
 
+fn chain_from_str<'de, D>(deserializer: D) -> Result<Chain, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+
+    Chain::try_from(s).map_err(de::Error::custom)
+}
+
 #[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Failed to parse JSON: {0}")]
@@ -26,33 +36,35 @@ impl From<serde_json::Error> for RpcError {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq)]
 struct StateRequestBody {
     #[serde(rename = "contractIds")]
     contract_ids: Vec<ContractId>,
     version: Version,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq)]
 struct ContractId {
     #[serde(deserialize_with = "hex_to_bytes")]
     address: Vec<u8>,
-    chain: String,
+    #[serde(deserialize_with = "chain_from_str")]
+    chain: Chain,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq)]
 struct Version {
     timestamp: String,
     block: Block,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq)]
 struct Block {
     #[serde(deserialize_with = "hex_to_bytes")]
     hash: Vec<u8>,
     #[serde(rename = "parentHash", deserialize_with = "hex_to_bytes")]
     parent_hash: Vec<u8>,
-    chain: String,
+    #[serde(deserialize_with = "chain_from_str")]
+    chain: Chain,
     number: i64,
 }
 
@@ -101,7 +113,7 @@ mod tests {
 
         let expected = StateRequestBody {
             contract_ids: vec![ContractId {
-                chain: "ethereum".to_string(),
+                chain: Chain::Ethereum,
                 address: contract0,
             }],
             version: Version {
@@ -109,7 +121,7 @@ mod tests {
                 block: Block {
                     hash: block_hash,
                     parent_hash: parent_block_hash,
-                    chain: "ethereum".to_string(),
+                    chain: Chain::Ethereum,
                     number: block_number,
                 },
             },
