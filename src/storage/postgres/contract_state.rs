@@ -97,7 +97,6 @@ where
     ) -> Result<i64, StorageError> {
         let now = chrono::Utc::now().naive_utc();
         let chain_id = self.get_chain_id(new.chain);
-        let tx_hash = H256::zero();
         let (creation_tx_id, created_ts) = match new.creation_tx {
             // If there is a transaction hash assigned to the Account, we load
             // the transaction ID and the timstamp of the block that this
