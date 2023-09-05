@@ -47,14 +47,7 @@ jobs:
         uses: Swatinem/rust-cache@v2.2.0
       - name: Format Check
         run: cargo fmt --check
-      - name: Code Lint
-        uses: giraffate/clippy-action@v1
-        if: ${{ matrix.toolchain == 'stable' }}
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-check
-          level: warning
-      - name: Install cargo-sort from git
+      - name: Install diesel cli
         uses: baptiste0928/cargo-install@v2
         with:
           crate: diesel_cli

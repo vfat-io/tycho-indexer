@@ -152,6 +152,8 @@ pub enum StorageError {
     DecodeError(String),
     #[error("Unexpected storage error: {0}")]
     Unexpected(String),
+    #[error("Currently unsupported operation: {0}")]
+    Unsupported(String),
 }
 
 /// Storage methods for chain specific objects.
@@ -282,22 +284,34 @@ pub trait ExtractionStateGateway {
     ) -> Result<(), StorageError>;
 }
 
+/// Point in time as either block or timestamp. If a block is chosen it
+/// timestamp attribute is used.
 #[derive(Debug)]
 pub enum BlockOrTimestamp {
     Block(BlockIdentifier),
     Timestamp(NaiveDateTime),
 }
 
+/// References certain states within a single block.
+///
+/// **Note:** Not all methods that take a version will support all version kinds,
+/// the versions here are included for completeness and to document the
+/// retrieval behaviour that is possible with the storage layout. Please refer
+/// to the individual implementation for information about which version kinds
+/// it supports.
+#[derive(Debug, Default)]
 pub enum VersionKind {
-    /// Get all states within a given block.
-    All,
-    /// Get the latest state within a given block.
+    /// Represents the final state within a specific block. Essentially, it
+    /// retrieves the state subsequent to the execution of the last transaction
+    /// executed in that block.
+    #[default]
     Last,
-}
-
-pub enum VersionedResult<T> {
-    All(Vec<T>),
-    Last(T),
+    /// Represents the initial state of a specific block. In other words,
+    /// it is the state before any transaction has been executed within that block.
+    First,
+    /// Represents a specific transactions indexed position within a block.
+    /// It includes the state after executing the transaction at that index.
+    Index(i64),
 }
 
 pub struct ContractId(Chain, Vec<u8>);
@@ -356,48 +370,47 @@ pub trait ProtocolGateway {
     type ProtocolComponent;
     // TODO: at this later type ProtocolState;
 
-    /// Retrieve a single ProtocolComponent struct
+    /// Retrieve ProtocolComponent from the db
     ///
     /// # Parameters
     /// - `chain` The chain of the component
-    /// - `system` The protocol system this component belongs to
-    /// - `id` The external id of the component e.g. address, or the pair
+    /// - `system` Allows to optionally filter by system.
+    /// - `id` Allows to optionally filter by id.
     ///
     /// # Returns
     /// Ok, if found else Err
-    async fn get_component(
+    async fn get_components(
         &self,
         chain: Chain,
-        system: ProtocolSystem,
-        id: &str,
-    ) -> Result<Self::ProtocolComponent, StorageError>;
+        system: Option<ProtocolSystem>,
+        ids: Option<&[&str]>,
+    ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
-    /// Stores a new ProtocolComponent
+    /// Stores new found ProtocolComponents.
     ///
     /// Components are assumed to be immutable. Any state belonging to a
     /// component that is dynamic, should be made available on ProtocolState,
     /// not on the Component.
     ///
     /// # Parameters
-    /// - `new`  The new protocol component.
+    /// - `new`  The new protocol components.
     ///
     /// # Returns
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
     /// - component with same is id already present.
-    async fn add_component(&self, new: Self::ProtocolComponent) -> Result<(), StorageError>;
+    async fn upsert_components(&self, new: &[Self::ProtocolComponent]) -> Result<(), StorageError>;
 
-    /// Retrieve a protocol components state
+    /// Retrieve protocol component states
     ///
-    /// This resource is versioned for blockchain based protocols, the version
-    /// can be specified by either block or timestamp, for off-chain components,
-    /// a block version will error.
+    /// This resource is versioned, the version can be specified by either block
+    /// or timestamp, for off-chain components, a block version will error.
     ///
     /// As the state is retained on a transaction basis on blockchain systems, a
     /// single version may relate to more than one state. In these cases a
-    /// vector with multiple entries is returned, with the latest entry being
-    /// the state at the end of the block and the first entry represents the
-    /// first change to the state within the block.
+    /// versioned result is returned, if requesting `Version:All` with the
+    /// latest entry being the state at the end of the block and the first entry
+    /// represents the first change to the state within the block.
     ///
     /// # Parameters
     /// - `chain` The chain of the component
@@ -410,21 +423,25 @@ pub trait ProtocolGateway {
     async fn get_states(
         &self,
         chain: Chain,
-        system: ProtocolSystem,
-        id: &str,
         at: Option<Version>,
+        system: Option<ProtocolSystem>,
+        id: Option<&[&str]>,
     ) -> Result<VersionedResult<Self::ProtocolState>, StorageError>;
      */
 
-    /// Retrieve a token from storage
+    /// Retrieves a tokens from storage
     ///
     /// # Parameters
     /// - `chain` The chain this token is implemented on.
     /// - `address` The address for the token within the chain.
     ///
     /// # Returns
-    /// Ok with the token if found, else Err.
-    async fn get_token(&self, chain: Chain, address: &[u8]) -> Result<Self::Token, StorageError>;
+    /// Ok if the results could be retrieved from the storage, else errors.
+    async fn get_tokens(
+        &self,
+        chain: Chain,
+        address: Option<&[&[u8]]>,
+    ) -> Result<Vec<Self::Token>, StorageError>;
 
     /// Saves multiple tokens to storage.
     ///
@@ -497,6 +514,7 @@ pub trait ContractStateGateway {
     /// - `at_tx` The transaction hash which deleted the contract. This
     ///     transaction is assumed to be in storage already. None retrieves the
     ///     latest state.
+    /// - `db` The database handle or connection.
     ///
     /// # Returns
     /// Ok if the deletion was successful, might Err if:
@@ -506,25 +524,31 @@ pub trait ContractStateGateway {
     async fn delete_contract(
         &self,
         id: ContractId,
-        at_tx: Option<&[u8]>,
+        at_tx: Option<&Self::Transaction>,
+        db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
     /// Retrieve contract storage.
     ///
-    /// Retrieve the storage slots of a given contract at a given time.
+    /// Retrieve the storage slots of contracts at a given time/version.
     ///
     /// Will return the slots state after the given block/timestamp. Later we
-    /// might change to use VersionResult, but for now we keep it simple.
+    /// might change to use VersionResult, but for now we keep it simple. Using
+    /// anything else then Version::Last is currently not supported.
     ///
     /// # Parameters
-    /// - `id` The identifier for the contract.
+    /// - `chain` The chain for which to retrieve slots for.
+    /// - `contracts` Optionally allows filtering by contract address.
     /// - `at` The version at which to retrieve slots. None retrieves the latest
+    /// - `db` The database handle or connection.
     ///   state.
     async fn get_contract_slots(
         &self,
-        id: ContractId,
+        chain: Chain,
+        contracts: Option<&[Self::Address]>,
         at: Option<Version>,
-    ) -> Result<HashMap<Self::Slot, Self::Value>, StorageError>;
+        db: &mut Self::DB,
+    ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError>;
 
     /// Upserts slots for a given contract.
     ///
@@ -561,21 +585,24 @@ pub trait ContractStateGateway {
     ///
     /// # Parameters
     /// - `id` The identifier for the contract.
+    /// - `chain` The chain for which to generate the delta changes. This is
+    ///   required because version might be a timestamp.
     /// - `start_version` The deltas start version, given a block uses
     ///     VersionKind::Last behaviour. If None the latest version is assumed.
     /// - `end_version` The deltas end version, given a block uses
-    ///     VersionKind::Last behaviour. If None the latest version is assumed.
+    ///     VersionKind::Last behaviour.
     ///
     /// # Returns
     /// A map containing the necessary changes to update a state from
-    /// start_version to end_version. Errors if: - The supplied version are the
-    ///     same. - The versions can't be located in storage. - The contract
-    ///     can't be located in storage.
+    /// start_version to end_version.
+    /// Errors if:
+    ///     - The versions can't be located in storage.
+    ///     - There was an error with the database
     async fn get_slots_delta(
         &self,
         id: Chain,
         start_version: Option<BlockOrTimestamp>,
-        end_version: Option<BlockOrTimestamp>,
+        end_version: BlockOrTimestamp,
         db: &mut Self::DB,
     ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError>;
 
@@ -583,6 +610,10 @@ pub trait ContractStateGateway {
     ///
     /// This modification will delete version in storage. The state will be
     /// reset to the passed version.
+    ///
+    /// Note:
+    /// This method is scoped to a chain via the id parameter. All changes on
+    /// that chain will be reverted to the target version.
     ///
     /// # Parameters
     /// - `id` The identifier for the contract.
