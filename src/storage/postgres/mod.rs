@@ -174,7 +174,7 @@ where
             map_enum: HashMap::new(),
         };
         for (id_, name_) in entries {
-            let val = E::try_from(name_.to_owned()).unwrap();
+            let val = E::try_from(name_.to_owned()).expect("Failed to convert name to enum value");
             cache.map_id.insert(val, *id_);
             cache.map_enum.insert(*id_, val);
         }

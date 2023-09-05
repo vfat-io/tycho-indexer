@@ -1,3 +1,10 @@
+use thiserror::Error;
+#[derive(Error, Debug)]
+pub enum ChainError {
+    #[error("Unknown blockchain value: {0}")]
+    UnknownChain(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Chain {
     Ethereum,
@@ -6,14 +13,14 @@ pub enum Chain {
 }
 
 impl TryFrom<String> for Chain {
-    type Error = String;
+    type Error = ChainError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         match value.as_str() {
             "ethereum" => Ok(Chain::Ethereum),
             "starknet" => Ok(Chain::Starknet),
             "zksync" => Ok(Chain::ZkSync),
-            _ => Err(format!("Can't interpret {} as chain!", value)),
+            _ => Err(ChainError::UnknownChain(value)),
         }
     }
 }

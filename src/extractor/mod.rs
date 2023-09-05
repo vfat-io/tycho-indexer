@@ -13,7 +13,7 @@ pub enum ExtractionError {
     #[error("Extractor setup failed: {0}")]
     Setup(String),
     #[error("Unexpected extraction error: {0}")]
-    Unkown(String),
+    Unknown(String),
 }
 
 #[async_trait]

@@ -2,7 +2,7 @@
 
 use crate::models::Chain;
 use serde::de::{self, Deserializer};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use thiserror::Error;
 
 // This will convert a hex string (with or without 0x) to a Vec<u8>
