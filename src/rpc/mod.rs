@@ -2,6 +2,7 @@
 
 use crate::models::Chain;
 use crate::rpc::deserialization_helpers::{chain_from_str, hex_to_bytes};
+use chrono::NaiveDateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use thiserror::Error;
@@ -30,14 +31,14 @@ struct StateRequestBody {
 
 #[derive(Debug, Deserialize, PartialEq)]
 struct Version {
-    timestamp: String,
+    timestamp: NaiveDateTime,
     block: Option<Block>,
 }
 
 impl Default for Version {
     fn default() -> Self {
         Version {
-            timestamp: Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+            timestamp: Utc::now().naive_utc(),
             block: None,
         }
     }
@@ -97,10 +98,13 @@ mod tests {
                 .unwrap();
         let block_number = 213;
 
+        let expected_timestamp =
+            NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
+
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
             version: Version {
-                timestamp: "2069-01-01T04:20:00".to_string(),
+                timestamp: expected_timestamp,
                 block: Some(Block {
                     hash: block_hash,
                     parent_hash: parent_block_hash,
@@ -138,11 +142,13 @@ mod tests {
             hex::decode("8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815")
                 .unwrap();
         let block_number = 213;
+        let expected_timestamp =
+            NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
 
         let expected = StateRequestBody {
             contract_ids: None,
             version: Version {
-                timestamp: "2069-01-01T04:20:00".to_string(),
+                timestamp: expected_timestamp,
                 block: Some(Block {
                     hash: block_hash,
                     parent_hash: parent_block_hash,
@@ -169,14 +175,13 @@ mod tests {
     "#;
 
         let result = parse_state_request(json_str).unwrap();
-        let current_timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
 
         let contract0 = hex::decode("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap();
 
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
             version: Version {
-                timestamp: current_timestamp,
+                timestamp: Utc::now().naive_utc(),
                 block: None,
             },
         };
