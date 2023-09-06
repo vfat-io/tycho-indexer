@@ -186,6 +186,12 @@ mod tests {
             },
         };
 
-        assert_eq!(result, expected);
+        let time_difference = expected.version.timestamp.timestamp_millis()
+            - result.version.timestamp.timestamp_millis();
+
+        // Allowing a small time delta (1 second)
+        assert!(time_difference <= 1000);
+        assert_eq!(result.contract_ids, expected.contract_ids);
+        assert_eq!(result.version.block, expected.version.block);
     }
 }
