@@ -45,6 +45,7 @@ pub struct Account {
 }
 
 impl Account {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain: Chain,
         address: H160,
@@ -56,17 +57,7 @@ impl Account {
         modify_tx: H256,
         creation_tx: Option<H256>,
     ) -> Self {
-        Self {
-            chain,
-            address,
-            title,
-            slots,
-            balance,
-            code,
-            code_hash,
-            modify_tx,
-            creation_tx,
-        }
+        Self { chain, address, title, slots, balance, code, code_hash, modify_tx, creation_tx }
     }
 }
 
@@ -83,6 +74,7 @@ pub struct AccountUpdate {
 }
 
 impl AccountUpdate {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor: String,
         chain: Chain,
@@ -93,16 +85,7 @@ impl AccountUpdate {
         code_hash: Option<H256>,
         tx_hash: Option<H256>,
     ) -> Self {
-        Self {
-            extractor,
-            chain,
-            address,
-            slots,
-            balance,
-            code,
-            code_hash,
-            tx_hash,
-        }
+        Self { extractor, chain, address, slots, balance, code, code_hash, tx_hash }
     }
 }
 
@@ -116,10 +99,7 @@ struct BlockStateChanges {
 
 impl NormalisedMessage for AccountUpdate {
     fn source(&self) -> ExtractorIdentity {
-        ExtractorIdentity {
-            chain: self.chain,
-            name: self.extractor.clone(),
-        }
+        ExtractorIdentity { chain: self.chain, name: self.extractor.clone() }
     }
 }
 

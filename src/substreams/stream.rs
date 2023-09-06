@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Error};
 use async_stream::try_stream;
 use futures03::{Stream, StreamExt};
+use once_cell::sync::Lazy;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -9,11 +10,12 @@ use std::{
 };
 use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
+use tracing::{error, info, warn};
 
-use crate::pb::sf::substreams::rpc::v2::{
-    response::Message, BlockScopedData, BlockUndoSignal, Request, Response,
+use crate::pb::sf::substreams::{
+    rpc::v2::{response::Message, BlockScopedData, BlockUndoSignal, Request, Response},
+    v1::Modules,
 };
-use crate::pb::sf::substreams::v1::Modules;
 
 use crate::substreams::SubstreamsEndpoint;
 
@@ -48,6 +50,9 @@ impl SubstreamsStream {
     }
 }
 
+static DEFAULT_BACKOFF: Lazy<ExponentialBackoff> =
+    Lazy::new(|| ExponentialBackoff::from_millis(500).max_delay(Duration::from_secs(45)));
+
 // Create the Stream implementation that streams blocks with auto-reconnection.
 fn stream_blocks(
     endpoint: Arc<SubstreamsEndpoint>,
@@ -57,12 +62,12 @@ fn stream_blocks(
     start_block_num: i64,
     stop_block_num: u64,
 ) -> impl Stream<Item = Result<BlockResponse, Error>> {
-    let mut latest_cursor = cursor.unwrap_or_else(|| "".to_string());
-    let mut backoff = ExponentialBackoff::from_millis(500).max_delay(Duration::from_secs(45));
+    let mut latest_cursor = cursor.unwrap_or_default();
+    let mut backoff = DEFAULT_BACKOFF.clone();
 
     try_stream! {
         loop {
-            println!("Blockstreams disconnected, connecting (endpoint {}, start block {}, cursor {})",
+            warn!("Blockstreams disconnected, connecting (endpoint {}, start block {}, cursor {})",
                 &endpoint,
                 start_block_num,
                 &latest_cursor
@@ -85,14 +90,14 @@ fn stream_blocks(
 
             match result {
                 Ok(stream) => {
-                    println!("Blockstreams connected");
+                    info!("Blockstreams connected");
 
                     let mut encountered_error = false;
-                    for await response in stream{
+                    for await response in stream {
                         match process_substreams_response(response).await {
                             BlockProcessedResult::BlockScopedData(block_scoped_data) => {
                                 // Reset backoff because we got a good value from the stream
-                                backoff = ExponentialBackoff::from_millis(500).max_delay(Duration::from_secs(45));
+                                backoff = DEFAULT_BACKOFF.clone();
 
                                 let cursor = block_scoped_data.cursor.clone();
                                 yield BlockResponse::New(block_scoped_data);
@@ -101,7 +106,7 @@ fn stream_blocks(
                             },
                             BlockProcessedResult::BlockUndoSignal(block_undo_signal) => {
                                 // Reset backoff because we got a good value from the stream
-                                backoff = ExponentialBackoff::from_millis(500).max_delay(Duration::from_secs(45));
+                                backoff = DEFAULT_BACKOFF.clone();
 
                                 let cursor = block_undo_signal.last_valid_cursor.clone();
                                 yield BlockResponse::Undo(block_undo_signal);
@@ -116,7 +121,7 @@ fn stream_blocks(
                                     Err(anyhow::Error::new(status.clone()))?;
                                 }
 
-                                println!("Received tonic error {:#}", status);
+                                error!("Received tonic error {:#}", status);
                                 encountered_error = true;
                                 break;
                             },
@@ -124,7 +129,7 @@ fn stream_blocks(
                     }
 
                     if !encountered_error {
-                        println!("Stream completed, reached end block");
+                        info!("Stream completed, reached end block");
                         return
                     }
                 },
@@ -133,7 +138,7 @@ fn stream_blocks(
                     // case where we actually _want_ to back off in case we keep
                     // having connection errors.
 
-                    println!("Unable to connect to endpoint: {:#}", e);
+                    error!("Unable to connect to endpoint: {:#}", e);
                 }
             }
 
@@ -171,13 +176,13 @@ async fn process_substreams_response(
         }
         Some(Message::Progress(_progress)) => {
             // The `ModulesProgress` messages goal is to report active parallel processing happening
-            // either to fill up backward (relative to your request's start block) some missing state
-            // or pre-process forward blocks (again relative).
+            // either to fill up backward (relative to your request's start block) some missing
+            // state or pre-process forward blocks (again relative).
             //
             // You could log that in trace or accumulate to push as metrics. Here a snippet of code
-            // that prints progress to standard out. If your `BlockScopedData` messages seems to never
-            // arrive in production mode, it's because progresses is happening but not yet for the output
-            // module you requested.
+            // that prints progress to standard out. If your `BlockScopedData` messages seems to
+            // never arrive in production mode, it's because progresses is happening but
+            // not yet for the output module you requested.
             //
             // let progresses: Vec<_> = progress
             //     .modules
@@ -202,12 +207,12 @@ async fn process_substreams_response(
             //     })
             //     .collect();
 
-            // println!("Progess {}", progresses.join(", "));
+            // info!("Progess {}", progresses.join(", "));
 
             BlockProcessedResult::Skip()
         }
         None => {
-            println!("Got None on substream message");
+            warn!("Got None on substream message");
             BlockProcessedResult::Skip()
         }
         _ => BlockProcessedResult::Skip(),

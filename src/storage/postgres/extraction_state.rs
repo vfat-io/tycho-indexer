@@ -1,12 +1,9 @@
 use crate::storage::{ExtractionState, ExtractionStateGateway, StorableBlock, StorableTransaction};
 
-use super::orm;
-use super::schema;
-use super::{Chain, PostgresGateway, StorageError};
+use super::{orm, schema, Chain, PostgresGateway, StorageError};
 use async_trait::async_trait;
-use diesel::prelude::*;
 use diesel::ExpressionMethods;
-use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 #[async_trait]
 impl<B, TX> ExtractionStateGateway for PostgresGateway<B, TX>
@@ -34,16 +31,8 @@ where
                 };
                 Ok(state)
             }
-            Ok(None) => Err(StorageError::NotFound(
-                "ExtractionState".to_owned(),
-                name.to_owned(),
-            )),
-            Err(err) => Err(StorageError::from_diesel(
-                err,
-                "ExtractionState",
-                name,
-                None,
-            )),
+            Ok(None) => Err(StorageError::NotFound("ExtractionState".to_owned(), name.to_owned())),
+            Err(err) => Err(StorageError::from_diesel(err, "ExtractionState", name, None)),
         }
     }
 
@@ -85,12 +74,7 @@ where
                 })?;
             }
             Err(err) => {
-                return Err(StorageError::from_diesel(
-                    err,
-                    "ExtractionState",
-                    &state.name,
-                    None,
-                ))
+                return Err(StorageError::from_diesel(err, "ExtractionState", &state.name, None))
             }
         }
         Ok(())
@@ -101,6 +85,10 @@ where
 mod test {
     use super::*;
     use crate::extractor::evm;
+
+    use diesel::{QueryDsl, SelectableHelper};
+    use diesel_async::AsyncConnection;
+
     async fn setup_db() -> AsyncPgConnection {
         // Creates a DB connecton
         // Creates a chain entry in the DB
@@ -178,10 +166,7 @@ mod test {
         let gateway = get_dgw(&mut conn).await;
         let extractor_name = "setup_extractor";
 
-        let state = gateway
-            .get_state(extractor_name, Chain::Ethereum, &mut conn)
-            .await
-            .unwrap();
+        let state = gateway.get_state(extractor_name, Chain::Ethereum, &mut conn).await.unwrap();
 
         assert_eq!(state.name, extractor_name);
         assert_eq!(state.chain, Chain::Ethereum);
@@ -213,16 +198,9 @@ mod test {
             cursor: "20".to_owned().into_bytes(),
         };
 
-        gateway
-            .save_state(&state, &mut conn)
-            .await
-            .expect("Failed to save state!");
+        gateway.save_state(&state, &mut conn).await.expect("Failed to save state!");
         assert_eq!(
-            gateway
-                .get_state(extractor_name, Chain::Ethereum, &mut conn)
-                .await
-                .unwrap()
-                .cursor,
+            gateway.get_state(extractor_name, Chain::Ethereum, &mut conn).await.unwrap().cursor,
             "20".to_owned().into_bytes()
         );
     }

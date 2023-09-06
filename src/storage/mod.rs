@@ -183,12 +183,10 @@ pub trait ChainGateway {
     /// no error is raised and the old entry is kept.
     ///
     /// # Parameters
-    /// - `new`: An instance of `Self::Block`, representing the new block to be
-    ///   stored.
+    /// - `new`: An instance of `Self::Block`, representing the new block to be stored.
     ///
     /// # Returns
-    /// - Empty ok result indicates success. Failure might occur if the block is
-    ///   already present.
+    /// - Empty ok result indicates success. Failure might occur if the block is already present.
     async fn upsert_block(&self, new: Self::Block, db: &mut Self::DB) -> Result<(), StorageError>;
     /// Retrieves a block from storage.
     ///
@@ -196,8 +194,7 @@ pub trait ChainGateway {
     /// - `id`: Block's unique identifier of type `BlockIdentifier`.
     ///
     /// # Returns
-    /// - An Ok result containing the block. Might fail if the block does not
-    ///   exist yet.
+    /// - An Ok result containing the block. Might fail if the block does not exist yet.
     async fn get_block(
         &self,
         id: BlockIdentifier,
@@ -209,8 +206,7 @@ pub trait ChainGateway {
     /// no error is raised and the old entry is kept.
     ///
     /// # Parameters
-    /// - `new`: An instance of `Self::Transaction`, representing the new
-    ///   transaction to be stored.
+    /// - `new`: An instance of `Self::Transaction`, representing the new transaction to be stored.
     ///
     /// # Returns
     /// - Empty ok result indicates success. Failure might occur if the
@@ -226,12 +222,10 @@ pub trait ChainGateway {
     /// hash.
     ///
     /// # Parameters
-    /// - `hash`: The byte slice representing the hash of the transaction to be
-    ///   retrieved.
+    /// - `hash`: The byte slice representing the hash of the transaction to be retrieved.
     ///
     /// # Returns
-    /// - An Ok result containing the transaction. Might fail if the transaction
-    ///   does not exist yet.
+    /// - An Ok result containing the transaction. Might fail if the transaction does not exist yet.
     async fn get_tx(
         &self,
         hash: &[u8],
@@ -484,8 +478,7 @@ pub trait ContractStateGateway {
     ///
     /// # Parameters
     /// - `id` The identifier for the contract.
-    /// - `version` Version at which to retrieve state for. None retrieves the latest
-    ///   state.
+    /// - `version` Version at which to retrieve state for. None retrieves the latest state.
     async fn get_contract(
         &self,
         id: &ContractId,
@@ -511,9 +504,8 @@ pub trait ContractStateGateway {
     ///
     /// # Parameters
     /// - `id` The identifier for the contract.
-    /// - `at_tx` The transaction hash which deleted the contract. This
-    ///     transaction is assumed to be in storage already. None retrieves the
-    ///     latest state.
+    /// - `at_tx` The transaction hash which deleted the contract. This transaction is assumed to be
+    ///   in storage already. None retrieves the latest state.
     /// - `db` The database handle or connection.
     ///
     /// # Returns
@@ -540,8 +532,7 @@ pub trait ContractStateGateway {
     /// - `chain` The chain for which to retrieve slots for.
     /// - `contracts` Optionally allows filtering by contract address.
     /// - `at` The version at which to retrieve slots. None retrieves the latest
-    /// - `db` The database handle or connection.
-    ///   state.
+    /// - `db` The database handle or connection. state.
     async fn get_contract_slots(
         &self,
         chain: Chain,
@@ -557,10 +548,9 @@ pub trait ContractStateGateway {
     /// assigned.
     ///
     /// # Parameters
-    /// - `slots` A slice containing only the changed slots. Including slots
-    ///     that were changed to 0. Must come with a corresponding transaction
-    ///     that modified the slots, as well as the account identifier the slots
-    ///     belong to.
+    /// - `slots` A slice containing only the changed slots. Including slots that were changed to 0.
+    ///   Must come with a corresponding transaction that modified the slots, as well as the account
+    ///   identifier the slots belong to.
     ///
     /// # Returns
     /// An empty `Ok(())` if the operation succeeded. Will raise an error if any
@@ -568,10 +558,7 @@ pub trait ContractStateGateway {
     /// transactions or accounts is not or not yet persisted.
     async fn upsert_slots(
         &self,
-        slots: &[(
-            Self::Transaction,
-            HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>,
-        )],
+        slots: &[(Self::Transaction, HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>)],
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
     /// Retrieve a slot delta between two versions
@@ -585,12 +572,11 @@ pub trait ContractStateGateway {
     ///
     /// # Parameters
     /// - `id` The identifier for the contract.
-    /// - `chain` The chain for which to generate the delta changes. This is
-    ///   required because version might be a timestamp.
-    /// - `start_version` The deltas start version, given a block uses
-    ///     VersionKind::Last behaviour. If None the latest version is assumed.
-    /// - `end_version` The deltas end version, given a block uses
-    ///     VersionKind::Last behaviour.
+    /// - `chain` The chain for which to generate the delta changes. This is required because
+    ///   version might be a timestamp.
+    /// - `start_version` The deltas start version, given a block uses VersionKind::Last behaviour.
+    ///   If None the latest version is assumed.
+    /// - `end_version` The deltas end version, given a block uses VersionKind::Last behaviour.
     ///
     /// # Returns
     /// A map containing the necessary changes to update a state from
@@ -617,8 +603,7 @@ pub trait ContractStateGateway {
     ///
     /// # Parameters
     /// - `id` The identifier for the contract.
-    /// - `to` The version to revert to. Given a block uses VersionKind::Last
-    ///   behaviour.
+    /// - `to` The version to revert to. Given a block uses VersionKind::Last behaviour.
     async fn revert_contract_state(
         &self,
         to: BlockIdentifier,

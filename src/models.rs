@@ -1,4 +1,5 @@
 use thiserror::Error;
+
 #[derive(Error, Debug)]
 pub enum ChainError {
     #[error("Unknown blockchain value: {0}")]
@@ -16,7 +17,7 @@ impl TryFrom<String> for Chain {
     type Error = ChainError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.as_str() {
+        match value.to_lowercase().as_str() {
             "ethereum" => Ok(Chain::Ethereum),
             "starknet" => Ok(Chain::Starknet),
             "zksync" => Ok(Chain::ZkSync),

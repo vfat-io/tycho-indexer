@@ -1,15 +1,13 @@
 use async_trait::async_trait;
 use diesel::prelude::*;
-use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use ethers::types::{H160, H256};
 
-use super::orm;
-use super::schema;
-use super::PostgresGateway;
-use crate::extractor::evm;
-use crate::models::Chain;
-use crate::storage::{
-    BlockIdentifier, ChainGateway, StorableBlock, StorableTransaction, StorageError,
+use super::{orm, schema, PostgresGateway};
+use crate::{
+    extractor::evm,
+    models::Chain,
+    storage::{BlockIdentifier, ChainGateway, StorableBlock, StorableTransaction, StorageError},
 };
 
 #[async_trait]
@@ -183,6 +181,8 @@ mod test {
 
     use super::*;
 
+    use diesel_async::AsyncConnection;
+
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
         let mut conn = AsyncPgConnection::establish(&db_url).await.unwrap();
@@ -235,10 +235,7 @@ mod test {
 
         gw.upsert_block(block, &mut conn).await.unwrap();
         let retrieved_block = gw
-            .get_block(
-                BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())),
-                &mut conn,
-            )
+            .get_block(BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
             .await
             .unwrap();
 
@@ -265,10 +262,7 @@ mod test {
 
         gw.upsert_block(block, &mut conn).await.unwrap();
         let retrieved_block = gw
-            .get_block(
-                BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())),
-                &mut conn,
-            )
+            .get_block(BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
             .await
             .unwrap();
 

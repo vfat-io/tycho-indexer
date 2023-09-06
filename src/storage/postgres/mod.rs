@@ -37,30 +37,28 @@
 //! As the are multiple different timestamp columns below is a short summary how
 //! these are used:
 //!
-//! * `inserted` and `modified_ts`: These are pure "book-keeping" values, used
-//!    to track when the record was inserted or updated. They are not used in
-//!    any business logic. These values are automatically set via Postgres
-//!    triggers, so they don't need to be manually set.
+//! * `inserted` and `modified_ts`: These are pure "book-keeping" values, used to track when the
+//!   record was inserted or updated. They are not used in any business logic. These values are
+//!   automatically set via Postgres triggers, so they don't need to be manually set.
 //!
-//! * `valid_from` and `valid_to`: These timestamps enable data versioning aka
-//!   time-travel functionality. Hence, these should always be set correctly.
-//!   `valid_from` must be set to the timestamp at which the entity was created
+//! * `valid_from` and `valid_to`: These timestamps enable data versioning aka time-travel
+//!   functionality. Hence, these should always be set correctly. `valid_from` must be set to the
+//!   timestamp at which the entity was created
 //!   - most often that will be the value of the corresponding `block.ts`. Same
 //!   applies for `valid_to`. There are triggers in place to automatically set
 //!   `valid_to` if you insert a new entity with the same identity (not primary
 //!   key). But to delete a record, `valid_to` needs to be manually set as no
 //!   automatic trigger exists for deletes yet.
 //!
-//! * `created_ts`: For entities that are immutable, this timestamp records when
-//!     the entity was created and is used for time-travel functionality. For
-//!     example, for contracts, this timestamp will be the block timestamp of
-//!     its deployment.
+//! * `created_ts`: For entities that are immutable, this timestamp records when the entity was
+//!   created and is used for time-travel functionality. For example, for contracts, this timestamp
+//!   will be the block timestamp of its deployment.
 //!
-//! * `deleted_ts`: This serves a similar purpose to `created_ts`, but in
-//!     reverse. It indicates when an entity was deleted.
+//! * `deleted_ts`: This serves a similar purpose to `created_ts`, but in reverse. It indicates when
+//!   an entity was deleted.
 //!
-//! * `block.ts`: This is the timestamp attached to the block. Ideally, it
-//!     should coincide with the validation/mining start time.
+//! * `block.ts`: This is the timestamp attached to the block. Ideally, it should coincide with the
+//!   validation/mining start time.
 //!
 //! ### Versioning
 //!
@@ -138,10 +136,7 @@ pub mod extraction_state;
 pub mod orm;
 pub mod schema;
 
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::marker::PhantomData;
-use std::sync::Arc;
+use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, sync::Arc};
 
 use diesel::prelude::*;
 #[allow(unused_imports)] // RunQueryDsl is wrongly marked as unused
@@ -169,10 +164,7 @@ where
     ///
     /// * `entries` - A slice of tuples ideally obtained from a database query.
     pub fn from_tuples(entries: &[(i64, String)]) -> Self {
-        let mut cache = Self {
-            map_id: HashMap::new(),
-            map_enum: HashMap::new(),
-        };
+        let mut cache = Self { map_id: HashMap::new(), map_enum: HashMap::new() };
         for (id_, name_) in entries {
             let val = E::try_from(name_.to_owned()).expect("Failed to convert name to enum value");
             cache.map_id.insert(val, *id_);
@@ -188,10 +180,7 @@ where
     /// * `val` - The enum variant to lookup.
     fn get_id(&self, val: E) -> i64 {
         *self.map_id.get(&val).unwrap_or_else(|| {
-            panic!(
-                "Unexpected cache miss for enum {:?}, entries: {:?}",
-                val, self.map_id
-            )
+            panic!("Unexpected cache miss for enum {:?}, entries: {:?}", val, self.map_id)
         })
     }
 
@@ -203,10 +192,7 @@ where
     /// * `id` - The database ID to lookup.
     fn get_chain(&self, id: i64) -> E {
         *self.map_enum.get(&id).unwrap_or_else(|| {
-            panic!(
-                "Unexpected cache miss for id {}, entries: {:?}",
-                id, self.map_enum
-            )
+            panic!("Unexpected cache miss for id {}, entries: {:?}", id, self.map_enum)
         })
     }
 }
@@ -234,7 +220,7 @@ impl StorageError {
             ) => {
                 if let Some(col) = details.column_name() {
                     if col == "id" {
-                        return StorageError::DuplicateEntry(entity.to_owned(), id.to_owned());
+                        return StorageError::DuplicateEntry(entity.to_owned(), id.to_owned())
                     }
                 }
                 StorageError::Unexpected(err_string)
@@ -245,7 +231,7 @@ impl StorageError {
                         entity.to_owned(),
                         id.to_owned(),
                         related_entitiy,
-                    );
+                    )
                 }
                 StorageError::NotFound(entity.to_owned(), id.to_owned())
             }
@@ -262,22 +248,15 @@ pub struct PostgresGateway<B, TX> {
 
 impl<B, TX> PostgresGateway<B, TX> {
     pub fn new(cache: Arc<ChainEnumCache>) -> Self {
-        Self {
-            chain_id_cache: cache,
-            _phantom_block: PhantomData,
-            _phantom_tx: PhantomData,
-        }
+        Self { chain_id_cache: cache, _phantom_block: PhantomData, _phantom_tx: PhantomData }
     }
 
+    #[allow(clippy::needless_pass_by_ref_mut)]
     #[cfg(test)]
     async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
         let results: Vec<(i64, String)> = async {
             use schema::chain::dsl::*;
-            chain
-                .select((id, name))
-                .load(conn)
-                .await
-                .expect("Failed to load chain ids!")
+            chain.select((id, name)).load(conn).await.expect("Failed to load chain ids!")
         }
         .await;
         let cache = Arc::new(ChainEnumCache::from_tuples(&results));
@@ -302,8 +281,7 @@ mod fixtures {
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
 
-    use super::orm;
-    use super::schema;
+    use super::{orm, schema};
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -334,9 +312,8 @@ mod fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(1),
-                schema::block::ts.eq("2020-01-01T00:00:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .expect("timestamp")),
+                schema::block::ts
+                    .eq("2020-01-01T00:00:00".parse::<chrono::NaiveDateTime>().expect("timestamp")),
                 schema::block::chain_id.eq(chain_id),
             ),
             (
@@ -355,9 +332,8 @@ mod fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(2),
-                schema::block::ts.eq("2020-01-01T01:00:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .unwrap()),
+                schema::block::ts
+                    .eq("2020-01-01T01:00:00".parse::<chrono::NaiveDateTime>().unwrap()),
                 schema::block::chain_id.eq(chain_id),
             ),
         ];
@@ -380,10 +356,7 @@ mod fixtures {
                 (
                     block_id.eq(b),
                     index.eq(i),
-                    hash.eq(H256::from_str(h)
-                        .expect("valid txhash")
-                        .as_bytes()
-                        .to_owned()),
+                    hash.eq(H256::from_str(h).expect("valid txhash").as_bytes().to_owned()),
                     from.eq(from_val.as_bytes()),
                     to.eq(to_val.as_bytes()),
                 )
@@ -410,11 +383,7 @@ mod fixtures {
             schema::account::creation_tx.eq(tx_id),
             schema::account::address.eq(hex::decode(address).unwrap()),
         ));
-        query
-            .returning(schema::account::id)
-            .get_result(conn)
-            .await
-            .unwrap()
+        query.returning(schema::account::id).get_result(conn).await.unwrap()
     }
 
     pub async fn insert_slots(
@@ -465,25 +434,17 @@ mod fixtures {
         let mut b1 = [0; 32];
         U256::zero().to_big_endian(&mut b0);
         U256::from(100).to_big_endian(&mut b1);
-        let data = vec![
+        let data = [
             (
                 b0,
                 None,
-                "2022-11-01T09:00:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .unwrap(),
-                Some(
-                    "2022-11-01T09:10:00"
-                        .parse::<chrono::NaiveDateTime>()
-                        .unwrap(),
-                ),
+                "2022-11-01T09:00:00".parse::<chrono::NaiveDateTime>().unwrap(),
+                Some("2022-11-01T09:10:00".parse::<chrono::NaiveDateTime>().unwrap()),
             ),
             (
                 b1,
                 Some(tx_id),
-                "2022-11-01T09:20:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .unwrap(),
+                "2022-11-01T09:20:00".parse::<chrono::NaiveDateTime>().unwrap(),
                 None,
             ),
         ];
@@ -499,11 +460,7 @@ mod fixtures {
             .collect();
 
         let query = diesel::insert_into(schema::account_balance::table).values(orm_balances);
-        query
-            .returning(schema::account_balance::id)
-            .get_results(conn)
-            .await
-            .unwrap()
+        query.returning(schema::account_balance::id).get_results(conn).await.unwrap()
     }
 
     pub async fn insert_contract_code(
@@ -518,9 +475,8 @@ mod fixtures {
             schema::contract_code::hash.eq(code_hash.as_bytes()),
             schema::contract_code::account_id.eq(account_id),
             schema::contract_code::modify_tx.eq(modify_tx),
-            schema::contract_code::valid_from.eq("2022-11-01T09:10:00"
-                .parse::<chrono::NaiveDateTime>()
-                .unwrap()),
+            schema::contract_code::valid_from
+                .eq("2022-11-01T09:10:00".parse::<chrono::NaiveDateTime>().unwrap()),
         );
 
         diesel::insert_into(schema::contract_code::table)

@@ -1,8 +1,10 @@
 //! This module contains Tycho RPC implementation
 
 use crate::models::Chain;
-use serde::de::{self, Deserializer};
-use serde::Deserialize;
+use serde::{
+    de::{self, Deserializer},
+    Deserialize,
+};
 use thiserror::Error;
 
 // This will convert a hex string (with or without 0x) to a Vec<u8>
@@ -112,10 +114,7 @@ mod tests {
         let block_number = 213;
 
         let expected = StateRequestBody {
-            contract_ids: vec![ContractId {
-                chain: Chain::Ethereum,
-                address: contract0,
-            }],
+            contract_ids: vec![ContractId { chain: Chain::Ethereum, address: contract0 }],
             version: Version {
                 timestamp: "2069-01-01T04:20:00".to_string(),
                 block: Block {

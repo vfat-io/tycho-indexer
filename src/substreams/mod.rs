@@ -48,22 +48,15 @@ impl SubstreamsEndpoint {
         let uri = endpoint.uri().to_string();
         let channel = endpoint.connect_lazy();
 
-        Ok(SubstreamsEndpoint {
-            uri,
-            channel,
-            token,
-        })
+        Ok(SubstreamsEndpoint { uri, channel, token })
     }
 
     pub async fn substreams(
         self: Arc<Self>,
         request: Request,
     ) -> Result<tonic::Streaming<Response>, anyhow::Error> {
-        let token_metadata: Option<MetadataValue<tonic::metadata::Ascii>> = match self.token.clone()
-        {
-            Some(token) => Some(token.as_str().try_into()?),
-            None => None,
-        };
+        let token_metadata: Option<MetadataValue<tonic::metadata::Ascii>> =
+            self.token.clone().map(|token| token.as_str().try_into()).transpose()?;
 
         let mut client = StreamClient::with_interceptor(
             self.channel.clone(),

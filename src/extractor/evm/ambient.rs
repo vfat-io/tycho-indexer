@@ -1,21 +1,16 @@
-use diesel_async::pooled_connection::bb8::Pool;
-use diesel_async::AsyncPgConnection;
+use diesel_async::{pooled_connection::bb8::Pool, AsyncPgConnection};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use super::EVMStateGateway;
-use crate::extractor::evm;
-use crate::extractor::ExtractionError;
-use crate::extractor::Extractor;
-use crate::models::Chain;
-use crate::models::ExtractorIdentity;
-use crate::pb::sf::substreams::rpc::v2::BlockScopedData;
-use crate::pb::sf::substreams::rpc::v2::BlockUndoSignal;
-use crate::pb::sf::substreams::rpc::v2::ModulesProgress;
-use crate::storage::BlockIdentifier;
-use crate::storage::StorageError;
+use crate::{
+    extractor::{evm, ExtractionError, Extractor},
+    models::{Chain, ExtractorIdentity},
+    pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
+    storage::{BlockIdentifier, StorageError},
+};
 
 struct Inner {
     cursor: Vec<u8>,
@@ -62,10 +57,7 @@ where
     G: AmbientGateway,
 {
     fn get_id(&self) -> ExtractorIdentity {
-        ExtractorIdentity {
-            chain: self.chain,
-            name: self.name.to_owned(),
-        }
+        ExtractorIdentity { chain: self.chain, name: self.name.to_owned() }
     }
 
     async fn get_cursor(&self) -> String {

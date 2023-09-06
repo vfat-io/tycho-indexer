@@ -1,6 +1,7 @@
-use crate::models;
-use crate::storage::BlockIdentifier;
-use crate::storage::ContractId;
+use crate::{
+    models,
+    storage::{BlockIdentifier, ContractId},
+};
 
 use super::schema::{
     account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
@@ -8,8 +9,7 @@ use super::schema::{
 };
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
-use diesel_async::AsyncPgConnection;
-use diesel_async::RunQueryDsl;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
 
 #[derive(Identifiable, Queryable, Selectable)]
