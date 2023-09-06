@@ -31,14 +31,14 @@ where
     async fn get_contract(
         &self,
         id: &ContractId,
-        version: Option<BlockOrTimestamp>,
+        version: &Option<BlockOrTimestamp>,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError> {
         let h160_address = H160::from_slice(&id.address);
         let account_orm: orm::Account = orm::Account::by_id(id, db).await.map_err(|err| {
             StorageError::from_diesel(err, "Account", &h160_address.to_string(), None)
         })?;
-        let version_ts = version_to_ts(&version, db).await?;
+        let version_ts = version_to_ts(version, db).await?;
 
         let balance_query = schema::account_balance::table
             .filter(schema::account_balance::account_id.eq(account_orm.id))
@@ -708,7 +708,7 @@ mod test {
         let gateway =
             PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let id = ContractId::new(Chain::Ethereum, hex::decode(acc_address).unwrap());
-        let actual = gateway.get_contract(&id, None, &mut conn).await.unwrap();
+        let actual = gateway.get_contract(&id, &None, &mut conn).await.unwrap();
 
         assert_eq!(expected, actual);
     }
@@ -722,7 +722,7 @@ mod test {
             Chain::Ethereum,
             hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
         );
-        let result = gateway.get_contract(&contract_id, None, &mut conn).await;
+        let result = gateway.get_contract(&contract_id, &None, &mut conn).await;
         if let Err(StorageError::NotFound(entity, id)) = result {
             assert_eq!(entity, "Account");
             assert_eq!(id, H160::from_slice(&contract_id.address).to_string());
@@ -780,7 +780,7 @@ mod test {
         );
 
         let actual = gateway
-            .get_contract(&contract_id, None, &mut conn)
+            .get_contract(&contract_id, &None, &mut conn)
             .await
             .unwrap();
 

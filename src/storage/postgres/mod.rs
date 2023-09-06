@@ -270,7 +270,7 @@ impl<B, TX> PostgresGateway<B, TX> {
     }
 
     #[cfg(test)]
-    async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
+    pub async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
         let results: Vec<(i64, String)> = async {
             use schema::chain::dsl::*;
             chain
@@ -294,7 +294,7 @@ impl<B, TX> PostgresGateway<B, TX> {
 }
 
 #[cfg(test)]
-mod fixtures {
+pub mod fixtures {
     use std::str::FromStr;
 
     use chrono::NaiveDateTime;

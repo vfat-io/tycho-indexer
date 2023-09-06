@@ -45,6 +45,7 @@ pub struct Account {
 }
 
 impl Account {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain: Chain,
         address: H160,
@@ -83,6 +84,7 @@ pub struct AccountUpdate {
 }
 
 impl AccountUpdate {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor: String,
         chain: Chain,

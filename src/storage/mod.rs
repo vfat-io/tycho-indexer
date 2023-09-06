@@ -502,7 +502,7 @@ pub trait ContractStateGateway {
     async fn get_contract(
         &self,
         id: &ContractId,
-        version: Option<BlockOrTimestamp>,
+        version: &Option<BlockOrTimestamp>,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError>;
 
