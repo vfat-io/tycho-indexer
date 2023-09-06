@@ -66,7 +66,7 @@ fn stream_blocks(
     let mut backoff = DEFAULT_BACKOFF.clone();
 
     try_stream! {
-        loop {
+        'retry_loop: loop {
             warn!("Blockstreams disconnected, connecting (endpoint {}, start block {}, cursor {})",
                 &endpoint,
                 start_block_num,
@@ -92,7 +92,6 @@ fn stream_blocks(
                 Ok(stream) => {
                     info!("Blockstreams connected");
 
-                    let mut encountered_error = false;
                     for await response in stream {
                         match process_substreams_response(response).await {
                             BlockProcessedResult::BlockScopedData(block_scoped_data) => {
@@ -118,19 +117,21 @@ fn stream_blocks(
                                 // Unauthenticated errors are not retried, we forward the error back to the
                                 // stream consumer which handles it
                                 if status.code() == tonic::Code::Unauthenticated {
-                                    Err(anyhow::Error::new(status.clone()))?;
+                                    return Err(anyhow::Error::new(status.clone()))?;
                                 }
 
                                 error!("Received tonic error {:#}", status);
-                                encountered_error = true;
-                                break;
+
+                                // If we reach this point, we must wait a bit before retrying
+                                if let Some(duration) = backoff.next() {
+                                    sleep(duration).await
+                                } else {
+                                    return Err(anyhow!("Backoff requested to stop retrying, quitting"))?;
+                                }
+
+                                continue 'retry_loop;
                             },
                         }
-                    }
-
-                    if !encountered_error {
-                        info!("Stream completed, reached end block");
-                        return
                     }
                 },
                 Err(e) => {
@@ -140,13 +141,6 @@ fn stream_blocks(
 
                     error!("Unable to connect to endpoint: {:#}", e);
                 }
-            }
-
-            // If we reach this point, we must wait a bit before retrying
-            if let Some(duration) = backoff.next() {
-                sleep(duration).await
-            } else {
-                Err(anyhow!("backoff requested to stop retrying, quitting"))?;
             }
         }
     }
