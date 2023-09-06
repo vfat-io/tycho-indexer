@@ -199,7 +199,7 @@ pub trait ChainGateway {
     /// - An Ok result containing the block. Might fail if the block does not exist yet.
     async fn get_block(
         &self,
-        id: BlockIdentifier,
+        id: &BlockIdentifier,
         db: &mut Self::DB,
     ) -> Result<Self::Block, StorageError>;
     /// Upserts a transaction to storage.
@@ -216,7 +216,7 @@ pub trait ChainGateway {
     /// exists.
     async fn upsert_tx(
         &self,
-        new: Self::Transaction,
+        new: &Self::Transaction,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -378,7 +378,7 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
     /// - component with same is id already present.
-    async fn upsert_components(&self, new: &[ProtocolComponent]) -> Result<(), StorageError>;
+    async fn upsert_components(&self, new: &[&ProtocolComponent]) -> Result<(), StorageError>;
 
     /// Retrieve protocol component states
     ///
@@ -434,7 +434,7 @@ pub trait ProtocolGateway {
     /// # Return
     /// Ok if all tokens could be inserted, Err if at least one token failed to
     /// insert.
-    async fn add_tokens(&self, chain: Chain, token: &[Self::Token]) -> Result<(), StorageError>;
+    async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError>;
 }
 
 /// A binary key value store for an account
@@ -522,7 +522,7 @@ pub trait ContractStateGateway {
     ///  - Contract was already deleted.
     async fn delete_contract(
         &self,
-        id: ContractId,
+        id: &ContractId,
         at_tx: &Self::Transaction,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
@@ -544,7 +544,7 @@ pub trait ContractStateGateway {
         &self,
         chain: Chain,
         contracts: Option<&[&[u8]]>,
-        at: Option<Version>,
+        at: Option<&Version>,
         db: &mut Self::DB,
     ) -> Result<AccountToContractStore, StorageError>;
 
@@ -595,7 +595,7 @@ pub trait ContractStateGateway {
         &self,
         id: Chain,
         start_version: Option<&BlockOrTimestamp>,
-        end_version: BlockOrTimestamp,
+        end_version: &BlockOrTimestamp,
         db: &mut Self::DB,
     ) -> Result<AccountToContractStore, StorageError>;
 
@@ -613,7 +613,7 @@ pub trait ContractStateGateway {
     /// - `to` The version to revert to. Given a block uses VersionKind::Last behaviour.
     async fn revert_contract_state(
         &self,
-        to: BlockIdentifier,
+        to: &BlockIdentifier,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 }

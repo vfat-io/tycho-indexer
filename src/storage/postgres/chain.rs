@@ -23,7 +23,7 @@ where
 
     async fn upsert_block(
         &self,
-        new: Self::Block,
+        new: &Self::Block,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::block::dsl::*;
@@ -44,7 +44,7 @@ where
 
     async fn get_block(
         &self,
-        block_id: BlockIdentifier,
+        block_id: &BlockIdentifier,
         conn: &mut Self::DB,
     ) -> Result<Self::Block, StorageError> {
         // taking a reference here is necessary, to not move block_id
@@ -66,7 +66,7 @@ where
 
     async fn upsert_tx(
         &self,
-        new: Self::Transaction,
+        new: &Self::Transaction,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::transaction::dsl::*;
@@ -230,7 +230,7 @@ mod test {
         let block_id = BlockIdentifier::Number((Chain::Ethereum, 2));
 
         let block = gw
-            .get_block(block_id, &mut conn)
+            .get_block(&block_id, &mut conn)
             .await
             .unwrap();
 
@@ -243,11 +243,11 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
         let block = block("0xbadbabe000000000000000000000000000000000000000000000000000000000");
 
-        gw.upsert_block(block, &mut conn)
+        gw.upsert_block(&block, &mut conn)
             .await
             .unwrap();
         let retrieved_block = gw
-            .get_block(BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
+            .get_block(&BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
             .await
             .unwrap();
 
@@ -272,11 +272,11 @@ mod test {
             ts: "2020-01-01T00:00:00".parse().unwrap(),
         };
 
-        gw.upsert_block(block, &mut conn)
+        gw.upsert_block(&block, &mut conn)
             .await
             .unwrap();
         let retrieved_block = gw
-            .get_block(BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
+            .get_block(&BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
             .await
             .unwrap();
 
@@ -320,7 +320,7 @@ mod test {
             H256::from_str("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9")
                 .unwrap();
 
-        gw.upsert_tx(tx, &mut conn)
+        gw.upsert_tx(&tx, &mut conn)
             .await
             .unwrap();
         let retrieved_tx = gw
@@ -349,7 +349,7 @@ mod test {
             index: 1,
         };
 
-        gw.upsert_tx(tx, &mut conn)
+        gw.upsert_tx(&tx, &mut conn)
             .await
             .unwrap();
         let retrieved_tx = gw

@@ -121,7 +121,7 @@ where
         let account_orm: orm::Account = orm::Account::by_id(id, db)
             .await
             .map_err(|err| StorageError::from_diesel(err, "Account", &hex::encode(&id.1), None))?;
-        let version_ts = version_to_ts(&version, db).await?;
+        let version_ts = version_to_ts(version, db).await?;
 
         let (balance_tx, balance_orm) = schema::account_balance::table
             .inner_join(schema::transaction::table)
@@ -238,7 +238,7 @@ where
 
     async fn delete_contract(
         &self,
-        id: ContractId,
+        id: &ContractId,
         at_tx: &Self::Transaction,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
@@ -304,7 +304,7 @@ where
         &self,
         chain: Chain,
         contracts: Option<&[&[u8]]>,
-        at: Option<Version>,
+        at: Option<&Version>,
         conn: &mut Self::DB,
     ) -> Result<HashMap<Vec<u8>, ContractStore>, StorageError> {
         let version_ts = if let Some(Version(version, kind)) = at {
@@ -426,7 +426,7 @@ where
         &self,
         chain: Chain,
         start_version: Option<&BlockOrTimestamp>,
-        target_version: BlockOrTimestamp,
+        target_version: &BlockOrTimestamp,
         conn: &mut AsyncPgConnection,
     ) -> Result<AccountToContractStore, StorageError> {
         let chain_id = self.get_chain_id(chain);
@@ -527,7 +527,7 @@ where
 
     async fn revert_contract_state(
         &self,
-        to: BlockIdentifier,
+        to: &BlockIdentifier,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         // To revert all changes of a chain, we need to delete & modify entries
@@ -882,7 +882,7 @@ mod test {
             .expect("blockquery succeeded");
         db_fixtures::insert_txns(&mut conn, &[(block_id, 12, deletion_txhash)]).await;
 
-        gw.delete_contract(id, &tx, &mut conn)
+        gw.delete_contract(&id, &tx, &mut conn)
             .await
             .unwrap();
 
@@ -1001,7 +1001,12 @@ mod test {
                 .collect::<Vec<_>>()
         });
         let res = gw
-            .get_contract_slots(Chain::Ethereum, addresses_slice.as_deref(), version, &mut conn)
+            .get_contract_slots(
+                Chain::Ethereum,
+                addresses_slice.as_deref(),
+                version.as_ref(),
+                &mut conn,
+            )
             .await
             .unwrap();
 
@@ -1163,7 +1168,7 @@ mod test {
                         .parse::<NaiveDateTime>()
                         .unwrap(),
                 )),
-                BlockOrTimestamp::Timestamp(
+                &BlockOrTimestamp::Timestamp(
                     "2020-01-01T02:00:00"
                         .parse::<NaiveDateTime>()
                         .unwrap(),
@@ -1197,7 +1202,7 @@ mod test {
                         .parse::<NaiveDateTime>()
                         .unwrap(),
                 )),
-                BlockOrTimestamp::Timestamp(
+                &BlockOrTimestamp::Timestamp(
                     "2020-01-01T00:00:00"
                         .parse::<NaiveDateTime>()
                         .unwrap(),
@@ -1309,7 +1314,7 @@ mod test {
         .collect();
         let gw = EvmGateway::from_connection(&mut conn).await;
 
-        gw.revert_contract_state(BlockIdentifier::Hash(block1_hash), &mut conn)
+        gw.revert_contract_state(&BlockIdentifier::Hash(block1_hash), &mut conn)
             .await
             .unwrap();
 
