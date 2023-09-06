@@ -107,7 +107,7 @@ fn parse_state_request(json_str: &str) -> Result<StateRequestBody, RpcError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::postgres::fixtures;
+    use crate::storage::postgres::db_fixtures;
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
     use std::collections::HashMap;
@@ -248,9 +248,9 @@ mod tests {
     pub async fn setup_account(conn: &mut AsyncPgConnection) -> String {
         // Adds fixtures: chain, block, transaction, account, account_balance
         let acc_address = "6B175474E89094C44Da98b954EedeAC495271d0F";
-        let chain_id = fixtures::insert_chain(conn, "ethereum").await;
-        let blk = fixtures::insert_blocks(conn, chain_id).await;
-        fixtures::insert_txns(
+        let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        db_fixtures::insert_txns(
             conn,
             &[
                 (
@@ -269,14 +269,15 @@ mod tests {
 
         let addr = hex::encode(H256::random().as_bytes());
         let tx_data = [(blk[1], 1234, addr.as_str())];
-        let tid = fixtures::insert_txns(conn, &tx_data).await;
+        let tid = db_fixtures::insert_txns(conn, &tx_data).await;
 
         // Insert account and balances
-        let acc_id = fixtures::insert_account(conn, acc_address, "account0", chain_id, None).await;
+        let acc_id =
+            db_fixtures::insert_account(conn, acc_address, "account0", chain_id, None).await;
 
-        fixtures::insert_account_balances(conn, tid[0], acc_id).await;
+        db_fixtures::insert_account_balances(conn, tid[0], acc_id).await;
         let contract_code = hex::decode("1234").unwrap();
-        fixtures::insert_contract_code(conn, acc_id, tid[0], contract_code).await;
+        db_fixtures::insert_contract_code(conn, acc_id, tid[0], contract_code).await;
         acc_address.to_string()
     }
 

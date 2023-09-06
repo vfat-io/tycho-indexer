@@ -294,7 +294,7 @@ impl<B, TX> PostgresGateway<B, TX> {
 }
 
 #[cfg(test)]
-pub mod fixtures {
+pub mod db_fixtures {
     use std::str::FromStr;
 
     use chrono::NaiveDateTime;
