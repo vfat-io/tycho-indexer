@@ -487,7 +487,7 @@ pub mod db_fixtures {
             .iter()
             .map(|(b, t, valid_from, valid_to)| orm::NewAccountBalance {
                 account_id,
-                balance: b.to_vec(),
+                balance: b.as_slice(),
                 modify_tx: *t,
                 valid_from: *valid_from,
                 valid_to: *valid_to,

@@ -314,9 +314,9 @@ impl Account {
 #[derive(Insertable)]
 #[diesel(table_name=account)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewAccount {
-    pub title: String,
-    pub address: Vec<u8>,
+pub struct NewAccount<'a> {
+    pub title: &'a str,
+    pub address: &'a [u8],
     pub chain_id: i64,
     pub creation_tx: Option<i64>,
     pub created_at: Option<NaiveDateTime>,
@@ -356,8 +356,8 @@ pub struct AccountBalance {
 #[derive(Insertable, Debug)]
 #[diesel(table_name=account_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewAccountBalance {
-    pub balance: Vec<u8>,
+pub struct NewAccountBalance<'a> {
+    pub balance: &'a [u8],
     pub account_id: i64,
     pub modify_tx: Option<i64>,
     pub valid_from: NaiveDateTime,
@@ -383,15 +383,19 @@ pub struct ContractCode {
 #[derive(Insertable, Debug)]
 #[diesel(table_name=contract_code)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewContractCode {
-    pub code: Vec<u8>,
-    pub hash: Vec<u8>,
+pub struct NewContractCode<'a> {
+    pub code: &'a [u8],
+    pub hash: &'a [u8],
     pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
 }
 
+// theoretically this struct could also simply reference the original struct.
+// Unfortunately that really doesn't play nicely with async_trait on the Gateway
+// and makes the types a lot more complicted. Once the system is up and running
+// this could be improved though.
 pub struct NewContract {
     pub title: String,
     pub address: Vec<u8>,
@@ -406,10 +410,9 @@ pub struct NewContract {
 
 impl NewContract {
     pub fn new_account(&self) -> NewAccount {
-        // TODO: use references
         NewAccount {
-            title: self.title.clone(),
-            address: self.address.clone(),
+            title: &self.title,
+            address: &self.address,
             chain_id: self.chain_id,
             creation_tx: self.creation_tx,
             created_at: self.created_at,
@@ -422,9 +425,8 @@ impl NewContract {
         modify_tx: i64,
         modify_ts: NaiveDateTime,
     ) -> NewAccountBalance {
-        // TODO: use references
         NewAccountBalance {
-            balance: self.balance.clone(),
+            balance: &self.balance,
             account_id,
             modify_tx: Some(modify_tx),
             valid_from: modify_ts,
@@ -437,10 +439,9 @@ impl NewContract {
         modify_tx: i64,
         modify_ts: NaiveDateTime,
     ) -> NewContractCode {
-        // TODO: use references
         NewContractCode {
-            code: self.code.clone(),
-            hash: self.code_hash.clone(),
+            code: &self.code,
+            hash: &self.code_hash,
             account_id,
             modify_tx,
             valid_from: modify_ts,
