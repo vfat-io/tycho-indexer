@@ -64,6 +64,18 @@ export SUBSTREAMS_API_TOKEN=$(curl https://auth.streamingfast.io/v1/auth/issue -
 rustup target add wasm32-unknown-unknown
 ```
 5. To compile protobuf files please install [buf](https://docs.buf.build/installation)
+6. To compile the substreams, run:
+```bash
+cd substreams/ethereum-ambient 
+cargo build --release --target wasm32-unknown-unknown
+substreams pack ./substreams.yaml 
+```
+7. To test the substreams (requires the SUBSTREAMS_API_TOKEN env variable set previously), run:
+```bash
+cd ../..
+RUST_LOG=info ./target/debug/tycho-indexer --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.2.0.spkg
+```
+
 ### Postgres & Diesel
 1. If you are on a mac, you might need to install postgres library first and add it to the library path:
 ```bash
