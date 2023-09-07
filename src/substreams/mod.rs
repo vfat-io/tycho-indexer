@@ -34,7 +34,11 @@ impl SubstreamsEndpoint {
             .parse::<Uri>()
             .expect("the url should have been validated by now, so it is a valid Uri");
 
-        let endpoint = match uri.scheme().unwrap_or(&Scheme::HTTP).as_str() {
+        let endpoint = match uri
+            .scheme()
+            .unwrap_or(&Scheme::HTTP)
+            .as_str()
+        {
             "http" => Channel::builder(uri),
             "https" => Channel::builder(uri)
                 .tls_config(ClientTlsConfig::new())
@@ -42,34 +46,31 @@ impl SubstreamsEndpoint {
             _ => panic!("invalid uri scheme for firehose endpoint"),
         }
         .connect_timeout(Duration::from_secs(10))
-        .http2_adaptive_window(true)
+        .http2_adaptive_window(false) // Prevent unexpected end of file errors: https://github.com/streamingfast/substreams/issues/277#issuecomment-1690904141
         .tcp_keepalive(Some(Duration::from_secs(30)));
 
         let uri = endpoint.uri().to_string();
         let channel = endpoint.connect_lazy();
 
-        Ok(SubstreamsEndpoint {
-            uri,
-            channel,
-            token,
-        })
+        Ok(SubstreamsEndpoint { uri, channel, token })
     }
 
     pub async fn substreams(
         self: Arc<Self>,
         request: Request,
     ) -> Result<tonic::Streaming<Response>, anyhow::Error> {
-        let token_metadata: Option<MetadataValue<tonic::metadata::Ascii>> = match self.token.clone()
-        {
-            Some(token) => Some(token.as_str().try_into()?),
-            None => None,
-        };
+        let token_metadata: Option<MetadataValue<tonic::metadata::Ascii>> = self
+            .token
+            .clone()
+            .map(|token| token.as_str().try_into())
+            .transpose()?;
 
         let mut client = StreamClient::with_interceptor(
             self.channel.clone(),
             move |mut r: tonic::Request<()>| {
                 if let Some(ref t) = token_metadata {
-                    r.metadata_mut().insert("authorization", t.clone());
+                    r.metadata_mut()
+                        .insert("authorization", t.clone());
                 }
 
                 Ok(r)

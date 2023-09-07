@@ -1,12 +1,9 @@
 use crate::storage::{ExtractionState, ExtractionStateGateway, StorableBlock, StorableTransaction};
 
-use super::orm;
-use super::schema;
-use super::{Chain, PostgresGateway, StorageError};
+use super::{orm, schema, Chain, PostgresGateway, StorageError};
 use async_trait::async_trait;
-use diesel::prelude::*;
 use diesel::ExpressionMethods;
-use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 #[async_trait]
 impl<B, TX> ExtractionStateGateway for PostgresGateway<B, TX>
@@ -34,16 +31,8 @@ where
                 };
                 Ok(state)
             }
-            Ok(None) => Err(StorageError::NotFound(
-                "ExtractionState".to_owned(),
-                name.to_owned(),
-            )),
-            Err(err) => Err(StorageError::from_diesel(
-                err,
-                "ExtractionState",
-                name,
-                None,
-            )),
+            Ok(None) => Err(StorageError::NotFound("ExtractionState".to_owned(), name.to_owned())),
+            Err(err) => Err(StorageError::from_diesel(err, "ExtractionState", name, None)),
         }
     }
 
@@ -64,9 +53,12 @@ where
                     .filter(schema::extraction_state::name.eq(&state.name))
                     .filter(schema::extraction_state::chain_id.eq(block_chain_id))
                     .set(&update_form);
-                update_query.execute(conn).await.map_err(|err| {
-                    StorageError::from_diesel(err, "ExtractionState", &state.name, None)
-                })?;
+                update_query
+                    .execute(conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(err, "ExtractionState", &state.name, None)
+                    })?;
             }
             Ok(None) => {
                 // No matching entry in the DB
@@ -80,17 +72,15 @@ where
                 };
                 let query = diesel::insert_into(schema::extraction_state::dsl::extraction_state)
                     .values(&orm_state);
-                query.execute(conn).await.map_err(|err| {
-                    StorageError::from_diesel(err, "ExtractionState", &state.name, None)
-                })?;
+                query
+                    .execute(conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(err, "ExtractionState", &state.name, None)
+                    })?;
             }
             Err(err) => {
-                return Err(StorageError::from_diesel(
-                    err,
-                    "ExtractionState",
-                    &state.name,
-                    None,
-                ))
+                return Err(StorageError::from_diesel(err, "ExtractionState", &state.name, None))
             }
         }
         Ok(())
@@ -101,13 +91,21 @@ where
 mod test {
     use super::*;
     use crate::extractor::evm;
+
+    use diesel::{QueryDsl, SelectableHelper};
+    use diesel_async::AsyncConnection;
+
     async fn setup_db() -> AsyncPgConnection {
         // Creates a DB connecton
         // Creates a chain entry in the DB
         // Creates a ExtractionState entry in the DB named "setup_extractor"
         let db_url = std::env::var("DATABASE_URL").unwrap();
-        let mut conn = AsyncPgConnection::establish(&db_url).await.unwrap();
-        conn.begin_test_transaction().await.unwrap();
+        let mut conn = AsyncPgConnection::establish(&db_url)
+            .await
+            .unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
         let chain_id: i64 = diesel::insert_into(schema::chain::table)
             .values(schema::chain::name.eq("ethereum"))
             .returning(schema::chain::id)
@@ -157,7 +155,10 @@ mod test {
         };
 
         // Save the state using the gateway
-        gateway.save_state(&state, &mut conn).await.unwrap();
+        gateway
+            .save_state(&state, &mut conn)
+            .await
+            .unwrap();
 
         let query_res: orm::ExtractionState = schema::extraction_state::table
             .filter(schema::extraction_state::name.eq(extractor_name))

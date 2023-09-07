@@ -51,43 +51,85 @@ To achieve the previously mentioned functionalities, Tycho uses the following me
 ## Getting started
 You will need to have rust, rustup, docker and docker-compose installed before getting started.
 
-1. Substreams 
-    1. Install [substreams-cli](https://thegraph.com/docs/en/substreams/getting-started/installing-the-cli/)
-    2. Retrieve an API key from https://app.streamingfast.io/
-    3. Set the api key as described below:
-    ```bash
-    export STREAMINGFAST_KEY=server_123123 # Use your own API key
-    export SUBSTREAMS_API_TOKEN=$(curl https://auth.streamingfast.io/v1/auth/issue -s --data-binary '{"api_key":"'$STREAMINGFAST_KEY'"}' | jq -r .token)
-    ```
-    4. Substreams compiles to wasm, so you need the corresponding toolchain:
-    ```bash
-    rustup target add wasm32-unknown-unknown
-    ```
-    5. To compile protobuf files please install [buf](https://docs.buf.build/installation)
-2. Postgres & Diesel
-    1. If you are on a mac, you might need to install postgres library first and add it to the library path:
-    ```bash
-    brew install libpq
-    # PATH-TO-LIB looks somewhat like this: /opt/homebrew/Cellar/libpq/15.4/lib
-    export LIBRARY_PATH=<PATH-TO-LIB>:$LIBRARY_PATH
-    ```
-    2. Install the diesel-cli:
-    ```bash
-    cargo install diesel_cli --no-default-features --features postgres
-    ```
-    3. Start up a the postgres db service
-    ```bash
-    docker-compose up -d
-    ```
-    4. Set the env var for the DB connection:
-    ```
-    export DATABASE_URL=postgres://postgres:mypassword@localhost:5432/tycho_indexer_0
-    ```
-    5. Setup/update the database:
-    ```bash
-    diesel migration run
-    ```
-    6. We use [pgFormatter](https://github.com/darold/pgFormatter) to keep SQL files consistently formatted.
+### Substreams 
+1. Install [substreams-cli](https://thegraph.com/docs/en/substreams/getting-started/installing-the-cli/)
+2. Retrieve an API key from https://app.streamingfast.io/
+3. Set the api key as described below:
+```bash
+export STREAMINGFAST_KEY=server_123123 # Use your own API key
+export SUBSTREAMS_API_TOKEN=$(curl https://auth.streamingfast.io/v1/auth/issue -s --data-binary '{"api_key":"'$STREAMINGFAST_KEY'"}' | jq -r .token)
+```
+4. Substreams compiles to wasm, so you need the corresponding toolchain:
+```bash
+rustup target add wasm32-unknown-unknown
+```
+5. To compile protobuf files please install [buf](https://docs.buf.build/installation)
+6. To compile the substreams, run:
+```bash
+cd substreams/ethereum-ambient 
+cargo build --release --target wasm32-unknown-unknown
+substreams pack ./substreams.yaml 
+```
+7. To test the substreams (requires the SUBSTREAMS_API_TOKEN env variable set previously), run:
+```bash
+cd ../..
+RUST_LOG=info ./target/debug/tycho-indexer --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.2.0.spkg
+```
+
+### Postgres & Diesel
+1. If you are on a mac, you might need to install postgres library first and add it to the library path:
+```bash
+brew install libpq
+# PATH-TO-LIB looks somewhat like this: /opt/homebrew/Cellar/libpq/15.4/lib
+export LIBRARY_PATH=<PATH-TO-LIB>:$LIBRARY_PATH
+```
+2. Install the diesel-cli:
+```bash
+cargo install diesel_cli --no-default-features --features postgres
+```
+3. Start up a the postgres db service
+```bash
+docker-compose up -d
+```
+4. Set the env var for the DB connection:
+```
+export DATABASE_URL=postgres://postgres:mypassword@localhost:5432/tycho_indexer_0
+```
+5. Setup/update the database:
+```bash
+diesel migration run
+```
+6. We use [pgFormatter](https://github.com/darold/pgFormatter) to keep SQL files consistently formatted.
+### Local development
+1. Please also make sure that the following commands pass if you have changed the code:
+
+```sh
+cargo check --all
+cargo test --all --all-features
+cargo +nightly fmt -- --check
+cargo +nightly clippy --all --all-features -- -D warnings
+```
+
+We are using the stable toolchain for building and testing, but the nightly toolchain for formatting and linting, as it allows us to use the latest features of rustfmt and clippy.
+
+If you are working in VSCode, we recommend you install the [rust-analyzer](https://rust-analyzer.github.io/) extension, and use the following VSCode user settings:
+
+```json
+"editor.formatOnSave": true,
+"rust-analyzer.rustfmt.extraArgs": ["+nightly"],
+"rust-analyzer.check.overrideCommand": [
+  "cargo",
+  "+nightly",
+  "clippy",
+  "--all",
+  "--all-features",
+  "--message-format=json"
+],
+"[rust]": {
+  "editor.defaultFormatter": "rust-lang.rust-analyzer"
+}
+```
+
 
 
 ### Migrations

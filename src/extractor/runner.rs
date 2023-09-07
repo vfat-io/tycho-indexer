@@ -6,6 +6,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::StreamExt;
+use tracing::{error, info};
 
 use super::Extractor;
 use crate::{
@@ -33,12 +34,16 @@ where
 {
     async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
         let (tx, rx) = mpsc::channel(1);
-        self.control_tx.send(ControlMessage::Subscribe(tx)).await?;
+        self.control_tx
+            .send(ControlMessage::Subscribe(tx))
+            .await?;
         Ok(rx)
     }
 
     async fn stop(self) -> Result<(), Box<dyn Error>> {
-        self.control_tx.send(ControlMessage::Stop).await?;
+        self.control_tx
+            .send(ControlMessage::Stop)
+            .await?;
         self.handle.await?;
         Ok(())
     }
@@ -74,7 +79,7 @@ where
                     val = self.substreams.next() => {
                         match val {
                             None => {
-                                println!("Stream consumed");
+                                info!("Stream consumed");
                                 break;
                             }
                             Some(Ok(BlockResponse::New(data))) => {
@@ -83,7 +88,7 @@ where
                                         Self::propagate_msg(&self.subscriptions, msg).await
                                     }
                                 } else {
-                                    println!("Error while processing tick!");
+                                    error!("Error while processing tick!");
                                     break;
                                 }
                             }
@@ -93,14 +98,12 @@ where
                                         Self::propagate_msg(&self.subscriptions, msg).await
                                     }
                                 } else {
-                                    println!("Error while processing revert!");
+                                    error!("Error while processing revert!");
                                     break;
                                 }
                             }
                             Some(Err(err)) => {
-                                println!();
-                                println!("Stream terminated with error");
-                                println!("{:?}", err);
+                                error!("Stream terminated with error {:?}", err);
                                 break;
                             }
                         };
@@ -113,7 +116,9 @@ where
     async fn propagate_msg(subscribers: &HashMap<u64, Sender<Arc<M>>>, message: M) {
         let arced_message = Arc::new(message);
         for s in subscribers.values() {
-            s.send(arced_message.clone()).await.unwrap();
+            s.send(arced_message.clone())
+                .await
+                .unwrap();
         }
     }
 }
@@ -187,9 +192,6 @@ where
             control_rx: ctrl_rx,
         };
 
-        Ok(ExtractorHandle {
-            handle: runner.run(),
-            control_tx: ctrl_tx,
-        })
+        Ok(ExtractorHandle { handle: runner.run(), control_tx: ctrl_tx })
     }
 }
