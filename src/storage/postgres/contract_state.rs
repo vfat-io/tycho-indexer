@@ -115,7 +115,7 @@ where
     async fn get_contract(
         &self,
         id: &ContractId,
-        version: &Option<&BlockOrTimestamp>,
+        version: &Option<&Version>,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError> {
         let account_orm: orm::Account = orm::Account::by_id(id, db)
@@ -125,6 +125,7 @@ where
             })?;
         let version_ts = version_to_ts(version, db).await?;
 
+        // TODO: we need to make sure we get the last change here according to VersionKind::Last
         let (balance_tx, balance_orm) = schema::account_balance::table
             .inner_join(schema::transaction::table)
             .filter(schema::account_balance::account_id.eq(account_orm.id))
@@ -138,6 +139,7 @@ where
             .first::<(Vec<u8>, orm::AccountBalance)>(db)
             .await?;
 
+        // TODO: we need to make sure we get the last change here according to VersionKind::Last
         let (code_tx, code_orm) = schema::contract_code::table
             .inner_join(schema::transaction::table)
             .filter(schema::contract_code::account_id.eq(account_orm.id))
@@ -176,139 +178,164 @@ where
         &self,
         chain: Chain,
         ids: Option<&[&[u8]]>,
-        version: Option<&BlockOrTimestamp>,
+        version: Option<&Version>,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::ContractState>, StorageError> {
         let chain_id = self.get_chain_id(chain);
         let version_ts = version_to_ts(version, conn).await?;
-        let mut q = schema::account::table
-            .filter(schema::account::chain_id.eq(chain_id))
-            .filter(
-                schema::account::deleted_at
-                    .is_null()
-                    .or(schema::account::deleted_at.lt(version_ts)),
-            )
-            .select(orm::Account::as_select())
-            .into_boxed();
+        let accounts = {
+            use schema::account::dsl::*;
+            let mut q = account
+                .filter(chain_id.eq(chain_id))
+                .filter(
+                    deleted_at
+                        .is_null()
+                        .or(deleted_at.lt(version_ts)),
+                )
+                .order_by(id)
+                .select(orm::Account::as_select())
+                .into_boxed();
 
-        // if user passed any contract ids filter by those else get all contracts
-        if let Some(contract_ids) = ids {
-            q = q.filter(schema::account::address.eq_any(contract_ids));
-        }
-        let accounts = q.get_results::<orm::Account>(conn).await?;
+            // if user passed any contract ids filter by those
+            // else get all contracts
+            if let Some(contract_ids) = ids {
+                q = q.filter(address.eq_any(contract_ids));
+            }
+            q.get_results::<orm::Account>(conn)
+                .await?
+        };
 
         // take all ids and query both code and storage
-        let account_ids = accounts.iter().map(|a| a.id).collect::<HashSet<_>>();
+        let account_ids = accounts
+            .iter()
+            .map(|a| a.id)
+            .collect::<HashSet<_>>();
 
-        let mut balances: HashMap<i64, orm::AccountBalance> = schema::account_balance::table
-            .filter(schema::account_balance::account_id.eq_any(&account_ids))
-            .filter(schema::account_balance::valid_from.le(version_ts))
-            .filter(
-                schema::account_balance::valid_to
-                    .is_null()
-                    .or(schema::account_balance::valid_to.gt(version_ts)),
-            )
-            .select(orm::AccountBalance::as_select())
-            .get_results::<orm::AccountBalance>(conn)
-            .await?
-            .into_iter()
-            .map(|b| (b.id, b))
-            .collect();
+        let balances = {
+            use schema::account_balance::dsl::*;
+            account_balance
+                .inner_join(schema::transaction::table)
+                .filter(account_id.eq_any(&account_ids))
+                .filter(valid_from.le(version_ts))
+                .filter(
+                    valid_to
+                        .is_null()
+                        .or(valid_to.gt(version_ts)),
+                )
+                .order_by((account_id, schema::transaction::index.desc()))
+                .select(orm::AccountBalance::as_select())
+                .distinct_on(account_id)
+                .get_results::<orm::AccountBalance>(conn)
+                .await?
+        };
 
-        let mut codes: HashMap<i64, orm::ContractCode> = schema::contract_code::table
-            .filter(schema::contract_code::account_id.eq_any(&account_ids))
-            .filter(schema::contract_code::valid_from.le(version_ts))
-            .filter(
-                schema::contract_code::valid_to
-                    .is_null()
-                    .or(schema::contract_code::valid_to.gt(version_ts)),
-            )
-            .select(orm::ContractCode::as_select())
-            .get_results::<orm::ContractCode>(conn)
-            .await?
-            .into_iter()
-            .map(|b| (b.id, b))
-            .collect::<HashMap<_, _>>();
+        let codes = {
+            use schema::contract_code::dsl::*;
+            contract_code
+                .inner_join(schema::transaction::table)
+                .filter(account_id.eq_any(&account_ids))
+                .filter(valid_from.le(version_ts))
+                .filter(
+                    valid_to
+                        .is_null()
+                        .or(valid_to.gt(version_ts)),
+                )
+                .order_by((account_id, schema::transaction::index.desc()))
+                .select(orm::ContractCode::as_select())
+                .distinct_on(account_id)
+                .get_results::<orm::ContractCode>(conn)
+                .await?
+        };
 
         // retrieve txhashes
-        let mut tx_ids: HashSet<i64> = accounts
+        let tx_ids: HashSet<i64> = accounts
             .iter()
             .filter(|a| a.creation_tx.is_some())
             .map(|a| a.creation_tx.unwrap())
+            .chain(codes.iter().map(|c| c.modify_tx))
+            // TODO: make balance.modify_tx not nullable
+            .chain(
+                balances
+                    .iter()
+                    .map(|b| b.modify_tx.unwrap()),
+            )
             .collect();
-        for code in codes.values() {
-            tx_ids.insert(code.modify_tx);
-        }
-        for balance in balances.values() {
-            tx_ids.insert(balance.modify_tx.expect("balance modify tx not nullable"));
-        }
 
-        let transactions: HashMap<i64, Vec<u8>> = schema::transaction::table
-            .filter(schema::transaction::id.eq_any(tx_ids))
-            .select((schema::transaction::id, schema::transaction::hash))
-            .get_results::<(i64, Vec<u8>)>(conn)
-            .await?
+        let txn_hashes: HashMap<i64, Vec<u8>> = {
+            use schema::transaction::dsl::*;
+            transaction
+                .filter(id.eq_any(tx_ids))
+                .select((id, hash))
+                .get_results::<(i64, Vec<u8>)>(conn)
+                .await?
+                .into_iter()
+                .collect()
+        };
+
+        // TODO: before zipping we should assert that the lengths match!
+        accounts
             .into_iter()
-            .collect();
+            .zip(
+                balances
+                    .into_iter()
+                    .zip(codes.into_iter()),
+            )
+            .map(|(account, (balance, code))| -> Result<Self::ContractState, StorageError> {
+                if !(account.id == balance.account_id && balance.account_id == code.account_id) {
+                    return Err(StorageError::DecodeError(format!(
+                        "Identity mismatch - while retrieving entries for account id: {} \
+                            encountered balance for id {} and code for id {}",
+                        &account.id, &balance.account_id, &code.account_id
+                    )))
+                }
 
-        let mut res = Vec::with_capacity(account_ids.len());
-        for account in accounts {
-            let balance = balances.remove(&account.id).ok_or_else(|| {
-                StorageError::DecodeError(format!(
-                    "Could not find balance for 0x{}",
-                    hex::encode(&account.address)
-                ))
-            })?;
-            let code = codes.remove(&account.id).ok_or_else(|| {
-                StorageError::DecodeError(format!(
-                    "Could not find code for 0x{}",
-                    hex::encode(&account.address)
-                ))
-            })?;
-            let balance_tx = transactions
-                .get(&balance.modify_tx.expect("balance tx not null"))
-                .ok_or_else(|| {
-                    StorageError::DecodeError(format!(
-                        "Could not find balance transaction for 0x{}",
-                        hex::encode(&account.address)
-                    ))
-                })?;
-            let code_tx = transactions.get(&code.modify_tx).ok_or_else(|| {
-                StorageError::DecodeError(format!(
-                    "Could not find code transaction for 0x{}",
-                    hex::encode(&account.address)
-                ))
-            })?;
+                let balance_tx = txn_hashes
+                    .get(
+                        &balance
+                            .modify_tx
+                            .expect("balance tx not null"),
+                    )
+                    .ok_or_else(|| {
+                        StorageError::DecodeError(format!(
+                            "Could not find balance transaction for 0x{}",
+                            hex::encode(&account.address)
+                        ))
+                    })?;
+                let code_tx = txn_hashes
+                    .get(&code.modify_tx)
+                    .ok_or_else(|| {
+                        StorageError::DecodeError(format!(
+                            "Could not find code transaction for 0x{}",
+                            hex::encode(&account.address)
+                        ))
+                    })?;
+                let creation_tx = account
+                    .creation_tx
+                    .as_ref()
+                    .map_or(None, |tx_id| {
+                        txn_hashes
+                            .get(tx_id)
+                            .ok_or_else(|| {
+                                StorageError::DecodeError(format!(
+                                    "Could not find creation transaction for 0x{}",
+                                    hex::encode(&account.address)
+                                ))
+                            })
+                            .ok()
+                    });
 
-            let creation_tx = if let Some(tx_id) = &account.creation_tx {
-                Some(transactions.get(tx_id).ok_or_else(|| {
-                    StorageError::DecodeError(format!(
-                        "Could not find creation transaction for 0x{}",
-                        hex::encode(&account.address)
-                    ))
-                })?)
-            } else {
-                None
-            };
+                let contract_orm = orm::Contract { account, balance, code };
 
-            let contract_orm = orm::Contract {
-                account,
-                balance,
-                code,
-            };
-
-            let contract = Self::ContractState::from_storage(
-                contract_orm,
-                self.get_chain(chain_id),
-                balance_tx,
-                code_tx,
-                creation_tx.map(|h| h.as_slice()),
-            );
-
-            res.push(contract);
-        }
-
-        Ok(vec![])
+                let contract = Self::ContractState::from_storage(
+                    contract_orm,
+                    self.get_chain(chain_id),
+                    balance_tx,
+                    code_tx,
+                    creation_tx.map(|h| h.as_slice()),
+                );
+                Ok(contract)
+            })
+            .collect()
     }
 
     async fn add_contract(
@@ -360,19 +387,14 @@ where
             .await
             .map_err(|err| StorageError::from_diesel(err, "AccountBalance", &hex_addr, None))?;
 
-        // Insert contract code and slots only if there is a creation transaction. Having
-        // a creation transaction implies that the account is a contract. If
-        // there is no creation transaction, the account is an EOA
-        if creation_tx_id.is_some() {
-            let (code_modify_tx_id, code_modify_ts) = tx_data
-                .get(new.code_modify_tx())
-                .expect("code tx present");
-            diesel::insert_into(schema::contract_code::table)
-                .values(new_contract.new_code(account_id, *code_modify_tx_id, *code_modify_ts))
-                .execute(db)
-                .await
-                .map_err(|err| StorageError::from_diesel(err, "ContractCode", &hex_addr, None))?;
-        }
+        let (code_modify_tx_id, code_modify_ts) = tx_data
+            .get(new.code_modify_tx())
+            .expect("code tx present");
+        diesel::insert_into(schema::contract_code::table)
+            .values(new_contract.new_code(account_id, *code_modify_tx_id, *code_modify_ts))
+            .execute(db)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "ContractCode", &hex_addr, None))?;
 
         Ok(())
     }
@@ -825,22 +847,30 @@ fn parse_u256_slot_entry(
 /// schema this means, that there were no changes detected at that block, but
 /// there might have been on previous or in later blocks.
 async fn version_to_ts(
-    start_version: &Option<&BlockOrTimestamp>,
+    start_version: &Option<&Version>,
     conn: &mut AsyncPgConnection,
 ) -> Result<NaiveDateTime, StorageError> {
-    match &start_version {
-        Some(BlockOrTimestamp::Block(BlockIdentifier::Hash(h))) => Ok(orm::Block::by_hash(h, conn)
-            .await
-            .map_err(|err| StorageError::from_diesel(err, "Block", &hex::encode(h), None))?
-            .ts),
-        Some(BlockOrTimestamp::Block(BlockIdentifier::Number((chain, no)))) => {
-            Ok(orm::Block::by_number(*chain, *no, conn)
-                .await
-                .map_err(|err| StorageError::from_diesel(err, "Block", &format!("{}", no), None))?
-                .ts)
+    if let Some(Version(version, kind)) = start_version {
+        if !matches!(kind, VersionKind::Last) {
+            return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", kind)))
         }
-        Some(BlockOrTimestamp::Timestamp(ts)) => Ok(*ts),
-        None => Ok(Utc::now().naive_utc()),
+        match version {
+            BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(&h, conn)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "Block", &hex::encode(h), None))?
+                .ts),
+            BlockOrTimestamp::Block(BlockIdentifier::Number((chain, no))) => {
+                Ok(orm::Block::by_number(*chain, *no, conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(err, "Block", &format!("{}", no), None)
+                    })?
+                    .ts)
+            }
+            BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
+        }
+    } else {
+        Ok(Utc::now().naive_utc())
     }
 }
 
