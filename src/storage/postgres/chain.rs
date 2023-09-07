@@ -179,6 +179,7 @@ mod test {
     use std::str::FromStr;
 
     use crate::storage::postgres::db_fixtures;
+    use diesel_async::AsyncConnection;
 
     use super::*;
 

@@ -90,11 +90,11 @@ where
 
 #[cfg(test)]
 mod test {
+    use diesel::prelude::*;
+    use diesel_async::{AsyncConnection, RunQueryDsl};
+
     use super::*;
     use crate::extractor::evm;
-
-    use diesel::{QueryDsl, SelectableHelper};
-    use diesel_async::AsyncConnection;
 
     async fn setup_db() -> AsyncPgConnection {
         // Creates a DB connecton
