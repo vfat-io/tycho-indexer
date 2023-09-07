@@ -71,8 +71,8 @@ async fn main() -> Result<(), Error> {
         package.modules.clone(),
         args.module_name,
         // Start/stop block are not handled within this project, feel free to play with it
-        17361664, // FIXME: remove magic value
-        17400000, // FIXME: remove magic value
+        18083172, // FIXME: remove magic value
+        18083200, // FIXME: remove magic value
     );
 
     info!("Starting stream");

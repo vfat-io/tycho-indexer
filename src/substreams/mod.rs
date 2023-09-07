@@ -46,7 +46,7 @@ impl SubstreamsEndpoint {
             _ => panic!("invalid uri scheme for firehose endpoint"),
         }
         .connect_timeout(Duration::from_secs(10))
-        .http2_adaptive_window(true)
+        .http2_adaptive_window(false) // Prevent unexpected end of file errors: https://github.com/streamingfast/substreams/issues/277#issuecomment-1690904141
         .tcp_keepalive(Some(Duration::from_secs(30)));
 
         let uri = endpoint.uri().to_string();

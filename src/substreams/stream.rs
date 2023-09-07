@@ -133,6 +133,9 @@ fn stream_blocks(
                             },
                         }
                     }
+
+                    info!("Stream completed, reached end block");
+                    return;
                 },
                 Err(e) => {
                     // We failed to connect and will try again; this is another
