@@ -331,6 +331,15 @@ impl Display for ContractId {
 
 pub struct Version(pub BlockOrTimestamp, pub VersionKind);
 
+impl Version {
+    pub fn from_block_number(chain: Chain, number: i64) -> Self {
+        Self(BlockOrTimestamp::Block(BlockIdentifier::Number((chain, number))), VersionKind::Last)
+    }
+    pub fn from_ts(ts: NaiveDateTime) -> Self {
+        Self(BlockOrTimestamp::Timestamp(ts), VersionKind::Last)
+    }
+}
+
 pub trait StorableToken<S, N, DbId> {
     fn from_storage(val: S, contract: ContractId) -> Self;
 
