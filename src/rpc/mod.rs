@@ -1,13 +1,15 @@
 //! This module contains Tycho RPC implementation
 
-use crate::extractor::evm::{self, Account};
-use crate::models::Chain;
-use crate::rpc::deserialization_helpers::{chain_from_str, hex_to_bytes};
-use crate::storage::postgres::PostgresGateway;
-use crate::storage::{BlockIdentifier, ContractStateGateway};
-use crate::storage::{BlockOrTimestamp, ContractId};
-use chrono::NaiveDateTime;
-use chrono::Utc;
+use crate::{
+    extractor::evm::{self, Account},
+    models::Chain,
+    rpc::deserialization_helpers::{chain_from_str, hex_to_bytes},
+    storage::{
+        postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractId,
+        ContractStateGateway,
+    },
+};
+use chrono::{NaiveDateTime, Utc};
 use diesel_async::AsyncPgConnection;
 use serde::Deserialize;
 use thiserror::Error;
@@ -80,10 +82,7 @@ struct Version {
 
 impl Default for Version {
     fn default() -> Self {
-        Version {
-            timestamp: Utc::now().naive_utc(),
-            block: None,
-        }
+        Version { timestamp: Utc::now().naive_utc(), block: None }
     }
 }
 
@@ -109,8 +108,7 @@ mod tests {
     use crate::storage::postgres::db_fixtures;
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
-    use std::collections::HashMap;
-    use std::str::FromStr;
+    use std::{collections::HashMap, str::FromStr};
 
     use super::*;
 
@@ -229,14 +227,17 @@ mod tests {
 
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
-            version: Version {
-                timestamp: Utc::now().naive_utc(),
-                block: None,
-            },
+            version: Version { timestamp: Utc::now().naive_utc(), block: None },
         };
 
-        let time_difference = expected.version.timestamp.timestamp_millis()
-            - result.version.timestamp.timestamp_millis();
+        let time_difference = expected
+            .version
+            .timestamp
+            .timestamp_millis() -
+            result
+                .version
+                .timestamp
+                .timestamp_millis();
 
         // Allowing a small time delta (1 second)
         assert!(time_difference <= 1000);
@@ -283,16 +284,17 @@ mod tests {
     #[tokio::test]
     async fn test_get_state() {
         let db_url = std::env::var("DATABASE_URL").unwrap();
-        let mut conn = AsyncPgConnection::establish(&db_url).await.unwrap();
-        conn.begin_test_transaction().await.unwrap();
+        let mut conn = AsyncPgConnection::establish(&db_url)
+            .await
+            .unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
         let acc_address = setup_account(&mut conn).await;
 
         let db_gtw =
             PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
-        let mut req_handler = RequestHandler {
-            db_gw: db_gtw,
-            db_connection: conn,
-        };
+        let mut req_handler = RequestHandler { db_gw: db_gtw, db_connection: conn };
 
         let code = hex::decode("1234").unwrap();
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
@@ -313,10 +315,7 @@ mod tests {
                 Chain::Ethereum,
                 hex::decode(acc_address).unwrap(),
             )]),
-            version: Version {
-                timestamp: Utc::now().naive_utc(),
-                block: None,
-            },
+            version: Version { timestamp: Utc::now().naive_utc(), block: None },
         };
 
         let state = req_handler.get_state(&request).await;

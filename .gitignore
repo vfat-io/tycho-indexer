@@ -79,4 +79,7 @@ Temporary Items
 
 # Substreams spkg files are build artifacts
 *.spkg
+
 .env
+.vscode
+*.log
