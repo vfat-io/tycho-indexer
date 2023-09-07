@@ -1,5 +1,7 @@
 //! This module contains Tycho RPC implementation
 
+use std::sync::Arc;
+
 use crate::{
     extractor::evm::{self, Account},
     models::Chain,
@@ -11,9 +13,15 @@ use crate::{
 };
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::AsyncPgConnection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::sync::Mutex;
 use tracing::error;
+
+use actix_web::{
+    web::{self, Data},
+    App, HttpResponse, HttpServer, Responder,
+};
 
 pub mod deserialization_helpers;
 struct RequestHandler {
@@ -50,6 +58,7 @@ impl RequestHandler {
     }
 }
 
+#[derive(Serialize)]
 struct StateRequestResponse {
     accounts: Vec<Account>,
 }
@@ -72,6 +81,30 @@ struct StateRequestBody {
     contract_ids: Option<Vec<ContractId>>,
     #[serde(default = "Version::default")]
     version: Version,
+    #[serde(rename = "chain", default = "default_chain")]
+    chain: Chain,
+    #[serde(rename = "tvlGt", default = "default_gt_filter_value")]
+    tvl_gt: i32,
+    #[serde(rename = "intertiaMinGt", default = "default_gt_filter_value")]
+    intertia_min_gt: i32,
+}
+
+fn default_gt_filter_value() -> i32 {
+    1
+}
+
+fn default_chain() -> Chain {
+    Chain::Ethereum
+}
+
+async fn handle_post(
+    handler: web::Data<Arc<Mutex<RequestHandler>>>,
+    contract_state: web::Json<StateRequestBody>,
+) -> impl Responder {
+    let mut handler = handler.lock().await;
+    let response = handler.get_state(&contract_state).await;
+
+    HttpResponse::Ok().json(response)
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -99,8 +132,19 @@ struct Block {
 
 fn parse_state_request(json_str: &str) -> Result<StateRequestBody, RpcError> {
     let request_body: StateRequestBody = serde_json::from_str(json_str)?;
-
     Ok(request_body)
+}
+
+#[actix_web::main]
+async fn run(req_handler: web::Data<Arc<Mutex<RequestHandler>>>) -> std::io::Result<()> {
+    HttpServer::new(move || {
+        App::new()
+            .app_data(req_handler.clone())
+            .route("/contract_state", web::post().to(handle_post))
+    })
+    .bind("127.0.0.1:8000")?
+    .run()
+    .await
 }
 
 #[cfg(test)]
@@ -159,6 +203,9 @@ mod tests {
                     number: block_number,
                 }),
             },
+            chain: Chain::Ethereum,
+            tvl_gt: 1,
+            intertia_min_gt: 1,
         };
 
         assert_eq!(result, expected);
@@ -203,6 +250,9 @@ mod tests {
                     number: block_number,
                 }),
             },
+            chain: Chain::Ethereum,
+            tvl_gt: 1,
+            intertia_min_gt: 1,
         };
 
         assert_eq!(result, expected);
@@ -228,13 +278,16 @@ mod tests {
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
             version: Version { timestamp: Utc::now().naive_utc(), block: None },
+            chain: Chain::Ethereum,
+            tvl_gt: 1,
+            intertia_min_gt: 1,
         };
 
         let time_difference = expected
             .version
             .timestamp
-            .timestamp_millis() -
-            result
+            .timestamp_millis()
+            - result
                 .version
                 .timestamp
                 .timestamp_millis();
@@ -316,6 +369,9 @@ mod tests {
                 hex::decode(acc_address).unwrap(),
             )]),
             version: Version { timestamp: Utc::now().naive_utc(), block: None },
+            chain: Chain::Ethereum,
+            tvl_gt: 1,
+            intertia_min_gt: 1,
         };
 
         let state = req_handler.get_state(&request).await;
