@@ -1,6 +1,8 @@
 use crate::models::Chain;
-use serde::de::{self, Deserializer};
-use serde::Deserialize;
+use serde::{
+    de::{self, Deserializer},
+    Deserialize,
+};
 
 // This will convert a hex string (with or without 0x) to a Vec<u8>
 pub fn hex_to_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
