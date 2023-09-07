@@ -493,6 +493,14 @@ pub trait ContractStateGateway {
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError>;
 
+    async fn get_contracts(
+        &self,
+        chain: Chain,
+        ids: Option<&[&[u8]]>,
+        version: Option<&BlockOrTimestamp>,
+        db: &mut Self::DB,
+    ) -> Result<Vec<Self::ContractState>, StorageError>;
+
     /// Save contract metadata.
     ///
     /// Inserts immutable contract metadata, as well as code and balance.
