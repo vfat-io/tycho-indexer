@@ -60,8 +60,9 @@ async fn main() -> Result<(), Error> {
     let args = Args::parse();
 
     let package = read_package(&args.package_file).await?;
-    let endpoint =
-        Arc::new(SubstreamsEndpoint::new(&args.endpoint_url, Some(args.substreams_api_token)).await?);
+    let endpoint = Arc::new(
+        SubstreamsEndpoint::new(&args.endpoint_url, Some(args.substreams_api_token)).await?,
+    );
 
     let cursor: Option<String> = load_persisted_cursor()?;
 
