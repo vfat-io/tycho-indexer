@@ -5,7 +5,7 @@ use crate::{
     extractor::evm::{self, Account},
     models::Chain,
     storage::{
-        postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractId,
+        self, postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractId,
         ContractStateGateway,
     },
 };
@@ -29,12 +29,13 @@ impl RequestHandler {
         };
 
         let mut accounts: Vec<Account> = Vec::new();
+        let version = storage::Version(at, storage::VersionKind::Last);
 
         if let Some(contract_ids) = &request.contract_ids {
             for contract_id in contract_ids {
                 match self
                     .db_gw
-                    .get_contract(contract_id, &Some(&at), &mut self.db_connection)
+                    .get_contract(contract_id, &Some(&version), &mut self.db_connection)
                     .await
                 {
                     Ok(contract_state) => accounts.push(contract_state),

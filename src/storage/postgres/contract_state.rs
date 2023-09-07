@@ -182,7 +182,7 @@ where
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::ContractState>, StorageError> {
         let chain_id = self.get_chain_id(chain);
-        let version_ts = version_to_ts(version, conn).await?;
+        let version_ts = version_to_ts(&version, conn).await?;
         let accounts = {
             use schema::account::dsl::*;
             let mut q = account
@@ -250,8 +250,7 @@ where
         // retrieve txhashes
         let tx_ids: HashSet<i64> = accounts
             .iter()
-            .filter(|a| a.creation_tx.is_some())
-            .map(|a| a.creation_tx.unwrap())
+            .filter_map(|a| a.creation_tx)
             .chain(codes.iter().map(|c| c.modify_tx))
             // TODO: make balance.modify_tx not nullable
             .chain(
@@ -275,11 +274,7 @@ where
         // TODO: before zipping we should assert that the lengths match!
         accounts
             .into_iter()
-            .zip(
-                balances
-                    .into_iter()
-                    .zip(codes.into_iter()),
-            )
+            .zip(balances.into_iter().zip(codes))
             .map(|(account, (balance, code))| -> Result<Self::ContractState, StorageError> {
                 if !(account.id == balance.account_id && balance.account_id == code.account_id) {
                     return Err(StorageError::DecodeError(format!(
@@ -312,7 +307,7 @@ where
                 let creation_tx = account
                     .creation_tx
                     .as_ref()
-                    .map_or(None, |tx_id| {
+                    .and_then(|tx_id| {
                         txn_hashes
                             .get(tx_id)
                             .ok_or_else(|| {
@@ -470,17 +465,7 @@ where
         at: Option<&Version>,
         conn: &mut Self::DB,
     ) -> Result<HashMap<Vec<u8>, ContractStore>, StorageError> {
-        let version_ts = if let Some(Version(version, kind)) = at {
-            if !matches!(kind, VersionKind::Last) {
-                return Err(StorageError::Unsupported(format!(
-                    "Unsupported version kind: {:?}",
-                    kind
-                )))
-            }
-            version_to_ts(&Some(version), conn).await?
-        } else {
-            Utc::now().naive_utc()
-        };
+        let version_ts = version_to_ts(&at, conn).await?;
 
         let slots = {
             use schema::{account, contract_storage::dsl::*};
@@ -595,8 +580,8 @@ where
         let chain_id = self.get_chain_id(chain);
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
-        let start_version_ts = version_to_ts(&start_version, conn).await?;
-        let target_version_ts = version_to_ts(&Some(target_version), conn).await?;
+        let start_version_ts = coerce_block_or_ts(&start_version, conn).await?;
+        let target_version_ts = coerce_block_or_ts(&Some(target_version), conn).await?;
 
         let changed_values = if start_version_ts <= target_version_ts {
             // Going forward
@@ -854,23 +839,31 @@ async fn version_to_ts(
         if !matches!(kind, VersionKind::Last) {
             return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", kind)))
         }
-        match version {
-            BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(&h, conn)
-                .await
-                .map_err(|err| StorageError::from_diesel(err, "Block", &hex::encode(h), None))?
-                .ts),
-            BlockOrTimestamp::Block(BlockIdentifier::Number((chain, no))) => {
-                Ok(orm::Block::by_number(*chain, *no, conn)
-                    .await
-                    .map_err(|err| {
-                        StorageError::from_diesel(err, "Block", &format!("{}", no), None)
-                    })?
-                    .ts)
-            }
-            BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
-        }
+        coerce_block_or_ts(&Some(version), conn).await
     } else {
         Ok(Utc::now().naive_utc())
+    }
+}
+
+async fn coerce_block_or_ts(
+    version: &Option<&BlockOrTimestamp>,
+    conn: &mut AsyncPgConnection,
+) -> Result<NaiveDateTime, StorageError> {
+    if version.is_none() {
+        return Ok(Utc::now().naive_utc())
+    }
+    match version.unwrap() {
+        BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(h, conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Block", &hex::encode(h), None))?
+            .ts),
+        BlockOrTimestamp::Block(BlockIdentifier::Number((chain, no))) => {
+            Ok(orm::Block::by_number(*chain, *no, conn)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "Block", &format!("{}", no), None))?
+                .ts)
+        }
+        BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
     }
 }
 

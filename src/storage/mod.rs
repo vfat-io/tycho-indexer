@@ -329,7 +329,7 @@ impl Display for ContractId {
     }
 }
 
-pub struct Version(BlockOrTimestamp, VersionKind);
+pub struct Version(pub BlockOrTimestamp, pub VersionKind);
 
 pub trait StorableToken<S, N, DbId> {
     fn from_storage(val: S, contract: ContractId) -> Self;
@@ -489,7 +489,7 @@ pub trait ContractStateGateway {
     async fn get_contract(
         &self,
         id: &ContractId,
-        version: &Option<&BlockOrTimestamp>,
+        version: &Option<&Version>,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError>;
 
@@ -497,7 +497,7 @@ pub trait ContractStateGateway {
         &self,
         chain: Chain,
         ids: Option<&[&[u8]]>,
-        version: Option<&BlockOrTimestamp>,
+        version: Option<&Version>,
         db: &mut Self::DB,
     ) -> Result<Vec<Self::ContractState>, StorageError>;
 
@@ -592,6 +592,20 @@ pub trait ContractStateGateway {
     /// - `start_version` The deltas start version, given a block uses VersionKind::Last behaviour.
     ///   If None the latest version is assumed.
     /// - `end_version` The deltas end version, given a block uses VersionKind::Last behaviour.
+    ///
+    /// # Note
+    ///
+    /// A choice to utilize `BlockOrTimestamp` has been made intentionally in
+    /// this scenario as passing a `Version` by user isn't quite logical.
+    /// Support for deltas is limited to the states at the start or end of
+    /// blocks because blockchain reorganization at the transaction level is not
+    /// common.
+    ///
+    /// The decision to use either the beginning or end state of a block is
+    /// automatically determined by the underlying logic. For example, if we are
+    /// tracing back, `VersionKind::First` retrieval mode will be used.
+    /// Conversely, if we're progressing forward, we would apply the
+    /// `VersionKind::Last` semantics.
     ///
     /// # Returns
     /// A map containing the necessary changes to update a state from
