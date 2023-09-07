@@ -40,8 +40,8 @@ struct Args {
     endpoint_url: String,
 
     /// Substreams API token
-    #[clap(env = "SUBSTREAMS_API_TOKEN", long)]
-    api_token: String,
+    #[clap(long, env)]
+    substreams_api_token: String,
 
     /// Package file
     #[clap(name = "spkg", short, long)]
@@ -54,11 +54,14 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    // Set up the subscriber
+    tracing_subscriber::fmt::init();
+
     let args = Args::parse();
 
     let package = read_package(&args.package_file).await?;
     let endpoint =
-        Arc::new(SubstreamsEndpoint::new(&args.endpoint_url, Some(args.api_token)).await?);
+        Arc::new(SubstreamsEndpoint::new(&args.endpoint_url, Some(args.substreams_api_token)).await?);
 
     let cursor: Option<String> = load_persisted_cursor()?;
 
@@ -68,8 +71,8 @@ async fn main() -> Result<(), Error> {
         package.modules.clone(),
         args.module_name,
         // Start/stop block are not handled within this project, feel free to play with it
-        0, // FIXME: remove magic value
-        0, // FIXME: remove magic value
+        17361664, // FIXME: remove magic value
+        17400000, // FIXME: remove magic value
     );
 
     info!("Starting stream");
@@ -228,7 +231,7 @@ mod cli_tests {
         let args = args.unwrap();
         let expected_args = Args {
             endpoint_url: "http://example.com".to_string(),
-            api_token: "your_api_token".to_string(),
+            substreams_api_token: "your_api_token".to_string(),
             package_file: "package.spkg".to_string(),
             module_name: "module_name".to_string(),
         };
@@ -255,7 +258,7 @@ mod cli_tests {
         let args = args.unwrap();
         let expected_args = Args {
             endpoint_url: "http://example.com".to_string(),
-            api_token: "your_api_token".to_string(),
+            substreams_api_token: "your_api_token".to_string(),
             package_file: "package.spkg".to_string(),
             module_name: "module_name".to_string(),
         };
