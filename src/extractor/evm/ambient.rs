@@ -68,7 +68,13 @@ where
         &self,
         inp: BlockScopedData,
     ) -> Result<Option<evm::AccountUpdate>, ExtractionError> {
-        let _data = inp.output.as_ref().unwrap().map_output.as_ref().unwrap();
+        let _data = inp
+            .output
+            .as_ref()
+            .unwrap()
+            .map_output
+            .as_ref()
+            .unwrap();
         // let msg = Message::decode::<Changes>(data.value.as_slice()).unwrap();
         self.update_cursor(inp.cursor).await;
         todo!()
@@ -78,7 +84,8 @@ where
         &self,
         inp: BlockUndoSignal,
     ) -> Result<Option<evm::AccountUpdate>, ExtractionError> {
-        self.update_cursor(inp.last_valid_cursor).await;
+        self.update_cursor(inp.last_valid_cursor)
+            .await;
         todo!()
     }
 

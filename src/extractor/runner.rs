@@ -34,12 +34,16 @@ where
 {
     async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
         let (tx, rx) = mpsc::channel(1);
-        self.control_tx.send(ControlMessage::Subscribe(tx)).await?;
+        self.control_tx
+            .send(ControlMessage::Subscribe(tx))
+            .await?;
         Ok(rx)
     }
 
     async fn stop(self) -> Result<(), Box<dyn Error>> {
-        self.control_tx.send(ControlMessage::Stop).await?;
+        self.control_tx
+            .send(ControlMessage::Stop)
+            .await?;
         self.handle.await?;
         Ok(())
     }
@@ -112,7 +116,9 @@ where
     async fn propagate_msg(subscribers: &HashMap<u64, Sender<Arc<M>>>, message: M) {
         let arced_message = Arc::new(message);
         for s in subscribers.values() {
-            s.send(arced_message.clone()).await.unwrap();
+            s.send(arced_message.clone())
+                .await
+                .unwrap();
         }
     }
 }

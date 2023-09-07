@@ -53,9 +53,12 @@ where
                     .filter(schema::extraction_state::name.eq(&state.name))
                     .filter(schema::extraction_state::chain_id.eq(block_chain_id))
                     .set(&update_form);
-                update_query.execute(conn).await.map_err(|err| {
-                    StorageError::from_diesel(err, "ExtractionState", &state.name, None)
-                })?;
+                update_query
+                    .execute(conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(err, "ExtractionState", &state.name, None)
+                    })?;
             }
             Ok(None) => {
                 // No matching entry in the DB
@@ -69,9 +72,12 @@ where
                 };
                 let query = diesel::insert_into(schema::extraction_state::dsl::extraction_state)
                     .values(&orm_state);
-                query.execute(conn).await.map_err(|err| {
-                    StorageError::from_diesel(err, "ExtractionState", &state.name, None)
-                })?;
+                query
+                    .execute(conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(err, "ExtractionState", &state.name, None)
+                    })?;
             }
             Err(err) => {
                 return Err(StorageError::from_diesel(err, "ExtractionState", &state.name, None))
@@ -94,8 +100,12 @@ mod test {
         // Creates a chain entry in the DB
         // Creates a ExtractionState entry in the DB named "setup_extractor"
         let db_url = std::env::var("DATABASE_URL").unwrap();
-        let mut conn = AsyncPgConnection::establish(&db_url).await.unwrap();
-        conn.begin_test_transaction().await.unwrap();
+        let mut conn = AsyncPgConnection::establish(&db_url)
+            .await
+            .unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
         let chain_id: i64 = diesel::insert_into(schema::chain::table)
             .values(schema::chain::name.eq("ethereum"))
             .returning(schema::chain::id)
@@ -145,7 +155,10 @@ mod test {
         };
 
         // Save the state using the gateway
-        gateway.save_state(&state, &mut conn).await.unwrap();
+        gateway
+            .save_state(&state, &mut conn)
+            .await
+            .unwrap();
 
         let query_res: orm::ExtractionState = schema::extraction_state::table
             .filter(schema::extraction_state::name.eq(extractor_name))
@@ -166,7 +179,10 @@ mod test {
         let gateway = get_dgw(&mut conn).await;
         let extractor_name = "setup_extractor";
 
-        let state = gateway.get_state(extractor_name, Chain::Ethereum, &mut conn).await.unwrap();
+        let state = gateway
+            .get_state(extractor_name, Chain::Ethereum, &mut conn)
+            .await
+            .unwrap();
 
         assert_eq!(state.name, extractor_name);
         assert_eq!(state.chain, Chain::Ethereum);
@@ -198,9 +214,16 @@ mod test {
             cursor: "20".to_owned().into_bytes(),
         };
 
-        gateway.save_state(&state, &mut conn).await.expect("Failed to save state!");
+        gateway
+            .save_state(&state, &mut conn)
+            .await
+            .expect("Failed to save state!");
         assert_eq!(
-            gateway.get_state(extractor_name, Chain::Ethereum, &mut conn).await.unwrap().cursor,
+            gateway
+                .get_state(extractor_name, Chain::Ethereum, &mut conn)
+                .await
+                .unwrap()
+                .cursor,
             "20".to_owned().into_bytes()
         );
     }

@@ -34,7 +34,11 @@ impl SubstreamsEndpoint {
             .parse::<Uri>()
             .expect("the url should have been validated by now, so it is a valid Uri");
 
-        let endpoint = match uri.scheme().unwrap_or(&Scheme::HTTP).as_str() {
+        let endpoint = match uri
+            .scheme()
+            .unwrap_or(&Scheme::HTTP)
+            .as_str()
+        {
             "http" => Channel::builder(uri),
             "https" => Channel::builder(uri)
                 .tls_config(ClientTlsConfig::new())
@@ -55,14 +59,18 @@ impl SubstreamsEndpoint {
         self: Arc<Self>,
         request: Request,
     ) -> Result<tonic::Streaming<Response>, anyhow::Error> {
-        let token_metadata: Option<MetadataValue<tonic::metadata::Ascii>> =
-            self.token.clone().map(|token| token.as_str().try_into()).transpose()?;
+        let token_metadata: Option<MetadataValue<tonic::metadata::Ascii>> = self
+            .token
+            .clone()
+            .map(|token| token.as_str().try_into())
+            .transpose()?;
 
         let mut client = StreamClient::with_interceptor(
             self.channel.clone(),
             move |mut r: tonic::Request<()>| {
                 if let Some(ref t) = token_metadata {
-                    r.metadata_mut().insert("authorization", t.clone());
+                    r.metadata_mut()
+                        .insert("authorization", t.clone());
                 }
 
                 Ok(r)

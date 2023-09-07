@@ -179,9 +179,12 @@ where
     ///
     /// * `val` - The enum variant to lookup.
     fn get_id(&self, val: E) -> i64 {
-        *self.map_id.get(&val).unwrap_or_else(|| {
-            panic!("Unexpected cache miss for enum {:?}, entries: {:?}", val, self.map_id)
-        })
+        *self
+            .map_id
+            .get(&val)
+            .unwrap_or_else(|| {
+                panic!("Unexpected cache miss for enum {:?}, entries: {:?}", val, self.map_id)
+            })
     }
 
     /// Retrieves the corresponding enum variant for a database ID. Panics on
@@ -191,9 +194,12 @@ where
     ///
     /// * `id` - The database ID to lookup.
     fn get_chain(&self, id: i64) -> E {
-        *self.map_enum.get(&id).unwrap_or_else(|| {
-            panic!("Unexpected cache miss for id {}, entries: {:?}", id, self.map_enum)
-        })
+        *self
+            .map_enum
+            .get(&id)
+            .unwrap_or_else(|| {
+                panic!("Unexpected cache miss for id {}, entries: {:?}", id, self.map_enum)
+            })
     }
 }
 
@@ -256,7 +262,11 @@ impl<B, TX> PostgresGateway<B, TX> {
     async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
         let results: Vec<(i64, String)> = async {
             use schema::chain::dsl::*;
-            chain.select((id, name)).load(conn).await.expect("Failed to load chain ids!")
+            chain
+                .select((id, name))
+                .load(conn)
+                .await
+                .expect("Failed to load chain ids!")
         }
         .await;
         let cache = Arc::new(ChainEnumCache::from_tuples(&results));
@@ -312,8 +322,9 @@ mod fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(1),
-                schema::block::ts
-                    .eq("2020-01-01T00:00:00".parse::<chrono::NaiveDateTime>().expect("timestamp")),
+                schema::block::ts.eq("2020-01-01T00:00:00"
+                    .parse::<chrono::NaiveDateTime>()
+                    .expect("timestamp")),
                 schema::block::chain_id.eq(chain_id),
             ),
             (
@@ -332,8 +343,9 @@ mod fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(2),
-                schema::block::ts
-                    .eq("2020-01-01T01:00:00".parse::<chrono::NaiveDateTime>().unwrap()),
+                schema::block::ts.eq("2020-01-01T01:00:00"
+                    .parse::<chrono::NaiveDateTime>()
+                    .unwrap()),
                 schema::block::chain_id.eq(chain_id),
             ),
         ];
@@ -356,7 +368,10 @@ mod fixtures {
                 (
                     block_id.eq(b),
                     index.eq(i),
-                    hash.eq(H256::from_str(h).expect("valid txhash").as_bytes().to_owned()),
+                    hash.eq(H256::from_str(h)
+                        .expect("valid txhash")
+                        .as_bytes()
+                        .to_owned()),
                     from.eq(from_val.as_bytes()),
                     to.eq(to_val.as_bytes()),
                 )
@@ -383,7 +398,11 @@ mod fixtures {
             schema::account::creation_tx.eq(tx_id),
             schema::account::address.eq(hex::decode(address).unwrap()),
         ));
-        query.returning(schema::account::id).get_result(conn).await.unwrap()
+        query
+            .returning(schema::account::id)
+            .get_result(conn)
+            .await
+            .unwrap()
     }
 
     pub async fn insert_slots(
@@ -393,7 +412,9 @@ mod fixtures {
         valid_from: &str,
         slots: &[(u64, u64)],
     ) -> Vec<i64> {
-        let ts = valid_from.parse::<chrono::NaiveDateTime>().unwrap();
+        let ts = valid_from
+            .parse::<chrono::NaiveDateTime>()
+            .unwrap();
         let data = slots
             .iter()
             .enumerate()
@@ -438,13 +459,21 @@ mod fixtures {
             (
                 b0,
                 None,
-                "2022-11-01T09:00:00".parse::<chrono::NaiveDateTime>().unwrap(),
-                Some("2022-11-01T09:10:00".parse::<chrono::NaiveDateTime>().unwrap()),
+                "2022-11-01T09:00:00"
+                    .parse::<chrono::NaiveDateTime>()
+                    .unwrap(),
+                Some(
+                    "2022-11-01T09:10:00"
+                        .parse::<chrono::NaiveDateTime>()
+                        .unwrap(),
+                ),
             ),
             (
                 b1,
                 Some(tx_id),
-                "2022-11-01T09:20:00".parse::<chrono::NaiveDateTime>().unwrap(),
+                "2022-11-01T09:20:00"
+                    .parse::<chrono::NaiveDateTime>()
+                    .unwrap(),
                 None,
             ),
         ];
@@ -460,7 +489,11 @@ mod fixtures {
             .collect();
 
         let query = diesel::insert_into(schema::account_balance::table).values(orm_balances);
-        query.returning(schema::account_balance::id).get_results(conn).await.unwrap()
+        query
+            .returning(schema::account_balance::id)
+            .get_results(conn)
+            .await
+            .unwrap()
     }
 
     pub async fn insert_contract_code(
@@ -475,8 +508,9 @@ mod fixtures {
             schema::contract_code::hash.eq(code_hash.as_bytes()),
             schema::contract_code::account_id.eq(account_id),
             schema::contract_code::modify_tx.eq(modify_tx),
-            schema::contract_code::valid_from
-                .eq("2022-11-01T09:10:00".parse::<chrono::NaiveDateTime>().unwrap()),
+            schema::contract_code::valid_from.eq("2022-11-01T09:10:00"
+                .parse::<chrono::NaiveDateTime>()
+                .unwrap()),
         );
 
         diesel::insert_into(schema::contract_code::table)
@@ -488,7 +522,9 @@ mod fixtures {
     }
 
     pub async fn delete_account(conn: &mut AsyncPgConnection, target_id: i64, ts: &str) {
-        let ts = ts.parse::<NaiveDateTime>().expect("timestamp valid");
+        let ts = ts
+            .parse::<NaiveDateTime>()
+            .expect("timestamp valid");
         {
             use schema::account::dsl::*;
             diesel::update(account.filter(id.eq(target_id)))

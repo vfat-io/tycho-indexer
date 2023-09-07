@@ -98,7 +98,13 @@ async fn main() -> Result<(), Error> {
 }
 
 fn process_block_scoped_data(data: &BlockScopedData) -> Result<(), Error> {
-    let output = data.output.as_ref().unwrap().map_output.as_ref().unwrap();
+    let output = data
+        .output
+        .as_ref()
+        .unwrap()
+        .map_output
+        .as_ref()
+        .unwrap();
 
     // You can decode the actual Any type received using this code:
     //
@@ -111,7 +117,9 @@ fn process_block_scoped_data(data: &BlockScopedData) -> Result<(), Error> {
     info!(
         "Block #{} - Payload {} ({} bytes)",
         data.clock.as_ref().unwrap().number,
-        output.type_url.replace("type.googleapis.com/", ""),
+        output
+            .type_url
+            .replace("type.googleapis.com/", ""),
         output.value.len()
     );
 
@@ -161,7 +169,10 @@ async fn read_package(input: &str) -> Result<Package, Error> {
 }
 
 async fn read_http_package(input: &str) -> Result<Package, Error> {
-    let body = reqwest::get(input).await?.bytes().await?;
+    let body = reqwest::get(input)
+        .await?
+        .bytes()
+        .await?;
 
     Package::decode(body).context("decode command")
 }

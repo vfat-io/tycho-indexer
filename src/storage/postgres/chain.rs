@@ -185,8 +185,12 @@ mod test {
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
-        let mut conn = AsyncPgConnection::establish(&db_url).await.unwrap();
-        conn.begin_test_transaction().await.unwrap();
+        let mut conn = AsyncPgConnection::establish(&db_url)
+            .await
+            .unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
 
         let chain_id: i64 = fixtures::insert_chain(&mut conn, "ethereum").await;
         let block_ids = fixtures::insert_blocks(&mut conn, chain_id).await;
@@ -222,7 +226,10 @@ mod test {
         let exp = block("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9");
         let block_id = BlockIdentifier::Number((Chain::Ethereum, 2));
 
-        let block = gw.get_block(block_id, &mut conn).await.unwrap();
+        let block = gw
+            .get_block(block_id, &mut conn)
+            .await
+            .unwrap();
 
         assert_eq!(block, exp);
     }
@@ -233,7 +240,9 @@ mod test {
         let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let block = block("0xbadbabe000000000000000000000000000000000000000000000000000000000");
 
-        gw.upsert_block(block, &mut conn).await.unwrap();
+        gw.upsert_block(block, &mut conn)
+            .await
+            .unwrap();
         let retrieved_block = gw
             .get_block(BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
             .await
@@ -260,7 +269,9 @@ mod test {
             ts: "2020-01-01T00:00:00".parse().unwrap(),
         };
 
-        gw.upsert_block(block, &mut conn).await.unwrap();
+        gw.upsert_block(block, &mut conn)
+            .await
+            .unwrap();
         let retrieved_block = gw
             .get_block(BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
             .await
@@ -288,7 +299,10 @@ mod test {
         let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let exp = transaction("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945");
 
-        let tx = gw.get_tx(exp.hash.as_bytes(), &mut conn).await.unwrap();
+        let tx = gw
+            .get_tx(exp.hash.as_bytes(), &mut conn)
+            .await
+            .unwrap();
 
         assert_eq!(tx, exp);
     }
@@ -303,8 +317,13 @@ mod test {
             H256::from_str("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9")
                 .unwrap();
 
-        gw.upsert_tx(tx, &mut conn).await.unwrap();
-        let retrieved_tx = gw.get_tx(tx.hash.as_bytes(), &mut conn).await.unwrap();
+        gw.upsert_tx(tx, &mut conn)
+            .await
+            .unwrap();
+        let retrieved_tx = gw
+            .get_tx(tx.hash.as_bytes(), &mut conn)
+            .await
+            .unwrap();
 
         assert_eq!(tx, retrieved_tx);
     }
@@ -327,8 +346,13 @@ mod test {
             index: 1,
         };
 
-        gw.upsert_tx(tx, &mut conn).await.unwrap();
-        let retrieved_tx = gw.get_tx(tx.hash.as_bytes(), &mut conn).await.unwrap();
+        gw.upsert_tx(tx, &mut conn)
+            .await
+            .unwrap();
+        let retrieved_tx = gw
+            .get_tx(tx.hash.as_bytes(), &mut conn)
+            .await
+            .unwrap();
 
         assert_eq!(tx, retrieved_tx);
     }

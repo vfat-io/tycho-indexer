@@ -35,9 +35,11 @@ where
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError> {
         let h160_address = H160::from_slice(&id.1);
-        let account_orm: orm::Account = orm::Account::by_id(id, db).await.map_err(|err| {
-            StorageError::from_diesel(err, "Account", &h160_address.to_string(), None)
-        })?;
+        let account_orm: orm::Account = orm::Account::by_id(id, db)
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(err, "Account", &h160_address.to_string(), None)
+            })?;
         let version_ts = version_to_ts(&version, db).await?;
 
         let balance_query = schema::account_balance::table
@@ -50,7 +52,9 @@ where
                     .or(schema::account_balance::valid_to.is_null()),
             );
 
-        let balance = balance_query.first::<Vec<u8>>(db).await?;
+        let balance = balance_query
+            .first::<Vec<u8>>(db)
+            .await?;
         let (code, code_hash) = schema::contract_code::table
             .filter(schema::contract_code::account_id.eq(account_orm.id))
             .select((schema::contract_code::code, schema::contract_code::hash))
@@ -123,14 +127,18 @@ where
             schema::account::created_at.eq(created_ts),
             schema::account::address.eq(new.address.as_bytes()),
         ));
-        let acc_id =
-            query.returning(schema::account::id).get_result::<i64>(db).await.map_err(|err| {
+        let acc_id = query
+            .returning(schema::account::id)
+            .get_result::<i64>(db)
+            .await
+            .map_err(|err| {
                 StorageError::from_diesel(err, "Account", &new.address.to_string(), None)
             })?;
 
         // Insert initial account balances to the respective table.
         let mut balance_bytes = [0; 32];
-        new.balance.to_big_endian(&mut balance_bytes);
+        new.balance
+            .to_big_endian(&mut balance_bytes);
 
         let orm_balance = orm::NewAccountBalance {
             account_id: acc_id,
@@ -181,14 +189,16 @@ where
         let account = orm::Account::by_id(&id, conn)
             .await
             .map_err(|err| StorageError::from_diesel(err, "Account", &id.to_string(), None))?;
-        let tx = orm::Transaction::by_hash(at_tx.hash(), conn).await.map_err(|err| {
-            StorageError::from_diesel(
-                err,
-                "Account",
-                &hex::encode(at_tx.hash()),
-                Some("Transaction".to_owned()),
-            )
-        })?;
+        let tx = orm::Transaction::by_hash(at_tx.hash(), conn)
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(
+                    err,
+                    "Account",
+                    &hex::encode(at_tx.hash()),
+                    Some("Transaction".to_owned()),
+                )
+            })?;
         let block_ts = schema::block::table
             .filter(schema::block::id.eq(tx.block_id))
             .select(schema::block::ts)
@@ -261,17 +271,25 @@ where
                 .inner_join(account::table)
                 .filter(account::chain_id.eq(chain_id))
                 .filter(
-                    valid_from.le(version_ts).and(valid_to.gt(version_ts).or(valid_to.is_null())),
+                    valid_from.le(version_ts).and(
+                        valid_to
+                            .gt(version_ts)
+                            .or(valid_to.is_null()),
+                    ),
                 )
                 .order_by((account::id, slot, valid_from.desc(), ordinal.desc()))
                 .select((account::id, slot, value))
                 .distinct_on((account::id, slot))
                 .into_boxed();
             if let Some(addresses) = contracts {
-                let filter_val: HashSet<_> = addresses.iter().map(|a| a.as_bytes()).collect();
+                let filter_val: HashSet<_> = addresses
+                    .iter()
+                    .map(|a| a.as_bytes())
+                    .collect();
                 q = q.filter(account::address.eq_any(filter_val));
             }
-            q.get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn).await?
+            q.get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
+                .await?
         };
         let accounts = orm::Account::get_addresses_by_id(slots.iter().map(|(cid, _, _)| cid), conn)
             .await?
@@ -286,7 +304,10 @@ where
         slots: &[(Self::Transaction, HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        let txns: HashSet<_> = slots.iter().map(|(tx, _)| tx.hash()).collect();
+        let txns: HashSet<_> = slots
+            .iter()
+            .map(|(tx, _)| tx.hash())
+            .collect();
         let tx_ids: HashMap<Vec<u8>, (i64, i64, NaiveDateTime)> = schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::hash.eq_any(txns))
@@ -300,7 +321,11 @@ where
             .collect();
         let accounts: HashSet<_> = slots
             .iter()
-            .flat_map(|(_, contract_slots)| contract_slots.keys().map(|addr| addr.as_bytes()))
+            .flat_map(|(_, contract_slots)| {
+                contract_slots
+                    .keys()
+                    .map(|addr| addr.as_bytes())
+            })
             .collect();
         let account_ids: HashMap<Vec<u8>, i64> = schema::account::table
             .filter(schema::account::address.eq_any(accounts))
@@ -322,13 +347,15 @@ where
                 )
             })?;
             for (address, storage) in contract_storage.iter() {
-                let account_id = account_ids.get(address.as_bytes()).ok_or_else(|| {
-                    StorageError::NoRelatedEntity(
-                        "Account".into(),
-                        "ContractStorage".into(),
-                        hex::encode(address),
-                    )
-                })?;
+                let account_id = account_ids
+                    .get(address.as_bytes())
+                    .ok_or_else(|| {
+                        StorageError::NoRelatedEntity(
+                            "Account".into(),
+                            "ContractStorage".into(),
+                            hex::encode(address),
+                        )
+                    })?;
                 for (slot_ref, value_ref) in storage.iter() {
                     slot_ref.to_big_endian(&mut bytes_buffer32);
                     let slot = bytes_buffer32.to_vec();
@@ -439,7 +466,13 @@ where
         // account. On mainnet that would be at max 300 contracts/slots, which
         // although not ideal is still bearable.
         let account_addresses = schema::account::table
-            .filter(schema::account::id.eq_any(changed_values.iter().map(|(cid, _, _)| cid)))
+            .filter(
+                schema::account::id.eq_any(
+                    changed_values
+                        .iter()
+                        .map(|(cid, _, _)| cid),
+                ),
+            )
             .select((schema::account::id, schema::account::address))
             .get_results::<(i64, Vec<u8>)>(conn)
             .await
@@ -664,8 +697,12 @@ mod test {
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
-        let mut conn = AsyncPgConnection::establish(&db_url).await.unwrap();
-        conn.begin_test_transaction().await.unwrap();
+        let mut conn = AsyncPgConnection::establish(&db_url)
+            .await
+            .unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
         conn
     }
 
@@ -689,7 +726,10 @@ mod test {
         let gateway =
             PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
         let id = ContractId(Chain::Ethereum, hex::decode(acc_address).unwrap());
-        let actual = gateway.get_contract(&id, None, &mut conn).await.unwrap();
+        let actual = gateway
+            .get_contract(&id, None, &mut conn)
+            .await
+            .unwrap();
 
         assert_eq!(expected, actual);
     }
@@ -703,7 +743,9 @@ mod test {
             Chain::Ethereum,
             hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
         );
-        let result = gateway.get_contract(&contract_id, None, &mut conn).await;
+        let result = gateway
+            .get_contract(&contract_id, None, &mut conn)
+            .await;
         if let Err(StorageError::NotFound(entity, id)) = result {
             assert_eq!(entity, "Account");
             assert_eq!(id, H160::from_slice(&contract_id.1).to_string());
@@ -754,17 +796,25 @@ mod test {
         );
         let gateway =
             PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
-        gateway.add_contract(&expected, &mut conn).await.unwrap();
+        gateway
+            .add_contract(&expected, &mut conn)
+            .await
+            .unwrap();
         let contract_id = ContractId(
             Chain::Ethereum,
             hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
         );
 
-        let actual = gateway.get_contract(&contract_id, None, &mut conn).await.unwrap();
+        let actual = gateway
+            .get_contract(&contract_id, None, &mut conn)
+            .await
+            .unwrap();
 
         assert_eq!(expected, actual);
 
-        let orm_account = orm::Account::by_id(&contract_id, &mut conn).await.unwrap();
+        let orm_account = orm::Account::by_id(&contract_id, &mut conn)
+            .await
+            .unwrap();
         let (block_ts, _tx_ts) = schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::id.eq(txn[1]))
@@ -789,7 +839,9 @@ mod test {
         let id = ContractId(Chain::Ethereum, address_bytes.clone());
         let gw = EvmGateway::from_connection(&mut conn).await;
         let tx = evm::Transaction {
-            hash: deletion_txhash.parse().expect("txhash ok"),
+            hash: deletion_txhash
+                .parse()
+                .expect("txhash ok"),
             ..Default::default()
         };
         let (block_id, block_ts) = schema::block::table
@@ -799,7 +851,9 @@ mod test {
             .expect("blockquery succeeded");
         fixtures::insert_txns(&mut conn, &[(block_id, 12, deletion_txhash)]).await;
 
-        gw.delete_contract(id, &tx, &mut conn).await.unwrap();
+        gw.delete_contract(id, &tx, &mut conn)
+            .await
+            .unwrap();
 
         let res = schema::account::table
             .inner_join(schema::account_balance::table)
@@ -959,7 +1013,9 @@ mod test {
 
         let gw = EvmGateway::from_connection(&mut conn).await;
 
-        gw.upsert_slots(&input_slots, &mut conn).await.unwrap();
+        gw.upsert_slots(&input_slots, &mut conn)
+            .await
+            .unwrap();
 
         // Query the stored slots from the database
         let stored_slots: Vec<(Vec<u8>, Option<Vec<u8>>)> = schema::contract_storage::table
@@ -971,7 +1027,9 @@ mod test {
         let mut fetched_slot_data: HashMap<U256, U256> = HashMap::new();
         for (slot, value) in stored_slots.into_iter() {
             let slot_ = U256::from_big_endian(&slot);
-            let value_ = value.map(|v| U256::from_big_endian(&v)).unwrap_or_else(U256::zero);
+            let value_ = value
+                .map(|v| U256::from_big_endian(&v))
+                .unwrap_or_else(U256::zero);
             fetched_slot_data.insert(slot_, value_);
         }
         assert_eq!(slot_data, fetched_slot_data);
@@ -1068,10 +1126,14 @@ mod test {
             .get_slots_delta(
                 Chain::Ethereum,
                 Some(BlockOrTimestamp::Timestamp(
-                    "2020-01-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
+                    "2020-01-01T00:00:00"
+                        .parse::<NaiveDateTime>()
+                        .unwrap(),
                 )),
                 BlockOrTimestamp::Timestamp(
-                    "2020-01-01T02:00:00".parse::<NaiveDateTime>().unwrap(),
+                    "2020-01-01T02:00:00"
+                        .parse::<NaiveDateTime>()
+                        .unwrap(),
                 ),
                 &mut conn,
             )
@@ -1098,10 +1160,14 @@ mod test {
             .get_slots_delta(
                 Chain::Ethereum,
                 Some(BlockOrTimestamp::Timestamp(
-                    "2020-01-01T02:00:00".parse::<NaiveDateTime>().unwrap(),
+                    "2020-01-01T02:00:00"
+                        .parse::<NaiveDateTime>()
+                        .unwrap(),
                 )),
                 BlockOrTimestamp::Timestamp(
-                    "2020-01-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
+                    "2020-01-01T00:00:00"
+                        .parse::<NaiveDateTime>()
+                        .unwrap(),
                 ),
                 &mut conn,
             )
@@ -1204,7 +1270,9 @@ mod test {
         .collect();
         let gw = EvmGateway::from_connection(&mut conn).await;
 
-        gw.revert_contract_state(BlockIdentifier::Hash(block1_hash), &mut conn).await.unwrap();
+        gw.revert_contract_state(BlockIdentifier::Hash(block1_hash), &mut conn)
+            .await
+            .unwrap();
 
         let slots: HashMap<U256, U256> = schema::contract_storage::table
             .inner_join(schema::account::table)
@@ -1217,7 +1285,9 @@ mod test {
             .map(|(k, v)| {
                 (
                     U256::from_big_endian(k),
-                    v.as_ref().map(|rv| U256::from_big_endian(rv)).unwrap_or_else(U256::zero),
+                    v.as_ref()
+                        .map(|rv| U256::from_big_endian(rv))
+                        .unwrap_or_else(U256::zero),
                 )
             })
             .collect();
