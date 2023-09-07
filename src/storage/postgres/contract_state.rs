@@ -179,6 +179,7 @@ where
         chain: Chain,
         ids: Option<&[&[u8]]>,
         version: Option<&Version>,
+        include_slots: bool,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::ContractState>, StorageError> {
         let chain_id = self.get_chain_id(chain);
@@ -228,7 +229,6 @@ where
                 .get_results::<orm::AccountBalance>(conn)
                 .await?
         };
-
         let codes = {
             use schema::contract_code::dsl::*;
             contract_code
@@ -247,17 +247,16 @@ where
                 .await?
         };
 
-        // retrieve txhashes
+        // Separately retrieve txhashes.
+        // Note: this can probably be avoided if we do a left join on
+        // transaction when retrieving accounts and a retrieve the corrsponding
+        // code and balance tx hashes with the queries above as they are already
+        // joined with the transaction table.
         let tx_ids: HashSet<i64> = accounts
             .iter()
             .filter_map(|a| a.creation_tx)
             .chain(codes.iter().map(|c| c.modify_tx))
-            // TODO: make balance.modify_tx not nullable
-            .chain(
-                balances
-                    .iter()
-                    .map(|b| b.modify_tx.unwrap()),
-            )
+            .chain(balances.iter().map(|b| b.modify_tx))
             .collect();
 
         let txn_hashes: HashMap<i64, Vec<u8>> = {
@@ -271,13 +270,31 @@ where
                 .collect()
         };
 
-        // TODO: before zipping we should assert that the lengths match!
+        let slots = if include_slots {
+            Some(
+                self.get_contract_slots(chain, ids, version, conn)
+                    .await?,
+            )
+        } else {
+            None
+        };
+
+        if !(accounts.len() == balances.len() && balances.len() == codes.len()) {
+            return Err(StorageError::Unexpected(format!(
+                "Some accounts were missing either code or balance entities. \
+                    Got {} accounts {} balances and {} code entries.",
+                accounts.len(),
+                balances.len(),
+                codes.len()
+            )))
+        }
+
         accounts
             .into_iter()
             .zip(balances.into_iter().zip(codes))
             .map(|(account, (balance, code))| -> Result<Self::ContractState, StorageError> {
                 if !(account.id == balance.account_id && balance.account_id == code.account_id) {
-                    return Err(StorageError::DecodeError(format!(
+                    return Err(StorageError::Unexpected(format!(
                         "Identity mismatch - while retrieving entries for account id: {} \
                             encountered balance for id {} and code for id {}",
                         &account.id, &balance.account_id, &code.account_id
@@ -285,24 +302,22 @@ where
                 }
 
                 let balance_tx = txn_hashes
-                    .get(
-                        &balance
-                            .modify_tx
-                            .expect("balance tx not null"),
-                    )
+                    .get(&balance.modify_tx)
                     .ok_or_else(|| {
-                        StorageError::DecodeError(format!(
-                            "Could not find balance transaction for 0x{}",
-                            hex::encode(&account.address)
-                        ))
+                        StorageError::NoRelatedEntity(
+                            "Transaction".to_owned(),
+                            "Balance".to_owned(),
+                            hex::encode(&account.address),
+                        )
                     })?;
                 let code_tx = txn_hashes
                     .get(&code.modify_tx)
                     .ok_or_else(|| {
-                        StorageError::DecodeError(format!(
-                            "Could not find code transaction for 0x{}",
-                            hex::encode(&account.address)
-                        ))
+                        StorageError::NoRelatedEntity(
+                            "Transaction".to_owned(),
+                            "ContractCode".to_owned(),
+                            hex::encode(&account.address),
+                        )
                     })?;
                 let creation_tx = account
                     .creation_tx
@@ -311,23 +326,31 @@ where
                         txn_hashes
                             .get(tx_id)
                             .ok_or_else(|| {
-                                StorageError::DecodeError(format!(
-                                    "Could not find creation transaction for 0x{}",
-                                    hex::encode(&account.address)
-                                ))
+                                StorageError::NoRelatedEntity(
+                                    "Transaction".to_owned(),
+                                    "Account".to_owned(),
+                                    hex::encode(&account.address),
+                                )
                             })
                             .ok()
                     });
 
                 let contract_orm = orm::Contract { account, balance, code };
 
-                let contract = Self::ContractState::from_storage(
+                let mut contract = Self::ContractState::from_storage(
                     contract_orm,
                     self.get_chain(chain_id),
                     balance_tx,
                     code_tx,
                     creation_tx.map(|h| h.as_slice()),
                 );
+
+                if let Some(storage) = &slots {
+                    if let Some(contract_slots) = storage.get(contract.address()) {
+                        contract.set_store(contract_slots)?;
+                    }
+                }
+
                 Ok(contract)
             })
             .collect()
@@ -895,7 +918,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_get_account() {
+    async fn test_get_contract() {
         let mut conn = setup_db().await;
         let acc_address = setup_account(&mut conn).await;
         let code_bytes = hex::decode("1234").unwrap();
@@ -925,6 +948,20 @@ mod test {
             .unwrap();
 
         assert_eq!(expected, actual);
+    }
+
+    #[tokio::test]
+    async fn test_get_contracts() {
+        let mut conn = setup_db().await;
+        setup_account(&mut conn).await;
+        let gw = EvmGateway::from_connection(&mut conn).await;
+
+        let results = gw
+            .get_contracts(Chain::Ethereum, None, None, true, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1)
     }
 
     #[tokio::test]

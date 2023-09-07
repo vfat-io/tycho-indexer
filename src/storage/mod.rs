@@ -498,6 +498,7 @@ pub trait ContractStateGateway {
         chain: Chain,
         ids: Option<&[&[u8]]>,
         version: Option<&Version>,
+        include_slots: bool,
         db: &mut Self::DB,
     ) -> Result<Vec<Self::ContractState>, StorageError>;
 

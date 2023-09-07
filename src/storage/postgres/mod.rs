@@ -464,7 +464,7 @@ pub mod db_fixtures {
         let data = [
             (
                 b0,
-                None,
+                tx_id,
                 "2022-11-01T09:00:00"
                     .parse::<chrono::NaiveDateTime>()
                     .unwrap(),
@@ -476,7 +476,7 @@ pub mod db_fixtures {
             ),
             (
                 b1,
-                Some(tx_id),
+                tx_id,
                 "2022-11-01T09:20:00"
                     .parse::<chrono::NaiveDateTime>()
                     .unwrap(),
