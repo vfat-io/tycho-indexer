@@ -31,7 +31,7 @@ where
     async fn get_contract(
         &self,
         id: &ContractId,
-        version: &Option<BlockOrTimestamp>,
+        version: &Option<&BlockOrTimestamp>,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError> {
         let h160_address = H160::from_slice(&id.address);
@@ -256,7 +256,7 @@ where
                     kind
                 )));
             }
-            version_to_ts(&Some(version), conn).await?
+            version_to_ts(&Some(&version), conn).await?
         } else {
             Utc::now().naive_utc()
         };
@@ -375,7 +375,7 @@ where
     async fn get_slots_delta(
         &self,
         chain: Chain,
-        start_version: Option<BlockOrTimestamp>,
+        start_version: Option<&BlockOrTimestamp>,
         target_version: BlockOrTimestamp,
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError> {
@@ -383,7 +383,7 @@ where
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
         let start_version_ts = version_to_ts(&start_version, conn).await?;
-        let target_version_ts = version_to_ts(&Some(target_version), conn).await?;
+        let target_version_ts = version_to_ts(&Some(&target_version), conn).await?;
 
         let changed_values = if start_version_ts <= target_version_ts {
             // Going forward
@@ -646,7 +646,7 @@ fn parse_u256_slot_entry(
 /// schema this means, that there were no changes detected at that block, but
 /// there might have been on previous or in later blocks.
 async fn version_to_ts(
-    start_version: &Option<BlockOrTimestamp>,
+    start_version: &Option<&BlockOrTimestamp>,
     conn: &mut AsyncPgConnection,
 ) -> Result<NaiveDateTime, StorageError> {
     match &start_version {
@@ -1106,7 +1106,7 @@ mod test {
         let res = gw
             .get_slots_delta(
                 Chain::Ethereum,
-                Some(BlockOrTimestamp::Timestamp(
+                Some(&BlockOrTimestamp::Timestamp(
                     "2020-01-01T00:00:00".parse::<NaiveDateTime>().unwrap(),
                 )),
                 BlockOrTimestamp::Timestamp(
@@ -1136,7 +1136,7 @@ mod test {
         let res = gw
             .get_slots_delta(
                 Chain::Ethereum,
-                Some(BlockOrTimestamp::Timestamp(
+                Some(&BlockOrTimestamp::Timestamp(
                     "2020-01-01T02:00:00".parse::<NaiveDateTime>().unwrap(),
                 )),
                 BlockOrTimestamp::Timestamp(

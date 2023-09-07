@@ -22,10 +22,8 @@ impl RequestHandler {
     async fn get_state(&mut self, request: &StateRequestBody) -> StateRequestResponse {
         //TODO: handle when no contract is specified with filters
         let at = match &request.version.block {
-            Some(b) => Some(BlockOrTimestamp::Block(BlockIdentifier::Hash(
-                b.hash.clone(),
-            ))),
-            None => Some(BlockOrTimestamp::Timestamp(request.version.timestamp)),
+            Some(b) => BlockOrTimestamp::Block(BlockIdentifier::Hash(b.hash.clone())),
+            None => BlockOrTimestamp::Timestamp(request.version.timestamp),
         };
 
         let mut accounts: Vec<Account> = Vec::new();
@@ -34,7 +32,7 @@ impl RequestHandler {
             for contract_id in contract_ids {
                 match self
                     .db_gw
-                    .get_contract(contract_id, &at, &mut self.db_connection)
+                    .get_contract(contract_id, &Some(&at), &mut self.db_connection)
                     .await
                 {
                     Ok(contract_state) => accounts.push(contract_state),

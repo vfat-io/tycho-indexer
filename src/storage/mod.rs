@@ -502,7 +502,7 @@ pub trait ContractStateGateway {
     async fn get_contract(
         &self,
         id: &ContractId,
-        version: &Option<BlockOrTimestamp>,
+        version: &Option<&BlockOrTimestamp>,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError>;
 
@@ -614,7 +614,7 @@ pub trait ContractStateGateway {
     async fn get_slots_delta(
         &self,
         id: Chain,
-        start_version: Option<BlockOrTimestamp>,
+        start_version: Option<&BlockOrTimestamp>,
         end_version: BlockOrTimestamp,
         db: &mut Self::DB,
     ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError>;
