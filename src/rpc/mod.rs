@@ -11,6 +11,7 @@ use chrono::Utc;
 use diesel_async::AsyncPgConnection;
 use serde::Deserialize;
 use thiserror::Error;
+use tracing::error;
 
 pub mod deserialization_helpers;
 struct RequestHandler {
@@ -37,7 +38,7 @@ impl RequestHandler {
                 {
                     Ok(contract_state) => accounts.push(contract_state),
                     Err(e) => {
-                        print!("Error while getting contract state {}", e)
+                        error!("Error while getting contract state {}", e)
                     }
                 }
             }
