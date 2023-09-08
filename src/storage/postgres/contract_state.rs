@@ -5,6 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
+use diesel::upsert::on_constraint;
 use diesel_async::RunQueryDsl;
 use ethers::types::{H160, H256, U256};
 
@@ -158,7 +159,15 @@ where
                 schema::transaction::index.desc(),
             ))
             .first::<(Vec<u8>, orm::AccountBalance)>(db)
-            .await?;
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(
+                    err,
+                    "AccountBalance",
+                    &hex::encode(&id.address),
+                    Some("Account".to_owned()),
+                )
+            })?;
 
         let (code_tx, code_orm) = schema::contract_code::table
             .inner_join(schema::transaction::table)
@@ -176,7 +185,15 @@ where
                 schema::transaction::index.desc(),
             ))
             .first::<(Vec<u8>, orm::ContractCode)>(db)
-            .await?;
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(
+                    err,
+                    "ContractCode",
+                    &hex::encode(&id.address),
+                    Some("Account".to_owned()),
+                )
+            })?;
 
         let creation_tx = match account_orm.creation_tx {
             Some(tx) => schema::transaction::table
@@ -347,7 +364,30 @@ where
             .collect()
     }
 
-    async fn add_contract(
+    /// # Upserts a Contract
+    ///
+    /// This function tries to upsert a contract and its related entries in child
+    /// tables (`account_balance`, `contract_code`).
+    ///
+    /// ## Important Consideration:
+    ///
+    /// When a new insertion attempt is made, it's possible that the data already
+    /// exists or only part of the data has been updated. In such cases, if any
+    /// insertion would lead to duplication, it will be ignored by our database
+    /// design (i.e., the existing data remains unchanged).
+    ///
+    /// To recognize duplicates or new entries, we use a unique constraint on both
+    /// `account_id` and `modify_tx`. This approach allows only one change per
+    /// account and transaction.
+    ///
+    /// To ensure this behavior and support upserts on versioned tables, we have
+    /// implemented an *AFTER INSERT* trigger. This trigger updates the `valid_to`
+    /// column but only after a successful insert. The need for this strategy comes
+    /// from the fact that a *BEFORE INSERT* trigger would update the row even if
+    /// the subsequent insertion were to fail.
+    ///
+    /// Please refer to the interface documentation for more detailed information.
+    async fn upsert_contract(
         &self,
         new: &Self::ContractState,
         db: &mut Self::DB,
@@ -384,12 +424,31 @@ where
 
         let new_contract = new.to_storage(chain_id, created_ts, creation_tx_id);
         let hex_addr = hex::encode(new.address());
-        let account_id = diesel::insert_into(schema::account::table)
+
+        let account_created = diesel::insert_into(schema::account::table)
             .values(new_contract.new_account())
+            .on_conflict(on_constraint("account_chain_id_address_key"))
+            .do_nothing()
             .returning(schema::account::id)
             .get_result::<i64>(db)
             .await
+            .optional()
             .map_err(|err| StorageError::from_diesel(err, "Account", &hex_addr, None))?;
+
+        let account_id = if let Some(id) = account_created {
+            id
+        } else {
+            // we had an update and we need to retrieve the updated id. cause
+            // the returning clause returns an empty set if nothing was updated.
+            // We do not want to make a noop update as this might cause db side
+            // triggers to fire unnecessarily.
+            schema::account::table
+                .filter(schema::account::address.eq(new.address()))
+                .filter(schema::account::chain_id.eq(chain_id))
+                .select(schema::account::id)
+                .first::<i64>(db)
+                .await?
+        };
 
         let (balance_modify_tx_id, balance_modify_ts) = tx_data
             .get(new.balance_modify_tx())
@@ -402,6 +461,8 @@ where
             })?;
         diesel::insert_into(schema::account_balance::table)
             .values(new_contract.new_balance(account_id, *balance_modify_tx_id, *balance_modify_ts))
+            .on_conflict(on_constraint("account_balance_account_id_modify_tx_key"))
+            .do_nothing()
             .execute(db)
             .await
             .map_err(|err| StorageError::from_diesel(err, "AccountBalance", &hex_addr, None))?;
@@ -417,6 +478,8 @@ where
             })?;
         diesel::insert_into(schema::contract_code::table)
             .values(new_contract.new_code(account_id, *code_modify_tx_id, *code_modify_ts))
+            .on_conflict(on_constraint("contract_code_account_id_modify_tx_key"))
+            .do_nothing()
             .execute(db)
             .await
             .map_err(|err| StorageError::from_diesel(err, "ContractCode", &hex_addr, None))?;
@@ -921,7 +984,7 @@ mod test {
         conn
     }
 
-    async fn setup_revert(conn: &mut AsyncPgConnection) {
+    async fn setup_data(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
         let txn = db_fixtures::insert_txns(
@@ -1013,7 +1076,7 @@ mod test {
     #[tokio::test]
     async fn test_get_contract() {
         let mut conn = setup_db().await;
-        setup_revert(&mut conn).await;
+        setup_data(&mut conn).await;
         let acc_address = "6B175474E89094C44Da98b954EedeAC495271d0F";
         let code_bytes = hex::decode("C0C0C0").unwrap();
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code_bytes));
@@ -1219,7 +1282,7 @@ mod test {
         #[case] exp: Vec<evm::Account>,
     ) {
         let mut conn = setup_db().await;
-        setup_revert(&mut conn).await;
+        setup_data(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
         let addresses = ids.as_ref().map(|outer| {
             outer
@@ -1302,7 +1365,7 @@ mod test {
         let gateway = EvmGateway::from_connection(&mut conn).await;
 
         gateway
-            .add_contract(&expected, &mut conn)
+            .upsert_contract(&expected, &mut conn)
             .await
             .unwrap();
 
@@ -1330,12 +1393,69 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_upsert_contract() {}
+    async fn test_upsert_contract() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw: PostgresGateway<evm::Block, evm::Transaction, Account> =
+            EvmGateway::from_connection(&mut conn).await;
+        let modfiy_txhash = "0x62f4d4f29d10db8722cb66a2adb0049478b11988c8b43cd446b755afb8954678";
+        let block = orm::Block::by_number(Chain::Ethereum, 2, &mut conn)
+            .await
+            .expect("block found");
+        db_fixtures::insert_txns(&mut conn, &[(block.id, 100, modfiy_txhash)]).await;
+        let mut account = account_c1(2);
+        account.set_balance(
+            U256::from(10000),
+            modfiy_txhash
+                .parse()
+                .expect("valid txhash"),
+        );
+        let contract_id = ContractId::new(Chain::Ethereum, account.address().to_vec());
+
+        gw.upsert_contract(&account, &mut conn)
+            .await
+            .expect("upsert success");
+
+        // ensure we did not modify code and the current version remains valid
+        let code_versions =
+            orm::ContractCode::all_versions(contract_id.address.as_slice(), &mut conn)
+                .await
+                .expect("fetch code versions ok");
+        assert_eq!(code_versions.len(), 1);
+        assert_eq!(
+            code_versions
+                .iter()
+                .filter(|v| v.valid_to.is_none())
+                .count(),
+            1
+        );
+        // ensure we modified balance and there is 1 currently valid version
+        let balance_versions =
+            orm::AccountBalance::all_versions(contract_id.address.as_slice(), &mut conn)
+                .await
+                .expect("fetch balance version ok");
+        assert_eq!(balance_versions.len(), 2);
+        assert_eq!(
+            balance_versions
+                .iter()
+                .filter(|v| v.valid_to.is_none())
+                .count(),
+            1
+        );
+        // ensure we can still get the contract as usual
+        // get contract used below to compare does not include slots
+        account.slots = HashMap::new();
+        let updated = gw
+            .get_contract(&contract_id, &None, &mut conn)
+            .await
+            .expect("updated in db");
+        assert_eq!(updated, account);
+    }
 
     #[tokio::test]
     async fn test_delete_contract() {
         let mut conn = setup_db().await;
-        setup_revert(&mut conn).await;
+        setup_data(&mut conn).await;
         let address = "6B175474E89094C44Da98b954EedeAC495271d0F";
         let deletion_tx = "36984d97c02a98614086c0f9e9c4e97f7e0911f6f136b3c8a76d37d6d524d1e5";
         let address_bytes = hex::decode(address).expect("address ok");
@@ -1458,7 +1578,7 @@ mod test {
         #[case] exp: AccountToContractStore,
     ) {
         let mut conn = setup_db().await;
-        setup_revert(&mut conn).await;
+        setup_data(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
 
         let addresses_slice = addresses.as_ref().map(|outer| {
@@ -1653,7 +1773,7 @@ mod test {
     #[tokio::test]
     async fn test_revert() {
         let mut conn = setup_db().await;
-        setup_revert(&mut conn).await;
+        setup_data(&mut conn).await;
         let block1_hash =
             H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
                 .unwrap()

@@ -631,7 +631,7 @@ pub trait ContractStateGateway {
     ///
     /// # Parameters
     /// - `new` the new contract state to be saved.
-    async fn add_contract(
+    async fn upsert_contract(
         &self,
         new: &Self::ContractState,
         db: &mut Self::DB,
