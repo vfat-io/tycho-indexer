@@ -49,7 +49,7 @@ use chrono::NaiveDateTime;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::models::{Chain, ExtractionState, ProtocolSystem, ProtocolType};
+use crate::models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem};
 
 /// Identifies a block in storage.
 #[derive(Debug)]
@@ -189,7 +189,7 @@ pub trait ChainGateway {
     ///
     /// # Returns
     /// - Empty ok result indicates success. Failure might occur if the block is already present.
-    async fn upsert_block(&self, new: Self::Block, db: &mut Self::DB) -> Result<(), StorageError>;
+    async fn upsert_block(&self, new: &Self::Block, db: &mut Self::DB) -> Result<(), StorageError>;
     /// Retrieves a block from storage.
     ///
     /// # Parameters
@@ -199,7 +199,7 @@ pub trait ChainGateway {
     /// - An Ok result containing the block. Might fail if the block does not exist yet.
     async fn get_block(
         &self,
-        id: BlockIdentifier,
+        id: &BlockIdentifier,
         db: &mut Self::DB,
     ) -> Result<Self::Block, StorageError>;
     /// Upserts a transaction to storage.
@@ -216,7 +216,7 @@ pub trait ChainGateway {
     /// exists.
     async fn upsert_tx(
         &self,
-        new: Self::Transaction,
+        new: &Self::Transaction,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -339,33 +339,6 @@ pub trait StorableToken<S, N, DbId> {
     fn contract_id(&self) -> ContractId;
 }
 
-pub trait StorableProtocolComponent<S, N, T, DbId> {
-    fn from_storage(
-        val: S,
-        tokens: Vec<T>,
-        contracts: Vec<ContractId>,
-        system: ProtocolSystem,
-        protocol_type: ProtocolType,
-    ) -> Self;
-
-    fn to_storage(
-        &self,
-        tokens: Vec<DbId>,
-        contracts: Vec<DbId>,
-        chain: DbId,
-        system: DbId,
-        protocol_type: DbId,
-    ) -> N;
-
-    fn chain(&self) -> Chain;
-
-    fn contracts(&self) -> Vec<ContractId>;
-
-    fn tokens(&self) -> Vec<Vec<u8>>;
-
-    fn system(&self) -> ProtocolSystem;
-}
-
 /// Store and retrieve protocol related structs.
 ///
 /// This trait defines how to retrieve protocol components, state as well as
@@ -374,7 +347,6 @@ pub trait StorableProtocolComponent<S, N, T, DbId> {
 pub trait ProtocolGateway {
     type DB;
     type Token;
-    type ProtocolComponent;
     // TODO: at this later type ProtocolState;
 
     /// Retrieve ProtocolComponent from the db
@@ -391,7 +363,7 @@ pub trait ProtocolGateway {
         chain: Chain,
         system: Option<ProtocolSystem>,
         ids: Option<&[&str]>,
-    ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
+    ) -> Result<Vec<ProtocolComponent>, StorageError>;
 
     /// Stores new found ProtocolComponents.
     ///
@@ -406,7 +378,7 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
     /// - component with same is id already present.
-    async fn upsert_components(&self, new: &[Self::ProtocolComponent]) -> Result<(), StorageError>;
+    async fn upsert_components(&self, new: &[&ProtocolComponent]) -> Result<(), StorageError>;
 
     /// Retrieve protocol component states
     ///
@@ -462,15 +434,40 @@ pub trait ProtocolGateway {
     /// # Return
     /// Ok if all tokens could be inserted, Err if at least one token failed to
     /// insert.
-    async fn add_tokens(&self, chain: Chain, token: &[Self::Token]) -> Result<(), StorageError>;
+    async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError>;
 }
 
-pub trait StorableContract<S, N, DbId> {
-    fn from_storage(val: S) -> Self;
+/// A binary key value store for an account
+type ContractStore = HashMap<Vec<u8>, Option<Vec<u8>>>;
+/// Multiple key values stores grouped by account address
+type AccountToContractStore = HashMap<Vec<u8>, ContractStore>;
+/// A set of changes to stores, grouped by the modifying transaction
+type SlotChangeSet<'a, T> = &'a [(T, AccountToContractStore)];
 
-    fn to_storage(&self, chain_id: DbId) -> N;
+pub trait StorableContract<S, N, DbId>: Send + Sync + 'static {
+    fn from_storage(
+        val: S,
+        chain: Chain,
+        balance_modify_tx: &[u8],
+        code_modify_tx: &[u8],
+        creation_tx: Option<&[u8]>,
+    ) -> Self;
 
-    fn chain() -> Chain;
+    fn to_storage(&self, chain_id: DbId, creation_ts: NaiveDateTime, tx_id: Option<DbId>) -> N;
+
+    fn chain(&self) -> Chain;
+
+    fn creation_tx(&self) -> Option<&[u8]>;
+
+    fn address(&self) -> &[u8];
+
+    fn balance_modify_tx(&self) -> &[u8];
+
+    fn code_modify_tx(&self) -> &[u8];
+
+    fn store(&self) -> ContractStore;
+
+    fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
 }
 
 /// Manage contracts and their state in storage.
@@ -481,9 +478,6 @@ pub trait ContractStateGateway {
     type DB;
     type Transaction;
     type ContractState;
-    type Address;
-    type Slot;
-    type Value;
 
     /// Get a contracts state from storage
     ///
@@ -509,7 +503,7 @@ pub trait ContractStateGateway {
         &self,
         new: &Self::ContractState,
         db: &mut Self::DB,
-    ) -> Result<i64, StorageError>;
+    ) -> Result<(), StorageError>;
 
     /// Mark a contract as deleted
     ///
@@ -528,7 +522,7 @@ pub trait ContractStateGateway {
     ///  - Contract was already deleted.
     async fn delete_contract(
         &self,
-        id: ContractId,
+        id: &ContractId,
         at_tx: &Self::Transaction,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
@@ -549,10 +543,10 @@ pub trait ContractStateGateway {
     async fn get_contract_slots(
         &self,
         chain: Chain,
-        contracts: Option<&[Self::Address]>,
-        at: Option<Version>,
+        contracts: Option<&[&[u8]]>,
+        at: Option<&Version>,
         db: &mut Self::DB,
-    ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError>;
+    ) -> Result<AccountToContractStore, StorageError>;
 
     /// Upserts slots for a given contract.
     ///
@@ -571,7 +565,7 @@ pub trait ContractStateGateway {
     /// transactions or accounts is not or not yet persisted.
     async fn upsert_slots(
         &self,
-        slots: &[(Self::Transaction, HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>)],
+        slots: SlotChangeSet<'_, Self::Transaction>,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
     /// Retrieve a slot delta between two versions
@@ -601,9 +595,9 @@ pub trait ContractStateGateway {
         &self,
         id: Chain,
         start_version: Option<&BlockOrTimestamp>,
-        end_version: BlockOrTimestamp,
+        end_version: &BlockOrTimestamp,
         db: &mut Self::DB,
-    ) -> Result<HashMap<Self::Address, HashMap<Self::Slot, Self::Value>>, StorageError>;
+    ) -> Result<AccountToContractStore, StorageError>;
 
     /// Reverts the contract in storage to a previous version.
     ///
@@ -619,7 +613,7 @@ pub trait ContractStateGateway {
     /// - `to` The version to revert to. Given a block uses VersionKind::Last behaviour.
     async fn revert_contract_state(
         &self,
-        to: BlockIdentifier,
+        to: &BlockIdentifier,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 }
@@ -634,16 +628,5 @@ pub trait StateGateway<DB, TX>:
 {
 }
 
-pub type StateGatewayType<DB, B, TX, T, P, C, A, S, V> = Arc<
-    dyn StateGateway<
-        DB,
-        TX,
-        Block = B,
-        Token = T,
-        ProtocolComponent = P,
-        ContractState = C,
-        Address = A,
-        Slot = S,
-        Value = V,
-    >,
->;
+pub type StateGatewayType<DB, B, TX, T, C> =
+    Arc<dyn StateGateway<DB, TX, Block = B, Token = T, ContractState = C>>;

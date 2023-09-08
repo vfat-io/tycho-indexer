@@ -16,7 +16,7 @@ use thiserror::Error;
 use tracing::error;
 
 struct RequestHandler {
-    db_gw: PostgresGateway<evm::Block, evm::Transaction>,
+    db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account>,
     db_connection: AsyncPgConnection,
 }
 
@@ -249,7 +249,7 @@ mod tests {
         let acc_address = "6B175474E89094C44Da98b954EedeAC495271d0F";
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
-        db_fixtures::insert_txns(
+        let tid = db_fixtures::insert_txns(
             conn,
             &[
                 (
@@ -265,11 +265,6 @@ mod tests {
             ],
         )
         .await;
-
-        let addr = hex::encode(H256::random().as_bytes());
-        let tx_data = [(blk[1], 1234, addr.as_str())];
-        let tid = db_fixtures::insert_txns(conn, &tx_data).await;
-
         // Insert account and balances
         let acc_id =
             db_fixtures::insert_account(conn, acc_address, "account0", chain_id, None).await;
@@ -292,7 +287,10 @@ mod tests {
         let acc_address = setup_account(&mut conn).await;
 
         let db_gtw =
-            PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+            PostgresGateway::<evm::Block, evm::Transaction, evm::Account>::from_connection(
+                &mut conn,
+            )
+            .await;
         let mut req_handler = RequestHandler { db_gw: db_gtw, db_connection: conn };
 
         let code = hex::decode("1234").unwrap();
@@ -305,7 +303,12 @@ mod tests {
             U256::from(100),
             code,
             code_hash,
-            H256::zero(),
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+                .parse()
+                .unwrap(),
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+                .parse()
+                .unwrap(),
             None,
         );
 

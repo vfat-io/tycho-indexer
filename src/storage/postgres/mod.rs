@@ -246,15 +246,21 @@ impl StorageError {
     }
 }
 
-pub struct PostgresGateway<B, TX> {
+pub struct PostgresGateway<B, TX, A> {
     chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
+    _phantom_acc: PhantomData<A>,
 }
 
-impl<B, TX> PostgresGateway<B, TX> {
+impl<B, TX, A> PostgresGateway<B, TX, A> {
     pub fn new(cache: Arc<ChainEnumCache>) -> Self {
-        Self { chain_id_cache: cache, _phantom_block: PhantomData, _phantom_tx: PhantomData }
+        Self {
+            chain_id_cache: cache,
+            _phantom_block: PhantomData,
+            _phantom_tx: PhantomData,
+            _phantom_acc: PhantomData,
+        }
     }
 
     #[allow(clippy::needless_pass_by_ref_mut)]
@@ -481,7 +487,7 @@ pub mod db_fixtures {
             .iter()
             .map(|(b, t, valid_from, valid_to)| orm::NewAccountBalance {
                 account_id,
-                balance: b.to_vec(),
+                balance: b.as_slice(),
                 modify_tx: *t,
                 valid_from: *valid_from,
                 valid_to: *valid_to,
