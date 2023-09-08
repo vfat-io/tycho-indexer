@@ -76,6 +76,19 @@ cd ../..
 RUST_LOG=info ./target/debug/tycho-indexer --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.2.0.spkg
 ```
 
+### Protobuf
+
+We use protobuf mainly to communicate with substreams. You can use the [language support extension](https://marketplace.visualstudio.com/items?itemName=pbkit.vscode-pbkit) and for formatting use the [buf extension for VS Code](https://marketplace.visualstudio.com/items?itemName=bufbuild.vscode-buf).
+
+1. To communicate with substreams, we always want to use their latest protobuf images. Usually the sf module is already committed but in case there was an update we can pull the latest version into the repo with:
+```
+buf export buf.build/streamingfast/substreams -o ./proto
+```
+2. Now that we have all our protobuf modules together we can generate the respective Rust code for them:
+```
+buf generate 
+```
+
 ### Postgres & Diesel
 1. If you are on a mac, you might need to install postgres library first and add it to the library path:
 ```bash

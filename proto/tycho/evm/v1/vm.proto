@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package tycho.evm.state.v1;
+package tycho.evm.v1;
 
 message Block {
   bytes hash = 1;
