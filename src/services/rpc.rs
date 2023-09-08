@@ -270,7 +270,7 @@ mod tests {
         let acc_id =
             db_fixtures::insert_account(conn, acc_address, "account0", chain_id, None).await;
 
-        db_fixtures::insert_account_balances(conn, tid[0], acc_id).await;
+        db_fixtures::insert_account_balance(conn, 100, tid[0], acc_id).await;
         let contract_code = hex::decode("1234").unwrap();
         db_fixtures::insert_contract_code(conn, acc_id, tid[0], contract_code).await;
         acc_address.to_string()

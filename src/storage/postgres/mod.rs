@@ -297,7 +297,7 @@ pub mod db_fixtures {
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
 
-    use super::{orm, schema};
+    use super::schema;
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {

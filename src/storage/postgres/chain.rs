@@ -183,8 +183,6 @@ mod test {
 
     type EVMGateway = PostgresGateway<evm::Block, evm::Transaction, evm::Account>;
 
-    use diesel_async::AsyncConnection;
-
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
         let mut conn = AsyncPgConnection::establish(&db_url)
