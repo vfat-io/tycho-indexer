@@ -107,7 +107,7 @@ diesel migration run
 cargo check --all
 cargo test --all --all-features
 cargo +nightly fmt -- --check
-cargo +nightly clippy --all --all-features -- -D warnings
+cargo +nightly clippy --all --all-features --all-targets -- -D warnings
 ```
 
 We are using the stable toolchain for building and testing, but the nightly toolchain for formatting and linting, as it allows us to use the latest features of rustfmt and clippy.
