@@ -43,7 +43,7 @@ pub mod postgres;
 
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use crate::rpc::deserialization_helpers::{chain_from_str, hex_to_bytes};
+use crate::services::deserialization_helpers::{chain_from_str, hex_to_bytes};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use serde::Deserialize;
