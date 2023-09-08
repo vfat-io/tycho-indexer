@@ -5,9 +5,9 @@ package:
 
 protobuf:
   files:
-    - storage_diff.proto
+    - vm.proto
   importPaths:
-    - ./proto
+    - ../../proto/evm
 
 binaries:
   default:
