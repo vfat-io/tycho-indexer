@@ -2,41 +2,41 @@ syntax = "proto3";
 
 package tycho.evm.state.v1;
 
-message Block{
-    bytes hash = 1;
-    bytes parent_hash = 2;
-    uint64 number = 3;
-    uint64 ts = 4;
+message Block {
+  bytes hash = 1;
+  bytes parent_hash = 2;
+  uint64 number = 3;
+  uint64 ts = 4;
 }
 
 message Transaction {
-    bytes hash = 1;
-    bytes from = 2;
-    bytes to = 3;
-    uint64 index = 4;
+  bytes hash = 1;
+  bytes from = 2;
+  bytes to = 3;
+  uint64 index = 4;
 }
 
 message ContractSlot {
-    bytes slot = 2;
-    bytes value = 3;
+  bytes slot = 2;
+  bytes value = 3;
 }
 
 message ContractChange {
-    bytes address = 1;
-    // empty bytes indicates no change
-    bytes balance = 2;
-    // empty bytes indicates no change
-    bytes code=3;
-    // empty sequence indicates no change
-    repeated ContractSlot slots = 4;
+  bytes address = 1;
+  // empty bytes indicates no change
+  bytes balance = 2;
+  // empty bytes indicates no change
+  bytes code = 3;
+  // empty sequence indicates no change
+  repeated ContractSlot slots = 4;
 }
 
 message TransactionChanges {
-    Transaction tx = 1;
-    repeated ContractChange contract_changes = 2;
+  Transaction tx = 1;
+  repeated ContractChange contract_changes = 2;
 }
 
 message BlockContractChanges {
-    Block block = 1;
-    repeated TransactionChanges changes = 2;
+  Block block = 1;
+  repeated TransactionChanges changes = 2;
 }
