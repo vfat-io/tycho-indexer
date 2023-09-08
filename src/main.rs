@@ -22,7 +22,7 @@ use tracing::info;
 mod extractor;
 mod models;
 mod pb;
-mod rpc;
+mod services;
 mod storage;
 mod substreams;
 

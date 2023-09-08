@@ -1,9 +1,9 @@
 //! This module contains Tycho RPC implementation
 
+use super::deserialization_helpers::{chain_from_str, hex_to_bytes};
 use crate::{
     extractor::evm::{self, Account},
     models::Chain,
-    rpc::deserialization_helpers::{chain_from_str, hex_to_bytes},
     storage::{
         postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractId,
         ContractStateGateway,
@@ -15,7 +15,6 @@ use serde::Deserialize;
 use thiserror::Error;
 use tracing::error;
 
-pub mod deserialization_helpers;
 struct RequestHandler {
     db_gw: PostgresGateway<evm::Block, evm::Transaction>,
     db_connection: AsyncPgConnection,
