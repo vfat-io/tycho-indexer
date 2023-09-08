@@ -988,8 +988,14 @@ mod test {
         db_fixtures::insert_account_balance(conn, 25, txn[1], c2).await;
         db_fixtures::insert_contract_code(conn, c2, txn[1], hex::decode("C2C2C2").unwrap()).await;
 
-        db_fixtures::insert_slots(conn, c0, txn[1], "2020-01-01T00:00:00", &[(0, 1), (1, 5), (2, 1)])
-            .await;
+        db_fixtures::insert_slots(
+            conn,
+            c0,
+            txn[1],
+            "2020-01-01T00:00:00",
+            &[(0, 1), (1, 5), (2, 1)],
+        )
+        .await;
         db_fixtures::insert_slots(conn, c2, txn[1], "2020-01-01T00:00:00", &[(1, 2), (2, 4)]).await;
         db_fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
         db_fixtures::insert_slots(
@@ -1056,7 +1062,7 @@ mod test {
                     .parse()
                     .unwrap(),
                 title: "account0".to_owned(),
-                slots: make_evm_slots(&vec![(1, 5), (2, 1), (0, 1)]),
+                slots: make_evm_slots(&[(1, 5), (2, 1), (0, 1)]),
                 balance: U256::from(100),
                 code: hex::decode("C0C0C0").unwrap(),
                 code_hash: "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
@@ -1082,7 +1088,7 @@ mod test {
                     .parse()
                     .unwrap(),
                 title: "account0".to_owned(),
-                slots: make_evm_slots(&vec![(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
+                slots: make_evm_slots(&[(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
                 balance: U256::from(100),
                 code: hex::decode("C0C0C0").unwrap(),
                 code_hash: "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
@@ -1114,7 +1120,7 @@ mod test {
                     .parse()
                     .unwrap(),
                 title: "c1".to_owned(),
-                slots: make_evm_slots(&vec![(1, 255), (0, 128)]),
+                slots: make_evm_slots(&[(1, 255), (0, 128)]),
                 balance: U256::from(50),
                 code: hex::decode("C1C1C1").unwrap(),
                 code_hash: "0xa04b84acdf586a694085997f32c4aa11c2726a7f7e0b677a27d44d180c08e07f"
@@ -1146,7 +1152,7 @@ mod test {
                     .parse()
                     .unwrap(),
                 title: "c2".to_owned(),
-                slots: make_evm_slots(&vec![(1, 2), (2, 4)]),
+                slots: make_evm_slots(&[(1, 2), (2, 4)]),
                 balance: U256::from(25),
                 code: hex::decode("C2C2C2").unwrap(),
                 code_hash: "0x7eb1e0ed9d018991eed6077f5be45b52347f6e5870728809d368ead5b96a1e96"
