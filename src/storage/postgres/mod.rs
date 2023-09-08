@@ -226,7 +226,7 @@ impl StorageError {
             ) => {
                 if let Some(col) = details.column_name() {
                     if col == "id" {
-                        return StorageError::DuplicateEntry(entity.to_owned(), id.to_owned());
+                        return StorageError::DuplicateEntry(entity.to_owned(), id.to_owned())
                     }
                 }
                 StorageError::Unexpected(err_string)
@@ -237,7 +237,7 @@ impl StorageError {
                         entity.to_owned(),
                         id.to_owned(),
                         related_entitiy,
-                    );
+                    )
                 }
                 StorageError::NotFound(entity.to_owned(), id.to_owned())
             }

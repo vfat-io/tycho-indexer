@@ -232,8 +232,8 @@ mod tests {
         let time_difference = expected
             .version
             .timestamp
-            .timestamp_millis()
-            - result
+            .timestamp_millis() -
+            result
                 .version
                 .timestamp
                 .timestamp_millis();

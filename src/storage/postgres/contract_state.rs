@@ -40,7 +40,7 @@ impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
             H256::from_slice(&val.code.hash),
             H256::from_slice(balance_modify_tx),
             H256::from_slice(code_modify_tx),
-            creation_tx.map(|b| H256::from_slice(b)),
+            creation_tx.map(H256::from_slice),
         )
     }
 
@@ -244,7 +244,7 @@ where
         at_tx: &Self::Transaction,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
-        let account = orm::Account::by_id(&id, conn)
+        let account = orm::Account::by_id(id, conn)
             .await
             .map_err(|err| StorageError::from_diesel(err, "Account", &id.to_string(), None))?;
         let tx = orm::Transaction::by_hash(at_tx.hash(), conn)
@@ -268,10 +268,10 @@ where
                     "Account {} was already deleted at {:?}!",
                     hex::encode(account.address),
                     account.deleted_at,
-                )));
+                )))
             }
             // Noop if called twice on deleted contract
-            return Ok(());
+            return Ok(())
         };
         diesel::update(schema::account::table.filter(schema::account::id.eq(account.id)))
             .set((schema::account::deletion_tx.eq(tx.id), schema::account::deleted_at.eq(block_ts)))
@@ -314,9 +314,9 @@ where
                 return Err(StorageError::Unsupported(format!(
                     "Unsupported version kind: {:?}",
                     kind
-                )));
+                )))
             }
-            version_to_ts(&Some(&version), conn).await?
+            version_to_ts(&Some(version), conn).await?
         } else {
             Utc::now().naive_utc()
         };
@@ -435,7 +435,7 @@ where
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
         let start_version_ts = version_to_ts(&start_version, conn).await?;
-        let target_version_ts = version_to_ts(&Some(&target_version), conn).await?;
+        let target_version_ts = version_to_ts(&Some(target_version), conn).await?;
 
         let changed_values = if start_version_ts <= target_version_ts {
             // Going forward
@@ -614,7 +614,7 @@ fn parse_id_h160(v: &[u8]) -> Result<H160, StorageError> {
         return Err(StorageError::DecodeError(format!(
             "Invalid contract address found: {}",
             hex::encode(v)
-        )));
+        )))
     }
     Ok(H160::from_slice(v))
 }
@@ -658,14 +658,14 @@ fn parse_u256_slot_entry(
         return Err(StorageError::DecodeError(format!(
             "Invalid byte length for U256 in slot key! Found: 0x{}",
             hex::encode(raw_key)
-        )));
+        )))
     }
     let v = if let Some(val) = raw_val {
         if val.len() != 32 {
             return Err(StorageError::DecodeError(format!(
                 "Invalid byte length for U256 in slot value! Found: 0x{}",
                 hex::encode(val)
-            )));
+            )))
         }
         U256::from_big_endian(val)
     } else {
