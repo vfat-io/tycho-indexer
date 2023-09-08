@@ -142,31 +142,39 @@ where
             })?;
         let version_ts = version_to_ts(version, db).await?;
 
-        // TODO: we need to make sure we get the last change here according to VersionKind::Last
         let (balance_tx, balance_orm) = schema::account_balance::table
             .inner_join(schema::transaction::table)
             .filter(schema::account_balance::account_id.eq(account_orm.id))
-            .select((schema::transaction::hash, orm::AccountBalance::as_select()))
             .filter(schema::account_balance::valid_from.le(version_ts))
             .filter(
                 schema::account_balance::valid_to
                     .gt(Some(version_ts))
                     .or(schema::account_balance::valid_to.is_null()),
             )
+            .select((schema::transaction::hash, orm::AccountBalance::as_select()))
+            .order_by((
+                schema::account_balance::account_id,
+                schema::account_balance::valid_from.desc(),
+                schema::transaction::index.desc(),
+            ))
             .first::<(Vec<u8>, orm::AccountBalance)>(db)
             .await?;
 
-        // TODO: we need to make sure we get the last change here according to VersionKind::Last
         let (code_tx, code_orm) = schema::contract_code::table
             .inner_join(schema::transaction::table)
             .filter(schema::contract_code::account_id.eq(account_orm.id))
-            .select((schema::transaction::hash, orm::ContractCode::as_select()))
             .filter(schema::contract_code::valid_from.le(version_ts))
             .filter(
                 schema::contract_code::valid_to
                     .gt(Some(version_ts))
                     .or(schema::contract_code::valid_to.is_null()),
             )
+            .select((schema::transaction::hash, orm::ContractCode::as_select()))
+            .order_by((
+                schema::contract_code::account_id,
+                schema::contract_code::valid_from.desc(),
+                schema::transaction::index.desc(),
+            ))
             .first::<(Vec<u8>, orm::ContractCode)>(db)
             .await?;
 
@@ -345,12 +353,13 @@ where
         db: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let chain_id = self.get_chain_id(new.chain());
-        let mut txns = HashSet::new();
-        txns.insert(new.code_modify_tx());
-        txns.insert(new.balance_modify_tx());
-        if let Some(h) = new.creation_tx() {
-            txns.insert(h);
-        }
+        let txns: HashSet<_> =
+            [Some(new.code_modify_tx()), Some(new.balance_modify_tx()), new.creation_tx()]
+                .iter()
+                .cloned()
+                .flatten()
+                .collect();
+
         let tx_data: HashMap<Vec<u8>, (i64, NaiveDateTime)> = schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::hash.eq_any(&txns))
@@ -361,10 +370,13 @@ where
             .collect();
 
         let (creation_tx_id, created_ts) = if let Some(h) = new.creation_tx() {
-            // TODO error handling for missing related tx entity
-            let (tx_id, ts) = tx_data
-                .get(h)
-                .expect("creation tx present");
+            let (tx_id, ts) = tx_data.get(h).ok_or_else(|| {
+                StorageError::NoRelatedEntity(
+                    "Transaction".to_owned(),
+                    "Account".to_owned(),
+                    hex::encode(h),
+                )
+            })?;
             (Some(*tx_id), *ts)
         } else {
             (None, chrono::Utc::now().naive_utc())
@@ -381,7 +393,13 @@ where
 
         let (balance_modify_tx_id, balance_modify_ts) = tx_data
             .get(new.balance_modify_tx())
-            .expect("balance tx present");
+            .ok_or_else(|| {
+                StorageError::NoRelatedEntity(
+                    "Transaction".to_owned(),
+                    "AccountBalance".to_owned(),
+                    hex::encode(new.balance_modify_tx()),
+                )
+            })?;
         diesel::insert_into(schema::account_balance::table)
             .values(new_contract.new_balance(account_id, *balance_modify_tx_id, *balance_modify_ts))
             .execute(db)
@@ -390,7 +408,13 @@ where
 
         let (code_modify_tx_id, code_modify_ts) = tx_data
             .get(new.code_modify_tx())
-            .expect("code tx present");
+            .ok_or_else(|| {
+                StorageError::NoRelatedEntity(
+                    "Transaction".to_owned(),
+                    "ContractCode".to_owned(),
+                    hex::encode(new.code_modify_tx()),
+                )
+            })?;
         diesel::insert_into(schema::contract_code::table)
             .values(new_contract.new_code(account_id, *code_modify_tx_id, *code_modify_ts))
             .execute(db)
