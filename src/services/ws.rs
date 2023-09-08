@@ -91,3 +91,69 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use actix_rt::time::timeout;
+    use actix_test::start;
+    use actix_web::App;
+    use futures03::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{
+        protocol::{frame::coding::CloseCode, CloseFrame},
+        Message,
+    };
+
+    #[actix_rt::test]
+    async fn test_websocket_ping_pong() {
+        let state = web::Data::new(AppState { app_name: "Tycho Indexer".to_string().into() });
+        let srv = start(move || {
+            App::new()
+                .app_data(state.clone())
+                .service(web::resource("/ws/").route(web::get().to(ws_index)))
+        });
+
+        let url = srv
+            .url("/ws/")
+            .to_string()
+            .replacen("http://", "ws://", 1);
+        println!("Connecting to test server at {}", url);
+
+        // Connect to the server
+        let (mut connection, _response) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("Failed to connect");
+
+        println!("Connected to test server");
+
+        // Test sending ping message and receiving pong message
+        connection
+            .send(Message::Ping(vec![]))
+            .await
+            .expect("Failed to send ping message");
+
+        println!("Sent ping message");
+
+        let msg = timeout(Duration::from_secs(1), connection.next())
+            .await
+            .expect("Failed to receive message")
+            .unwrap()
+            .unwrap();
+
+        if let Message::Pong(_) = msg {
+            // Pong received as expected
+            info!("Received pong message");
+        } else {
+            panic!("Unexpected message {:?}", msg);
+        }
+
+        // Close the connection
+        connection
+            .send(Message::Close(Some(CloseFrame { code: CloseCode::Normal, reason: "".into() })))
+            .await
+            .expect("Failed to send close message");
+        println!("Closed connection");
+    }
+}
