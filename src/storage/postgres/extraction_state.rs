@@ -8,8 +8,8 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 #[async_trait]
 impl<B, TX, A> ExtractionStateGateway for PostgresGateway<B, TX, A>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock> + Send + Sync + 'static,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64> + Send + Sync + 'static,
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     A: Send + Sync + 'static,
 {
     type DB = AsyncPgConnection;

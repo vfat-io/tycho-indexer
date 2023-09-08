@@ -11,9 +11,9 @@ use ethers::types::{H160, H256, U256};
 use crate::{
     extractor::evm,
     storage::{
-        AccountToContractStore, BlockIdentifier, BlockOrTimestamp, ContractId,
+        AccountToContractStore, AddressRef, BlockIdentifier, BlockOrTimestamp, ContractId,
         ContractStateGateway, ContractStore, SlotChangeSet, StorableBlock, StorableContract,
-        StorableTransaction, Version, VersionKind,
+        StorableTransaction, TxHashRef, Version, VersionKind,
     },
 };
 
@@ -29,9 +29,9 @@ impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
     fn from_storage(
         val: orm::Contract,
         chain: Chain,
-        balance_modify_tx: &[u8],
-        code_modify_tx: &[u8],
-        creation_tx: Option<&[u8]>,
+        balance_modify_tx: TxHashRef,
+        code_modify_tx: TxHashRef,
+        creation_tx: Option<TxHashRef>,
     ) -> Self {
         evm::Account::new(
             chain,
@@ -70,21 +70,21 @@ impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
         self.chain
     }
 
-    fn creation_tx(&self) -> Option<&[u8]> {
+    fn creation_tx(&self) -> Option<TxHashRef> {
         self.creation_tx
             .as_ref()
             .map(|h| h.as_bytes())
     }
 
-    fn address(&self) -> &[u8] {
+    fn address(&self) -> AddressRef {
         self.address.as_bytes()
     }
 
-    fn balance_modify_tx(&self) -> &[u8] {
+    fn balance_modify_tx(&self) -> TxHashRef {
         self.balance_modify_tx.as_bytes()
     }
 
-    fn code_modify_tx(&self) -> &[u8] {
+    fn code_modify_tx(&self) -> TxHashRef {
         self.code_modify_tx.as_bytes()
     }
 
@@ -122,12 +122,11 @@ impl<T> Deref for WithTxHash<T> {
 #[async_trait]
 impl<B, TX, A> ContractStateGateway for PostgresGateway<B, TX, A>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock> + Send + Sync + 'static,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64> + Send + Sync + 'static,
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
 {
     type DB = AsyncPgConnection;
-    type Transaction = TX;
     type ContractState = A;
 
     async fn get_contract(
@@ -195,7 +194,7 @@ where
     async fn get_contracts(
         &self,
         chain: Chain,
-        ids: Option<&[&[u8]]>,
+        ids: Option<&[AddressRef]>,
         version: Option<&Version>,
         include_slots: bool,
         conn: &mut Self::DB,
@@ -404,19 +403,19 @@ where
     async fn delete_contract(
         &self,
         id: &ContractId,
-        at_tx: &Self::Transaction,
+        at_tx: TxHashRef<'_>,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let account = orm::Account::by_id(id, conn)
             .await
             .map_err(|err| StorageError::from_diesel(err, "Account", &id.to_string(), None))?;
-        let tx = orm::Transaction::by_hash(at_tx.hash(), conn)
+        let tx = orm::Transaction::by_hash(at_tx, conn)
             .await
             .map_err(|err| {
                 StorageError::from_diesel(
                     err,
                     "Account",
-                    &hex::encode(at_tx.hash()),
+                    &hex::encode(at_tx),
                     Some("Transaction".to_owned()),
                 )
             })?;
@@ -468,7 +467,7 @@ where
     async fn get_contract_slots(
         &self,
         chain: Chain,
-        contracts: Option<&[&[u8]]>,
+        contracts: Option<&[AddressRef]>,
         at: Option<&Version>,
         conn: &mut Self::DB,
     ) -> Result<HashMap<Vec<u8>, ContractStore>, StorageError> {
@@ -508,13 +507,10 @@ where
 
     async fn upsert_slots(
         &self,
-        slots: SlotChangeSet<'_, Self::Transaction>,
+        slots: SlotChangeSet<'_>,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        let txns: HashSet<_> = slots
-            .iter()
-            .map(|(tx, _)| tx.hash())
-            .collect();
+        let txns: HashSet<_> = slots.iter().map(|(tx, _)| tx).collect();
         let tx_ids: HashMap<Vec<u8>, (i64, i64, NaiveDateTime)> = schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::hash.eq_any(txns))
@@ -539,9 +535,8 @@ where
             .collect();
 
         let mut new_entries = Vec::new();
-        for (tx, contract_storage) in slots.iter() {
-            let txhash = tx.hash();
-            let (modify_tx, tx_index, block_ts) = tx_ids.get(txhash).ok_or_else(|| {
+        for (txhash, contract_storage) in slots.iter() {
+            let (modify_tx, tx_index, block_ts) = tx_ids.get(*txhash).ok_or_else(|| {
                 StorageError::NoRelatedEntity(
                     "Transaction".into(),
                     "ContractStorage".into(),
@@ -1312,24 +1307,19 @@ mod test {
         let mut conn = setup_db().await;
         setup_revert(&mut conn).await;
         let address = "6B175474E89094C44Da98b954EedeAC495271d0F";
-        let deletion_txhash = "36984d97c02a98614086c0f9e9c4e97f7e0911f6f136b3c8a76d37d6d524d1e5";
+        let deletion_tx = "36984d97c02a98614086c0f9e9c4e97f7e0911f6f136b3c8a76d37d6d524d1e5";
         let address_bytes = hex::decode(address).expect("address ok");
         let id = ContractId::new(Chain::Ethereum, address_bytes.clone());
         let gw = EvmGateway::from_connection(&mut conn).await;
-        let tx = evm::Transaction {
-            hash: deletion_txhash
-                .parse()
-                .expect("txhash ok"),
-            ..Default::default()
-        };
+        let tx_hash = hex::decode(deletion_tx).unwrap();
         let (block_id, block_ts) = schema::block::table
             .select((schema::block::id, schema::block::ts))
             .first::<(i64, NaiveDateTime)>(&mut conn)
             .await
             .expect("blockquery succeeded");
-        db_fixtures::insert_txns(&mut conn, &[(block_id, 12, deletion_txhash)]).await;
+        fixtures::insert_txns(&mut conn, &[(block_id, 12, deletion_tx)]).await;
 
-        gw.delete_contract(&id, &tx, &mut conn)
+        gw.delete_contract(&id, tx_hash.as_slice(), &mut conn)
             .await
             .unwrap();
 
@@ -1485,14 +1475,12 @@ mod test {
         ]
         .into_iter()
         .collect();
+
+        let tx_hash =
+            hex::decode("bb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")
+                .unwrap();
         let input_slots = vec![(
-            evm::Transaction {
-                hash: H256::from_str(
-                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-                )
-                .expect("hash ok"),
-                ..Default::default()
-            },
+            tx_hash.as_slice(),
             vec![(
                 hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F")
                     .expect("account address ok"),
@@ -1639,7 +1627,7 @@ mod test {
         let block1_hash =
             H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
                 .unwrap()
-                .as_bytes()
+                .0
                 .into();
         let c0_address =
             hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").expect("c0 address valid");

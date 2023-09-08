@@ -13,8 +13,8 @@ use crate::{
 #[async_trait]
 impl<B, TX, A> ChainGateway for PostgresGateway<B, TX, A>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock> + Send + Sync + 'static,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64> + Send + Sync + 'static,
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     A: Send + Sync + 'static,
 {
     type DB = AsyncPgConnection;
@@ -55,9 +55,7 @@ where
                 orm::Block::by_number(*chain, *number, conn).await
             }
 
-            BlockIdentifier::Hash(block_hash) => {
-                orm::Block::by_hash(block_hash.as_slice(), conn).await
-            }
+            BlockIdentifier::Hash(block_hash) => orm::Block::by_hash(block_hash, conn).await,
         }
         .map_err(|err| StorageError::from_diesel(err, "Block", &block_id.to_string(), None))?;
         let chain = self.get_chain(orm_block.chain_id);
@@ -117,7 +115,7 @@ where
     }
 }
 
-impl StorableBlock<orm::Block, orm::NewBlock> for evm::Block {
+impl StorableBlock<orm::Block, orm::NewBlock, i64> for evm::Block {
     fn from_storage(val: orm::Block, chain: Chain) -> Self {
         evm::Block {
             number: val.number as u64,
