@@ -120,7 +120,9 @@ where
     ) -> Result<Self::ContractState, StorageError> {
         let account_orm: orm::Account = orm::Account::by_id(id, db)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "Account", &hex::encode(&id.1), None))?;
+            .map_err(|err| {
+                StorageError::from_diesel(err, "Account", &hex::encode(&id.address), None)
+            })?;
         let version_ts = version_to_ts(version, db).await?;
 
         let (balance_tx, balance_orm) = schema::account_balance::table
@@ -776,7 +778,7 @@ mod test {
             .await;
         if let Err(StorageError::NotFound(entity, id)) = result {
             assert_eq!(entity, "Account");
-            assert_eq!(id, hex::encode(contract_id.1));
+            assert_eq!(id, hex::encode(contract_id.address));
         } else {
             panic!("Expected NotFound error");
         }
