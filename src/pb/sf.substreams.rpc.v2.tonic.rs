@@ -2,8 +2,7 @@
 /// Generated client implementations.
 pub mod stream_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
-    use tonic::codegen::*;
-    use tonic::codegen::http::Uri;
+    use tonic::codegen::{http::Uri, *};
     #[derive(Debug, Clone)]
     pub struct StreamClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -15,7 +14,9 @@ pub mod stream_client {
             D: std::convert::TryInto<tonic::transport::Endpoint>,
             D::Error: Into<StdError>,
         {
-            let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
+            let conn = tonic::transport::Endpoint::new(dst)?
+                .connect()
+                .await?;
             Ok(Self::new(conn))
         }
     }
@@ -47,9 +48,8 @@ pub mod stream_client {
                     <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
             >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::BoxBody>,
-            >>::Error: Into<StdError> + Send + Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
+                Into<StdError> + Send + Sync,
         {
             StreamClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -71,24 +71,19 @@ pub mod stream_client {
         pub async fn blocks(
             &mut self,
             request: impl tonic::IntoRequest<super::Request>,
-        ) -> Result<
-            tonic::Response<tonic::codec::Streaming<super::Response>>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> Result<tonic::Response<tonic::codec::Streaming<super::Response>>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/sf.substreams.rpc.v2.Stream/Blocks",
-            );
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let path = http::uri::PathAndQuery::from_static("/sf.substreams.rpc.v2.Stream/Blocks");
+            self.inner
+                .server_streaming(request.into_request(), path, codec)
+                .await
         }
     }
 }

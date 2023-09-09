@@ -2,21 +2,21 @@
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StoreDeltas {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub store_deltas: ::prost::alloc::vec::Vec<StoreDelta>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StoreDelta {
-    #[prost(enumeration="store_delta::Operation", tag="1")]
+    #[prost(enumeration = "store_delta::Operation", tag = "1")]
     pub operation: i32,
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag = "2")]
     pub ordinal: u64,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub key: ::prost::alloc::string::String,
-    #[prost(bytes="vec", tag="4")]
+    #[prost(bytes = "vec", tag = "4")]
     pub old_value: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes="vec", tag="5")]
+    #[prost(bytes = "vec", tag = "5")]
     pub new_value: ::prost::alloc::vec::Vec<u8>,
 }
 /// Nested message and enum types in `StoreDelta`.
@@ -57,111 +57,111 @@ pub mod store_delta {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ModuleOutput {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub module_name: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag = "4")]
     pub logs: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag = "5")]
     pub debug_logs_truncated: bool,
-    #[prost(bool, tag="6")]
+    #[prost(bool, tag = "6")]
     pub cached: bool,
-    #[prost(oneof="module_output::Data", tags="2, 3")]
+    #[prost(oneof = "module_output::Data", tags = "2, 3")]
     pub data: ::core::option::Option<module_output::Data>,
 }
 /// Nested message and enum types in `ModuleOutput`.
 pub mod module_output {
     #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Data {
-        #[prost(message, tag="2")]
+        #[prost(message, tag = "2")]
         MapOutput(::prost_types::Any),
-        #[prost(message, tag="3")]
+        #[prost(message, tag = "3")]
         StoreDeltas(super::StoreDeltas),
     }
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ProcessRangeRequest {
-    #[prost(uint64, tag="1")]
+    #[prost(uint64, tag = "1")]
     pub start_block_num: u64,
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag = "2")]
     pub stop_block_num: u64,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub output_module: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub modules: ::core::option::Option<super::super::v1::Modules>,
     /// 0-based index of stage to execute up to
-    #[prost(uint32, tag="5")]
+    #[prost(uint32, tag = "5")]
     pub stage: u32,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ProcessRangeResponse {
-    #[prost(oneof="process_range_response::Type", tags="4, 5, 6")]
+    #[prost(oneof = "process_range_response::Type", tags = "4, 5, 6")]
     pub r#type: ::core::option::Option<process_range_response::Type>,
 }
 /// Nested message and enum types in `ProcessRangeResponse`.
 pub mod process_range_response {
     #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Type {
-        #[prost(message, tag="4")]
+        #[prost(message, tag = "4")]
         Failed(super::Failed),
-        #[prost(message, tag="5")]
+        #[prost(message, tag = "5")]
         Completed(super::Completed),
-        #[prost(message, tag="6")]
+        #[prost(message, tag = "6")]
         Update(super::Update),
     }
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Update {
-    #[prost(uint64, tag="1")]
+    #[prost(uint64, tag = "1")]
     pub duration_ms: u64,
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag = "2")]
     pub processed_blocks: u64,
-    #[prost(uint64, tag="3")]
+    #[prost(uint64, tag = "3")]
     pub total_bytes_read: u64,
-    #[prost(uint64, tag="4")]
+    #[prost(uint64, tag = "4")]
     pub total_bytes_written: u64,
-    #[prost(message, repeated, tag="5")]
+    #[prost(message, repeated, tag = "5")]
     pub modules_stats: ::prost::alloc::vec::Vec<ModuleStats>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ModuleStats {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag = "2")]
     pub processing_time_ms: u64,
-    #[prost(uint64, tag="3")]
+    #[prost(uint64, tag = "3")]
     pub store_operation_time_ms: u64,
-    #[prost(uint64, tag="4")]
+    #[prost(uint64, tag = "4")]
     pub store_read_count: u64,
-    #[prost(message, repeated, tag="5")]
+    #[prost(message, repeated, tag = "5")]
     pub external_call_metrics: ::prost::alloc::vec::Vec<ExternalCallMetric>,
     /// store-specific (will be 0 on mappers)
-    #[prost(uint64, tag="10")]
+    #[prost(uint64, tag = "10")]
     pub store_write_count: u64,
-    #[prost(uint64, tag="11")]
+    #[prost(uint64, tag = "11")]
     pub store_deleteprefix_count: u64,
-    #[prost(uint64, tag="12")]
+    #[prost(uint64, tag = "12")]
     pub store_size_bytes: u64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExternalCallMetric {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag = "2")]
     pub count: u64,
-    #[prost(uint64, tag="3")]
+    #[prost(uint64, tag = "3")]
     pub time_ms: u64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Completed {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub all_processed_ranges: ::prost::alloc::vec::Vec<BlockRange>,
     /// TraceId represents the producer's trace id that produced the partial files.
     /// This is present here so that the consumer can use it to identify the
@@ -171,27 +171,27 @@ pub struct Completed {
     /// consuming this message that the tier2 that produced those partial files
     /// is not yet updated to produce a trace id and a such, the tier1 should
     /// generate a legacy partial file name.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub trace_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Failed {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub reason: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub logs: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// FailureLogsTruncated is a flag that tells you if you received all the logs or if they
     /// were truncated because you logged too much (fixed limit currently is set to 128 KiB).
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub logs_truncated: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockRange {
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag = "2")]
     pub start_block: u64,
-    #[prost(uint64, tag="3")]
+    #[prost(uint64, tag = "3")]
     pub end_block: u64,
 }
 include!("sf.substreams.internal.v2.tonic.rs");
