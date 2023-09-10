@@ -97,16 +97,6 @@ fn default_chain() -> Chain {
     Chain::Ethereum
 }
 
-async fn handle_post(
-    handler: web::Data<Arc<Mutex<RequestHandler>>>,
-    contract_state: web::Json<StateRequestBody>,
-) -> impl Responder {
-    let mut handler = handler.lock().await;
-    let response = handler.get_state(&contract_state).await;
-
-    HttpResponse::Ok().json(response)
-}
-
 #[derive(Debug, Deserialize, PartialEq)]
 struct Version {
     timestamp: NaiveDateTime,
@@ -135,6 +125,16 @@ fn parse_state_request(json_str: &str) -> Result<StateRequestBody, RpcError> {
     Ok(request_body)
 }
 
+async fn handle_post(
+    handler: web::Data<Arc<Mutex<RequestHandler>>>,
+    contract_state: web::Json<StateRequestBody>,
+) -> impl Responder {
+    let mut handler = handler.lock().await;
+    let response = handler.get_state(&contract_state).await;
+
+    HttpResponse::Ok().json(response)
+}
+
 #[actix_web::main]
 async fn run(req_handler: web::Data<Arc<Mutex<RequestHandler>>>) -> std::io::Result<()> {
     HttpServer::new(move || {
@@ -149,7 +149,7 @@ async fn run(req_handler: web::Data<Arc<Mutex<RequestHandler>>>) -> std::io::Res
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::postgres::db_fixtures;
+    use crate::{extractor::evm::Transaction, storage::postgres::db_fixtures};
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
     use std::{collections::HashMap, str::FromStr};
@@ -286,8 +286,8 @@ mod tests {
         let time_difference = expected
             .version
             .timestamp
-            .timestamp_millis()
-            - result
+            .timestamp_millis() -
+            result
                 .version
                 .timestamp
                 .timestamp_millis();
@@ -334,20 +334,44 @@ mod tests {
         acc_address.to_string()
     }
 
-    #[tokio::test]
-    async fn test_get_state() {
+    async fn get_db_connection() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
+
         let mut conn = AsyncPgConnection::establish(&db_url)
             .await
             .unwrap();
         conn.begin_test_transaction()
             .await
             .unwrap();
+
+        return conn
+    }
+
+    async fn get_db_gateway(
+        conn: &mut AsyncPgConnection,
+    ) -> PostgresGateway<evm::Block, Transaction> {
+        let db_gtw: PostgresGateway<evm::Block, Transaction> =
+            PostgresGateway::<evm::Block, Transaction>::from_connection(conn).await;
+        return db_gtw
+    }
+
+    async fn get_request_handler(
+        conn: AsyncPgConnection,
+        db_gw: PostgresGateway<evm::Block, Transaction>,
+    ) -> RequestHandler {
+        let req_handler = RequestHandler { db_gw, db_connection: conn };
+
+        return req_handler
+    }
+
+    #[tokio::test]
+    async fn test_get_state() {
+        let mut conn = get_db_connection().await;
         let acc_address = setup_account(&mut conn).await;
 
-        let db_gtw =
-            PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
-        let mut req_handler = RequestHandler { db_gw: db_gtw, db_connection: conn };
+        let db_gw = get_db_gateway(&mut conn).await;
+
+        let mut req_handler = get_request_handler(conn, db_gw).await;
 
         let code = hex::decode("1234").unwrap();
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
@@ -377,5 +401,50 @@ mod tests {
         let state = req_handler.get_state(&request).await;
 
         assert_eq!(state.accounts[0], expected);
+    }
+
+    #[actix_web::test]
+    async fn test_handle_post() {
+        let mut conn = get_db_connection().await;
+        let db_gw = get_db_gateway(&mut conn).await;
+        let mut req_handler = get_request_handler(conn, db_gw).await;
+        let shared_handler = Arc::new(Mutex::new(req_handler));
+
+        let state_request_body = r#"
+        {
+            "contractIds": [
+                {
+                    "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
+                    "chain": "ethereum"
+                }
+            ],
+            "version": {
+                "timestamp": "2069-01-01T04:20:00",
+                "block": {
+                    "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                    "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
+                    "number": 213,
+                    "chain": "ethereum"
+                }
+            }
+        }
+        "#;
+
+        let mut app = test::init_service(
+            App::new()
+                .app_data(shared_handler.clone())
+                .route("/contract_state", web::post().to(handle_post)),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/contract_state")
+            .set_json(&state_request_body.0) // passing json payload
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        // You can add further assertions based on expected response body
     }
 }
