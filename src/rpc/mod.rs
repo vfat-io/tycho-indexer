@@ -403,7 +403,7 @@ mod tests {
         assert_eq!(state.accounts[0], expected);
     }
 
-    #[actix_web::test]
+    #[actix_rt::test]
     async fn test_handle_post() {
         let mut conn = get_db_connection().await;
         let db_gw = get_db_gateway(&mut conn).await;
@@ -430,6 +430,9 @@ mod tests {
         }
         "#;
 
+        let state_request_body: serde_json::Value =
+            serde_json::from_str(state_request_body).unwrap();
+
         let mut app = test::init_service(
             App::new()
                 .app_data(shared_handler.clone())
@@ -439,7 +442,7 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri("/contract_state")
-            .set_json(&state_request_body.0) // passing json payload
+            .set_json(&state_request_body) // passing json payload
             .to_request();
 
         let resp = test::call_service(&mut app, req).await;
