@@ -346,7 +346,7 @@ pub struct AccountBalance {
     pub id: i64,
     pub balance: Vec<u8>,
     pub account_id: i64,
-    pub modify_tx: Option<i64>,
+    pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
@@ -359,7 +359,7 @@ pub struct AccountBalance {
 pub struct NewAccountBalance<'a> {
     pub balance: &'a [u8],
     pub account_id: i64,
-    pub modify_tx: Option<i64>,
+    pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
 }
@@ -428,7 +428,7 @@ impl NewContract {
         NewAccountBalance {
             balance: &self.balance,
             account_id,
-            modify_tx: Some(modify_tx),
+            modify_tx,
             valid_from: modify_ts,
             valid_to: None,
         }

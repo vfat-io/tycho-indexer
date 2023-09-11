@@ -51,6 +51,23 @@ use thiserror::Error;
 
 use crate::models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem};
 
+// We use variable length bytes type for literals of the contract store for
+// flexibility and because postgres does not support a fixed size byte array
+// column type. On blockchains these are usually fixed, e.g. 32 bytes on
+// ethereum but might have different lengths (e.g. addresses in Ethereum has 20
+// bytes length vs Starknet uses 32 byte addresses).
+
+/// Address hash literal type to uniquely identify contracts/accounts on a
+/// blockchain.
+type Address = Vec<u8>;
+/// Block hash literal type to uniquely identify a block in the chain and
+/// likely across chains.
+type BlockHash = Vec<u8>;
+
+type AddressRef<'a> = &'a [u8];
+type BlockHashRef<'a> = &'a [u8];
+type TxHashRef<'a> = &'a [u8];
+
 /// Identifies a block in storage.
 #[derive(Debug)]
 pub enum BlockIdentifier {
@@ -66,7 +83,7 @@ pub enum BlockIdentifier {
     ///
     /// The hash should be unique across multiple chains. Preferred method if
     /// the block is very recent.
-    Hash(Vec<u8>),
+    Hash(BlockHash),
 }
 
 impl Display for BlockIdentifier {
@@ -75,13 +92,23 @@ impl Display for BlockIdentifier {
     }
 }
 
-/// `StorableBlock` abstracts (de)serialization behavior of a block entity
-/// specific to a storage backend.
+/// Lays out the necessary interface needed to store and retrieve blocks from
+/// storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   block.
+/// * `N`: This represents the storage-specific data type used when converting from the block to
+///   storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the block.
 ///
 /// It defines methods for converting from a storage-specific type to a block,
 /// converting from a block to a storage-specific type, and getting the block's
 /// chain.
-pub trait StorableBlock<S, N> {
+pub trait StorableBlock<S, N, I>: Send + Sync + 'static {
     /// Constructs a block from a storage-specific value `val` and a `Chain`.
     ///
     /// # Arguments
@@ -103,7 +130,7 @@ pub trait StorableBlock<S, N> {
     /// # Returns
     ///
     /// The storage-specific representation of the block
-    fn to_storage(&self, chain_id: i64) -> N;
+    fn to_storage(&self, chain_id: I) -> N;
 
     /// Returns the `Chain` object associated with the block.
     ///
@@ -113,33 +140,37 @@ pub trait StorableBlock<S, N> {
     fn chain(&self) -> Chain;
 }
 
-/// The `StorableTransaction` is a public trait which lays out the necessary
-/// interface needed to store and retrieve transactions from storage. This trait
-/// is generic over four types - `S`, `N`, `BH`, and `DbId`.
+/// Lays out the necessary interface needed to store and retrieve transactions
+/// from storage.
 ///
-/// `S` represents the storage specific transaction type e.g. orm struct. `N`
-/// represents the storage specific type for a new transaction,. `BH`
-/// corresponds to the block hash type that uniquely identifies a block. `DbId`
-/// is the ID used to refer to each transaction in the database.
-pub trait StorableTransaction<S, N, DbId> {
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   transaction.
+/// * `N`: This represents the storage-specific data type used when converting from the transaction
+///   to storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the transaction.
+pub trait StorableTransaction<S, N, I>: Send + Sync + 'static {
     /// Converts a transaction from storage representation (`S`) to transaction
-    /// form. This function uses the original block hash (`BH`), where the
+    /// form. This function uses the original block hash, where the
     /// transaction resides, for this conversion.
-    fn from_storage(val: S, block_hash: &[u8]) -> Self;
+    fn from_storage(val: S, block_hash: BlockHashRef) -> Self;
 
     /// Converts a transaction object to its storable representation (`N`),
     /// while also associating it with a specific block through a database ID
-    /// (`DbId`).
-    fn to_storage(&self, block_id: DbId) -> N;
+    /// (`I`).
+    fn to_storage(&self, block_id: I) -> N;
 
-    /// Returns the block hash (`BH`) associated with a transaction. This is
+    /// Returns the block hash associated with a transaction. This is
     /// necessary to ensure that transactions can be traced back to the blocks
     /// from which they originated.
-    fn block_hash(&self) -> &[u8];
+    fn block_hash(&self) -> BlockHashRef;
 
-    /// Returns the transaction hash (`BH`) associated with a transaction. This
-    /// is necessary to uniquely identify this transaction.
-    fn hash(&self) -> &[u8];
+    /// Returns the hash associated with this transaction, which
+    /// uniquely identifies it.
+    fn hash(&self) -> TxHashRef;
 }
 
 #[derive(Error, Debug)]
@@ -317,8 +348,9 @@ pub struct ContractId {
     chain: Chain,
 }
 
+/// Uniquely identifies a contract on a specific chain.
 impl ContractId {
-    pub fn new(chain: Chain, address: Vec<u8>) -> Self {
+    pub fn new(chain: Chain, address: Address) -> Self {
         Self { address, chain }
     }
 }
@@ -329,12 +361,34 @@ impl Display for ContractId {
     }
 }
 
-pub struct Version(BlockOrTimestamp, VersionKind);
+/// A version desribes the state of the DB at a exact point in time.
+/// See the module level docs for more information on how versioning works.
+pub struct Version(pub BlockOrTimestamp, pub VersionKind);
 
-pub trait StorableToken<S, N, DbId> {
+impl Version {
+    pub fn from_block_number(chain: Chain, number: i64) -> Self {
+        Self(BlockOrTimestamp::Block(BlockIdentifier::Number((chain, number))), VersionKind::Last)
+    }
+    pub fn from_ts(ts: NaiveDateTime) -> Self {
+        Self(BlockOrTimestamp::Timestamp(ts), VersionKind::Last)
+    }
+}
+/// Lays out the necessary interface needed to store and retrieve tokens from
+/// storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   token.
+/// * `N`: This represents the storage-specific data type used when converting from the token to
+///   storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the token.
+pub trait StorableToken<S, N, I>: Send + Sync + 'static {
     fn from_storage(val: S, contract: ContractId) -> Self;
 
-    fn to_storage(&self, contract_id: DbId) -> N;
+    fn to_storage(&self, contract_id: I) -> N;
 
     fn contract_id(&self) -> ContractId;
 }
@@ -419,7 +473,7 @@ pub trait ProtocolGateway {
     async fn get_tokens(
         &self,
         chain: Chain,
-        address: Option<&[&[u8]]>,
+        address: Option<&[AddressRef]>,
     ) -> Result<Vec<Self::Token>, StorageError>;
 
     /// Saves multiple tokens to storage.
@@ -437,36 +491,87 @@ pub trait ProtocolGateway {
     async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError>;
 }
 
-/// A binary key value store for an account
-type ContractStore = HashMap<Vec<u8>, Option<Vec<u8>>>;
-/// Multiple key values stores grouped by account address
-type AccountToContractStore = HashMap<Vec<u8>, ContractStore>;
-/// A set of changes to stores, grouped by the modifying transaction
-type SlotChangeSet<'a, T> = &'a [(T, AccountToContractStore)];
+/// Key literal type of the contract store.
+type StoreKey = Vec<u8>;
+/// Value literal type of the contract store.
+type StoreVal = Vec<u8>;
+/// A binary key value store for an account.
+type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
+/// Multiple key values stores grouped by account address.
+type AccountToContractStore = HashMap<Address, ContractStore>;
+/// A set of changes to stores, grouped by the modifying transaction hash.
+type SlotChangeSet<'a> = &'a [(TxHashRef<'a>, AccountToContractStore)];
 
-pub trait StorableContract<S, N, DbId>: Send + Sync + 'static {
+/// Lays out the necessary interface needed to store and retrieve contracts from
+/// and their associated state from storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   contract.
+/// * `N`: This represents the storage-specific data type used when converting from the contract to
+///   storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the contract.
+pub trait StorableContract<S, N, I>: Send + Sync + 'static {
+    /// Creates a transaction from storage.
+    ///
+    /// # Parameters:
+    /// * `val`: State as retrieved from storage.
+    /// * `chain`: The blockchain where this contract resides.
+    /// * `balance_modify_tx`: Transaction hash reference that modified the balance.
+    /// * `code_modify_tx`: Transaction hash reference that modified the code.
+    /// * `creation_tx`: Transaction hash reference that created the contract.
     fn from_storage(
         val: S,
         chain: Chain,
-        balance_modify_tx: &[u8],
-        code_modify_tx: &[u8],
-        creation_tx: Option<&[u8]>,
+        balance_modify_tx: TxHashRef,
+        code_modify_tx: TxHashRef,
+        creation_tx: Option<TxHashRef>,
     ) -> Self;
 
-    fn to_storage(&self, chain_id: DbId, creation_ts: NaiveDateTime, tx_id: Option<DbId>) -> N;
+    /// Transforms the state of the contract into it's storable form.
+    ///
+    /// # Parameters:
+    /// * `chain_id`: Identifier for the chain
+    /// * `creation_ts`: Timestamp when the contract was created
+    /// * `tx_id`: Identifier of the transaction
+    fn to_storage(&self, chain_id: I, creation_ts: NaiveDateTime, tx_id: Option<I>) -> N;
 
+    /// Get the chain where this contract resides.
     fn chain(&self) -> Chain;
 
-    fn creation_tx(&self) -> Option<&[u8]>;
+    /// Get the transaction hash that created this contract if it exists.
+    ///
+    /// # Note
+    /// We allow the creation transaction to be optional as sometimes we need to
+    /// insert old contracts and finding the original transaction that created
+    /// it during indexing is hard. Thus this is optional but should be always
+    /// set when the contract creation is actually observed. Contracts with this
+    /// field unset will not be deleted on during a revert.
+    fn creation_tx(&self) -> Option<TxHashRef>;
 
-    fn address(&self) -> &[u8];
+    /// Get a reference to the address of this contract.
+    fn address(&self) -> AddressRef;
 
-    fn balance_modify_tx(&self) -> &[u8];
+    /// Get the transaction that last modified the balance of this contract.
+    fn balance_modify_tx(&self) -> TxHashRef;
 
-    fn code_modify_tx(&self) -> &[u8];
+    /// Get the transaction that last modified the code of this contract.
+    fn code_modify_tx(&self) -> TxHashRef;
 
+    /// Get a copy of this contract's store in it's storable form.
     fn store(&self) -> ContractStore;
 
+    /// Replace the current store of this contract with a new one.
+    ///
+    /// # Parameters:
+    /// * `store`: The new contract store as retrieved from storage.
+    ///
+    /// # Errors:
+    /// This method will return an error if the replacement is not successful.
+    /// E.g. if the passed store value fails to convert into this structs types.
     fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
 }
 
@@ -476,7 +581,6 @@ pub trait StorableContract<S, N, DbId>: Send + Sync + 'static {
 #[async_trait]
 pub trait ContractStateGateway {
     type DB;
-    type Transaction;
     type ContractState;
 
     /// Get a contracts state from storage
@@ -489,9 +593,37 @@ pub trait ContractStateGateway {
     async fn get_contract(
         &self,
         id: &ContractId,
-        version: &Option<&BlockOrTimestamp>,
+        version: &Option<&Version>,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError>;
+
+    /// Get multiple contracts' states from storage.
+    ///
+    /// This method retrieves balance and code, and optionally storage, of
+    /// multiple contracts in a chain. It can optionally filter by given
+    /// addresses and retrieve state for specific versions.
+    ///
+    /// # Parameters:
+    /// - `chain`: The blockchain where the contracts reside.
+    /// - `addresses`: Filter for specific addresses. If set to `None`, it retrieves all indexed
+    ///   contracts in the chain.
+    /// - `version`: Version at which to retrieve state for. If set to `None`, it retrieves the
+    ///   latest state.
+    /// - `include_slots`: Flag to determine whether to include slot changes. If set to `true`, it
+    ///   includes storage slot.
+    /// - `db`: Database session reference.
+    ///
+    /// # Returns:
+    /// A `Result` with a list of contract states if the operation is
+    /// successful, or a `StorageError` if the operation fails.
+    async fn get_contracts(
+        &self,
+        chain: Chain,
+        addresses: Option<&[AddressRef]>,
+        version: Option<&Version>,
+        include_slots: bool,
+        db: &mut Self::DB,
+    ) -> Result<Vec<Self::ContractState>, StorageError>;
 
     /// Save contract metadata.
     ///
@@ -523,7 +655,7 @@ pub trait ContractStateGateway {
     async fn delete_contract(
         &self,
         id: &ContractId,
-        at_tx: &Self::Transaction,
+        at_tx: TxHashRef<'_>,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -537,13 +669,13 @@ pub trait ContractStateGateway {
     ///
     /// # Parameters
     /// - `chain` The chain for which to retrieve slots for.
-    /// - `contracts` Optionally allows filtering by contract address.
+    /// - `addresses` Optionally allows filtering by contract address.
     /// - `at` The version at which to retrieve slots. None retrieves the latest
     /// - `db` The database handle or connection. state.
     async fn get_contract_slots(
         &self,
         chain: Chain,
-        contracts: Option<&[&[u8]]>,
+        addresses: Option<&[AddressRef]>,
         at: Option<&Version>,
         db: &mut Self::DB,
     ) -> Result<AccountToContractStore, StorageError>;
@@ -556,8 +688,8 @@ pub trait ContractStateGateway {
     ///
     /// # Parameters
     /// - `slots` A slice containing only the changed slots. Including slots that were changed to 0.
-    ///   Must come with a corresponding transaction that modified the slots, as well as the account
-    ///   identifier the slots belong to.
+    ///   Includes slot changes grouped per account and indexed by the transaction hash that
+    ///   modified them.
     ///
     /// # Returns
     /// An empty `Ok(())` if the operation succeeded. Will raise an error if any
@@ -565,7 +697,7 @@ pub trait ContractStateGateway {
     /// transactions or accounts is not or not yet persisted.
     async fn upsert_slots(
         &self,
-        slots: SlotChangeSet<'_, Self::Transaction>,
+        slots: SlotChangeSet<'_>,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
     /// Retrieve a slot delta between two versions
@@ -584,6 +716,20 @@ pub trait ContractStateGateway {
     /// - `start_version` The deltas start version, given a block uses VersionKind::Last behaviour.
     ///   If None the latest version is assumed.
     /// - `end_version` The deltas end version, given a block uses VersionKind::Last behaviour.
+    ///
+    /// # Note
+    ///
+    /// A choice to utilize `BlockOrTimestamp` has been made intentionally in
+    /// this scenario as passing a `Version` by user isn't quite logical.
+    /// Support for deltas is limited to the states at the start or end of
+    /// blocks because blockchain reorganization at the transaction level is not
+    /// common.
+    ///
+    /// The decision to use either the beginning or end state of a block is
+    /// automatically determined by the underlying logic. For example, if we are
+    /// tracing back, `VersionKind::First` retrieval mode will be used.
+    /// Conversely, if we're progressing forward, we would apply the
+    /// `VersionKind::Last` semantics.
     ///
     /// # Returns
     /// A map containing the necessary changes to update a state from
@@ -618,15 +764,15 @@ pub trait ContractStateGateway {
     ) -> Result<(), StorageError>;
 }
 
-pub trait StateGateway<DB, TX>:
+pub trait StateGateway<DB>:
     ExtractionStateGateway<DB = DB>
-    + ChainGateway<DB = DB, Transaction = TX>
+    + ChainGateway<DB = DB>
     + ProtocolGateway<DB = DB>
-    + ContractStateGateway<DB = DB, Transaction = TX>
+    + ContractStateGateway<DB = DB>
     + Send
     + Sync
 {
 }
 
 pub type StateGatewayType<DB, B, TX, T, C> =
-    Arc<dyn StateGateway<DB, TX, Block = B, Token = T, ContractState = C>>;
+    Arc<dyn StateGateway<DB, Transaction = TX, Block = B, Token = T, ContractState = C>>;
