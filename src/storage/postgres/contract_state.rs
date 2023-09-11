@@ -386,7 +386,7 @@ where
     /// from the fact that a *BEFORE INSERT* trigger would update the row even if
     /// the subsequent insertion were to fail.
     ///
-    /// Please refer to the interface documentation for more detailed information.
+    /// Please refer to the [`ContractStateGateway`] for more detailed information.
     async fn upsert_contract(
         &self,
         new: &Self::ContractState,
