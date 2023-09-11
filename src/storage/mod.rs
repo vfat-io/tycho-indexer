@@ -54,7 +54,7 @@ use crate::models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem};
 // We use variable length bytes type for literals of the contract store for
 // flexibility and because postgres does not support a fixed size byte array
 // column type. On blockchains these are usually fixed, e.g. 32 bytes on
-// ethereuE but might have different lengths (e.g. addresses in Ethereum has 20
+// ethereum but might have different lengths (e.g. addresses in Ethereum has 20
 // bytes length vs Starknet uses 32 byte addresses).
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
