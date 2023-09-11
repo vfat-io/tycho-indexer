@@ -1,5 +1,7 @@
 use diesel_async::{pooled_connection::bb8::Pool, AsyncPgConnection};
-use std::sync::Arc;
+use ethers::types::{H160, H256};
+use prost::Message;
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -8,18 +10,24 @@ use super::EVMStateGateway;
 use crate::{
     extractor::{evm, ExtractionError, Extractor},
     models::{Chain, ExtractorIdentity},
-    pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
+    pb::{
+        sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
+        tycho::evm::v1::BlockContractChanges,
+    },
     storage::{BlockIdentifier, StorageError},
 };
 
 struct Inner {
     cursor: Vec<u8>,
+    contracts: HashMap<H160, evm::Account>,
 }
 
 pub struct AmbientContractExtractor<G> {
     gateway: G,
     name: String,
     chain: Chain,
+    // TODO: There is not reason this needs to be shared
+    // try removing the Mutex
     inner: Arc<Mutex<Inner>>,
 }
 
@@ -37,19 +45,22 @@ struct AmbientPgGateway {
 }
 
 #[async_trait]
-trait AmbientGateway: Send + Sync {
+pub trait AmbientGateway: Send + Sync {
     async fn get_cursor(&self, name: &str, chain: Chain) -> Result<Vec<u8>, StorageError>;
     async fn upsert_contract(
         &self,
         changes: evm::BlockStateChanges,
-        new_cursor: &[u8],
+        new_cursor: &str,
     ) -> Result<(), StorageError>;
-    async fn revert_contract(
+
+    async fn revert(
         &self,
         to: BlockIdentifier,
-        new_cursor: &[u8],
+        new_cursor: &str,
     ) -> Result<evm::AccountUpdate, StorageError>;
 }
+
+impl<G> AmbientContractExtractor<G> where G: AmbientGateway {}
 
 #[async_trait]
 impl<G> Extractor<G, evm::AccountUpdate> for AmbientContractExtractor<G>
@@ -75,7 +86,17 @@ where
             .map_output
             .as_ref()
             .unwrap();
-        // let msg = Message::decode::<Changes>(data.value.as_slice()).unwrap();
+
+        let msg = evm::BlockStateChanges::try_from_message(
+            BlockContractChanges::decode(_data.value.as_slice()).unwrap(),
+            &self.name,
+            self.chain,
+        )?;
+
+        self.gateway
+            .upsert_contract(msg, inp.cursor.as_ref())
+            .await?;
+
         self.update_cursor(inp.cursor).await;
         todo!()
     }
@@ -84,9 +105,25 @@ where
         &self,
         inp: BlockUndoSignal,
     ) -> Result<Option<evm::AccountUpdate>, ExtractionError> {
+        let block_ref = inp
+            .last_valid_block
+            .ok_or_else(|| ExtractionError::DecodeError("Revert without block ref".into()))?;
+        let block_hash = H256::from_str(&block_ref.id).map_err(|err| {
+            ExtractionError::DecodeError(format!(
+                "Failed to parse {} as block hash: {}",
+                block_ref.id, err
+            ))
+        })?;
+        let account_update = self
+            .gateway
+            .revert(
+                BlockIdentifier::Hash(block_hash.as_bytes().to_vec()),
+                inp.last_valid_cursor.as_ref(),
+            )
+            .await?;
         self.update_cursor(inp.last_valid_cursor)
             .await;
-        todo!()
+        Ok(Some(account_update))
     }
 
     async fn handle_progress(&self, _inp: ModulesProgress) -> Result<(), ExtractionError> {
@@ -105,13 +142,14 @@ async fn setup<G: AmbientGateway>(
             gateway,
             name: name.to_owned(),
             chain,
-            inner: Arc::new(Mutex::new(Inner { cursor: Vec::new() })),
+            inner: Arc::new(Mutex::new(Inner { cursor: Vec::new(), contracts: HashMap::new() })),
         },
         Ok(cursor) => AmbientContractExtractor {
             gateway,
             name: name.to_owned(),
             chain,
-            inner: Arc::new(Mutex::new(Inner { cursor })),
+            // TODO: load contract here instead.
+            inner: Arc::new(Mutex::new(Inner { cursor, contracts: HashMap::new() })),
         },
         Err(err) => return Err(ExtractionError::Setup(err.to_string())),
     };

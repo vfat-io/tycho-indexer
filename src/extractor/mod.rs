@@ -4,6 +4,7 @@ pub mod runner;
 use crate::{
     models::{ExtractorIdentity, NormalisedMessage},
     pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
+    storage::StorageError,
 };
 use async_trait::async_trait;
 use thiserror::Error;
@@ -12,8 +13,14 @@ use thiserror::Error;
 pub enum ExtractionError {
     #[error("Extractor setup failed: {0}")]
     Setup(String),
+    #[error("Failed to decode: {0}")]
+    DecodeError(String),
+    #[error("Can't decode an empty message")]
+    Empty,
     #[error("Unexpected extraction error: {0}")]
     Unknown(String),
+    #[error("Storage failure")]
+    Storage(#[from] StorageError),
 }
 
 #[async_trait]

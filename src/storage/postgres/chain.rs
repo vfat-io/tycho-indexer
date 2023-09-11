@@ -144,21 +144,23 @@ impl StorableBlock<orm::Block, orm::NewBlock, i64> for evm::Block {
 
 impl StorableTransaction<orm::Transaction, orm::NewTransaction, i64> for evm::Transaction {
     fn from_storage(val: orm::Transaction, block_hash: &[u8]) -> Self {
+        let to = if !val.to.is_empty() { Some(H160::from_slice(&val.to)) } else { None };
         Self {
             hash: H256::from_slice(&val.hash),
             block_hash: H256::from_slice(block_hash),
             from: H160::from_slice(&val.from),
-            to: H160::from_slice(&val.to),
+            to,
             index: val.index as u64,
         }
     }
 
     fn to_storage(&self, block_id: i64) -> orm::NewTransaction {
+        let to: Vec<u8> = if let Some(h) = self.to { Vec::from(h.as_bytes()) } else { Vec::new() };
         orm::NewTransaction {
             hash: Vec::from(self.hash.as_bytes()),
             block_id,
             from: Vec::from(self.from.as_bytes()),
-            to: Vec::from(self.to.as_bytes()),
+            to,
             index: self.index as i64,
         }
     }
@@ -288,7 +290,7 @@ mod test {
             )
             .expect("block hash ok"),
             from: H160::from_str("0x4648451b5f87ff8f0f7d622bd40574bb97e25980").expect("from ok"),
-            to: H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").expect("to ok"),
+            to: Some(H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").expect("to ok")),
             index: 1,
         }
     }
@@ -342,7 +344,7 @@ mod test {
             )
             .expect("block hash ok"),
             from: H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980").expect("from ok"),
-            to: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").expect("to ok"),
+            to: Some(H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").expect("to ok")),
             index: 1,
         };
 
