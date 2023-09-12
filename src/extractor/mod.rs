@@ -7,6 +7,7 @@ use crate::{
     storage::StorageError,
 };
 use async_trait::async_trait;
+use prost::DecodeError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -15,6 +16,8 @@ pub enum ExtractionError {
     Setup(String),
     #[error("Failed to decode: {0}")]
     DecodeError(String),
+    #[error("Protobuf error: {0}")]
+    ProtobufError(#[from] DecodeError),
     #[error("Can't decode an empty message")]
     Empty,
     #[error("Unexpected extraction error: {0}")]

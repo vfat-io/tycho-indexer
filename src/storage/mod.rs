@@ -768,6 +768,7 @@ pub trait StateGateway<DB>:
     ExtractionStateGateway<DB = DB>
     + ChainGateway<DB = DB>
     + ProtocolGateway<DB = DB>
+    + ExtractionStateGateway<DB = DB>
     + ContractStateGateway<DB = DB>
     + Send
     + Sync

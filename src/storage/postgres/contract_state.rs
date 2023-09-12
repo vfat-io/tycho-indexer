@@ -20,7 +20,7 @@ use crate::{
 
 use super::*;
 
-fn u256_to_bytes(v: &U256) -> Vec<u8> {
+pub fn u256_to_bytes(v: &U256) -> Vec<u8> {
     let mut bytes32 = [0u8; 32];
     v.to_big_endian(&mut bytes32);
     bytes32.to_vec()
@@ -36,6 +36,7 @@ impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
     ) -> Self {
         evm::Account::new(
             chain,
+            // TODO: from_slice may panic
             H160::from_slice(&val.account.address),
             val.account.title.clone(),
             HashMap::new(),
@@ -885,7 +886,7 @@ fn construct_account_to_contract_store(
 /// Parses a tuple of U256 representing an slot entry
 ///
 /// In case the value is None it will assume a value of zero.
-fn parse_u256_slot_entry(
+pub fn parse_u256_slot_entry(
     raw_key: &[u8],
     raw_val: Option<&[u8]>,
 ) -> Result<(U256, U256), StorageError> {
