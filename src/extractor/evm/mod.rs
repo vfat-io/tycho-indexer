@@ -141,8 +141,8 @@ impl NormalisedMessage for BlockAccountChanges {
 }
 
 pub struct AccountUpdateWithTx {
-    update: AccountUpdate,
-    tx: Transaction,
+    pub update: AccountUpdate,
+    pub tx: Transaction,
 }
 
 impl AccountUpdateWithTx {
@@ -198,7 +198,8 @@ pub struct BlockStateChanges {
     pub new_pools: HashMap<H160, SwapPool>,
 }
 
-pub type EVMStateGateway<DB> = StateGatewayType<DB, Block, Transaction, ERC20Token, Account>;
+pub type EVMStateGateway<DB> =
+    StateGatewayType<DB, Block, Transaction, ERC20Token, Account, AccountUpdateWithTx>;
 
 impl Block {
     pub fn try_from_message(msg: substreams::Block, chain: Chain) -> Result<Self, ExtractionError> {

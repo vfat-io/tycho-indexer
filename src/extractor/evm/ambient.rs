@@ -2,7 +2,7 @@ use diesel_async::{
     pooled_connection::bb8::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
 };
-use ethers::types::{H160, H256, U256};
+use ethers::types::{H160, H256};
 use prost::Message;
 use serde_json::json;
 use std::{collections::HashMap, str::FromStr, sync::Arc};
@@ -18,10 +18,7 @@ use crate::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
     },
-    storage::{
-        postgres::contract_state::{parse_u256_slot_entry, u256_to_bytes},
-        BlockIdentifier, BlockOrTimestamp, ContractId, StorageError, Version, VersionKind,
-    },
+    storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
 };
 
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
@@ -95,48 +92,28 @@ impl AmbientPgGateway {
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
-        let contract_id = ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.to_vec());
         self.state_gateway
             .upsert_block(&changes.block, conn)
             .await?;
-        // TODO: handle account not found case in that case
-        // transaction.to should be None else error.
-        let mut account = self
-            .state_gateway
-            .get_contract(&contract_id, &None, conn)
-            .await?;
+
         for update in changes.tx_updates.iter() {
-            account.transition(update);
             self.state_gateway
                 .upsert_tx(&update.tx, conn)
                 .await?;
-            self.state_gateway
-                .upsert_contract(&account, conn)
-                .await?;
+            if update.tx.to.is_none() {
+                // TODO insert contract
+            }
         }
-        let slot_changes = changes
-            .tx_updates
-            .iter()
-            .map(|update| {
-                (
-                    update.tx.hash.as_bytes(),
-                    [(update.address, &update.slots)]
-                        .iter()
-                        .map(|(addr, slots)| {
-                            (
-                                addr.as_bytes().to_vec(),
-                                slots
-                                    .iter()
-                                    .map(|(s, v)| (u256_to_bytes(s), Some(u256_to_bytes(v))))
-                                    .collect::<HashMap<_, _>>(),
-                            )
-                        })
-                        .collect::<HashMap<Vec<u8>, HashMap<Vec<u8>, Option<Vec<u8>>>>>(),
-                )
-            })
-            .collect::<Vec<_>>();
         self.state_gateway
-            .upsert_slots(slot_changes.as_slice(), conn)
+            .update_contracts(
+                self.chain,
+                &changes
+                    .tx_updates
+                    .iter()
+                    .filter(|u| u.tx.to.is_some())
+                    .collect::<Vec<_>>(),
+                conn,
+            )
             .await?;
         self.save_cursor(new_cursor, conn)
             .await?;
@@ -171,23 +148,6 @@ impl AmbientGateway for AmbientPgGateway {
         Ok(())
     }
 
-    // How should we handle this ideally we want a single query for reverted
-    // transactions but doing synchronising that that might be complex and slow
-    // - So everyone should request reverts as they need them, the call is
-    // cached for a few blocks second requester will directly hit the cache.
-    // Problem: During revert, I am not interested in inserting things by tx
-    // I simply want to generate a diff in a client digestible format, as
-    // quickly as possible:
-    // Currently balance and code updates are not exposed by gateway. Following
-    // changes are necessary to make this more ergonomic: Change keep
-    // get_contract methods that return full or partial accounts, change upsert
-    // and delta methods to return account update entities.
-    // Bunch of housekeeping missing - e.g. how do we know which was the latest
-    // extracted version for an extractor? I mean we know the cursor but we
-    // don't know yet how that relates to a block.. Do we need that in the DB?
-    // Can the extractor not decide for itself whether it is syncing or not? In
-    // this case requesting latest version can be deceiving. Responses form the
-    // service should always contains some kind of time reference.
     async fn revert(
         &self,
         to: BlockIdentifier,
@@ -202,64 +162,20 @@ impl AmbientGateway for AmbientPgGateway {
                         .get_block(&to, conn)
                         .await?;
                     let target = BlockOrTimestamp::Block(to);
-                    // TODO: everything below is due to unergonomic interface,
-                    // but without this step the required distinction between
-                    // input and output models would not have been very
-                    // clear/hard to predict!
-
                     let address = H160::from(AMBIENT_CONTRACT);
-                    let target_version = Version(target, VersionKind::Last);
-                    // Retrieve contracts at target version and put into hash map
-                    let account = self
-                        .state_gateway
-                        .get_contracts(
-                            self.chain,
-                            Some(&[AMBIENT_CONTRACT.as_slice()]),
-                            Some(&target_version),
-                            false,
-                            conn,
-                        )
-                        .await?;
-                    let account = account
-                        .into_iter()
-                        .map(|a| (a.address, a))
-                        .collect::<HashMap<_, _>>();
-                    let account = account
-                        .get(&address)
-                        .expect("ambient account exists");
-
-                    // retrieve deltas
-                    let mut delta = self
-                        .state_gateway
-                        .get_slots_delta(self.chain, None, &target_version.0, conn)
-                        .await?
-                        .into_iter()
-                        .map(|(addr_raw, slots_raw)| {
-                            let address = H160::from_slice(addr_raw.as_slice());
-                            let slots = slots_raw
-                                .iter()
-                                .map(|(rk, rv)| parse_u256_slot_entry(rk, rv.as_deref()))
-                                .collect::<Result<HashMap<U256, U256>, StorageError>>()?;
-                            Ok((address, slots))
-                        })
-                        .collect::<Result<HashMap<H160, HashMap<_, _>>, StorageError>>()?;
-                    let delta = delta
-                        .remove(&address)
-                        .unwrap_or_else(HashMap::new);
-
-                    // create a single account update
-                    let account_updates = [(
-                        address,
-                        evm::AccountUpdate::new(
-                            address,
-                            self.chain,
-                            delta,
-                            Some(account.balance),
-                            Some(account.code.clone()),
-                        ),
-                    )]
-                    .into_iter()
-                    .collect::<HashMap<_, _>>();
+                    let account_updates =
+                        self.state_gateway
+                            .get_account_delta(self.chain, None, &target, conn)
+                            .await?
+                            .into_iter()
+                            .filter_map(|u| {
+                                if u.address == address {
+                                    Some((u.address, u))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
 
                     self.save_cursor(new_cursor, conn)
                         .await?;

@@ -11,11 +11,12 @@ use crate::{
 };
 
 #[async_trait]
-impl<B, TX, A> ChainGateway for PostgresGateway<B, TX, A>
+impl<B, TX, A, D> ChainGateway for PostgresGateway<B, TX, A, D>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     A: Send + Sync + 'static,
+    D: Send + Sync + 'static,
 {
     type DB = AsyncPgConnection;
     type Block = B;
@@ -183,7 +184,8 @@ mod test {
 
     use super::*;
 
-    type EVMGateway = PostgresGateway<evm::Block, evm::Transaction, evm::Account>;
+    type EVMGateway =
+        PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdateWithTx>;
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();

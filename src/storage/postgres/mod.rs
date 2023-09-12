@@ -246,20 +246,22 @@ impl StorageError {
     }
 }
 
-pub struct PostgresGateway<B, TX, A> {
+pub struct PostgresGateway<B, TX, A, D> {
     chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
     _phantom_acc: PhantomData<A>,
+    _phantom_delta: PhantomData<D>,
 }
 
-impl<B, TX, A> PostgresGateway<B, TX, A> {
+impl<B, TX, A, D> PostgresGateway<B, TX, A, D> {
     pub fn new(cache: Arc<ChainEnumCache>) -> Self {
         Self {
             chain_id_cache: cache,
             _phantom_block: PhantomData,
             _phantom_tx: PhantomData,
             _phantom_acc: PhantomData,
+            _phantom_delta: PhantomData,
         }
     }
 

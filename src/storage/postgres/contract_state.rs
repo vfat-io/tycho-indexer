@@ -5,15 +5,17 @@ use std::{
 
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
-use diesel::upsert::on_constraint;
 use diesel_async::RunQueryDsl;
-use ethers::types::{H160, H256, U256};
+use ethers::{
+    types::{H160, H256, U256},
+    utils::keccak256,
+};
 
 use crate::{
     extractor::evm,
     storage::{
-        AccountToContractStore, AddressRef, BlockIdentifier, BlockOrTimestamp, ContractId,
-        ContractStateGateway, ContractStore, SlotChangeSet, StorableBlock, StorableContract,
+        AccountToContractStore, AddressRef, BlockIdentifier, BlockOrTimestamp, ContractDelta,
+        ContractId, ContractStateGateway, ContractStore, StorableBlock, StorableContract,
         StorableTransaction, TxHashRef, Version, VersionKind,
     },
 };
@@ -106,6 +108,33 @@ impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
     }
 }
 
+// Keep this as delta but the input model would have these somehow attached to transaction, this way
+// we can reuse the type for evm::AccountUpdates
+impl ContractDelta for evm::AccountUpdateWithTx {
+    fn contract_id(&self) -> ContractId {
+        ContractId::new(self.chain, self.address.as_bytes().to_vec())
+    }
+
+    fn dirty_balance(&self) -> Option<Vec<u8>> {
+        self.balance.map(|b| u256_to_bytes(&b))
+    }
+
+    fn dirty_code(&self) -> Option<&[u8]> {
+        self.code.as_deref()
+    }
+
+    fn dirty_slots(&self) -> ContractStore {
+        self.slots
+            .iter()
+            .map(|(s, v)| (u256_to_bytes(s), Some(u256_to_bytes(v))))
+            .collect()
+    }
+
+    fn transaction(&self) -> TxHashRef {
+        return self.tx.hash.as_bytes()
+    }
+}
+
 // Helper type to retrieve entities with their associated tx hashes.
 #[derive(Debug)]
 struct WithTxHash<T> {
@@ -121,20 +150,397 @@ impl<T> Deref for WithTxHash<T> {
     }
 }
 
+impl<B, TX, A, D> PostgresGateway<B, TX, A, D> {
+    async fn get_balance_deltas(
+        &self,
+        chain_id: i64,
+        start_version_ts: &NaiveDateTime,
+        target_version_ts: &NaiveDateTime,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<HashMap<i64, Vec<u8>>, StorageError> {
+        use schema::account_balance::dsl::*;
+        let res = if start_version_ts <= target_version_ts {
+            let changed_account_ids = account_balance
+                .inner_join(schema::account::table.inner_join(schema::chain::table))
+                .filter(schema::chain::id.eq(chain_id))
+                .filter(valid_from.gt(start_version_ts))
+                .filter(valid_from.le(target_version_ts))
+                .select(account_id)
+                .distinct()
+                .into_boxed();
+
+            account_balance
+                .inner_join(schema::transaction::table)
+                .filter(account_id.eq_any(changed_account_ids))
+                .filter(valid_from.le(target_version_ts))
+                .filter(
+                    valid_to
+                        .gt(target_version_ts)
+                        .or(valid_to.is_null()),
+                )
+                .select((account_id, balance))
+                .order_by((account_id, valid_from.desc(), schema::transaction::index.desc()))
+                .distinct_on(account_id)
+                .get_results::<(i64, Vec<u8>)>(conn)
+                .await?
+                .into_iter()
+                .collect::<HashMap<i64, Vec<u8>>>()
+        } else {
+            let changed_account_ids = account_balance
+                .inner_join(schema::account::table.inner_join(schema::chain::table))
+                .filter(schema::chain::id.eq(chain_id))
+                .filter(valid_from.gt(target_version_ts))
+                .filter(valid_from.le(start_version_ts))
+                .select(account_id)
+                .distinct()
+                .into_boxed();
+
+            account_balance
+                .inner_join(schema::transaction::table)
+                .filter(account_id.eq_any(changed_account_ids))
+                .filter(valid_from.le(target_version_ts))
+                .filter(
+                    valid_to
+                        .gt(target_version_ts)
+                        .or(valid_to.is_null()),
+                )
+                .select((account_id, balance))
+                .order_by((account_id, valid_from.asc(), schema::transaction::index.asc()))
+                .distinct_on(account_id)
+                .get_results::<(i64, Vec<u8>)>(conn)
+                .await?
+                .into_iter()
+                .collect::<HashMap<i64, Vec<u8>>>()
+        };
+        Ok(res)
+    }
+
+    async fn get_code_deltas(
+        &self,
+        chain_id: i64,
+        start_version_ts: &NaiveDateTime,
+        target_version_ts: &NaiveDateTime,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<HashMap<i64, Vec<u8>>, StorageError> {
+        use schema::contract_code::dsl::*;
+        let res = if start_version_ts <= target_version_ts {
+            let changed_account_ids = contract_code
+                .inner_join(schema::account::table.inner_join(schema::chain::table))
+                .filter(schema::chain::id.eq(chain_id))
+                .filter(valid_from.gt(start_version_ts))
+                .filter(valid_from.le(target_version_ts))
+                .select(account_id)
+                .distinct()
+                .into_boxed();
+
+            contract_code
+                .inner_join(schema::transaction::table)
+                .filter(account_id.eq_any(changed_account_ids))
+                .filter(valid_from.le(target_version_ts))
+                .filter(
+                    valid_to
+                        .gt(target_version_ts)
+                        .or(valid_to.is_null()),
+                )
+                .select((account_id, code))
+                .order_by((account_id, valid_from.desc(), schema::transaction::index.desc()))
+                .distinct_on(account_id)
+                .get_results::<(i64, Vec<u8>)>(conn)
+                .await?
+                .into_iter()
+                .collect::<HashMap<i64, Vec<u8>>>()
+        } else {
+            let changed_account_ids = contract_code
+                .inner_join(schema::account::table.inner_join(schema::chain::table))
+                .filter(schema::chain::id.eq(chain_id))
+                .filter(valid_from.gt(target_version_ts))
+                .filter(valid_from.le(start_version_ts))
+                .select(account_id)
+                .distinct()
+                .into_boxed();
+
+            contract_code
+                .inner_join(schema::transaction::table)
+                .filter(account_id.eq_any(changed_account_ids))
+                .filter(valid_from.le(target_version_ts))
+                .filter(
+                    valid_to
+                        .gt(target_version_ts)
+                        .or(valid_to.is_null()),
+                )
+                .select((account_id, code))
+                .order_by((account_id, valid_from.asc(), schema::transaction::index.asc()))
+                .distinct_on(account_id)
+                .get_results::<(i64, Vec<u8>)>(conn)
+                .await?
+                .into_iter()
+                .collect::<HashMap<i64, Vec<u8>>>()
+        };
+        Ok(res)
+    }
+
+    async fn get_slots_delta(
+        &self,
+        chain_id: i64,
+        start_version_ts: &NaiveDateTime,
+        target_version_ts: &NaiveDateTime,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<HashMap<i64, ContractStore>, StorageError> {
+        let changed_values = if start_version_ts <= target_version_ts {
+            // Going forward
+            //                  ]     changes to forward   ]
+            // -----------------|--------------------------|
+            //                start                     target
+            // We query for changes between start and target version. Then sort
+            // these by account and slot by change time in a desending matter
+            // (latest change first). Next we deduplicate by account and slot.
+            // Finally we select the value column to give us the latest value
+            // within the version range.
+            schema::contract_storage::table
+                .inner_join(schema::account::table.inner_join(schema::chain::table))
+                .filter(schema::chain::id.eq(chain_id))
+                .filter(schema::contract_storage::valid_from.gt(start_version_ts))
+                .filter(schema::contract_storage::valid_from.le(target_version_ts))
+                .order_by((
+                    schema::account::id,
+                    schema::contract_storage::slot,
+                    schema::contract_storage::valid_from.desc(),
+                    schema::contract_storage::ordinal.desc(),
+                ))
+                .select((
+                    schema::account::id,
+                    schema::contract_storage::slot,
+                    schema::contract_storage::value,
+                ))
+                .distinct_on((schema::account::id, schema::contract_storage::slot))
+                .get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
+                .await?
+        } else {
+            // Going backwards
+            //                  ]     changes to revert    ]
+            // -----------------|--------------------------|
+            //                target                     start
+            // We query for changes between target and start version. Then sort
+            // these for each account and slot by change time in an ascending
+            // manner. Next, we deduplicate by taking the first row for each
+            // account and slot. Finally we select the previous_value column to
+            // give us the value before this first change within the version
+            // range.
+            schema::contract_storage::table
+                .inner_join(schema::account::table.inner_join(schema::chain::table))
+                .filter(schema::chain::id.eq(chain_id))
+                .filter(schema::contract_storage::valid_from.gt(target_version_ts))
+                .filter(schema::contract_storage::valid_from.le(start_version_ts))
+                .order_by((
+                    schema::account::id.asc(),
+                    schema::contract_storage::slot.asc(),
+                    schema::contract_storage::valid_from.asc(),
+                    schema::contract_storage::ordinal.asc(),
+                ))
+                .select((
+                    schema::account::id,
+                    schema::contract_storage::slot,
+                    schema::contract_storage::previous_value,
+                ))
+                .distinct_on((schema::account::id, schema::contract_storage::slot))
+                .get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
+                .await?
+        };
+        let mut result: HashMap<i64, ContractStore> = HashMap::new();
+        for (cid, raw_key, raw_val) in changed_values.into_iter() {
+            match result.entry(cid) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().insert(raw_key, raw_val);
+                }
+                Entry::Vacant(e) => {
+                    let mut contract_storage = HashMap::new();
+                    contract_storage.insert(raw_key, raw_val);
+                    e.insert(contract_storage);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Upserts slots for a given contract.
+    ///
+    /// Upserts slots from multiple accounts. To correctly track changes, it is
+    /// necessary that each slot modification has a corresponding transaction
+    /// assigned.
+    ///
+    /// # Parameters
+    /// - `slots` A slice containing only the changed slots. Including slots that were changed to 0.
+    ///   Includes slot changes grouped per account and indexed by the transaction hash that
+    ///   modified them.
+    ///
+    /// # Returns
+    /// An empty `Ok(())` if the operation succeeded. Will raise an error if any
+    /// of the related entities can not be found: e.g. one of the referenced
+    /// transactions or accounts is not or not yet persisted.
+    async fn upsert_slots(
+        &self,
+        slots: HashMap<i64, AccountToContractStore>,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<(), StorageError> {
+        let txns: HashSet<_> = slots.keys().copied().collect();
+        let tx_ids: HashMap<i64, (i64, NaiveDateTime)> = schema::transaction::table
+            .inner_join(schema::block::table)
+            .filter(schema::transaction::id.eq_any(txns))
+            .select((schema::transaction::id, (schema::transaction::index, schema::block::ts)))
+            .get_results::<(i64, (i64, NaiveDateTime))>(conn)
+            .await?
+            .into_iter()
+            .collect();
+        let accounts: HashSet<_> = slots
+            .iter()
+            .flat_map(|(_, contract_slots)| contract_slots.keys())
+            .collect();
+        let account_ids: HashMap<Vec<u8>, i64> = schema::account::table
+            .filter(schema::account::address.eq_any(accounts))
+            .select((schema::account::address, schema::account::id))
+            .get_results::<(Vec<u8>, i64)>(conn)
+            .await?
+            .into_iter()
+            .collect();
+
+        let mut new_entries = Vec::new();
+        for (modify_tx, contract_storage) in slots.iter() {
+            let (tx_index, block_ts) = tx_ids.get(modify_tx).ok_or_else(|| {
+                StorageError::NoRelatedEntity(
+                    "Transaction".into(),
+                    "ContractStorage".into(),
+                    format!("{}", modify_tx),
+                )
+            })?;
+            for (address, storage) in contract_storage.iter() {
+                let account_id = account_ids
+                    .get(address)
+                    .ok_or_else(|| {
+                        StorageError::NoRelatedEntity(
+                            "Account".into(),
+                            "ContractStorage".into(),
+                            hex::encode(address),
+                        )
+                    })?;
+                for (slot, value) in storage.iter() {
+                    new_entries.push(orm::NewSlot {
+                        slot,
+                        value: value.as_ref(),
+                        account_id: *account_id,
+                        modify_tx: *modify_tx,
+                        ordinal: *tx_index,
+                        valid_from: *block_ts,
+                    })
+                }
+            }
+        }
+        diesel::insert_into(schema::contract_storage::table)
+            .values(&new_entries)
+            .execute(conn)
+            .await?;
+        Ok(())
+    }
+
+    /// Retrieve contract storage.
+    ///
+    /// Retrieve the storage slots of contracts at a given time/version.
+    ///
+    /// Will return the slots state after the given block/timestamp. Later we
+    /// might change to use VersionResult, but for now we keep it simple. Using
+    /// anything else then Version::Last is currently not supported.
+    ///
+    /// # Parameters
+    /// - `chain` The chain for which to retrieve slots for.
+    /// - `addresses` Optionally allows filtering by contract address.
+    /// - `at` The version at which to retrieve slots. None retrieves the latest
+    /// - `db` The database handle or connection. state.
+    async fn get_contract_slots(
+        &self,
+        chain: Chain,
+        contracts: Option<&[AddressRef<'_>]>,
+        at: Option<&Version>,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<HashMap<Vec<u8>, ContractStore>, StorageError> {
+        let version_ts = version_to_ts(&at, conn).await?;
+
+        let slots = {
+            use schema::{account, contract_storage::dsl::*};
+
+            let chain_id = self.get_chain_id(chain);
+            let mut q = contract_storage
+                .inner_join(account::table)
+                .filter(account::chain_id.eq(chain_id))
+                .filter(
+                    valid_from.le(version_ts).and(
+                        valid_to
+                            .gt(version_ts)
+                            .or(valid_to.is_null()),
+                    ),
+                )
+                .order_by((account::id, slot, valid_from.desc(), ordinal.desc()))
+                .select((account::id, slot, value))
+                .distinct_on((account::id, slot))
+                .into_boxed();
+            if let Some(addresses) = contracts {
+                let filter_val: HashSet<_> = addresses.iter().collect();
+                q = q.filter(account::address.eq_any(filter_val));
+            }
+            q.get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
+                .await?
+        };
+        let accounts = orm::Account::get_addresses_by_id(slots.iter().map(|(cid, _, _)| cid), conn)
+            .await?
+            .into_iter()
+            .collect::<HashMap<i64, Vec<u8>>>();
+        Self::construct_account_to_contract_store(slots.into_iter(), accounts)
+    }
+
+    fn construct_account_to_contract_store(
+        slot_values: impl Iterator<Item = (i64, Vec<u8>, Option<Vec<u8>>)>,
+        addresses: HashMap<i64, Vec<u8>>,
+    ) -> Result<AccountToContractStore, StorageError> {
+        let mut result: AccountToContractStore = HashMap::with_capacity(addresses.len());
+        for (cid, raw_key, raw_val) in slot_values.into_iter() {
+            // note this can theoretically happen (only if there is some really
+            // bad database inconsistency) because the call above simply filters
+            // for account ids, but won't error or give any inidication of a
+            // missing contract id.
+            let account_address = addresses.get(&cid).ok_or_else(|| {
+                StorageError::DecodeError(format!("Failed to find contract address for id {}", cid))
+            })?;
+
+            match result.entry(account_address.clone()) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().insert(raw_key, raw_val);
+                }
+                Entry::Vacant(e) => {
+                    let mut contract_storage = HashMap::new();
+                    contract_storage.insert(raw_key, raw_val);
+                    e.insert(contract_storage);
+                }
+            }
+        }
+        Ok(result)
+    }
+}
+
 #[async_trait]
-impl<B, TX, A> ContractStateGateway for PostgresGateway<B, TX, A>
+impl<B, TX, A, D> ContractStateGateway for PostgresGateway<B, TX, A, D>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
 {
     type DB = AsyncPgConnection;
     type ContractState = A;
+    type Delta = D;
 
     async fn get_contract(
         &self,
         id: &ContractId,
         version: &Option<&Version>,
+        include_slots: bool,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError> {
         let account_orm: orm::Account = orm::Account::by_id(id, db)
@@ -205,15 +611,23 @@ where
                 .ok(),
             None => None,
         };
-
-        let chain_id = account_orm.chain_id;
-        let account = Self::ContractState::from_storage(
+        let mut account = Self::ContractState::from_storage(
             orm::Contract { account: account_orm, balance: balance_orm, code: code_orm },
-            self.get_chain(chain_id),
+            id.chain,
             &balance_tx,
             &code_tx,
             creation_tx.as_deref(),
         );
+
+        if include_slots {
+            let slots = self
+                .get_contract_slots(id.chain, Some(&[account.address()]), *version, db)
+                .await?
+                .remove(&id.address)
+                .unwrap_or_else(HashMap::new);
+            account.set_store(&slots)?;
+        }
+
         Ok(account)
     }
 
@@ -225,7 +639,7 @@ where
         include_slots: bool,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::ContractState>, StorageError> {
-        let chain_id = self.get_chain_id(chain);
+        let chain_db_id = self.get_chain_id(chain);
         let version_ts = version_to_ts(&version, conn).await?;
         let accounts = {
             use schema::account::dsl::*;
@@ -234,7 +648,7 @@ where
                     schema::transaction::table
                         .on(creation_tx.eq(schema::transaction::id.nullable())),
                 )
-                .filter(chain_id.eq(chain_id))
+                .filter(chain_id.eq(chain_db_id))
                 .filter(created_at.le(version_ts))
                 .filter(
                     deleted_at
@@ -348,7 +762,7 @@ where
 
                 let mut contract = Self::ContractState::from_storage(
                     contract_orm,
-                    self.get_chain(chain_id),
+                    chain,
                     balance_tx.as_slice(),
                     code_tx.as_slice(),
                     creation_tx.as_deref(),
@@ -363,6 +777,59 @@ where
                 Ok(contract)
             })
             .collect()
+    }
+
+    async fn insert_contract(
+        &self,
+        new: &Self::ContractState,
+        db: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        let (creation_tx_id, created_ts) = if let Some(h) = new.creation_tx() {
+            let (tx_id, ts) = schema::transaction::table
+                .inner_join(schema::block::table)
+                .filter(schema::transaction::hash.eq(h))
+                .select((schema::transaction::id, schema::block::ts))
+                .first::<(i64, NaiveDateTime)>(db)
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(
+                        err,
+                        "Transaction",
+                        &hex::encode(h),
+                        Some("Account".into()),
+                    )
+                })?;
+
+            (Some(tx_id), ts)
+        } else {
+            (None, chrono::Utc::now().naive_utc())
+        };
+
+        let chain_id = self.get_chain_id(new.chain());
+        let new_contract = new.to_storage(chain_id, created_ts, creation_tx_id);
+        let hex_addr = hex::encode(new.address());
+
+        let account_id = diesel::insert_into(schema::account::table)
+            .values(new_contract.new_account())
+            .returning(schema::account::id)
+            .get_result::<i64>(db)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Account", &hex_addr, None))?;
+
+        // we can only insert balance and contract_code if we have a creation transaction.
+        if let Some(tx_id) = creation_tx_id {
+            diesel::insert_into(schema::account_balance::table)
+                .values(new_contract.new_balance(account_id, tx_id, created_ts))
+                .execute(db)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "AccountBalance", &hex_addr, None))?;
+            diesel::insert_into(schema::contract_code::table)
+                .values(new_contract.new_code(account_id, tx_id, created_ts))
+                .execute(db)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "ContractCode", &hex_addr, None))?;
+        }
+        Ok(())
     }
 
     /// # Upserts a Contract
@@ -388,103 +855,130 @@ where
     /// the subsequent insertion were to fail.
     ///
     /// Please refer to the [`ContractStateGateway`] for more detailed information.
-    async fn upsert_contract(
+    async fn update_contracts(
         &self,
-        new: &Self::ContractState,
-        db: &mut Self::DB,
+        chain: Chain,
+        new: &[&Self::Delta],
+        conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        let chain_id = self.get_chain_id(new.chain());
-        let txns: HashSet<_> =
-            [Some(new.code_modify_tx()), Some(new.balance_modify_tx()), new.creation_tx()]
-                .iter()
-                .cloned()
-                .flatten()
-                .collect();
+        let chain_id = self.get_chain_id(chain);
 
-        let tx_data: HashMap<Vec<u8>, (i64, NaiveDateTime)> = schema::transaction::table
+        let txns: HashMap<Vec<u8>, (i64, NaiveDateTime)> = schema::transaction::table
             .inner_join(schema::block::table)
-            .filter(schema::transaction::hash.eq_any(&txns))
+            .filter(schema::transaction::hash.eq_any(new.iter().map(|u| u.transaction())))
             .select((schema::transaction::hash, (schema::transaction::id, schema::block::ts)))
-            .get_results::<(Vec<u8>, (i64, NaiveDateTime))>(db)
+            .get_results::<(Vec<u8>, (i64, NaiveDateTime))>(conn)
             .await?
             .into_iter()
             .collect();
 
-        let (creation_tx_id, created_ts) = if let Some(h) = new.creation_tx() {
-            let (tx_id, ts) = tx_data.get(h).ok_or_else(|| {
+        let addresses: Result<Vec<Vec<u8>>, StorageError> = new
+            .iter()
+            .map(|u| {
+                let id = u.contract_id();
+                if id.chain != chain {
+                    return Err(StorageError::Unsupported(format!(
+                        "Updating contracts of different chains with a single query  \
+                    is not supported. Expected: {}, got: {}!",
+                        chain.to_string(),
+                        id.chain.to_string()
+                    )))
+                }
+                Ok(id.address)
+            })
+            .collect();
+
+        let accounts: HashMap<_, _> = schema::account::table
+            .filter(schema::account::chain_id.eq(chain_id))
+            .filter(schema::account::address.eq_any(addresses?))
+            .select((schema::account::address, schema::account::id))
+            .get_results::<(Vec<u8>, i64)>(conn)
+            .await?
+            .into_iter()
+            .collect();
+
+        let mut balance_data = Vec::new();
+        let mut code_data = Vec::new();
+        let mut slot_data: HashMap<i64, AccountToContractStore> = HashMap::new();
+
+        for delta in new.iter() {
+            let contract_id = delta.contract_id();
+            let account_id = *accounts
+                .get(&contract_id.address)
+                .ok_or_else(|| {
+                    StorageError::NotFound("Account".to_owned(), hex::encode(&contract_id.address))
+                })?;
+
+            let tx_hash = delta.transaction();
+            let (tx_id, ts) = *txns.get(tx_hash).ok_or_else(|| {
                 StorageError::NoRelatedEntity(
                     "Transaction".to_owned(),
                     "Account".to_owned(),
-                    hex::encode(h),
+                    hex::encode(tx_hash),
                 )
             })?;
-            (Some(*tx_id), *ts)
-        } else {
-            (None, chrono::Utc::now().naive_utc())
-        };
 
-        let new_contract = new.to_storage(chain_id, created_ts, creation_tx_id);
-        let hex_addr = hex::encode(new.address());
+            if let Some(new_balance) = delta.dirty_balance() {
+                let new = orm::NewAccountBalance {
+                    balance: new_balance,
+                    account_id,
+                    modify_tx: tx_id,
+                    valid_from: ts,
+                    valid_to: None,
+                };
+                balance_data.push(new);
+            }
 
-        let account_created = diesel::insert_into(schema::account::table)
-            .values(new_contract.new_account())
-            .on_conflict(on_constraint("account_chain_id_address_key"))
-            .do_nothing()
-            .returning(schema::account::id)
-            .get_result::<i64>(db)
-            .await
-            .optional()
-            .map_err(|err| StorageError::from_diesel(err, "Account", &hex_addr, None))?;
+            if let Some(new_code) = delta.dirty_code() {
+                let new = orm::NewContractCode {
+                    code: new_code,
+                    hash: keccak256(new_code).to_vec(),
+                    account_id,
+                    modify_tx: tx_id,
+                    valid_from: ts,
+                    valid_to: None,
+                };
+                code_data.push(new);
+            }
 
-        let account_id = if let Some(id) = account_created {
-            id
-        } else {
-            // we had an update and we need to retrieve the updated id. cause
-            // the returning clause returns an empty set if nothing was updated.
-            // We do not want to make a noop update as this might cause db side
-            // triggers to fire unnecessarily.
-            schema::account::table
-                .filter(schema::account::address.eq(new.address()))
-                .filter(schema::account::chain_id.eq(chain_id))
-                .select(schema::account::id)
-                .first::<i64>(db)
-                .await?
-        };
+            let slots = delta.dirty_slots();
+            if !slots.is_empty() {
+                match slot_data.entry(tx_id) {
+                    Entry::Occupied(mut e) => {
+                        let v = e.get_mut();
+                        if v.contains_key(&contract_id.address) {
+                            return Err(StorageError::Unexpected(format!("Ambiguous update! Contract 0x{} received different updates in same tx!", hex::encode(&contract_id.address))));
+                        }
+                        v.extend([(contract_id.address.clone(), slots)]);
+                    }
 
-        let (balance_modify_tx_id, balance_modify_ts) = tx_data
-            .get(new.balance_modify_tx())
-            .ok_or_else(|| {
-                StorageError::NoRelatedEntity(
-                    "Transaction".to_owned(),
-                    "AccountBalance".to_owned(),
-                    hex::encode(new.balance_modify_tx()),
-                )
-            })?;
-        diesel::insert_into(schema::account_balance::table)
-            .values(new_contract.new_balance(account_id, *balance_modify_tx_id, *balance_modify_ts))
-            .on_conflict(on_constraint("account_balance_account_id_modify_tx_key"))
-            .do_nothing()
-            .execute(db)
-            .await
-            .map_err(|err| StorageError::from_diesel(err, "AccountBalance", &hex_addr, None))?;
+                    Entry::Vacant(e) => {
+                        let v = [(contract_id.address.clone(), slots)]
+                            .into_iter()
+                            .collect();
+                        e.insert(v);
+                    }
+                }
+            }
+        }
 
-        let (code_modify_tx_id, code_modify_ts) = tx_data
-            .get(new.code_modify_tx())
-            .ok_or_else(|| {
-                StorageError::NoRelatedEntity(
-                    "Transaction".to_owned(),
-                    "ContractCode".to_owned(),
-                    hex::encode(new.code_modify_tx()),
-                )
-            })?;
-        diesel::insert_into(schema::contract_code::table)
-            .values(new_contract.new_code(account_id, *code_modify_tx_id, *code_modify_ts))
-            .on_conflict(on_constraint("contract_code_account_id_modify_tx_key"))
-            .do_nothing()
-            .execute(db)
-            .await
-            .map_err(|err| StorageError::from_diesel(err, "ContractCode", &hex_addr, None))?;
+        if !balance_data.is_empty() {
+            diesel::insert_into(schema::account_balance::table)
+                .values(&balance_data)
+                .execute(conn)
+                .await?;
+        }
+        if !code_data.is_empty() {
+            diesel::insert_into(schema::contract_code::table)
+                .values(&code_data)
+                .execute(conn)
+                .await?;
+        }
 
+        if !slot_data.is_empty() {
+            self.upsert_slots(slot_data, conn)
+                .await?;
+        }
         Ok(())
     }
 
@@ -552,187 +1046,28 @@ where
         Ok(())
     }
 
-    async fn get_contract_slots(
-        &self,
-        chain: Chain,
-        contracts: Option<&[AddressRef]>,
-        at: Option<&Version>,
-        conn: &mut Self::DB,
-    ) -> Result<HashMap<Vec<u8>, ContractStore>, StorageError> {
-        let version_ts = version_to_ts(&at, conn).await?;
-
-        let slots = {
-            use schema::{account, contract_storage::dsl::*};
-
-            let chain_id = self.get_chain_id(chain);
-            let mut q = contract_storage
-                .inner_join(account::table)
-                .filter(account::chain_id.eq(chain_id))
-                .filter(
-                    valid_from.le(version_ts).and(
-                        valid_to
-                            .gt(version_ts)
-                            .or(valid_to.is_null()),
-                    ),
-                )
-                .order_by((account::id, slot, valid_from.desc(), ordinal.desc()))
-                .select((account::id, slot, value))
-                .distinct_on((account::id, slot))
-                .into_boxed();
-            if let Some(addresses) = contracts {
-                let filter_val: HashSet<_> = addresses.iter().collect();
-                q = q.filter(account::address.eq_any(filter_val));
-            }
-            q.get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
-                .await?
-        };
-        let accounts = orm::Account::get_addresses_by_id(slots.iter().map(|(cid, _, _)| cid), conn)
-            .await?
-            .into_iter()
-            .collect::<HashMap<i64, Vec<u8>>>();
-        construct_account_to_contract_store(slots.into_iter(), accounts)
-    }
-
-    async fn upsert_slots(
-        &self,
-        slots: SlotChangeSet<'_>,
-        conn: &mut Self::DB,
-    ) -> Result<(), StorageError> {
-        let txns: HashSet<_> = slots.iter().map(|(tx, _)| tx).collect();
-        let tx_ids: HashMap<Vec<u8>, (i64, i64, NaiveDateTime)> = schema::transaction::table
-            .inner_join(schema::block::table)
-            .filter(schema::transaction::hash.eq_any(txns))
-            .select((
-                schema::transaction::hash,
-                (schema::transaction::id, schema::transaction::index, schema::block::ts),
-            ))
-            .get_results::<(Vec<u8>, (i64, i64, NaiveDateTime))>(conn)
-            .await?
-            .into_iter()
-            .collect();
-        let accounts: HashSet<_> = slots
-            .iter()
-            .flat_map(|(_, contract_slots)| contract_slots.keys())
-            .collect();
-        let account_ids: HashMap<Vec<u8>, i64> = schema::account::table
-            .filter(schema::account::address.eq_any(accounts))
-            .select((schema::account::address, schema::account::id))
-            .get_results::<(Vec<u8>, i64)>(conn)
-            .await?
-            .into_iter()
-            .collect();
-
-        let mut new_entries = Vec::new();
-        for (txhash, contract_storage) in slots.iter() {
-            let (modify_tx, tx_index, block_ts) = tx_ids.get(*txhash).ok_or_else(|| {
-                StorageError::NoRelatedEntity(
-                    "Transaction".into(),
-                    "ContractStorage".into(),
-                    hex::encode(txhash),
-                )
-            })?;
-            for (address, storage) in contract_storage.iter() {
-                let account_id = account_ids
-                    .get(address)
-                    .ok_or_else(|| {
-                        StorageError::NoRelatedEntity(
-                            "Account".into(),
-                            "ContractStorage".into(),
-                            hex::encode(address),
-                        )
-                    })?;
-                for (slot, value) in storage.iter() {
-                    new_entries.push(orm::NewSlot {
-                        slot,
-                        value: value.as_ref(),
-                        account_id: *account_id,
-                        modify_tx: *modify_tx,
-                        ordinal: *tx_index,
-                        valid_from: *block_ts,
-                    })
-                }
-            }
-        }
-        diesel::insert_into(schema::contract_storage::table)
-            .values(&new_entries)
-            .execute(conn)
-            .await?;
-        Ok(())
-    }
-
-    async fn get_slots_delta(
+    async fn get_account_delta(
         &self,
         chain: Chain,
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut AsyncPgConnection,
-    ) -> Result<AccountToContractStore, StorageError> {
+    ) -> Result<Vec<evm::AccountUpdate>, StorageError> {
         let chain_id = self.get_chain_id(chain);
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
         let start_version_ts = coerce_block_or_ts(&start_version, conn).await?;
         let target_version_ts = coerce_block_or_ts(&Some(target_version), conn).await?;
 
-        let changed_values = if start_version_ts <= target_version_ts {
-            // Going forward
-            //                  ]     changes to forward   ]
-            // -----------------|--------------------------|
-            //                start                     target
-            // We query for changes between start and target version. Then sort
-            // these by account and slot by change time in a desending matter
-            // (latest change first). Next we deduplicate by account and slot.
-            // Finally we select the value column to give us the latest value
-            // within the version range.
-            schema::contract_storage::table
-                .inner_join(schema::account::table.inner_join(schema::chain::table))
-                .filter(schema::chain::id.eq(chain_id))
-                .filter(schema::contract_storage::valid_from.gt(start_version_ts))
-                .filter(schema::contract_storage::valid_from.le(target_version_ts))
-                .order_by((
-                    schema::account::id,
-                    schema::contract_storage::slot,
-                    schema::contract_storage::valid_from.desc(),
-                    schema::contract_storage::ordinal.desc(),
-                ))
-                .select((
-                    schema::account::id,
-                    schema::contract_storage::slot,
-                    schema::contract_storage::value,
-                ))
-                .distinct_on((schema::account::id, schema::contract_storage::slot))
-                .get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
-                .await?
-        } else {
-            // Going backwards
-            //                  ]     changes to revert    ]
-            // -----------------|--------------------------|
-            //                target                     start
-            // We query for changes between target and start version. Then sort
-            // these for each account and slot by change time in an ascending
-            // manner. Next, we deduplicate by taking the first row for each
-            // account and slot. Finally we select the previous_value column to
-            // give us the value before this first change within the version
-            // range.
-            schema::contract_storage::table
-                .inner_join(schema::account::table.inner_join(schema::chain::table))
-                .filter(schema::chain::id.eq(chain_id))
-                .filter(schema::contract_storage::valid_from.gt(target_version_ts))
-                .filter(schema::contract_storage::valid_from.le(start_version_ts))
-                .order_by((
-                    schema::account::id.asc(),
-                    schema::contract_storage::slot.asc(),
-                    schema::contract_storage::valid_from.asc(),
-                    schema::contract_storage::ordinal.asc(),
-                ))
-                .select((
-                    schema::account::id,
-                    schema::contract_storage::slot,
-                    schema::contract_storage::previous_value,
-                ))
-                .distinct_on((schema::account::id, schema::contract_storage::slot))
-                .get_results::<(i64, Vec<u8>, Option<Vec<u8>>)>(conn)
-                .await?
-        };
+        let balance_deltas = self
+            .get_balance_deltas(chain_id, &start_version_ts, &target_version_ts, conn)
+            .await?;
+        let code_deltas = self
+            .get_code_deltas(chain_id, &start_version_ts, &target_version_ts, conn)
+            .await?;
+        let slot_deltas = self
+            .get_slots_delta(chain_id, &start_version_ts, &target_version_ts, conn)
+            .await?;
 
         // We retrieve account addresses separately because this is more
         // efficient for the most common cases. In the most common case, only a
@@ -748,19 +1083,42 @@ where
         let account_addresses = schema::account::table
             .filter(
                 schema::account::id.eq_any(
-                    changed_values
-                        .iter()
-                        .map(|(cid, _, _)| cid),
+                    balance_deltas
+                        .keys()
+                        .chain(code_deltas.keys())
+                        .chain(slot_deltas.keys())
+                        .collect::<HashSet<_>>(),
                 ),
             )
             .select((schema::account::id, schema::account::address))
             .get_results::<(i64, Vec<u8>)>(conn)
-            .await
-            .map_err(StorageError::from)?
-            .into_iter()
-            .collect::<HashMap<i64, Vec<u8>>>();
+            .await?;
 
-        construct_account_to_contract_store(changed_values.into_iter(), account_addresses)
+        account_addresses
+            .into_iter()
+            .map(|(id, address)| -> Result<evm::AccountUpdate, StorageError> {
+                let address = parse_id_h160(&address)?;
+                let evm_slots = slot_deltas
+                    .get(&id)
+                    .map(|s| {
+                        s.iter()
+                            .map(|(s, v)| parse_u256_slot_entry(s, v.as_deref()))
+                            .collect::<Result<HashMap<U256, U256>, StorageError>>()
+                    })
+                    .unwrap_or_else(|| Ok(HashMap::new()))?;
+
+                let update = evm::AccountUpdate::new(
+                    address,
+                    chain,
+                    evm_slots,
+                    balance_deltas
+                        .get(&id)
+                        .map(|v| U256::from_big_endian(v.as_slice())),
+                    code_deltas.get(&id).cloned(),
+                );
+                Ok(update)
+            })
+            .collect::<Result<Vec<_>, _>>()
     }
 
     async fn revert_contract_state(
@@ -855,34 +1213,6 @@ fn parse_id_h160(v: &[u8]) -> Result<H160, StorageError> {
     Ok(H160::from_slice(v))
 }
 
-fn construct_account_to_contract_store(
-    slot_values: impl Iterator<Item = (i64, Vec<u8>, Option<Vec<u8>>)>,
-    addresses: HashMap<i64, Vec<u8>>,
-) -> Result<AccountToContractStore, StorageError> {
-    let mut result: AccountToContractStore = HashMap::with_capacity(addresses.len());
-    for (cid, raw_key, raw_val) in slot_values.into_iter() {
-        // note this can theoretically happen (only if there is some really
-        // bad database inconsistency) because the call above simply filters
-        // for account ids, but won't error or give any inidication of a
-        // missing contract id.
-        let account_address = addresses.get(&cid).ok_or_else(|| {
-            StorageError::DecodeError(format!("Failed to find contract address for id {}", cid))
-        })?;
-
-        match result.entry(account_address.clone()) {
-            Entry::Occupied(mut e) => {
-                e.get_mut().insert(raw_key, raw_val);
-            }
-            Entry::Vacant(e) => {
-                let mut contract_storage = HashMap::new();
-                contract_storage.insert(raw_key, raw_val);
-                e.insert(contract_storage);
-            }
-        }
-    }
-    Ok(result)
-}
-
 /// Parses a tuple of U256 representing an slot entry
 ///
 /// In case the value is None it will assume a value of zero.
@@ -968,10 +1298,11 @@ mod test {
     use super::*;
     use crate::{
         extractor::evm::{self, Account},
-        storage::postgres::db_fixtures,
+        storage::{postgres::db_fixtures, ChainGateway},
     };
 
-    type EvmGateway = PostgresGateway<evm::Block, evm::Transaction, evm::Account>;
+    type EvmGateway =
+        PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdateWithTx>;
     type MaybeTS = Option<NaiveDateTime>;
 
     async fn setup_db() -> AsyncPgConnection {
@@ -1105,7 +1436,7 @@ mod test {
         let gateway = EvmGateway::from_connection(&mut conn).await;
         let id = ContractId::new(Chain::Ethereum, hex::decode(acc_address).unwrap());
         let actual = gateway
-            .get_contract(&id, &None, &mut conn)
+            .get_contract(&id, &None, false, &mut conn)
             .await
             .unwrap();
 
@@ -1309,7 +1640,7 @@ mod test {
             hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
         );
         let result = gateway
-            .get_contract(&contract_id, &None, &mut conn)
+            .get_contract(&contract_id, &None, false, &mut conn)
             .await;
         if let Err(StorageError::NotFound(entity, id)) = result {
             assert_eq!(entity, "Account");
@@ -1320,11 +1651,12 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_add_contract() {
+    async fn test_insert_contract() {
         let mut conn = setup_db().await;
         let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        let gateway = EvmGateway::from_connection(&mut conn).await;
         let blk = db_fixtures::insert_blocks(&mut conn, chain_id).await;
-        let txn = db_fixtures::insert_txns(
+        db_fixtures::insert_txns(
             &mut conn,
             &[
                 (
@@ -1363,10 +1695,9 @@ mod test {
                 .unwrap(),
             ),
         );
-        let gateway = EvmGateway::from_connection(&mut conn).await;
 
         gateway
-            .upsert_contract(&expected, &mut conn)
+            .insert_contract(&expected, &mut conn)
             .await
             .unwrap();
 
@@ -1375,45 +1706,44 @@ mod test {
             hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
         );
         let actual = gateway
-            .get_contract(&contract_id, &None, &mut conn)
+            .get_contract(&contract_id, &None, true, &mut conn)
             .await
             .unwrap();
         assert_eq!(expected, actual);
-
-        let orm_account = orm::Account::by_id(&contract_id, &mut conn)
-            .await
-            .unwrap();
-        let (block_ts, _tx_ts) = schema::transaction::table
-            .inner_join(schema::block::table)
-            .filter(schema::transaction::id.eq(txn[1]))
-            .select((schema::block::ts, schema::transaction::inserted_ts))
-            .first::<(NaiveDateTime, NaiveDateTime)>(&mut conn)
-            .await
-            .unwrap();
-        assert_eq!(block_ts, orm_account.created_at.unwrap());
     }
 
     #[tokio::test]
     async fn test_upsert_contract() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
-        let gw: PostgresGateway<evm::Block, evm::Transaction, Account> =
-            EvmGateway::from_connection(&mut conn).await;
-        let modfiy_txhash = "0x62f4d4f29d10db8722cb66a2adb0049478b11988c8b43cd446b755afb8954678";
+        let gw = EvmGateway::from_connection(&mut conn).await;
+        let modfiy_txhash = "62f4d4f29d10db8722cb66a2adb0049478b11988c8b43cd446b755afb8954678";
         let block = orm::Block::by_number(Chain::Ethereum, 2, &mut conn)
             .await
             .expect("block found");
         db_fixtures::insert_txns(&mut conn, &[(block.id, 100, modfiy_txhash)]).await;
         let mut account = account_c1(2);
-        account.set_balance(
-            U256::from(10000),
-            modfiy_txhash
-                .parse()
-                .expect("valid txhash"),
+        account.set_balance(U256::from(10000), modfiy_txhash.parse().unwrap());
+        let tx = gw
+            .get_tx(
+                hex::decode(modfiy_txhash)
+                    .unwrap()
+                    .as_slice(),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+        let update = evm::AccountUpdateWithTx::new(
+            account.address,
+            account.chain,
+            HashMap::new(),
+            Some(U256::from(10_000)),
+            None,
+            tx,
         );
         let contract_id = ContractId::new(Chain::Ethereum, account.address().to_vec());
 
-        gw.upsert_contract(&account, &mut conn)
+        gw.update_contracts(Chain::Ethereum, &[&update], &mut conn)
             .await
             .expect("upsert success");
 
@@ -1447,7 +1777,7 @@ mod test {
         // get contract used below to compare does not include slots
         account.slots = HashMap::new();
         let updated = gw
-            .get_contract(&contract_id, &None, &mut conn)
+            .get_contract(&contract_id, &None, false, &mut conn)
             .await
             .expect("updated in db");
         assert_eq!(updated, account);
@@ -1626,12 +1956,8 @@ mod test {
         ]
         .into_iter()
         .collect();
-
-        let tx_hash =
-            hex::decode("bb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")
-                .unwrap();
-        let input_slots = vec![(
-            tx_hash.as_slice(),
+        let input_slots = [(
+            txn[0],
             vec![(
                 hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F")
                     .expect("account address ok"),
@@ -1639,11 +1965,12 @@ mod test {
             )]
             .into_iter()
             .collect(),
-        )];
-
+        )]
+        .into_iter()
+        .collect();
         let gw = EvmGateway::from_connection(&mut conn).await;
 
-        gw.upsert_slots(&input_slots, &mut conn)
+        gw.upsert_slots(input_slots, &mut conn)
             .await
             .unwrap();
 
@@ -1703,32 +2030,43 @@ mod test {
         .await;
     }
 
+    async fn get_account(
+        address: &[u8],
+        conn: &mut AsyncPgConnection,
+    ) -> Result<i64, StorageError> {
+        Ok(schema::account::table
+            .filter(schema::account::address.eq(address))
+            .select(schema::account::id)
+            .first::<i64>(conn)
+            .await?)
+    }
+
     #[tokio::test]
     async fn get_slots_delta_forward() {
         let mut conn = setup_db().await;
         setup_slots_delta(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
+        let chain_id = gw.get_chain_id(Chain::Ethereum);
         let storage: ContractStore = vec![(0u8, 2u8), (1u8, 3u8), (5u8, 25u8), (6u8, 30u8)]
             .into_iter()
             .map(|(k, v)| if v > 0 { (bytes32(k), Some(bytes32(v))) } else { (bytes32(k), None) })
             .collect();
         let mut exp = HashMap::new();
         let addr = hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
-        exp.insert(addr, storage);
+        let account_id = get_account(addr.as_slice(), &mut conn)
+            .await
+            .unwrap();
+        exp.insert(account_id, storage);
 
         let res = gw
             .get_slots_delta(
-                Chain::Ethereum,
-                Some(&BlockOrTimestamp::Timestamp(
-                    "2020-01-01T00:00:00"
-                        .parse::<NaiveDateTime>()
-                        .unwrap(),
-                )),
-                &BlockOrTimestamp::Timestamp(
-                    "2020-01-01T02:00:00"
-                        .parse::<NaiveDateTime>()
-                        .unwrap(),
-                ),
+                chain_id,
+                &"2020-01-01T00:00:00"
+                    .parse::<NaiveDateTime>()
+                    .unwrap(),
+                &"2020-01-01T02:00:00"
+                    .parse::<NaiveDateTime>()
+                    .unwrap(),
                 &mut conn,
             )
             .await
@@ -1742,27 +2080,27 @@ mod test {
         let mut conn = setup_db().await;
         setup_slots_delta(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
+        let chain_id = gw.get_chain_id(Chain::Ethereum);
         let storage: ContractStore = vec![(0u8, 1u8), (1u8, 5u8), (5u8, 0u8), (6u8, 0u8)]
             .into_iter()
             .map(|(k, v)| if v > 0 { (bytes32(k), Some(bytes32(v))) } else { (bytes32(k), None) })
             .collect();
         let mut exp = HashMap::new();
         let addr = hex::decode("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
-        exp.insert(addr, storage);
+        let account_id = get_account(addr.as_slice(), &mut conn)
+            .await
+            .unwrap();
+        exp.insert(account_id, storage);
 
         let res = gw
             .get_slots_delta(
-                Chain::Ethereum,
-                Some(&BlockOrTimestamp::Timestamp(
-                    "2020-01-01T02:00:00"
-                        .parse::<NaiveDateTime>()
-                        .unwrap(),
-                )),
-                &BlockOrTimestamp::Timestamp(
-                    "2020-01-01T00:00:00"
-                        .parse::<NaiveDateTime>()
-                        .unwrap(),
-                ),
+                chain_id,
+                &"2020-01-01T02:00:00"
+                    .parse::<NaiveDateTime>()
+                    .unwrap(),
+                &"2020-01-01T00:00:00"
+                    .parse::<NaiveDateTime>()
+                    .unwrap(),
                 &mut conn,
             )
             .await

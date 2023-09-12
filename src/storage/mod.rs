@@ -43,7 +43,10 @@ pub mod postgres;
 
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use crate::services::deserialization_helpers::{chain_from_str, hex_to_bytes};
+use crate::{
+    extractor::evm,
+    services::deserialization_helpers::{chain_from_str, hex_to_bytes},
+};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use serde::Deserialize;
@@ -499,8 +502,6 @@ type StoreVal = Vec<u8>;
 type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
 /// Multiple key values stores grouped by account address.
 type AccountToContractStore = HashMap<Address, ContractStore>;
-/// A set of changes to stores, grouped by the modifying transaction hash.
-type SlotChangeSet<'a> = &'a [(TxHashRef<'a>, AccountToContractStore)];
 
 /// Lays out the necessary interface needed to store and retrieve contracts from
 /// and their associated state from storage.
@@ -575,6 +576,18 @@ pub trait StorableContract<S, N, I>: Send + Sync + 'static {
     fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
 }
 
+pub trait ContractDelta: Send + Sync + 'static {
+    fn contract_id(&self) -> ContractId;
+
+    fn dirty_balance(&self) -> Option<Vec<u8>>;
+
+    fn dirty_code(&self) -> Option<&[u8]>;
+
+    fn dirty_slots(&self) -> ContractStore;
+
+    fn transaction(&self) -> TxHashRef;
+}
+
 /// Manage contracts and their state in storage.
 ///
 /// Specifies how to retrieve, add and update contracts in storage.
@@ -582,6 +595,7 @@ pub trait StorableContract<S, N, I>: Send + Sync + 'static {
 pub trait ContractStateGateway {
     type DB;
     type ContractState;
+    type Delta: ContractDelta;
 
     /// Get a contracts state from storage
     ///
@@ -594,6 +608,7 @@ pub trait ContractStateGateway {
         &self,
         id: &ContractId,
         version: &Option<&Version>,
+        include_slots: bool,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError>;
 
@@ -625,15 +640,22 @@ pub trait ContractStateGateway {
         db: &mut Self::DB,
     ) -> Result<Vec<Self::ContractState>, StorageError>;
 
+    async fn insert_contract(
+        &self,
+        new: &Self::ContractState,
+        db: &mut Self::DB,
+    ) -> Result<(), StorageError>;
+
     /// Save contract metadata.
     ///
     /// Inserts immutable contract metadata, as well as code and balance.
     ///
     /// # Parameters
     /// - `new` the new contract state to be saved.
-    async fn upsert_contract(
+    async fn update_contracts(
         &self,
-        new: &Self::ContractState,
+        chain: Chain,
+        new: &[&Self::Delta],
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -659,47 +681,6 @@ pub trait ContractStateGateway {
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
-    /// Retrieve contract storage.
-    ///
-    /// Retrieve the storage slots of contracts at a given time/version.
-    ///
-    /// Will return the slots state after the given block/timestamp. Later we
-    /// might change to use VersionResult, but for now we keep it simple. Using
-    /// anything else then Version::Last is currently not supported.
-    ///
-    /// # Parameters
-    /// - `chain` The chain for which to retrieve slots for.
-    /// - `addresses` Optionally allows filtering by contract address.
-    /// - `at` The version at which to retrieve slots. None retrieves the latest
-    /// - `db` The database handle or connection. state.
-    async fn get_contract_slots(
-        &self,
-        chain: Chain,
-        addresses: Option<&[AddressRef]>,
-        at: Option<&Version>,
-        db: &mut Self::DB,
-    ) -> Result<AccountToContractStore, StorageError>;
-
-    /// Upserts slots for a given contract.
-    ///
-    /// Upserts slots from multiple accounts. To correctly track changes, it is
-    /// necessary that each slot modification has a corresponding transaction
-    /// assigned.
-    ///
-    /// # Parameters
-    /// - `slots` A slice containing only the changed slots. Including slots that were changed to 0.
-    ///   Includes slot changes grouped per account and indexed by the transaction hash that
-    ///   modified them.
-    ///
-    /// # Returns
-    /// An empty `Ok(())` if the operation succeeded. Will raise an error if any
-    /// of the related entities can not be found: e.g. one of the referenced
-    /// transactions or accounts is not or not yet persisted.
-    async fn upsert_slots(
-        &self,
-        slots: SlotChangeSet<'_>,
-        db: &mut Self::DB,
-    ) -> Result<(), StorageError>;
     /// Retrieve a slot delta between two versions
     ///
     /// Given start version V1 and end version V2, this method will return the
@@ -737,13 +718,15 @@ pub trait ContractStateGateway {
     /// Errors if:
     ///     - The versions can't be located in storage.
     ///     - There was an error with the database
-    async fn get_slots_delta(
+    ///
+    /// TODO: Decouple this from evm
+    async fn get_account_delta(
         &self,
         id: Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         db: &mut Self::DB,
-    ) -> Result<AccountToContractStore, StorageError>;
+    ) -> Result<Vec<evm::AccountUpdate>, StorageError>;
 
     /// Reverts the contract in storage to a previous version.
     ///
@@ -775,5 +758,5 @@ pub trait StateGateway<DB>:
 {
 }
 
-pub type StateGatewayType<DB, B, TX, T, C> =
-    Arc<dyn StateGateway<DB, Transaction = TX, Block = B, Token = T, ContractState = C>>;
+pub type StateGatewayType<DB, B, TX, T, C, D> =
+    Arc<dyn StateGateway<DB, Transaction = TX, Block = B, Token = T, ContractState = C, Delta = D>>;
