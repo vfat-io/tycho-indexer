@@ -185,7 +185,7 @@ mod test {
     use super::*;
 
     type EVMGateway =
-        PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdateWithTx>;
+        PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>;
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();

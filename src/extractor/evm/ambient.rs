@@ -107,11 +107,15 @@ impl AmbientPgGateway {
         self.state_gateway
             .update_contracts(
                 self.chain,
-                &changes
+                changes
                     .tx_updates
                     .iter()
-                    .filter(|u| u.tx.to.is_some())
-                    .collect::<Vec<_>>(),
+                    .filter_map(|u| {
+                        u.tx.to
+                            .map(|_| (u.tx.hash.as_bytes(), &u.update))
+                    })
+                    .collect::<Vec<_>>()
+                    .as_slice(),
                 conn,
             )
             .await?;

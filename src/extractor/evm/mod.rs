@@ -199,7 +199,7 @@ pub struct BlockStateChanges {
 }
 
 pub type EVMStateGateway<DB> =
-    StateGatewayType<DB, Block, Transaction, ERC20Token, Account, AccountUpdateWithTx>;
+    StateGatewayType<DB, Block, Transaction, ERC20Token, Account, AccountUpdate>;
 
 impl Block {
     pub fn try_from_message(msg: substreams::Block, chain: Chain) -> Result<Self, ExtractionError> {

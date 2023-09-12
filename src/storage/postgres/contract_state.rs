@@ -110,7 +110,7 @@ impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
 
 // Keep this as delta but the input model would have these somehow attached to transaction, this way
 // we can reuse the type for evm::AccountUpdates
-impl ContractDelta for evm::AccountUpdateWithTx {
+impl ContractDelta for evm::AccountUpdate {
     fn contract_id(&self) -> ContractId {
         ContractId::new(self.chain, self.address.as_bytes().to_vec())
     }
@@ -130,8 +130,29 @@ impl ContractDelta for evm::AccountUpdateWithTx {
             .collect()
     }
 
-    fn transaction(&self) -> TxHashRef {
-        return self.tx.hash.as_bytes()
+    fn from_storage(
+        chain: Chain,
+        address: AddressRef,
+        slots: Option<&ContractStore>,
+        balance: Option<&[u8]>,
+        code: Option<&[u8]>,
+    ) -> Result<Self, StorageError> {
+        let slots = slots
+            .map(|s| {
+                s.iter()
+                    .map(|(s, v)| parse_u256_slot_entry(s, v.as_deref()))
+                    .collect::<Result<HashMap<U256, U256>, StorageError>>()
+            })
+            .unwrap_or_else(|| Ok(HashMap::new()))?;
+
+        let update = evm::AccountUpdate::new(
+            parse_id_h160(address)?,
+            chain,
+            slots,
+            balance.map(U256::from_big_endian),
+            code.map(|v| v.to_vec()),
+        );
+        Ok(update)
     }
 }
 
@@ -858,14 +879,18 @@ where
     async fn update_contracts(
         &self,
         chain: Chain,
-        new: &[&Self::Delta],
+        new: &[(AddressRef, &Self::Delta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let chain_id = self.get_chain_id(chain);
+        let new = new
+            .iter()
+            .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_vec()) })
+            .collect::<Vec<_>>();
 
         let txns: HashMap<Vec<u8>, (i64, NaiveDateTime)> = schema::transaction::table
             .inner_join(schema::block::table)
-            .filter(schema::transaction::hash.eq_any(new.iter().map(|u| u.transaction())))
+            .filter(schema::transaction::hash.eq_any(new.iter().filter_map(|u| u.tx.as_ref())))
             .select((schema::transaction::hash, (schema::transaction::id, schema::block::ts)))
             .get_results::<(Vec<u8>, (i64, NaiveDateTime))>(conn)
             .await?
@@ -909,7 +934,7 @@ where
                     StorageError::NotFound("Account".to_owned(), hex::encode(&contract_id.address))
                 })?;
 
-            let tx_hash = delta.transaction();
+            let tx_hash = delta.tx.as_ref().unwrap();
             let (tx_id, ts) = *txns.get(tx_hash).ok_or_else(|| {
                 StorageError::NoRelatedEntity(
                     "Transaction".to_owned(),
@@ -1052,7 +1077,7 @@ where
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<evm::AccountUpdate>, StorageError> {
+    ) -> Result<Vec<Self::Delta>, StorageError> {
         let chain_id = self.get_chain_id(chain);
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
@@ -1096,26 +1121,17 @@ where
 
         account_addresses
             .into_iter()
-            .map(|(id, address)| -> Result<evm::AccountUpdate, StorageError> {
-                let address = parse_id_h160(&address)?;
-                let evm_slots = slot_deltas
-                    .get(&id)
-                    .map(|s| {
-                        s.iter()
-                            .map(|(s, v)| parse_u256_slot_entry(s, v.as_deref()))
-                            .collect::<Result<HashMap<U256, U256>, StorageError>>()
-                    })
-                    .unwrap_or_else(|| Ok(HashMap::new()))?;
-
-                let update = evm::AccountUpdate::new(
-                    address,
+            .map(|(id, address)| -> Result<Self::Delta, StorageError> {
+                let slots = slot_deltas.get(&id);
+                let update = Self::Delta::from_storage(
                     chain,
-                    evm_slots,
+                    address.as_slice(),
+                    slots,
                     balance_deltas
                         .get(&id)
-                        .map(|v| U256::from_big_endian(v.as_slice())),
-                    code_deltas.get(&id).cloned(),
-                );
+                        .map(Vec::as_slice),
+                    code_deltas.get(&id).map(Vec::as_slice),
+                )?;
                 Ok(update)
             })
             .collect::<Result<Vec<_>, _>>()
@@ -1298,11 +1314,11 @@ mod test {
     use super::*;
     use crate::{
         extractor::evm::{self, Account},
-        storage::{postgres::db_fixtures, ChainGateway},
+        storage::postgres::db_fixtures,
     };
 
     type EvmGateway =
-        PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdateWithTx>;
+        PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>;
     type MaybeTS = Option<NaiveDateTime>;
 
     async fn setup_db() -> AsyncPgConnection {
@@ -1713,37 +1729,28 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_upsert_contract() {
+    async fn test_update_contracts() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
         let modfiy_txhash = "62f4d4f29d10db8722cb66a2adb0049478b11988c8b43cd446b755afb8954678";
+        let tx_hash_bytes = hex::decode(modfiy_txhash).unwrap();
         let block = orm::Block::by_number(Chain::Ethereum, 2, &mut conn)
             .await
             .expect("block found");
         db_fixtures::insert_txns(&mut conn, &[(block.id, 100, modfiy_txhash)]).await;
         let mut account = account_c1(2);
         account.set_balance(U256::from(10000), modfiy_txhash.parse().unwrap());
-        let tx = gw
-            .get_tx(
-                hex::decode(modfiy_txhash)
-                    .unwrap()
-                    .as_slice(),
-                &mut conn,
-            )
-            .await
-            .unwrap();
-        let update = evm::AccountUpdateWithTx::new(
+        let update = evm::AccountUpdate::new(
             account.address,
             account.chain,
             HashMap::new(),
             Some(U256::from(10_000)),
             None,
-            tx,
         );
         let contract_id = ContractId::new(Chain::Ethereum, account.address().to_vec());
 
-        gw.update_contracts(Chain::Ethereum, &[&update], &mut conn)
+        gw.update_contracts(Chain::Ethereum, &[(tx_hash_bytes.as_slice(), &update)], &mut conn)
             .await
             .expect("upsert success");
 

@@ -43,10 +43,7 @@ pub mod postgres;
 
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use crate::{
-    extractor::evm,
-    services::deserialization_helpers::{chain_from_str, hex_to_bytes},
-};
+use crate::services::deserialization_helpers::{chain_from_str, hex_to_bytes};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use serde::Deserialize;
@@ -576,7 +573,15 @@ pub trait StorableContract<S, N, I>: Send + Sync + 'static {
     fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
 }
 
-pub trait ContractDelta: Send + Sync + 'static {
+pub trait ContractDelta: Sized + Send + Sync + 'static {
+    fn from_storage(
+        chain: Chain,
+        address: AddressRef,
+        slots: Option<&ContractStore>,
+        balance: Option<&[u8]>,
+        code: Option<&[u8]>,
+    ) -> Result<Self, StorageError>;
+
     fn contract_id(&self) -> ContractId;
 
     fn dirty_balance(&self) -> Option<Vec<u8>>;
@@ -584,8 +589,6 @@ pub trait ContractDelta: Send + Sync + 'static {
     fn dirty_code(&self) -> Option<&[u8]>;
 
     fn dirty_slots(&self) -> ContractStore;
-
-    fn transaction(&self) -> TxHashRef;
 }
 
 /// Manage contracts and their state in storage.
@@ -655,7 +658,7 @@ pub trait ContractStateGateway {
     async fn update_contracts(
         &self,
         chain: Chain,
-        new: &[&Self::Delta],
+        new: &[(TxHashRef, &Self::Delta)],
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -718,15 +721,13 @@ pub trait ContractStateGateway {
     /// Errors if:
     ///     - The versions can't be located in storage.
     ///     - There was an error with the database
-    ///
-    /// TODO: Decouple this from evm
     async fn get_account_delta(
         &self,
         id: Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         db: &mut Self::DB,
-    ) -> Result<Vec<evm::AccountUpdate>, StorageError>;
+    ) -> Result<Vec<Self::Delta>, StorageError>;
 
     /// Reverts the contract in storage to a previous version.
     ///

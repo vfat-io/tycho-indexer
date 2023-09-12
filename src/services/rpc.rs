@@ -16,7 +16,7 @@ use thiserror::Error;
 use tracing::error;
 
 struct RequestHandler {
-    db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdateWithTx>,
+    db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>,
     db_connection: AsyncPgConnection,
 }
 
@@ -291,7 +291,7 @@ mod tests {
             evm::Block,
             evm::Transaction,
             evm::Account,
-            evm::AccountUpdateWithTx,
+            evm::AccountUpdate,
         >::from_connection(&mut conn)
         .await;
         let mut req_handler = RequestHandler { db_gw: db_gtw, db_connection: conn };
