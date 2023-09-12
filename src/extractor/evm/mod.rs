@@ -18,6 +18,8 @@ use ethers::{
 use serde::{Deserialize, Serialize};
 
 use super::ExtractionError;
+
+#[derive(Debug)]
 pub struct SwapPool {}
 
 pub struct ERC20Token {}
@@ -88,6 +90,28 @@ impl Account {
     }
 }
 
+impl From<&AccountUpdateWithTx> for Account {
+    fn from(value: &AccountUpdateWithTx) -> Self {
+        let empty_hash = H256::from(keccak256(Vec::new()));
+        Account::new(
+            value.chain,
+            value.address,
+            format!("{:x}", value.address),
+            value.slots.clone(),
+            value.balance.unwrap_or_default(),
+            value.code.clone().unwrap_or_default(),
+            value
+                .code
+                .as_ref()
+                .map(|v| H256::from(keccak256(v)))
+                .unwrap_or(empty_hash),
+            value.tx.hash,
+            value.tx.hash,
+            Some(value.tx.hash),
+        )
+    }
+}
+
 #[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
 pub struct AccountUpdate {
     pub address: H160,
@@ -126,6 +150,7 @@ impl AccountUpdate {
     }
 }
 
+#[derive(Debug)]
 pub struct BlockAccountChanges {
     extractor: String,
     chain: Chain,
@@ -198,8 +223,7 @@ pub struct BlockStateChanges {
     pub new_pools: HashMap<H160, SwapPool>,
 }
 
-pub type EVMStateGateway<DB> =
-    StateGatewayType<DB, Block, Transaction, ERC20Token, Account, AccountUpdate>;
+pub type EVMStateGateway<DB> = StateGatewayType<DB, Block, Transaction, Account, AccountUpdate>;
 
 impl Block {
     pub fn try_from_message(msg: substreams::Block, chain: Chain) -> Result<Self, ExtractionError> {

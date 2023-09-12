@@ -7,7 +7,10 @@ use super::{orm, schema, PostgresGateway};
 use crate::{
     extractor::evm,
     models::Chain,
-    storage::{BlockIdentifier, ChainGateway, StorableBlock, StorableTransaction, StorageError},
+    storage::{
+        BlockIdentifier, ChainGateway, ContractDelta, StorableBlock, StorableContract,
+        StorableTransaction, StorageError,
+    },
 };
 
 #[async_trait]
@@ -15,8 +18,8 @@ impl<B, TX, A, D> ChainGateway for PostgresGateway<B, TX, A, D>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    A: Send + Sync + 'static,
-    D: Send + Sync + 'static,
+    D: ContractDelta,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
 {
     type DB = AsyncPgConnection;
     type Block = B;

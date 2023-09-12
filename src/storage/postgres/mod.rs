@@ -139,10 +139,14 @@ pub mod schema;
 use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, sync::Arc};
 
 use diesel::prelude::*;
-#[allow(unused_imports)] // RunQueryDsl is wrongly marked as unused
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{
+    pooled_connection::{bb8::Pool, AsyncDieselConnectionManager},
+    AsyncPgConnection, RunQueryDsl,
+};
 
-use super::StorageError;
+use super::{
+    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableTransaction, StorageError,
+};
 use crate::models::Chain;
 
 pub struct EnumTableCache<E> {
@@ -158,6 +162,23 @@ where
     E: Eq + Hash + Copy + TryFrom<String> + std::fmt::Debug,
     <E as TryFrom<String>>::Error: std::fmt::Debug,
 {
+    pub async fn from_pool(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
+
+        let results: Vec<(i64, String)> = async {
+            use schema::chain::dsl::*;
+            chain
+                .select((id, name))
+                .load(&mut conn)
+                .await
+                .expect("Failed to load chain ids!")
+        }
+        .await;
+        Ok(Self::from_tuples(&results))
+    }
     /// Creates a new cache from a slice of tuples.
     ///
     /// # Arguments
@@ -254,8 +275,14 @@ pub struct PostgresGateway<B, TX, A, D> {
     _phantom_delta: PhantomData<D>,
 }
 
-impl<B, TX, A, D> PostgresGateway<B, TX, A, D> {
-    pub fn new(cache: Arc<ChainEnumCache>) -> Self {
+impl<B, TX, A, D> PostgresGateway<B, TX, A, D>
+where
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
+{
+    pub fn with_cache(cache: Arc<ChainEnumCache>) -> Self {
         Self {
             chain_id_cache: cache,
             _phantom_block: PhantomData,
@@ -278,7 +305,7 @@ impl<B, TX, A, D> PostgresGateway<B, TX, A, D> {
         }
         .await;
         let cache = Arc::new(ChainEnumCache::from_tuples(&results));
-        Self::new(cache)
+        Self::with_cache(cache)
     }
 
     fn get_chain_id(&self, chain: Chain) -> i64 {
@@ -288,6 +315,33 @@ impl<B, TX, A, D> PostgresGateway<B, TX, A, D> {
     fn get_chain(&self, id: i64) -> Chain {
         self.chain_id_cache.get_chain(id)
     }
+
+    pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
+        let cache = EnumTableCache::<Chain>::from_pool(pool.clone()).await?;
+
+        let gw = Arc::new(PostgresGateway::<B, TX, A, D>::with_cache(Arc::new(cache)));
+
+        Ok(gw)
+    }
+}
+
+impl<B, TX, A, D> StateGateway<AsyncPgConnection> for PostgresGateway<B, TX, A, D>
+where
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
+{
+    // No methods in here - this just ties everything together
+}
+
+pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageError> {
+    let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url);
+    let pool = Pool::builder()
+        .build(config)
+        .await
+        .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
+    Ok(pool)
 }
 
 #[cfg(test)]

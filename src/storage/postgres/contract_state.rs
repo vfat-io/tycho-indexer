@@ -171,7 +171,13 @@ impl<T> Deref for WithTxHash<T> {
     }
 }
 
-impl<B, TX, A, D> PostgresGateway<B, TX, A, D> {
+impl<B, TX, A, D> PostgresGateway<B, TX, A, D>
+where
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
+{
     async fn get_balance_deltas(
         &self,
         chain_id: i64,

@@ -44,12 +44,11 @@ impl<DB> AmbientContractExtractor<DB> {
     }
 }
 
-struct AmbientPgGateway {
+pub struct AmbientPgGateway {
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
-    contract_cache: Mutex<HashMap<H160, evm::Account>>,
 }
 
 #[async_trait]
@@ -69,6 +68,15 @@ pub trait AmbientGateway: Send + Sync {
 }
 
 impl AmbientPgGateway {
+    pub fn new(
+        name: &str,
+        chain: Chain,
+        pool: Pool<AsyncPgConnection>,
+        gw: EVMStateGateway<AsyncPgConnection>,
+    ) -> Self {
+        AmbientPgGateway { name: name.to_owned(), chain, pool, state_gateway: gw }
+    }
+
     async fn save_cursor(
         &self,
         new_cursor: &str,
@@ -95,13 +103,15 @@ impl AmbientPgGateway {
         self.state_gateway
             .upsert_block(&changes.block, conn)
             .await?;
-
         for update in changes.tx_updates.iter() {
             self.state_gateway
                 .upsert_tx(&update.tx, conn)
                 .await?;
             if update.tx.to.is_none() {
-                // TODO insert contract
+                let new: evm::Account = update.into();
+                self.state_gateway
+                    .insert_contract(&new, conn)
+                    .await?;
             }
         }
         self.state_gateway
@@ -200,17 +210,11 @@ impl AmbientGateway for AmbientPgGateway {
     }
 }
 
-// We need to decide whether we want to retrieve accounts from the gateway or account updates.
-// Alternatively we could use things as they are an introduce a wrapper type for slots.
-// One way or another it seems that we are lacking one generic parameters.
-// We can easily convert from AccountUpdate to Account and given a precious Account we can forward
-// using AccountUpdate.
-
 impl<G> AmbientContractExtractor<G>
 where
     G: AmbientGateway,
 {
-    async fn new(name: &str, chain: Chain, gateway: G) -> Result<Self, ExtractionError> {
+    pub async fn new(name: &str, chain: Chain, gateway: G) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor(name, chain).await {
             Err(StorageError::NotFound(_, _)) => AmbientContractExtractor {
@@ -296,9 +300,8 @@ where
             .await?;
         self.update_cursor(inp.last_valid_cursor)
             .await;
-        // TODO: Once changes.account_updates can be empty return None here if
-        // it is
-        Ok(Some(changes))
+
+        Ok((!changes.account_updates.is_empty()).then_some(changes))
     }
 
     async fn handle_progress(&self, _inp: ModulesProgress) -> Result<(), ExtractionError> {
