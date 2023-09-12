@@ -72,6 +72,11 @@ impl Account {
             creation_tx,
         }
     }
+
+    pub fn set_balance(&mut self, new_balance: U256, modified_at: H256) {
+        self.balance = new_balance;
+        self.balance_modify_tx = modified_at;
+    }
 }
 
 #[derive(PartialEq, Debug)]

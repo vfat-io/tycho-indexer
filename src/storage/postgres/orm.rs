@@ -267,7 +267,7 @@ pub struct ProtocolComponent {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(Transaction, foreign_key = creation_tx))]
 #[diesel(table_name=account)]
@@ -338,7 +338,7 @@ pub struct Token {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name=account_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -353,6 +353,21 @@ pub struct AccountBalance {
     pub modified_ts: NaiveDateTime,
 }
 
+impl AccountBalance {
+    /// retrieves all balances from a certain account
+    pub async fn all_versions(
+        address: &[u8],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
+        account_balance::table
+            .inner_join(account::table)
+            .filter(account::address.eq(address))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await
+    }
+}
+
 #[derive(Insertable, Debug)]
 #[diesel(table_name=account_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -364,7 +379,7 @@ pub struct NewAccountBalance<'a> {
     pub valid_to: Option<NaiveDateTime>,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name=contract_code)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -378,6 +393,21 @@ pub struct ContractCode {
     pub valid_to: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+impl ContractCode {
+    /// retrieves all codes from a certain account
+    pub async fn all_versions(
+        address: &[u8],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
+        contract_code::table
+            .inner_join(account::table)
+            .filter(account::address.eq(address))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await
+    }
 }
 
 #[derive(Insertable, Debug)]
