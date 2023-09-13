@@ -366,7 +366,7 @@ mod tests {
 
             tokio::spawn(async move {
                 loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs_f32(0.1)).await;
                     dbg!("Sending DummyMessage");
                     let dummy_message = DummyMessage::new(extractor_id.clone());
                     if tx
