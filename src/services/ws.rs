@@ -285,6 +285,7 @@ mod tests {
         Message,
     };
 
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     struct DummyMessage {
         extractor_id: ExtractorIdentity,
     }
