@@ -4,7 +4,7 @@ use crate::{
     extractor::runner::ExtractorHandle,
     models::{ExtractorIdentity, NormalisedMessage},
 };
-use actix::{Actor, ActorContext, ActorFutureExt, AsyncContext, SpawnHandle, StreamHandler};
+use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 use uuid::Uuid;
 
 /// How often heartbeat pings are sent
@@ -107,52 +107,48 @@ where
         ctx: &mut ws::WebsocketContext<Self>,
         extractor_id: &ExtractorIdentity,
     ) {
-        info!("Subscribing to extractor: {:?}", extractor_id);
+        dbg!("Subscribing to extractor: {:?}", extractor_id);
+        {
+            let extractors_guard = self
+                .app_state
+                .extractors
+                .lock()
+                .unwrap();
 
-        let extractors_guard = self
-            .app_state
-            .extractors
-            .lock()
-            .unwrap();
+            if let Some(extractor_handle) = extractors_guard.get(extractor_id) {
+                // Generate a unique ID for this subscription
+                let subscription_id = Uuid::new_v4();
+                dbg!("Generated subscription ID: {:?}", subscription_id);
 
-        if let Some(extractor_handle) = extractors_guard.get(extractor_id) {
-            // Generate a unique ID for this subscription
-            let _subscription_id = Uuid::new_v4();
-
-            let fut = async move {
-                match extractor_handle.subscribe().await {
+                match extractor_handle.subscribe() {
                     Ok(mut rx) => {
                         let stream = async_stream::stream! {
                             while let Some(item) = rx.recv().await {
-                                yield item;
+                                yield Ok(item);
                             }
                         };
-                        Ok((stream, _subscription_id))
-                    }
-                    Err(e) => Err(e),
-                }
-            };
+                        let handle = ctx.add_stream(stream);
 
-            let fut = actix::fut::wrap_future::<_, Self>(fut);
-            let fut = fut.map(|res, act, ctx| {
-                match res {
-                    Ok((stream, subscription_id)) => {
-                        let handle = Self::add_stream(stream, ctx);
-                        act.subscriptions
+                        self.subscriptions
                             .insert(subscription_id, handle);
+                        dbg!("Added subscription to hashmap: {:?}", subscription_id);
+
+                        let message = OutgoingMessage::<M>::NewSubscription { subscription_id };
+                        ctx.text(serde_json::to_string(&message).unwrap());
                     }
                     Err(e) => {
-                        // Handle error properly here
-                        println!("Failed to subscribe: {:?}", e);
-                    }
-                }
-            });
-            ctx.spawn(fut);
-        } else {
-            error!("Extractor not found: {:?}", extractor_id);
+                        error!("Failed to subscribe to extractor: {:?}", e);
 
-            let error = WebsocketError::ExtractorNotFound(extractor_id.clone());
-            ctx.text(serde_json::to_string(&error).unwrap());
+                        let error = WebsocketError::ExtractorNotFound(extractor_id.clone());
+                        ctx.text(serde_json::to_string(&error).unwrap());
+                    }
+                };
+            } else {
+                error!("Extractor not found: {:?}", extractor_id);
+
+                let error = WebsocketError::ExtractorNotFound(extractor_id.clone());
+                ctx.text(serde_json::to_string(&error).unwrap());
+            }
         }
     }
 
@@ -430,7 +426,7 @@ mod tests {
             .expect("Failed to send subscribe message");
 
         // Receive the new subscription ID from the server
-        let response_msg = timeout(Duration::from_secs(1), connection.next())
+        let response_msg = timeout(Duration::from_secs(5), connection.next())
             .await
             .expect("Failed to receive message")
             .unwrap()

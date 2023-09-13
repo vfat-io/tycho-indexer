@@ -1,4 +1,5 @@
 use anyhow::{format_err, Context};
+use futures03::executor::block_on;
 use prost::Message;
 use std::{collections::HashMap, env, error::Error, sync::Arc};
 use tokio::{
@@ -36,11 +37,13 @@ where
         Self { handle, control_tx }
     }
 
-    pub async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
+    pub fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
         let (tx, rx) = mpsc::channel(1);
-        self.control_tx
-            .send(ControlMessage::Subscribe(tx))
-            .await?;
+        // FIXME blocking call
+        block_on(
+            self.control_tx
+                .send(ControlMessage::Subscribe(tx)),
+        )?;
         Ok(rx)
     }
 
