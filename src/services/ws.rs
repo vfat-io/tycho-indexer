@@ -589,7 +589,7 @@ mod tests {
         };
 
         // Receive the DummyMessage from the server
-        let _message = wait_for_dummy_message(&mut connection, extractor_id)
+        let _message = wait_for_dummy_message(&mut connection, extractor_id.clone())
             .await
             .expect("Failed to get the expected DummyMessage");
         dbg!("Received DummyMessage from server");
@@ -635,6 +635,15 @@ mod tests {
         } else {
             panic!("Unexpected response: {:?}", response);
         }
+
+        // Try to receive a DummyMessage from the first extractor (expecting timeout to occur)
+        let result =
+            timeout(Duration::from_secs(2), wait_for_dummy_message(&mut connection, extractor_id))
+                .await;
+        assert!(
+            matches!(result, Err(_)),
+            "Received a message from the first extractor after unsubscribing"
+        );
 
         // Receive the DummyMessage from the second exractor
         let _message = wait_for_dummy_message(&mut connection, extractor_id2)
