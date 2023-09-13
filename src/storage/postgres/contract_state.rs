@@ -6,145 +6,15 @@ use std::{
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::RunQueryDsl;
-use ethers::{
-    types::{H160, H256, U256},
-    utils::keccak256,
-};
+use ethers::utils::keccak256;
 
-use crate::{
-    extractor::evm,
-    storage::{
-        AccountToContractStore, AddressRef, BlockIdentifier, BlockOrTimestamp, ContractDelta,
-        ContractId, ContractStateGateway, ContractStore, StorableBlock, StorableContract,
-        StorableTransaction, TxHashRef, Version, VersionKind,
-    },
+use crate::storage::{
+    AccountToContractStore, AddressRef, BlockIdentifier, BlockOrTimestamp, ContractDelta,
+    ContractId, ContractStateGateway, ContractStore, StorableBlock, StorableContract,
+    StorableTransaction, TxHashRef, Version, VersionKind,
 };
 
 use super::*;
-
-pub fn u256_to_bytes(v: &U256) -> Vec<u8> {
-    let mut bytes32 = [0u8; 32];
-    v.to_big_endian(&mut bytes32);
-    bytes32.to_vec()
-}
-
-impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
-    fn from_storage(
-        val: orm::Contract,
-        chain: Chain,
-        balance_modify_tx: TxHashRef,
-        code_modify_tx: TxHashRef,
-        creation_tx: Option<TxHashRef>,
-    ) -> Self {
-        evm::Account::new(
-            chain,
-            // TODO: from_slice may panic
-            H160::from_slice(&val.account.address),
-            val.account.title.clone(),
-            HashMap::new(),
-            U256::from_big_endian(&val.balance.balance),
-            val.code.code,
-            H256::from_slice(&val.code.hash),
-            H256::from_slice(balance_modify_tx),
-            H256::from_slice(code_modify_tx),
-            creation_tx.map(H256::from_slice),
-        )
-    }
-
-    fn to_storage(
-        &self,
-        chain_id: i64,
-        creation_ts: NaiveDateTime,
-        tx_id: Option<i64>,
-    ) -> orm::NewContract {
-        orm::NewContract {
-            title: self.title.clone(),
-            address: self.address.as_bytes().to_vec(),
-            chain_id,
-            creation_tx: tx_id,
-            created_at: Some(creation_ts),
-            deleted_at: None,
-            balance: u256_to_bytes(&self.balance),
-            code: self.code.clone(),
-            code_hash: self.code_hash.as_bytes().to_vec(),
-        }
-    }
-
-    fn chain(&self) -> Chain {
-        self.chain
-    }
-
-    fn creation_tx(&self) -> Option<TxHashRef> {
-        self.creation_tx
-            .as_ref()
-            .map(|h| h.as_bytes())
-    }
-
-    fn address(&self) -> AddressRef {
-        self.address.as_bytes()
-    }
-
-    fn store(&self) -> ContractStore {
-        self.slots
-            .iter()
-            .map(|(s, v)| (u256_to_bytes(s), Some(u256_to_bytes(v))))
-            .collect()
-    }
-
-    fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError> {
-        self.slots = store
-            .iter()
-            .map(|(rk, rv)| parse_u256_slot_entry(rk, rv.as_deref()))
-            .collect::<Result<HashMap<_, _>, _>>()?;
-        Ok(())
-    }
-}
-
-impl ContractDelta for evm::AccountUpdate {
-    fn contract_id(&self) -> ContractId {
-        ContractId::new(self.chain, self.address.as_bytes().to_vec())
-    }
-
-    fn dirty_balance(&self) -> Option<Vec<u8>> {
-        self.balance.map(|b| u256_to_bytes(&b))
-    }
-
-    fn dirty_code(&self) -> Option<&[u8]> {
-        self.code.as_deref()
-    }
-
-    fn dirty_slots(&self) -> ContractStore {
-        self.slots
-            .iter()
-            .map(|(s, v)| (u256_to_bytes(s), Some(u256_to_bytes(v))))
-            .collect()
-    }
-
-    fn from_storage(
-        chain: Chain,
-        address: AddressRef,
-        slots: Option<&ContractStore>,
-        balance: Option<&[u8]>,
-        code: Option<&[u8]>,
-    ) -> Result<Self, StorageError> {
-        let slots = slots
-            .map(|s| {
-                s.iter()
-                    .map(|(s, v)| parse_u256_slot_entry(s, v.as_deref()))
-                    .collect::<Result<HashMap<U256, U256>, StorageError>>()
-            })
-            .unwrap_or_else(|| Ok(HashMap::new()))?;
-
-        let update = evm::AccountUpdate::new(
-            parse_id_h160(address)?,
-            chain,
-            slots,
-            balance.map(U256::from_big_endian),
-            code.map(|v| v.to_vec()),
-        );
-        Ok(update)
-    }
-}
 
 // Helper type to retrieve entities with their associated tx hashes.
 #[derive(Debug)]
@@ -161,6 +31,7 @@ impl<T> Deref for WithTxHash<T> {
     }
 }
 
+// Private methods
 impl<B, TX, A, D> PostgresGateway<B, TX, A, D>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
@@ -1208,49 +1079,6 @@ where
     }
 }
 
-/// Parses an evm address hash from the db
-///
-/// The db id is required to provide additional error context in case the
-/// parsing fails.
-fn parse_id_h160(v: &[u8]) -> Result<H160, StorageError> {
-    if v.len() != 20 {
-        return Err(StorageError::DecodeError(format!(
-            "Invalid contract address found: {}",
-            hex::encode(v)
-        )))
-    }
-    Ok(H160::from_slice(v))
-}
-
-/// Parses a tuple of U256 representing an slot entry
-///
-/// In case the value is None it will assume a value of zero.
-pub fn parse_u256_slot_entry(
-    raw_key: &[u8],
-    raw_val: Option<&[u8]>,
-) -> Result<(U256, U256), StorageError> {
-    if raw_key.len() != 32 {
-        return Err(StorageError::DecodeError(format!(
-            "Invalid byte length for U256 in slot key! Found: 0x{}",
-            hex::encode(raw_key)
-        )))
-    }
-    let v = if let Some(val) = raw_val {
-        if val.len() != 32 {
-            return Err(StorageError::DecodeError(format!(
-                "Invalid byte length for U256 in slot value! Found: 0x{}",
-                hex::encode(val)
-            )))
-        }
-        U256::from_big_endian(val)
-    } else {
-        U256::zero()
-    };
-
-    let k = U256::from_big_endian(raw_key);
-    Ok((k, v))
-}
-
 /// Given a version find the corresponding timestamp.
 ///
 /// If the version is a block, it will query the database for that block and
@@ -1301,7 +1129,7 @@ mod test {
     use std::str::FromStr;
 
     use diesel_async::{AsyncConnection, RunQueryDsl};
-    use ethers::types::H256;
+    use ethers::types::{H160, H256, U256};
     use rstest::rstest;
 
     use super::*;

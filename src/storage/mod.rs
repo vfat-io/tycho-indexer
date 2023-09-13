@@ -59,14 +59,14 @@ use crate::models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem};
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
 /// blockchain.
-type Address = Vec<u8>;
+pub type Address = Vec<u8>;
 /// Block hash literal type to uniquely identify a block in the chain and
 /// likely across chains.
-type BlockHash = Vec<u8>;
+pub type BlockHash = Vec<u8>;
 
-type AddressRef<'a> = &'a [u8];
-type BlockHashRef<'a> = &'a [u8];
-type TxHashRef<'a> = &'a [u8];
+pub type AddressRef<'a> = &'a [u8];
+pub type BlockHashRef<'a> = &'a [u8];
+pub type TxHashRef<'a> = &'a [u8];
 
 /// Identifies a block in storage.
 #[derive(Debug)]
@@ -495,7 +495,7 @@ type StoreKey = Vec<u8>;
 /// Value literal type of the contract store.
 type StoreVal = Vec<u8>;
 /// A binary key value store for an account.
-type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
+pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
 /// Multiple key values stores grouped by account address.
 type AccountToContractStore = HashMap<Address, ContractStore>;
 
