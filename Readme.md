@@ -73,7 +73,7 @@ substreams pack ./substreams.yaml
 7. To test the substreams (requires the SUBSTREAMS_API_TOKEN env variable set previously), run:
 ```bash
 cd ../..
-RUST_LOG=info ./target/debug/tycho-indexer --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.2.0.spkg
+RUST_LOG=info cargo run -- --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.2.0.spkg
 ```
 
 ### Protobuf

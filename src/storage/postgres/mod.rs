@@ -336,6 +336,24 @@ where
     // No methods in here - this just ties everything together
 }
 
+/// Establishes a connection to the database and creates a connection pool.
+///
+/// This function takes in the URL of the database as an argument and returns a pool
+/// of connections that the application can use to interact with the database. If there's
+/// any error during the creation of this pool, it is converted into a `StorageError` for
+/// uniform error handling across the application.
+///
+/// # Arguments
+///
+/// - `db_url`: A string slice that holds the URL of the database to connect to.
+///
+/// # Returns
+///
+/// A Result which is either:
+///
+/// - `Ok`: Contains a `Pool` of `AsyncPgConnection`s if the connection was established
+///   successfully.
+/// - `Err`: Contains a `StorageError` if there was an issue creating the connection pool.
 pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageError> {
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url);
     let pool = Pool::builder()
@@ -345,6 +363,31 @@ pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageErr
     Ok(pool)
 }
 
+/// Ensures the `Chain` enum is present in the database, if not it inserts it.
+///
+/// This function serves as a way to ensure all chains found within the `chains`  
+/// slice are present within the database. It does this by inserting each chain into
+/// the `chain` table. If a conflict arises during this operation (indicating that
+/// the chain already exists in the database), it simply does nothing for that
+/// specific operation and moves on.
+///
+/// It uses a connection from the passed in `Pool<AsyncPgConnection>` asynchronously.
+/// In case of any error during these operations, the function will panic with an
+/// appropriate error message.
+///
+///
+/// # Arguments
+///
+/// - `chains`: A slice containing chains which need to be ensured in the database.
+/// - `pool`: An instance of `Pool` containing `AsyncPgConnection`s used to interact with the
+///   database.
+///
+/// # Panics
+///
+/// This function will panic under two circumstances:
+///
+/// - If it failed to get a connection from the provided pool.
+/// - If there was an issue ensuring the presence of chains in the database.
 pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
     info!("Ensured chain enum presence for: {:?}", chains);
     let mut conn = pool.get().await.expect("connection ok");

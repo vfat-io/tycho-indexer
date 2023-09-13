@@ -84,14 +84,6 @@ impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
         self.address.as_bytes()
     }
 
-    fn balance_modify_tx(&self) -> TxHashRef {
-        self.balance_modify_tx.as_bytes()
-    }
-
-    fn code_modify_tx(&self) -> TxHashRef {
-        self.code_modify_tx.as_bytes()
-    }
-
     fn store(&self) -> ContractStore {
         self.slots
             .iter()
@@ -108,8 +100,6 @@ impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
     }
 }
 
-// Keep this as delta but the input model would have these somehow attached to transaction, this way
-// we can reuse the type for evm::AccountUpdates
 impl ContractDelta for evm::AccountUpdate {
     fn contract_id(&self) -> ContractId {
         ContractId::new(self.chain, self.address.as_bytes().to_vec())
@@ -178,6 +168,9 @@ where
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
 {
+    /// Retrieves deltas for any accounts balance changes.
+    ///
+    /// See [`ContractStateGateway::get_account_deltas`] for more information.
     async fn get_balance_deltas(
         &self,
         chain_id: i64,
@@ -242,6 +235,9 @@ where
         Ok(res)
     }
 
+    /// Retrieves deltas for any accounts code changes.
+    ///
+    /// See [`ContractStateGateway::get_account_deltas`] for more information.
     async fn get_code_deltas(
         &self,
         chain_id: i64,
@@ -306,6 +302,9 @@ where
         Ok(res)
     }
 
+    /// Retrieves deltas for any accounts slot changes.
+    ///
+    /// See [`ContractStateGateway::get_account_deltas`] for more information.
     async fn get_slots_delta(
         &self,
         chain_id: i64,
@@ -391,14 +390,13 @@ where
 
     /// Upserts slots for a given contract.
     ///
-    /// Upserts slots from multiple accounts. To correctly track changes, it is
-    /// necessary that each slot modification has a corresponding transaction
-    /// assigned.
+    /// Upserts slots from multiple accounts. To correctly track changes, it is necessary that each
+    /// slot modification is associated with the transaction that actually changed the slots.
     ///
     /// # Parameters
-    /// - `slots` A slice containing only the changed slots. Including slots that were changed to 0.
-    ///   Includes slot changes grouped per account and indexed by the transaction hash that
-    ///   modified them.
+    /// - `slots` A hashmap containing only the changed slots. Grouped first by the transaction
+    ///   database id that contained the changes, then by account address. Slots that were changed
+    ///   to 0 are expected to be included here.
     ///
     /// # Returns
     /// An empty `Ok(())` if the operation succeeded. Will raise an error if any
@@ -468,7 +466,7 @@ where
         Ok(())
     }
 
-    /// Retrieve contract storage.
+    /// Retrieve contract slots.
     ///
     /// Retrieve the storage slots of contracts at a given time/version.
     ///
@@ -478,9 +476,9 @@ where
     ///
     /// # Parameters
     /// - `chain` The chain for which to retrieve slots for.
-    /// - `addresses` Optionally allows filtering by contract address.
+    /// - `contracts` Optionally allows filtering by contract address.
     /// - `at` The version at which to retrieve slots. None retrieves the latest
-    /// - `db` The database handle or connection. state.
+    /// - `conn` The database handle or connection. state.
     async fn get_contract_slots(
         &self,
         chain: Chain,
@@ -522,6 +520,7 @@ where
         Self::construct_account_to_contract_store(slots.into_iter(), accounts)
     }
 
+    /// Constructs a mapping from address to contract slots
     fn construct_account_to_contract_store(
         slot_values: impl Iterator<Item = (i64, Vec<u8>, Option<Vec<u8>>)>,
         addresses: HashMap<i64, Vec<u8>>,
@@ -855,33 +854,22 @@ where
                 .execute(db)
                 .await
                 .map_err(|err| StorageError::from_diesel(err, "ContractCode", &hex_addr, None))?;
+            self.upsert_slots(
+                [(
+                    tx_id,
+                    [(new.address().to_vec(), new.store())]
+                        .into_iter()
+                        .collect(),
+                )]
+                .into_iter()
+                .collect(),
+                db,
+            )
+            .await?;
         }
         Ok(())
     }
 
-    /// # Upserts a Contract
-    ///
-    /// This function tries to upsert a contract and its related entries in child
-    /// tables (`account_balance`, `contract_code`).
-    ///
-    /// ## Important Consideration:
-    ///
-    /// When a new insertion attempt is made, it's possible that the data already
-    /// exists or only part of the data has been updated. In such cases, if any
-    /// insertion would lead to duplication, it will be ignored by our database
-    /// design (i.e., the existing data remains unchanged).
-    ///
-    /// To recognize duplicates or new entries, we use a unique constraint on both
-    /// `account_id` and `modify_tx`. This approach allows only one change per
-    /// account and transaction.
-    ///
-    /// To ensure this behavior and support upserts on versioned tables, we have
-    /// implemented an *AFTER INSERT* trigger. This trigger updates the `valid_to`
-    /// column but only after a successful insert. The need for this strategy comes
-    /// from the fact that a *BEFORE INSERT* trigger would update the row even if
-    /// the subsequent insertion were to fail.
-    ///
-    /// Please refer to the [`ContractStateGateway`] for more detailed information.
     async fn update_contracts(
         &self,
         chain: Chain,

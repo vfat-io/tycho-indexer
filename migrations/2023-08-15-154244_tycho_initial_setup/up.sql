@@ -429,7 +429,8 @@ BEGIN
     WHERE
         valid_to IS NULL
         AND account_id = NEW.account_id
-        -- we run this as an after insert trigger so we can use upserts
+        -- running this after inserts allows us to use upserts, 
+        -- currently the application does not use that though
         AND id != NEW.id;
     RETURN NEW;
 END;
@@ -453,7 +454,8 @@ BEGIN
     WHERE
         valid_to IS NULL
         AND account_id = NEW.account_id
-        -- we run this as an after insert trigger so we can use upserts
+        -- running this after inserts allows us to use upserts, 
+        -- currently the application does not use that though
         AND id != NEW.id;
     RETURN NEW;
 END;

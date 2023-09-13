@@ -374,32 +374,3 @@ impl BlockStateChanges {
         })
     }
 }
-
-impl Account {
-    pub fn from(val: AccountUpdateWithTx) -> Self {
-        let code = val.update.code.unwrap_or_default();
-        let code_hash = H256::from(keccak256(&code));
-        Self {
-            address: val.update.address,
-            chain: val.update.chain,
-            title: format!("Contract {:x}", val.update.address),
-            slots: val.update.slots,
-            balance: val.update.balance.unwrap_or_default(),
-            code,
-            code_hash,
-            balance_modify_tx: val.tx.hash,
-            code_modify_tx: val.tx.hash,
-            creation_tx: Some(val.tx.hash),
-        }
-    }
-
-    pub fn transition(&mut self, msg: &AccountUpdate) {
-        if let Some(new_balance) = msg.balance {
-            self.balance = new_balance;
-        }
-        if let Some(code) = msg.code.as_ref() {
-            self.code = code.clone();
-        }
-        self.slots.extend(msg.slots.clone());
-    }
-}

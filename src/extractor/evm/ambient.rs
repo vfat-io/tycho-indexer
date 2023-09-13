@@ -127,9 +127,8 @@ impl AmbientPgGateway {
                 changes
                     .tx_updates
                     .iter()
-                    .filter_map(|u| {
-                        (u.tx.hash != H256(DEPLOY_TX)).then(|| (u.tx.hash.as_bytes(), &u.update))
-                    })
+                    .filter(|&u| (u.tx.hash != H256(DEPLOY_TX)))
+                    .map(|u| (u.tx.hash.as_bytes(), &u.update))
                     .collect::<Vec<_>>()
                     .as_slice(),
                 conn,

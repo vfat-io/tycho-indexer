@@ -553,12 +553,6 @@ pub trait StorableContract<S, N, I>: Send + Sync + 'static {
     /// Get a reference to the address of this contract.
     fn address(&self) -> AddressRef;
 
-    /// Get the transaction that last modified the balance of this contract.
-    fn balance_modify_tx(&self) -> TxHashRef;
-
-    /// Get the transaction that last modified the code of this contract.
-    fn code_modify_tx(&self) -> TxHashRef;
-
     /// Get a copy of this contract's store in it's storable form.
     fn store(&self) -> ContractStore;
 
@@ -573,7 +567,28 @@ pub trait StorableContract<S, N, I>: Send + Sync + 'static {
     fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
 }
 
+/// Provides methods associated with changes in a contract.
+///
+/// This includes methods for loading a contract from storage, getting a
+/// Contract ID, retrieving a potentially dirty (i.e., updated) balance or code,
+/// and getting dirty slots.
+///
+/// Types that implement this trait should represent the delta of an on-chain
+/// contract's state.
 pub trait ContractDelta: Sized + Send + Sync + 'static {
+    /// Loads a `ContractDelta` from storage given a chain, address reference,
+    /// optional slots, balance, and code.
+    ///
+    /// # Arguments
+    /// - `chain`: The blockchain where the contract resides.
+    /// - `address`: Reference to the address of the contract.
+    /// - `slots`: Optional reference to the contract's store.
+    /// - `balance`: Optional byte slice representing the contract's balance.
+    /// - `code`: Optional byte slice representing the contract's code.
+    ///
+    /// # Returns
+    /// - Result containing the instance of the `ContractDelta` implementation if successful, and a
+    ///   `StorageError` if there was an issue reading from storage.
     fn from_storage(
         chain: Chain,
         address: AddressRef,
@@ -582,12 +597,28 @@ pub trait ContractDelta: Sized + Send + Sync + 'static {
         code: Option<&[u8]>,
     ) -> Result<Self, StorageError>;
 
+    /// Identifies the contract which had changes.
+    ///
+    /// # Returns
+    /// - ContractId.
     fn contract_id(&self) -> ContractId;
 
+    /// Retrieves the potentially dirty (i.e., updated) balance of the contract.
+    ///
+    /// # Returns
+    /// - An Option that contains new bytes if the balance has been changed, or None otherwise.
     fn dirty_balance(&self) -> Option<Vec<u8>>;
 
+    /// Retrieves the potentially dirty (i.e., updated) code of the contract.
+    ///
+    /// # Returns
+    /// - An Option that contains a byte slice if the code has been changed, or None otherwise.
     fn dirty_code(&self) -> Option<&[u8]>;
 
+    /// Retrieves the slots of the contract which had changes.
+    ///
+    /// # Returns
+    /// - ContractStore object containing all changed slots.
     fn dirty_slots(&self) -> ContractStore;
 }
 
@@ -602,11 +633,14 @@ pub trait ContractStateGateway {
 
     /// Get a contracts state from storage
     ///
-    /// This method retrieves balance and code, but not storage.
+    /// This method retrieves a single contract from the database.
     ///
     /// # Parameters
     /// - `id` The identifier for the contract.
     /// - `version` Version at which to retrieve state for. None retrieves the latest state.
+    /// - `include_slots`: Flag to determine whether to include slot changes. If set to `true`, it
+    ///   includes storage slot.
+    /// - `db`: Database session reference.
     async fn get_contract(
         &self,
         id: &ContractId,
@@ -643,18 +677,47 @@ pub trait ContractStateGateway {
         db: &mut Self::DB,
     ) -> Result<Vec<Self::ContractState>, StorageError>;
 
+    /// Inserts a new contract into the database.
+    ///
+    /// If it the creation transaction is known, the contract will have slots, balance and code
+    /// inserted alongside with the new account else it won't.
+    ///
+    /// # Arguments
+    /// - `new`: A reference to the new contract state to be inserted.
+    /// - `db`: Database session reference.
+    ///
+    /// # Returns
+    /// - A Result with Ok if the operation was successful, and an Err containing `StorageError` if
+    ///   there was an issue inserting the contract into the database. E.g. if the contract already
+    ///   existed.
     async fn insert_contract(
         &self,
         new: &Self::ContractState,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
-    /// Save contract metadata.
+    /// Update multiple contracts
     ///
-    /// Inserts immutable contract metadata, as well as code and balance.
+    /// Given contract deltas, this method will batch all updates to contracts across a single
+    /// chain.
     ///
-    /// # Parameters
-    /// - `new` the new contract state to be saved.
+    /// As changes are versioned by transaction, each changeset needs to be associated with a
+    /// transaction hash. All references transaction are assumed to be already persisted.
+    ///
+    /// # Arguments
+    ///
+    /// - `chain`: The blockchain which the contracts belong to.
+    /// - `new`: A reference to a slice of tuples where each tuple has a transaction hash
+    ///   (`TxHashRef`) and a reference to the state delta (`&Self::Delta`) for that transaction.
+    /// - `db`: A mutable reference to the connected database where the updated contracts will be
+    ///   stored.
+    ///
+    /// # Returns
+    ///
+    /// A Result with `Ok` if the operation was successful, and an `Err` containing
+    /// `StorageError` if there was an issue updating the contracts in the database. E.g. if a
+    /// transaction can't be located by it's reference or accounts refer to a different chain then
+    /// the one specified.
     async fn update_contracts(
         &self,
         chain: Chain,
@@ -684,19 +747,21 @@ pub trait ContractStateGateway {
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
-    /// Retrieve a slot delta between two versions
+    /// Retrieve a account delta between two versions.
     ///
     /// Given start version V1 and end version V2, this method will return the
     /// changes necessary to move from V1 to V2. So if V1 < V2, it will contain
-    /// the value of all slots that changed between the two versions with the
+    /// the changes of all accounts that changed between the two versions with the
     /// values corresponding to V2. If V2 < V1 then it will contain all the
-    /// slots that changed between the two versions with the values
-    /// corresponding to V1.
+    /// slots that changed between the two versions with the values corresponding to V1.
+    ///
+    /// This method is mainly meant to handle reverts, but can also be used to create delta changes
+    /// between two historical version thus providing the basis for creating a backtestable stream
+    /// of messages.
     ///
     /// # Parameters
-    /// - `id` The identifier for the contract.
-    /// - `chain` The chain for which to generate the delta changes. This is required because
-    ///   version might be a timestamp.
+    ///
+    /// - `chain` The chain for which to generate the delta changes.
     /// - `start_version` The deltas start version, given a block uses VersionKind::Last behaviour.
     ///   If None the latest version is assumed.
     /// - `end_version` The deltas end version, given a block uses VersionKind::Last behaviour.
@@ -716,14 +781,13 @@ pub trait ContractStateGateway {
     /// `VersionKind::Last` semantics.
     ///
     /// # Returns
-    /// A map containing the necessary changes to update a state from
-    /// start_version to end_version.
+    /// A map containing the necessary changes to update a state from start_version to end_version.
     /// Errors if:
     ///     - The versions can't be located in storage.
     ///     - There was an error with the database
     async fn get_account_delta(
         &self,
-        id: Chain,
+        chain: Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         db: &mut Self::DB,
