@@ -50,7 +50,7 @@ struct Args {
 
     /// DB Connection url
     #[clap(long, env)]
-    database_url: String,
+    db_url: String,
 
     /// Package file
     #[clap(name = "spkg", short, long)]
@@ -68,7 +68,7 @@ async fn main() -> Result<(), Error> {
 
     let args = Args::parse();
 
-    let pool = postgres::connect(&args.database_url).await?;
+    let pool = postgres::connect(&args.db_url).await?;
     postgres::ensure_chains(&[Chain::Ethereum], pool.clone()).await;
     let evm_gw =
         PostgresGateway::<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>::new(
@@ -113,7 +113,7 @@ mod cli_tests {
     async fn test_arg_parsing_short() {
         // Set the SUBSTREAMS_API_TOKEN environment variable for testing.
         env::set_var("SUBSTREAMS_API_TOKEN", "your_api_token");
-        env::set_var("DATABASE_URL", "my_db");
+        env::set_var("DB_URL", "my_db");
 
         let args = Args::try_parse_from(vec![
             "tycho-indexer",
@@ -126,14 +126,14 @@ mod cli_tests {
         ]);
 
         env::remove_var("SUBSTREAMS_API_TOKEN");
-        env::remove_var("DATABASE_URL");
+        env::remove_var("DB_URL");
 
         assert!(args.is_ok());
         let args = args.unwrap();
         let expected_args = Args {
             endpoint_url: "http://example.com".to_string(),
             substreams_api_token: "your_api_token".to_string(),
-            database_url: "my_db".to_string(),
+            db_url: "my_db".to_string(),
             package_file: "package.spkg".to_string(),
             module_name: "module_name".to_string(),
         };
@@ -145,7 +145,7 @@ mod cli_tests {
     async fn test_arg_parsing_long() {
         // Set the SUBSTREAMS_API_TOKEN environment variable for testing.
         env::set_var("SUBSTREAMS_API_TOKEN", "your_api_token");
-        env::set_var("DATABASE_URL", "my_db");
+        env::set_var("DB_URL", "my_db");
         let args = Args::try_parse_from(vec![
             "tycho-indexer",
             "--endpoint",
@@ -157,13 +157,13 @@ mod cli_tests {
         ]);
 
         env::remove_var("SUBSTREAMS_API_TOKEN");
-        env::remove_var("DATABASE_URL");
+        env::remove_var("DB_URL");
         assert!(args.is_ok());
         let args = args.unwrap();
         let expected_args = Args {
             endpoint_url: "http://example.com".to_string(),
             substreams_api_token: "your_api_token".to_string(),
-            database_url: "my_db".to_string(),
+            db_url: "my_db".to_string(),
             package_file: "package.spkg".to_string(),
             module_name: "module_name".to_string(),
         };
