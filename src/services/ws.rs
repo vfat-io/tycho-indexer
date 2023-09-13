@@ -1,7 +1,7 @@
 //! This module contains Tycho Websocket implementation
 
 use crate::{
-    extractor::runner::ExtractorHandle,
+    extractor::runner::ExtractorSubscriber,
     models::{ExtractorIdentity, NormalisedMessage},
 };
 use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::error;
 use uuid::Uuid;
 
 /// How often heartbeat pings are sent
@@ -60,16 +60,19 @@ impl Serialize for WebsocketError {
     }
 }
 
+type ExtractorSubscriberMap<M> =
+    HashMap<ExtractorIdentity, Arc<dyn ExtractorSubscriber<M> + Send + Sync>>;
+
 /// Shared application data between all connections
 /// Parameters are hidden behind a Mutex to allow for sharing between threads
 pub struct AppState<M> {
-    /// There is one extractor handle per extractor
-    pub extractors: Arc<Mutex<HashMap<ExtractorIdentity, ExtractorHandle<M>>>>,
+    /// There is one extractor subscriber per extractor identity
+    pub subscribers: Arc<Mutex<ExtractorSubscriberMap<M>>>,
 }
 
 impl<M> AppState<M> {
     pub fn new() -> Self {
-        Self { extractors: Arc::new(Mutex::new(HashMap::new())) }
+        Self { subscribers: Arc::new(Mutex::new(HashMap::new())) }
     }
 }
 
@@ -102,6 +105,18 @@ where
         ws::start(WsActor::new(data), &req, stream)
     }
 
+    fn heartbeat(&mut self, ctx: &mut <Self as Actor>::Context) {
+        // Send a first heartbeat ping
+        ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
+            if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
+                dbg!("Websocket Client heartbeat failed, disconnecting!");
+                ctx.stop();
+                return
+            }
+            ctx.ping(b"");
+        });
+    }
+
     fn subscribe(
         &mut self,
         ctx: &mut ws::WebsocketContext<Self>,
@@ -111,29 +126,29 @@ where
         {
             let extractors_guard = self
                 .app_state
-                .extractors
+                .subscribers
                 .lock()
                 .unwrap();
 
-            if let Some(extractor_handle) = extractors_guard.get(extractor_id) {
+            if let Some(extractor_subscriber) = extractors_guard.get(extractor_id) {
                 // Generate a unique ID for this subscription
                 let subscription_id = Uuid::new_v4();
                 dbg!("Generated subscription ID: {:?}", subscription_id);
 
-                match extractor_handle.subscribe() {
+                match extractor_subscriber.subscribe() {
                     Ok(mut rx) => {
                         let stream = async_stream::stream! {
                             while let Some(item) = rx.recv().await {
                                 yield Ok(item);
                             }
                         };
-                        let handle = ctx.add_stream(stream);
 
+                        let handle = ctx.add_stream(stream);
                         self.subscriptions
                             .insert(subscription_id, handle);
                         dbg!("Added subscription to hashmap: {:?}", subscription_id);
 
-                        let message = OutgoingMessage::<M>::NewSubscription { subscription_id };
+                        let message = Response::NewSubscription { subscription_id };
                         ctx.text(serde_json::to_string(&message).unwrap());
                     }
                     Err(e) => {
@@ -153,17 +168,18 @@ where
     }
 
     fn unsubscribe(&mut self, ctx: &mut ws::WebsocketContext<Self>, subscription_id: Uuid) {
-        info!("Unsubscribing from subscription: {:?}", subscription_id);
+        dbg!("Unsubscribing from subscription: {:?}", subscription_id);
 
         if let Some(handle) = self
             .subscriptions
             .remove(&subscription_id)
         {
+            dbg!("Removed subscription from hashmap: {:?}", subscription_id);
             // Cancel the future of the subscription stream
             ctx.cancel_future(handle);
+            dbg!("Cancelled subscription future: {:?}", subscription_id);
 
-            let message = OutgoingMessage::<M>::SubscriptionEnded { subscription_id };
-
+            let message = Response::SubscriptionEnded { subscription_id };
             ctx.text(serde_json::to_string(&message).unwrap());
         } else {
             error!("Subscription ID not found: {}", subscription_id);
@@ -183,38 +199,33 @@ where
     fn started(&mut self, ctx: &mut Self::Context) {
         dbg!("Websocket connection established");
 
-        // Send a first heartbeat ping
-        ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
-            if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
-                dbg!("Websocket Client heartbeat failed, disconnecting!");
-                ctx.stop();
-                return
-            }
-            ctx.ping(b"");
-        });
+        // Start the heartbeat
+        self.heartbeat(ctx);
     }
 
-    fn stopped(&mut self, _ctx: &mut Self::Context) {
+    fn stopped(&mut self, ctx: &mut Self::Context) {
         dbg!("Websocket connection closed");
+
+        // Close all remaining subscriptions
+        for (subscription_id, handle) in self.subscriptions.drain() {
+            dbg!("Closing subscription: {:?}", subscription_id);
+            ctx.cancel_future(handle);
+        }
     }
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "lowercase")]
-pub enum IncomingMessage {
+pub enum Command {
     Subscribe { extractor: ExtractorIdentity },
     Unsubscribe { subscription_id: Uuid },
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "lowercase")]
-pub enum OutgoingMessage<M>
-where
-    M: NormalisedMessage + Sync + Send + 'static,
-{
+pub enum Response {
     NewSubscription { subscription_id: Uuid },
     SubscriptionEnded { subscription_id: Uuid },
-    ForwardFromExtractor { message: Arc<M> },
 }
 
 impl<M> StreamHandler<Result<Arc<M>, ws::ProtocolError>> for WsActor<M>
@@ -226,10 +237,11 @@ where
         match msg {
             Ok(message) => {
                 dbg!("Forwarding message to client");
-
                 ctx.text(serde_json::to_string(&message).unwrap());
             }
-            _ => ctx.stop(),
+            Err(e) => {
+                error!("Failed to receive message from extractor: {:?}", e);
+            }
         }
     }
 }
@@ -254,15 +266,15 @@ where
                 dbg!("Websocket text message received: {:?}", text.clone());
 
                 // Try to deserialize the message to a Message enum
-                match serde_json::from_str::<IncomingMessage>(&text) {
+                match serde_json::from_str::<Command>(&text) {
                     Ok(message) => {
                         // Handle the message based on its variant
                         match message {
-                            IncomingMessage::Subscribe { extractor } => {
+                            Command::Subscribe { extractor } => {
                                 dbg!("Subscribing to extractor: {:?}", extractor.clone());
                                 self.subscribe(ctx, &extractor);
                             }
-                            IncomingMessage::Unsubscribe { subscription_id } => {
+                            Command::Unsubscribe { subscription_id } => {
                                 dbg!("Unsubscribing from subscription: {:?}", subscription_id);
                                 self.unsubscribe(ctx, subscription_id);
                             }
@@ -285,7 +297,11 @@ where
                 ctx.close(reason);
                 ctx.stop()
             }
-            _ => ctx.stop(),
+            Err(e) => {
+                error!("Failed to receive message: {:?}", e);
+                ctx.stop()
+            }
+            _ => (),
         }
     }
 }
@@ -294,18 +310,24 @@ where
 mod tests {
     use std::time::Duration;
 
-    use crate::models::Chain;
+    use crate::{extractor::runner::ControlMessage, models::Chain};
 
     use super::*;
     use actix_rt::time::timeout;
-    use actix_test::start;
+    use actix_test::{start, start_with, TestServerConfig};
     use actix_web::App;
     use futures03::SinkExt;
-    use tokio::{sync::mpsc, task::JoinHandle};
+    use tokio::{
+        net::TcpStream,
+        sync::mpsc::{self, error::SendError, Receiver},
+    };
     use tokio_stream::StreamExt;
-    use tokio_tungstenite::tungstenite::{
-        protocol::{frame::coding::CloseCode, CloseFrame},
-        Message,
+    use tokio_tungstenite::{
+        tungstenite::{
+            protocol::{frame::coding::CloseCode, CloseFrame},
+            Message,
+        },
+        MaybeTlsStream, WebSocketStream,
     };
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -325,6 +347,43 @@ mod tests {
         }
     }
 
+    pub struct MyExtractorSubscriber {
+        extractor_id: ExtractorIdentity,
+    }
+
+    impl MyExtractorSubscriber {
+        pub fn new(extractor_id: ExtractorIdentity) -> Self {
+            Self { extractor_id }
+        }
+    }
+
+    impl ExtractorSubscriber<DummyMessage> for MyExtractorSubscriber {
+        fn subscribe(
+            &self,
+        ) -> Result<Receiver<Arc<DummyMessage>>, SendError<ControlMessage<DummyMessage>>> {
+            let (tx, rx) = mpsc::channel(1);
+            let extractor_id = self.extractor_id.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    dbg!("Sending DummyMessage");
+                    let dummy_message = DummyMessage::new(extractor_id.clone());
+                    if tx
+                        .send(Arc::new(dummy_message))
+                        .await
+                        .is_err()
+                    {
+                        dbg!("Receiver dropped");
+                        break
+                    }
+                }
+            });
+
+            Ok(rx)
+        }
+    }
+
     #[actix_rt::test]
     async fn test_websocket_ping_pong() {
         let app_state = web::Data::new(AppState::<DummyMessage>::new());
@@ -340,14 +399,14 @@ mod tests {
             .url("/ws/")
             .to_string()
             .replacen("http://", "ws://", 1);
-        println!("Connecting to test server at {}", url);
+        dbg!("Connecting to test server at {}", url.clone());
 
         // Connect to the server
         let (mut connection, _response) = tokio_tungstenite::connect_async(url)
             .await
             .expect("Failed to connect");
 
-        println!("Connected to test server");
+        dbg!("Connected to test server");
 
         // Test sending ping message and receiving pong message
         connection
@@ -355,7 +414,7 @@ mod tests {
             .await
             .expect("Failed to send ping message");
 
-        println!("Sent ping message");
+        dbg!("Sent ping message");
 
         let msg = timeout(Duration::from_secs(1), connection.next())
             .await
@@ -365,7 +424,7 @@ mod tests {
 
         if let Message::Pong(_) = msg {
             // Pong received as expected
-            info!("Received pong message");
+            dbg!("Received pong message");
         } else {
             panic!("Unexpected message {:?}", msg);
         }
@@ -375,103 +434,220 @@ mod tests {
             .send(Message::Close(Some(CloseFrame { code: CloseCode::Normal, reason: "".into() })))
             .await
             .expect("Failed to send close message");
-        println!("Closed connection");
+        dbg!("Closed connection");
+    }
+
+    async fn wait_for_response<F>(
+        connection: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+        mut criteria: F,
+    ) -> Result<Message, String>
+    where
+        F: FnMut(&Message) -> bool,
+    {
+        loop {
+            let response_msg = timeout(Duration::from_secs(5), connection.next())
+                .await
+                .map_err(|_| "Failed to receive message".to_string())?
+                .ok_or("Connection closed".to_string())?
+                .map_err(|_| "Failed to receive message".to_string())?;
+
+            if criteria(&response_msg) {
+                return Ok(response_msg)
+            } else {
+                dbg!("Message did not meet criteria, waiting for the correct message");
+            }
+        }
+    }
+
+    async fn wait_for_dummy_message(
+        connection: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+        extractor_id: ExtractorIdentity,
+    ) -> Result<DummyMessage, String> {
+        let criteria = move |msg: &Message| {
+            if let Message::Text(text) = msg {
+                if let Ok(message) = serde_json::from_str::<DummyMessage>(text) {
+                    return message.extractor_id == extractor_id
+                }
+            }
+            false
+        };
+
+        if let Message::Text(response_text) = wait_for_response(connection, criteria).await? {
+            serde_json::from_str(&response_text).map_err(|e| e.to_string())
+        } else {
+            Err("Received a non-text message".to_string())
+        }
+    }
+
+    async fn wait_for_new_subscription(
+        connection: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    ) -> Result<Response, String> {
+        let criteria = |msg: &Message| {
+            if let Message::Text(text) = msg {
+                if let Ok(message) = serde_json::from_str::<Response>(text) {
+                    matches!(message, Response::NewSubscription { .. })
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+
+        if let Message::Text(response_text) = wait_for_response(connection, criteria).await? {
+            serde_json::from_str(&response_text).map_err(|e| e.to_string())
+        } else {
+            Err("Received a non-text message".to_string())
+        }
+    }
+
+    async fn wait_for_subscription_ended(
+        connection: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    ) -> Result<Response, String> {
+        let criteria = |msg: &Message| {
+            if let Message::Text(text) = msg {
+                if let Ok(message) = serde_json::from_str::<Response>(text) {
+                    matches!(message, Response::SubscriptionEnded { .. })
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+
+        if let Message::Text(response_text) = wait_for_response(connection, criteria).await? {
+            serde_json::from_str(&response_text).map_err(|e| e.to_string())
+        } else {
+            Err("Received a non-text message".to_string())
+        }
     }
 
     #[actix_rt::test]
     async fn test_subscribe_and_unsubscribe() -> Result<(), String> {
-        let (ctrl_tx, _ctrl_rx) = mpsc::channel(1);
-        let handle: JoinHandle<()> = tokio::spawn(async {});
-        let extractor_handle = ExtractorHandle::<DummyMessage>::new(handle, ctrl_tx);
-
         // Add the extractor handle to AppState
-        let extractor_name = "dummy".to_string();
-        let extractor_id =
-            ExtractorIdentity { chain: Chain::Ethereum, name: extractor_name.clone() };
+        let extractor_id = ExtractorIdentity::new(Chain::Ethereum, "dummy");
+        let extractor_id2 = ExtractorIdentity::new(Chain::Ethereum, "dummy2");
+
         let app_state = web::Data::new(AppState::<DummyMessage>::new());
 
-        app_state
-            .extractors
-            .lock()
-            .unwrap()
-            .insert(extractor_id.clone(), extractor_handle);
+        let extractor_subscriber = Arc::new(MyExtractorSubscriber::new(extractor_id.clone()));
+        let extractor_subscriber2 = Arc::new(MyExtractorSubscriber::new(extractor_id2.clone()));
+
+        {
+            let mut subscribers = app_state.subscribers.lock().unwrap();
+            subscribers.insert(extractor_id.clone(), extractor_subscriber);
+            subscribers.insert(extractor_id2.clone(), extractor_subscriber2);
+        }
 
         // Setup WebSocket server and client, similar to existing test
-        let server = start(move || {
-            App::new()
-                .app_data(app_state.clone())
-                .service(
-                    web::resource("/ws/").route(web::get().to(WsActor::<DummyMessage>::ws_index)),
-                )
-        });
+        let server = start_with(
+            TestServerConfig::default().client_request_timeout(Duration::from_secs(5)),
+            move || {
+                App::new()
+                    .app_data(app_state.clone())
+                    .service(
+                        web::resource("/ws/")
+                            .route(web::get().to(WsActor::<DummyMessage>::ws_index)),
+                    )
+            },
+        );
 
         let url = server
             .url("/ws/")
             .to_string()
             .replacen("http://", "ws://", 1);
-        println!("Connecting to test server at {}", url);
+        dbg!("Connecting to test server at {}", url.clone());
 
         // Connect to the server
         let (mut connection, _response) = tokio_tungstenite::connect_async(url)
             .await
             .expect("Failed to connect");
 
-        println!("Connected to test server");
+        dbg!("Connected to test server");
 
         // Create and send a subscribe message from the client
-        let action = IncomingMessage::Subscribe { extractor: extractor_id };
+        let action = Command::Subscribe { extractor: extractor_id.clone() };
         connection
             .send(Message::Text(serde_json::to_string(&action).unwrap()))
             .await
             .expect("Failed to send subscribe message");
+        dbg!("Sent subscribe message");
 
-        // Receive the new subscription ID from the server
-        let response_msg = timeout(Duration::from_secs(5), connection.next())
+        // Accept the subscription ID
+        let response = wait_for_new_subscription(&mut connection)
             .await
-            .expect("Failed to receive message")
-            .unwrap()
-            .unwrap();
-        let new_subscription_id = if let Message::Text(response_msg) = response_msg {
-            let message: OutgoingMessage<DummyMessage> =
-                serde_json::from_str(&response_msg).expect("Failed to parse message");
-            match message {
-                OutgoingMessage::NewSubscription { subscription_id } => {
-                    info!("Received new subscription ID: {:?}", subscription_id);
-                    subscription_id
-                }
-                _ => panic!("Unexpected outgoing message: {:?}", message),
-            }
+            .expect("Failed to get the expected new subscription message");
+        let first_subscription_id = if let Response::NewSubscription {
+            subscription_id: first_subscription_id,
+        } = response
+        {
+            dbg!("Received first subscription ID: {:?}", first_subscription_id);
+            first_subscription_id
         } else {
-            panic!("Unexpected message {:?}", response_msg);
+            panic!("Unexpected response: {:?}", response);
         };
 
+        // Receive the DummyMessage from the server
+        let _message = wait_for_dummy_message(&mut connection, extractor_id)
+            .await
+            .expect("Failed to get the expected DummyMessage");
+        dbg!("Received DummyMessage from server");
+
+        // Create and send a second subscribe message from the client
+        let action = Command::Subscribe { extractor: extractor_id2.clone() };
+        connection
+            .send(Message::Text(serde_json::to_string(&action).unwrap()))
+            .await
+            .expect("Failed to send subscribe message");
+        dbg!("Sent subscribe message for second extractor");
+
+        // Accept the second subscription ID
+        let response = wait_for_new_subscription(&mut connection)
+            .await
+            .expect("Failed to get the expected new subscription message");
+        if let Response::NewSubscription { subscription_id: second_subscription_id } = response {
+            dbg!("Received second subscription ID: {:?}", second_subscription_id);
+        } else {
+            panic!("Unexpected response: {:?}", response);
+        }
+
+        // Receive the DummyMessage from the second exractor
+        let _message = wait_for_dummy_message(&mut connection, extractor_id2.clone())
+            .await
+            .expect("Failed to get the expected DummyMessage");
+        dbg!("Received DummyMessage2 from server");
+
         // Create and send a unsubscribe message from the client
-        let action = IncomingMessage::Unsubscribe { subscription_id: new_subscription_id };
+        let action = Command::Unsubscribe { subscription_id: first_subscription_id };
         connection
             .send(Message::Text(serde_json::to_string(&action).unwrap()))
             .await
             .expect("Failed to send unsubscribe message");
+        dbg!("Sent unsubscribe message");
 
-        // Get the confirmation that the subscription has ended
-        let response_msg = timeout(Duration::from_secs(1), connection.next())
+        // Accept the unsubscription ID
+        let response = wait_for_subscription_ended(&mut connection)
             .await
-            .expect("Failed to receive message")
-            .unwrap()
-            .unwrap();
-        let ended_subscription_id = if let Message::Text(response_msg) = response_msg {
-            let message: OutgoingMessage<DummyMessage> =
-                serde_json::from_str(&response_msg).expect("Failed to parse message");
-            match message {
-                OutgoingMessage::SubscriptionEnded { subscription_id } => {
-                    info!("Received ended subscription ID: {:?}", subscription_id);
-                    subscription_id
-                }
-                _ => panic!("Unexpected outgoing message: {:?}", message),
-            }
+            .expect("Failed to get the expected subscription ended message");
+        if let Response::SubscriptionEnded { subscription_id } = response {
+            dbg!("Received unsubscription ID: {:?}", subscription_id);
         } else {
-            panic!("Unexpected message {:?}", response_msg);
-        };
-        assert_eq!(new_subscription_id, ended_subscription_id);
+            panic!("Unexpected response: {:?}", response);
+        }
+
+        // Receive the DummyMessage from the second exractor
+        let _message = wait_for_dummy_message(&mut connection, extractor_id2)
+            .await
+            .expect("Failed to get the expected DummyMessage");
+        dbg!("Received DummyMessage2 from server");
+
+        // Close the connection
+        connection
+            .send(Message::Close(Some(CloseFrame { code: CloseCode::Normal, reason: "".into() })))
+            .await
+            .expect("Failed to send close message");
+        dbg!("Closed connection");
 
         Ok(())
     }

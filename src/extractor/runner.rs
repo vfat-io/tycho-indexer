@@ -24,6 +24,13 @@ pub enum ControlMessage<M> {
     Subscribe(Sender<Arc<M>>),
 }
 
+pub trait ExtractorSubscriber<M>: Send + Sync
+where
+    M: NormalisedMessage + Sync + Send + 'static,
+{
+    fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>>;
+}
+
 pub struct ExtractorHandle<M> {
     handle: JoinHandle<()>,
     control_tx: Sender<ControlMessage<M>>,
@@ -33,18 +40,8 @@ impl<M> ExtractorHandle<M>
 where
     M: NormalisedMessage + Sync + Send + 'static,
 {
-    pub fn new(handle: JoinHandle<()>, control_tx: Sender<ControlMessage<M>>) -> Self {
+    fn new(handle: JoinHandle<()>, control_tx: Sender<ControlMessage<M>>) -> Self {
         Self { handle, control_tx }
-    }
-
-    pub fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
-        let (tx, rx) = mpsc::channel(1);
-        // FIXME blocking call
-        block_on(
-            self.control_tx
-                .send(ControlMessage::Subscribe(tx)),
-        )?;
-        Ok(rx)
     }
 
     pub async fn stop(self) -> Result<(), Box<dyn Error>> {
@@ -53,6 +50,20 @@ where
             .await?;
         self.handle.await?;
         Ok(())
+    }
+}
+
+impl<M> ExtractorSubscriber<M> for ExtractorHandle<M>
+where
+    M: NormalisedMessage + Sync + Send + 'static,
+{
+    fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
+        let (tx, rx) = mpsc::channel(1);
+        block_on(
+            self.control_tx
+                .send(ControlMessage::Subscribe(tx)),
+        )?;
+        Ok(rx)
     }
 }
 
