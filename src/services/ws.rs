@@ -4,18 +4,24 @@ use crate::{
     extractor::runner::ExtractorHandle,
     models::{ExtractorIdentity, NormalisedMessage},
 };
-use actix::{Actor, ActorContext, StreamHandler};
+use actix::{Actor, ActorContext, AsyncContext, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 use thiserror::Error;
 use tokio::sync::mpsc::Receiver;
 use tracing::{error, info};
 use uuid::Uuid;
+
+/// How often heartbeat pings are sent
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+/// How long before lack of client response causes a timeout
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Error, Debug)]
 pub enum WebsocketError {
@@ -70,6 +76,7 @@ impl<M> AppState<M> {
 /// Actor handling a single WS connection
 struct WsActor<M> {
     _id: Uuid,
+    heartbeat: Instant,
     app_state: web::Data<AppState<M>>,
     subscriptions: HashMap<Uuid, Receiver<Arc<M>>>,
 }
@@ -79,7 +86,12 @@ where
     M: NormalisedMessage + Sync + Send + 'static,
 {
     fn new(app_state: web::Data<AppState<M>>) -> Self {
-        Self { _id: Uuid::new_v4(), app_state, subscriptions: HashMap::new() }
+        Self {
+            _id: Uuid::new_v4(),
+            heartbeat: Instant::now(),
+            app_state,
+            subscriptions: HashMap::new(),
+        }
     }
 
     pub async fn ws_index(
@@ -146,8 +158,18 @@ where
 {
     type Context = ws::WebsocketContext<Self>;
 
-    fn started(&mut self, _ctx: &mut Self::Context) {
+    fn started(&mut self, ctx: &mut Self::Context) {
         info!("Websocket connection established");
+
+        // Send a first heartbeat ping
+        ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
+            if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
+                println!("Websocket Client heartbeat failed, disconnecting!");
+                ctx.stop();
+                return
+            }
+            ctx.ping(b"");
+        });
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
@@ -173,8 +195,13 @@ where
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         info!("Websocket message received: {:?}", msg);
         match msg {
-            Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
-            Ok(ws::Message::Pong(_)) => (),
+            Ok(ws::Message::Ping(msg)) => {
+                self.heartbeat = Instant::now();
+                ctx.pong(&msg);
+            }
+            Ok(ws::Message::Pong(_)) => {
+                self.heartbeat = Instant::now();
+            }
             Ok(ws::Message::Text(text)) => {
                 info!("Websocket text message received: {:?}", text);
 
