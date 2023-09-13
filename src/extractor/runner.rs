@@ -32,6 +32,10 @@ impl<M> ExtractorHandle<M>
 where
     M: NormalisedMessage + Sync + Send + 'static,
 {
+    pub fn new(handle: JoinHandle<()>, control_tx: Sender<ControlMessage<M>>) -> Self {
+        Self { handle, control_tx }
+    }
+
     pub async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
         let (tx, rx) = mpsc::channel(1);
         self.control_tx
@@ -192,6 +196,6 @@ where
             control_rx: ctrl_rx,
         };
 
-        Ok(ExtractorHandle { handle: runner.run(), control_tx: ctrl_tx })
+        Ok(ExtractorHandle::new(runner.run(), ctrl_tx))
     }
 }

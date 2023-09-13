@@ -150,7 +150,7 @@ where
             .subscriptions
             .remove(&subscription_id)
         {
-            // Call the close method on the receiver to close the channel
+            // Cancel the future of the subscription stream
             ctx.cancel_future(handle);
 
             let message = OutgoingMessage::<M>::SubscriptionEnded { subscription_id };
@@ -190,7 +190,7 @@ where
     }
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "lowercase")]
 pub enum IncomingMessage<M>
 where
@@ -201,7 +201,7 @@ where
     ForwardFromExtractor { message: Arc<M> },
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "lowercase")]
 pub enum OutgoingMessage<M>
 where
@@ -275,11 +275,20 @@ where
 mod tests {
     use std::time::Duration;
 
+    use crate::{extractor::runner::ControlMessage, models::Chain};
+
     use super::*;
     use actix_rt::time::timeout;
     use actix_test::start;
     use actix_web::App;
-    use futures03::{SinkExt, StreamExt};
+    use async_trait::async_trait;
+    use futures03::SinkExt;
+    use std::error::Error;
+    use tokio::{
+        sync::mpsc::{self, error::SendError, Receiver},
+        task::JoinHandle,
+    };
+    use tokio_stream::StreamExt;
     use tokio_tungstenite::tungstenite::{
         protocol::{frame::coding::CloseCode, CloseFrame},
         Message,
@@ -304,16 +313,16 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_websocket_ping_pong() {
-        let state = web::Data::new(AppState::<DummyMessage>::new());
-        let srv = start(move || {
+        let app_state = web::Data::new(AppState::<DummyMessage>::new());
+        let server = start(move || {
             App::new()
-                .app_data(state.clone())
+                .app_data(app_state.clone())
                 .service(
                     web::resource("/ws/").route(web::get().to(WsActor::<DummyMessage>::ws_index)),
                 )
         });
 
-        let url = srv
+        let url = server
             .url("/ws/")
             .to_string()
             .replacen("http://", "ws://", 1);
@@ -353,5 +362,112 @@ mod tests {
             .await
             .expect("Failed to send close message");
         println!("Closed connection");
+    }
+
+    #[actix_rt::test]
+    async fn test_subscribe_and_unsubscribe() -> Result<(), String> {
+        let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
+        let handle: JoinHandle<()> = tokio::spawn(async {});
+        let extractor_handle = ExtractorHandle::<DummyMessage>::new(handle, ctrl_tx);
+
+        // Add the extractor handle to AppState
+        let extractor_name = "dummy".to_string();
+        let extractor_id =
+            ExtractorIdentity { chain: Chain::Ethereum, name: extractor_name.clone() };
+        let mut app_state = web::Data::new(AppState::<DummyMessage>::new());
+
+        app_state
+            .extractors
+            .lock()
+            .unwrap()
+            .insert(extractor_id.clone(), extractor_handle);
+
+        // Setup WebSocket server and client, similar to existing test
+        let server = start(move || {
+            App::new()
+                .app_data(app_state.clone())
+                .service(
+                    web::resource("/ws/").route(web::get().to(WsActor::<DummyMessage>::ws_index)),
+                )
+        });
+
+        let url = server
+            .url("/ws/")
+            .to_string()
+            .replacen("http://", "ws://", 1);
+        println!("Connecting to test server at {}", url);
+
+        // Connect to the server
+        let (mut connection, _response) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("Failed to connect");
+
+        println!("Connected to test server");
+
+        // Create and send a subscribe message from the client
+        let action = IncomingMessage::<DummyMessage>::Subscribe { extractor: extractor_id };
+        connection
+            .send(Message::Text(
+                serde_json::to_string(&action)
+                    .unwrap()
+                    .into(),
+            ))
+            .await
+            .expect("Failed to send subscribe message");
+
+        // Receive the new subscription ID from the server
+        let response_msg = timeout(Duration::from_secs(1), connection.next())
+            .await
+            .expect("Failed to receive message")
+            .unwrap()
+            .unwrap();
+        let new_subscription_id = if let Message::Text(response_msg) = response_msg {
+            let message: OutgoingMessage<DummyMessage> =
+                serde_json::from_str(&response_msg).expect("Failed to parse message");
+            match message {
+                OutgoingMessage::NewSubscription { subscription_id } => {
+                    info!("Received new subscription ID: {:?}", subscription_id);
+                    subscription_id
+                }
+                _ => panic!("Unexpected outgoing message: {:?}", message),
+            }
+        } else {
+            panic!("Unexpected message {:?}", response_msg);
+        };
+
+        // Create and send a unsubscribe message from the client
+        let action =
+            IncomingMessage::<DummyMessage>::Unsubscribe { subscription_id: new_subscription_id };
+        connection
+            .send(Message::Text(
+                serde_json::to_string(&action)
+                    .unwrap()
+                    .into(),
+            ))
+            .await
+            .expect("Failed to send unsubscribe message");
+
+        // Get the confirmation that the subscription has ended
+        let response_msg = timeout(Duration::from_secs(1), connection.next())
+            .await
+            .expect("Failed to receive message")
+            .unwrap()
+            .unwrap();
+        let ended_subscription_id = if let Message::Text(response_msg) = response_msg {
+            let message: OutgoingMessage<DummyMessage> =
+                serde_json::from_str(&response_msg).expect("Failed to parse message");
+            match message {
+                OutgoingMessage::SubscriptionEnded { subscription_id } => {
+                    info!("Received ended subscription ID: {:?}", subscription_id);
+                    subscription_id
+                }
+                _ => panic!("Unexpected outgoing message: {:?}", message),
+            }
+        } else {
+            panic!("Unexpected message {:?}", response_msg);
+        };
+        assert_eq!(new_subscription_id, ended_subscription_id);
+
+        Ok(())
     }
 }
