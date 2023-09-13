@@ -28,6 +28,8 @@ mod substreams;
 
 use clap::Parser;
 
+use crate::pb::tycho::evm::v1::BlockContractChanges;
+
 /// Tycho Indexer using Substreams
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
 #[clap(
@@ -72,8 +74,8 @@ async fn main() -> Result<(), Error> {
         package.modules.clone(),
         args.module_name,
         // Start/stop block are not handled within this project, feel free to play with it
-        18083172, // FIXME: remove magic value
-        18083200, // FIXME: remove magic value
+        17361664, // FIXME: remove magic value
+        17362000, // FIXME: remove magic value
     );
 
     info!("Starting stream");
@@ -110,13 +112,7 @@ fn process_block_scoped_data(data: &BlockScopedData) -> Result<(), Error> {
         .as_ref()
         .unwrap();
 
-    // You can decode the actual Any type received using this code:
-    //
-    //     use prost::Message;
-    //     let value = Message::decode::<GeneratedStructName>(data.value.as_slice())?;
-    //
-    // Where GeneratedStructName is the Rust code generated for the Protobuf representing
-    // your type.
+    let block_changes = BlockContractChanges::decode(output.value.as_slice())?;
 
     info!(
         "Block #{} - Payload {} ({} bytes)",
@@ -126,7 +122,7 @@ fn process_block_scoped_data(data: &BlockScopedData) -> Result<(), Error> {
             .replace("type.googleapis.com/", ""),
         output.value.len()
     );
-
+    info!("Message: {:?}", block_changes);
     Ok(())
 }
 
