@@ -640,10 +640,7 @@ mod tests {
         let result =
             timeout(Duration::from_secs(2), wait_for_dummy_message(&mut connection, extractor_id))
                 .await;
-        assert!(
-            matches!(result, Err(_)),
-            "Received a message from the first extractor after unsubscribing"
-        );
+        assert!(result.is_err(), "Received a message from the first extractor after unsubscribing");
 
         // Receive the DummyMessage from the second exractor
         let _message = wait_for_dummy_message(&mut connection, extractor_id2)
