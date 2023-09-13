@@ -165,6 +165,7 @@ impl NormalisedMessage for BlockAccountChanges {
     }
 }
 
+#[derive(Debug)]
 pub struct AccountUpdateWithTx {
     pub update: AccountUpdate,
     pub tx: Transaction,
@@ -215,6 +216,7 @@ impl Deref for AccountUpdateWithTx {
     }
 }
 
+#[derive(Debug)]
 pub struct BlockStateChanges {
     extractor: String,
     chain: Chain,
@@ -246,17 +248,32 @@ fn parse_32bytes<T>(v: &[u8]) -> Result<T, ExtractionError>
 where
     T: From<[u8; 32]>,
 {
-    let data: [u8; 32] = v.try_into().map_err(|_| {
-        ExtractionError::DecodeError(format!("Failed to decode hash: {}", hex::encode(v)))
-    })?;
+    if v.len() > 32 {
+        return Err(ExtractionError::DecodeError(format!(
+            "Byte slice too long: Expected 32, got {}",
+            v.len()
+        )))
+    }
+    let mut data: [u8; 32] = [0; 32];
+    let start_index = 32 - v.len();
+    data[start_index..].copy_from_slice(v);
+
     Ok(T::from(data))
 }
 
 fn parse_h160(v: &[u8]) -> Result<H160, ExtractionError> {
-    let parent_hash: [u8; 20] = v.try_into().map_err(|_| {
-        ExtractionError::DecodeError(format!("Failed to decode hash: {}", hex::encode(v)))
-    })?;
-    Ok(H160::from(parent_hash))
+    if v.len() > 20 {
+        return Err(ExtractionError::DecodeError(format!(
+            "H160: Byte slice too long: Expected 20, got {}",
+            v.len()
+        )))
+    }
+
+    let mut data: [u8; 20] = [0; 20];
+    let start_index = 20 - v.len();
+    data[start_index..].copy_from_slice(v);
+
+    Ok(H160::from(data))
 }
 
 impl Transaction {
@@ -284,7 +301,11 @@ impl AccountUpdateWithTx {
         let update = AccountUpdate {
             address: parse_h160(&msg.address)?,
             chain,
-            slots: HashMap::new(),
+            slots: msg
+                .slots
+                .into_iter()
+                .map(|cs| Ok((parse_32bytes::<U256>(&cs.slot)?, parse_32bytes::<U256>(&cs.value)?)))
+                .collect::<Result<HashMap<_, _>, ExtractionError>>()?,
             balance: if !msg.balance.is_empty() {
                 Some(parse_32bytes(&msg.balance)?)
             } else {

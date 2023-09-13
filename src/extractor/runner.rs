@@ -7,7 +7,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::StreamExt;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use super::Extractor;
 use crate::{
@@ -110,28 +110,35 @@ where
                                 break;
                             }
                             Some(Ok(BlockResponse::New(data))) => {
-                                if let Ok(msg) = self.extractor.handle_tick_scoped_data(data).await {
-                                    if let Some(msg) = msg {
-                                        info!("Got message: {:?}", msg);
-                                        Self::propagate_msg(&self.subscriptions, msg).await
-                                    }
-                                } else {
-                                    error!("Error while processing tick!");
-                                    break;
+                                match self.extractor.handle_tick_scoped_data(data).await {
+                                    Ok(msg) => {
+                                        if let Some(msg) = msg {
+                                            debug!("Propagating message: {:?}", msg);
+                                            Self::propagate_msg(&self.subscriptions, msg).await
+                                        }
+                                    },
+                                    Err(err) => {
+                                        error!("Error while processing tick: {err}!");
+                                        break;
+                                    },
                                 }
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
-                                if let Ok(msg) = self.extractor.handle_revert(undo_signal).await {
-                                    if let Some(msg) = msg {
-                                        Self::propagate_msg(&self.subscriptions, msg).await
+                                info!("Revert detected {:?}", undo_signal);
+                                match self.extractor.handle_revert(undo_signal).await {
+                                    Ok(msg) => {
+                                        if let Some(msg) = msg {
+                                            Self::propagate_msg(&self.subscriptions, msg).await
+                                        }
+                                    },
+                                    Err(err) => {
+                                        error!("Error while processing revert!: {}", err);
+                                        break;
                                     }
-                                } else {
-                                    error!("Error while processing revert!");
-                                    break;
                                 }
                             }
                             Some(Err(err)) => {
-                                error!("Stream terminated with error {:?}", err);
+                                error!("Stream terminated with error {:#?}", err);
                                 break;
                             }
                         };
@@ -216,7 +223,7 @@ where
             spkg.modules.clone(),
             self.module_name,
             self.start_block,
-            0,
+            self.end_block as u64,
         );
 
         let (ctrl_tx, ctrl_rx) = mpsc::channel(1);

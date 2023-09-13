@@ -22,7 +22,7 @@ pub enum ExtractionError {
     Empty,
     #[error("Unexpected extraction error: {0}")]
     Unknown(String),
-    #[error("Storage failure")]
+    #[error("Storage failure: {0}")]
     Storage(#[from] StorageError),
 }
 

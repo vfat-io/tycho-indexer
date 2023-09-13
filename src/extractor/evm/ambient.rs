@@ -6,6 +6,7 @@ use ethers::types::{H160, H256};
 use prost::Message;
 use serde_json::json;
 use std::{collections::HashMap, str::FromStr, sync::Arc};
+use tracing::{debug, info};
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -22,6 +23,8 @@ use crate::{
 };
 
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
+const DEPLOY_TX: [u8; 32] =
+    hex_literal::hex!("11f2acc5882e7a6903bcbb39d1af7cd6cad99afd7e421197f48a537ae73a7f3a");
 
 struct Inner {
     cursor: Vec<u8>,
@@ -100,20 +103,24 @@ impl AmbientPgGateway {
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
+        debug!("Upserting block: {:?}", &changes.block);
         self.state_gateway
             .upsert_block(&changes.block, conn)
             .await?;
         for update in changes.tx_updates.iter() {
+            debug!("Processing tx: 0x{:x}", &update.tx.hash);
             self.state_gateway
                 .upsert_tx(&update.tx, conn)
                 .await?;
-            if update.tx.to.is_none() {
+            if update.tx.hash == H256(DEPLOY_TX) {
                 let new: evm::Account = update.into();
+                info!("New contract found at {}: 0x{:x}", &changes.block.number, &new.address);
                 self.state_gateway
                     .insert_contract(&new, conn)
                     .await?;
             }
         }
+        debug!("Applying contract state changes");
         self.state_gateway
             .update_contracts(
                 self.chain,
@@ -121,8 +128,7 @@ impl AmbientPgGateway {
                     .tx_updates
                     .iter()
                     .filter_map(|u| {
-                        u.tx.to
-                            .map(|_| (u.tx.hash.as_bytes(), &u.update))
+                        (u.tx.hash != H256(DEPLOY_TX)).then(|| (u.tx.hash.as_bytes(), &u.update))
                     })
                     .collect::<Vec<_>>()
                     .as_slice(),
@@ -260,11 +266,10 @@ where
             .as_ref()
             .unwrap();
 
-        let msg = match evm::BlockStateChanges::try_from_message(
-            BlockContractChanges::decode(_data.value.as_slice())?,
-            &self.name,
-            self.chain,
-        ) {
+        let raw_msg = BlockContractChanges::decode(_data.value.as_slice())?;
+        debug!("Received message: {raw_msg:?}");
+
+        let msg = match evm::BlockStateChanges::try_from_message(raw_msg, &self.name, self.chain) {
             Ok(changes) => changes,
             Err(ExtractionError::Empty) => return Ok(None),
             Err(e) => return Err(e),
