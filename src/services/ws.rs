@@ -4,18 +4,18 @@ use crate::{
     extractor::runner::ExtractorHandle,
     models::{ExtractorIdentity, NormalisedMessage},
 };
-use actix::{Actor, ActorContext, AsyncContext, StreamHandler};
+use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    fmt::Debug,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use tokio::sync::mpsc::Receiver;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 /// How often heartbeat pings are sent
@@ -78,12 +78,12 @@ struct WsActor<M> {
     _id: Uuid,
     heartbeat: Instant,
     app_state: web::Data<AppState<M>>,
-    subscriptions: HashMap<Uuid, Receiver<Arc<M>>>,
+    subscriptions: HashMap<Uuid, SpawnHandle>,
 }
 
 impl<M> WsActor<M>
 where
-    M: NormalisedMessage + Sync + Send + 'static,
+    M: NormalisedMessage + Serialize + DeserializeOwned + Sync + Send + 'static,
 {
     fn new(app_state: web::Data<AppState<M>>) -> Self {
         Self {
@@ -119,9 +119,22 @@ where
             // Generate a unique ID for this subscription
             let _subscription_id = Uuid::new_v4();
 
-            // FIXME: Subscribe to the events and spawn an Actor forwarding the messages to the
-            // client
-            let _receiver = extractor_handle.subscribe();
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let mut rx = rt
+                .block_on(extractor_handle.subscribe())
+                .unwrap();
+
+            let stream = async_stream::stream! {
+                while let Some(item) = rx.recv().await {
+                    let websocket_message = IncomingMessage::ForwardFromExtractor { message: item };
+                    let message_text = serde_json::to_string(&websocket_message).unwrap();
+                    yield Ok(ws::Message::Text(message_text.into()));
+                }
+            };
+
+            let handle = Self::add_stream(stream, ctx);
+            self.subscriptions
+                .insert(_subscription_id, handle);
         } else {
             error!("Extractor not found: {:?}", extractor_id);
 
@@ -133,16 +146,16 @@ where
     fn unsubscribe(&mut self, ctx: &mut ws::WebsocketContext<Self>, subscription_id: Uuid) {
         info!("Unsubscribing from subscription: {:?}", subscription_id);
 
-        if let Some(mut receiver) = self
+        if let Some(handle) = self
             .subscriptions
             .remove(&subscription_id)
         {
-            // FIXME: Should I also call extractor_handle.stop()?
-
             // Call the close method on the receiver to close the channel
-            receiver.close();
+            ctx.cancel_future(handle);
 
-            ctx.text(format!("Unsubscribed from {}", subscription_id));
+            let message = OutgoingMessage::<M>::SubscriptionEnded { subscription_id };
+
+            ctx.text(serde_json::to_string(&message).unwrap());
         } else {
             error!("Subscription ID not found: {}", subscription_id);
 
@@ -154,7 +167,7 @@ where
 
 impl<M> Actor for WsActor<M>
 where
-    M: NormalisedMessage + Sync + Send + 'static,
+    M: NormalisedMessage + Serialize + DeserializeOwned + Sync + Send + 'static,
 {
     type Context = ws::WebsocketContext<Self>;
 
@@ -177,20 +190,32 @@ where
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(tag = "method", rename_all = "lowercase")]
-pub enum Message {
-    #[serde(rename = "subscribe")]
+pub enum IncomingMessage<M>
+where
+    M: NormalisedMessage + Sync + Send + 'static,
+{
     Subscribe { extractor: ExtractorIdentity },
-
-    #[serde(rename = "unsubscribe")]
     Unsubscribe { subscription_id: Uuid },
+    ForwardFromExtractor { message: Arc<M> },
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+#[serde(tag = "method", rename_all = "lowercase")]
+pub enum OutgoingMessage<M>
+where
+    M: NormalisedMessage + Sync + Send + 'static,
+{
+    NewSubscription { subscription_id: Uuid },
+    SubscriptionEnded { subscription_id: Uuid },
+    ForwardFromExtractor { message: Arc<M> },
 }
 
 /// Handle incoming messages from the WS connection
 impl<M> StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsActor<M>
 where
-    M: NormalisedMessage + Sync + Send + 'static,
+    M: NormalisedMessage + Serialize + DeserializeOwned + Sync + Send + 'static,
 {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         info!("Websocket message received: {:?}", msg);
@@ -206,15 +231,21 @@ where
                 info!("Websocket text message received: {:?}", text);
 
                 // Try to deserialize the message to a Message enum
-                match serde_json::from_str::<Message>(&text) {
+                match serde_json::from_str::<IncomingMessage<M>>(&text) {
                     Ok(message) => {
                         // Handle the message based on its variant
                         match message {
-                            Message::Subscribe { extractor } => {
+                            IncomingMessage::Subscribe { extractor } => {
                                 self.subscribe(ctx, &extractor);
                             }
-                            Message::Unsubscribe { subscription_id } => {
+                            IncomingMessage::Unsubscribe { subscription_id } => {
                                 self.unsubscribe(ctx, subscription_id);
+                            }
+                            IncomingMessage::ForwardFromExtractor { message } => {
+                                debug!("Forwarding message to client");
+
+                                let message = OutgoingMessage::ForwardFromExtractor { message };
+                                ctx.text(serde_json::to_string(&message).unwrap());
                             }
                         }
                     }
