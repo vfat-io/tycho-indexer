@@ -9,9 +9,9 @@ use diesel_async::RunQueryDsl;
 use ethers::utils::keccak256;
 
 use crate::storage::{
-    AccountToContractStore, AddressRef, BlockIdentifier, BlockOrTimestamp, ContractDelta,
-    ContractId, ContractStateGateway, ContractStore, StorableBlock, StorableContract,
-    StorableTransaction, TxHashRef, Version, VersionKind,
+    AccountToContractStore, AddressRef, Balance, BlockIdentifier, BlockOrTimestamp, Code,
+    ContractDelta, ContractId, ContractStateGateway, ContractStore, StorableBlock,
+    StorableContract, StorableTransaction, TxHashRef, Version, VersionKind,
 };
 
 use super::*;
@@ -39,16 +39,22 @@ where
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
 {
-    /// Retrieves deltas for any accounts balance changes.
+    /// Retrieves the changes in balance for all accounts of a chain.
     ///
-    /// See [`ContractStateGateway::get_account_deltas`] for more information.
+    /// See [ContractStateGateway::get_account_delta] for more information on
+    /// the mechanics of this method regarding version timestamps.
+    ///
+    /// # Returns
+    /// This method returns a mapping from each account id to its respective `Balance`. The returned
+    /// map indicates the new balance that needs to be applied to reach the desired target
+    /// version.
     async fn get_balance_deltas(
         &self,
         chain_id: i64,
         start_version_ts: &NaiveDateTime,
         target_version_ts: &NaiveDateTime,
         conn: &mut AsyncPgConnection,
-    ) -> Result<HashMap<i64, Vec<u8>>, StorageError> {
+    ) -> Result<HashMap<i64, Balance>, StorageError> {
         use schema::account_balance::dsl::*;
         let res = if start_version_ts <= target_version_ts {
             let changed_account_ids = account_balance
@@ -106,16 +112,22 @@ where
         Ok(res)
     }
 
-    /// Retrieves deltas for any accounts code changes.
+    /// Retrieves the changes in code for all accounts of a chain.
     ///
-    /// See [`ContractStateGateway::get_account_deltas`] for more information.
+    /// See [ContractStateGateway::get_account_delta] for more information on
+    /// the mechanics of this method regarding version timestamps.
+    ///
+    /// # Returns
+    /// This method returns a mapping from each account id to its respective
+    /// `Code`. The returned map indicates the new code that needs to be applied
+    /// to reach the desired target version.
     async fn get_code_deltas(
         &self,
         chain_id: i64,
         start_version_ts: &NaiveDateTime,
         target_version_ts: &NaiveDateTime,
         conn: &mut AsyncPgConnection,
-    ) -> Result<HashMap<i64, Vec<u8>>, StorageError> {
+    ) -> Result<HashMap<i64, Code>, StorageError> {
         use schema::contract_code::dsl::*;
         let res = if start_version_ts <= target_version_ts {
             let changed_account_ids = contract_code
@@ -173,9 +185,15 @@ where
         Ok(res)
     }
 
-    /// Retrieves deltas for any accounts slot changes.
+    /// Retrieves the changes in slots for all accounts of a chain.
     ///
-    /// See [`ContractStateGateway::get_account_deltas`] for more information.
+    /// See [ContractStateGateway::get_account_delta] for more information on
+    /// the mechanics of this method regarding version timestamps.
+    ///
+    /// # Returns
+    /// This method returns a mapping from each account id to a `ContractStore`.
+    /// The returned store entries indicate the updates needed to reach the specified target
+    /// version.
     async fn get_slots_delta(
         &self,
         chain_id: i64,

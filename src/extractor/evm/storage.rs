@@ -7,8 +7,8 @@ use crate::{
     },
     models::Chain,
     storage::{
-        AddressRef, ContractDelta, ContractId, ContractStore, StorableContract, StorageError,
-        TxHashRef,
+        AddressRef, BalanceRef, CodeRef, ContractDelta, ContractId, ContractStore,
+        StorableContract, StorageError, TxHashRef,
     },
 };
 
@@ -119,8 +119,8 @@ pub mod pg {
             chain: Chain,
             address: AddressRef,
             slots: Option<&ContractStore>,
-            balance: Option<&[u8]>,
-            code: Option<&[u8]>,
+            balance: Option<BalanceRef>,
+            code: Option<CodeRef>,
         ) -> Result<Self, StorageError> {
             let slots = slots
                 .map(|s| {
