@@ -16,9 +16,22 @@ use chrono::NaiveDateTime;
 use ethers::prelude::*;
 
 pub mod pg {
-    use crate::storage::postgres::orm;
+    use crate::storage::{postgres::orm, ChangeType};
 
     use super::*;
+
+    impl From<evm::Account> for evm::AccountUpdate {
+        fn from(value: evm::Account) -> Self {
+            evm::AccountUpdate::new(
+                value.address,
+                value.chain,
+                value.slots,
+                Some(value.balance),
+                Some(value.code),
+                ChangeType::Creation,
+            )
+        }
+    }
 
     impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
         fn from_storage(
@@ -87,8 +100,7 @@ pub mod pg {
             self.slots = store
                 .iter()
                 .map(|(rk, rv)| {
-                    parse_u256_slot_entry(rk, rv.as_deref())
-                        .map_err(|err| StorageError::DecodeError(err))
+                    parse_u256_slot_entry(rk, rv.as_deref()).map_err(StorageError::DecodeError)
                 })
                 .collect::<Result<HashMap<_, _>, _>>()?;
             Ok(())
@@ -121,24 +133,26 @@ pub mod pg {
             slots: Option<&ContractStore>,
             balance: Option<BalanceRef>,
             code: Option<CodeRef>,
+            change: ChangeType,
         ) -> Result<Self, StorageError> {
             let slots = slots
                 .map(|s| {
                     s.iter()
                         .map(|(s, v)| {
                             parse_u256_slot_entry(s, v.as_deref())
-                                .map_err(|err| StorageError::DecodeError(err))
+                                .map_err(StorageError::DecodeError)
                         })
                         .collect::<Result<HashMap<U256, U256>, StorageError>>()
                 })
                 .unwrap_or_else(|| Ok(HashMap::new()))?;
 
             let update = evm::AccountUpdate::new(
-                parse_id_h160(address).map_err(|err| StorageError::DecodeError(err))?,
+                parse_id_h160(address).map_err(StorageError::DecodeError)?,
                 chain,
                 slots,
                 balance.map(U256::from_big_endian),
                 code.map(|v| v.to_vec()),
+                change,
             );
             Ok(update)
         }

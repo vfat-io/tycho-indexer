@@ -9,9 +9,9 @@ use diesel_async::RunQueryDsl;
 use ethers::utils::keccak256;
 
 use crate::storage::{
-    AccountToContractStore, AddressRef, Balance, BlockIdentifier, BlockOrTimestamp, Code,
-    ContractDelta, ContractId, ContractStateGateway, ContractStore, StorableBlock,
-    StorableContract, StorableTransaction, TxHashRef, Version, VersionKind,
+    AccountToContractStore, Address, AddressRef, Balance, BlockIdentifier, BlockOrTimestamp,
+    ChangeType, Code, ContractDelta, ContractId, ContractStateGateway, ContractStore,
+    StorableBlock, StorableContract, StorableTransaction, TxHashRef, Version, VersionKind,
 };
 
 use super::*;
@@ -31,12 +31,19 @@ impl<T> Deref for WithTxHash<T> {
     }
 }
 
+struct CreatedOrDeleted<T> {
+    /// Accounts that were created (and deltas are equal to their updates)
+    created: HashSet<Address>,
+    /// Accounts that were deleted and needed restoring to get correct deltas.
+    restored: HashMap<Address, T>,
+}
+
 // Private methods
 impl<B, TX, A, D> PostgresGateway<B, TX, A, D>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    D: ContractDelta,
+    D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
 {
     /// Retrieves the changes in balance for all accounts of a chain.
@@ -56,6 +63,8 @@ where
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<i64, Balance>, StorageError> {
         use schema::account_balance::dsl::*;
+        dbg!(&start_version_ts);
+        dbg!(&target_version_ts);
         let res = if start_version_ts <= target_version_ts {
             let changed_account_ids = account_balance
                 .inner_join(schema::account::table.inner_join(schema::chain::table))
@@ -277,6 +286,197 @@ where
         Ok(result)
     }
 
+    /// Handle deleted or created account deltas
+    ///
+    /// # Operations
+    ///   
+    /// 1. Going Forward (`start < target`):
+    ///     - a) If an account was deleted, emit an empty delta with [ChangeType::Deletion].
+    ///     - b) If an account was created, emit an already collected update delta but with
+    ///       [ChangeType::Creation].. No need to fetches the state at the `target_version` as by
+    ///       design we emit newly created contracts and their components when going forward.
+    ///  
+    /// 2. Going Backward (`target < start`):
+    ///     - a) If an account was deleted, it restores the account. Therefore, it needs to retrieve
+    ///       the account state at `target` and emits the account with [ChangeType::Creation].
+    ///     - b) If an account was created, emit an empty delta with [ChangeType::Deletion].
+    ///
+    /// We boil down the rules above into two simple operations:
+    ///     - The cases from 1b, are simple we just need to record which
+    ///     accounts are affected by 1b and then mark existing deltas as created
+    ///     - The remaining cases will require new deltas to be constructed,
+    ///     those are either restores (2a) or empty deltas indicating deletions
+    ///     (1a & 2b)
+    ///
+    /// # Returns
+    ///     
+    /// The CreatedOrDeleted struct. It contains accounts that fall under 1a within it's created
+    /// attribute. We can use this attribute to satisfy the first operation. It also contains new
+    /// restored / deleted delta structs withing the `restored` attribute with which we can satisfy
+    /// the second rule.
+    async fn created_or_deleted_accounts(
+        &self,
+        chain: Chain,
+        start_version_ts: &NaiveDateTime,
+        target_version_ts: &NaiveDateTime,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<CreatedOrDeleted<D>, StorageError> {
+        // Find created or deleted Accounts
+        let cod_accounts: Vec<orm::Account> = {
+            use schema::account::dsl::*;
+            let (start, end) = if start_version_ts < target_version_ts {
+                (start_version_ts, target_version_ts)
+            } else {
+                (target_version_ts, start_version_ts)
+            };
+            account
+                .filter(
+                    (deleted_at
+                        .gt(start)
+                        .and(deleted_at.le(end)))
+                    .or(created_at
+                        .gt(start)
+                        .and(created_at.le(end))),
+                )
+                .select(orm::Account::as_select())
+                .get_results::<orm::Account>(conn)
+                .await?
+        };
+        // Handle creation and deletion of same account within range. Currently
+        // not properly supported. We only check for the existence of such a
+        // problematic situation see (PR#30).
+        // - forward
+        //      1. c + d -> current: not present, target: not present => noop
+        //      2. c + d + c -> current: present, target: present => emit created, merge with
+        //         updates after creation
+        //      3. d + c -> current: present, target: present     => emit created, merge with
+        //         updates after creation
+        //      4. d + c + d -> current: present, target: not present => emit deletion
+        // - backward
+        //      5. c + d -> current: not present, target: not preset => noop
+        //      6. c + d + c -> current: present, target: not preset => emit delete
+        //      7. d + c -> current: present, target: present => restore at target
+        //      8. d + c + d -> current: not present, target: present => restore at target
+        //
+        // The easiest will be to check for these situations, then load the complete state at
+        // target.
+        if cod_accounts.iter().any(|acc| {
+            if start_version_ts < target_version_ts {
+                let one = acc
+                    .created_at
+                    .map(|ts| start_version_ts < &ts && &ts <= target_version_ts)
+                    .unwrap_or(false);
+                let two = acc
+                    .deleted_at
+                    .map(|ts| start_version_ts < &ts && &ts <= target_version_ts)
+                    .unwrap_or(false);
+                one && two
+            } else {
+                let one = acc
+                    .created_at
+                    .map(|ts| target_version_ts < &ts && &ts <= start_version_ts)
+                    .unwrap_or(false);
+                let two = acc
+                    .deleted_at
+                    .map(|ts| target_version_ts < &ts && &ts <= start_version_ts)
+                    .unwrap_or(false);
+                one && two
+            }
+        }) {
+            return Err(StorageError::Unexpected(format!(
+                "Found account that was deleted and created within range {} - {}!",
+                start_version_ts, target_version_ts
+            )))
+        }
+
+        // The code below assumes that no account is deleted or created more
+        // than once within the given version range.
+        let (mark_created, cod_deltas) = if start_version_ts > target_version_ts {
+            // going backwards
+            let deleted_addresses = cod_accounts
+                .iter()
+                .filter(|a| a.deleted_at.is_some())
+                .map(|a| a.address.as_slice())
+                .collect::<Vec<_>>();
+
+            // Restore full state delta at from target version for accounts that were deleted
+            let version = Some(Version::from_ts(*target_version_ts));
+            let restored = self
+                .get_contracts(
+                    chain,
+                    Some(deleted_addresses.as_slice()),
+                    version.as_ref(),
+                    true,
+                    conn,
+                )
+                .await?
+                .into_iter()
+                .map(|acc| (acc.address().to_vec(), acc.into()))
+                .collect::<HashMap<Address, D>>();
+
+            let deltas = cod_accounts
+                .iter()
+                .map(|acc| -> Result<_, StorageError> {
+                    let update = if let Some(update) = restored.get(&acc.address) {
+                        // assuming these have ChangeType created
+                        update.clone()
+                    } else {
+                        D::from_storage(
+                            chain,
+                            acc.address.as_slice(),
+                            None,
+                            None,
+                            None,
+                            ChangeType::Deletion,
+                        )?
+                    };
+                    Ok((acc.address.clone(), update))
+                })
+                .collect::<Result<HashMap<_, _>, _>>()?;
+
+            // ensure all accounts have a restore delta
+            cod_accounts
+                .iter()
+                .map(|v| {
+                    deltas
+                        .contains_key(&v.address)
+                        .then_some(v)
+                        .ok_or_else(|| {
+                            StorageError::Unexpected(format!(
+                                "Fatal: Missing account 0x{} detected in delta changes!",
+                                hex::encode(&v.address),
+                            ))
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            (HashSet::<Vec<u8>>::new(), deltas)
+        } else {
+            let (deleted, created): (Vec<_>, Vec<_>) = cod_accounts
+                .into_iter()
+                .partition(|acc| acc.deleted_at.is_some());
+            let created: HashSet<_> = created
+                .into_iter()
+                .map(|acc| acc.address)
+                .collect();
+            let deltas = deleted
+                .iter()
+                .map(|acc| {
+                    let update = D::from_storage(
+                        chain,
+                        acc.address.as_slice(),
+                        None,
+                        None,
+                        None,
+                        ChangeType::Deletion,
+                    )?;
+                    Ok((acc.address.clone(), update))
+                })
+                .collect::<Result<HashMap<_, _>, StorageError>>()?;
+            (created, deltas)
+        };
+        Ok(CreatedOrDeleted { created: mark_created, restored: cod_deltas })
+    }
+
     /// Upserts slots for a given contract.
     ///
     /// Upserts slots from multiple accounts. To correctly track changes, it is necessary that each
@@ -444,7 +644,7 @@ impl<B, TX, A, D> ContractStateGateway for PostgresGateway<B, TX, A, D>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    D: ContractDelta,
+    D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
 {
     type DB = AsyncPgConnection;
@@ -975,6 +1175,9 @@ where
         let slot_deltas = self
             .get_slots_delta(chain_id, &start_version_ts, &target_version_ts, conn)
             .await?;
+        let account_deltas = self
+            .created_or_deleted_accounts(chain, &start_version_ts, &target_version_ts, conn)
+            .await?;
 
         // We retrieve account addresses separately because this is more
         // efficient for the most common cases. In the most common case, only a
@@ -998,13 +1201,21 @@ where
                 ),
             )
             .select((schema::account::id, schema::account::address))
-            .get_results::<(i64, Vec<u8>)>(conn)
+            .get_results::<(i64, Address)>(conn)
             .await?;
 
-        account_addresses
+        let deltas = account_addresses
             .into_iter()
-            .map(|(id, address)| -> Result<Self::Delta, StorageError> {
+            .map(|(id, address)| -> Result<_, StorageError> {
                 let slots = slot_deltas.get(&id);
+                let state = if account_deltas
+                    .created
+                    .contains(&address)
+                {
+                    ChangeType::Creation
+                } else {
+                    ChangeType::Update
+                };
                 let update = Self::Delta::from_storage(
                     chain,
                     address.as_slice(),
@@ -1013,10 +1224,19 @@ where
                         .get(&id)
                         .map(Vec::as_slice),
                     code_deltas.get(&id).map(Vec::as_slice),
+                    state,
                 )?;
-                Ok(update)
+                Ok((address, update))
             })
-            .collect::<Result<Vec<_>, _>>()
+            .chain(
+                account_deltas
+                    .restored
+                    .into_iter()
+                    .map(Ok),
+            )
+            .collect::<Result<HashMap<_, _>, _>>()?;
+
+        Ok(deltas.into_values().collect())
     }
 
     async fn revert_contract_state(
@@ -1144,6 +1364,9 @@ async fn coerce_block_or_ts(
 
 #[cfg(test)]
 mod test {
+    //! Tests for PostgresGateway's ContractStateGateway methods
+    //!
+    //! The tests below test the functionalit using the concrete EVM types.
     use std::str::FromStr;
 
     use diesel_async::{AsyncConnection, RunQueryDsl};
@@ -1171,6 +1394,10 @@ mod test {
         conn
     }
 
+    /// This sets up the data needed to test the gateway. The setup is structured such that each
+    /// accounts historical changes are kept together this makes it easy to reason about that change
+    /// an account should have at each version Please not that if you change something here, also
+    /// update the account fixtures right below, which contain account states at each version
     async fn setup_data(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
@@ -1189,6 +1416,7 @@ mod test {
                     2i64,
                     "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
                 ),
+                // ----- Block 01 LAST
                 (
                     // deploy c1, delete c2
                     blk[1],
@@ -1201,6 +1429,7 @@ mod test {
                     2i64,
                     "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
                 ),
+                // ----- Block 02 LAST
             ],
         )
         .await;
@@ -1213,8 +1442,25 @@ mod test {
         )
         .await;
         db_fixtures::insert_account_balance(conn, 0, txn[0], c0).await;
-        db_fixtures::insert_account_balance(conn, 100, txn[1], c0).await;
         db_fixtures::insert_contract_code(conn, c0, txn[0], hex::decode("C0C0C0").unwrap()).await;
+        db_fixtures::insert_account_balance(conn, 100, txn[1], c0).await;
+        db_fixtures::insert_slots(
+            conn,
+            c0,
+            txn[1],
+            "2020-01-01T00:00:00",
+            &[(0, 1), (1, 5), (2, 1)],
+        )
+        .await;
+        db_fixtures::insert_account_balance(conn, 101, txn[3], c0).await;
+        db_fixtures::insert_slots(
+            conn,
+            c0,
+            txn[3],
+            "2020-01-01T01:00:00",
+            &[(0, 2), (1, 3), (5, 25), (6, 30)],
+        )
+        .await;
 
         let c1 = db_fixtures::insert_account(
             conn,
@@ -1226,6 +1472,8 @@ mod test {
         .await;
         db_fixtures::insert_account_balance(conn, 50, txn[2], c1).await;
         db_fixtures::insert_contract_code(conn, c1, txn[2], hex::decode("C1C1C1").unwrap()).await;
+        db_fixtures::insert_slots(conn, c1, txn[3], "2020-01-01T01:00:00", &[(0, 128), (1, 255)])
+            .await;
 
         let c2 = db_fixtures::insert_account(
             conn,
@@ -1237,71 +1485,8 @@ mod test {
         .await;
         db_fixtures::insert_account_balance(conn, 25, txn[1], c2).await;
         db_fixtures::insert_contract_code(conn, c2, txn[1], hex::decode("C2C2C2").unwrap()).await;
-
-        db_fixtures::insert_slots(
-            conn,
-            c0,
-            txn[1],
-            "2020-01-01T00:00:00",
-            &[(0, 1), (1, 5), (2, 1)],
-        )
-        .await;
         db_fixtures::insert_slots(conn, c2, txn[1], "2020-01-01T00:00:00", &[(1, 2), (2, 4)]).await;
         db_fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
-        db_fixtures::insert_slots(
-            conn,
-            c0,
-            txn[3],
-            "2020-01-01T01:00:00",
-            &[(0, 2), (1, 3), (5, 25), (6, 30)],
-        )
-        .await;
-        db_fixtures::insert_slots(conn, c1, txn[3], "2020-01-01T01:00:00", &[(0, 128), (1, 255)])
-            .await;
-    }
-
-    #[tokio::test]
-    async fn test_get_contract() {
-        let mut conn = setup_db().await;
-        setup_data(&mut conn).await;
-        let acc_address = "6B175474E89094C44Da98b954EedeAC495271d0F";
-        let code_bytes = hex::decode("C0C0C0").unwrap();
-        let code_hash = H256::from_slice(&ethers::utils::keccak256(&code_bytes));
-        let expected = Account::new(
-            Chain::Ethereum,
-            H160::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-            "account0".to_owned(),
-            HashMap::new(),
-            U256::from(100),
-            code_bytes,
-            code_hash,
-            "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54"
-                .parse()
-                .expect("txhash ok"),
-            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
-                .parse()
-                .expect("txhash ok"),
-            Some(
-                "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
-                    .parse()
-                    .expect("txhash ok"),
-            ),
-        );
-
-        let gateway = EvmGateway::from_connection(&mut conn).await;
-        let id = ContractId::new(Chain::Ethereum, hex::decode(acc_address).unwrap());
-        let actual = gateway
-            .get_contract(&id, &None, false, &mut conn)
-            .await
-            .unwrap();
-
-        assert_eq!(expected, actual);
-    }
-
-    fn make_evm_slots(v: &[(u64, u64)]) -> HashMap<U256, U256> {
-        v.iter()
-            .map(|(s, v)| (U256::from(*s), U256::from(*v)))
-            .collect()
     }
 
     fn account_c0(version: u64) -> evm::Account {
@@ -1312,7 +1497,7 @@ mod test {
                     .parse()
                     .unwrap(),
                 title: "account0".to_owned(),
-                slots: make_evm_slots(&[(1, 5), (2, 1), (0, 1)]),
+                slots: evm_slots([(1, 5), (2, 1), (0, 1)]),
                 balance: U256::from(100),
                 code: hex::decode("C0C0C0").unwrap(),
                 code_hash: "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
@@ -1338,14 +1523,14 @@ mod test {
                     .parse()
                     .unwrap(),
                 title: "account0".to_owned(),
-                slots: make_evm_slots(&[(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
-                balance: U256::from(100),
+                slots: evm_slots([(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
+                balance: U256::from(101),
                 code: hex::decode("C0C0C0").unwrap(),
                 code_hash: "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                     .parse()
                     .unwrap(),
                 balance_modify_tx:
-                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54"
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
                         .parse()
                         .unwrap(),
                 code_modify_tx:
@@ -1362,6 +1547,12 @@ mod test {
         }
     }
 
+    fn evm_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap<U256, U256> {
+        data.into_iter()
+            .map(|(s, v)| (U256::from(s), U256::from(v)))
+            .collect()
+    }
+
     fn account_c1(version: u64) -> evm::Account {
         match version {
             2 => evm::Account {
@@ -1370,7 +1561,7 @@ mod test {
                     .parse()
                     .unwrap(),
                 title: "c1".to_owned(),
-                slots: make_evm_slots(&[(1, 255), (0, 128)]),
+                slots: evm_slots([(1, 255), (0, 128)]),
                 balance: U256::from(50),
                 code: hex::decode("C1C1C1").unwrap(),
                 code_hash: "0xa04b84acdf586a694085997f32c4aa11c2726a7f7e0b677a27d44d180c08e07f"
@@ -1402,7 +1593,7 @@ mod test {
                     .parse()
                     .unwrap(),
                 title: "c2".to_owned(),
-                slots: make_evm_slots(&[(1, 2), (2, 4)]),
+                slots: evm_slots([(1, 2), (2, 4)]),
                 balance: U256::from(25),
                 code: hex::decode("C2C2C2").unwrap(),
                 code_hash: "0x7eb1e0ed9d018991eed6077f5be45b52347f6e5870728809d368ead5b96a1e96"
@@ -1424,6 +1615,29 @@ mod test {
             },
             _ => panic!("No version found"),
         }
+    }
+
+    #[rstest]
+    #[case::with_slots(true)]
+    #[case::without_slots(false)]
+    #[tokio::test]
+    async fn test_get_contract(#[case] include_slots: bool) {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let acc_address = "6B175474E89094C44Da98b954EedeAC495271d0F";
+        let mut expected = account_c0(2);
+        if !include_slots {
+            expected.slots.clear();
+        }
+
+        let gateway = EvmGateway::from_connection(&mut conn).await;
+        let id = ContractId::new(Chain::Ethereum, hex::decode(acc_address).unwrap());
+        let actual = gateway
+            .get_contract(&id, &None, include_slots, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(expected, actual);
     }
 
     #[rstest]
@@ -1586,6 +1800,7 @@ mod test {
             HashMap::new(),
             Some(U256::from(10_000)),
             None,
+            ChangeType::Update,
         );
         let contract_id = ContractId::new(Chain::Ethereum, account.address().to_vec());
 
@@ -1955,6 +2170,155 @@ mod test {
         assert_eq!(res, exp);
     }
 
+    #[rstest]
+    #[case::with_start_version(
+        Some(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))))
+    )]
+    #[case::no_start_version(None)]
+    #[tokio::test]
+    async fn get_account_delta_backward(#[case] start_version: Option<BlockOrTimestamp>) {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EvmGateway::from_connection(&mut conn).await;
+        let exp = vec![
+            // c0 had some changes which need to be reverted
+            evm::AccountUpdate::new(
+                "0x6b175474e89094c44da98b954eedeac495271d0f"
+                    .parse()
+                    .expect("addr ok"),
+                Chain::Ethereum,
+                evm_slots([(6, 0), (0, 1), (1, 5), (5, 0)]),
+                Some(U256::from(100)),
+                None,
+                ChangeType::Update,
+            ),
+            // c1 which was deployed on block 2 is deleted
+            evm::AccountUpdate::new(
+                "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
+                    .parse()
+                    .expect("addr ok"),
+                Chain::Ethereum,
+                evm_slots([]),
+                None,
+                None,
+                ChangeType::Deletion,
+            ),
+            // c2 is recreated
+            evm::AccountUpdate::new(
+                "0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
+                    .parse()
+                    .expect("addr ok"),
+                Chain::Ethereum,
+                evm_slots([(1, 2), (2, 4)]),
+                Some(U256::from(25)),
+                Some(hex::decode("C2C2C2").expect("code ok")),
+                ChangeType::Creation,
+            ),
+        ];
+
+        let mut changes = gw
+            .get_account_delta(
+                Chain::Ethereum,
+                start_version.as_ref(),
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+        changes.sort_unstable_by_key(|u| u.address);
+        dbg!(&changes);
+
+        assert_eq!(changes, exp);
+    }
+
+    #[tokio::test]
+    async fn get_account_delta_forward() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EvmGateway::from_connection(&mut conn).await;
+        let exp = vec![
+            // c0 updates some slots and balances
+            evm::AccountUpdate::new(
+                "0x6b175474e89094c44da98b954eedeac495271d0f"
+                    .parse()
+                    .expect("addr ok"),
+                Chain::Ethereum,
+                evm_slots([(6, 30), (0, 2), (1, 3), (5, 25)]),
+                Some(U256::from(101)),
+                None,
+                ChangeType::Update,
+            ),
+            // c1 was deployed
+            evm::AccountUpdate::new(
+                "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
+                    .parse()
+                    .expect("addr ok"),
+                Chain::Ethereum,
+                evm_slots([(0, 128), (1, 255)]),
+                Some(U256::from(50)),
+                Some(hex::decode("C1C1C1").expect("code ok")),
+                ChangeType::Creation,
+            ),
+            // c2 is deleted
+            evm::AccountUpdate::new(
+                "0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
+                    .parse()
+                    .expect("addr ok"),
+                Chain::Ethereum,
+                evm_slots([]),
+                None,
+                None,
+                ChangeType::Deletion,
+            ),
+        ];
+
+        let mut changes = gw
+            .get_account_delta(
+                Chain::Ethereum,
+                Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1)))),
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+        changes.sort_unstable_by_key(|u| u.address);
+        dbg!(&changes);
+
+        assert_eq!(changes, exp);
+    }
+
+    #[rstest]
+    #[case::forward("2020-01-01T00:00:00", "2020-01-01T01:00:00")]
+    #[case::backward("2020-01-01T01:00:00", "2020-01-01T00:00:00")]
+    #[tokio::test]
+    async fn get_account_delta_fail(#[case] start: &str, #[case] end: &str) {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let c1 = &orm::Account::by_hash(
+            hex::decode("73BcE791c239c8010Cd3C857d96580037CCdd0EE")
+                .expect("address ok")
+                .as_slice(),
+            &mut conn,
+        )
+        .await
+        .unwrap()[0];
+        db_fixtures::delete_account(&mut conn, c1.id, "2020-01-01T01:00:00").await;
+        let gw = EvmGateway::from_connection(&mut conn).await;
+        let start_ts = start.parse().unwrap();
+        let start_version = BlockOrTimestamp::Timestamp(start_ts);
+        let end_ts = end.parse().unwrap();
+        let end_version = BlockOrTimestamp::Timestamp(end_ts);
+        let exp = Err(StorageError::Unexpected(format!(
+            "Found account that was deleted and created within range {} - {}!",
+            start_ts, end_ts
+        )));
+
+        let res = gw
+            .get_account_delta(Chain::Ethereum, Some(&start_version), &end_version, &mut conn)
+            .await;
+
+        assert_eq!(res, exp);
+    }
     #[tokio::test]
     async fn test_revert() {
         let mut conn = setup_db().await;

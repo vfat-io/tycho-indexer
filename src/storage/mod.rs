@@ -20,6 +20,24 @@
 //! having an index, the original sequence of state modifications stays
 //! preserved.
 //!
+//! ### Version semantics intra block
+//!
+//! ```text
+//! tx            1    2       1  2             3          1  2            3
+//! B01 ----------x----x---B02-x--x-------------x---B03----x--x------------x-->
+//! 00:00                  00:12                 | |00:24
+//! ____Block(B02), VersionKind::Index(3)________| |
+//! ____Block(B02), VersionKind::Last______________+
+//!                                                |
+//! ____Block(B03), VersionKind::First_____________|
+//! ```
+//!
+//! Above you'll find the 3 possible version kinds. Note that Index(N) specifies
+//! the transaction slot after N. VersionKind::First includes the last
+//! transaction of the previous block and VersionKind::Last includes the last
+//! transaction of the specified block. So it is possbile to convert between the
+//! variants first and last
+//!
 //! ## Literal Types
 //!
 //! For the representation of various literals, we utilize a variable-length
@@ -59,7 +77,7 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 use crate::services::deserialization_helpers::hex_to_bytes;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem};
@@ -109,7 +127,7 @@ pub type CodeRef<'a> = &'a [u8];
 pub type BalanceRef<'a> = &'a [u8];
 
 /// Identifies a block in storage.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockIdentifier {
     /// Identifies the block by its position on a specified chain.
     ///
@@ -213,7 +231,7 @@ pub trait StorableTransaction<S, N, I>: Send + Sync + 'static {
     fn hash(&self) -> TxHashRef;
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum StorageError {
     #[error("Could not find {0} with id `{1}`!")]
     NotFound(String, String),
@@ -353,7 +371,7 @@ pub trait ExtractionStateGateway {
 
 /// Point in time as either block or timestamp. If a block is chosen it
 /// timestamp attribute is used.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockOrTimestamp {
     Block(BlockIdentifier),
     Timestamp(NaiveDateTime),
@@ -597,6 +615,14 @@ pub trait StorableContract<S, N, I>: Send + Sync + 'static {
     fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
 }
 
+#[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize)]
+pub enum ChangeType {
+    #[default]
+    Update,
+    Deletion,
+    Creation,
+}
+
 /// Provides methods associated with changes in a contract.
 ///
 /// This includes methods for loading a contract from storage, getting a
@@ -605,7 +631,7 @@ pub trait StorableContract<S, N, I>: Send + Sync + 'static {
 ///
 /// Types that implement this trait should represent the delta of an on-chain
 /// contract's state.
-pub trait ContractDelta: Sized + Send + Sync + 'static {
+pub trait ContractDelta: std::fmt::Debug + Clone + Sized + Send + Sync + 'static {
     /// Converts into a struct implementing `ContractDelta` from storage literals.
     ///
     /// # Arguments
@@ -624,6 +650,7 @@ pub trait ContractDelta: Sized + Send + Sync + 'static {
         slots: Option<&ContractStore>,
         balance: Option<BalanceRef>,
         code: Option<CodeRef>,
+        change: ChangeType,
     ) -> Result<Self, StorageError>;
 
     /// Identifies the contract which had changes.
