@@ -1,4 +1,7 @@
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    de::{self, DeserializeOwned},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -101,7 +104,7 @@ pub struct ExtractionState {
     pub cursor: Vec<u8>,
 }
 
-pub trait NormalisedMessage {
+pub trait NormalisedMessage: Serialize + DeserializeOwned + Send + Sync + Clone + 'static {
     fn source(&self) -> ExtractorIdentity;
 }
 

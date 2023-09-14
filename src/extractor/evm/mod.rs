@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use chrono::NaiveDateTime;
 use ethers::types::{H160, H256, U256};
+use serde::{Deserialize, Serialize};
 
 pub struct SwapPool {}
 
@@ -79,7 +80,7 @@ impl Account {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
 pub struct AccountUpdate {
     extractor: String,
     chain: Chain,

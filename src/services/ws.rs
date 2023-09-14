@@ -1,13 +1,14 @@
 //! This module contains Tycho Websocket implementation
 
 use crate::{
-    extractor::runner::ExtractorSubscriber,
+    extractor::runner::MessageSender,
     models::{ExtractorIdentity, NormalisedMessage},
 };
 use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use futures03::executor::block_on;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -15,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use tracing::error;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 /// How often heartbeat pings are sent
@@ -32,13 +33,10 @@ pub enum WebsocketError {
     SubscriptionNotFound(Uuid),
 
     #[error("Failed to parse JSON: {0}")]
-    ParseError(serde_json::Error),
-}
+    ParseError(#[from] serde_json::Error),
 
-impl From<serde_json::Error> for WebsocketError {
-    fn from(e: serde_json::Error) -> Self {
-        WebsocketError::ParseError(e)
-    }
+    #[error("Failed to subscribe to extractor: {0}")]
+    SubscribeError(ExtractorIdentity),
 }
 
 impl Serialize for WebsocketError {
@@ -54,20 +52,21 @@ impl Serialize for WebsocketError {
                 serializer.serialize_str(&format!("Subscription not found: {:?}", subscription_id))
             }
             WebsocketError::ParseError(e) => {
-                serializer.serialize_str(&format!("Parse error: {:?}", e))
+                serializer.serialize_str(&format!("Failed to parse JSON: {:?}", e))
             }
+            WebsocketError::SubscribeError(extractor_id) => serializer
+                .serialize_str(&format!("Failed to subscribe to extractor: {:?}", extractor_id)),
         }
     }
 }
 
-type ExtractorSubscriberMap<M> =
-    HashMap<ExtractorIdentity, Arc<dyn ExtractorSubscriber<M> + Send + Sync>>;
+type MessageSenderMap<M> = HashMap<ExtractorIdentity, Arc<dyn MessageSender<M> + Send + Sync>>;
 
 /// Shared application data between all connections
 /// Parameters are hidden behind a Mutex to allow for sharing between threads
 pub struct AppState<M> {
     /// There is one extractor subscriber per extractor identity
-    pub subscribers: Arc<Mutex<ExtractorSubscriberMap<M>>>,
+    pub subscribers: Arc<Mutex<MessageSenderMap<M>>>,
 }
 
 impl<M> AppState<M> {
@@ -77,8 +76,14 @@ impl<M> AppState<M> {
 }
 
 /// Actor handling a single WS connection
+///
+/// This actor is responsible for:
+/// - Receiving adn forwarding messages from the extractor
+/// - Receiving and handling commands from the client
 struct WsActor<M> {
     _id: Uuid,
+    /// Client must send ping at least once per 10 seconds (CLIENT_TIMEOUT), otherwise we drop the
+    /// connection.
     heartbeat: Instant,
     app_state: web::Data<AppState<M>>,
     subscriptions: HashMap<Uuid, SpawnHandle>,
@@ -86,7 +91,7 @@ struct WsActor<M> {
 
 impl<M> WsActor<M>
 where
-    M: NormalisedMessage + Serialize + DeserializeOwned + Sync + Send + 'static,
+    M: NormalisedMessage,
 {
     fn new(app_state: web::Data<AppState<M>>) -> Self {
         Self {
@@ -105,24 +110,28 @@ where
         ws::start(WsActor::new(data), &req, stream)
     }
 
+    /// Helper method that sends heartbeat ping to client every 5 seconds (HEARTBEAT_INTERVAL)
+    /// Also this method checks heartbeats from client
     fn heartbeat(&mut self, ctx: &mut <Self as Actor>::Context) {
-        // Send a first heartbeat ping
         ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
+            // Check client heartbeats
             if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
-                dbg!("Websocket Client heartbeat failed, disconnecting!");
+                warn!("Websocket Client heartbeat failed, disconnecting!");
                 ctx.stop();
                 return
             }
+            // Send ping
             ctx.ping(b"");
         });
     }
 
+    /// Subscribe to an extractor
     fn subscribe(
         &mut self,
         ctx: &mut ws::WebsocketContext<Self>,
         extractor_id: &ExtractorIdentity,
     ) {
-        dbg!("Subscribing to extractor: {:?}", extractor_id);
+        info!("Subscribing to extractor: {:?}", extractor_id);
         {
             let extractors_guard = self
                 .app_state
@@ -130,12 +139,12 @@ where
                 .lock()
                 .unwrap();
 
-            if let Some(extractor_subscriber) = extractors_guard.get(extractor_id) {
+            if let Some(message_sender) = extractors_guard.get(extractor_id) {
                 // Generate a unique ID for this subscription
                 let subscription_id = Uuid::new_v4();
-                dbg!("Generated subscription ID: {:?}", subscription_id);
+                info!("Generated subscription ID: {:?}", subscription_id);
 
-                match extractor_subscriber.subscribe() {
+                match block_on(message_sender.subscribe()) {
                     Ok(mut rx) => {
                         let stream = async_stream::stream! {
                             while let Some(item) = rx.recv().await {
@@ -146,7 +155,7 @@ where
                         let handle = ctx.add_stream(stream);
                         self.subscriptions
                             .insert(subscription_id, handle);
-                        dbg!("Added subscription to hashmap: {:?}", subscription_id);
+                        info!("Added subscription to hashmap: {:?}", subscription_id);
 
                         let message = Response::NewSubscription { subscription_id };
                         ctx.text(serde_json::to_string(&message).unwrap());
@@ -154,7 +163,7 @@ where
                     Err(e) => {
                         error!("Failed to subscribe to extractor: {:?}", e);
 
-                        let error = WebsocketError::ExtractorNotFound(extractor_id.clone());
+                        let error = WebsocketError::SubscribeError(extractor_id.clone());
                         ctx.text(serde_json::to_string(&error).unwrap());
                     }
                 };
@@ -168,16 +177,16 @@ where
     }
 
     fn unsubscribe(&mut self, ctx: &mut ws::WebsocketContext<Self>, subscription_id: Uuid) {
-        dbg!("Unsubscribing from subscription: {:?}", subscription_id);
+        info!("Unsubscribing from subscription: {:?}", subscription_id);
 
         if let Some(handle) = self
             .subscriptions
             .remove(&subscription_id)
         {
-            dbg!("Removed subscription from hashmap: {:?}", subscription_id);
+            info!("Removed subscription from hashmap: {:?}", subscription_id);
             // Cancel the future of the subscription stream
             ctx.cancel_future(handle);
-            dbg!("Cancelled subscription future: {:?}", subscription_id);
+            info!("Cancelled subscription future: {:?}", subscription_id);
 
             let message = Response::SubscriptionEnded { subscription_id };
             ctx.text(serde_json::to_string(&message).unwrap());
@@ -192,23 +201,23 @@ where
 
 impl<M> Actor for WsActor<M>
 where
-    M: NormalisedMessage + Serialize + DeserializeOwned + Sync + Send + 'static,
+    M: NormalisedMessage,
 {
     type Context = ws::WebsocketContext<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        dbg!("Websocket connection established");
+        info!("Websocket connection established");
 
         // Start the heartbeat
         self.heartbeat(ctx);
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
-        dbg!("Websocket connection closed");
+        info!("Websocket connection closed");
 
         // Close all remaining subscriptions
         for (subscription_id, handle) in self.subscriptions.drain() {
-            dbg!("Closing subscription: {:?}", subscription_id);
+            info!("Closing subscription: {:?}", subscription_id);
             ctx.cancel_future(handle);
         }
     }
@@ -230,13 +239,13 @@ pub enum Response {
 
 impl<M> StreamHandler<Result<Arc<M>, ws::ProtocolError>> for WsActor<M>
 where
-    M: NormalisedMessage + Serialize + DeserializeOwned + Sync + Send + 'static,
+    M: NormalisedMessage,
 {
     fn handle(&mut self, msg: Result<Arc<M>, ws::ProtocolError>, ctx: &mut Self::Context) {
-        dbg!("Message received from extractor");
+        info!("Message received from extractor");
         match msg {
             Ok(message) => {
-                dbg!("Forwarding message to client");
+                info!("Forwarding message to client");
                 ctx.text(serde_json::to_string(&message).unwrap());
             }
             Err(e) => {
@@ -249,13 +258,13 @@ where
 /// Handle incoming messages from the WS connection
 impl<M> StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsActor<M>
 where
-    M: NormalisedMessage + Serialize + DeserializeOwned + Sync + Send + 'static,
+    M: NormalisedMessage,
 {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        dbg!("Websocket message received.");
+        info!("Websocket message received.");
         match msg {
             Ok(ws::Message::Ping(msg)) => {
-                dbg!("Websocket ping message received");
+                info!("Websocket ping message received");
                 self.heartbeat = Instant::now();
                 ctx.pong(&msg);
             }
@@ -263,7 +272,7 @@ where
                 self.heartbeat = Instant::now();
             }
             Ok(ws::Message::Text(text)) => {
-                dbg!("Websocket text message received: {:?}", text.clone());
+                info!("Websocket text message received: {:?}", &text);
 
                 // Try to deserialize the message to a Message enum
                 match serde_json::from_str::<Command>(&text) {
@@ -271,11 +280,11 @@ where
                         // Handle the message based on its variant
                         match message {
                             Command::Subscribe { extractor } => {
-                                dbg!("Subscribing to extractor: {:?}", extractor.clone());
+                                info!("Subscribing to extractor: {:?}", &extractor);
                                 self.subscribe(ctx, &extractor);
                             }
                             Command::Unsubscribe { subscription_id } => {
-                                dbg!("Unsubscribing from subscription: {:?}", subscription_id);
+                                info!("Unsubscribing from subscription: {:?}", subscription_id);
                                 self.unsubscribe(ctx, subscription_id);
                             }
                         }
@@ -289,11 +298,11 @@ where
                 }
             }
             Ok(ws::Message::Binary(bin)) => {
-                dbg!("Websocket binary message received: {:?}", bin.clone());
+                info!("Websocket binary message received: {:?}", &bin);
                 ctx.binary(bin)
             }
             Ok(ws::Message::Close(reason)) => {
-                dbg!("Websocket close message received: {:?}", reason.clone());
+                info!("Websocket close message received: {:?}", &reason);
                 ctx.close(reason);
                 ctx.stop()
             }
@@ -316,6 +325,7 @@ mod tests {
     use actix_rt::time::timeout;
     use actix_test::{start, start_with, TestServerConfig};
     use actix_web::App;
+    use async_trait::async_trait;
     use futures03::SinkExt;
     use tokio::{
         net::TcpStream,
@@ -347,26 +357,28 @@ mod tests {
         }
     }
 
-    pub struct MyExtractorSubscriber {
+    pub struct MyMessageSender {
         extractor_id: ExtractorIdentity,
     }
 
-    impl MyExtractorSubscriber {
+    impl MyMessageSender {
         pub fn new(extractor_id: ExtractorIdentity) -> Self {
             Self { extractor_id }
         }
     }
 
-    impl ExtractorSubscriber<DummyMessage> for MyExtractorSubscriber {
-        fn subscribe(
+    #[async_trait]
+    impl MessageSender<DummyMessage> for MyMessageSender {
+        async fn subscribe(
             &self,
         ) -> Result<Receiver<Arc<DummyMessage>>, SendError<ControlMessage<DummyMessage>>> {
             let (tx, rx) = mpsc::channel(1);
             let extractor_id = self.extractor_id.clone();
 
+            // Spawn a task that sends a DummyMessage every 100ms
             tokio::spawn(async move {
                 loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs_f32(0.1)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     dbg!("Sending DummyMessage");
                     let dummy_message = DummyMessage::new(extractor_id.clone());
                     if tx
@@ -399,7 +411,7 @@ mod tests {
             .url("/ws/")
             .to_string()
             .replacen("http://", "ws://", 1);
-        dbg!("Connecting to test server at {}", url.clone());
+        dbg!("Connecting to test server at {}", &url);
 
         // Connect to the server
         let (mut connection, _response) = tokio_tungstenite::connect_async(url)
@@ -531,13 +543,13 @@ mod tests {
 
         let app_state = web::Data::new(AppState::<DummyMessage>::new());
 
-        let extractor_subscriber = Arc::new(MyExtractorSubscriber::new(extractor_id.clone()));
-        let extractor_subscriber2 = Arc::new(MyExtractorSubscriber::new(extractor_id2.clone()));
+        let message_sender = Arc::new(MyMessageSender::new(extractor_id.clone()));
+        let message_sender2 = Arc::new(MyMessageSender::new(extractor_id2.clone()));
 
         {
             let mut subscribers = app_state.subscribers.lock().unwrap();
-            subscribers.insert(extractor_id.clone(), extractor_subscriber);
-            subscribers.insert(extractor_id2.clone(), extractor_subscriber2);
+            subscribers.insert(extractor_id.clone(), message_sender);
+            subscribers.insert(extractor_id2.clone(), message_sender2);
         }
 
         // Setup WebSocket server and client, similar to existing test
