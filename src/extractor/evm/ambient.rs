@@ -279,7 +279,7 @@ where
             .await?;
 
         self.update_cursor(inp.cursor).await;
-        Ok(Some(msg.merge_updates()?))
+        Ok(Some(msg.aggregate_updates()?))
     }
 
     async fn handle_revert(
