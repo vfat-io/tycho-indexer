@@ -1,3 +1,7 @@
+use serde::{
+    de::{self, DeserializeOwned},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -11,6 +15,25 @@ pub enum Chain {
     Ethereum,
     Starknet,
     ZkSync,
+}
+
+impl Serialize for Chain {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for Chain {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Chain::try_from(s).map_err(de::Error::custom)
+    }
 }
 
 impl TryFrom<String> for Chain {
@@ -55,9 +78,22 @@ pub struct ProtocolType {
     implementation_type: ImplementationType,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExtractorIdentity {
     pub chain: Chain,
     pub name: String,
+}
+
+impl ExtractorIdentity {
+    pub fn new(chain: Chain, name: &str) -> Self {
+        Self { chain, name: name.to_owned() }
+    }
+}
+
+impl std::fmt::Display for ExtractorIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.chain.to_string(), self.name)
+    }
 }
 
 #[derive(Debug)]
@@ -68,7 +104,7 @@ pub struct ExtractionState {
     pub cursor: Vec<u8>,
 }
 
-pub trait NormalisedMessage {
+pub trait NormalisedMessage: Serialize + DeserializeOwned + Send + Sync + Clone + 'static {
     fn source(&self) -> ExtractorIdentity;
 }
 

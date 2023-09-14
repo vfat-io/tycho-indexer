@@ -1,4 +1,5 @@
 use anyhow::{format_err, Context};
+use async_trait::async_trait;
 use prost::Message;
 use std::{collections::HashMap, env, error::Error, sync::Arc};
 use tokio::{
@@ -23,6 +24,17 @@ pub enum ControlMessage<M> {
     Subscribe(Sender<Arc<M>>),
 }
 
+/// A trait for a message sender that can be used to subscribe to messages
+///
+/// Extracted out of the [ExtractorHandle] to allow for easier testing
+#[async_trait]
+pub trait MessageSender<M>: Send + Sync
+where
+    M: NormalisedMessage + Sync + Send + 'static,
+{
+    async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>>;
+}
+
 pub struct ExtractorHandle<M> {
     handle: JoinHandle<()>,
     control_tx: Sender<ControlMessage<M>>,
@@ -32,20 +44,31 @@ impl<M> ExtractorHandle<M>
 where
     M: NormalisedMessage + Sync + Send + 'static,
 {
-    async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
-        let (tx, rx) = mpsc::channel(1);
-        self.control_tx
-            .send(ControlMessage::Subscribe(tx))
-            .await?;
-        Ok(rx)
+    fn new(handle: JoinHandle<()>, control_tx: Sender<ControlMessage<M>>) -> Self {
+        Self { handle, control_tx }
     }
 
-    async fn stop(self) -> Result<(), Box<dyn Error>> {
+    pub async fn stop(self) -> Result<(), Box<dyn Error>> {
         self.control_tx
             .send(ControlMessage::Stop)
             .await?;
         self.handle.await?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl<M> MessageSender<M> for ExtractorHandle<M>
+where
+    M: NormalisedMessage + Sync + Send + 'static,
+{
+    async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
+        let (tx, rx) = mpsc::channel(1);
+        self.control_tx
+            .send(ControlMessage::Subscribe(tx))
+            .await?;
+
+        Ok(rx)
     }
 }
 
@@ -192,6 +215,6 @@ where
             control_rx: ctrl_rx,
         };
 
-        Ok(ExtractorHandle { handle: runner.run(), control_tx: ctrl_tx })
+        Ok(ExtractorHandle::new(runner.run(), ctrl_tx))
     }
 }
