@@ -16,7 +16,7 @@ use thiserror::Error;
 use tracing::error;
 
 struct RequestHandler {
-    db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account>,
+    db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>,
     db_connection: AsyncPgConnection,
 }
 
@@ -35,7 +35,7 @@ impl RequestHandler {
             for contract_id in contract_ids {
                 match self
                     .db_gw
-                    .get_contract(contract_id, &Some(&version), &mut self.db_connection)
+                    .get_contract(contract_id, &Some(&version), false, &mut self.db_connection)
                     .await
                 {
                     Ok(contract_state) => accounts.push(contract_state),
@@ -287,11 +287,13 @@ mod tests {
             .unwrap();
         let acc_address = setup_account(&mut conn).await;
 
-        let db_gtw =
-            PostgresGateway::<evm::Block, evm::Transaction, evm::Account>::from_connection(
-                &mut conn,
-            )
-            .await;
+        let db_gtw = PostgresGateway::<
+            evm::Block,
+            evm::Transaction,
+            evm::Account,
+            evm::AccountUpdate,
+        >::from_connection(&mut conn)
+        .await;
         let mut req_handler = RequestHandler { db_gw: db_gtw, db_connection: conn };
 
         let code = hex::decode("1234").unwrap();

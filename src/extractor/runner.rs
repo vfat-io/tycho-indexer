@@ -7,7 +7,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::StreamExt;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use super::Extractor;
 use crate::{
@@ -55,6 +55,10 @@ where
         self.handle.await?;
         Ok(())
     }
+
+    pub async fn wait(self) {
+        self.handle.await.unwrap();
+    }
 }
 
 #[async_trait]
@@ -81,7 +85,7 @@ pub struct ExtractorRunner<G, M> {
 
 impl<G, M> ExtractorRunner<G, M>
 where
-    M: NormalisedMessage + Sync + Send + 'static,
+    M: NormalisedMessage + std::fmt::Debug + Sync + Send + 'static,
     G: Sync + Send + 'static,
 {
     pub fn run(mut self) -> JoinHandle<()> {
@@ -106,27 +110,35 @@ where
                                 break;
                             }
                             Some(Ok(BlockResponse::New(data))) => {
-                                if let Ok(msg) = self.extractor.handle_tick_scoped_data(data).await {
-                                    if let Some(msg) = msg {
-                                        Self::propagate_msg(&self.subscriptions, msg).await
-                                    }
-                                } else {
-                                    error!("Error while processing tick!");
-                                    break;
+                                match self.extractor.handle_tick_scoped_data(data).await {
+                                    Ok(msg) => {
+                                        if let Some(msg) = msg {
+                                            debug!("Propagating message: {:?}", msg);
+                                            Self::propagate_msg(&self.subscriptions, msg).await
+                                        }
+                                    },
+                                    Err(err) => {
+                                        error!("Error while processing tick: {err}!");
+                                        break;
+                                    },
                                 }
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
-                                if let Ok(msg) = self.extractor.handle_revert(undo_signal).await {
-                                    if let Some(msg) = msg {
-                                        Self::propagate_msg(&self.subscriptions, msg).await
+                                info!("Revert detected {:?}", undo_signal);
+                                match self.extractor.handle_revert(undo_signal).await {
+                                    Ok(msg) => {
+                                        if let Some(msg) = msg {
+                                            Self::propagate_msg(&self.subscriptions, msg).await
+                                        }
+                                    },
+                                    Err(err) => {
+                                        error!("Error while processing revert!: {}", err);
+                                        break;
                                     }
-                                } else {
-                                    error!("Error while processing revert!");
-                                    break;
                                 }
                             }
                             Some(Err(err)) => {
-                                error!("Stream terminated with error {:?}", err);
+                                error!("Stream terminated with error {:#?}", err);
                                 break;
                             }
                         };
@@ -146,18 +158,19 @@ where
     }
 }
 
-struct ExtractorRunnerBuilder<G, M> {
+pub struct ExtractorRunnerBuilder<G, M> {
     spkg_file: String,
     endpoint_url: String,
     module_name: String,
     start_block: i64,
+    end_block: i64,
     token: String,
     extractor: Arc<dyn Extractor<G, M>>,
 }
 
 impl<G, M> ExtractorRunnerBuilder<G, M>
 where
-    M: NormalisedMessage + Sync + Send + 'static,
+    M: NormalisedMessage + std::fmt::Debug + Sync + Send + 'static,
     G: Sync + Send + 'static,
 {
     pub fn new(spkg: &str, extractor: Arc<dyn Extractor<G, M>>) -> Self {
@@ -166,6 +179,7 @@ where
             endpoint_url: "https://mainnet.eth.streamingfast.io:443".to_owned(),
             module_name: "map_changes".to_owned(),
             start_block: 0,
+            end_block: 0,
             token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
             extractor,
         }
@@ -183,6 +197,11 @@ where
 
     pub fn start_block(mut self, val: i64) -> Self {
         self.start_block = val;
+        self
+    }
+
+    pub fn end_block(mut self, val: i64) -> Self {
+        self.end_block = val;
         self
     }
 
@@ -204,7 +223,7 @@ where
             spkg.modules.clone(),
             self.module_name,
             self.start_block,
-            0,
+            self.end_block as u64,
         );
 
         let (ctrl_tx, ctrl_rx) = mpsc::channel(1);

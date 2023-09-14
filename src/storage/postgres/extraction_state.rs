@@ -1,4 +1,7 @@
-use crate::storage::{ExtractionState, ExtractionStateGateway, StorableBlock, StorableTransaction};
+use crate::storage::{
+    ContractDelta, ExtractionState, ExtractionStateGateway, StorableBlock, StorableContract,
+    StorableTransaction,
+};
 
 use super::{orm, schema, Chain, PostgresGateway, StorageError};
 use async_trait::async_trait;
@@ -6,11 +9,12 @@ use diesel::ExpressionMethods;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 #[async_trait]
-impl<B, TX, A> ExtractionStateGateway for PostgresGateway<B, TX, A>
+impl<B, TX, A, D> ExtractionStateGateway for PostgresGateway<B, TX, A, D>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    A: Send + Sync + 'static,
+    D: ContractDelta,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
 {
     type DB = AsyncPgConnection;
 
@@ -137,8 +141,8 @@ mod test {
 
     async fn get_dgw(
         conn: &mut AsyncPgConnection,
-    ) -> PostgresGateway<evm::Block, evm::Transaction, ()> {
-        PostgresGateway::<evm::Block, evm::Transaction, ()>::from_connection(conn).await
+    ) -> PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate> {
+        PostgresGateway::<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>::from_connection(conn).await
     }
 
     #[tokio::test]

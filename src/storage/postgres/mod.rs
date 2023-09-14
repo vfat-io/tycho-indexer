@@ -139,10 +139,15 @@ pub mod schema;
 use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, sync::Arc};
 
 use diesel::prelude::*;
-#[allow(unused_imports)] // RunQueryDsl is wrongly marked as unused
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{
+    pooled_connection::{bb8::Pool, AsyncDieselConnectionManager},
+    AsyncPgConnection, RunQueryDsl,
+};
+use tracing::info;
 
-use super::StorageError;
+use super::{
+    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableTransaction, StorageError,
+};
 use crate::models::Chain;
 
 pub struct EnumTableCache<E> {
@@ -158,6 +163,23 @@ where
     E: Eq + Hash + Copy + TryFrom<String> + std::fmt::Debug,
     <E as TryFrom<String>>::Error: std::fmt::Debug,
 {
+    pub async fn from_pool(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
+
+        let results: Vec<(i64, String)> = async {
+            use schema::chain::dsl::*;
+            chain
+                .select((id, name))
+                .load(&mut conn)
+                .await
+                .expect("Failed to load chain ids!")
+        }
+        .await;
+        Ok(Self::from_tuples(&results))
+    }
     /// Creates a new cache from a slice of tuples.
     ///
     /// # Arguments
@@ -246,20 +268,28 @@ impl StorageError {
     }
 }
 
-pub struct PostgresGateway<B, TX, A> {
+pub struct PostgresGateway<B, TX, A, D> {
     chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
     _phantom_acc: PhantomData<A>,
+    _phantom_delta: PhantomData<D>,
 }
 
-impl<B, TX, A> PostgresGateway<B, TX, A> {
-    pub fn new(cache: Arc<ChainEnumCache>) -> Self {
+impl<B, TX, A, D> PostgresGateway<B, TX, A, D>
+where
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
+{
+    pub fn with_cache(cache: Arc<ChainEnumCache>) -> Self {
         Self {
             chain_id_cache: cache,
             _phantom_block: PhantomData,
             _phantom_tx: PhantomData,
             _phantom_acc: PhantomData,
+            _phantom_delta: PhantomData,
         }
     }
 
@@ -276,7 +306,7 @@ impl<B, TX, A> PostgresGateway<B, TX, A> {
         }
         .await;
         let cache = Arc::new(ChainEnumCache::from_tuples(&results));
-        Self::new(cache)
+        Self::with_cache(cache)
     }
 
     fn get_chain_id(&self, chain: Chain) -> i64 {
@@ -286,6 +316,92 @@ impl<B, TX, A> PostgresGateway<B, TX, A> {
     fn get_chain(&self, id: i64) -> Chain {
         self.chain_id_cache.get_chain(id)
     }
+
+    pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
+        let cache = EnumTableCache::<Chain>::from_pool(pool.clone()).await?;
+
+        let gw = Arc::new(PostgresGateway::<B, TX, A, D>::with_cache(Arc::new(cache)));
+
+        Ok(gw)
+    }
+}
+
+impl<B, TX, A, D> StateGateway<AsyncPgConnection> for PostgresGateway<B, TX, A, D>
+where
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
+{
+    // No methods in here - this just ties everything together
+}
+
+/// Establishes a connection to the database and creates a connection pool.
+///
+/// This function takes in the URL of the database as an argument and returns a pool
+/// of connections that the application can use to interact with the database. If there's
+/// any error during the creation of this pool, it is converted into a `StorageError` for
+/// uniform error handling across the application.
+///
+/// # Arguments
+///
+/// - `db_url`: A string slice that holds the URL of the database to connect to.
+///
+/// # Returns
+///
+/// A Result which is either:
+///
+/// - `Ok`: Contains a `Pool` of `AsyncPgConnection`s if the connection was established
+///   successfully.
+/// - `Err`: Contains a `StorageError` if there was an issue creating the connection pool.
+pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageError> {
+    let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url);
+    let pool = Pool::builder()
+        .build(config)
+        .await
+        .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
+    Ok(pool)
+}
+
+/// Ensures the `Chain` enum is present in the database, if not it inserts it.
+///
+/// This function serves as a way to ensure all chains found within the `chains`  
+/// slice are present within the database. It does this by inserting each chain into
+/// the `chain` table. If a conflict arises during this operation (indicating that
+/// the chain already exists in the database), it simply does nothing for that
+/// specific operation and moves on.
+///
+/// It uses a connection from the passed in `Pool<AsyncPgConnection>` asynchronously.
+/// In case of any error during these operations, the function will panic with an
+/// appropriate error message.
+///
+///
+/// # Arguments
+///
+/// - `chains`: A slice containing chains which need to be ensured in the database.
+/// - `pool`: An instance of `Pool` containing `AsyncPgConnection`s used to interact with the
+///   database.
+///
+/// # Panics
+///
+/// This function will panic under two circumstances:
+///
+/// - If it failed to get a connection from the provided pool.
+/// - If there was an issue ensuring the presence of chains in the database.
+pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
+    info!("Ensured chain enum presence for: {:?}", chains);
+    let mut conn = pool.get().await.expect("connection ok");
+    diesel::insert_into(schema::chain::table)
+        .values(
+            chains
+                .iter()
+                .map(|c| schema::chain::name.eq(c.to_string()))
+                .collect::<Vec<_>>(),
+        )
+        .on_conflict_do_nothing()
+        .execute(&mut conn)
+        .await
+        .expect("chains ensured");
 }
 
 #[cfg(test)]

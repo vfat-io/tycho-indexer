@@ -371,8 +371,8 @@ impl AccountBalance {
 #[derive(Insertable, Debug)]
 #[diesel(table_name=account_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewAccountBalance<'a> {
-    pub balance: &'a [u8],
+pub struct NewAccountBalance {
+    pub balance: Vec<u8>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
@@ -415,7 +415,7 @@ impl ContractCode {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewContractCode<'a> {
     pub code: &'a [u8],
-    pub hash: &'a [u8],
+    pub hash: Vec<u8>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
@@ -456,7 +456,7 @@ impl NewContract {
         modify_ts: NaiveDateTime,
     ) -> NewAccountBalance {
         NewAccountBalance {
-            balance: &self.balance,
+            balance: self.balance.clone(),
             account_id,
             modify_tx,
             valid_from: modify_ts,
@@ -471,7 +471,7 @@ impl NewContract {
     ) -> NewContractCode {
         NewContractCode {
             code: &self.code,
-            hash: &self.code_hash,
+            hash: self.code_hash.clone(),
             account_id,
             modify_tx,
             valid_from: modify_ts,

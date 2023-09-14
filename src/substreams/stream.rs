@@ -67,7 +67,7 @@ fn stream_blocks(
 
     try_stream! {
         'retry_loop: loop {
-            warn!("Blockstreams disconnected, connecting (endpoint {}, start block {}, cursor {})",
+            info!("Blockstreams disconnected, connecting (endpoint {}, start block {}, cursor {})",
                 &endpoint,
                 start_block_num,
                 &latest_cursor
@@ -124,6 +124,7 @@ fn stream_blocks(
 
                                 // If we reach this point, we must wait a bit before retrying
                                 if let Some(duration) = backoff.next() {
+                                    info!("Will try to reconnect after {:?}", duration);
                                     sleep(duration).await
                                 } else {
                                     return Err(anyhow!("Backoff requested to stop retrying, quitting"))?;

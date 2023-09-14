@@ -49,6 +49,7 @@ actix = "0.13.1"
 actix-web = "4.4.0"
 actix-web-actors = "4.2.0"
 tracing-actix-web = "0.7.6"
+hex-literal = "0.4.1"
 uuid = { version = "1.4.1", features = [
     "serde",
     "v4",
