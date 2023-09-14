@@ -19,12 +19,12 @@ use serde::{Deserialize, Serialize};
 
 use super::ExtractionError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SwapPool {}
 
 pub struct ERC20Token {}
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Deserialize, Serialize)]
 pub struct Block {
     pub number: u64,
     pub hash: H256,
@@ -150,7 +150,7 @@ impl AccountUpdate {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BlockAccountChanges {
     extractor: String,
     chain: Chain,
