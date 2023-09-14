@@ -10,6 +10,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
 };
+use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::pb::tycho::evm::v1 as substreams;
 use chrono::NaiveDateTime;
@@ -237,8 +238,9 @@ impl Block {
         Ok(Self {
             chain,
             number: msg.number,
-            hash: parse_32bytes(&msg.hash)?,
-            parent_hash: parse_32bytes(&msg.parent_hash)?,
+            hash: pad_and_parse_32bytes(&msg.hash).map_err(ExtractionError::DecodeError)?,
+            parent_hash: pad_and_parse_32bytes(&msg.parent_hash)
+                .map_err(ExtractionError::DecodeError)?,
             ts: NaiveDateTime::from_timestamp_opt(msg.ts as i64, 0).ok_or_else(|| {
                 ExtractionError::DecodeError(format!(
                     "Failed to convert timestamp {} to datetime!",
@@ -249,48 +251,20 @@ impl Block {
     }
 }
 
-fn parse_32bytes<T>(v: &[u8]) -> Result<T, ExtractionError>
-where
-    T: From<[u8; 32]>,
-{
-    if v.len() > 32 {
-        return Err(ExtractionError::DecodeError(format!(
-            "Byte slice too long: Expected 32, got {}",
-            v.len()
-        )))
-    }
-    let mut data: [u8; 32] = [0; 32];
-    let start_index = 32 - v.len();
-    data[start_index..].copy_from_slice(v);
-
-    Ok(T::from(data))
-}
-
-fn parse_h160(v: &[u8]) -> Result<H160, ExtractionError> {
-    if v.len() > 20 {
-        return Err(ExtractionError::DecodeError(format!(
-            "H160: Byte slice too long: Expected 20, got {}",
-            v.len()
-        )))
-    }
-
-    let mut data: [u8; 20] = [0; 20];
-    let start_index = 20 - v.len();
-    data[start_index..].copy_from_slice(v);
-
-    Ok(H160::from(data))
-}
-
 impl Transaction {
     pub fn try_from_message(
         msg: substreams::Transaction,
         block_hash: &H256,
     ) -> Result<Self, ExtractionError> {
-        let to = if !msg.to.is_empty() { Some(parse_h160(&msg.to)?) } else { None };
+        let to = if !msg.to.is_empty() {
+            Some(pad_and_parse_h160(&msg.to).map_err(ExtractionError::DecodeError)?)
+        } else {
+            None
+        };
         Ok(Self {
-            hash: parse_32bytes(&msg.hash)?,
+            hash: pad_and_parse_32bytes(&msg.hash).map_err(ExtractionError::DecodeError)?,
             block_hash: *block_hash,
-            from: parse_h160(&msg.from)?,
+            from: pad_and_parse_h160(&msg.from).map_err(ExtractionError::DecodeError)?,
             to,
             index: msg.index,
         })
@@ -304,15 +278,22 @@ impl AccountUpdateWithTx {
         chain: Chain,
     ) -> Result<Self, ExtractionError> {
         let update = AccountUpdate {
-            address: parse_h160(&msg.address)?,
+            address: pad_and_parse_h160(&msg.address).map_err(ExtractionError::DecodeError)?,
             chain,
             slots: msg
                 .slots
                 .into_iter()
-                .map(|cs| Ok((parse_32bytes::<U256>(&cs.slot)?, parse_32bytes::<U256>(&cs.value)?)))
+                .map(|cs| {
+                    Ok((
+                        pad_and_parse_32bytes::<U256>(&cs.slot)
+                            .map_err(ExtractionError::DecodeError)?,
+                        pad_and_parse_32bytes::<U256>(&cs.value)
+                            .map_err(ExtractionError::DecodeError)?,
+                    ))
+                })
                 .collect::<Result<HashMap<_, _>, ExtractionError>>()?,
             balance: if !msg.balance.is_empty() {
-                Some(parse_32bytes(&msg.balance)?)
+                Some(pad_and_parse_32bytes(&msg.balance).map_err(ExtractionError::DecodeError)?)
             } else {
                 None
             },
