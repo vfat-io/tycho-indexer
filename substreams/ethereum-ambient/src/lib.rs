@@ -45,7 +45,16 @@ impl From<InterimContractChange> for tycho::ContractChange {
         }
     }
 }
-
+/// Extracts all contract changes relevant to vm simulations
+///
+/// This implementation has currently two major limitations:
+/// 1. It is hardwired to only care about changes to the ambient main contract, this is ok for this
+///    particular use case but for a more general prupose implementation this is not ideal
+/// 2. Changes are processed separately, this means that if there are any side effects between each
+///    other (e.g. if account is deleted and then created again in ethereum all the storage is set
+///    to 0. So there is a side effect between account creation and contract storage.) these might
+///    not be properly accounted for. Most of the time this should not be a major issue but may lead
+///    to wrong results so consume this implementation with care.
 #[substreams::handlers::map]
 fn map_changes(
     block: eth::v2::Block,

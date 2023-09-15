@@ -24,8 +24,6 @@ use crate::{
 };
 
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
-const DEPLOY_TX: [u8; 32] =
-    hex_literal::hex!("11f2acc5882e7a6903bcbb39d1af7cd6cad99afd7e421197f48a537ae73a7f3a");
 
 struct Inner {
     cursor: Vec<u8>,
@@ -114,7 +112,7 @@ impl AmbientPgGateway {
             self.state_gateway
                 .upsert_tx(&update.tx, conn)
                 .await?;
-            if update.tx.hash == H256(DEPLOY_TX) {
+            if update.is_creation() {
                 let new: evm::Account = update.into();
                 info!("New contract found at {}: 0x{:x}", &changes.block.number, &new.address);
                 self.state_gateway
@@ -129,7 +127,7 @@ impl AmbientPgGateway {
                 changes
                     .tx_updates
                     .iter()
-                    .filter(|&u| (u.tx.hash != H256(DEPLOY_TX)))
+                    .filter(|&u| u.is_update())
                     .map(|u| (u.tx.hash.as_bytes(), &u.update))
                     .collect::<Vec<_>>()
                     .as_slice(),
@@ -183,7 +181,7 @@ impl AmbientGateway for AmbientPgGateway {
                         .get_block(&to, conn)
                         .await?;
                     let target = BlockOrTimestamp::Block(to);
-                    let address = H160::from(AMBIENT_CONTRACT);
+                    let address = H160(AMBIENT_CONTRACT);
                     let account_updates =
                         self.state_gateway
                             .get_account_delta(self.chain, None, &target, conn)
