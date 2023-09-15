@@ -136,7 +136,7 @@ pub mod extraction_state;
 pub mod orm;
 pub mod schema;
 
-use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, sync::Arc};
+use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, str::FromStr, sync::Arc};
 
 use diesel::prelude::*;
 use diesel_async::{
@@ -158,10 +158,10 @@ pub struct EnumTableCache<E> {
 /// Provides caching for enum and its database ID relationships.
 ///
 /// Uses a double sided hash map to provide quick lookups in both directions.
-impl<E> EnumTableCache<E>
+impl<'a, E> EnumTableCache<E>
 where
-    E: Eq + Hash + Copy + TryFrom<String> + std::fmt::Debug,
-    <E as TryFrom<String>>::Error: std::fmt::Debug,
+    E: Eq + Hash + Copy + FromStr + std::fmt::Debug,
+    <E as FromStr>::Err: std::fmt::Debug,
 {
     pub async fn from_pool(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
         let mut conn = pool
@@ -178,22 +178,24 @@ where
                 .expect("Failed to load chain ids!")
         }
         .await;
-        Ok(Self::from_tuples(&results))
+        Ok(Self::from_tuples(results))
     }
+
     /// Creates a new cache from a slice of tuples.
     ///
     /// # Arguments
     ///
     /// * `entries` - A slice of tuples ideally obtained from a database query.
-    pub fn from_tuples(entries: &[(i64, String)]) -> Self {
+    pub fn from_tuples(entries: Vec<(i64, String)>) -> Self {
         let mut cache = Self { map_id: HashMap::new(), map_enum: HashMap::new() };
         for (id_, name_) in entries {
-            let val = E::try_from(name_.to_owned()).expect("Failed to convert name to enum value");
-            cache.map_id.insert(val, *id_);
-            cache.map_enum.insert(*id_, val);
+            let val = E::from_str(&name_).expect("valid enum value");
+            cache.map_id.insert(val, id_);
+            cache.map_enum.insert(id_, val);
         }
         cache
     }
+
     /// Fetches the associated database ID for an enum variant. Panics on cache
     /// miss.
     ///
@@ -305,7 +307,7 @@ where
                 .expect("Failed to load chain ids!")
         }
         .await;
-        let cache = Arc::new(ChainEnumCache::from_tuples(&results));
+        let cache = Arc::new(ChainEnumCache::from_tuples(results));
         Self::with_cache(cache)
     }
 
