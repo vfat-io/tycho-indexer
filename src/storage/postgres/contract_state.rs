@@ -899,8 +899,7 @@ where
                     return Err(StorageError::Unsupported(format!(
                         "Updating contracts of different chains with a single query  \
                     is not supported. Expected: {}, got: {}!",
-                        chain.to_string(),
-                        id.chain.to_string()
+                        chain, id.chain
                     )))
                 }
                 Ok(id.address)

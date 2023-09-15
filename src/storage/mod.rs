@@ -43,7 +43,7 @@ pub mod postgres;
 
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use crate::services::deserialization_helpers::{chain_from_str, hex_to_bytes};
+use crate::services::deserialization_helpers::hex_to_bytes;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use serde::Deserialize;
@@ -344,7 +344,6 @@ pub enum VersionKind {
 pub struct ContractId {
     #[serde(deserialize_with = "hex_to_bytes")]
     address: Vec<u8>,
-    #[serde(deserialize_with = "chain_from_str")]
     chain: Chain,
 }
 

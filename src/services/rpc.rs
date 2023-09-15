@@ -1,6 +1,6 @@
 //! This module contains Tycho RPC implementation
 
-use super::deserialization_helpers::{chain_from_str, hex_to_bytes};
+use super::deserialization_helpers::hex_to_bytes;
 use crate::{
     extractor::evm::{self, Account},
     models::Chain,
@@ -92,7 +92,6 @@ struct Block {
     hash: Vec<u8>,
     #[serde(rename = "parentHash", deserialize_with = "hex_to_bytes")]
     parent_hash: Vec<u8>,
-    #[serde(deserialize_with = "chain_from_str")]
     chain: Chain,
     number: i64,
 }
