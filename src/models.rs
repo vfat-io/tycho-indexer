@@ -63,6 +63,22 @@ pub struct ExtractionState {
     pub cursor: Vec<u8>,
 }
 
+impl ExtractionState {
+    pub fn new(
+        name: &str,
+        chain: Chain,
+        attributes: Option<serde_json::Value>,
+        cursor: &[u8],
+    ) -> Self {
+        ExtractionState {
+            name: name.to_owned(),
+            chain,
+            attributes: attributes.unwrap_or_default(),
+            cursor: cursor.to_vec(),
+        }
+    }
+}
+
 pub trait NormalisedMessage:
     Serialize + DeserializeOwned + std::fmt::Debug + Send + Sync + Clone + 'static
 {
