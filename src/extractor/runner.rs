@@ -1,13 +1,15 @@
-use anyhow::{format_err, Context};
+use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
+use once_cell::sync::Lazy;
 use prost::Message;
-use std::{collections::HashMap, env, error::Error, sync::Arc};
+use std::{collections::HashMap, env, error::Error, sync::Arc, time::Duration};
 use tokio::{
     sync::mpsc::{self, error::SendError, Receiver, Sender},
     task::JoinHandle,
 };
+use tokio_retry::{strategy::ExponentialBackoff, Retry};
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use super::Extractor;
 use crate::{
@@ -19,6 +21,9 @@ use crate::{
     },
 };
 
+static DEFAULT_BACKOFF: Lazy<ExponentialBackoff> =
+    Lazy::new(|| ExponentialBackoff::from_millis(500).max_delay(Duration::from_secs(45)));
+    
 pub enum ControlMessage<M> {
     Stop,
     Subscribe(Sender<Arc<M>>),
@@ -28,7 +33,7 @@ pub enum ControlMessage<M> {
 ///
 /// Extracted out of the [ExtractorHandle] to allow for easier testing
 #[async_trait]
-pub trait MessageSender<M: NormalisedMessage>: Send + Sync{
+pub trait MessageSender<M: NormalisedMessage>: Send + Sync {
     async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>>;
 }
 
@@ -92,9 +97,11 @@ where
                     Some(ctrl) = self.control_rx.recv() =>  {
                         match ctrl {
                             ControlMessage::Stop => {
+                                warn!("Stopping stream.");
                                 break;
                             },
                             ControlMessage::Subscribe(sender) => {
+                                info!("New subscriber.");
                                 let counter = self.subscriptions.len() as u64;
                                 self.subscriptions.insert(counter, sender);
                             },
@@ -103,32 +110,54 @@ where
                     val = self.substreams.next() => {
                         match val {
                             None => {
-                                info!("Stream consumed");
+                                warn!("Stream consumed.");
                                 break;
                             }
                             Some(Ok(BlockResponse::New(data))) => {
-                                match self.extractor.handle_tick_scoped_data(data).await {
-                                    Ok(msg) => {
-                                        if let Some(msg) = msg {
-                                            Self::propagate_msg(&self.subscriptions, msg).await
-                                        }
-                                    },
+                                let extractor = self.extractor.clone();
+                                let result = Retry::spawn(DEFAULT_BACKOFF.clone(), || {
+                                    let data = data.clone();
+                                    async {
+                                        extractor.handle_tick_scoped_data(data).await
+                                    }
+                                })
+                                .await;
+
+                                match result {
+                                    Ok(Some(msg)) => {
+                                        debug!("Propagating new data message.");
+                                        Self::propagate_msg(&self.subscriptions, msg).await
+                                    }
+                                    Ok(None) => {
+                                        debug!("No message to propagate.");
+                                    }
                                     Err(err) => {
-                                        error!("Error while processing tick: {err}!");
+                                        error!("Error while processing tick: {err}! Retries exhausted.");
                                         break;
-                                    },
+                                    }
                                 }
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
                                 info!("Revert detected {:?}", undo_signal);
-                                match self.extractor.handle_revert(undo_signal).await {
-                                    Ok(msg) => {
-                                        if let Some(msg) = msg {
-                                            Self::propagate_msg(&self.subscriptions, msg).await
-                                        }
-                                    },
-                                    Err(err) => {
-                                        error!("Error while processing revert!: {}", err);
+                                let extractor = self.extractor.clone();
+                                let result = Retry::spawn(DEFAULT_BACKOFF.clone(), || {
+                                    let undo_signal = undo_signal.clone();
+                                    async {
+                                        extractor.handle_revert(undo_signal).await
+                                    }
+                                })
+                                .await;
+
+                                match result {
+                                    Ok(Some(msg)) => {
+                                        debug!("Propagating undo message.");
+                                        Self::propagate_msg(&self.subscriptions, msg).await
+                                    }
+                                    Ok(None) => {
+                                        debug!("No message to propagate.");
+                                    }
+                                    Err(_) => {
+                                        error!("Error while processing revert! Retries exhausted.");
                                         break;
                                     }
                                 }
@@ -145,7 +174,7 @@ where
     }
 
     async fn propagate_msg(subscribers: &HashMap<u64, Sender<Arc<M>>>, message: M) {
-        debug!("Propagating message: {:?}", msg);
+        debug!("Propagating message: {:?}", message);
         let arced_message = Arc::new(message);
         for s in subscribers.values() {
             s.send(arced_message.clone())
