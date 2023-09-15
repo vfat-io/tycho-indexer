@@ -4,7 +4,10 @@ use once_cell::sync::Lazy;
 use prost::Message;
 use std::{collections::HashMap, env, error::Error, sync::Arc, time::Duration};
 use tokio::{
-    sync::mpsc::{self, error::SendError, Receiver, Sender},
+    sync::{
+        mpsc::{self, error::SendError, Receiver, Sender},
+        Mutex,
+    },
     task::JoinHandle,
 };
 use tokio_retry::{strategy::ExponentialBackoff, Retry};
@@ -78,10 +81,13 @@ where
     }
 }
 
+// Define the SubscriptionsMap type alias
+type SubscriptionsMap<M> = HashMap<u64, Sender<Arc<M>>>;
+
 pub struct ExtractorRunner<G, M> {
     extractor: Arc<dyn Extractor<G, M>>,
     substreams: SubstreamsStream,
-    subscriptions: HashMap<u64, Sender<Arc<M>>>,
+    subscriptions: Arc<Mutex<SubscriptionsMap<M>>>,
     control_rx: Receiver<ControlMessage<M>>,
 }
 
@@ -101,9 +107,7 @@ where
                                 break;
                             },
                             ControlMessage::Subscribe(sender) => {
-                                info!("New subscriber.");
-                                let counter = self.subscriptions.len() as u64;
-                                self.subscriptions.insert(counter, sender);
+                                self.subscribe(sender).await;
                             },
                         }
                     }
@@ -126,7 +130,7 @@ where
                                 match result {
                                     Ok(Some(msg)) => {
                                         debug!("Propagating new data message.");
-                                        Self::propagate_msg(&mut self.subscriptions, msg).await
+                                        Self::propagate_msg(&self.subscriptions, msg).await
                                     }
                                     Ok(None) => {
                                         debug!("No message to propagate.");
@@ -151,7 +155,7 @@ where
                                 match result {
                                     Ok(Some(msg)) => {
                                         debug!("Propagating undo message.");
-                                        Self::propagate_msg(&mut self.subscriptions, msg).await
+                                        Self::propagate_msg(&self.subscriptions, msg).await
                                     }
                                     Ok(None) => {
                                         debug!("No message to propagate.");
@@ -173,20 +177,34 @@ where
         })
     }
 
-    async fn propagate_msg(subscribers: &mut HashMap<u64, Sender<Arc<M>>>, message: M) {
+    async fn subscribe(&mut self, sender: Sender<Arc<M>>) {
+        info!("New subscriber.");
+        let counter = self.subscriptions.lock().await.len() as u64;
+        self.subscriptions
+            .lock()
+            .await
+            .insert(counter, sender);
+    }
+
+    async fn propagate_msg(subscribers: &Arc<Mutex<SubscriptionsMap<M>>>, message: M) {
         debug!("Propagating message: {:?}", message);
         let arced_message = Arc::new(message);
 
         let mut to_remove = Vec::new();
 
+        // Lock the subscribers HashMap for exclusive access
+        let mut subscribers = subscribers.lock().await;
+
         for (counter, sender) in subscribers.iter_mut() {
             match sender.send(arced_message.clone()).await {
                 Ok(_) => {
                     // Message sent successfully
+                    info!("Message sent to subscriber {}", counter);
                 }
                 Err(_) => {
                     // Receiver has been dropped, mark for removal
                     to_remove.push(*counter);
+                    error!("Subscriber {} has been dropped", counter);
                 }
             }
         }
@@ -270,7 +288,7 @@ where
         let runner = ExtractorRunner {
             extractor: self.extractor,
             substreams: stream,
-            subscriptions: HashMap::new(),
+            subscriptions: Arc::new(Mutex::new(HashMap::new())),
             control_rx: ctrl_rx,
         };
 
