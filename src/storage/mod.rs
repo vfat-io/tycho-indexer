@@ -127,7 +127,7 @@ pub type CodeRef<'a> = &'a [u8];
 pub type BalanceRef<'a> = &'a [u8];
 
 /// Identifies a block in storage.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockIdentifier {
     /// Identifies the block by its position on a specified chain.
     ///

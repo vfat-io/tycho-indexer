@@ -27,7 +27,7 @@ pub struct SwapPool {}
 
 pub struct ERC20Token {}
 
-#[derive(Debug, PartialEq, Copy, Clone, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Copy, Clone, Deserialize, Serialize, Default)]
 pub struct Block {
     pub number: u64,
     pub hash: H256,
@@ -199,7 +199,7 @@ impl AccountUpdate {
 /// 
 /// Hold a single update per account. This is a condensed from of
 /// [BlockStateChanges].
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct BlockAccountChanges {
     extractor: String,
     chain: Chain,
@@ -454,6 +454,85 @@ impl BlockStateChanges {
     }
 }
 
+
+
+
+#[cfg(test)]
+pub mod fixtures {
+    pub const HASH_256_0: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+    pub fn pb_block_scoped_data(msg: impl prost::Message) -> crate::pb::sf::substreams::rpc::v2::BlockScopedData {
+        use crate::pb::sf::substreams::rpc::v2::*;
+        use crate::pb::sf::substreams::v1::Clock;
+        let val = msg.encode_to_vec();
+        BlockScopedData{ 
+            output: Some(MapModuleOutput { name: "map_changes".to_owned(), map_output: Some(prost_types::Any{type_url: "tycho.evm.v1.BlockContractChanges".to_owned(), value: val}), debug_info: None }), 
+            clock: Some(Clock { id: HASH_256_0.to_owned(), number: 420, timestamp: Some(prost_types::Timestamp { seconds: 1000, nanos: 0 }) }),
+            cursor: "cursor@420".to_owned(),
+            final_block_height: 405,
+            debug_map_outputs: vec![],
+            debug_store_outputs: vec![],
+        }
+    }
+
+    pub fn pb_block_contract_changes() -> crate::pb::tycho::evm::v1::BlockContractChanges {
+        use crate::pb::tycho::evm::v1::*;
+        BlockContractChanges {
+            block: Some(Block {
+                hash: vec![0x31, 0x32, 0x33, 0x34], 
+                parent_hash: vec![0x21, 0x22, 0x23, 0x24],
+                number: 1,
+                ts: 1000,
+            }),
+        
+            changes: vec![
+                TransactionChanges {
+                    tx: Some(Transaction {
+                        hash: vec![0x11, 0x12, 0x13, 0x14],
+                        from: vec![0x41, 0x42, 0x43, 0x44],
+                        to: vec![0x51, 0x52, 0x53, 0x54],
+                        index: 2,
+                    }),
+                    contract_changes: vec![
+                        ContractChange {
+                            address: vec![0x61, 0x62, 0x63, 0x64],
+                            balance: vec![0x71, 0x72, 0x73, 0x74],
+                            code: vec![0x81, 0x82, 0x83, 0x84],
+                            slots: vec![
+                                ContractSlot {
+                                    slot: vec![0xa1, 0xa2, 0xa3, 0xa4],
+                                    value: vec![0xb1, 0xb2, 0xb3, 0xb4],
+                                },
+                                ContractSlot {
+                                    slot: vec![0xc1, 0xc2, 0xc3, 0xc4],
+                                    value: vec![0xd1, 0xd2, 0xd3, 0xd4],
+                                },
+                            ],
+                        },
+                        ContractChange {
+                            address: vec![0x61, 0x62, 0x63, 0x64],
+                            balance: vec![0xf1, 0xf2, 0xf3, 0xf4],
+                            code: vec![0x01, 0x02, 0x03, 0x04],
+                            slots: vec![
+                                ContractSlot {
+                                    slot: vec![0x91, 0x92, 0x93, 0x94],
+                                    value: vec![0xa1, 0xa2, 0xa3, 0xa4],
+                                },
+                                ContractSlot {
+                                    slot: vec![0xb1, 0xb2, 0xb3, 0xb4],
+                                    value: vec![0xc1, 0xc2, 0xc3, 0xc4],
+                                },
+                            ],
+                        },
+                    ]
+                },
+            ],
+        }
+    }
+
+}
+
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -608,61 +687,6 @@ mod test {
         assert_eq!(res, exp);
     }
 
-    fn pb_block_contract_changes() -> crate::pb::tycho::evm::v1::BlockContractChanges {
-        use crate::pb::tycho::evm::v1::*;
-        BlockContractChanges {
-            block: Some(Block {
-                hash: vec![0x31, 0x32, 0x33, 0x34], 
-                parent_hash: vec![0x21, 0x22, 0x23, 0x24],
-                number: 1,
-                ts: 1000,
-            }),
-        
-            changes: vec![
-                TransactionChanges {
-                    tx: Some(Transaction {
-                        hash: vec![0x11, 0x12, 0x13, 0x14],
-                        from: vec![0x41, 0x42, 0x43, 0x44],
-                        to: vec![0x51, 0x52, 0x53, 0x54],
-                        index: 2,
-                    }),
-                    contract_changes: vec![
-                        ContractChange {
-                            address: vec![0x61, 0x62, 0x63, 0x64],
-                            balance: vec![0x71, 0x72, 0x73, 0x74],
-                            code: vec![0x81, 0x82, 0x83, 0x84],
-                            slots: vec![
-                                ContractSlot {
-                                    slot: vec![0xa1, 0xa2, 0xa3, 0xa4],
-                                    value: vec![0xb1, 0xb2, 0xb3, 0xb4],
-                                },
-                                ContractSlot {
-                                    slot: vec![0xc1, 0xc2, 0xc3, 0xc4],
-                                    value: vec![0xd1, 0xd2, 0xd3, 0xd4],
-                                },
-                            ],
-                        },
-                        ContractChange {
-                            address: vec![0x61, 0x62, 0x63, 0x64],
-                            balance: vec![0xf1, 0xf2, 0xf3, 0xf4],
-                            code: vec![0x01, 0x02, 0x03, 0x04],
-                            slots: vec![
-                                ContractSlot {
-                                    slot: vec![0x91, 0x92, 0x93, 0x94],
-                                    value: vec![0xa1, 0xa2, 0xa3, 0xa4],
-                                },
-                                ContractSlot {
-                                    slot: vec![0xb1, 0xb2, 0xb3, 0xb4],
-                                    value: vec![0xc1, 0xc2, 0xc3, 0xc4],
-                                },
-                            ],
-                        },
-                    ]
-                },
-            ],
-        }
-    }
-
     fn block_state_changes() -> BlockStateChanges{
         let tx = Transaction {
             hash: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000011121314),
@@ -711,7 +735,7 @@ mod test {
 
     #[rstest]
     fn test_block_state_changes_parse_msg() {
-        let msg = pb_block_contract_changes();
+        let msg = fixtures::pb_block_contract_changes();
 
         let res = BlockStateChanges::try_from_message(msg, "test", Chain::Ethereum).unwrap();
 
