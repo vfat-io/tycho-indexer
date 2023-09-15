@@ -48,5 +48,9 @@ DROP FUNCTION update_modified_column;
 
 DROP FUNCTION invalidate_previous_entry_protocol_calls_contract;
 
-DROP FUNCTION invalidate_previous_entry;
+DROP FUNCTION invalidate_previous_entry_protocol_state;
+
+DROP FUNCTION invalidate_previous_entry_account_balance;
+
+DROP FUNCTION invalidate_previous_entry_contract_code;
 

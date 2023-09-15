@@ -151,10 +151,12 @@ impl Block {
             .await
     }
 
-    pub async fn by_id(id: BlockIdentifier, conn: &mut AsyncPgConnection) -> QueryResult<Block> {
+    pub async fn by_id(id: &BlockIdentifier, conn: &mut AsyncPgConnection) -> QueryResult<Block> {
         match id {
-            BlockIdentifier::Hash(hash) => Self::by_hash(&hash, conn).await,
-            BlockIdentifier::Number((chain, number)) => Self::by_number(chain, number, conn).await,
+            BlockIdentifier::Hash(hash) => Self::by_hash(hash, conn).await,
+            BlockIdentifier::Number((chain, number)) => {
+                Self::by_number(*chain, *number, conn).await
+            }
         }
     }
 }
@@ -265,7 +267,7 @@ pub struct ProtocolComponent {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(Transaction, foreign_key = creation_tx))]
 #[diesel(table_name=account)]
@@ -312,9 +314,9 @@ impl Account {
 #[derive(Insertable)]
 #[diesel(table_name=account)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewAccount {
-    pub title: String,
-    pub address: Vec<u8>,
+pub struct NewAccount<'a> {
+    pub title: &'a str,
+    pub address: &'a [u8],
     pub chain_id: i64,
     pub creation_tx: Option<i64>,
     pub created_at: Option<NaiveDateTime>,
@@ -336,7 +338,7 @@ pub struct Token {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name=account_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -344,11 +346,26 @@ pub struct AccountBalance {
     pub id: i64,
     pub balance: Vec<u8>,
     pub account_id: i64,
-    pub modify_tx: Option<i64>,
+    pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+impl AccountBalance {
+    /// retrieves all balances from a certain account
+    pub async fn all_versions(
+        address: &[u8],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
+        account_balance::table
+            .inner_join(account::table)
+            .filter(account::address.eq(address))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await
+    }
 }
 
 #[derive(Insertable, Debug)]
@@ -357,12 +374,12 @@ pub struct AccountBalance {
 pub struct NewAccountBalance {
     pub balance: Vec<u8>,
     pub account_id: i64,
-    pub modify_tx: Option<i64>,
+    pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name=contract_code)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -376,6 +393,91 @@ pub struct ContractCode {
     pub valid_to: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+impl ContractCode {
+    /// retrieves all codes from a certain account
+    pub async fn all_versions(
+        address: &[u8],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
+        contract_code::table
+            .inner_join(account::table)
+            .filter(account::address.eq(address))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await
+    }
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name=contract_code)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewContractCode<'a> {
+    pub code: &'a [u8],
+    pub hash: Vec<u8>,
+    pub account_id: i64,
+    pub modify_tx: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
+}
+
+// theoretically this struct could also simply reference the original struct.
+// Unfortunately that really doesn't play nicely with async_trait on the Gateway
+// and makes the types a lot more complicted. Once the system is up and running
+// this could be improved though.
+pub struct NewContract {
+    pub title: String,
+    pub address: Vec<u8>,
+    pub chain_id: i64,
+    pub creation_tx: Option<i64>,
+    pub created_at: Option<NaiveDateTime>,
+    pub deleted_at: Option<NaiveDateTime>,
+    pub balance: Vec<u8>,
+    pub code: Vec<u8>,
+    pub code_hash: Vec<u8>,
+}
+
+impl NewContract {
+    pub fn new_account(&self) -> NewAccount {
+        NewAccount {
+            title: &self.title,
+            address: &self.address,
+            chain_id: self.chain_id,
+            creation_tx: self.creation_tx,
+            created_at: self.created_at,
+            deleted_at: None,
+        }
+    }
+    pub fn new_balance(
+        &self,
+        account_id: i64,
+        modify_tx: i64,
+        modify_ts: NaiveDateTime,
+    ) -> NewAccountBalance {
+        NewAccountBalance {
+            balance: self.balance.clone(),
+            account_id,
+            modify_tx,
+            valid_from: modify_ts,
+            valid_to: None,
+        }
+    }
+    pub fn new_code(
+        &self,
+        account_id: i64,
+        modify_tx: i64,
+        modify_ts: NaiveDateTime,
+    ) -> NewContractCode {
+        NewContractCode {
+            code: &self.code,
+            hash: self.code_hash.clone(),
+            account_id,
+            modify_tx,
+            valid_from: modify_ts,
+            valid_to: None,
+        }
+    }
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
@@ -399,13 +501,19 @@ pub struct ContractStorage {
 #[derive(Insertable)]
 #[diesel(table_name=contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewSlot {
-    pub slot: Vec<u8>,
-    pub value: Option<Vec<u8>>,
+pub struct NewSlot<'a> {
+    pub slot: &'a Vec<u8>,
+    pub value: Option<&'a Vec<u8>>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub ordinal: i64,
     pub valid_from: NaiveDateTime,
+}
+
+pub struct Contract {
+    pub account: Account,
+    pub balance: AccountBalance,
+    pub code: ContractCode,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]

@@ -73,7 +73,20 @@ substreams pack ./substreams.yaml
 7. To test the substreams (requires the SUBSTREAMS_API_TOKEN env variable set previously), run:
 ```bash
 cd ../..
-RUST_LOG=info ./target/debug/tycho-indexer --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.2.0.spkg
+RUST_LOG=info cargo run -- --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.2.0.spkg
+```
+
+### Protobuf
+
+We use protobuf mainly to communicate with substreams. You can use the [language support extension](https://marketplace.visualstudio.com/items?itemName=pbkit.vscode-pbkit) and for formatting use the [buf extension for VS Code](https://marketplace.visualstudio.com/items?itemName=bufbuild.vscode-buf).
+
+1. To communicate with substreams, we always want to use their latest protobuf images. Usually the sf module is already committed but in case there was an update we can pull the latest version into the repo with:
+```
+buf export buf.build/streamingfast/substreams -o ./proto
+```
+2. Now that we have all our protobuf modules together we can generate the respective Rust code for them:
+```
+buf generate 
 ```
 
 ### Postgres & Diesel
@@ -107,7 +120,7 @@ diesel migration run
 cargo check --all
 cargo test --all --all-features
 cargo +nightly fmt -- --check
-cargo +nightly clippy --all --all-features -- -D warnings
+cargo +nightly clippy --all --all-features --all-targets -- -D warnings
 ```
 
 We are using the stable toolchain for building and testing, but the nightly toolchain for formatting and linting, as it allows us to use the latest features of rustfmt and clippy.

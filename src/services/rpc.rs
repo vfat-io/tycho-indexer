@@ -1,31 +1,22 @@
 //! This module contains Tycho RPC implementation
 
-use std::sync::Arc;
-
+use super::deserialization_helpers::{chain_from_str, hex_to_bytes};
 use crate::{
     extractor::evm::{self, Account},
     models::Chain,
-    rpc::deserialization_helpers::{chain_from_str, hex_to_bytes},
     storage::{
-        postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractId,
+        self, postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractId,
         ContractStateGateway,
     },
 };
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::AsyncPgConnection;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use thiserror::Error;
-use tokio::sync::Mutex;
 use tracing::error;
 
-use actix_web::{
-    web::{self, Data},
-    App, HttpResponse, HttpServer, Responder,
-};
-
-pub mod deserialization_helpers;
 struct RequestHandler {
-    db_gw: PostgresGateway<evm::Block, evm::Transaction>,
+    db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>,
     db_connection: AsyncPgConnection,
 }
 
@@ -38,12 +29,13 @@ impl RequestHandler {
         };
 
         let mut accounts: Vec<Account> = Vec::new();
+        let version = storage::Version(at, storage::VersionKind::Last);
 
         if let Some(contract_ids) = &request.contract_ids {
             for contract_id in contract_ids {
                 match self
                     .db_gw
-                    .get_contract(contract_id, &Some(&at), &mut self.db_connection)
+                    .get_contract(contract_id, &Some(&version), false, &mut self.db_connection)
                     .await
                 {
                     Ok(contract_state) => accounts.push(contract_state),
@@ -58,7 +50,6 @@ impl RequestHandler {
     }
 }
 
-#[derive(Serialize)]
 struct StateRequestResponse {
     accounts: Vec<Account>,
 }
@@ -81,20 +72,6 @@ struct StateRequestBody {
     contract_ids: Option<Vec<ContractId>>,
     #[serde(default = "Version::default")]
     version: Version,
-    #[serde(rename = "chain", default = "default_chain")]
-    chain: Chain,
-    #[serde(rename = "tvlGt", default = "default_gt_filter_value")]
-    tvl_gt: i32,
-    #[serde(rename = "intertiaMinGt", default = "default_gt_filter_value")]
-    intertia_min_gt: i32,
-}
-
-fn default_gt_filter_value() -> i32 {
-    1
-}
-
-fn default_chain() -> Chain {
-    Chain::Ethereum
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -122,34 +99,13 @@ struct Block {
 
 fn parse_state_request(json_str: &str) -> Result<StateRequestBody, RpcError> {
     let request_body: StateRequestBody = serde_json::from_str(json_str)?;
+
     Ok(request_body)
-}
-
-async fn handle_post(
-    handler: web::Data<Arc<Mutex<RequestHandler>>>,
-    contract_state: web::Json<StateRequestBody>,
-) -> impl Responder {
-    let mut handler = handler.lock().await;
-    let response = handler.get_state(&contract_state).await;
-
-    HttpResponse::Ok().json(response)
-}
-
-#[actix_web::main]
-async fn run(req_handler: web::Data<Arc<Mutex<RequestHandler>>>) -> std::io::Result<()> {
-    HttpServer::new(move || {
-        App::new()
-            .app_data(req_handler.clone())
-            .route("/contract_state", web::post().to(handle_post))
-    })
-    .bind("127.0.0.1:8000")?
-    .run()
-    .await
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{extractor::evm::Transaction, storage::postgres::db_fixtures};
+    use crate::storage::postgres::db_fixtures;
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
     use std::{collections::HashMap, str::FromStr};
@@ -203,9 +159,6 @@ mod tests {
                     number: block_number,
                 }),
             },
-            chain: Chain::Ethereum,
-            tvl_gt: 1,
-            intertia_min_gt: 1,
         };
 
         assert_eq!(result, expected);
@@ -250,9 +203,6 @@ mod tests {
                     number: block_number,
                 }),
             },
-            chain: Chain::Ethereum,
-            tvl_gt: 1,
-            intertia_min_gt: 1,
         };
 
         assert_eq!(result, expected);
@@ -278,9 +228,6 @@ mod tests {
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
             version: Version { timestamp: Utc::now().naive_utc(), block: None },
-            chain: Chain::Ethereum,
-            tvl_gt: 1,
-            intertia_min_gt: 1,
         };
 
         let time_difference = expected
@@ -303,7 +250,7 @@ mod tests {
         let acc_address = "6B175474E89094C44Da98b954EedeAC495271d0F";
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
-        db_fixtures::insert_txns(
+        let tid = db_fixtures::insert_txns(
             conn,
             &[
                 (
@@ -319,59 +266,35 @@ mod tests {
             ],
         )
         .await;
-
-        let addr = hex::encode(H256::random().as_bytes());
-        let tx_data = [(blk[1], 1234, addr.as_str())];
-        let tid = db_fixtures::insert_txns(conn, &tx_data).await;
-
         // Insert account and balances
         let acc_id =
             db_fixtures::insert_account(conn, acc_address, "account0", chain_id, None).await;
 
-        db_fixtures::insert_account_balances(conn, tid[0], acc_id).await;
+        db_fixtures::insert_account_balance(conn, 100, tid[0], acc_id).await;
         let contract_code = hex::decode("1234").unwrap();
         db_fixtures::insert_contract_code(conn, acc_id, tid[0], contract_code).await;
         acc_address.to_string()
     }
 
-    async fn get_db_connection() -> AsyncPgConnection {
+    #[tokio::test]
+    async fn test_get_state() {
         let db_url = std::env::var("DATABASE_URL").unwrap();
-
         let mut conn = AsyncPgConnection::establish(&db_url)
             .await
             .unwrap();
         conn.begin_test_transaction()
             .await
             .unwrap();
-
-        return conn
-    }
-
-    async fn get_db_gateway(
-        conn: &mut AsyncPgConnection,
-    ) -> PostgresGateway<evm::Block, Transaction> {
-        let db_gtw: PostgresGateway<evm::Block, Transaction> =
-            PostgresGateway::<evm::Block, Transaction>::from_connection(conn).await;
-        return db_gtw
-    }
-
-    async fn get_request_handler(
-        conn: AsyncPgConnection,
-        db_gw: PostgresGateway<evm::Block, Transaction>,
-    ) -> RequestHandler {
-        let req_handler = RequestHandler { db_gw, db_connection: conn };
-
-        return req_handler
-    }
-
-    #[tokio::test]
-    async fn test_get_state() {
-        let mut conn = get_db_connection().await;
         let acc_address = setup_account(&mut conn).await;
 
-        let db_gw = get_db_gateway(&mut conn).await;
-
-        let mut req_handler = get_request_handler(conn, db_gw).await;
+        let db_gtw = PostgresGateway::<
+            evm::Block,
+            evm::Transaction,
+            evm::Account,
+            evm::AccountUpdate,
+        >::from_connection(&mut conn)
+        .await;
+        let mut req_handler = RequestHandler { db_gw: db_gtw, db_connection: conn };
 
         let code = hex::decode("1234").unwrap();
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
@@ -383,7 +306,12 @@ mod tests {
             U256::from(100),
             code,
             code_hash,
-            H256::zero(),
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+                .parse()
+                .unwrap(),
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+                .parse()
+                .unwrap(),
             None,
         );
 
@@ -393,61 +321,10 @@ mod tests {
                 hex::decode(acc_address).unwrap(),
             )]),
             version: Version { timestamp: Utc::now().naive_utc(), block: None },
-            chain: Chain::Ethereum,
-            tvl_gt: 1,
-            intertia_min_gt: 1,
         };
 
         let state = req_handler.get_state(&request).await;
 
         assert_eq!(state.accounts[0], expected);
-    }
-
-    #[actix_rt::test]
-    async fn test_handle_post() {
-        let mut conn = get_db_connection().await;
-        let db_gw = get_db_gateway(&mut conn).await;
-        let mut req_handler = get_request_handler(conn, db_gw).await;
-        let shared_handler = Arc::new(Mutex::new(req_handler));
-
-        let state_request_body = r#"
-        {
-            "contractIds": [
-                {
-                    "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
-                    "chain": "ethereum"
-                }
-            ],
-            "version": {
-                "timestamp": "2069-01-01T04:20:00",
-                "block": {
-                    "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
-                    "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
-                    "number": 213,
-                    "chain": "ethereum"
-                }
-            }
-        }
-        "#;
-
-        let state_request_body: serde_json::Value =
-            serde_json::from_str(state_request_body).unwrap();
-
-        let mut app = test::init_service(
-            App::new()
-                .app_data(shared_handler.clone())
-                .route("/contract_state", web::post().to(handle_post)),
-        )
-        .await;
-
-        let req = test::TestRequest::post()
-            .uri("/contract_state")
-            .set_json(&state_request_body) // passing json payload
-            .to_request();
-
-        let resp = test::call_service(&mut app, req).await;
-
-        assert_eq!(resp.status(), http::StatusCode::OK);
-        // You can add further assertions based on expected response body
     }
 }

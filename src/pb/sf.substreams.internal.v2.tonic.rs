@@ -1,13 +1,13 @@
 // @generated
 /// Generated client implementations.
-pub mod stream_client {
+pub mod substreams_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::{http::Uri, *};
     #[derive(Debug, Clone)]
-    pub struct StreamClient<T> {
+    pub struct SubstreamsClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl StreamClient<tonic::transport::Channel> {
+    impl SubstreamsClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -20,7 +20,7 @@ pub mod stream_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> StreamClient<T>
+    impl<T> SubstreamsClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::BoxBody>,
         T::Error: Into<StdError>,
@@ -38,7 +38,7 @@ pub mod stream_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> StreamClient<InterceptedService<T, F>>
+        ) -> SubstreamsClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -51,7 +51,7 @@ pub mod stream_client {
             <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
                 Into<StdError> + Send + Sync,
         {
-            StreamClient::new(InterceptedService::new(inner, interceptor))
+            SubstreamsClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -68,11 +68,13 @@ pub mod stream_client {
             self.inner = self.inner.accept_compressed(encoding);
             self
         }
-        pub async fn blocks(
+        pub async fn process_range(
             &mut self,
-            request: impl tonic::IntoRequest<super::Request>,
-        ) -> Result<tonic::Response<tonic::codec::Streaming<super::Response>>, tonic::Status>
-        {
+            request: impl tonic::IntoRequest<super::ProcessRangeRequest>,
+        ) -> Result<
+            tonic::Response<tonic::codec::Streaming<super::ProcessRangeResponse>>,
+            tonic::Status,
+        > {
             self.inner.ready().await.map_err(|e| {
                 tonic::Status::new(
                     tonic::Code::Unknown,
@@ -80,7 +82,9 @@ pub mod stream_client {
                 )
             })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static("/sf.substreams.rpc.v2.Stream/Blocks");
+            let path = http::uri::PathAndQuery::from_static(
+                "/sf.substreams.internal.v2.Substreams/ProcessRange",
+            );
             self.inner
                 .server_streaming(request.into_request(), path, codec)
                 .await

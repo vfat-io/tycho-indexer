@@ -4,35 +4,40 @@
 //!
 //! Currently this module only contains the raw boilerplate code to
 //! connect to a substream from within rust.
-use anyhow::{format_err, Context, Error};
-use futures03::StreamExt;
-use pb::sf::substreams::{
-    rpc::v2::{BlockScopedData, BlockUndoSignal},
-    v1::Package,
+use anyhow::Error;
+use diesel_async::{pooled_connection::bb8::Pool, AsyncPgConnection};
+use extractor::{
+    evm::{
+        ambient::{AmbientContractExtractor, AmbientPgGateway},
+        EVMStateGateway,
+    },
+    runner::{ExtractorHandle, ExtractorRunnerBuilder},
 };
+use models::Chain;
 
-use prost::Message;
 use std::sync::Arc;
-use substreams::{
-    stream::{BlockResponse, SubstreamsStream},
-    SubstreamsEndpoint,
-};
 use tracing::info;
 
 mod extractor;
 mod models;
 mod pb;
-mod rpc;
+mod services;
 mod storage;
 mod substreams;
 
 use clap::Parser;
 
+use crate::{
+    extractor::evm,
+    storage::postgres::{self, PostgresGateway},
+};
+
 /// Tycho Indexer using Substreams
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
 #[clap(
     version = "0.1.0",
-    about = "Does awesome things. Requires the environment variable SUBSTREAMS_API_TOKEN to be set."
+    about = "Extracts Ambient contract state. Requires the environment variable \
+    SUBSTREAMS_API_TOKEN and DATABASE_URL to be set."
 )]
 struct Args {
     /// Substreams API endpoint URL
@@ -42,6 +47,10 @@ struct Args {
     /// Substreams API token
     #[clap(long, env)]
     substreams_api_token: String,
+
+    /// DB Connection url
+    #[clap(long, env)]
+    db_url: String,
 
     /// Package file
     #[clap(name = "spkg", short, long)]
@@ -59,149 +68,38 @@ async fn main() -> Result<(), Error> {
 
     let args = Args::parse();
 
-    let package = read_package(&args.package_file).await?;
-    let endpoint = Arc::new(
-        SubstreamsEndpoint::new(&args.endpoint_url, Some(args.substreams_api_token)).await?,
-    );
-
-    let cursor: Option<String> = load_persisted_cursor()?;
-
-    let mut stream = SubstreamsStream::new(
-        endpoint.clone(),
-        cursor,
-        package.modules.clone(),
-        args.module_name,
-        // Start/stop block are not handled within this project, feel free to play with it
-        18083172, // FIXME: remove magic value
-        18083200, // FIXME: remove magic value
-    );
-
-    info!("Starting stream");
-
-    loop {
-        match stream.next().await {
-            None => {
-                info!("Stream consumed");
-                break
-            }
-            Some(Ok(BlockResponse::New(data))) => {
-                process_block_scoped_data(&data)?;
-                persist_cursor(data.cursor)?;
-            }
-            Some(Ok(BlockResponse::Undo(undo_signal))) => {
-                process_block_undo_signal(&undo_signal)?;
-                persist_cursor(undo_signal.last_valid_cursor)?;
-            }
-            Some(Err(err)) => {
-                panic!("Stream terminated with error: {:?}", err);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn process_block_scoped_data(data: &BlockScopedData) -> Result<(), Error> {
-    let output = data
-        .output
-        .as_ref()
-        .unwrap()
-        .map_output
-        .as_ref()
-        .unwrap();
-
-    // You can decode the actual Any type received using this code:
-    //
-    //     use prost::Message;
-    //     let value = Message::decode::<GeneratedStructName>(data.value.as_slice())?;
-    //
-    // Where GeneratedStructName is the Rust code generated for the Protobuf representing
-    // your type.
-
-    info!(
-        "Block #{} - Payload {} ({} bytes)",
-        data.clock.as_ref().unwrap().number,
-        output
-            .type_url
-            .replace("type.googleapis.com/", ""),
-        output.value.len()
-    );
-
-    Ok(())
-}
-
-fn process_block_undo_signal(_undo_signal: &BlockUndoSignal) -> Result<(), Error> {
-    // `BlockUndoSignal` must be treated as "delete every data that has been recorded after
-    // block height specified by block in BlockUndoSignal". In the example above, this means
-    // you must delete changes done by `Block #7b` and `Block #6b`. The exact details depends
-    // on your own logic. If for example all your added record contain a block number, a
-    // simple way is to do `delete all records where block_num > 5` which is the block num
-    // received in the `BlockUndoSignal` (this is true for append only records, so when only
-    // `INSERT` are allowed).
-    unimplemented!("you must implement some kind of block undo handling, or request only final blocks (tweak substreams_stream.rs)")
-}
-
-fn persist_cursor(_cursor: String) -> Result<(), Error> {
-    // FIXME: Handling of the cursor is missing here. It should be saved each time
-    // a full block has been correctly processed/persisted. The saving location
-    // is your responsibility.
-    //
-    // By making it persistent, we ensure that if we crash, on startup we are
-    // going to read it back from database and start back our SubstreamsStream
-    // with it ensuring we are continuously streaming without ever losing a single
-    // element.
-    Ok(())
-}
-
-fn load_persisted_cursor() -> Result<Option<String>, Error> {
-    // FIXME: Handling of the cursor is missing here. It should be loaded from
-    // somewhere (local file, database, cloud storage) and then `SubstreamStream` will
-    // be able correctly resume from the right block.
-    Ok(None)
-}
-
-async fn read_package(input: &str) -> Result<Package, Error> {
-    if input.starts_with("http") {
-        return read_http_package(input).await
-    }
-
-    // Assume it's a local file
-
-    let content =
-        std::fs::read(input).context(format_err!("read package from file '{}'", input))?;
-    Package::decode(content.as_ref()).context("decode command")
-}
-
-async fn read_http_package(input: &str) -> Result<Package, Error> {
-    let body = reqwest::get(input)
-        .await?
-        .bytes()
+    let pool = postgres::connect(&args.db_url).await?;
+    postgres::ensure_chains(&[Chain::Ethereum], pool.clone()).await;
+    let evm_gw =
+        PostgresGateway::<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>::new(
+            pool.clone(),
+        )
         .await?;
 
-    Package::decode(body).context("decode command")
+    info!("Starting Tycho");
+    info!("Starting ambient extractor");
+    let ambient_handle =
+        start_ambient_extractor(&args.package_file, pool.clone(), evm_gw.clone()).await?;
+
+    ambient_handle.wait().await;
+    Ok(())
 }
 
-async fn create_stream(
-    spkg_file: &str,
-    cursor: Option<&str>,
-    endpoint_url: &str,
-    module_name: &str,
-    start_block: i64,
-    token: &str,
-) -> Result<SubstreamsStream, Error> {
-    let content =
-        std::fs::read(spkg_file).context(format_err!("read package from file '{}'", spkg_file))?;
-    let spkg = Package::decode(content.as_ref()).context("decode command")?;
-    let endpoint = Arc::new(SubstreamsEndpoint::new(&endpoint_url, Some(token.to_owned())).await?);
+async fn start_ambient_extractor(
+    spkg: &str,
+    pool: Pool<AsyncPgConnection>,
+    evm_gw: EVMStateGateway<AsyncPgConnection>,
+) -> Result<ExtractorHandle<evm::BlockAccountChanges>, Error> {
+    let ambient_gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool, evm_gw);
+    let extractor =
+        AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, ambient_gw).await?;
 
-    Ok(SubstreamsStream::new(
-        endpoint,
-        cursor.map(|s| s.to_owned()),
-        spkg.modules.clone(),
-        module_name.to_string(),
-        start_block,
-        0, // FIXME: remove magic value
-    ))
+    let builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
+        .start_block(17361664)
+        // for testing only
+        .end_block(17362000);
+    let handle = builder.run().await?;
+    Ok(handle)
 }
 
 #[cfg(test)]
@@ -215,6 +113,7 @@ mod cli_tests {
     async fn test_arg_parsing_short() {
         // Set the SUBSTREAMS_API_TOKEN environment variable for testing.
         env::set_var("SUBSTREAMS_API_TOKEN", "your_api_token");
+        env::set_var("DB_URL", "my_db");
 
         let args = Args::try_parse_from(vec![
             "tycho-indexer",
@@ -227,12 +126,14 @@ mod cli_tests {
         ]);
 
         env::remove_var("SUBSTREAMS_API_TOKEN");
+        env::remove_var("DB_URL");
 
         assert!(args.is_ok());
         let args = args.unwrap();
         let expected_args = Args {
             endpoint_url: "http://example.com".to_string(),
             substreams_api_token: "your_api_token".to_string(),
+            db_url: "my_db".to_string(),
             package_file: "package.spkg".to_string(),
             module_name: "module_name".to_string(),
         };
@@ -244,6 +145,7 @@ mod cli_tests {
     async fn test_arg_parsing_long() {
         // Set the SUBSTREAMS_API_TOKEN environment variable for testing.
         env::set_var("SUBSTREAMS_API_TOKEN", "your_api_token");
+        env::set_var("DB_URL", "my_db");
         let args = Args::try_parse_from(vec![
             "tycho-indexer",
             "--endpoint",
@@ -255,11 +157,13 @@ mod cli_tests {
         ]);
 
         env::remove_var("SUBSTREAMS_API_TOKEN");
+        env::remove_var("DB_URL");
         assert!(args.is_ok());
         let args = args.unwrap();
         let expected_args = Args {
             endpoint_url: "http://example.com".to_string(),
             substreams_api_token: "your_api_token".to_string(),
+            db_url: "my_db".to_string(),
             package_file: "package.spkg".to_string(),
             module_name: "module_name".to_string(),
         };

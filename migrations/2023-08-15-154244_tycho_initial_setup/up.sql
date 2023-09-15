@@ -270,7 +270,7 @@ CREATE TABLE account_balance(
     -- the account this entry refers to.
     "account_id" bigint REFERENCES account(id) ON DELETE CASCADE NOT NULL,
     -- the transaction that modified the state to this entry.
-    "modify_tx" bigint REFERENCES "transaction"(id) ON DELETE CASCADE,
+    "modify_tx" bigint REFERENCES "transaction"(id) ON DELETE CASCADE NOT NULL,
     -- The ts at which this state became valid at.
     "valid_from" timestamptz NOT NULL,
     -- The ts at which this state stopped being valid at. Null if this
@@ -279,7 +279,8 @@ CREATE TABLE account_balance(
     -- Timestamp this entry was inserted into this table.
     "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Timestamp this entry was inserted into this table.
-    "modified_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "modified_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE ("account_id", "modify_tx")
 );
 
 CREATE INDEX IF NOT EXISTS idx_account_balance_account_id ON account_balance(account_id);
@@ -305,7 +306,8 @@ CREATE TABLE contract_code(
     -- Timestamp this entry was inserted into this table.
     "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Timestamp this entry was inserted into this table.
-    "modified_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "modified_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE ("account_id", "modify_tx")
 );
 
 CREATE INDEX IF NOT EXISTS idx_contract_code_account_id ON contract_code(account_id);
@@ -393,29 +395,18 @@ CREATE TABLE IF NOT EXISTS audit_log(
  * identify the previous version of an entry, set the valid_to field to the 
  * valid_from of the new version.
  */
--- invalidate previous entry automatically through an identity column
-CREATE OR REPLACE FUNCTION invalidate_previous_entry()
+CREATE OR REPLACE FUNCTION invalidate_previous_entry_protocol_state()
     RETURNS TRIGGER
     AS $$
-DECLARE
-    _tbl_name text;
-    _identity_col text;
-    _query text;
 BEGIN
-    IF TG_NARGS <> 2 THEN
-        RAISE EXCEPTION 'This trigger requires exactly two parameters: table name and identity column';
-    END IF;
-    _tbl_name := TG_ARGV[0];
-    _identity_col := TG_ARGV[1];
-    _query := format('
-       UPDATE %I 
-       SET valid_to = $1.valid_from 
-       WHERE id = (
-           SELECT id FROM %I 
-           WHERE valid_to IS NULL AND %I = ($1).%I 
-       );', _tbl_name, _tbl_name, _identity_col, _identity_col);
-    EXECUTE _query
-    USING NEW;
+    -- Update the 'valid_to' field of the last valid entry when a new one is inserted.
+    UPDATE
+        protocol_state
+    SET
+        valid_to = NEW.valid_from
+    WHERE
+        valid_to IS NULL
+        AND protocol_component_id = NEW.protocol_component_id;
     RETURN NEW;
 END;
 $$
@@ -424,17 +415,57 @@ LANGUAGE plpgsql;
 CREATE TRIGGER invalidate_previous_protocol_state
     BEFORE INSERT ON protocol_state
     FOR EACH ROW
-    EXECUTE PROCEDURE invalidate_previous_entry('protocol_state', 'protocol_component_id');
+    EXECUTE PROCEDURE invalidate_previous_entry_protocol_state();
+
+CREATE OR REPLACE FUNCTION invalidate_previous_entry_account_balance()
+    RETURNS TRIGGER
+    AS $$
+BEGIN
+    -- Update the 'valid_to' field of the last valid entry when a new one is inserted.
+    UPDATE
+        account_balance
+    SET
+        valid_to = NEW.valid_from
+    WHERE
+        valid_to IS NULL
+        AND account_id = NEW.account_id
+        -- running this after inserts allows us to use upserts, 
+        -- currently the application does not use that though
+        AND id != NEW.id;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
 
 CREATE TRIGGER invalidate_previous_account_balance
-    BEFORE INSERT ON account_balance
+    AFTER INSERT ON account_balance
     FOR EACH ROW
-    EXECUTE PROCEDURE invalidate_previous_entry('account_balance', 'account_id');
+    EXECUTE PROCEDURE invalidate_previous_entry_account_balance();
+
+CREATE OR REPLACE FUNCTION invalidate_previous_entry_contract_code()
+    RETURNS TRIGGER
+    AS $$
+BEGIN
+    -- Update the 'valid_to' field of the last valid entry when a new one is inserted.
+    UPDATE
+        contract_code
+    SET
+        valid_to = NEW.valid_from
+    WHERE
+        valid_to IS NULL
+        AND account_id = NEW.account_id
+        -- running this after inserts allows us to use upserts, 
+        -- currently the application does not use that though
+        AND id != NEW.id;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
 
 CREATE TRIGGER invalidate_previous_contract_code
-    BEFORE INSERT ON contract_code
+    AFTER INSERT ON contract_code
     FOR EACH ROW
-    EXECUTE PROCEDURE invalidate_previous_entry('contract_code', 'account_id');
+    EXECUTE PROCEDURE invalidate_previous_entry_contract_code();
 
 CREATE OR REPLACE FUNCTION invalidate_previous_entry_contract_storage()
     RETURNS TRIGGER

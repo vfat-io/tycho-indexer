@@ -7,14 +7,19 @@ use super::{orm, schema, PostgresGateway};
 use crate::{
     extractor::evm,
     models::Chain,
-    storage::{BlockIdentifier, ChainGateway, StorableBlock, StorableTransaction, StorageError},
+    storage::{
+        BlockIdentifier, ChainGateway, ContractDelta, StorableBlock, StorableContract,
+        StorableTransaction, StorageError,
+    },
 };
 
 #[async_trait]
-impl<B, TX> ChainGateway for PostgresGateway<B, TX>
+impl<B, TX, A, D> ChainGateway for PostgresGateway<B, TX, A, D>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock> + Send + Sync + 'static,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64> + Send + Sync + 'static,
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
 {
     type DB = AsyncPgConnection;
     type Block = B;
@@ -22,7 +27,7 @@ where
 
     async fn upsert_block(
         &self,
-        new: Self::Block,
+        new: &Self::Block,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::block::dsl::*;
@@ -43,7 +48,7 @@ where
 
     async fn get_block(
         &self,
-        block_id: BlockIdentifier,
+        block_id: &BlockIdentifier,
         conn: &mut Self::DB,
     ) -> Result<Self::Block, StorageError> {
         // taking a reference here is necessary, to not move block_id
@@ -54,9 +59,7 @@ where
                 orm::Block::by_number(*chain, *number, conn).await
             }
 
-            BlockIdentifier::Hash(block_hash) => {
-                orm::Block::by_hash(block_hash.as_slice(), conn).await
-            }
+            BlockIdentifier::Hash(block_hash) => orm::Block::by_hash(block_hash, conn).await,
         }
         .map_err(|err| StorageError::from_diesel(err, "Block", &block_id.to_string(), None))?;
         let chain = self.get_chain(orm_block.chain_id);
@@ -65,7 +68,7 @@ where
 
     async fn upsert_tx(
         &self,
-        new: Self::Transaction,
+        new: &Self::Transaction,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::transaction::dsl::*;
@@ -116,7 +119,7 @@ where
     }
 }
 
-impl StorableBlock<orm::Block, orm::NewBlock> for evm::Block {
+impl StorableBlock<orm::Block, orm::NewBlock, i64> for evm::Block {
     fn from_storage(val: orm::Block, chain: Chain) -> Self {
         evm::Block {
             number: val.number as u64,
@@ -145,21 +148,23 @@ impl StorableBlock<orm::Block, orm::NewBlock> for evm::Block {
 
 impl StorableTransaction<orm::Transaction, orm::NewTransaction, i64> for evm::Transaction {
     fn from_storage(val: orm::Transaction, block_hash: &[u8]) -> Self {
+        let to = if !val.to.is_empty() { Some(H160::from_slice(&val.to)) } else { None };
         Self {
             hash: H256::from_slice(&val.hash),
             block_hash: H256::from_slice(block_hash),
             from: H160::from_slice(&val.from),
-            to: H160::from_slice(&val.to),
+            to,
             index: val.index as u64,
         }
     }
 
     fn to_storage(&self, block_id: i64) -> orm::NewTransaction {
+        let to: Vec<u8> = if let Some(h) = self.to { Vec::from(h.as_bytes()) } else { Vec::new() };
         orm::NewTransaction {
             hash: Vec::from(self.hash.as_bytes()),
             block_id,
             from: Vec::from(self.from.as_bytes()),
-            to: Vec::from(self.to.as_bytes()),
+            to,
             index: self.index as i64,
         }
     }
@@ -178,10 +183,12 @@ mod test {
     use std::str::FromStr;
 
     use crate::storage::postgres::db_fixtures;
+    use diesel_async::AsyncConnection;
 
     use super::*;
 
-    use diesel_async::AsyncConnection;
+    type EVMGateway =
+        PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>;
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -222,12 +229,12 @@ mod test {
     #[tokio::test]
     async fn test_get_block() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
         let exp = block("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9");
         let block_id = BlockIdentifier::Number((Chain::Ethereum, 2));
 
         let block = gw
-            .get_block(block_id, &mut conn)
+            .get_block(&block_id, &mut conn)
             .await
             .unwrap();
 
@@ -237,14 +244,14 @@ mod test {
     #[tokio::test]
     async fn test_add_block() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
         let block = block("0xbadbabe000000000000000000000000000000000000000000000000000000000");
 
-        gw.upsert_block(block, &mut conn)
+        gw.upsert_block(&block, &mut conn)
             .await
             .unwrap();
         let retrieved_block = gw
-            .get_block(BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
+            .get_block(&BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
             .await
             .unwrap();
 
@@ -254,7 +261,7 @@ mod test {
     #[tokio::test]
     async fn test_upsert_block() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
         let block = evm::Block {
             number: 1,
             hash: H256::from_str(
@@ -269,11 +276,11 @@ mod test {
             ts: "2020-01-01T00:00:00".parse().unwrap(),
         };
 
-        gw.upsert_block(block, &mut conn)
+        gw.upsert_block(&block, &mut conn)
             .await
             .unwrap();
         let retrieved_block = gw
-            .get_block(BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
+            .get_block(&BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
             .await
             .unwrap();
 
@@ -288,7 +295,7 @@ mod test {
             )
             .expect("block hash ok"),
             from: H160::from_str("0x4648451b5f87ff8f0f7d622bd40574bb97e25980").expect("from ok"),
-            to: H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").expect("to ok"),
+            to: Some(H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").expect("to ok")),
             index: 1,
         }
     }
@@ -296,7 +303,7 @@ mod test {
     #[tokio::test]
     async fn test_get_tx() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
         let exp = transaction("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945");
 
         let tx = gw
@@ -310,14 +317,14 @@ mod test {
     #[tokio::test]
     async fn test_add_tx() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
         let mut tx =
             transaction("0xbadbabe000000000000000000000000000000000000000000000000000000000");
         tx.block_hash =
             H256::from_str("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9")
                 .unwrap();
 
-        gw.upsert_tx(tx, &mut conn)
+        gw.upsert_tx(&tx, &mut conn)
             .await
             .unwrap();
         let retrieved_tx = gw
@@ -331,7 +338,7 @@ mod test {
     #[tokio::test]
     async fn test_upsert_tx() {
         let mut conn = setup_db().await;
-        let gw = PostgresGateway::<evm::Block, evm::Transaction>::from_connection(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
         let tx = evm::Transaction {
             hash: H256::from_str(
                 "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
@@ -342,11 +349,11 @@ mod test {
             )
             .expect("block hash ok"),
             from: H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980").expect("from ok"),
-            to: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").expect("to ok"),
+            to: Some(H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").expect("to ok")),
             index: 1,
         };
 
-        gw.upsert_tx(tx, &mut conn)
+        gw.upsert_tx(&tx, &mut conn)
             .await
             .unwrap();
         let retrieved_tx = gw

@@ -139,10 +139,15 @@ pub mod schema;
 use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, sync::Arc};
 
 use diesel::prelude::*;
-#[allow(unused_imports)] // RunQueryDsl is wrongly marked as unused
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{
+    pooled_connection::{bb8::Pool, AsyncDieselConnectionManager},
+    AsyncPgConnection, RunQueryDsl,
+};
+use tracing::info;
 
-use super::StorageError;
+use super::{
+    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableTransaction, StorageError,
+};
 use crate::models::Chain;
 
 pub struct EnumTableCache<E> {
@@ -158,6 +163,23 @@ where
     E: Eq + Hash + Copy + TryFrom<String> + std::fmt::Debug,
     <E as TryFrom<String>>::Error: std::fmt::Debug,
 {
+    pub async fn from_pool(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
+
+        let results: Vec<(i64, String)> = async {
+            use schema::chain::dsl::*;
+            chain
+                .select((id, name))
+                .load(&mut conn)
+                .await
+                .expect("Failed to load chain ids!")
+        }
+        .await;
+        Ok(Self::from_tuples(&results))
+    }
     /// Creates a new cache from a slice of tuples.
     ///
     /// # Arguments
@@ -246,15 +268,29 @@ impl StorageError {
     }
 }
 
-pub struct PostgresGateway<B, TX> {
+pub struct PostgresGateway<B, TX, A, D> {
     chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
+    _phantom_acc: PhantomData<A>,
+    _phantom_delta: PhantomData<D>,
 }
 
-impl<B, TX> PostgresGateway<B, TX> {
-    pub fn new(cache: Arc<ChainEnumCache>) -> Self {
-        Self { chain_id_cache: cache, _phantom_block: PhantomData, _phantom_tx: PhantomData }
+impl<B, TX, A, D> PostgresGateway<B, TX, A, D>
+where
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
+{
+    pub fn with_cache(cache: Arc<ChainEnumCache>) -> Self {
+        Self {
+            chain_id_cache: cache,
+            _phantom_block: PhantomData,
+            _phantom_tx: PhantomData,
+            _phantom_acc: PhantomData,
+            _phantom_delta: PhantomData,
+        }
     }
 
     #[allow(clippy::needless_pass_by_ref_mut)]
@@ -270,7 +306,7 @@ impl<B, TX> PostgresGateway<B, TX> {
         }
         .await;
         let cache = Arc::new(ChainEnumCache::from_tuples(&results));
-        Self::new(cache)
+        Self::with_cache(cache)
     }
 
     fn get_chain_id(&self, chain: Chain) -> i64 {
@@ -280,10 +316,127 @@ impl<B, TX> PostgresGateway<B, TX> {
     fn get_chain(&self, id: i64) -> Chain {
         self.chain_id_cache.get_chain(id)
     }
+
+    pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
+        let cache = EnumTableCache::<Chain>::from_pool(pool.clone()).await?;
+
+        let gw = Arc::new(PostgresGateway::<B, TX, A, D>::with_cache(Arc::new(cache)));
+
+        Ok(gw)
+    }
+}
+
+impl<B, TX, A, D> StateGateway<AsyncPgConnection> for PostgresGateway<B, TX, A, D>
+where
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
+{
+    // No methods in here - this just ties everything together
+}
+
+/// Establishes a connection to the database and creates a connection pool.
+///
+/// This function takes in the URL of the database as an argument and returns a pool
+/// of connections that the application can use to interact with the database. If there's
+/// any error during the creation of this pool, it is converted into a `StorageError` for
+/// uniform error handling across the application.
+///
+/// # Arguments
+///
+/// - `db_url`: A string slice that holds the URL of the database to connect to.
+///
+/// # Returns
+///
+/// A Result which is either:
+///
+/// - `Ok`: Contains a `Pool` of `AsyncPgConnection`s if the connection was established
+///   successfully.
+/// - `Err`: Contains a `StorageError` if there was an issue creating the connection pool.
+pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageError> {
+    let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url);
+    let pool = Pool::builder()
+        .build(config)
+        .await
+        .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
+    Ok(pool)
+}
+
+/// Ensures the `Chain` enum is present in the database, if not it inserts it.
+///
+/// This function serves as a way to ensure all chains found within the `chains`  
+/// slice are present within the database. It does this by inserting each chain into
+/// the `chain` table. If a conflict arises during this operation (indicating that
+/// the chain already exists in the database), it simply does nothing for that
+/// specific operation and moves on.
+///
+/// It uses a connection from the passed in `Pool<AsyncPgConnection>` asynchronously.
+/// In case of any error during these operations, the function will panic with an
+/// appropriate error message.
+///
+///
+/// # Arguments
+///
+/// - `chains`: A slice containing chains which need to be ensured in the database.
+/// - `pool`: An instance of `Pool` containing `AsyncPgConnection`s used to interact with the
+///   database.
+///
+/// # Panics
+///
+/// This function will panic under two circumstances:
+///
+/// - If it failed to get a connection from the provided pool.
+/// - If there was an issue ensuring the presence of chains in the database.
+pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
+    info!("Ensured chain enum presence for: {:?}", chains);
+    let mut conn = pool.get().await.expect("connection ok");
+    diesel::insert_into(schema::chain::table)
+        .values(
+            chains
+                .iter()
+                .map(|c| schema::chain::name.eq(c.to_string()))
+                .collect::<Vec<_>>(),
+        )
+        .on_conflict_do_nothing()
+        .execute(&mut conn)
+        .await
+        .expect("chains ensured");
 }
 
 #[cfg(test)]
 pub mod db_fixtures {
+    //! # General Purpose Fixtures for Database State Modification
+    //!
+    //! The module contains fixtures that are designed to alter the database state
+    //! for testing purposes.
+    //!
+    //! This module doesn't rely on any locally specific code from the Postgres
+    //! packages, except for the autogenerated `schema` module. Given that `schema`
+    //! is generated by examining our table schema, it's reasonable to assert that
+    //! this module belongs to the `schema` and not the package itself.
+    //!
+    //! A key goal of these fixtures is to prevent reliance on application code when
+    //! setting up test data, thereby avoiding cyclical dependencies. For example,
+    //! if you're modifying how an entity is inserted, and this change affects the
+    //! data setup for other tests, these tests would start failing – a situation we
+    //! want to avoid. This could lead to complex, hard-to-resolve issues,
+    //! particularly if you're using the insertion method to validate that a second
+    //! insertion fails, while simultaneously working on the insertion method. In
+    //! such cases, running your tests becomes impossible if the insertion method
+    //! encounters bugs.
+    //!
+    //! # Heads Up
+    //! We advise adding only general-purpose methods to this module, such as those
+    //! for adding or removing a single row/entry, or maximum entries along with
+    //! their child entities. More intricate setups should be localized where they
+    //! are explicitly used.
+    //!
+    //! If you need to share more complex setups and decide to include them here,
+    //! please think through whether this is the suitable location, or whether a
+    //! local copy might serve your needs better. For instance, if the complete
+    //! shared setup isn't necessary for your test case, copy it and keep only
+    //! the entries that are crucial to your test case.
     use std::str::FromStr;
 
     use chrono::NaiveDateTime;
@@ -291,7 +444,7 @@ pub mod db_fixtures {
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
 
-    use super::{orm, schema};
+    use super::schema;
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -392,10 +545,25 @@ pub mod db_fixtures {
         chain_id: i64,
         tx_id: Option<i64>,
     ) -> i64 {
+        let ts: Option<NaiveDateTime> = if let Some(id) = tx_id {
+            Some(
+                schema::transaction::table
+                    .inner_join(schema::block::table)
+                    .filter(schema::transaction::id.eq(id))
+                    .select(schema::block::ts)
+                    .first::<NaiveDateTime>(conn)
+                    .await
+                    .expect("setup tx id not found"),
+            )
+        } else {
+            None
+        };
+
         let query = diesel::insert_into(schema::account::table).values((
             schema::account::title.eq(title),
             schema::account::chain_id.eq(chain_id),
             schema::account::creation_tx.eq(tx_id),
+            schema::account::created_at.eq(ts),
             schema::account::address.eq(hex::decode(address).unwrap()),
         ));
         query
@@ -446,54 +614,36 @@ pub mod db_fixtures {
             .unwrap()
     }
 
-    pub async fn insert_account_balances(
+    pub async fn insert_account_balance(
         conn: &mut AsyncPgConnection,
+        new_balance: u64,
         tx_id: i64,
-        account_id: i64,
-    ) -> Vec<i64> {
-        let mut b0 = [0; 32];
-        let mut b1 = [0; 32];
-        U256::zero().to_big_endian(&mut b0);
-        U256::from(100).to_big_endian(&mut b1);
-        let data = [
-            (
-                b0,
-                None,
-                "2022-11-01T09:00:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .unwrap(),
-                Some(
-                    "2022-11-01T09:10:00"
-                        .parse::<chrono::NaiveDateTime>()
-                        .unwrap(),
-                ),
-            ),
-            (
-                b1,
-                Some(tx_id),
-                "2022-11-01T09:20:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .unwrap(),
-                None,
-            ),
-        ];
-        let orm_balances: Vec<orm::NewAccountBalance> = data
-            .iter()
-            .map(|(b, t, valid_from, valid_to)| orm::NewAccountBalance {
-                account_id,
-                balance: b.to_vec(),
-                modify_tx: *t,
-                valid_from: *valid_from,
-                valid_to: *valid_to,
-            })
-            .collect();
-
-        let query = diesel::insert_into(schema::account_balance::table).values(orm_balances);
-        query
-            .returning(schema::account_balance::id)
-            .get_results(conn)
+        account: i64,
+    ) {
+        let ts = schema::transaction::table
+            .inner_join(schema::block::table)
+            .filter(schema::transaction::id.eq(tx_id))
+            .select(schema::block::ts)
+            .first::<NaiveDateTime>(conn)
             .await
-            .unwrap()
+            .expect("setup tx id not found");
+
+        let mut b0 = [0; 32];
+        U256::from(new_balance).to_big_endian(&mut b0);
+        {
+            use schema::account_balance::dsl::*;
+            diesel::insert_into(account_balance)
+                .values((
+                    account_id.eq(account),
+                    balance.eq(b0.as_slice()),
+                    modify_tx.eq(tx_id),
+                    valid_from.eq(ts),
+                    valid_to.eq(Option::<NaiveDateTime>::None),
+                ))
+                .execute(conn)
+                .await
+                .expect("balance insert ok");
+        }
     }
 
     pub async fn insert_contract_code(
@@ -502,15 +652,21 @@ pub mod db_fixtures {
         modify_tx: i64,
         code: Vec<u8>,
     ) -> i64 {
+        let ts = schema::transaction::table
+            .inner_join(schema::block::table)
+            .filter(schema::transaction::id.eq(modify_tx))
+            .select(schema::block::ts)
+            .first::<NaiveDateTime>(conn)
+            .await
+            .expect("setup tx id not found");
+
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
         let data = (
             schema::contract_code::code.eq(code),
             schema::contract_code::hash.eq(code_hash.as_bytes()),
             schema::contract_code::account_id.eq(account_id),
             schema::contract_code::modify_tx.eq(modify_tx),
-            schema::contract_code::valid_from.eq("2022-11-01T09:10:00"
-                .parse::<chrono::NaiveDateTime>()
-                .unwrap()),
+            schema::contract_code::valid_from.eq(ts),
         );
 
         diesel::insert_into(schema::contract_code::table)
@@ -531,7 +687,23 @@ pub mod db_fixtures {
                 .set(deleted_at.eq(ts))
                 .execute(conn)
                 .await
-                .expect("delete succeeded");
+                .expect("delete account table ok");
+        }
+        {
+            use schema::account_balance::dsl::*;
+            diesel::update(account_balance.filter(account_id.eq(target_id)))
+                .set(valid_to.eq(ts))
+                .execute(conn)
+                .await
+                .expect("delete balance table ok");
+        }
+        {
+            use schema::contract_code::dsl::*;
+            diesel::update(contract_code.filter(account_id.eq(target_id)))
+                .set(valid_to.eq(ts))
+                .execute(conn)
+                .await
+                .expect("delete code table ok");
         }
         {
             use schema::contract_storage::dsl::*;
@@ -539,7 +711,7 @@ pub mod db_fixtures {
                 .set(valid_to.eq(ts))
                 .execute(conn)
                 .await
-                .unwrap();
+                .expect("delete storage table ok");
         }
     }
 }
