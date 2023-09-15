@@ -514,6 +514,7 @@ pub mod fixtures {
                                 value: vec![0xd1, 0xd2, 0xd3, 0xd4],
                             },
                         ],
+                        change: ChangeType::Update.into(),
                     },
                     ContractChange {
                         address: vec![0x61, 0x62, 0x63, 0x64],
@@ -529,6 +530,7 @@ pub mod fixtures {
                                 value: vec![0xc1, 0xc2, 0xc3, 0xc4],
                             },
                         ],
+                        change: ChangeType::Update.into(),
                     },
                 ],
             }],
