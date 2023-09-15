@@ -23,7 +23,7 @@ use crate::{
 
 static DEFAULT_BACKOFF: Lazy<ExponentialBackoff> =
     Lazy::new(|| ExponentialBackoff::from_millis(500).max_delay(Duration::from_secs(45)));
-    
+
 pub enum ControlMessage<M> {
     Stop,
     Subscribe(Sender<Arc<M>>),
@@ -126,7 +126,7 @@ where
                                 match result {
                                     Ok(Some(msg)) => {
                                         debug!("Propagating new data message.");
-                                        Self::propagate_msg(&self.subscriptions, msg).await
+                                        Self::propagate_msg(&mut self.subscriptions, msg).await
                                     }
                                     Ok(None) => {
                                         debug!("No message to propagate.");
@@ -151,7 +151,7 @@ where
                                 match result {
                                     Ok(Some(msg)) => {
                                         debug!("Propagating undo message.");
-                                        Self::propagate_msg(&self.subscriptions, msg).await
+                                        Self::propagate_msg(&mut self.subscriptions, msg).await
                                     }
                                     Ok(None) => {
                                         debug!("No message to propagate.");
@@ -173,13 +173,27 @@ where
         })
     }
 
-    async fn propagate_msg(subscribers: &HashMap<u64, Sender<Arc<M>>>, message: M) {
+    async fn propagate_msg(subscribers: &mut HashMap<u64, Sender<Arc<M>>>, message: M) {
         debug!("Propagating message: {:?}", message);
         let arced_message = Arc::new(message);
-        for s in subscribers.values() {
-            s.send(arced_message.clone())
-                .await
-                .unwrap();
+
+        let mut to_remove = Vec::new();
+
+        for (counter, sender) in subscribers.iter_mut() {
+            match sender.send(arced_message.clone()).await {
+                Ok(_) => {
+                    // Message sent successfully
+                }
+                Err(_) => {
+                    // Receiver has been dropped, mark for removal
+                    to_remove.push(*counter);
+                }
+            }
+        }
+
+        // Remove inactive subscribers
+        for counter in to_remove {
+            subscribers.remove(&counter);
         }
     }
 }
