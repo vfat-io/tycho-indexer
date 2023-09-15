@@ -104,7 +104,7 @@ pub struct ExtractionState {
     pub cursor: Vec<u8>,
 }
 
-pub trait NormalisedMessage: Serialize + DeserializeOwned + Send + Sync + Clone + 'static {
+pub trait NormalisedMessage: Serialize + DeserializeOwned + std::fmt::Debug + Send + Sync + Clone + 'static {
     fn source(&self) -> ExtractorIdentity;
 }
 

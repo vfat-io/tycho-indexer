@@ -28,10 +28,7 @@ pub enum ControlMessage<M> {
 ///
 /// Extracted out of the [ExtractorHandle] to allow for easier testing
 #[async_trait]
-pub trait MessageSender<M>: Send + Sync
-where
-    M: NormalisedMessage + Sync + Send + 'static,
-{
+pub trait MessageSender<M: NormalisedMessage>: Send + Sync{
     async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>>;
 }
 
@@ -42,7 +39,7 @@ pub struct ExtractorHandle<M> {
 
 impl<M> ExtractorHandle<M>
 where
-    M: NormalisedMessage + Sync + Send + 'static,
+    M: NormalisedMessage,
 {
     fn new(handle: JoinHandle<()>, control_tx: Sender<ControlMessage<M>>) -> Self {
         Self { handle, control_tx }
@@ -64,7 +61,7 @@ where
 #[async_trait]
 impl<M> MessageSender<M> for ExtractorHandle<M>
 where
-    M: NormalisedMessage + Sync + Send + 'static,
+    M: NormalisedMessage,
 {
     async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
         let (tx, rx) = mpsc::channel(1);
@@ -85,7 +82,7 @@ pub struct ExtractorRunner<G, M> {
 
 impl<G, M> ExtractorRunner<G, M>
 where
-    M: NormalisedMessage + std::fmt::Debug + Sync + Send + 'static,
+    M: NormalisedMessage,
     G: Sync + Send + 'static,
 {
     pub fn run(mut self) -> JoinHandle<()> {
@@ -113,7 +110,6 @@ where
                                 match self.extractor.handle_tick_scoped_data(data).await {
                                     Ok(msg) => {
                                         if let Some(msg) = msg {
-                                            debug!("Propagating message: {:?}", msg);
                                             Self::propagate_msg(&self.subscriptions, msg).await
                                         }
                                     },
@@ -149,6 +145,7 @@ where
     }
 
     async fn propagate_msg(subscribers: &HashMap<u64, Sender<Arc<M>>>, message: M) {
+        debug!("Propagating message: {:?}", msg);
         let arced_message = Arc::new(message);
         for s in subscribers.values() {
             s.send(arced_message.clone())
@@ -170,7 +167,7 @@ pub struct ExtractorRunnerBuilder<G, M> {
 
 impl<G, M> ExtractorRunnerBuilder<G, M>
 where
-    M: NormalisedMessage + std::fmt::Debug + Sync + Send + 'static,
+    M: NormalisedMessage,
     G: Sync + Send + 'static,
 {
     pub fn new(spkg: &str, extractor: Arc<dyn Extractor<G, M>>) -> Self {
