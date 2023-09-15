@@ -1,13 +1,13 @@
 specVersion: v0.1.0
 package:
   name: "substreams_ethereum_ambient"
-  version: v0.2.0
+  version: v0.3.0
 
 protobuf:
   files:
     - vm.proto
   importPaths:
-    - ../../proto/evm
+    - ../../proto/tycho/evm/v1/
 
 binaries:
   default:
