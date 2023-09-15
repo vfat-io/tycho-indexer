@@ -1,8 +1,7 @@
 use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
-use once_cell::sync::Lazy;
 use prost::Message;
-use std::{collections::HashMap, env, error::Error, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, error::Error, sync::Arc};
 use tokio::{
     sync::{
         mpsc::{self, error::SendError, Receiver, Sender},
@@ -10,7 +9,6 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tokio_retry::{strategy::ExponentialBackoff, Retry};
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
 
@@ -23,9 +21,6 @@ use crate::{
         SubstreamsEndpoint,
     },
 };
-
-static DEFAULT_BACKOFF: Lazy<ExponentialBackoff> =
-    Lazy::new(|| ExponentialBackoff::from_millis(500).max_delay(Duration::from_secs(45)));
 
 pub enum ControlMessage<M> {
     Stop,
@@ -118,16 +113,7 @@ where
                                 break;
                             }
                             Some(Ok(BlockResponse::New(data))) => {
-                                let extractor = self.extractor.clone();
-                                let result = Retry::spawn(DEFAULT_BACKOFF.clone(), || {
-                                    let data = data.clone();
-                                    async {
-                                        extractor.handle_tick_scoped_data(data).await
-                                    }
-                                })
-                                .await;
-
-                                match result {
+                                match self.extractor.handle_tick_scoped_data(data).await {
                                     Ok(Some(msg)) => {
                                         debug!("Propagating new data message.");
                                         Self::propagate_msg(&self.subscriptions, msg).await
@@ -142,17 +128,7 @@ where
                                 }
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
-                                info!("Revert detected {:?}", undo_signal);
-                                let extractor = self.extractor.clone();
-                                let result = Retry::spawn(DEFAULT_BACKOFF.clone(), || {
-                                    let undo_signal = undo_signal.clone();
-                                    async {
-                                        extractor.handle_revert(undo_signal).await
-                                    }
-                                })
-                                .await;
-
-                                match result {
+                                match self.extractor.handle_revert(undo_signal).await {
                                     Ok(Some(msg)) => {
                                         debug!("Propagating undo message.");
                                         Self::propagate_msg(&self.subscriptions, msg).await
