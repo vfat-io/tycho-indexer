@@ -1,13 +1,16 @@
-use anyhow::{format_err, Context};
+use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
 use prost::Message;
 use std::{collections::HashMap, env, error::Error, sync::Arc};
 use tokio::{
-    sync::mpsc::{self, error::SendError, Receiver, Sender},
+    sync::{
+        mpsc::{self, error::SendError, Receiver, Sender},
+        Mutex,
+    },
     task::JoinHandle,
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use super::Extractor;
 use crate::{
@@ -28,10 +31,7 @@ pub enum ControlMessage<M> {
 ///
 /// Extracted out of the [ExtractorHandle] to allow for easier testing
 #[async_trait]
-pub trait MessageSender<M>: Send + Sync
-where
-    M: NormalisedMessage + Sync + Send + 'static,
-{
+pub trait MessageSender<M: NormalisedMessage>: Send + Sync {
     async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>>;
 }
 
@@ -42,7 +42,7 @@ pub struct ExtractorHandle<M> {
 
 impl<M> ExtractorHandle<M>
 where
-    M: NormalisedMessage + Sync + Send + 'static,
+    M: NormalisedMessage,
 {
     fn new(handle: JoinHandle<()>, control_tx: Sender<ControlMessage<M>>) -> Self {
         Self { handle, control_tx }
@@ -64,7 +64,7 @@ where
 #[async_trait]
 impl<M> MessageSender<M> for ExtractorHandle<M>
 where
-    M: NormalisedMessage + Sync + Send + 'static,
+    M: NormalisedMessage,
 {
     async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
         let (tx, rx) = mpsc::channel(1);
@@ -76,16 +76,19 @@ where
     }
 }
 
+// Define the SubscriptionsMap type alias
+type SubscriptionsMap<M> = HashMap<u64, Sender<Arc<M>>>;
+
 pub struct ExtractorRunner<G, M> {
     extractor: Arc<dyn Extractor<G, M>>,
     substreams: SubstreamsStream,
-    subscriptions: HashMap<u64, Sender<Arc<M>>>,
+    subscriptions: Arc<Mutex<SubscriptionsMap<M>>>,
     control_rx: Receiver<ControlMessage<M>>,
 }
 
 impl<G, M> ExtractorRunner<G, M>
 where
-    M: NormalisedMessage + std::fmt::Debug + Sync + Send + 'static,
+    M: NormalisedMessage,
     G: Sync + Send + 'static,
 {
     pub fn run(mut self) -> JoinHandle<()> {
@@ -95,44 +98,46 @@ where
                     Some(ctrl) = self.control_rx.recv() =>  {
                         match ctrl {
                             ControlMessage::Stop => {
+                                warn!("Stopping stream.");
                                 break;
                             },
                             ControlMessage::Subscribe(sender) => {
-                                let counter = self.subscriptions.len() as u64;
-                                self.subscriptions.insert(counter, sender);
+                                self.subscribe(sender).await;
                             },
                         }
                     }
                     val = self.substreams.next() => {
                         match val {
                             None => {
-                                info!("Stream consumed");
+                                warn!("Stream consumed.");
                                 break;
                             }
                             Some(Ok(BlockResponse::New(data))) => {
                                 match self.extractor.handle_tick_scoped_data(data).await {
-                                    Ok(msg) => {
-                                        if let Some(msg) = msg {
-                                            debug!("Propagating message: {:?}", msg);
-                                            Self::propagate_msg(&self.subscriptions, msg).await
-                                        }
-                                    },
+                                    Ok(Some(msg)) => {
+                                        debug!("Propagating new data message.");
+                                        Self::propagate_msg(&self.subscriptions, msg).await
+                                    }
+                                    Ok(None) => {
+                                        debug!("No message to propagate.");
+                                    }
                                     Err(err) => {
-                                        error!("Error while processing tick: {err}!");
+                                        error!("Error while processing tick: {err}! Retries exhausted.");
                                         break;
-                                    },
+                                    }
                                 }
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
-                                info!("Revert detected {:?}", undo_signal);
                                 match self.extractor.handle_revert(undo_signal).await {
-                                    Ok(msg) => {
-                                        if let Some(msg) = msg {
-                                            Self::propagate_msg(&self.subscriptions, msg).await
-                                        }
-                                    },
-                                    Err(err) => {
-                                        error!("Error while processing revert!: {}", err);
+                                    Ok(Some(msg)) => {
+                                        debug!("Propagating undo message.");
+                                        Self::propagate_msg(&self.subscriptions, msg).await
+                                    }
+                                    Ok(None) => {
+                                        debug!("No message to propagate.");
+                                    }
+                                    Err(_) => {
+                                        error!("Error while processing revert! Retries exhausted.");
                                         break;
                                     }
                                 }
@@ -148,12 +153,41 @@ where
         })
     }
 
-    async fn propagate_msg(subscribers: &HashMap<u64, Sender<Arc<M>>>, message: M) {
+    async fn subscribe(&mut self, sender: Sender<Arc<M>>) {
+        info!("New subscriber.");
+        let counter = self.subscriptions.lock().await.len() as u64;
+        self.subscriptions
+            .lock()
+            .await
+            .insert(counter, sender);
+    }
+
+    async fn propagate_msg(subscribers: &Arc<Mutex<SubscriptionsMap<M>>>, message: M) {
+        debug!("Propagating message: {:?}", message);
         let arced_message = Arc::new(message);
-        for s in subscribers.values() {
-            s.send(arced_message.clone())
-                .await
-                .unwrap();
+
+        let mut to_remove = Vec::new();
+
+        // Lock the subscribers HashMap for exclusive access
+        let mut subscribers = subscribers.lock().await;
+
+        for (counter, sender) in subscribers.iter_mut() {
+            match sender.send(arced_message.clone()).await {
+                Ok(_) => {
+                    // Message sent successfully
+                    info!("Message sent to subscriber {}", counter);
+                }
+                Err(_) => {
+                    // Receiver has been dropped, mark for removal
+                    to_remove.push(*counter);
+                    error!("Subscriber {} has been dropped", counter);
+                }
+            }
+        }
+
+        // Remove inactive subscribers
+        for counter in to_remove {
+            subscribers.remove(&counter);
         }
     }
 }
@@ -170,7 +204,7 @@ pub struct ExtractorRunnerBuilder<G, M> {
 
 impl<G, M> ExtractorRunnerBuilder<G, M>
 where
-    M: NormalisedMessage + std::fmt::Debug + Sync + Send + 'static,
+    M: NormalisedMessage,
     G: Sync + Send + 'static,
 {
     pub fn new(spkg: &str, extractor: Arc<dyn Extractor<G, M>>) -> Self {
@@ -230,7 +264,7 @@ where
         let runner = ExtractorRunner {
             extractor: self.extractor,
             substreams: stream,
-            subscriptions: HashMap::new(),
+            subscriptions: Arc::new(Mutex::new(HashMap::new())),
             control_rx: ctrl_rx,
         };
 
