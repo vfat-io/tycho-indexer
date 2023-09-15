@@ -10,6 +10,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
 };
+use tracing::warn;
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::pb::tycho::evm::v1 as substreams;
@@ -111,6 +112,9 @@ impl From<&AccountUpdateWithTx> for Account {
     /// transaction.
     fn from(value: &AccountUpdateWithTx) -> Self {
         let empty_hash = H256::from(keccak256(Vec::new()));
+        if value.change != ChangeType::Creation {
+            warn!("Creating an account from a partial change!")
+        }
         Account::new(
             value.chain,
             value.address,
@@ -190,6 +194,14 @@ impl AccountUpdate {
         self.code = other.code.or(self.code.take());
 
         Ok(())
+    }
+
+    fn is_update(&self) -> bool {
+        self.change == ChangeType::Update
+    }
+
+    fn is_creation(&self) -> bool {
+        self.change == ChangeType::Creation
     }
 }
 
@@ -347,6 +359,7 @@ impl AccountUpdateWithTx {
         tx: &Transaction,
         chain: Chain,
     ) -> Result<Self, ExtractionError> {
+        let change = msg.change().into();
         let update = AccountUpdate {
             address: pad_and_parse_h160(&msg.address).map_err(ExtractionError::DecodeError)?,
             chain,
@@ -368,9 +381,22 @@ impl AccountUpdateWithTx {
                 None
             },
             code: if !msg.code.is_empty() { Some(msg.code) } else { None },
-            change: ChangeType::Update,
+            change,
         };
         Ok(Self { update, tx: *tx })
+    }
+}
+
+impl From<substreams::ChangeType> for ChangeType {
+    fn from(value: substreams::ChangeType) -> Self {
+        match value {
+            substreams::ChangeType::Unspecified => {
+                panic!("Unkown enum member encountered: {:?}", value)
+            }
+            substreams::ChangeType::Update => ChangeType::Update,
+            substreams::ChangeType::Creation => ChangeType::Creation,
+            substreams::ChangeType::Deletion => ChangeType::Deletion,
+        }
     }
 }
 
