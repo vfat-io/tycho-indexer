@@ -1,8 +1,10 @@
 pub mod ambient;
+pub mod storage;
+mod utils;
 
 use crate::{
     models::{Chain, ExtractorIdentity, NormalisedMessage},
-    storage::StateGatewayType,
+    storage::{ChangeType, StateGatewayType},
 };
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -119,6 +121,7 @@ pub struct AccountUpdate {
     pub slots: HashMap<U256, U256>,
     pub balance: Option<U256>,
     pub code: Option<Vec<u8>>,
+    pub change: ChangeType,
 }
 
 impl AccountUpdate {
@@ -129,8 +132,9 @@ impl AccountUpdate {
         slots: HashMap<U256, U256>,
         balance: Option<U256>,
         code: Option<Vec<u8>>,
+        change: ChangeType,
     ) -> Self {
-        Self { address, chain, slots, balance, code }
+        Self { address, chain, slots, balance, code, change }
     }
 
     // TODO: test
@@ -181,7 +185,8 @@ impl AccountUpdateWithTx {
         code: Option<Vec<u8>>,
         tx: Transaction,
     ) -> Self {
-        Self { update: AccountUpdate { address, chain, slots, balance, code }, tx }
+        let change = ChangeType::default();
+        Self { update: AccountUpdate { address, chain, slots, balance, code, change }, tx }
     }
 
     pub fn merge(&mut self, other: AccountUpdateWithTx) -> Result<(), ExtractionError> {
@@ -312,6 +317,7 @@ impl AccountUpdateWithTx {
                 None
             },
             code: if !msg.code.is_empty() { Some(msg.code) } else { None },
+            change: ChangeType::Update,
         };
         Ok(Self { update, tx: *tx })
     }

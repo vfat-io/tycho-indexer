@@ -20,6 +20,37 @@
 //! having an index, the original sequence of state modifications stays
 //! preserved.
 //!
+//! ### Version semantics intra block
+//!
+//! ```text
+//! tx            0    1       0  1             2          0  1            2
+//! B01 ----------x----x---B02-x--x-------------x---B03----x--x------------x-->
+//! 00:00                  00:12                 | |00:24
+//! ____Block(B02), VersionKind::Index(2)________| |
+//! ____Block(B02), VersionKind::Last______________+
+//!                                                |
+//! ____Block(B03), VersionKind::First_____________|
+//! ```
+//!
+//! Above you'll find the 3 possible version kinds. Note that Index(N) specifies
+//! the transaction slot after N. VersionKind::First includes the last
+//! transaction of the previous block and VersionKind::Last includes the last
+//! transaction of the specified block. So it is possible to refer to the exact
+//! same state using both Last and First VersionKind variants.
+//!
+//! ## Literal Types
+//!
+//! For the representation of various literals, we utilize a variable-length
+//! byte type (`Vec<u8>`) This decision predominantly arises from the uncertain
+//! nature of their size, which may not necessarily fit into a smaller data
+//! type, such as `int64`. Therefore, literals encompassing but not limited to,
+//! hashes, balances, codes, and values, are facilitated by the `Vec<u8>`
+//! structure.
+//!
+//! To enhance readability and clarity, we've introduced multiple type aliases.
+//! These help us effectively differentiate when each literal type is being
+//! referred to in our code.
+//!
 //! ## Implementations
 //!
 //! To set up a storage system, you need to implement all the traits defined
@@ -46,30 +77,57 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 use crate::services::deserialization_helpers::hex_to_bytes;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem};
 
-// We use variable length bytes type for literals of the contract store for
-// flexibility and because postgres does not support a fixed size byte array
-// column type. On blockchains these are usually fixed, e.g. 32 bytes on
-// ethereum but might have different lengths (e.g. addresses in Ethereum has 20
-// bytes length vs Starknet uses 32 byte addresses).
-
 /// Address hash literal type to uniquely identify contracts/accounts on a
 /// blockchain.
-type Address = Vec<u8>;
+pub type Address = Vec<u8>;
+
 /// Block hash literal type to uniquely identify a block in the chain and
 /// likely across chains.
-type BlockHash = Vec<u8>;
+pub type BlockHash = Vec<u8>;
 
-type AddressRef<'a> = &'a [u8];
-type BlockHashRef<'a> = &'a [u8];
-type TxHashRef<'a> = &'a [u8];
+/// Smart contract code is represented as a byte vector containing opcodes.
+pub type Code = Vec<u8>;
+
+/// The chain specific hash digest of an account's code.
+pub type CodeHash = Vec<u8>;
+
+/// The balance of an account is a big endian serialised integer of variable size.
+pub type Balance = Vec<u8>;
+
+/// Key literal type of the contract store.
+pub type StoreKey = Vec<u8>;
+
+/// Value literal type of the contract store.
+pub type StoreVal = Vec<u8>;
+
+/// A binary key value store for an account.
+pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
+
+/// Multiple key values stores grouped by account address.
+pub type AccountToContractStore = HashMap<Address, ContractStore>;
+
+/// A slice into an [Address].
+pub type AddressRef<'a> = &'a [u8];
+
+/// A slice into a [BlockHash].
+pub type BlockHashRef<'a> = &'a [u8];
+
+/// A slice into a transaction hash.
+pub type TxHashRef<'a> = &'a [u8];
+
+/// A slice into [Code].
+pub type CodeRef<'a> = &'a [u8];
+
+/// A slice into a [Balance] value.
+pub type BalanceRef<'a> = &'a [u8];
 
 /// Identifies a block in storage.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockIdentifier {
     /// Identifies the block by its position on a specified chain.
     ///
@@ -173,7 +231,7 @@ pub trait StorableTransaction<S, N, I>: Send + Sync + 'static {
     fn hash(&self) -> TxHashRef;
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum StorageError {
     #[error("Could not find {0} with id `{1}`!")]
     NotFound(String, String),
@@ -313,7 +371,7 @@ pub trait ExtractionStateGateway {
 
 /// Point in time as either block or timestamp. If a block is chosen it
 /// timestamp attribute is used.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockOrTimestamp {
     Block(BlockIdentifier),
     Timestamp(NaiveDateTime),
@@ -490,15 +548,6 @@ pub trait ProtocolGateway {
     async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError>;
 }
 
-/// Key literal type of the contract store.
-type StoreKey = Vec<u8>;
-/// Value literal type of the contract store.
-type StoreVal = Vec<u8>;
-/// A binary key value store for an account.
-type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
-/// Multiple key values stores grouped by account address.
-type AccountToContractStore = HashMap<Address, ContractStore>;
-
 /// Lays out the necessary interface needed to store and retrieve contracts from
 /// and their associated state from storage.
 ///
@@ -566,6 +615,14 @@ pub trait StorableContract<S, N, I>: Send + Sync + 'static {
     fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
 }
 
+#[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize)]
+pub enum ChangeType {
+    #[default]
+    Update,
+    Deletion,
+    Creation,
+}
+
 /// Provides methods associated with changes in a contract.
 ///
 /// This includes methods for loading a contract from storage, getting a
@@ -574,9 +631,8 @@ pub trait StorableContract<S, N, I>: Send + Sync + 'static {
 ///
 /// Types that implement this trait should represent the delta of an on-chain
 /// contract's state.
-pub trait ContractDelta: Sized + Send + Sync + 'static {
-    /// Loads a `ContractDelta` from storage given a chain, address reference,
-    /// optional slots, balance, and code.
+pub trait ContractDelta: std::fmt::Debug + Clone + Sized + Send + Sync + 'static {
+    /// Converts into a struct implementing `ContractDelta` from storage literals.
     ///
     /// # Arguments
     /// - `chain`: The blockchain where the contract resides.
@@ -592,8 +648,9 @@ pub trait ContractDelta: Sized + Send + Sync + 'static {
         chain: Chain,
         address: AddressRef,
         slots: Option<&ContractStore>,
-        balance: Option<&[u8]>,
-        code: Option<&[u8]>,
+        balance: Option<BalanceRef>,
+        code: Option<CodeRef>,
+        change: ChangeType,
     ) -> Result<Self, StorageError>;
 
     /// Identifies the contract which had changes.

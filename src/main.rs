@@ -32,6 +32,10 @@ use crate::{
     storage::postgres::{self, PostgresGateway},
 };
 
+#[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions;
+
 /// Tycho Indexer using Substreams
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
 #[clap(

@@ -299,6 +299,18 @@ impl Account {
             .await
     }
 
+    /// retrieves a account by address
+    pub async fn by_address(
+        address: &[u8],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
+        account::table
+            .filter(account::address.eq(address))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await
+    }
+
     pub async fn get_addresses_by_id(
         ids: impl Iterator<Item = &i64>,
         conn: &mut AsyncPgConnection,

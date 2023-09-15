@@ -332,7 +332,7 @@ impl<B, TX, A, D> StateGateway<AsyncPgConnection> for PostgresGateway<B, TX, A, 
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    D: ContractDelta,
+    D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
 {
     // No methods in here - this just ties everything together
