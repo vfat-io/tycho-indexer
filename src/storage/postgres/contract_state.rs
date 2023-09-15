@@ -63,8 +63,6 @@ where
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<i64, Balance>, StorageError> {
         use schema::account_balance::dsl::*;
-        dbg!(&start_version_ts);
-        dbg!(&target_version_ts);
         let res = if start_version_ts <= target_version_ts {
             let changed_account_ids = account_balance
                 .inner_join(schema::account::table.inner_join(schema::chain::table))
@@ -286,14 +284,14 @@ where
         Ok(result)
     }
 
-    /// Handle deleted or created account deltas
+    /// Fetch deleted or created account deltas
     ///
     /// # Operations
     ///   
     /// 1. Going Forward (`start < target`):
     ///     - a) If an account was deleted, emit an empty delta with [ChangeType::Deletion].
     ///     - b) If an account was created, emit an already collected update delta but with
-    ///       [ChangeType::Creation].. No need to fetches the state at the `target_version` as by
+    ///       [ChangeType::Creation].. No need to fetch the state at the `target_version` as by
     ///       design we emit newly created contracts and their components when going forward.
     ///  
     /// 2. Going Backward (`target < start`):
@@ -314,7 +312,7 @@ where
     /// attribute. We can use this attribute to satisfy the first operation. It also contains new
     /// restored / deleted delta structs withing the `restored` attribute with which we can satisfy
     /// the second rule.
-    async fn created_or_deleted_accounts(
+    async fn get_created_or_deleted_accounts(
         &self,
         chain: Chain,
         start_version_ts: &NaiveDateTime,
@@ -1176,7 +1174,7 @@ where
             .get_slots_delta(chain_id, &start_version_ts, &target_version_ts, conn)
             .await?;
         let account_deltas = self
-            .created_or_deleted_accounts(chain, &start_version_ts, &target_version_ts, conn)
+            .get_created_or_deleted_accounts(chain, &start_version_ts, &target_version_ts, conn)
             .await?;
 
         // We retrieve account addresses separately because this is more
@@ -2294,7 +2292,7 @@ mod test {
     async fn get_account_delta_fail(#[case] start: &str, #[case] end: &str) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
-        let c1 = &orm::Account::by_hash(
+        let c1 = &orm::Account::by_address(
             hex::decode("73BcE791c239c8010Cd3C857d96580037CCdd0EE")
                 .expect("address ok")
                 .as_slice(),

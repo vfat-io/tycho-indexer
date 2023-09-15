@@ -23,10 +23,10 @@
 //! ### Version semantics intra block
 //!
 //! ```text
-//! tx            1    2       1  2             3          1  2            3
+//! tx            0    1       0  1             2          0  1            2
 //! B01 ----------x----x---B02-x--x-------------x---B03----x--x------------x-->
 //! 00:00                  00:12                 | |00:24
-//! ____Block(B02), VersionKind::Index(3)________| |
+//! ____Block(B02), VersionKind::Index(2)________| |
 //! ____Block(B02), VersionKind::Last______________+
 //!                                                |
 //! ____Block(B03), VersionKind::First_____________|
@@ -35,8 +35,8 @@
 //! Above you'll find the 3 possible version kinds. Note that Index(N) specifies
 //! the transaction slot after N. VersionKind::First includes the last
 //! transaction of the previous block and VersionKind::Last includes the last
-//! transaction of the specified block. So it is possbile to convert between the
-//! variants first and last
+//! transaction of the specified block. So it is possible to refer to the exact
+//! same state using both Last and First VersionKind variants.
 //!
 //! ## Literal Types
 //!

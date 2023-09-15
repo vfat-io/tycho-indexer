@@ -299,8 +299,11 @@ impl Account {
             .await
     }
 
-    /// retrieves a account by hash
-    pub async fn by_hash(address: &[u8], conn: &mut AsyncPgConnection) -> QueryResult<Vec<Self>> {
+    /// retrieves a account by address
+    pub async fn by_address(
+        address: &[u8],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
         account::table
             .filter(account::address.eq(address))
             .select(Self::as_select())
