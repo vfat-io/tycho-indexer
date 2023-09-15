@@ -269,25 +269,17 @@ where
 
         let raw_msg = BlockContractChanges::decode(_data.value.as_slice())?;
         debug!("Received message: {raw_msg:?}");
-        dbg!("entering");
+
         let msg = match evm::BlockStateChanges::try_from_message(raw_msg, &self.name, self.chain) {
-            Ok(changes) => {
-                dbg!("changes");
-                changes
-            }
+            Ok(changes) => changes,
             Err(ExtractionError::Empty) => {
                 return {
-                    dbg!("empty");
                     self.update_cursor(inp.cursor).await;
                     Ok(None)
                 }
             }
-            Err(e) => {
-                dbg!(&e);
-                return Err(e)
-            }
+            Err(e) => return Err(e),
         };
-        dbg!(&msg);
         self.gateway
             .upsert_contract(&msg, inp.cursor.as_ref())
             .await?;

@@ -101,14 +101,13 @@ impl Account {
 }
 
 impl From<&AccountUpdateWithTx> for Account {
-
     /// Creates a full account from a change.
-    /// 
+    ///
     /// This can be used to get an insertable an account if we know the update
     /// is actually a creation.
-    /// 
+    ///
     /// Assumes that all relevant changes are set on `self` if something is
-    /// missing, it will use the corresponding types default. 
+    /// missing, it will use the corresponding types default.
     /// Will use the associated transaction as creation, balance and code modify
     /// transaction.
     fn from(value: &AccountUpdateWithTx) -> Self {
@@ -196,7 +195,7 @@ impl AccountUpdate {
 }
 
 /// A container for account updates grouped by account.
-/// 
+///
 /// Hold a single update per account. This is a condensed from of
 /// [BlockStateChanges].
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
@@ -242,14 +241,13 @@ impl AccountUpdateWithTx {
     ///
     /// The method combines two `AccountUpdateWithTx` instances under certain
     /// conditions:
-    /// - The block from which both updates came should be the same. If the
-    ///   updates are from different blocks, the method will return an error.
-    /// - The transactions for each of the updates should be distinct. If they
-    ///   come from the same transaction, the method will return an error.
-    /// - The order of the transaction matters. The transaction from `other`
-    ///   must have occurred later than the self transaction. If the self
-    ///   transaction has a higher index than `other`, the method will return an
-    ///   error.
+    /// - The block from which both updates came should be the same. If the updates are from
+    ///   different blocks, the method will return an error.
+    /// - The transactions for each of the updates should be distinct. If they come from the same
+    ///   transaction, the method will return an error.
+    /// - The order of the transaction matters. The transaction from `other` must have occurred
+    ///   later than the self transaction. If the self transaction has a higher index than `other`,
+    ///   the method will return an error.
     ///
     /// The merged update keeps the transaction of `other`.
     ///
@@ -289,7 +287,7 @@ impl Deref for AccountUpdateWithTx {
 }
 
 /// A container for account updates grouped by transaction.
-/// 
+///
 /// Hold the detailed state changes for a block alongside with protocol
 /// component changes.
 #[derive(Debug, PartialEq)]
@@ -430,10 +428,7 @@ impl BlockStateChanges {
     pub fn aggregate_updates(self) -> Result<BlockAccountChanges, ExtractionError> {
         let mut account_updates: HashMap<H160, AccountUpdateWithTx> = HashMap::new();
 
-        for update in self
-            .tx_updates
-            .into_iter()
-        {
+        for update in self.tx_updates.into_iter() {
             match account_updates.entry(update.address) {
                 Entry::Occupied(mut e) => {
                     e.get_mut().merge(update)?;
@@ -448,26 +443,39 @@ impl BlockStateChanges {
             extractor: self.extractor,
             chain: self.chain,
             block: self.block,
-            account_updates: account_updates.into_iter().map(|(k, v)|(k, v.update)).collect(), 
+            account_updates: account_updates
+                .into_iter()
+                .map(|(k, v)| (k, v.update))
+                .collect(),
             new_pools: self.new_pools,
         })
     }
 }
 
-
-
-
 #[cfg(test)]
 pub mod fixtures {
-    pub const HASH_256_0: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    pub const HASH_256_0: &str =
+        "0x0000000000000000000000000000000000000000000000000000000000000000";
 
-    pub fn pb_block_scoped_data(msg: impl prost::Message) -> crate::pb::sf::substreams::rpc::v2::BlockScopedData {
-        use crate::pb::sf::substreams::rpc::v2::*;
-        use crate::pb::sf::substreams::v1::Clock;
+    pub fn pb_block_scoped_data(
+        msg: impl prost::Message,
+    ) -> crate::pb::sf::substreams::rpc::v2::BlockScopedData {
+        use crate::pb::sf::substreams::{rpc::v2::*, v1::Clock};
         let val = msg.encode_to_vec();
-        BlockScopedData{ 
-            output: Some(MapModuleOutput { name: "map_changes".to_owned(), map_output: Some(prost_types::Any{type_url: "tycho.evm.v1.BlockContractChanges".to_owned(), value: val}), debug_info: None }), 
-            clock: Some(Clock { id: HASH_256_0.to_owned(), number: 420, timestamp: Some(prost_types::Timestamp { seconds: 1000, nanos: 0 }) }),
+        BlockScopedData {
+            output: Some(MapModuleOutput {
+                name: "map_changes".to_owned(),
+                map_output: Some(prost_types::Any {
+                    type_url: "tycho.evm.v1.BlockContractChanges".to_owned(),
+                    value: val,
+                }),
+                debug_info: None,
+            }),
+            clock: Some(Clock {
+                id: HASH_256_0.to_owned(),
+                number: 420,
+                timestamp: Some(prost_types::Timestamp { seconds: 1000, nanos: 0 }),
+            }),
             cursor: "cursor@420".to_owned(),
             final_block_height: 405,
             debug_map_outputs: vec![],
@@ -479,59 +487,55 @@ pub mod fixtures {
         use crate::pb::tycho::evm::v1::*;
         BlockContractChanges {
             block: Some(Block {
-                hash: vec![0x31, 0x32, 0x33, 0x34], 
+                hash: vec![0x31, 0x32, 0x33, 0x34],
                 parent_hash: vec![0x21, 0x22, 0x23, 0x24],
                 number: 1,
                 ts: 1000,
             }),
-        
-            changes: vec![
-                TransactionChanges {
-                    tx: Some(Transaction {
-                        hash: vec![0x11, 0x12, 0x13, 0x14],
-                        from: vec![0x41, 0x42, 0x43, 0x44],
-                        to: vec![0x51, 0x52, 0x53, 0x54],
-                        index: 2,
-                    }),
-                    contract_changes: vec![
-                        ContractChange {
-                            address: vec![0x61, 0x62, 0x63, 0x64],
-                            balance: vec![0x71, 0x72, 0x73, 0x74],
-                            code: vec![0x81, 0x82, 0x83, 0x84],
-                            slots: vec![
-                                ContractSlot {
-                                    slot: vec![0xa1, 0xa2, 0xa3, 0xa4],
-                                    value: vec![0xb1, 0xb2, 0xb3, 0xb4],
-                                },
-                                ContractSlot {
-                                    slot: vec![0xc1, 0xc2, 0xc3, 0xc4],
-                                    value: vec![0xd1, 0xd2, 0xd3, 0xd4],
-                                },
-                            ],
-                        },
-                        ContractChange {
-                            address: vec![0x61, 0x62, 0x63, 0x64],
-                            balance: vec![0xf1, 0xf2, 0xf3, 0xf4],
-                            code: vec![0x01, 0x02, 0x03, 0x04],
-                            slots: vec![
-                                ContractSlot {
-                                    slot: vec![0x91, 0x92, 0x93, 0x94],
-                                    value: vec![0xa1, 0xa2, 0xa3, 0xa4],
-                                },
-                                ContractSlot {
-                                    slot: vec![0xb1, 0xb2, 0xb3, 0xb4],
-                                    value: vec![0xc1, 0xc2, 0xc3, 0xc4],
-                                },
-                            ],
-                        },
-                    ]
-                },
-            ],
+
+            changes: vec![TransactionChanges {
+                tx: Some(Transaction {
+                    hash: vec![0x11, 0x12, 0x13, 0x14],
+                    from: vec![0x41, 0x42, 0x43, 0x44],
+                    to: vec![0x51, 0x52, 0x53, 0x54],
+                    index: 2,
+                }),
+                contract_changes: vec![
+                    ContractChange {
+                        address: vec![0x61, 0x62, 0x63, 0x64],
+                        balance: vec![0x71, 0x72, 0x73, 0x74],
+                        code: vec![0x81, 0x82, 0x83, 0x84],
+                        slots: vec![
+                            ContractSlot {
+                                slot: vec![0xa1, 0xa2, 0xa3, 0xa4],
+                                value: vec![0xb1, 0xb2, 0xb3, 0xb4],
+                            },
+                            ContractSlot {
+                                slot: vec![0xc1, 0xc2, 0xc3, 0xc4],
+                                value: vec![0xd1, 0xd2, 0xd3, 0xd4],
+                            },
+                        ],
+                    },
+                    ContractChange {
+                        address: vec![0x61, 0x62, 0x63, 0x64],
+                        balance: vec![0xf1, 0xf2, 0xf3, 0xf4],
+                        code: vec![0x01, 0x02, 0x03, 0x04],
+                        slots: vec![
+                            ContractSlot {
+                                slot: vec![0x91, 0x92, 0x93, 0x94],
+                                value: vec![0xa1, 0xa2, 0xa3, 0xa4],
+                            },
+                            ContractSlot {
+                                slot: vec![0xb1, 0xb2, 0xb3, 0xb4],
+                                value: vec![0xc1, 0xc2, 0xc3, 0xc4],
+                            },
+                        ],
+                    },
+                ],
+            }],
         }
     }
-
 }
-
 
 #[cfg(test)]
 mod test {
@@ -658,21 +662,18 @@ mod test {
         assert_eq!(res, exp);
     }
 
-    // diff block
-    // same tx
-    // lower idx
     #[rstest]
     #[case::diff_block(
-        transaction02(HASH_256_1, HASH_256_1, 11), 
+        transaction02(HASH_256_1, HASH_256_1, 11),
         Err(ExtractionError::Unknown(format!("Can't merge AccountUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
     )]
     #[case::same_tx(
-        transaction02(HASH_256_0, HASH_256_0, 11), 
+        transaction02(HASH_256_0, HASH_256_0, 11),
         Err(ExtractionError::Unknown(format!("Can't merge AccountUpdates from the same transaction: 0x{:x}", H256::zero())))
     )]
     #[case::lower_idx(
-        transaction02(HASH_256_1, HASH_256_0, 1), 
-        Err(ExtractionError::Unknown(format!("Can't merge AccountUpdates with lower transaction index: 10 > 1")))
+        transaction02(HASH_256_1, HASH_256_0, 1),
+        Err(ExtractionError::Unknown("Can't merge AccountUpdates with lower transaction index: 10 > 1".to_owned()))
     )]
     fn test_merge_account_update_w_tx(
         #[case] tx: Transaction,
@@ -687,10 +688,14 @@ mod test {
         assert_eq!(res, exp);
     }
 
-    fn block_state_changes() -> BlockStateChanges{
+    fn block_state_changes() -> BlockStateChanges {
         let tx = Transaction {
-            hash: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000011121314),
-            block_hash: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000031323334),
+            hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000011121314,
+            ),
+            block_hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000031323334,
+            ),
             from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
             to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
             index: 2,
@@ -700,8 +705,12 @@ mod test {
             chain: Chain::Ethereum,
             block: Block {
                 number: 1,
-                hash: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000031323334),
-                parent_hash: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000021222324),
+                hash: H256::from_low_u64_be(
+                    0x0000000000000000000000000000000000000000000000000000000031323334,
+                ),
+                parent_hash: H256::from_low_u64_be(
+                    0x0000000000000000000000000000000000000000000000000000000021222324,
+                ),
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
@@ -716,18 +725,18 @@ mod test {
                         change: ChangeType::Update,
                     },
                     tx,
-                }, 
+                },
                 AccountUpdateWithTx {
                     update: AccountUpdate {
                         address: H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                         chain: Chain::Ethereum,
                         slots: evm_slots([(2981278644, 3250766788), (2442302356, 2711790500)]),
                         balance: Some(U256::from(4059231220u64)),
-                        code: Some(vec![1,2,3,4]),
+                        code: Some(vec![1, 2, 3, 4]),
                         change: ChangeType::Update,
                     },
                     tx,
-                }, 
+                },
             ],
             new_pools: HashMap::new(),
         }
@@ -739,7 +748,7 @@ mod test {
 
         let res = BlockStateChanges::try_from_message(msg, "test", Chain::Ethereum).unwrap();
 
-        assert_eq!(res, block_state_changes()); 
+        assert_eq!(res, block_state_changes());
     }
 
     fn block_account_changes() -> BlockAccountChanges {
@@ -749,21 +758,33 @@ mod test {
             chain: Chain::Ethereum,
             block: Block {
                 number: 1,
-                hash: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000031323334),
-                parent_hash: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000021222324),
+                hash: H256::from_low_u64_be(
+                    0x0000000000000000000000000000000000000000000000000000000031323334,
+                ),
+                parent_hash: H256::from_low_u64_be(
+                    0x0000000000000000000000000000000000000000000000000000000021222324,
+                ),
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
-            account_updates: vec![(address, 
+            account_updates: vec![(
+                address,
                 AccountUpdate {
-                        address: H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
-                        chain: Chain::Ethereum,
-                        slots: evm_slots([(2711790500, 2981278644), (3250766788, 3520254932), (2981278644, 3250766788), (2442302356, 2711790500)]),
-                        balance: Some(U256::from(4059231220u64)),
-                        code: Some(vec![1,2,3,4]),
-                        change: ChangeType::Update,
-                } )
-            ].into_iter().collect(),
+                    address: H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                    chain: Chain::Ethereum,
+                    slots: evm_slots([
+                        (2711790500, 2981278644),
+                        (3250766788, 3520254932),
+                        (2981278644, 3250766788),
+                        (2442302356, 2711790500),
+                    ]),
+                    balance: Some(U256::from(4059231220u64)),
+                    code: Some(vec![1, 2, 3, 4]),
+                    change: ChangeType::Update,
+                },
+            )]
+            .into_iter()
+            .collect(),
             new_pools: HashMap::new(),
         }
     }
@@ -780,5 +801,4 @@ mod test {
 
         assert_eq!(res, block_account_changes());
     }
-
 }
