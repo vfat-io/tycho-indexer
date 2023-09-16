@@ -732,7 +732,7 @@ where
             &balance_tx,
             &code_tx,
             creation_tx.as_deref(),
-        );
+        )?;
 
         if include_slots {
             let slots = self
@@ -881,7 +881,7 @@ where
                     balance_tx.as_slice(),
                     code_tx.as_slice(),
                     creation_tx.as_deref(),
-                );
+                )?;
 
                 if let Some(storage) = &slots {
                     if let Some(contract_slots) = storage.get(contract.address()) {

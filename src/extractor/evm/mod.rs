@@ -45,7 +45,6 @@ pub struct Transaction {
     pub index: u64,
 }
 
-
 impl Transaction {
     pub fn new(hash: H256, block_hash: H256, from: H160, to: Option<H160>, index: u64) -> Self {
         Transaction { hash, block_hash, from, to, index }
@@ -115,7 +114,7 @@ impl From<&AccountUpdateWithTx> for Account {
         Account::new(
             value.chain,
             value.address,
-            format!("0x{:x}", value.address),
+            format!("{:#020x}", value.address),
             value.slots.clone(),
             value.balance.unwrap_or_default(),
             value.code.clone().unwrap_or_default(),
@@ -180,7 +179,7 @@ impl AccountUpdate {
     fn merge(&mut self, other: AccountUpdate) -> Result<(), ExtractionError> {
         if self.address != other.address {
             return Err(ExtractionError::Unknown(format!(
-                "Can't merge AccountUpdates from differing identities; Expected 0x{:x}, got 0x{:x}",
+                "Can't merge AccountUpdates from differing identities; Expected {:#020x}, got {:#020x}",
                 self.address, other.address
             )))
         }

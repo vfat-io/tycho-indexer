@@ -273,10 +273,8 @@ where
         let msg = match evm::BlockStateChanges::try_from_message(raw_msg, &self.name, self.chain) {
             Ok(changes) => changes,
             Err(ExtractionError::Empty) => {
-                return {
-                    self.update_cursor(inp.cursor).await;
-                    Ok(None)
-                }
+                self.update_cursor(inp.cursor).await;
+                return Ok(None)
             }
             Err(e) => return Err(e),
         };
