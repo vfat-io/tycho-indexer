@@ -70,8 +70,8 @@ pub struct AppState<M> {
 }
 
 impl<M> AppState<M> {
-    pub fn new() -> Self {
-        Self { subscribers: Arc::new(Mutex::new(HashMap::new())) }
+    pub fn new(extractors: MessageSenderMap<M>) -> Self {
+        Self { subscribers: Arc::new(Mutex::new(extractors)) }
     }
 }
 
@@ -168,7 +168,11 @@ where
                     }
                 };
             } else {
-                error!("Extractor not found: {:?}", extractor_id);
+                let available = extractors_guard
+                    .keys()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>();
+                error!("Extractor '{}' unknown; available: {:?}", extractor_id, available);
 
                 let error = WebsocketError::ExtractorNotFound(extractor_id.clone());
                 ctx.text(serde_json::to_string(&error).unwrap());
@@ -668,5 +672,14 @@ mod tests {
         dbg!("Closed connection");
 
         Ok(())
+    }
+
+    #[test]
+    fn test_msg() {
+        // Create and send a subscribe message from the client
+        let extractor = ExtractorIdentity { chain: Chain::Ethereum, name: "vm:ambient".to_owned() };
+        let action = Command::Subscribe { extractor };
+        let res = serde_json::to_string(&action).unwrap();
+        println!("{}", res);
     }
 }

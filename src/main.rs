@@ -79,13 +79,13 @@ async fn main() -> Result<(), Error> {
         .await?;
 
     info!("Starting Tycho");
-    info!("Starting ambient extractor");
     let mut ambient_handle =
         start_ambient_extractor(&args.package_file, pool.clone(), evm_gw.clone()).await?;
+    info!("{} started!", ambient_handle.get_id());
 
     let ambient_fut = ambient_handle.join_handle()?;
     let ambient_fut = async {
-        ambient_fut.await;
+        let _ = ambient_fut.await;
         // TODO: change ExtractionRunner output type to return result
         Ok::<(), std::io::Error>(())
     };
@@ -94,7 +94,9 @@ async fn main() -> Result<(), Error> {
     let services_fut = ServicesBuilder::new()
         .register_extractor(ambient_handle)
         .run();
-    try_join!(ambient_fut, services_fut).map(|_| ()).map_err(|err| err.into())
+    try_join!(ambient_fut, services_fut)
+        .map(|_| ())
+        .map_err(|err| err.into())
 }
 
 async fn start_ambient_extractor(
@@ -109,7 +111,7 @@ async fn start_ambient_extractor(
     let builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(17361664)
         // for testing only
-        .end_block(17362000);
+        .end_block(17375000);
     let handle = builder.run().await?;
     Ok(handle)
 }

@@ -52,8 +52,7 @@ impl<M: NormalisedMessage> ServicesBuilder<M> {
     }
 
     pub async fn run(self) -> std::io::Result<()> {
-        let app_state = web::Data::new(AppState::<M>::new());
-
+        let app_state = web::Data::new(AppState::<M>::new(self.extractor_handles));
         HttpServer::new(move || {
             App::new()
                 .app_data(app_state.clone())

@@ -14,6 +14,7 @@ use tracing::{debug, error, info, warn};
 
 use super::Extractor;
 use crate::{
+    extractor::ExtractionError,
     models::{ExtractorIdentity, NormalisedMessage},
     pb::sf::substreams::v1::Package,
     substreams::{
@@ -21,7 +22,6 @@ use crate::{
         SubstreamsEndpoint,
     },
 };
-use crate::extractor::ExtractionError;
 
 pub enum ControlMessage<M> {
     Stop,
@@ -71,10 +71,12 @@ where
     }
 
     pub fn join_handle(&mut self) -> Result<JoinHandle<()>, ExtractionError> {
-        self.handle.take().ok_or_else(|| ExtractionError::Unknown(format!(
-            "The extractor: {}|{} had it's handle already taken!",
-            self.id.chain, self.id.name
-        )))
+        self.handle.take().ok_or_else(|| {
+            ExtractionError::Unknown(format!(
+                "The extractor: {}|{} had it's handle already taken!",
+                self.id.chain, self.id.name
+            ))
+        })
     }
 }
 
