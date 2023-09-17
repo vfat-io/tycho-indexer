@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// How often heartbeat pings are sent
@@ -131,7 +131,6 @@ where
         ctx: &mut ws::WebsocketContext<Self>,
         extractor_id: &ExtractorIdentity,
     ) {
-        info!("Subscribing to extractor: {:?}", extractor_id);
         {
             let extractors_guard = self
                 .app_state
@@ -142,7 +141,7 @@ where
             if let Some(message_sender) = extractors_guard.get(extractor_id) {
                 // Generate a unique ID for this subscription
                 let subscription_id = Uuid::new_v4();
-                info!("Generated subscription ID: {:?}", subscription_id);
+                debug!("Generated subscription ID: {:?}", subscription_id);
 
                 match block_on(message_sender.subscribe()) {
                     Ok(mut rx) => {
@@ -155,7 +154,7 @@ where
                         let handle = ctx.add_stream(stream);
                         self.subscriptions
                             .insert(subscription_id, handle);
-                        info!("Added subscription to hashmap: {:?}", subscription_id);
+                        debug!("Added subscription to hashmap: {:?}", subscription_id);
 
                         let message = Response::NewSubscription { subscription_id };
                         ctx.text(serde_json::to_string(&message).unwrap());
@@ -246,10 +245,10 @@ where
     M: NormalisedMessage,
 {
     fn handle(&mut self, msg: Result<Arc<M>, ws::ProtocolError>, ctx: &mut Self::Context) {
-        info!("Message received from extractor");
+        debug!("Message received from extractor");
         match msg {
             Ok(message) => {
-                info!("Forwarding message to client");
+                debug!("Forwarding message to client");
                 ctx.text(serde_json::to_string(&message).unwrap());
             }
             Err(e) => {
@@ -265,10 +264,10 @@ where
     M: NormalisedMessage,
 {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        info!("Websocket message received.");
+        debug!("Websocket message received.");
         match msg {
             Ok(ws::Message::Ping(msg)) => {
-                info!("Websocket ping message received");
+                debug!("Websocket ping message received");
                 self.heartbeat = Instant::now();
                 ctx.pong(&msg);
             }
@@ -276,7 +275,7 @@ where
                 self.heartbeat = Instant::now();
             }
             Ok(ws::Message::Text(text)) => {
-                info!("Websocket text message received: {:?}", &text);
+                debug!("Websocket text message received: {:?}", &text);
 
                 // Try to deserialize the message to a Message enum
                 match serde_json::from_str::<Command>(&text) {

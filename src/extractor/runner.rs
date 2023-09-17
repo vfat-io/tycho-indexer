@@ -159,7 +159,6 @@ where
     }
 
     async fn subscribe(&mut self, sender: Sender<Arc<M>>) {
-        info!("New subscriber.");
         let counter = self.subscriptions.lock().await.len() as u64;
         self.subscriptions
             .lock()
@@ -180,7 +179,7 @@ where
             match sender.send(arced_message.clone()).await {
                 Ok(_) => {
                     // Message sent successfully
-                    info!("Message sent to subscriber {}", counter);
+                    debug!("Message sent to subscriber {}", counter);
                 }
                 Err(_) => {
                     // Receiver has been dropped, mark for removal

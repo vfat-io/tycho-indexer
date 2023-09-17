@@ -109,8 +109,8 @@ async fn start_ambient_extractor(
 
     let builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(17361664)
-        // for testing only
-        .end_block(17375000);
+        // Run over first 1000 blocks for testing
+        .end_block(17362664);
     builder.run().await
 }
 
