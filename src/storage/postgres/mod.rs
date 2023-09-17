@@ -143,7 +143,7 @@ use diesel_async::{
     pooled_connection::{bb8::Pool, AsyncDieselConnectionManager},
     AsyncPgConnection, RunQueryDsl,
 };
-use tracing::info;
+use tracing::debug;
 
 use super::{
     ContractDelta, StateGateway, StorableBlock, StorableContract, StorableTransaction, StorageError,
@@ -391,7 +391,7 @@ pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageErr
 /// - If it failed to get a connection from the provided pool.
 /// - If there was an issue ensuring the presence of chains in the database.
 pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
-    info!("Ensured chain enum presence for: {:?}", chains);
+    debug!("Ensured chain enum presence for: {:?}", chains);
     let mut conn = pool.get().await.expect("connection ok");
     diesel::insert_into(schema::chain::table)
         .values(

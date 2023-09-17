@@ -5,7 +5,7 @@ use crate::{
     models::{ExtractorIdentity, NormalisedMessage},
 };
 use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
-use actix_web::{web, Error, HttpRequest, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use futures03::executor::block_on;
 use serde::{Deserialize, Serialize};
@@ -106,7 +106,7 @@ where
         req: HttpRequest,
         stream: web::Payload,
         data: web::Data<AppState<M>>,
-    ) -> Result<HttpResponse, Error> {
+    ) -> Result<HttpResponse, actix_web::Error> {
         ws::start(WsActor::new(data), &req, stream)
     }
 
@@ -402,7 +402,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_websocket_ping_pong() {
-        let app_state = web::Data::new(AppState::<DummyMessage>::new());
+        let app_state = web::Data::new(AppState::<DummyMessage>::new(HashMap::new()));
         let server = start(move || {
             App::new()
                 .app_data(app_state.clone())
@@ -545,7 +545,7 @@ mod tests {
         let extractor_id = ExtractorIdentity::new(Chain::Ethereum, "dummy");
         let extractor_id2 = ExtractorIdentity::new(Chain::Ethereum, "dummy2");
 
-        let app_state = web::Data::new(AppState::<DummyMessage>::new());
+        let app_state = web::Data::new(AppState::<DummyMessage>::new(HashMap::new()));
 
         let message_sender = Arc::new(MyMessageSender::new(extractor_id.clone()));
         let message_sender2 = Arc::new(MyMessageSender::new(extractor_id2.clone()));

@@ -63,15 +63,18 @@ fn stream_blocks(
     stop_block_num: u64,
 ) -> impl Stream<Item = Result<BlockResponse, Error>> {
     let mut latest_cursor = cursor.unwrap_or_default();
+    let mut retry_count = 0;
     let mut backoff = DEFAULT_BACKOFF.clone();
 
     try_stream! {
         'retry_loop: loop {
-            info!("Blockstreams disconnected, connecting (endpoint {}, start block {}, cursor {})",
-                &endpoint,
-                start_block_num,
-                &latest_cursor
-            );
+            if retry_count > 0 {
+                warn!("Blockstreams disconnected, connecting (endpoint {}, start block {}, cursor {})",
+                    &endpoint,
+                    start_block_num,
+                    &latest_cursor
+                );
+            }
 
             let result = endpoint.clone().substreams(Request {
                 start_block_num,
@@ -125,7 +128,8 @@ fn stream_blocks(
                                 // If we reach this point, we must wait a bit before retrying
                                 if let Some(duration) = backoff.next() {
                                     info!("Will try to reconnect after {:?}", duration);
-                                    sleep(duration).await
+                                    sleep(duration).await;
+                                    retry_count += 1;
                                 } else {
                                     return Err(anyhow!("Backoff requested to stop retrying, quitting"))?;
                                 }

@@ -36,9 +36,9 @@ pub trait MessageSender<M: NormalisedMessage>: Send + Sync {
     async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>>;
 }
 
+#[derive(Clone)]
 pub struct ExtractorHandle<M> {
     id: ExtractorIdentity,
-    handle: Option<JoinHandle<Result<(), ExtractionError>>>,
     control_tx: Sender<ControlMessage<M>>,
 }
 
@@ -46,12 +46,8 @@ impl<M> ExtractorHandle<M>
 where
     M: NormalisedMessage,
 {
-    fn new(
-        id: ExtractorIdentity,
-        handle: JoinHandle<Result<(), ExtractionError>>,
-        control_tx: Sender<ControlMessage<M>>,
-    ) -> Self {
-        Self { id, handle: Some(handle), control_tx }
+    fn new(id: ExtractorIdentity, control_tx: Sender<ControlMessage<M>>) -> Self {
+        Self { id, control_tx }
     }
 
     pub fn get_id(&self) -> ExtractorIdentity {
@@ -64,25 +60,6 @@ where
             .send(ControlMessage::Stop)
             .await
             .map_err(|err| ExtractionError::Unknown(err.to_string()))
-    }
-
-    pub async fn wait(self) {
-        self.handle
-            .unwrap()
-            .await
-            .unwrap()
-            .unwrap();
-    }
-
-    pub fn join_handle(
-        &mut self,
-    ) -> Result<JoinHandle<Result<(), ExtractionError>>, ExtractionError> {
-        self.handle.take().ok_or_else(|| {
-            ExtractionError::Unknown(format!(
-                "The extractor: {} had it's handle already taken!",
-                self.id
-            ))
-        })
     }
 }
 
@@ -124,8 +101,8 @@ where
                     Some(ctrl) = self.control_rx.recv() =>  {
                         match ctrl {
                             ControlMessage::Stop => {
-                                warn!("{}: Stream consumed.", &id);
-                                break;
+                                warn!("{}: Stop signal received; exiting!", &id);
+                                return Ok(())
                             },
                             ControlMessage::Subscribe(sender) => {
                                 self.subscribe(sender).await;
@@ -135,9 +112,8 @@ where
                     val = self.substreams.next() => {
                         match val {
                             None => {
-                                warn!("{}: The stream for was stopped!", &id);
-                                break;
-                            }
+                                return Err(ExtractionError::SubstreamsError(format!("{id}: stream ended")));
+                            },
                             Some(Ok(BlockResponse::New(data))) => {
                                 let block = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 match self.extractor.handle_tick_scoped_data(data).await {
@@ -156,7 +132,7 @@ where
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
                                 let block = undo_signal.last_valid_block.as_ref().map(|v| v.number).unwrap_or(0);
-                                warn!("{id}: Revert to {block} requested!")
+                                warn!("{id}: Revert to {block} requested!");
                                 match self.extractor.handle_revert(undo_signal).await {
                                     Ok(Some(msg)) => {
                                         debug!("{id}: Propagating undo message.");
@@ -166,7 +142,7 @@ where
                                         debug!("{id}: No undo message to propagate.");
                                     }
                                     Err(err) => {
-                                        error!("{id}: Error while processing revert!");
+                                        error!("{id}: Error while processing revert to {block}!");
                                         return Err(err);
                                     }
                                 }
@@ -179,7 +155,6 @@ where
                     }
                 }
             }
-            Ok(())
         })
     }
 
@@ -274,12 +249,21 @@ where
         self
     }
 
-    pub async fn run(self) -> Result<ExtractorHandle<M>, anyhow::Error> {
+    pub async fn run(
+        self,
+    ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle<M>), ExtractionError>
+    {
         let content = std::fs::read(&self.spkg_file)
-            .context(format_err!("read package from file '{}'", self.spkg_file))?;
-        let spkg = Package::decode(content.as_ref()).context("decode command")?;
-        let endpoint =
-            Arc::new(SubstreamsEndpoint::new(&self.endpoint_url, Some(self.token)).await?);
+            .context(format_err!("read package from file '{}'", self.spkg_file))
+            .map_err(|err| ExtractionError::SubstreamsError(err.to_string()))?;
+        let spkg = Package::decode(content.as_ref())
+            .context("decode command")
+            .map_err(|err| ExtractionError::SubstreamsError(err.to_string()))?;
+        let endpoint = Arc::new(
+            SubstreamsEndpoint::new(&self.endpoint_url, Some(self.token))
+                .await
+                .map_err(|err| ExtractionError::SubstreamsError(err.to_string()))?,
+        );
         let cursor = self.extractor.get_cursor().await;
         let stream = SubstreamsStream::new(
             endpoint,
@@ -299,6 +283,7 @@ where
             control_rx: ctrl_rx,
         };
 
-        Ok(ExtractorHandle::new(id, runner.run(), ctrl_tx))
+        let handle = runner.run();
+        Ok((handle, ExtractorHandle::new(id, ctrl_tx)))
     }
 }
