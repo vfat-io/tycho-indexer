@@ -24,6 +24,10 @@ pub enum ExtractionError {
     Unknown(String),
     #[error("Storage failure: {0}")]
     Storage(#[from] StorageError),
+    #[error("Stream errored: {0}")]
+    SubstreamsError(String),
+    #[error("Service error: {0}")]
+    ServiceError(String),
 }
 
 #[async_trait]

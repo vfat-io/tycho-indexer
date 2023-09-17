@@ -9,8 +9,10 @@ use extractor::{
     },
     runner::{ExtractorHandle, ExtractorRunnerBuilder},
 };
+use futures03::future::select_all;
 use models::Chain;
 
+use actix_web::dev::ServerHandle;
 use std::sync::Arc;
 use tracing::info;
 
@@ -25,7 +27,8 @@ use clap::Parser;
 use futures03::try_join;
 
 use crate::{
-    extractor::evm,
+    extractor::{evm, ExtractionError},
+    models::NormalisedMessage,
     services::ServicesBuilder,
     storage::postgres::{self, PostgresGateway},
 };
@@ -64,7 +67,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), ExtractionError> {
     // Set up the subscriber
     tracing_subscriber::fmt::init();
 
@@ -82,21 +85,15 @@ async fn main() -> Result<(), Error> {
     let mut ambient_handle =
         start_ambient_extractor(&args.package_file, pool.clone(), evm_gw.clone()).await?;
     info!("{} started!", ambient_handle.get_id());
-
-    let ambient_fut = ambient_handle.join_handle()?;
-    let ambient_fut = async {
-        let _ = ambient_fut.await;
-        // TODO: change ExtractionRunner output type to return result
-        Ok::<(), std::io::Error>(())
-    };
+    let ambient_task = ambient_handle.join_handle()?;
 
     info!("Starting services");
-    let services_fut = ServicesBuilder::new()
+    let (server_handle, server_task) = ServicesBuilder::new()
         .register_extractor(ambient_handle)
-        .run();
-    try_join!(ambient_fut, services_fut)
-        .map(|_| ())
-        .map_err(|err| err.into())
+        .run()?;
+    let shutdown_task = tokio::spawn(shutdown_handler(server_handle, &[ambient_handle]));
+    let (res, _, _) = select_all([ambient_task, server_task]).await;
+    res.unwrap()
 }
 
 async fn start_ambient_extractor(
@@ -114,6 +111,18 @@ async fn start_ambient_extractor(
         .end_block(17375000);
     let handle = builder.run().await?;
     Ok(handle)
+}
+
+async fn shutdown_handler<M: NormalisedMessage>(
+    server_handle: ServerHandle,
+    extractors: &[ExtractorHandle<M>],
+) {
+    // listen for ctrl-c
+    tokio::signal::ctrl_c().await.unwrap();
+    for e in extractors.iter() {
+        e.stop().await.unwrap();
+    }
+    server_handle.stop(true).await;
 }
 
 #[cfg(test)]

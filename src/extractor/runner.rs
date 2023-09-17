@@ -1,7 +1,7 @@
 use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
 use prost::Message;
-use std::{collections::HashMap, env, error::Error, sync::Arc};
+use std::{collections::HashMap, env, sync::Arc};
 use tokio::{
     sync::{
         mpsc::{self, error::SendError, Receiver, Sender},
@@ -38,7 +38,7 @@ pub trait MessageSender<M: NormalisedMessage>: Send + Sync {
 
 pub struct ExtractorHandle<M> {
     id: ExtractorIdentity,
-    handle: Option<JoinHandle<()>>,
+    handle: Option<JoinHandle<Result<(), ExtractionError>>>,
     control_tx: Sender<ControlMessage<M>>,
 }
 
@@ -48,7 +48,7 @@ where
 {
     fn new(
         id: ExtractorIdentity,
-        handle: JoinHandle<()>,
+        handle: JoinHandle<Result<(), ExtractionError>>,
         control_tx: Sender<ControlMessage<M>>,
     ) -> Self {
         Self { id, handle: Some(handle), control_tx }
@@ -58,23 +58,29 @@ where
         self.id.clone()
     }
 
-    pub async fn stop(self) -> Result<(), Box<dyn Error>> {
+    pub async fn stop(&self) -> Result<(), ExtractionError> {
+        // TODO: send a oneshot along here and wait for it
         self.control_tx
             .send(ControlMessage::Stop)
-            .await?;
-        self.handle.unwrap().await?;
-        Ok(())
+            .await
+            .map_err(|err| ExtractionError::Unknown(err.to_string()))
     }
 
     pub async fn wait(self) {
-        self.handle.unwrap().await.unwrap();
+        self.handle
+            .unwrap()
+            .await
+            .unwrap()
+            .unwrap();
     }
 
-    pub fn join_handle(&mut self) -> Result<JoinHandle<()>, ExtractionError> {
+    pub fn join_handle(
+        &mut self,
+    ) -> Result<JoinHandle<Result<(), ExtractionError>>, ExtractionError> {
         self.handle.take().ok_or_else(|| {
             ExtractionError::Unknown(format!(
-                "The extractor: {}|{} had it's handle already taken!",
-                self.id.chain, self.id.name
+                "The extractor: {} had it's handle already taken!",
+                self.id
             ))
         })
     }
@@ -110,14 +116,15 @@ where
     M: NormalisedMessage,
     G: Sync + Send + 'static,
 {
-    pub fn run(mut self) -> JoinHandle<()> {
+    pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
         tokio::spawn(async move {
+            let id = self.extractor.get_id();
             loop {
                 tokio::select! {
                     Some(ctrl) = self.control_rx.recv() =>  {
                         match ctrl {
                             ControlMessage::Stop => {
-                                warn!("Stopping stream.");
+                                warn!("{}: Stream consumed.", &id);
                                 break;
                             },
                             ControlMessage::Subscribe(sender) => {
@@ -128,47 +135,51 @@ where
                     val = self.substreams.next() => {
                         match val {
                             None => {
-                                warn!("Stream consumed.");
+                                warn!("{}: The stream for was stopped!", &id);
                                 break;
                             }
                             Some(Ok(BlockResponse::New(data))) => {
+                                let block = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 match self.extractor.handle_tick_scoped_data(data).await {
                                     Ok(Some(msg)) => {
-                                        debug!("Propagating new data message.");
+                                        debug!("{}:{}: Propagating new data message.", &block, &id);
                                         Self::propagate_msg(&self.subscriptions, msg).await
                                     }
                                     Ok(None) => {
-                                        debug!("No message to propagate.");
+                                        debug!("{}:{}: No message to propagate.", &block ,&id);
                                     }
                                     Err(err) => {
-                                        error!("Error while processing tick: {err}! Retries exhausted.");
-                                        break;
+                                        error!("{block}:{id}: Error while processing tick: {err}!");
+                                        return Err(err);
                                     }
                                 }
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
+                                let block = undo_signal.last_valid_block.as_ref().map(|v| v.number).unwrap_or(0);
+                                warn!("{id}: Revert to {block} requested!")
                                 match self.extractor.handle_revert(undo_signal).await {
                                     Ok(Some(msg)) => {
-                                        debug!("Propagating undo message.");
+                                        debug!("{id}: Propagating undo message.");
                                         Self::propagate_msg(&self.subscriptions, msg).await
                                     }
                                     Ok(None) => {
-                                        debug!("No message to propagate.");
+                                        debug!("{id}: No undo message to propagate.");
                                     }
-                                    Err(_) => {
-                                        error!("Error while processing revert! Retries exhausted.");
-                                        break;
+                                    Err(err) => {
+                                        error!("{id}: Error while processing revert!");
+                                        return Err(err);
                                     }
                                 }
                             }
                             Some(Err(err)) => {
-                                error!("Stream terminated with error {:#?}", err);
-                                break;
+                                error!("{}: Stream terminated with error {:#?}", id, err);
+                                return Err(ExtractionError::SubstreamsError(err.to_string()));
                             }
                         };
                     }
                 }
             }
+            Ok(())
         })
     }
 
