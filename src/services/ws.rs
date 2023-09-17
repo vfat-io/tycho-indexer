@@ -60,7 +60,7 @@ impl Serialize for WebsocketError {
     }
 }
 
-type MessageSenderMap<M> = HashMap<ExtractorIdentity, Arc<dyn MessageSender<M> + Send + Sync>>;
+pub type MessageSenderMap<M> = HashMap<ExtractorIdentity, Arc<dyn MessageSender<M> + Send + Sync>>;
 
 /// Shared application data between all connections
 /// Parameters are hidden behind a Mutex to allow for sharing between threads
@@ -80,7 +80,7 @@ impl<M> AppState<M> {
 /// This actor is responsible for:
 /// - Receiving adn forwarding messages from the extractor
 /// - Receiving and handling commands from the client
-struct WsActor<M> {
+pub struct WsActor<M> {
     _id: Uuid,
     /// Client must send ping at least once per 10 seconds (CLIENT_TIMEOUT), otherwise we drop the
     /// connection.

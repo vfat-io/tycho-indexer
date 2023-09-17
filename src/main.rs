@@ -22,9 +22,11 @@ mod storage;
 mod substreams;
 
 use clap::Parser;
+use futures03::try_join;
 
 use crate::{
     extractor::evm,
+    services::ServicesBuilder,
     storage::postgres::{self, PostgresGateway},
 };
 
@@ -78,11 +80,21 @@ async fn main() -> Result<(), Error> {
 
     info!("Starting Tycho");
     info!("Starting ambient extractor");
-    let ambient_handle =
+    let mut ambient_handle =
         start_ambient_extractor(&args.package_file, pool.clone(), evm_gw.clone()).await?;
 
-    ambient_handle.wait().await;
-    Ok(())
+    let ambient_fut = ambient_handle.join_handle()?;
+    let ambient_fut = async {
+        ambient_fut.await;
+        // TODO: change ExtractionRunner output type to return result
+        Ok::<(), std::io::Error>(())
+    };
+
+    info!("Starting services");
+    let services_fut = ServicesBuilder::new()
+        .register_extractor(ambient_handle)
+        .run();
+    try_join!(ambient_fut, services_fut).map(|_| ()).map_err(|err| err.into())
 }
 
 async fn start_ambient_extractor(

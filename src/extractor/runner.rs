@@ -14,13 +14,14 @@ use tracing::{debug, error, info, warn};
 
 use super::Extractor;
 use crate::{
-    models::NormalisedMessage,
+    models::{ExtractorIdentity, NormalisedMessage},
     pb::sf::substreams::v1::Package,
     substreams::{
         stream::{BlockResponse, SubstreamsStream},
         SubstreamsEndpoint,
     },
 };
+use crate::extractor::ExtractionError;
 
 pub enum ControlMessage<M> {
     Stop,
@@ -36,7 +37,8 @@ pub trait MessageSender<M: NormalisedMessage>: Send + Sync {
 }
 
 pub struct ExtractorHandle<M> {
-    handle: JoinHandle<()>,
+    id: ExtractorIdentity,
+    handle: Option<JoinHandle<()>>,
     control_tx: Sender<ControlMessage<M>>,
 }
 
@@ -44,20 +46,35 @@ impl<M> ExtractorHandle<M>
 where
     M: NormalisedMessage,
 {
-    fn new(handle: JoinHandle<()>, control_tx: Sender<ControlMessage<M>>) -> Self {
-        Self { handle, control_tx }
+    fn new(
+        id: ExtractorIdentity,
+        handle: JoinHandle<()>,
+        control_tx: Sender<ControlMessage<M>>,
+    ) -> Self {
+        Self { id, handle: Some(handle), control_tx }
+    }
+
+    pub fn get_id(&self) -> ExtractorIdentity {
+        self.id.clone()
     }
 
     pub async fn stop(self) -> Result<(), Box<dyn Error>> {
         self.control_tx
             .send(ControlMessage::Stop)
             .await?;
-        self.handle.await?;
+        self.handle.unwrap().await?;
         Ok(())
     }
 
     pub async fn wait(self) {
-        self.handle.await.unwrap();
+        self.handle.unwrap().await.unwrap();
+    }
+
+    pub fn join_handle(&mut self) -> Result<JoinHandle<()>, ExtractionError> {
+        self.handle.take().ok_or_else(|| ExtractionError::Unknown(format!(
+            "The extractor: {}|{} had it's handle already taken!",
+            self.id.chain, self.id.name
+        )))
     }
 }
 
@@ -260,6 +277,7 @@ where
             self.end_block as u64,
         );
 
+        let id = self.extractor.get_id();
         let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
         let runner = ExtractorRunner {
             extractor: self.extractor,
@@ -268,6 +286,6 @@ where
             control_rx: ctrl_rx,
         };
 
-        Ok(ExtractorHandle::new(runner.run(), ctrl_tx))
+        Ok(ExtractorHandle::new(id, runner.run(), ctrl_tx))
     }
 }
