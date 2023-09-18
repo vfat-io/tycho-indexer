@@ -2,7 +2,10 @@ FROM rust:1.72-bookworm AS build
 ARG TARGETPLATFORM
 WORKDIR /build
 RUN apt-get update && apt-get install -y libpq-dev jq
-RUN ARCH=$(echo $TARGETPLATFORM | sed -e 's/\//_/g') && \ 
+RUN ARCH=$(echo $TARGETPLATFORM | sed -e 's/\//_/g') && \
+    if [ "$ARCH" = "linux_amd64" ]; then \
+    ARCH="linux_x86_64"; \
+    fi && \
     LINK=$(curl -s https://api.github.com/repos/streamingfast/substreams/releases/latest | jq -r ".assets[] | select(.name | contains(\"$ARCH\")) | .browser_download_url")  && \
     echo ARCH: $ARCH, LINK: $LINK && \
     curl -L  $LINK  | tar zxf - -C /usr/local/bin/
