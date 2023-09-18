@@ -74,13 +74,15 @@ pub mod postgres;
 
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use crate::services::deserialization_helpers::hex_to_bytes;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem};
+use crate::{
+    models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem},
+    services::serde_hex::{deserialize_hex, serialize_hex},
+};
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
 /// blockchain.
@@ -398,9 +400,9 @@ pub enum VersionKind {
     /// It includes the state after executing the transaction at that index.
     Index(i64),
 }
-#[derive(Debug, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ContractId {
-    #[serde(deserialize_with = "hex_to_bytes")]
+    #[serde(serialize_with = "serialize_hex", deserialize_with = "deserialize_hex")]
     pub address: Vec<u8>,
     pub chain: Chain,
 }
