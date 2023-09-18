@@ -136,10 +136,11 @@ fn map_changes(
                         balance: Vec::new(),
                         code: Vec::new(),
                         slots,
-                        change: created_accounts
-                            .contains_key(&storage_change.address)
-                            .then_some(ChangeType::Creation)
-                            .unwrap_or(ChangeType::Update),
+                        change: if created_accounts.contains_key(&storage_change.address) {
+                            ChangeType::Creation
+                        } else {
+                            ChangeType::Update
+                        },
                     });
                 }
             }
@@ -176,10 +177,11 @@ fn map_changes(
                             balance: new_balance.bytes.clone(),
                             code: Vec::new(),
                             slots: HashMap::new(),
-                            change: created_accounts
-                                .contains_key(&balance_change.address)
-                                .then_some(ChangeType::Creation)
-                                .unwrap_or(ChangeType::Update),
+                            change: if created_accounts.contains_key(&balance_change.address) {
+                                ChangeType::Creation
+                            } else {
+                                ChangeType::Update
+                            },
                         });
                     }
                 }
@@ -214,10 +216,11 @@ fn map_changes(
                         balance: Vec::new(),
                         code: code_change.new_code.clone(),
                         slots: HashMap::new(),
-                        change: created_accounts
-                            .contains_key(&code_change.address)
-                            .then_some(ChangeType::Creation)
-                            .unwrap_or(ChangeType::Update),
+                        change: if created_accounts.contains_key(&code_change.address) {
+                            ChangeType::Creation
+                        } else {
+                            ChangeType::Update
+                        },
                     });
                 }
             }
