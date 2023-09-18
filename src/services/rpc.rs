@@ -76,6 +76,27 @@ impl RequestHandler {
     }
 }
 
+#[get("/contract_state")]
+async fn contract_state(
+    query: web::Query<QueryParameters>,
+    body: web::Json<StateRequestBody>,
+    handler: web::Data<RequestHandler>,
+) -> impl Responder {
+    // Call the handler to get the state
+    let response = handler
+        .into_inner()
+        .get_state(&body, &query)
+        .await;
+
+    match response {
+        Ok(state) => HttpResponse::Ok().json(state),
+        Err(e) => {
+            error!("Error while getting contract state: {}", e);
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct StateRequestResponse {
     accounts: Vec<Account>,
