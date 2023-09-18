@@ -330,8 +330,7 @@ mod tests {
         acc_address.to_string()
     }
 
-    #[tokio::test]
-    async fn test_get_state() {
+    async fn setup_database() -> (AsyncPgConnection, String) {
         let db_url = std::env::var("DATABASE_URL").unwrap();
         let mut conn = AsyncPgConnection::establish(&db_url)
             .await
@@ -341,14 +340,21 @@ mod tests {
             .unwrap();
         let acc_address = setup_account(&mut conn).await;
 
-        let db_gtw = PostgresGateway::<
+        (conn, acc_address)
+    }
+
+    #[tokio::test]
+    async fn test_get_state() {
+        let (mut conn, acc_address) = setup_database().await;
+
+        let db_gw = PostgresGateway::<
             evm::Block,
             evm::Transaction,
             evm::Account,
             evm::AccountUpdate,
         >::from_connection(&mut conn)
         .await;
-        let req_handler = RequestHandler::new(db_gtw, conn);
+        let req_handler = RequestHandler::new(db_gw, conn);
 
         let code = hex::decode("1234").unwrap();
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
@@ -392,23 +398,16 @@ mod tests {
 
     #[actix_web::test]
     async fn test_contract_state_route() {
-        let db_url = std::env::var("DATABASE_URL").unwrap();
-        let mut conn = AsyncPgConnection::establish(&db_url)
-            .await
-            .unwrap();
-        conn.begin_test_transaction()
-            .await
-            .unwrap();
-        let acc_address = setup_account(&mut conn).await;
+        let (mut conn, acc_address) = setup_database().await;
 
-        let db_gtw = PostgresGateway::<
+        let db_gw = PostgresGateway::<
             evm::Block,
             evm::Transaction,
             evm::Account,
             evm::AccountUpdate,
         >::from_connection(&mut conn)
         .await;
-        let req_handler = RequestHandler::new(db_gtw, conn);
+        let req_handler = RequestHandler::new(db_gw, conn);
 
         // Set up the expected account data
         let code = hex::decode("1234").unwrap();
