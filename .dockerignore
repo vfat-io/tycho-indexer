@@ -6,4 +6,6 @@ target
 venv
 */venv
 .idea
+.git
 **/*.spkg
+Dockerfile

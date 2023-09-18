@@ -28,7 +28,9 @@ protobuf:
 binaries:
   default:
     type: wasm/rust-v1
-    file: ./target/wasm32-unknown-unknown/release/substreams.wasm
+    # this points to the workspace target directory we use a special 
+    # substreams build profile to optimise wasm binaries
+    file: ../../target/wasm32-unknown-unknown/substreams/substreams_[CHAIN]_[PROTOCOL_SYSTEM].wasm
 
 modules:
   # sample module provides access to blocks.

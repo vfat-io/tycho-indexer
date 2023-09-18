@@ -1,15 +1,20 @@
-FROM rust:1.72 AS build
+FROM rust:1.72-bookworm AS build
 WORKDIR /build
-RUN echo "fn main() {}" > dummy.rs
-COPY Cargo.toml .
-COPY Cargo.lock .
-RUN sed -i 's#src/main.rs#dummy.rs#' Cargo.toml
-RUN cargo build --release
-RUN sed -i 's#dummy.rs#src/main.rs#' Cargo.toml
+ARG TARGETPLATFORM
+RUN ARCH=$(echo $TARGETPLATFORM | sed -e 's/\//_/g') && \ 
+    LINK=$(curl -s https://api.github.com/repos/streamingfast/substreams/releases/latest | awk '/download.url.*'"$ARCH"'/ {print $2}' | sed 's/"//g') && \
+    echo ARCH: $ARCH, LINK: $LINK && \
+    curl -L  $LINK  | tar zxf - -C /usr/local/bin/
+RUN apt-get update && apt-get install -y libpq-dev
+RUN cargo install cargo-workspaces
 COPY . .
-RUN cargo build --release
+# the hack below is probably needed because of rust-toolchain.toml
+# will fix this later we have time to optimise the build
+RUN rustup target add wasm32-unknown-unknown && ./stable-build.sh
 
-
-FROM debian:bullseye-slim
-COPY --from=build /build/target/release/tycho-indexer ./target/release/tycho-indexer
-ENTRYPOINT ["./target/release/tycho-indexer"]
+FROM debian:bookworm
+WORKDIR /the/workdir/path
+COPY --from=build /build/target/release/tycho-indexer ./tycho-indexer
+COPY --from=build /build/target/spkg/*.spkg ./
+RUN apt-get update && apt-get install -y libpq-dev && rm -rf /var/lib/apt/lists/*
+ENTRYPOINT ["./tycho-indexer"]

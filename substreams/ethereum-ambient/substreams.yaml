@@ -12,12 +12,12 @@ protobuf:
 binaries:
   default:
     type: wasm/rust-v1
-    file: ./target/wasm32-unknown-unknown/release/substreams_ethereum_ambient.wasm
+    file: ../../target/wasm32-unknown-unknown/substreams/substreams_ethereum_ambient.wasm
 
 modules:
   - name: map_changes
     kind: map
-    inputs:
+    inputs: 
       - source: sf.ethereum.type.v2.Block
     output:
       type: proto:tycho.evm.state.v1.BlockContractChanges
