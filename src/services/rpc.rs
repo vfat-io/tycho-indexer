@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::{
     extractor::evm::{self, Account},
     models::Chain,
+    serde_helpers::{deserialize_hex, serialize_hex},
     storage::{
         self, postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractId,
         ContractStateGateway, StorageError,
@@ -18,8 +19,6 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::error;
 
-use super::serde_hex::{deserialize_hex, serialize_hex};
-
 struct RequestHandler {
     db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>,
     db_connection: Arc<Mutex<AsyncPgConnection>>,
@@ -32,9 +31,7 @@ impl RequestHandler {
     ) -> Self {
         Self { db_gw, db_connection: Arc::new(Mutex::new(db_connection)) }
     }
-}
 
-impl RequestHandler {
     async fn get_state(
         &self,
         request: &StateRequestBody,
@@ -90,7 +87,7 @@ async fn contract_state(
     match response {
         Ok(state) => HttpResponse::Ok().json(state),
         Err(e) => {
-            error!("Error while getting contract state: {}", e);
+            error!("Error while getting contract state: request body: {:?}, query parameters: {:?}, error: {}", body, query, e);
             HttpResponse::InternalServerError().finish()
         }
     }

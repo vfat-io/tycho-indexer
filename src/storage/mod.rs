@@ -81,7 +81,7 @@ use thiserror::Error;
 
 use crate::{
     models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem},
-    services::serde_hex::{deserialize_hex, serialize_hex},
+    serde_helpers::{deserialize_hex, serialize_hex},
 };
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
