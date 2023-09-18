@@ -1,63 +1,107 @@
 //! This module contains Tycho RPC implementation
 
+use std::sync::Arc;
+
 use super::deserialization_helpers::hex_to_bytes;
 use crate::{
     extractor::evm::{self, Account},
     models::Chain,
     storage::{
         self, postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractId,
-        ContractStateGateway,
+        ContractStateGateway, StorageError,
     },
 };
+use actix_web::{get, web, HttpResponse, Responder};
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::AsyncPgConnection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::sync::Mutex;
 use tracing::error;
 
 struct RequestHandler {
     db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>,
-    db_connection: AsyncPgConnection,
+    db_connection: Arc<Mutex<AsyncPgConnection>>,
 }
 
 impl RequestHandler {
-    async fn get_state(&mut self, request: &StateRequestBody) -> StateRequestResponse {
+    pub fn new(
+        db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>,
+        db_connection: AsyncPgConnection,
+    ) -> Self {
+        Self { db_gw, db_connection: Arc::new(Mutex::new(db_connection)) }
+    }
+}
+
+impl RequestHandler {
+    async fn get_state(
+        &self,
+        request: &StateRequestBody,
+        params: &QueryParameters,
+    ) -> Result<StateRequestResponse, RpcError> {
         //TODO: handle when no contract is specified with filters
         let at = match &request.version.block {
             Some(b) => BlockOrTimestamp::Block(BlockIdentifier::Hash(b.hash.clone())),
             None => BlockOrTimestamp::Timestamp(request.version.timestamp),
         };
 
-        let mut accounts: Vec<Account> = Vec::new();
         let version = storage::Version(at, storage::VersionKind::Last);
 
-        if let Some(contract_ids) = &request.contract_ids {
-            for contract_id in contract_ids {
-                match self
-                    .db_gw
-                    .get_contract(contract_id, &Some(&version), false, &mut self.db_connection)
-                    .await
-                {
-                    Ok(contract_state) => accounts.push(contract_state),
-                    Err(e) => {
-                        error!("Error while getting contract state {}", e)
-                    }
-                }
+        let mut db_connection_lock = self.db_connection.lock().await;
+
+        // Get the contract IDs from the request
+        let contract_ids = request.contract_ids.clone();
+        let address_slices: Option<Vec<&[u8]>> = contract_ids.as_ref().map(|ids| {
+            ids.iter()
+                .map(|id| id.address.as_slice())
+                .collect()
+        });
+        let addresses: Option<&[&[u8]]> = address_slices.as_deref();
+
+        // Get the contract states from the database
+        // TODO support additional tvl_gt and intertia_min_gt filters
+        match self
+            .db_gw
+            .get_contracts(params.chain, addresses, Some(&version), false, &mut db_connection_lock)
+            .await
+        {
+            Ok(accounts) => {
+                Ok(StateRequestResponse::new(accounts))
+            }
+            Err(e) => {
+                error!("Error while getting contract states: {}", e);
+                Err(RpcError::StorageError(e))
             }
         }
-
-        StateRequestResponse { accounts }
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct StateRequestResponse {
     accounts: Vec<Account>,
+}
+
+impl StateRequestResponse {
+    fn new(accounts: Vec<Account>) -> Self {
+        Self { accounts }
+    }
 }
 
 #[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Failed to parse JSON: {0}")]
     ParseError(#[from] serde_json::Error),
+
+    #[error("Failed to get storage: {0}")]
+    StorageError(#[from] StorageError),
+}
+
+#[derive(Deserialize, Default, Debug)]
+struct QueryParameters {
+    #[serde(default = "Chain::default")]
+    chain: Chain,
+    tvl_gt: Option<f64>,
+    intertia_min_gt: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -255,7 +299,8 @@ mod tests {
         .await;
         // Insert account and balances
         let acc_id =
-            db_fixtures::insert_account(conn, acc_address, "account0", chain_id, None).await;
+            db_fixtures::insert_account(conn, acc_address, "account0", chain_id, Some(tid[0]))
+                .await;
 
         db_fixtures::insert_account_balance(conn, 100, tid[0], acc_id).await;
         let contract_code = hex::decode("1234").unwrap();
@@ -281,7 +326,7 @@ mod tests {
             evm::AccountUpdate,
         >::from_connection(&mut conn)
         .await;
-        let mut req_handler = RequestHandler { db_gw: db_gtw, db_connection: conn };
+        let req_handler = RequestHandler::new(db_gtw, conn);
 
         let code = hex::decode("1234").unwrap();
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
@@ -299,7 +344,11 @@ mod tests {
             "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
                 .parse()
                 .unwrap(),
-            None,
+            Some(
+                "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+                    .parse()
+                    .unwrap(),
+            ),
         );
 
         let request = StateRequestBody {
@@ -310,8 +359,15 @@ mod tests {
             version: Version { timestamp: Utc::now().naive_utc(), block: None },
         };
 
-        let state = req_handler.get_state(&request).await;
+        let state = req_handler
+            .get_state(&request, &QueryParameters::default())
+            .await;
 
-        assert_eq!(state.accounts[0], expected);
+        if let Ok(state) = state {
+            assert_eq!(state.accounts.len(), 1);
+            assert_eq!(state.accounts[0], expected);
+        } else {
+            panic!("State is not Ok");
+        }
     }
 }

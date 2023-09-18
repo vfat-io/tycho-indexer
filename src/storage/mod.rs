@@ -398,11 +398,11 @@ pub enum VersionKind {
     /// It includes the state after executing the transaction at that index.
     Index(i64),
 }
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct ContractId {
     #[serde(deserialize_with = "hex_to_bytes")]
-    address: Vec<u8>,
-    chain: Chain,
+    pub address: Vec<u8>,
+    pub chain: Chain,
 }
 
 /// Uniquely identifies a contract on a specific chain.
