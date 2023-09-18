@@ -10,7 +10,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 use super::Extractor;
 use crate::{

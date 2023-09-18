@@ -12,8 +12,3 @@ substreams = "0.5"
 substreams-ethereum = "0.9"
 prost = "0.11"
 hex-literal = "0.4.1"
-
-[profile.release]
-lto = true
-opt-level = 'z'
-strip = "debuginfo"

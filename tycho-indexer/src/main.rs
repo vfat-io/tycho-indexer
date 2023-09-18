@@ -1,5 +1,5 @@
 #![allow(dead_code)] // FIXME: remove after initial development
-#![doc = include_str!("../Readme.md")]
+#![doc = include_str!("../../Readme.md")]
 use diesel_async::{pooled_connection::bb8::Pool, AsyncPgConnection};
 use extractor::{
     evm::{
