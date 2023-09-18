@@ -57,13 +57,7 @@ struct StateRequestResponse {
 #[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Failed to parse JSON: {0}")]
-    ParseError(serde_json::Error),
-}
-
-impl From<serde_json::Error> for RpcError {
-    fn from(err: serde_json::Error) -> RpcError {
-        RpcError::ParseError(err)
-    }
+    ParseError(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -94,12 +88,6 @@ struct Block {
     parent_hash: Vec<u8>,
     chain: Chain,
     number: i64,
-}
-
-fn parse_state_request(json_str: &str) -> Result<StateRequestBody, RpcError> {
-    let request_body: StateRequestBody = serde_json::from_str(json_str)?;
-
-    Ok(request_body)
 }
 
 #[cfg(test)]
@@ -133,7 +121,7 @@ mod tests {
         }
         "#;
 
-        let result = parse_state_request(json_str).unwrap();
+        let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let contract0 = hex::decode("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap();
         let block_hash =
@@ -179,7 +167,7 @@ mod tests {
     }
     "#;
 
-        let result = parse_state_request(json_str).unwrap();
+        let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let block_hash =
             hex::decode("24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4")
@@ -220,7 +208,7 @@ mod tests {
     }
     "#;
 
-        let result = parse_state_request(json_str).unwrap();
+        let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let contract0 = hex::decode("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap();
 
