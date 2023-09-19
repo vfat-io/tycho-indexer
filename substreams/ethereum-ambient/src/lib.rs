@@ -3,7 +3,7 @@ mod pb;
 use std::collections::{hash_map::Entry, HashMap};
 
 use hex_literal::hex;
-use pb::tycho::evm::state::v1::{self as tycho};
+use pb::tycho::evm::v1::{self as tycho, ChangeType};
 use substreams_ethereum::pb::eth::{self};
 
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
@@ -19,13 +19,14 @@ impl SlotValue {
     }
 }
 
-// uses a map for slots, protobug does not
+// uses a map for slots, protobuf does not
 // allow bytes in hashmap keys
 struct InterimContractChange {
     address: Vec<u8>,
     balance: Vec<u8>,
     code: Vec<u8>,
     slots: HashMap<Vec<u8>, SlotValue>,
+    change: tycho::ChangeType,
 }
 
 impl From<InterimContractChange> for tycho::ContractChange {
@@ -38,30 +39,51 @@ impl From<InterimContractChange> for tycho::ContractChange {
                 .slots
                 .into_iter()
                 .filter(|(_, value)| value.has_changed())
-                .map(|(slot, value)| tycho::ContractSlot {
-                    slot,
-                    value: value.new_value,
-                })
+                .map(|(slot, value)| tycho::ContractSlot { slot, value: value.new_value })
                 .collect(),
+            change: value.change.into(),
         }
     }
 }
-
+/// Extracts all contract changes relevant to vm simulations
+///
+/// This implementation has currently two major limitations:
+/// 1. It is hardwired to only care about changes to the ambient main contract, this is ok for this
+///    particular use case but for a more general purpose implementation this is not ideal
+/// 2. Changes are processed separately, this means that if there are any side effects between each
+///    other (e.g. if account is deleted and then created again in ethereum all the storage is set
+///    to 0. So there is a side effect between account creation and contract storage.) these might
+///    not be properly accounted for. Most of the time this should not be a major issue but may lead
+///    to wrong results so consume this implementation with care. See example below for a concrete
+///    case where this is problematic.
+///
+/// ## A very contrived example:
+/// 1. Some existing contract receives a transaction that changes it state, the state is updated
+/// 2. Next, this contract has self destruct called on itself
+/// 3. The contract is created again using CREATE2 at the same address
+/// 4. The contract receives a transaction that changes it state
+/// 5. We would emit this as as contract creation with slots set from 1 and from 4, although we
+///    should only emit the slots changed from 4.
 #[substreams::handlers::map]
 fn map_changes(
     block: eth::v2::Block,
 ) -> Result<tycho::BlockContractChanges, substreams::errors::Error> {
-    let mut block_changes = tycho::BlockContractChanges {
-        block: None,
-        changes: Vec::new(),
-    };
+    let mut block_changes = tycho::BlockContractChanges { block: None, changes: Vec::new() };
 
-    let mut tx_change = tycho::TransactionChanges {
-        tx: None,
-        contract_changes: Vec::new(),
-    };
+    let mut tx_change = tycho::TransactionChanges { tx: None, contract_changes: Vec::new() };
 
     let mut changed_contracts: HashMap<Vec<u8>, InterimContractChange> = HashMap::new();
+
+    let created_accounts: HashMap<_, _> = block
+        .transactions()
+        .flat_map(|tx| {
+            tx.calls.iter().flat_map(|call| {
+                call.account_creations
+                    .iter()
+                    .map(|ac| (&ac.account, ac.ordinal))
+            })
+        })
+        .collect();
 
     for block_tx in block.transactions() {
         // extract storage changes
@@ -87,7 +109,10 @@ fn map_changes(
                 //  only append the change about this storage slot
                 Entry::Occupied(mut e) => {
                     let contract_change = e.get_mut();
-                    match contract_change.slots.entry(storage_change.key.clone()) {
+                    match contract_change
+                        .slots
+                        .entry(storage_change.key.clone())
+                    {
                         // The storage slot was already changed before, simply
                         //  update new_value
                         Entry::Occupied(mut v) => {
@@ -120,6 +145,10 @@ fn map_changes(
                         balance: Vec::new(),
                         code: Vec::new(),
                         slots,
+                        change: created_accounts
+                            .contains_key(&storage_change.address)
+                            .then_some(ChangeType::Creation)
+                            .unwrap_or(ChangeType::Update),
                     });
                 }
             }
@@ -156,6 +185,10 @@ fn map_changes(
                             balance: new_balance.bytes.clone(),
                             code: Vec::new(),
                             slots: HashMap::new(),
+                            change: created_accounts
+                                .contains_key(&balance_change.address)
+                                .then_some(ChangeType::Creation)
+                                .unwrap_or(ChangeType::Update),
                         });
                     }
                 }
@@ -190,6 +223,10 @@ fn map_changes(
                         balance: Vec::new(),
                         code: code_change.new_code.clone(),
                         slots: HashMap::new(),
+                        change: created_accounts
+                            .contains_key(&code_change.address)
+                            .then_some(ChangeType::Creation)
+                            .unwrap_or(ChangeType::Update),
                     });
                 }
             }
@@ -207,18 +244,22 @@ fn map_changes(
             // reuse changed_contracts hash map by draining it, next iteration
             // will start empty. This avoids a costly realliocation
             for (_, change) in changed_contracts.drain() {
-                tx_change.contract_changes.push(change.into())
+                tx_change
+                    .contract_changes
+                    .push(change.into())
             }
 
-            block_changes.changes.push(tx_change.clone());
+            block_changes
+                .changes
+                .push(tx_change.clone());
 
             // clear out the interim contract changes after we pushed those.
             tx_change.tx = None;
             tx_change.contract_changes.clear();
         }
     }
-    // if there were some changes set the block, if not transferring save some
-    // unnecessary bytes
+    // if there were some changes set the block, if not save some
+    // unnecessary bytes by making a 0 bytes msg
     if !block_changes.changes.is_empty() {
         block_changes.block = Some(tycho::Block {
             number: block.number,

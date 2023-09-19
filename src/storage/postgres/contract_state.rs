@@ -63,8 +63,6 @@ where
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<i64, Balance>, StorageError> {
         use schema::account_balance::dsl::*;
-        dbg!(&start_version_ts);
-        dbg!(&target_version_ts);
         let res = if start_version_ts <= target_version_ts {
             let changed_account_ids = account_balance
                 .inner_join(schema::account::table.inner_join(schema::chain::table))

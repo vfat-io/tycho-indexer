@@ -10,6 +10,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
 };
+use tracing::warn;
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::pb::tycho::evm::v1 as substreams;
@@ -111,6 +112,9 @@ impl From<&AccountUpdateWithTx> for Account {
     /// transaction.
     fn from(value: &AccountUpdateWithTx) -> Self {
         let empty_hash = H256::from(keccak256(Vec::new()));
+        if value.change != ChangeType::Creation {
+            warn!("Creating an account from a partial change!")
+        }
         Account::new(
             value.chain,
             value.address,
@@ -191,6 +195,14 @@ impl AccountUpdate {
 
         Ok(())
     }
+
+    fn is_update(&self) -> bool {
+        self.change == ChangeType::Update
+    }
+
+    fn is_creation(&self) -> bool {
+        self.change == ChangeType::Creation
+    }
 }
 
 /// A container for account updates grouped by account.
@@ -230,9 +242,9 @@ impl AccountUpdateWithTx {
         slots: HashMap<U256, U256>,
         balance: Option<U256>,
         code: Option<Vec<u8>>,
+        change: ChangeType,
         tx: Transaction,
     ) -> Self {
-        let change = ChangeType::default();
         Self { update: AccountUpdate { address, chain, slots, balance, code, change }, tx }
     }
 
@@ -347,6 +359,7 @@ impl AccountUpdateWithTx {
         tx: &Transaction,
         chain: Chain,
     ) -> Result<Self, ExtractionError> {
+        let change = msg.change().into();
         let update = AccountUpdate {
             address: pad_and_parse_h160(&msg.address).map_err(ExtractionError::DecodeError)?,
             chain,
@@ -368,9 +381,22 @@ impl AccountUpdateWithTx {
                 None
             },
             code: if !msg.code.is_empty() { Some(msg.code) } else { None },
-            change: ChangeType::Update,
+            change,
         };
         Ok(Self { update, tx: *tx })
+    }
+}
+
+impl From<substreams::ChangeType> for ChangeType {
+    fn from(value: substreams::ChangeType) -> Self {
+        match value {
+            substreams::ChangeType::Unspecified => {
+                panic!("Unkown enum member encountered: {:?}", value)
+            }
+            substreams::ChangeType::Update => ChangeType::Update,
+            substreams::ChangeType::Creation => ChangeType::Creation,
+            substreams::ChangeType::Deletion => ChangeType::Deletion,
+        }
     }
 }
 
@@ -453,8 +479,30 @@ impl BlockStateChanges {
 
 #[cfg(test)]
 pub mod fixtures {
+    use super::*;
+
     pub const HASH_256_0: &str =
         "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+    pub fn transaction01() -> Transaction {
+        Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10)
+    }
+
+    pub fn transaction02(hash: &str, block: &str, index: u64) -> Transaction {
+        Transaction::new(
+            hash.parse().unwrap(),
+            block.parse().unwrap(),
+            H160::zero(),
+            Some(H160::zero()),
+            index,
+        )
+    }
+
+    pub fn evm_slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<U256, U256> {
+        data.into_iter()
+            .map(|(s, v)| (U256::from(s), U256::from(v)))
+            .collect()
+    }
 
     pub fn pb_block_scoped_data(
         msg: impl prost::Message,
@@ -514,6 +562,7 @@ pub mod fixtures {
                                 value: vec![0xd1, 0xd2, 0xd3, 0xd4],
                             },
                         ],
+                        change: ChangeType::Update.into(),
                     },
                     ContractChange {
                         address: vec![0x61, 0x62, 0x63, 0x64],
@@ -529,6 +578,7 @@ pub mod fixtures {
                                 value: vec![0xc1, 0xc2, 0xc3, 0xc4],
                             },
                         ],
+                        change: ChangeType::Update.into(),
                     },
                 ],
             }],
@@ -554,27 +604,13 @@ mod test {
                 .parse()
                 .unwrap(),
             "0xe688b84b23f322a994a53dbf8e15fa82cdb71127".into(),
-            evm_slots([]),
+            fixtures::evm_slots([]),
             U256::from(10000),
             code,
             code_hash,
             H256::zero(),
             H256::zero(),
             Some(H256::zero()),
-        )
-    }
-
-    fn transaction01() -> Transaction {
-        Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10)
-    }
-
-    fn transaction02(hash: &str, block: &str, index: u64) -> Transaction {
-        Transaction::new(
-            hash.parse().unwrap(),
-            block.parse().unwrap(),
-            H160::zero(),
-            Some(H160::zero()),
-            index,
         )
     }
 
@@ -585,10 +621,11 @@ mod test {
                 .parse()
                 .unwrap(),
             Chain::Ethereum,
-            evm_slots([]),
+            fixtures::evm_slots([]),
             Some(U256::from(10000)),
             Some(code),
-            transaction01(),
+            ChangeType::Update,
+            fixtures::transaction01(),
         )
     }
 
@@ -598,7 +635,7 @@ mod test {
                 .parse()
                 .unwrap(),
             Chain::Ethereum,
-            evm_slots([]),
+            fixtures::evm_slots([]),
             Some(U256::from(420)),
             None,
             ChangeType::Update,
@@ -611,17 +648,11 @@ mod test {
                 .parse()
                 .unwrap(),
             Chain::Ethereum,
-            evm_slots([(0, 1), (1, 2)]),
+            fixtures::evm_slots([(0, 1), (1, 2)]),
             None,
             None,
             ChangeType::Update,
         )
-    }
-
-    fn evm_slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<U256, U256> {
-        data.into_iter()
-            .map(|(s, v)| (U256::from(s), U256::from(v)))
-            .collect()
     }
 
     #[rstest]
@@ -663,15 +694,15 @@ mod test {
 
     #[rstest]
     #[case::diff_block(
-        transaction02(HASH_256_1, HASH_256_1, 11),
+        fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
         Err(ExtractionError::Unknown(format!("Can't merge AccountUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
     )]
     #[case::same_tx(
-        transaction02(HASH_256_0, HASH_256_0, 11),
+        fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
         Err(ExtractionError::Unknown(format!("Can't merge AccountUpdates from the same transaction: 0x{:x}", H256::zero())))
     )]
     #[case::lower_idx(
-        transaction02(HASH_256_1, HASH_256_0, 1),
+        fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
         Err(ExtractionError::Unknown("Can't merge AccountUpdates with lower transaction index: 10 > 1".to_owned()))
     )]
     fn test_merge_account_update_w_tx(
@@ -718,7 +749,10 @@ mod test {
                     update: AccountUpdate {
                         address: H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                         chain: Chain::Ethereum,
-                        slots: evm_slots([(2711790500, 2981278644), (3250766788, 3520254932)]),
+                        slots: fixtures::evm_slots([
+                            (2711790500, 2981278644),
+                            (3250766788, 3520254932),
+                        ]),
                         balance: Some(U256::from(1903326068)),
                         code: Some(vec![129, 130, 131, 132]),
                         change: ChangeType::Update,
@@ -729,7 +763,10 @@ mod test {
                     update: AccountUpdate {
                         address: H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                         chain: Chain::Ethereum,
-                        slots: evm_slots([(2981278644, 3250766788), (2442302356, 2711790500)]),
+                        slots: fixtures::evm_slots([
+                            (2981278644, 3250766788),
+                            (2442302356, 2711790500),
+                        ]),
                         balance: Some(U256::from(4059231220u64)),
                         code: Some(vec![1, 2, 3, 4]),
                         change: ChangeType::Update,
@@ -771,7 +808,7 @@ mod test {
                 AccountUpdate {
                     address: H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                     chain: Chain::Ethereum,
-                    slots: evm_slots([
+                    slots: fixtures::evm_slots([
                         (2711790500, 2981278644),
                         (3250766788, 3520254932),
                         (2981278644, 3250766788),
@@ -793,7 +830,7 @@ mod test {
         let mut msg = block_state_changes();
         let block_hash = "0x0000000000000000000000000000000000000000000000000000000031323334";
         // use a different tx so merge works
-        msg.tx_updates[1].tx = transaction02(HASH_256_1, block_hash, 5);
+        msg.tx_updates[1].tx = fixtures::transaction02(HASH_256_1, block_hash, 5);
 
         // should error cause same tx
         let res = msg.aggregate_updates().unwrap();

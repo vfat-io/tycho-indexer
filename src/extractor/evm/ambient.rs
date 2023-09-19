@@ -24,8 +24,6 @@ use crate::{
 };
 
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
-const DEPLOY_TX: [u8; 32] =
-    hex_literal::hex!("11f2acc5882e7a6903bcbb39d1af7cd6cad99afd7e421197f48a537ae73a7f3a");
 
 struct Inner {
     cursor: Vec<u8>,
@@ -58,7 +56,7 @@ pub struct AmbientPgGateway {
 #[automock]
 #[async_trait]
 pub trait AmbientGateway: Send + Sync {
-    async fn get_cursor(&self, name: &str, chain: Chain) -> Result<Vec<u8>, StorageError>;
+    async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
     async fn upsert_contract(
         &self,
         changes: &evm::BlockStateChanges,
@@ -114,7 +112,7 @@ impl AmbientPgGateway {
             self.state_gateway
                 .upsert_tx(&update.tx, conn)
                 .await?;
-            if update.tx.hash == H256(DEPLOY_TX) {
+            if update.is_creation() {
                 let new: evm::Account = update.into();
                 info!("New contract found at {}: 0x{:x}", &changes.block.number, &new.address);
                 self.state_gateway
@@ -122,14 +120,13 @@ impl AmbientPgGateway {
                     .await?;
             }
         }
-        debug!("Applying contract state changes");
         self.state_gateway
             .update_contracts(
                 self.chain,
                 changes
                     .tx_updates
                     .iter()
-                    .filter(|&u| (u.tx.hash != H256(DEPLOY_TX)))
+                    .filter(|&u| u.is_update())
                     .map(|u| (u.tx.hash.as_bytes(), &u.update))
                     .collect::<Vec<_>>()
                     .as_slice(),
@@ -140,17 +137,60 @@ impl AmbientPgGateway {
             .await?;
         Result::<(), StorageError>::Ok(())
     }
+
+    async fn backward(
+        &self,
+        to: &BlockIdentifier,
+        new_cursor: &str,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<evm::BlockAccountChanges, StorageError> {
+        let block = self
+            .state_gateway
+            .get_block(to, conn)
+            .await?;
+        let target = BlockOrTimestamp::Block(to.clone());
+        let address = H160(AMBIENT_CONTRACT);
+        let account_updates = self
+            .state_gateway
+            .get_account_delta(self.chain, None, &target, conn)
+            .await?
+            .into_iter()
+            .filter_map(|u| if u.address == address { Some((u.address, u)) } else { None })
+            .collect();
+
+        self.state_gateway
+            .revert_contract_state(to, conn)
+            .await?;
+
+        self.save_cursor(new_cursor, conn)
+            .await?;
+
+        let changes = evm::BlockAccountChanges {
+            chain: self.chain,
+            extractor: self.name.clone(),
+            block,
+            account_updates,
+            new_pools: HashMap::new(),
+        };
+        Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
+    }
+
+    // This method is separate so it can be properly tested
+    // see the tests docstring below to understand more.
+    async fn get_last_cursor(&self, conn: &mut AsyncPgConnection) -> Result<Vec<u8>, StorageError> {
+        let state = self
+            .state_gateway
+            .get_state(&self.name, self.chain, conn)
+            .await?;
+        Ok(state.cursor)
+    }
 }
 
 #[async_trait]
 impl AmbientGateway for AmbientPgGateway {
-    async fn get_cursor(&self, name: &str, chain: Chain) -> Result<Vec<u8>, StorageError> {
+    async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
         let mut conn = self.pool.get().await.unwrap();
-        let state = self
-            .state_gateway
-            .get_state(name, chain, &mut conn)
-            .await?;
-        Ok(state.cursor)
+        self.get_last_cursor(&mut conn).await
     }
     async fn upsert_contract(
         &self,
@@ -178,37 +218,8 @@ impl AmbientGateway for AmbientPgGateway {
         let res = conn
             .transaction(|conn| {
                 async move {
-                    let block = self
-                        .state_gateway
-                        .get_block(&to, conn)
-                        .await?;
-                    let target = BlockOrTimestamp::Block(to);
-                    let address = H160::from(AMBIENT_CONTRACT);
-                    let account_updates =
-                        self.state_gateway
-                            .get_account_delta(self.chain, None, &target, conn)
-                            .await?
-                            .into_iter()
-                            .filter_map(|u| {
-                                if u.address == address {
-                                    Some((u.address, u))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-
-                    self.save_cursor(new_cursor, conn)
-                        .await?;
-
-                    let changes = evm::BlockAccountChanges {
-                        chain: self.chain,
-                        extractor: self.name.clone(),
-                        block,
-                        account_updates,
-                        new_pools: HashMap::new(),
-                    };
-                    Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
+                    self.backward(&to, new_cursor, conn)
+                        .await
                 }
                 .scope_boxed()
             })
@@ -223,7 +234,7 @@ where
 {
     pub async fn new(name: &str, chain: Chain, gateway: G) -> Result<Self, ExtractionError> {
         // check if this extractor has state
-        let res = match gateway.get_cursor(name, chain).await {
+        let res = match gateway.get_cursor().await {
             Err(StorageError::NotFound(_, _)) => AmbientContractExtractor {
                 gateway,
                 name: name.to_owned(),
@@ -320,10 +331,7 @@ where
 #[cfg(test)]
 mod test {
 
-    use crate::{
-        extractor::evm::{fixtures, BlockAccountChanges},
-        pb::sf::substreams::v1::BlockRef,
-    };
+    use crate::{extractor::evm, pb::sf::substreams::v1::BlockRef};
 
     use super::*;
 
@@ -331,9 +339,8 @@ mod test {
     async fn test_get_cursor() {
         let mut gw = MockAmbientGateway::new();
         gw.expect_get_cursor()
-            .withf(|name, chain| name == "vm:ambient" && chain == &Chain::Ethereum)
             .times(1)
-            .returning(|_, _| Ok("cursor".into()));
+            .returning(|| Ok("cursor".into()));
         let extractor = AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, gw)
             .await
             .expect("extractor init ok");
@@ -344,7 +351,7 @@ mod test {
     }
 
     fn block_contract_changes_ok() -> BlockContractChanges {
-        let mut data = fixtures::pb_block_contract_changes();
+        let mut data = evm::fixtures::pb_block_contract_changes();
         // TODO: make fixtures configurable through parameters so they can be
         // properly reused. Will need fixture to easily assemble contract
         // change objects.
@@ -358,16 +365,15 @@ mod test {
     async fn test_handle_tick_scoped_data() {
         let mut gw = MockAmbientGateway::new();
         gw.expect_get_cursor()
-            .withf(|name, chain| name == "vm:ambient" && chain == &Chain::Ethereum)
             .times(1)
-            .returning(|_, _| Ok("cursor".into()));
+            .returning(|| Ok("cursor".into()));
         gw.expect_upsert_contract()
             .times(1)
             .returning(|_, _| Ok(()));
         let extractor = AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, gw)
             .await
             .expect("extractor init ok");
-        let inp = fixtures::pb_block_scoped_data(block_contract_changes_ok());
+        let inp = evm::fixtures::pb_block_scoped_data(block_contract_changes_ok());
         let exp = Ok(Some(()));
 
         let res = extractor
@@ -383,16 +389,15 @@ mod test {
     async fn test_handle_tick_scoped_data_skip() {
         let mut gw = MockAmbientGateway::new();
         gw.expect_get_cursor()
-            .withf(|name, chain| name == "vm:ambient" && chain == &Chain::Ethereum)
             .times(1)
-            .returning(|_, _| Ok("cursor".into()));
+            .returning(|| Ok("cursor".into()));
         gw.expect_upsert_contract()
             .times(0)
             .returning(|_, _| Ok(()));
         let extractor = AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, gw)
             .await
             .expect("extractor init ok");
-        let inp = fixtures::pb_block_scoped_data(());
+        let inp = evm::fixtures::pb_block_scoped_data(());
 
         let res = extractor
             .handle_tick_scoped_data(inp)
@@ -404,7 +409,7 @@ mod test {
 
     fn undo_signal() -> BlockUndoSignal {
         BlockUndoSignal {
-            last_valid_block: Some(BlockRef { id: fixtures::HASH_256_0.into(), number: 400 }),
+            last_valid_block: Some(BlockRef { id: evm::fixtures::HASH_256_0.into(), number: 400 }),
             last_valid_cursor: "cursor@400".into(),
         }
     }
@@ -413,16 +418,15 @@ mod test {
     async fn test_handle_revert() {
         let mut gw = MockAmbientGateway::new();
         gw.expect_get_cursor()
-            .withf(|name, chain| name == "vm:ambient" && chain == &Chain::Ethereum)
             .times(1)
-            .returning(|_, _| Ok("cursor".into()));
+            .returning(|| Ok("cursor".into()));
         gw.expect_revert()
             .withf(|v, cursor| {
-                v == &BlockIdentifier::Hash(hex::decode(&fixtures::HASH_256_0[2..]).unwrap()) &&
+                v == &BlockIdentifier::Hash(hex::decode(&evm::fixtures::HASH_256_0[2..]).unwrap()) &&
                     cursor == "cursor@400"
             })
             .times(1)
-            .returning(|_, _| Ok(BlockAccountChanges::default()));
+            .returning(|_, _| Ok(evm::BlockAccountChanges::default()));
         let extractor = AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, gw)
             .await
             .expect("extractor init ok");
@@ -432,5 +436,217 @@ mod test {
 
         assert!(matches!(res, Ok(None)));
         assert_eq!(extractor.get_cursor().await, "cursor@400");
+    }
+}
+
+#[cfg(test)]
+mod gateway_test {
+    //! It is notoriously hard to mock postgres here, we would need to have traits and abstractions
+    //! for the connection pooling as well as for transaction handling so the easiest way
+    //! forward is to just run these tests against a real postgres instance.
+    //!
+    //! The challenge here is to leave the database empty. So we need to initiate a test transaction
+    //! and should avoid calling the trait methods which start a transaction of their own. So we do
+    //! that by moving the main logic of each trait method into a private method and test this
+    //! method instead.
+    //!
+    //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
+    //! between this component and the actual db interactions
+    use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
+    use ethers::types::U256;
+
+    use super::*;
+
+    const TX_HASH_0: &str = "0x2f6350a292c0fc918afe67cb893744a080dacb507b0cea4cc07437b8aff23cdb";
+    const TX_HASH_1: &str = "0x0d9e0da36cf9f305a189965b248fc79c923619801e8ab5ef158d4fd528a291ad";
+    const BLOCK_HASH_0: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
+
+    async fn setup_gw() -> (AmbientPgGateway, AsyncPgConnection) {
+        let db_url = std::env::var("DATABASE_URL").expect("database url should be set for testing");
+        let pool = postgres::connect(&db_url)
+            .await
+            .expect("test db should be available");
+        // We need a dedicated connection so we don't use the pool as this would actually insert
+        // data.
+        let mut conn = pool
+            .dedicated_connection()
+            .await
+            .expect("pool should get a connection");
+        conn.begin_test_transaction()
+            .await
+            .expect("starting test transaction should succeed");
+        postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        let evm_gw = PostgresGateway::<
+            evm::Block,
+            evm::Transaction,
+            evm::Account,
+            evm::AccountUpdate,
+        >::from_connection(&mut conn)
+        .await;
+
+        let gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool, Arc::new(evm_gw));
+        (gw, conn)
+    }
+
+    #[tokio::test]
+    async fn test_get_cursor() {
+        let (gw, mut conn) = setup_gw().await;
+        let evm_gw = gw.state_gateway.clone();
+        let state =
+            ExtractionState::new("vm:ambient", Chain::Ethereum, None, "cursor@420".as_bytes());
+        evm_gw
+            .save_state(&state, &mut conn)
+            .await
+            .expect("extaction state insertion succeeded");
+
+        let cursor = gw
+            .get_last_cursor(&mut conn)
+            .await
+            .expect("get cursor should succeed");
+
+        assert_eq!(cursor, "cursor@420".as_bytes());
+    }
+
+    fn ambient_account(at_version: u64) -> evm::Account {
+        match at_version {
+            0 => evm::Account::new(
+                Chain::Ethereum,
+                "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688"
+                    .parse()
+                    .unwrap(),
+                "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
+                evm::fixtures::evm_slots([(1, 200)]),
+                U256::from(1000),
+                vec![0, 0, 0, 0],
+                "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
+                    .parse()
+                    .unwrap(),
+                "0x2f6350a292c0fc918afe67cb893744a080dacb507b0cea4cc07437b8aff23cdb"
+                    .parse()
+                    .unwrap(),
+                H256::zero(),
+                Some(H256::zero()),
+            ),
+            _ => panic!("Unkown version"),
+        }
+    }
+
+    fn ambient_creation_and_update() -> evm::BlockStateChanges {
+        evm::BlockStateChanges {
+            extractor: "vm:ambient".to_owned(),
+            chain: Chain::Ethereum,
+            block: evm::Block::default(),
+            tx_updates: vec![
+                evm::AccountUpdateWithTx::new(
+                    H160(AMBIENT_CONTRACT),
+                    Chain::Ethereum,
+                    HashMap::new(),
+                    None,
+                    Some(vec![0, 0, 0, 0]),
+                    ChangeType::Creation,
+                    evm::fixtures::transaction01(),
+                ),
+                evm::AccountUpdateWithTx::new(
+                    H160(AMBIENT_CONTRACT),
+                    Chain::Ethereum,
+                    evm::fixtures::evm_slots([(1, 200)]),
+                    Some(U256::from(1000)),
+                    None,
+                    ChangeType::Update,
+                    evm::fixtures::transaction02(TX_HASH_0, evm::fixtures::HASH_256_0, 1),
+                ),
+            ],
+            new_pools: HashMap::new(),
+        }
+    }
+
+    fn ambient_update02() -> evm::BlockStateChanges {
+        let block = evm::Block {
+            number: 1,
+            chain: Chain::Ethereum,
+            hash: BLOCK_HASH_0.parse().unwrap(),
+            parent_hash: H256::zero(),
+            ts: "2020-01-01T01:00:00".parse().unwrap(),
+        };
+        evm::BlockStateChanges {
+            extractor: "vm:ambient".to_owned(),
+            chain: Chain::Ethereum,
+            block,
+            tx_updates: vec![evm::AccountUpdateWithTx::new(
+                H160(AMBIENT_CONTRACT),
+                Chain::Ethereum,
+                evm::fixtures::evm_slots([(42, 0xbadbabe)]),
+                Some(U256::from(2000)),
+                None,
+                ChangeType::Update,
+                evm::fixtures::transaction02(TX_HASH_1, BLOCK_HASH_0, 1),
+            )],
+            new_pools: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_upsert_contract() {
+        let (gw, mut conn) = setup_gw().await;
+        let evm_gw = gw.state_gateway.clone();
+        let msg = ambient_creation_and_update();
+        let exp = ambient_account(0);
+
+        gw.forward(&msg, "cursor@500", &mut conn)
+            .await
+            .expect("upsert should succeed");
+
+        let res = evm_gw
+            .get_contract(
+                &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.to_vec()),
+                &None,
+                true,
+                &mut conn,
+            )
+            .await
+            .expect("test successfully inserted ambient contract");
+        assert_eq!(res, exp);
+    }
+
+    #[tokio::test]
+    async fn test_revert() {
+        let (gw, mut conn) = setup_gw().await;
+        let evm_gw = gw.state_gateway.clone();
+        let msg0 = ambient_creation_and_update();
+        let msg1 = ambient_update02();
+        gw.forward(&msg0, "cursor@0", &mut conn)
+            .await
+            .expect("upsert should succeed");
+        gw.forward(&msg1, "cursor@1", &mut conn)
+            .await
+            .expect("upsert should succeed");
+        let ambient_address = H160(AMBIENT_CONTRACT);
+        let exp_change = evm::AccountUpdate::new(
+            ambient_address,
+            Chain::Ethereum,
+            evm::fixtures::evm_slots([(42, 0)]),
+            Some(U256::from(1000)),
+            None,
+            ChangeType::Update,
+        );
+        let exp_account = ambient_account(0);
+
+        let changes = gw
+            .backward(&BlockIdentifier::Number((Chain::Ethereum, 0)), "cursor@2", &mut conn)
+            .await
+            .expect("revert should succeed");
+
+        assert_eq!(changes.account_updates.len(), 1);
+        assert_eq!(changes.account_updates[&ambient_address], exp_change);
+        let account = evm_gw
+            .get_contract(
+                &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.to_vec()),
+                &None,
+                true,
+                &mut conn,
+            )
+            .await
+            .expect("test successfully retrieved ambient contract");
+        assert_eq!(account, exp_account);
     }
 }
