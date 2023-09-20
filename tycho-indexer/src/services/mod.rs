@@ -12,7 +12,6 @@ use crate::{
 
 use self::ws::{AppState, MessageSenderMap, WsActor};
 
-pub mod deserialization_helpers;
 mod rpc;
 mod ws;
 

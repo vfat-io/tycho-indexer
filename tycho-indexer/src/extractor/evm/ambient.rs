@@ -5,7 +5,6 @@ use diesel_async::{
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
-use serde_json::json;
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tracing::{debug, info};
 
@@ -85,12 +84,7 @@ impl AmbientPgGateway {
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
-        let state = ExtractionState {
-            name: self.name.clone(),
-            chain: self.chain,
-            attributes: json!(null),
-            cursor: new_cursor.as_bytes().to_vec(),
-        };
+        let state = ExtractionState::new(&self.name, self.chain, None, new_cursor.as_bytes());
         self.state_gateway
             .save_state(&state, conn)
             .await?;
@@ -257,7 +251,7 @@ where
     G: AmbientGateway,
 {
     fn get_id(&self) -> ExtractorIdentity {
-        ExtractorIdentity { chain: self.chain, name: self.name.to_owned() }
+        ExtractorIdentity::new(self.chain, &self.name)
     }
 
     async fn get_cursor(&self) -> String {

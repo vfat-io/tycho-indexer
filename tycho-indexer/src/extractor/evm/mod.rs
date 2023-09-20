@@ -26,6 +26,7 @@ use super::ExtractionError;
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SwapPool {}
 
+#[allow(dead_code)]
 pub struct ERC20Token {}
 
 #[derive(Debug, PartialEq, Copy, Clone, Deserialize, Serialize, Default)]
@@ -94,6 +95,7 @@ impl Account {
         }
     }
 
+    #[cfg(test)]
     pub fn set_balance(&mut self, new_balance: U256, modified_at: H256) {
         self.balance = new_balance;
         self.balance_modify_tx = modified_at;
@@ -220,7 +222,7 @@ pub struct BlockAccountChanges {
 
 impl NormalisedMessage for BlockAccountChanges {
     fn source(&self) -> ExtractorIdentity {
-        ExtractorIdentity { chain: self.chain, name: self.extractor.clone() }
+        ExtractorIdentity::new(self.chain, &self.extractor)
     }
 }
 
@@ -360,11 +362,10 @@ impl AccountUpdateWithTx {
         chain: Chain,
     ) -> Result<Self, ExtractionError> {
         let change = msg.change().into();
-        let update = AccountUpdate {
-            address: pad_and_parse_h160(&msg.address).map_err(ExtractionError::DecodeError)?,
+        let update = AccountUpdateWithTx::new(
+            pad_and_parse_h160(&msg.address).map_err(ExtractionError::DecodeError)?,
             chain,
-            slots: msg
-                .slots
+            msg.slots
                 .into_iter()
                 .map(|cs| {
                     Ok((
@@ -375,15 +376,16 @@ impl AccountUpdateWithTx {
                     ))
                 })
                 .collect::<Result<HashMap<_, _>, ExtractionError>>()?,
-            balance: if !msg.balance.is_empty() {
+            if !msg.balance.is_empty() {
                 Some(pad_and_parse_32bytes(&msg.balance).map_err(ExtractionError::DecodeError)?)
             } else {
                 None
             },
-            code: if !msg.code.is_empty() { Some(msg.code) } else { None },
+            if !msg.code.is_empty() { Some(msg.code) } else { None },
             change,
-        };
-        Ok(Self { update, tx: *tx })
+            *tx,
+        );
+        Ok(update)
     }
 }
 

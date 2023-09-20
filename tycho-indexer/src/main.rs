@@ -1,4 +1,3 @@
-
 #![doc = include_str!("../../Readme.md")]
 use diesel_async::{pooled_connection::bb8::Pool, AsyncPgConnection};
 use extractor::{
@@ -89,6 +88,9 @@ async fn main() -> Result<(), ExtractionError> {
 
     info!("Starting ws service");
     let (server_handle, server_task) = ServicesBuilder::new()
+        .prefix("v1")
+        .bind("127.0.0.1")
+        .port(4242)
         .register_extractor(ambient_handle)
         .run()?;
     let shutdown_task = tokio::spawn(shutdown_handler(server_handle, extractor_handles));

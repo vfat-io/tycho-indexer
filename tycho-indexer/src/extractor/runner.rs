@@ -223,11 +223,13 @@ where
         }
     }
 
+    #[allow(dead_code)]
     pub fn endpoint_url(mut self, val: &str) -> Self {
         self.endpoint_url = val.to_owned();
         self
     }
 
+    #[allow(dead_code)]
     pub fn module_name(mut self, val: &str) -> Self {
         self.module_name = val.to_owned();
         self
@@ -243,6 +245,7 @@ where
         self
     }
 
+    #[allow(dead_code)]
     pub fn token(mut self, val: &str) -> Self {
         self.token = val.to_owned();
         self

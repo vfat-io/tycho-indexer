@@ -25,6 +25,7 @@ struct RequestHandler {
 }
 
 impl RequestHandler {
+    #[allow(dead_code)]
     pub fn new(
         db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>,
         db_connection: AsyncPgConnection,

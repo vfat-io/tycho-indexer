@@ -28,12 +28,12 @@ where
 
         match orm::ExtractionState::by_name(name, block_chain_id, conn).await {
             Ok(Some(orm_state)) => {
-                let state = ExtractionState {
-                    name: orm_state.name,
+                let state = ExtractionState::new(
+                    &orm_state.name,
                     chain,
-                    attributes: orm_state.attributes.into(),
-                    cursor: orm_state.cursor.unwrap_or_default(),
-                };
+                    orm_state.attributes,
+                    &orm_state.cursor.unwrap_or_default(),
+                );
                 Ok(state)
             }
             Ok(None) => Err(StorageError::NotFound("ExtractionState".to_owned(), name.to_owned())),
@@ -152,12 +152,12 @@ mod test {
         let extractor_name = "test_extractor";
 
         let gateway = get_dgw(&mut conn).await;
-        let state = ExtractionState {
-            name: extractor_name.to_owned(),
-            chain: Chain::Ethereum,
-            attributes: serde_json::json!({"test": "test"}),
-            cursor: "10".to_owned().into_bytes(),
-        };
+        let state = ExtractionState::new(
+            extractor_name,
+            Chain::Ethereum,
+            Some(serde_json::json!({"test": "test"})),
+            "10".to_owned().as_bytes(),
+        );
 
         // Save the state using the gateway
         gateway
@@ -212,12 +212,12 @@ mod test {
         let gateway = get_dgw(&mut conn).await;
         let extractor_name = "setup_extractor";
 
-        let state = ExtractionState {
-            name: extractor_name.to_owned(),
-            chain: Chain::Ethereum,
-            attributes: serde_json::json!({"test": "test"}),
-            cursor: "20".to_owned().into_bytes(),
-        };
+        let state = ExtractionState::new(
+            extractor_name,
+            Chain::Ethereum,
+            Some(serde_json::json!({"test": "test"})),
+            "20".as_bytes(),
+        );
 
         gateway
             .save_state(&state, &mut conn)
