@@ -49,12 +49,21 @@ impl From<InterimContractChange> for tycho::ContractChange {
 ///
 /// This implementation has currently two major limitations:
 /// 1. It is hardwired to only care about changes to the ambient main contract, this is ok for this
-///    particular use case but for a more general prupose implementation this is not ideal
+///    particular use case but for a more general purpose implementation this is not ideal
 /// 2. Changes are processed separately, this means that if there are any side effects between each
 ///    other (e.g. if account is deleted and then created again in ethereum all the storage is set
 ///    to 0. So there is a side effect between account creation and contract storage.) these might
 ///    not be properly accounted for. Most of the time this should not be a major issue but may lead
-///    to wrong results so consume this implementation with care.
+///    to wrong results so consume this implementation with care. See example below for a concrete
+///    case where this is problematic.
+///
+/// ## A very contrived example:
+/// 1. Some existing contract receives a transaction that changes it state, the state is updated
+/// 2. Next, this contract has self destruct called on itself
+/// 3. The contract is created again using CREATE2 at the same address
+/// 4. The contract receives a transaction that changes it state
+/// 5. We would emit this as as contract creation with slots set from 1 and from 4, although we
+///    should only emit the slots changed from 4.
 #[substreams::handlers::map]
 fn map_changes(
     block: eth::v2::Block,

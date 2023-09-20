@@ -20,6 +20,7 @@ use tracing::info;
 mod extractor;
 mod models;
 mod pb;
+mod serde_helpers;
 mod services;
 mod storage;
 mod substreams;
