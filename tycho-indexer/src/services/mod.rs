@@ -23,14 +23,20 @@ pub struct ServicesBuilder<M> {
     extractor_handles: MessageSenderMap<M>,
 }
 
-impl<M: NormalisedMessage> ServicesBuilder<M> {
-    pub fn new() -> Self {
+impl<M> Default for ServicesBuilder<M> {
+    fn default() -> Self {
         Self {
             prefix: "v1".to_owned(),
             port: 4242,
             bind: "0.0.0.0".to_owned(),
             extractor_handles: HashMap::new(),
         }
+    }
+}
+
+impl<M: NormalisedMessage> ServicesBuilder<M> {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn register_extractor(mut self, handle: ExtractorHandle<M>) -> Self {

@@ -69,10 +69,11 @@ fn stream_blocks(
     try_stream! {
         'retry_loop: loop {
             if retry_count > 0 {
-                warn!("Blockstreams disconnected, connecting (endpoint {}, start block {}, cursor {})",
+                warn!("Blockstreams disconnected, connecting (endpoint {}, start block {}, cursor {}, retry_count {})",
                     &endpoint,
                     start_block_num,
-                    &latest_cursor
+                    &latest_cursor,
+                    retry_count
                 );
             }
 
