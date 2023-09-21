@@ -6,7 +6,7 @@ use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
 use std::{collections::HashMap, str::FromStr, sync::Arc};
-use tracing::{debug, info};
+use tracing::{debug, info, instrument};
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -64,7 +64,7 @@ pub trait AmbientGateway: Send + Sync {
 
     async fn revert(
         &self,
-        to: BlockIdentifier,
+        to: &BlockIdentifier,
         new_cursor: &str,
     ) -> Result<evm::BlockAccountChanges, StorageError>;
 }
@@ -79,6 +79,7 @@ impl AmbientPgGateway {
         AmbientPgGateway { name: name.to_owned(), chain, pool, state_gateway: gw }
     }
 
+    #[instrument(skip_all)]
     async fn save_cursor(
         &self,
         new_cursor: &str,
@@ -91,24 +92,25 @@ impl AmbientPgGateway {
         Ok(())
     }
 
+    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %changes.block.number))]
     async fn forward(
         &self,
         changes: &evm::BlockStateChanges,
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
-        debug!("Upserting block: {:?}", &changes.block);
+        debug!("Upserting block");
         self.state_gateway
             .upsert_block(&changes.block, conn)
             .await?;
         for update in changes.tx_updates.iter() {
-            debug!("Processing tx: 0x{:x}", &update.tx.hash);
+            debug!(tx_hash = ?update.tx.hash, "Processing transaction");
             self.state_gateway
                 .upsert_tx(&update.tx, conn)
                 .await?;
             if update.is_creation() {
                 let new: evm::Account = update.into();
-                info!("New contract found at {}: 0x{:x}", &changes.block.number, &new.address);
+                info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
                 self.state_gateway
                     .insert_contract(&new, conn)
                     .await?;
@@ -132,15 +134,16 @@ impl AmbientPgGateway {
         Result::<(), StorageError>::Ok(())
     }
 
+    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block = ?to))]
     async fn backward(
         &self,
-        to: BlockIdentifier,
+        to: &BlockIdentifier,
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
     ) -> Result<evm::BlockAccountChanges, StorageError> {
         let block = self
             .state_gateway
-            .get_block(&to, conn)
+            .get_block(to, conn)
             .await?;
         let target = BlockOrTimestamp::Block(to.clone());
         let address = H160(AMBIENT_CONTRACT);
@@ -153,7 +156,7 @@ impl AmbientPgGateway {
             .collect();
 
         self.state_gateway
-            .revert_contract_state(&to, conn)
+            .revert_contract_state(to, conn)
             .await?;
 
         self.save_cursor(new_cursor, conn)
@@ -184,6 +187,8 @@ impl AmbientGateway for AmbientPgGateway {
         let mut conn = self.pool.get().await.unwrap();
         self.get_last_cursor(&mut conn).await
     }
+
+    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %changes.block.number))]
     async fn upsert_contract(
         &self,
         changes: &evm::BlockStateChanges,
@@ -201,9 +206,10 @@ impl AmbientGateway for AmbientPgGateway {
         Ok(())
     }
 
+    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %to))]
     async fn revert(
         &self,
-        to: BlockIdentifier,
+        to: &BlockIdentifier,
         new_cursor: &str,
     ) -> Result<evm::BlockAccountChanges, StorageError> {
         let mut conn = self.pool.get().await.unwrap();
@@ -258,6 +264,7 @@ where
         String::from_utf8(self.inner.lock().await.cursor.clone()).expect("Cursor is utf8")
     }
 
+    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name))]
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
@@ -271,10 +278,14 @@ where
             .unwrap();
 
         let raw_msg = BlockContractChanges::decode(_data.value.as_slice())?;
-        debug!("Received message: {raw_msg:?}");
+
+        debug!(?raw_msg, "Received message");
 
         let msg = match evm::BlockStateChanges::try_from_message(raw_msg, &self.name, self.chain) {
-            Ok(changes) => changes,
+            Ok(changes) => {
+                tracing::Span::current().record("block_number", changes.block.number);
+                changes
+            }
             Err(ExtractionError::Empty) => {
                 self.update_cursor(inp.cursor).await;
                 return Ok(None)
@@ -289,6 +300,7 @@ where
         Ok(Some(msg.aggregate_updates()?))
     }
 
+    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %inp.last_valid_block.as_ref().unwrap().number))]
     async fn handle_revert(
         &self,
         inp: BlockUndoSignal,
@@ -305,7 +317,7 @@ where
         let changes = self
             .gateway
             .revert(
-                BlockIdentifier::Hash(block_hash.as_bytes().to_vec()),
+                &BlockIdentifier::Hash(block_hash.as_bytes().to_vec()),
                 inp.last_valid_cursor.as_ref(),
             )
             .await?;
@@ -315,6 +327,7 @@ where
         Ok((!changes.account_updates.is_empty()).then_some(changes))
     }
 
+    #[instrument(skip_all)]
     async fn handle_progress(&self, _inp: ModulesProgress) -> Result<(), ExtractionError> {
         todo!()
     }
@@ -624,7 +637,7 @@ mod gateway_test {
         let exp_account = ambient_account(0);
 
         let changes = gw
-            .backward(BlockIdentifier::Number((Chain::Ethereum, 0)), "cursor@2", &mut conn)
+            .backward(&BlockIdentifier::Number((Chain::Ethereum, 0)), "cursor@2", &mut conn)
             .await
             .expect("revert should succeed");
 

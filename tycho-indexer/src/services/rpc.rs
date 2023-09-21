@@ -65,9 +65,9 @@ impl RequestHandler {
             .await
         {
             Ok(accounts) => Ok(StateRequestResponse::new(accounts)),
-            Err(e) => {
-                error!("Error while getting contract states: {}", e);
-                Err(RpcError::StorageError(e))
+            Err(err) => {
+                error!(error = %err, "Error while getting contract states.");
+                Err(RpcError::StorageError(err))
             }
         }
     }
@@ -87,8 +87,8 @@ async fn contract_state(
 
     match response {
         Ok(state) => HttpResponse::Ok().json(state),
-        Err(e) => {
-            error!("Error while getting contract state: request body: {:?}, query parameters: {:?}, error: {}", body, query, e);
+        Err(err) => {
+            error!(error = %err, ?body, ?query, "Error while getting contract state.");
             HttpResponse::InternalServerError().finish()
         }
     }
@@ -160,8 +160,10 @@ struct Block {
 mod tests {
     use crate::storage::postgres::db_fixtures;
     use actix_web::{test, App};
+    use actix_web_opentelemetry::RequestTracing;
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
+
     use std::{collections::HashMap, str::FromStr};
 
     use super::*;
@@ -398,6 +400,7 @@ mod tests {
     }
 
     #[actix_web::test]
+
     async fn test_contract_state_route() {
         let (mut conn, acc_address) = setup_database().await;
 
@@ -437,6 +440,7 @@ mod tests {
         // Set up the app with the RequestHandler and the contract_state service
         let app = test::init_service(
             App::new()
+                .wrap(RequestTracing::new())
                 .app_data(web::Data::new(req_handler))
                 .service(contract_state),
         )
@@ -450,14 +454,12 @@ mod tests {
             )]),
             version: Version { timestamp: Utc::now().naive_utc(), block: None },
         };
-        dbg!(&request_body);
 
         // Create a POST request to the /contract_state route
         let req = test::TestRequest::post()
             .uri("/contract_state")
             .set_json(request_body)
             .to_request();
-        dbg!(&req);
 
         // Send the request to the app
         let response: StateRequestResponse = test::call_and_read_body_json(&app, req).await;

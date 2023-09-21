@@ -10,7 +10,7 @@ use std::{
 };
 use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
-use tracing::{error, info, warn};
+use tracing::{error, info, info_span, warn};
 
 use crate::pb::sf::substreams::{
     rpc::v2::{response::Message, BlockScopedData, BlockUndoSignal, Request, Response},
@@ -66,15 +66,13 @@ fn stream_blocks(
     let mut retry_count = 0;
     let mut backoff = DEFAULT_BACKOFF.clone();
 
+    let span =
+        info_span!("substreams_stream", %endpoint, %start_block_num, %latest_cursor, %retry_count);
+    let _enter = span.enter();
     try_stream! {
         'retry_loop: loop {
             if retry_count > 0 {
-                warn!("Blockstreams disconnected, connecting (endpoint {}, start block {}, cursor {}, retry_count {})",
-                    &endpoint,
-                    start_block_num,
-                    &latest_cursor,
-                    retry_count
-                );
+                warn!("Blockstreams disconnected, connecting again");
             }
 
             let result = endpoint.clone().substreams(Request {

@@ -123,7 +123,7 @@ diesel migration run
 
 ```sh
 cargo check --all
-cargo test --all --all-features
+cargo nextest run --workspace --all-features --all-targets
 cargo +nightly fmt -- --check
 cargo +nightly clippy --all --all-features --all-targets -- -D warnings
 ```
@@ -139,8 +139,9 @@ If you are working in VSCode, we recommend you install the [rust-analyzer](https
   "cargo",
   "+nightly",
   "clippy",
-  "--all",
+  "--workspace",
   "--all-features",
+  "--all-targets",
   "--message-format=json"
 ],
 "[rust]": {
