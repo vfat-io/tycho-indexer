@@ -187,7 +187,7 @@ impl AccountUpdate {
             return Err(ExtractionError::Unknown(format!(
                 "Can't merge AccountUpdates from differing identities; Expected {:#020x}, got {:#020x}",
                 self.address, other.address
-            )))
+            )));
         }
 
         self.slots.extend(other.slots);
@@ -218,6 +218,12 @@ pub struct BlockAccountChanges {
     pub block: Block,
     pub account_updates: HashMap<H160, AccountUpdate>,
     pub new_pools: HashMap<H160, SwapPool>,
+}
+
+impl std::fmt::Display for BlockAccountChanges {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "block_number: {}, extractor: {}", self.block.number, self.extractor)
+    }
 }
 
 impl NormalisedMessage for BlockAccountChanges {
