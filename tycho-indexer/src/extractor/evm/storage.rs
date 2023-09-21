@@ -71,15 +71,13 @@ pub mod pg {
             } else {
                 None
             };
-            Ok(Self {
-                hash: H256::try_decode(&val.hash, "tx hash").map_err(StorageError::DecodeError)?,
-                block_hash: H256::try_decode(block_hash, "tx block hash")
-                    .map_err(StorageError::DecodeError)?,
-                from: H160::try_decode(&val.from, "tx sender")
-                    .map_err(StorageError::DecodeError)?,
+            Ok(Self::new(
+                H256::try_decode(&val.hash, "tx hash").map_err(StorageError::DecodeError)?,
+                H256::try_decode(block_hash, "tx block hash").map_err(StorageError::DecodeError)?,
+                H160::try_decode(&val.from, "tx sender").map_err(StorageError::DecodeError)?,
                 to,
-                index: val.index as u64,
-            })
+                val.index as u64,
+            ))
         }
 
         fn to_storage(&self, block_id: i64) -> orm::NewTransaction {

@@ -95,9 +95,6 @@ pub type BlockHash = Vec<u8>;
 /// Smart contract code is represented as a byte vector containing opcodes.
 pub type Code = Vec<u8>;
 
-/// The chain specific hash digest of an account's code.
-pub type CodeHash = Vec<u8>;
-
 /// The balance of an account is a big endian serialised integer of variable size.
 pub type Balance = Vec<u8>;
 
@@ -393,11 +390,14 @@ pub enum VersionKind {
     /// executed in that block.
     #[default]
     Last,
+
     /// Represents the initial state of a specific block. In other words,
     /// it is the state before any transaction has been executed within that block.
+    #[allow(dead_code)]
     First,
     /// Represents a specific transactions indexed position within a block.
     /// It includes the state after executing the transaction at that index.
+    #[allow(dead_code)]
     Index(i64),
 }
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -425,6 +425,7 @@ impl Display for ContractId {
 pub struct Version(pub BlockOrTimestamp, pub VersionKind);
 
 impl Version {
+    #[cfg(test)]
     pub fn from_block_number(chain: Chain, number: i64) -> Self {
         Self(BlockOrTimestamp::Block(BlockIdentifier::Number((chain, number))), VersionKind::Last)
     }

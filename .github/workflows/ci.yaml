@@ -51,7 +51,7 @@ jobs:
           crate: diesel_cli
           features: postgres
       - name: DB Setup
-        run: diesel migration run
+        run: cd tycho-indexer && diesel migration run
       - name: Test 
         run: cargo test
 

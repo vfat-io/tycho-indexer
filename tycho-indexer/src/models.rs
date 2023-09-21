@@ -14,15 +14,18 @@ pub enum Chain {
     ZkSync,
 }
 
+#[allow(dead_code)]
 pub enum ProtocolSystem {
     Ambient,
 }
 
+#[allow(dead_code)]
 pub enum ImplementationType {
     Vm,
     Custom,
 }
 
+#[allow(dead_code)]
 pub enum FinancialType {
     Swap,
     Lend,
@@ -30,6 +33,7 @@ pub enum FinancialType {
     Psm,
 }
 
+#[allow(dead_code)]
 pub struct ProtocolType {
     name: String,
     attribute_schema: serde_json::Value,
@@ -85,5 +89,5 @@ pub trait NormalisedMessage:
     fn source(&self) -> ExtractorIdentity;
 }
 
-// TODO: will require implementing
+#[allow(dead_code)]
 pub struct ProtocolComponent {}

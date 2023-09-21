@@ -28,7 +28,9 @@ protobuf:
 binaries:
   default:
     type: wasm/rust-v1
-    file: ./target/wasm32-unknown-unknown/release/substreams.wasm
+    # this points to the workspace target directory we use a special 
+    # substreams build profile to optimise wasm binaries
+    file: ../../target/wasm32-unknown-unknown/substreams/substreams_[CHAIN]_[PROTOCOL_SYSTEM].wasm
 
 modules:
   # sample module provides access to blocks.
@@ -43,7 +45,7 @@ modules:
 Substreams packages are Rust crates so we also need a `cargo.toml`. 
 The example from the official docs will serve us just well:
 
-```
+```toml
 [package]
 name = "substreams_[CHAIN]_[PROTOCOL_SYSTEM]"
 version = "0.1.0"
@@ -58,10 +60,6 @@ substreams = "0.5"
 substreams-ethereum = "0.9"
 prost = "0.11"
 
-[profile.release]
-lto = true
-opt-level = 'z'
-strip = "debuginfo"
 ```
 
 Now we can generate the Rust protobuf code:

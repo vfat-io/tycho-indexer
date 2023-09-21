@@ -63,13 +63,17 @@ export SUBSTREAMS_API_TOKEN=$(curl https://auth.streamingfast.io/v1/auth/issue -
 ```bash
 rustup target add wasm32-unknown-unknown
 ```
-5. To compile protobuf files please install [buf](https://docs.buf.build/installation)
-6. To compile the substreams, run:
+5. To compile protobuf files please install [buf](https://docs.buf.build/installation). To generate protobuf definition for a substream crate:
 ```bash
-cd substreams/ethereum-ambient 
-cargo build --release --target wasm32-unknown-unknown
-substreams pack ./substreams.yaml 
+cd substreams/ethereum-abmient
+substreams protogen substreams.yaml --exclude-paths="sf/substreams,google"
 ```
+6. To compile the substreams into a spkgs, run:
+```bash
+cargo build --package substreams-ethereum-ambient --target wasm32-unknown-unknown --profile substreams
+substreams pack substreams/ethereum-ambient/substreams.yaml
+```
+7. Alternatively you can run the `./stable-build.sh` script which will build all substreams crates and pack them. The spkgs artifacts will be placed under `./target`.
 7. To test the substreams (requires the SUBSTREAMS_API_TOKEN env variable set previously), run:
 ```bash
 cd ../..
@@ -113,6 +117,7 @@ export DATABASE_URL=postgres://postgres:mypassword@localhost:5432/tycho_indexer_
 diesel migration run
 ```
 6. We use [pgFormatter](https://github.com/darold/pgFormatter) to keep SQL files consistently formatted.
+
 ### Local development
 1. Please also make sure that the following commands pass if you have changed the code:
 

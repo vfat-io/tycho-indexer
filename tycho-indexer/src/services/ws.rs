@@ -5,7 +5,7 @@ use crate::{
     models::{ExtractorIdentity, NormalisedMessage},
 };
 use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
-use actix_web::{web, Error, HttpRequest, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use futures03::executor::block_on;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// How often heartbeat pings are sent
@@ -60,7 +60,7 @@ impl Serialize for WebsocketError {
     }
 }
 
-type MessageSenderMap<M> = HashMap<ExtractorIdentity, Arc<dyn MessageSender<M> + Send + Sync>>;
+pub type MessageSenderMap<M> = HashMap<ExtractorIdentity, Arc<dyn MessageSender<M> + Send + Sync>>;
 
 /// Shared application data between all connections
 /// Parameters are hidden behind a Mutex to allow for sharing between threads
@@ -70,8 +70,8 @@ pub struct AppState<M> {
 }
 
 impl<M> AppState<M> {
-    pub fn new() -> Self {
-        Self { subscribers: Arc::new(Mutex::new(HashMap::new())) }
+    pub fn new(extractors: MessageSenderMap<M>) -> Self {
+        Self { subscribers: Arc::new(Mutex::new(extractors)) }
     }
 }
 
@@ -80,7 +80,7 @@ impl<M> AppState<M> {
 /// This actor is responsible for:
 /// - Receiving adn forwarding messages from the extractor
 /// - Receiving and handling commands from the client
-struct WsActor<M> {
+pub struct WsActor<M> {
     _id: Uuid,
     /// Client must send ping at least once per 10 seconds (CLIENT_TIMEOUT), otherwise we drop the
     /// connection.
@@ -106,7 +106,7 @@ where
         req: HttpRequest,
         stream: web::Payload,
         data: web::Data<AppState<M>>,
-    ) -> Result<HttpResponse, Error> {
+    ) -> Result<HttpResponse, actix_web::Error> {
         ws::start(WsActor::new(data), &req, stream)
     }
 
@@ -131,7 +131,6 @@ where
         ctx: &mut ws::WebsocketContext<Self>,
         extractor_id: &ExtractorIdentity,
     ) {
-        info!("Subscribing to extractor: {:?}", extractor_id);
         {
             let extractors_guard = self
                 .app_state
@@ -142,7 +141,7 @@ where
             if let Some(message_sender) = extractors_guard.get(extractor_id) {
                 // Generate a unique ID for this subscription
                 let subscription_id = Uuid::new_v4();
-                info!("Generated subscription ID: {:?}", subscription_id);
+                debug!("Generated subscription ID: {:?}", subscription_id);
 
                 match block_on(message_sender.subscribe()) {
                     Ok(mut rx) => {
@@ -155,7 +154,7 @@ where
                         let handle = ctx.add_stream(stream);
                         self.subscriptions
                             .insert(subscription_id, handle);
-                        info!("Added subscription to hashmap: {:?}", subscription_id);
+                        debug!("Added subscription to hashmap: {:?}", subscription_id);
 
                         let message = Response::NewSubscription { subscription_id };
                         ctx.text(serde_json::to_string(&message).unwrap());
@@ -168,7 +167,11 @@ where
                     }
                 };
             } else {
-                error!("Extractor not found: {:?}", extractor_id);
+                let available = extractors_guard
+                    .keys()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>();
+                error!("Extractor '{}' unknown; available: {:?}", extractor_id, available);
 
                 let error = WebsocketError::ExtractorNotFound(extractor_id.clone());
                 ctx.text(serde_json::to_string(&error).unwrap());
@@ -242,10 +245,10 @@ where
     M: NormalisedMessage,
 {
     fn handle(&mut self, msg: Result<Arc<M>, ws::ProtocolError>, ctx: &mut Self::Context) {
-        info!("Message received from extractor");
+        debug!("Message received from extractor");
         match msg {
             Ok(message) => {
-                info!("Forwarding message to client");
+                debug!("Forwarding message to client");
                 ctx.text(serde_json::to_string(&message).unwrap());
             }
             Err(e) => {
@@ -261,10 +264,10 @@ where
     M: NormalisedMessage,
 {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        info!("Websocket message received.");
+        debug!("Websocket message received.");
         match msg {
             Ok(ws::Message::Ping(msg)) => {
-                info!("Websocket ping message received");
+                debug!("Websocket ping message received");
                 self.heartbeat = Instant::now();
                 ctx.pong(&msg);
             }
@@ -272,7 +275,7 @@ where
                 self.heartbeat = Instant::now();
             }
             Ok(ws::Message::Text(text)) => {
-                info!("Websocket text message received: {:?}", &text);
+                debug!("Websocket text message received: {:?}", &text);
 
                 // Try to deserialize the message to a Message enum
                 match serde_json::from_str::<Command>(&text) {
@@ -398,7 +401,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_websocket_ping_pong() {
-        let app_state = web::Data::new(AppState::<DummyMessage>::new());
+        let app_state = web::Data::new(AppState::<DummyMessage>::new(HashMap::new()));
         let server = start(move || {
             App::new()
                 .app_data(app_state.clone())
@@ -541,7 +544,7 @@ mod tests {
         let extractor_id = ExtractorIdentity::new(Chain::Ethereum, "dummy");
         let extractor_id2 = ExtractorIdentity::new(Chain::Ethereum, "dummy2");
 
-        let app_state = web::Data::new(AppState::<DummyMessage>::new());
+        let app_state = web::Data::new(AppState::<DummyMessage>::new(HashMap::new()));
 
         let message_sender = Arc::new(MyMessageSender::new(extractor_id.clone()));
         let message_sender2 = Arc::new(MyMessageSender::new(extractor_id2.clone()));
@@ -668,5 +671,14 @@ mod tests {
         dbg!("Closed connection");
 
         Ok(())
+    }
+
+    #[test]
+    fn test_msg() {
+        // Create and send a subscribe message from the client
+        let extractor = ExtractorIdentity { chain: Chain::Ethereum, name: "vm:ambient".to_owned() };
+        let action = Command::Subscribe { extractor };
+        let res = serde_json::to_string(&action).unwrap();
+        println!("{}", res);
     }
 }

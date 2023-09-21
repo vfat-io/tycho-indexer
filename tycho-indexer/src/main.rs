@@ -1,6 +1,4 @@
-#![allow(dead_code)] // FIXME: remove after initial development
-#![doc = include_str!("../Readme.md")]
-use anyhow::Error;
+#![doc = include_str!("../../Readme.md")]
 use diesel_async::{pooled_connection::bb8::Pool, AsyncPgConnection};
 use extractor::{
     evm::{
@@ -9,9 +7,13 @@ use extractor::{
     },
     runner::{ExtractorHandle, ExtractorRunnerBuilder},
 };
+use futures03::future::select_all;
 use models::Chain;
 
+use actix_web::dev::ServerHandle;
+use clap::Parser;
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 use tracing::info;
 
 mod extractor;
@@ -22,10 +24,10 @@ mod services;
 mod storage;
 mod substreams;
 
-use clap::Parser;
-
 use crate::{
-    extractor::evm,
+    extractor::{evm, evm::BlockAccountChanges, ExtractionError},
+    models::NormalisedMessage,
+    services::ServicesBuilder,
     storage::postgres::{self, PostgresGateway},
 };
 
@@ -63,7 +65,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), ExtractionError> {
     // Set up the subscriber
     tracing_subscriber::fmt::init();
 
@@ -78,29 +80,54 @@ async fn main() -> Result<(), Error> {
         .await?;
 
     info!("Starting Tycho");
-    info!("Starting ambient extractor");
-    let ambient_handle =
+    let mut extractor_handles = Vec::new();
+    let (ambient_task, ambient_handle) =
         start_ambient_extractor(&args.package_file, pool.clone(), evm_gw.clone()).await?;
+    extractor_handles.push(ambient_handle.clone());
+    info!("Extractor {} started!", ambient_handle.get_id());
 
-    ambient_handle.wait().await;
-    Ok(())
+    info!("Starting ws service");
+    let (server_handle, server_task) = ServicesBuilder::new()
+        .prefix("v1")
+        .bind("127.0.0.1")
+        .port(4242)
+        .register_extractor(ambient_handle)
+        .run()?;
+    let shutdown_task = tokio::spawn(shutdown_handler(server_handle, extractor_handles));
+    let (res, _, _) = select_all([ambient_task, server_task, shutdown_task]).await;
+    res.expect("Extractor- nor ServiceTasks should panic!")
 }
 
 async fn start_ambient_extractor(
     spkg: &str,
     pool: Pool<AsyncPgConnection>,
     evm_gw: EVMStateGateway<AsyncPgConnection>,
-) -> Result<ExtractorHandle<evm::BlockAccountChanges>, Error> {
+) -> Result<
+    (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle<BlockAccountChanges>),
+    ExtractionError,
+> {
     let ambient_gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool, evm_gw);
     let extractor =
         AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, ambient_gw).await?;
 
     let builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(17361664)
-        // for testing only
-        .end_block(17362000);
-    let handle = builder.run().await?;
-    Ok(handle)
+        // Run over first 1000 blocks for testing
+        .end_block(17362664);
+    builder.run().await
+}
+
+async fn shutdown_handler<M: NormalisedMessage>(
+    server_handle: ServerHandle,
+    extractors: Vec<ExtractorHandle<M>>,
+) -> Result<(), ExtractionError> {
+    // listen for ctrl-c
+    tokio::signal::ctrl_c().await.unwrap();
+    for e in extractors.iter() {
+        e.stop().await.unwrap();
+    }
+    server_handle.stop(true).await;
+    Ok(())
 }
 
 #[cfg(test)]

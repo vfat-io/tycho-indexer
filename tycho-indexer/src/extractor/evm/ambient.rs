@@ -5,7 +5,6 @@ use diesel_async::{
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
-use serde_json::json;
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tracing::{debug, info};
 
@@ -85,12 +84,7 @@ impl AmbientPgGateway {
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
-        let state = ExtractionState {
-            name: self.name.clone(),
-            chain: self.chain,
-            attributes: json!(null),
-            cursor: new_cursor.as_bytes().to_vec(),
-        };
+        let state = ExtractionState::new(&self.name, self.chain, None, new_cursor.as_bytes());
         self.state_gateway
             .save_state(&state, conn)
             .await?;
@@ -140,13 +134,13 @@ impl AmbientPgGateway {
 
     async fn backward(
         &self,
-        to: &BlockIdentifier,
+        to: BlockIdentifier,
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
     ) -> Result<evm::BlockAccountChanges, StorageError> {
         let block = self
             .state_gateway
-            .get_block(to, conn)
+            .get_block(&to, conn)
             .await?;
         let target = BlockOrTimestamp::Block(to.clone());
         let address = H160(AMBIENT_CONTRACT);
@@ -159,7 +153,7 @@ impl AmbientPgGateway {
             .collect();
 
         self.state_gateway
-            .revert_contract_state(to, conn)
+            .revert_contract_state(&to, conn)
             .await?;
 
         self.save_cursor(new_cursor, conn)
@@ -175,8 +169,6 @@ impl AmbientPgGateway {
         Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
     }
 
-    // This method is separate so it can be properly tested
-    // see the tests docstring below to understand more.
     async fn get_last_cursor(&self, conn: &mut AsyncPgConnection) -> Result<Vec<u8>, StorageError> {
         let state = self
             .state_gateway
@@ -218,7 +210,7 @@ impl AmbientGateway for AmbientPgGateway {
         let res = conn
             .transaction(|conn| {
                 async move {
-                    self.backward(&to, new_cursor, conn)
+                    self.backward(to, new_cursor, conn)
                         .await
                 }
                 .scope_boxed()
@@ -259,7 +251,7 @@ where
     G: AmbientGateway,
 {
     fn get_id(&self) -> ExtractorIdentity {
-        ExtractorIdentity { chain: self.chain, name: self.name.to_owned() }
+        ExtractorIdentity::new(self.chain, &self.name)
     }
 
     async fn get_cursor(&self) -> String {
@@ -632,7 +624,7 @@ mod gateway_test {
         let exp_account = ambient_account(0);
 
         let changes = gw
-            .backward(&BlockIdentifier::Number((Chain::Ethereum, 0)), "cursor@2", &mut conn)
+            .backward(BlockIdentifier::Number((Chain::Ethereum, 0)), "cursor@2", &mut conn)
             .await
             .expect("revert should succeed");
 

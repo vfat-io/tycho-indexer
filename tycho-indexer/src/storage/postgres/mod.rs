@@ -143,12 +143,15 @@ use diesel_async::{
     pooled_connection::{bb8::Pool, AsyncDieselConnectionManager},
     AsyncPgConnection, RunQueryDsl,
 };
-use tracing::info;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use tracing::{debug, info};
 
 use super::{
     ContractDelta, StateGateway, StorableBlock, StorableContract, StorableTransaction, StorageError,
 };
 use crate::models::Chain;
+
+const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
 pub struct EnumTableCache<E> {
     map_id: HashMap<E, i64>,
@@ -362,6 +365,7 @@ pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageErr
         .build(config)
         .await
         .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
+    run_migrations(db_url);
     Ok(pool)
 }
 
@@ -391,7 +395,6 @@ pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageErr
 /// - If it failed to get a connection from the provided pool.
 /// - If there was an issue ensuring the presence of chains in the database.
 pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
-    info!("Ensured chain enum presence for: {:?}", chains);
     let mut conn = pool.get().await.expect("connection ok");
     diesel::insert_into(schema::chain::table)
         .values(
@@ -404,6 +407,14 @@ pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
         .execute(&mut conn)
         .await
         .expect("chains ensured");
+    debug!("Ensured chain enum presence for: {:?}", chains);
+}
+
+fn run_migrations(db_url: &str) {
+    info!("Upgrading database...");
+    let mut conn = PgConnection::establish(db_url).expect("Connection to database should succeed");
+    conn.run_pending_migrations(MIGRATIONS)
+        .expect("migrations should execute without errors");
 }
 
 #[cfg(test)]

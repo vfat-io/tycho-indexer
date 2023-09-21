@@ -1,0 +1,12 @@
+.vscode/
+target
+**/target
+*/target/
+.github
+venv
+*/venv
+.idea
+.git
+**/*.spkg
+Dockerfile
+.env

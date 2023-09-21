@@ -1,7 +1,7 @@
 use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
 use prost::Message;
-use std::{collections::HashMap, env, error::Error, sync::Arc};
+use std::{collections::HashMap, env, sync::Arc};
 use tokio::{
     sync::{
         mpsc::{self, error::SendError, Receiver, Sender},
@@ -10,11 +10,12 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 use super::Extractor;
 use crate::{
-    models::NormalisedMessage,
+    extractor::ExtractionError,
+    models::{ExtractorIdentity, NormalisedMessage},
     pb::sf::substreams::v1::Package,
     substreams::{
         stream::{BlockResponse, SubstreamsStream},
@@ -35,8 +36,9 @@ pub trait MessageSender<M: NormalisedMessage>: Send + Sync {
     async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>>;
 }
 
+#[derive(Clone)]
 pub struct ExtractorHandle<M> {
-    handle: JoinHandle<()>,
+    id: ExtractorIdentity,
     control_tx: Sender<ControlMessage<M>>,
 }
 
@@ -44,20 +46,20 @@ impl<M> ExtractorHandle<M>
 where
     M: NormalisedMessage,
 {
-    fn new(handle: JoinHandle<()>, control_tx: Sender<ControlMessage<M>>) -> Self {
-        Self { handle, control_tx }
+    fn new(id: ExtractorIdentity, control_tx: Sender<ControlMessage<M>>) -> Self {
+        Self { id, control_tx }
     }
 
-    pub async fn stop(self) -> Result<(), Box<dyn Error>> {
+    pub fn get_id(&self) -> ExtractorIdentity {
+        self.id.clone()
+    }
+
+    pub async fn stop(&self) -> Result<(), ExtractionError> {
+        // TODO: send a oneshot along here and wait for it
         self.control_tx
             .send(ControlMessage::Stop)
-            .await?;
-        self.handle.await?;
-        Ok(())
-    }
-
-    pub async fn wait(self) {
-        self.handle.await.unwrap();
+            .await
+            .map_err(|err| ExtractionError::Unknown(err.to_string()))
     }
 }
 
@@ -91,15 +93,16 @@ where
     M: NormalisedMessage,
     G: Sync + Send + 'static,
 {
-    pub fn run(mut self) -> JoinHandle<()> {
+    pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
         tokio::spawn(async move {
+            let id = self.extractor.get_id();
             loop {
                 tokio::select! {
                     Some(ctrl) = self.control_rx.recv() =>  {
                         match ctrl {
                             ControlMessage::Stop => {
-                                warn!("Stopping stream.");
-                                break;
+                                warn!("{}: Stop signal received; exiting!", &id);
+                                return Ok(())
                             },
                             ControlMessage::Subscribe(sender) => {
                                 self.subscribe(sender).await;
@@ -109,42 +112,44 @@ where
                     val = self.substreams.next() => {
                         match val {
                             None => {
-                                warn!("Stream consumed.");
-                                break;
-                            }
+                                return Err(ExtractionError::SubstreamsError(format!("{id}: stream ended")));
+                            },
                             Some(Ok(BlockResponse::New(data))) => {
+                                let block = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 match self.extractor.handle_tick_scoped_data(data).await {
                                     Ok(Some(msg)) => {
-                                        debug!("Propagating new data message.");
+                                        debug!("{}:{}: Propagating new data message.", &block, &id);
                                         Self::propagate_msg(&self.subscriptions, msg).await
                                     }
                                     Ok(None) => {
-                                        debug!("No message to propagate.");
+                                        debug!("{}:{}: No message to propagate.", &block ,&id);
                                     }
                                     Err(err) => {
-                                        error!("Error while processing tick: {err}! Retries exhausted.");
-                                        break;
+                                        error!("{block}:{id}: Error while processing tick: {err}!");
+                                        return Err(err);
                                     }
                                 }
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
+                                let block = undo_signal.last_valid_block.as_ref().map(|v| v.number).unwrap_or(0);
+                                warn!("{id}: Revert to {block} requested!");
                                 match self.extractor.handle_revert(undo_signal).await {
                                     Ok(Some(msg)) => {
-                                        debug!("Propagating undo message.");
+                                        debug!("{id}: Propagating undo message.");
                                         Self::propagate_msg(&self.subscriptions, msg).await
                                     }
                                     Ok(None) => {
-                                        debug!("No message to propagate.");
+                                        debug!("{id}: No undo message to propagate.");
                                     }
-                                    Err(_) => {
-                                        error!("Error while processing revert! Retries exhausted.");
-                                        break;
+                                    Err(err) => {
+                                        error!("{id}: Error while processing revert to {block}!");
+                                        return Err(err);
                                     }
                                 }
                             }
                             Some(Err(err)) => {
-                                error!("Stream terminated with error {:#?}", err);
-                                break;
+                                error!("{}: Stream terminated with error {:#?}", id, err);
+                                return Err(ExtractionError::SubstreamsError(err.to_string()));
                             }
                         };
                     }
@@ -154,7 +159,6 @@ where
     }
 
     async fn subscribe(&mut self, sender: Sender<Arc<M>>) {
-        info!("New subscriber.");
         let counter = self.subscriptions.lock().await.len() as u64;
         self.subscriptions
             .lock()
@@ -175,7 +179,7 @@ where
             match sender.send(arced_message.clone()).await {
                 Ok(_) => {
                     // Message sent successfully
-                    info!("Message sent to subscriber {}", counter);
+                    debug!("Message sent to subscriber {}", counter);
                 }
                 Err(_) => {
                     // Receiver has been dropped, mark for removal
@@ -219,11 +223,13 @@ where
         }
     }
 
+    #[allow(dead_code)]
     pub fn endpoint_url(mut self, val: &str) -> Self {
         self.endpoint_url = val.to_owned();
         self
     }
 
+    #[allow(dead_code)]
     pub fn module_name(mut self, val: &str) -> Self {
         self.module_name = val.to_owned();
         self
@@ -239,17 +245,27 @@ where
         self
     }
 
+    #[allow(dead_code)]
     pub fn token(mut self, val: &str) -> Self {
         self.token = val.to_owned();
         self
     }
 
-    pub async fn run(self) -> Result<ExtractorHandle<M>, anyhow::Error> {
+    pub async fn run(
+        self,
+    ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle<M>), ExtractionError>
+    {
         let content = std::fs::read(&self.spkg_file)
-            .context(format_err!("read package from file '{}'", self.spkg_file))?;
-        let spkg = Package::decode(content.as_ref()).context("decode command")?;
-        let endpoint =
-            Arc::new(SubstreamsEndpoint::new(&self.endpoint_url, Some(self.token)).await?);
+            .context(format_err!("read package from file '{}'", self.spkg_file))
+            .map_err(|err| ExtractionError::SubstreamsError(err.to_string()))?;
+        let spkg = Package::decode(content.as_ref())
+            .context("decode command")
+            .map_err(|err| ExtractionError::SubstreamsError(err.to_string()))?;
+        let endpoint = Arc::new(
+            SubstreamsEndpoint::new(&self.endpoint_url, Some(self.token))
+                .await
+                .map_err(|err| ExtractionError::SubstreamsError(err.to_string()))?,
+        );
         let cursor = self.extractor.get_cursor().await;
         let stream = SubstreamsStream::new(
             endpoint,
@@ -260,6 +276,7 @@ where
             self.end_block as u64,
         );
 
+        let id = self.extractor.get_id();
         let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
         let runner = ExtractorRunner {
             extractor: self.extractor,
@@ -268,6 +285,7 @@ where
             control_rx: ctrl_rx,
         };
 
-        Ok(ExtractorHandle::new(runner.run(), ctrl_tx))
+        let handle = runner.run();
+        Ok((handle, ExtractorHandle::new(id, ctrl_tx)))
     }
 }

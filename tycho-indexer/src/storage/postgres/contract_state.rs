@@ -1016,6 +1016,8 @@ where
 
             let tx_hash = delta.tx.as_ref().unwrap();
             let (tx_id, ts) = *txns.get(tx_hash).ok_or_else(|| {
+                dbg!(&tx_hash);
+                dbg!(&txns);
                 StorageError::NoRelatedEntity(
                     "Transaction".to_owned(),
                     "Account".to_owned(),
