@@ -379,11 +379,9 @@ mod test {
         let mut mock_extractor = MockExtractor::<DummyMessage>::new();
         mock_extractor
             .expect_get_cursor()
-            .times(1)
             .returning(|| "cursor@0".to_string());
         mock_extractor
             .expect_get_id()
-            .times(1..10)
             .returning(ExtractorIdentity::default);
 
         // Build the ExtractorRunnerBuilder
