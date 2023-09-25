@@ -83,17 +83,16 @@ where
 // Define the SubscriptionsMap type alias
 type SubscriptionsMap<M> = HashMap<u64, Sender<Arc<M>>>;
 
-pub struct ExtractorRunner<G, M> {
-    extractor: Arc<dyn Extractor<G, M>>,
+pub struct ExtractorRunner<M> {
+    extractor: Arc<dyn Extractor<M>>,
     substreams: SubstreamsStream,
     subscriptions: Arc<Mutex<SubscriptionsMap<M>>>,
     control_rx: Receiver<ControlMessage<M>>,
 }
 
-impl<G, M> ExtractorRunner<G, M>
+impl<M> ExtractorRunner<M>
 where
     M: NormalisedMessage,
-    G: Sync + Send + 'static,
 {
     pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
         let id = self.extractor.get_id().clone();
@@ -208,24 +207,23 @@ where
     }
 }
 
-pub struct ExtractorRunnerBuilder<G, M> {
+pub struct ExtractorRunnerBuilder<M> {
     spkg_file: String,
     endpoint_url: String,
     module_name: String,
     start_block: i64,
     end_block: i64,
     token: String,
-    extractor: Arc<dyn Extractor<G, M>>,
+    extractor: Arc<dyn Extractor<M>>,
 }
 
 pub type HandleResult<M> = (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle<M>);
 
-impl<G, M> ExtractorRunnerBuilder<G, M>
+impl<M> ExtractorRunnerBuilder<M>
 where
     M: NormalisedMessage,
-    G: Sync + Send + 'static,
 {
-    pub fn new(spkg: &str, extractor: Arc<dyn Extractor<G, M>>) -> Self {
+    pub fn new(spkg: &str, extractor: Arc<dyn Extractor<M>>) -> Self {
         Self {
             spkg_file: spkg.to_owned(),
             endpoint_url: "https://mainnet.eth.streamingfast.io:443".to_owned(),
@@ -299,5 +297,119 @@ where
 
         let handle = runner.run();
         Ok((handle, ExtractorHandle::new(id, ctrl_tx)))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use serde::{Deserialize, Serialize};
+    use tracing::info_span;
+
+    use crate::extractor::MockExtractor;
+
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+    struct DummyMessage {
+        extractor_id: ExtractorIdentity,
+    }
+
+    impl std::fmt::Display for DummyMessage {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.extractor_id)
+        }
+    }
+
+    impl DummyMessage {
+        pub fn new(extractor_id: ExtractorIdentity) -> Self {
+            Self { extractor_id }
+        }
+    }
+
+    impl NormalisedMessage for DummyMessage {
+        fn source(&self) -> ExtractorIdentity {
+            self.extractor_id.clone()
+        }
+    }
+
+    pub struct MyMessageSender {
+        extractor_id: ExtractorIdentity,
+    }
+
+    impl MyMessageSender {
+        #[allow(dead_code)]
+        pub fn new(extractor_id: ExtractorIdentity) -> Self {
+            Self { extractor_id }
+        }
+    }
+
+    #[async_trait]
+    impl MessageSender<DummyMessage> for MyMessageSender {
+        async fn subscribe(
+            &self,
+        ) -> Result<Receiver<Arc<DummyMessage>>, SendError<ControlMessage<DummyMessage>>> {
+            let (tx, rx) = mpsc::channel(1);
+            let extractor_id = self.extractor_id.clone();
+
+            // Spawn a task that sends a DummyMessage every 100ms
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    debug!("Sending DummyMessage");
+                    let dummy_message = DummyMessage::new(extractor_id.clone());
+                    if tx
+                        .send(Arc::new(dummy_message))
+                        .await
+                        .is_err()
+                    {
+                        debug!("Receiver dropped");
+                        break
+                    }
+                }
+                .instrument(info_span!("DummyMessageSender", extractor_id = %extractor_id))
+            });
+
+            Ok(rx)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extractor_runner_builder() {
+        // Mock the Extractor
+        let mut mock_extractor = MockExtractor::<DummyMessage>::new();
+        mock_extractor
+            .expect_get_cursor()
+            .times(1)
+            .returning(|| "cursor@0".to_string());
+        mock_extractor
+            .expect_get_id()
+            .times(1..10)
+            .returning(ExtractorIdentity::default);
+
+        // Build the ExtractorRunnerBuilder
+        let extractor = Arc::new(mock_extractor);
+        let builder = ExtractorRunnerBuilder::new(
+            "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg",
+            extractor,
+        )
+        .endpoint_url("https://mainnet.eth.streamingfast.io:443")
+        .module_name("test_module")
+        .start_block(0)
+        .end_block(10)
+        .token("test_token");
+
+        // Run the builder
+        let (task, _handle) = builder.run().await.unwrap();
+
+        // Wait for the handle to complete
+        match task.await {
+            Ok(_) => {
+                info!("ExtractorRunnerBuilder completed successfully");
+            }
+            Err(err) => {
+                error!(error = %err, "ExtractorRunnerBuilder failed");
+                panic!("ExtractorRunnerBuilder failed");
+            }
+        }
     }
 }
