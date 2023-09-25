@@ -69,13 +69,13 @@ pub struct ExtractionState {
 
 impl ExtractionState {
     pub fn new(
-        name: &str,
+        name: String,
         chain: Chain,
         attributes: Option<serde_json::Value>,
         cursor: &[u8],
     ) -> Self {
         ExtractionState {
-            name: name.to_owned(),
+            name,
             chain,
             attributes: attributes.unwrap_or_default(),
             cursor: cursor.to_vec(),

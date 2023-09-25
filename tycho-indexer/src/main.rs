@@ -23,6 +23,7 @@ mod serde_helpers;
 mod services;
 mod storage;
 mod substreams;
+mod hex_bytes;
 
 use crate::{
     extractor::{evm, evm::BlockAccountChanges, ExtractionError},

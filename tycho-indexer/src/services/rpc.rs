@@ -5,10 +5,9 @@ use std::sync::Arc;
 use crate::{
     extractor::evm::{self, Account},
     models::Chain,
-    serde_helpers::{deserialize_hex, serialize_hex},
     storage::{
-        self, postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractId,
-        ContractStateGateway, StorageError,
+        self, postgres::PostgresGateway, Address, BlockHash, BlockIdentifier, BlockOrTimestamp,
+        ContractId, ContractStateGateway, StorageError,
     },
 };
 use actix_web::{post, web, HttpResponse, Responder};
@@ -50,18 +49,20 @@ impl RequestHandler {
 
         // Get the contract IDs from the request
         let contract_ids = request.contract_ids.clone();
-        let address_slices: Option<Vec<&[u8]>> = contract_ids.as_ref().map(|ids| {
-            ids.iter()
-                .map(|id| id.address.as_slice())
-                .collect()
+        let addresses: Option<Vec<Address>> = contract_ids.map(|ids| {
+            ids.into_iter()
+                .map(|id| id.address)
+                .collect::<Vec<Address>>()
         });
-        let addresses: Option<&[&[u8]]> = address_slices.as_deref();
+        let addresses = addresses
+            .as_ref()
+            .map(|ids| ids.as_slice());
 
         // Get the contract states from the database
         // TODO support additional tvl_gt and intertia_min_gt filters
         match self
             .db_gw
-            .get_contracts(params.chain, addresses, Some(&version), false, &mut db_connection_lock)
+            .get_contracts(&params.chain, addresses, Some(&version), false, &mut db_connection_lock)
             .await
         {
             Ok(accounts) => Ok(StateRequestResponse::new(accounts)),
@@ -144,21 +145,16 @@ impl Default for Version {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Block {
-    #[serde(serialize_with = "serialize_hex", deserialize_with = "deserialize_hex")]
-    hash: Vec<u8>,
-    #[serde(
-        rename = "parentHash",
-        serialize_with = "serialize_hex",
-        deserialize_with = "deserialize_hex"
-    )]
-    parent_hash: Vec<u8>,
+    hash: BlockHash,
+    #[serde(rename = "parentHash")]
+    parent_hash: BlockHash,
     chain: Chain,
     number: i64,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::postgres::db_fixtures;
+    use crate::storage::{postgres::db_fixtures, Code};
     use actix_web::{test, App};
     use actix_web_opentelemetry::RequestTracing;
     use diesel_async::AsyncConnection;
@@ -192,13 +188,10 @@ mod tests {
 
         let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
-        let contract0 = hex::decode("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap();
-        let block_hash =
-            hex::decode("24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4")
-                .unwrap();
+        let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092".into();
+        let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".into();
         let parent_block_hash =
-            hex::decode("8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815")
-                .unwrap();
+            "8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815".into();
         let block_number = 213;
 
         let expected_timestamp =
@@ -238,12 +231,9 @@ mod tests {
 
         let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
-        let block_hash =
-            hex::decode("24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4")
-                .unwrap();
+        let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".into();
         let parent_block_hash =
-            hex::decode("8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815")
-                .unwrap();
+            "8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815".into();
         let block_number = 213;
         let expected_timestamp =
             NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
@@ -279,7 +269,7 @@ mod tests {
 
         let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
-        let contract0 = hex::decode("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap();
+        let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092".into();
 
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
@@ -328,7 +318,7 @@ mod tests {
                 .await;
 
         db_fixtures::insert_account_balance(conn, 100, tid[0], acc_id).await;
-        let contract_code = hex::decode("1234").unwrap();
+        let contract_code = Code::from("1234");
         db_fixtures::insert_contract_code(conn, acc_id, tid[0], contract_code).await;
         acc_address.to_string()
     }
@@ -359,7 +349,7 @@ mod tests {
         .await;
         let req_handler = RequestHandler::new(db_gw, conn);
 
-        let code = hex::decode("1234").unwrap();
+        let code = Code::from("1234");
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
         let expected = Account::new(
             Chain::Ethereum,
@@ -385,7 +375,7 @@ mod tests {
         let request = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(
                 Chain::Ethereum,
-                hex::decode(acc_address).unwrap(),
+                acc_address.parse().unwrap(),
             )]),
             version: Version { timestamp: Utc::now().naive_utc(), block: None },
         };
@@ -414,7 +404,7 @@ mod tests {
         let req_handler = RequestHandler::new(db_gw, conn);
 
         // Set up the expected account data
-        let code = hex::decode("1234").unwrap();
+        let code = Code::from("1234");
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
         let expected = Account::new(
             Chain::Ethereum,
@@ -450,7 +440,7 @@ mod tests {
         let request_body = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(
                 Chain::Ethereum,
-                hex::decode(acc_address).unwrap(),
+                acc_address.parse().unwrap(),
             )]),
             version: Version { timestamp: Utc::now().naive_utc(), block: None },
         };

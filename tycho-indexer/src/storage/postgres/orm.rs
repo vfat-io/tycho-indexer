@@ -1,6 +1,6 @@
 use crate::{
     models,
-    storage::{BlockIdentifier, ContractId},
+    storage::{BlockIdentifier, ContractId, BlockHash, TxHash, Address, Balance, Code, CodeHash}, hex_bytes::Bytes,
 };
 
 use super::schema::{
@@ -118,8 +118,8 @@ pub struct ExtractionStateForm<'a> {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Block {
     pub id: i64,
-    pub hash: Vec<u8>,
-    pub parent_hash: Vec<u8>,
+    pub hash: BlockHash,
+    pub parent_hash: BlockHash,
     pub chain_id: i64,
     pub main: bool,
     pub number: i64,
@@ -165,8 +165,8 @@ impl Block {
 #[diesel(table_name=block)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewBlock {
-    pub hash: Vec<u8>,
-    pub parent_hash: Vec<u8>,
+    pub hash: BlockHash,
+    pub parent_hash: BlockHash,
     pub chain_id: i64,
     pub main: bool,
     pub number: i64,
@@ -179,10 +179,10 @@ pub struct NewBlock {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Transaction {
     pub id: i64,
-    pub hash: Vec<u8>,
+    pub hash: TxHash,
     pub block_id: i64,
-    pub from: Vec<u8>,
-    pub to: Vec<u8>,
+    pub from: Address,
+    pub to: Address,
     pub index: i64,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
@@ -202,10 +202,10 @@ impl Transaction {
 #[diesel(table_name=transaction)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewTransaction {
-    pub hash: Vec<u8>,
+    pub hash: TxHash,
     pub block_id: i64,
-    pub from: Vec<u8>,
-    pub to: Vec<u8>,
+    pub from: Address,
+    pub to: Address,
     pub index: i64,
 }
 
@@ -275,7 +275,7 @@ pub struct ProtocolComponent {
 pub struct Account {
     pub id: i64,
     pub title: String,
-    pub address: Vec<u8>,
+    pub address: Address,
     pub chain_id: i64,
     pub creation_tx: Option<i64>,
     pub created_at: Option<NaiveDateTime>,
@@ -314,11 +314,11 @@ impl Account {
     pub async fn get_addresses_by_id(
         ids: impl Iterator<Item = &i64>,
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Vec<(i64, Vec<u8>)>> {
+    ) -> QueryResult<Vec<(i64, Address)>> {
         account::table
             .filter(account::id.eq_any(ids))
             .select((account::id, account::address))
-            .get_results::<(i64, Vec<u8>)>(conn)
+            .get_results::<(i64, Address)>(conn)
             .await
     }
 }
@@ -356,7 +356,7 @@ pub struct Token {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct AccountBalance {
     pub id: i64,
-    pub balance: Vec<u8>,
+    pub balance: Balance,
     pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
@@ -368,7 +368,7 @@ pub struct AccountBalance {
 impl AccountBalance {
     /// retrieves all balances from a certain account
     pub async fn all_versions(
-        address: &[u8],
+        address: &Address,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<Self>> {
         account_balance::table
@@ -384,7 +384,7 @@ impl AccountBalance {
 #[diesel(table_name=account_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccountBalance {
-    pub balance: Vec<u8>,
+    pub balance: Balance,
     pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
@@ -397,8 +397,8 @@ pub struct NewAccountBalance {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ContractCode {
     pub id: i64,
-    pub code: Vec<u8>,
-    pub hash: Vec<u8>,
+    pub code: Code,
+    pub hash: CodeHash,
     pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
@@ -426,8 +426,8 @@ impl ContractCode {
 #[diesel(table_name=contract_code)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewContractCode<'a> {
-    pub code: &'a [u8],
-    pub hash: Vec<u8>,
+    pub code: &'a Code,
+    pub hash: CodeHash,
     pub account_id: i64,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
@@ -440,14 +440,14 @@ pub struct NewContractCode<'a> {
 // this could be improved though.
 pub struct NewContract {
     pub title: String,
-    pub address: Vec<u8>,
+    pub address: Address,
     pub chain_id: i64,
     pub creation_tx: Option<i64>,
     pub created_at: Option<NaiveDateTime>,
     pub deleted_at: Option<NaiveDateTime>,
-    pub balance: Vec<u8>,
-    pub code: Vec<u8>,
-    pub code_hash: Vec<u8>,
+    pub balance: Balance,
+    pub code: Code,
+    pub code_hash: CodeHash,
 }
 
 impl NewContract {
@@ -498,9 +498,9 @@ impl NewContract {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ContractStorage {
     pub id: i64,
-    pub slot: Vec<u8>,
-    pub value: Option<Vec<u8>>,
-    pub previous_value: Option<Vec<u8>>,
+    pub slot: Bytes,
+    pub value: Option<Bytes>,
+    pub previous_value: Option<Bytes>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub ordinal: i64,
@@ -514,8 +514,8 @@ pub struct ContractStorage {
 #[diesel(table_name=contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewSlot<'a> {
-    pub slot: &'a Vec<u8>,
-    pub value: Option<&'a Vec<u8>>,
+    pub slot: &'a Bytes,
+    pub value: Option<&'a Bytes>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub ordinal: i64,

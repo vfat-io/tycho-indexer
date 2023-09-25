@@ -1,23 +1,30 @@
-use serde::{
-    de::{self, Deserializer},
-    Deserialize, Serializer,
-};
+/// serde functions for handling bytes as hex strings, such as [bytes::Bytes]
+pub mod hex_bytes {
+    use serde::{Deserialize, Deserializer, Serializer};
 
-/// Serializes a Vec<u8> as a hex string with '0x' prefix.
-pub fn serialize_hex<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let hex_str = format!("0x{}", hex::encode(bytes));
-    serializer.serialize_str(&hex_str)
-}
+    /// Serialize a byte vec as a hex string with 0x prefix
+    pub fn serialize<S, T>(x: T, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: AsRef<[u8]>,
+    {
+        s.serialize_str(&format!("0x{}", hex::encode(x.as_ref())))
+    }
 
-/// Deserializes a hex string to a Vec<u8>. The hex string can either have a '0x' prefix or not.
-pub fn deserialize_hex<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: &str = Deserialize::deserialize(deserializer)?;
-    let hex_str = s.strip_prefix("0x").unwrap_or(s);
-    hex::decode(hex_str).map_err(de::Error::custom)
+    /// Deserialize a hex string into a byte vec
+    /// Accepts a hex string with optional 0x prefix
+    pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: From<Vec<u8>>,
+    {
+        let value = String::deserialize(d)?;
+        if let Some(value) = value.strip_prefix("0x") {
+            hex::decode(value)
+        } else {
+            hex::decode(&value)
+        }
+        .map(Into::into)
+        .map_err(|e| serde::de::Error::custom(e.to_string()))
+    }
 }

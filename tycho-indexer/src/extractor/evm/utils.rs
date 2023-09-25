@@ -1,5 +1,7 @@
 use ethers::types::{H160, H256, U256};
 
+use crate::hex_bytes::Bytes;
+
 /// Decoding trait with nice contextual error messages
 pub trait TryDecode: Sized {
     /// Tries to decode a literal value
@@ -13,14 +15,14 @@ pub trait TryDecode: Sized {
     ///
     /// ## Example
     /// ```
-    /// let data = [0;32].to_vec();
+    /// let data = [0;32].into();
     /// let balance = U256::try_decode(data.as_slice(), "balance").unwrap();
     /// ```
-    fn try_decode(v: &[u8], type_context: &str) -> Result<Self, String>;
+    fn try_decode(v: &Bytes, type_context: &str) -> Result<Self, String>;
 }
 
 impl TryDecode for H160 {
-    fn try_decode(v: &[u8], type_context: &str) -> Result<Self, String> {
+    fn try_decode(v: &Bytes, type_context: &str) -> Result<Self, String> {
         if v.len() != 20 {
             return Err(format!("H160: Invalid {} format: 0x{}", type_context, hex::encode(v)))
         }
@@ -32,7 +34,7 @@ impl TryDecode for H160 {
 }
 
 impl TryDecode for H256 {
-    fn try_decode(v: &[u8], type_context: &str) -> Result<Self, String> {
+    fn try_decode(v: &Bytes, type_context: &str) -> Result<Self, String> {
         if v.len() != 32 {
             return Err(format!("H256: Invalid {} format: 0x{}", type_context, hex::encode(v)))
         }
@@ -41,7 +43,7 @@ impl TryDecode for H256 {
 }
 
 impl TryDecode for U256 {
-    fn try_decode(v: &[u8], type_context: &str) -> Result<Self, String> {
+    fn try_decode(v: &Bytes, type_context: &str) -> Result<Self, String> {
         if v.len() != 32 {
             return Err(format!("U256: Invalid {} format: 0x{}", type_context, hex::encode(v)))
         }
@@ -50,7 +52,7 @@ impl TryDecode for U256 {
 }
 
 // Parse an address potentially zero left padding the value
-pub fn pad_and_parse_h160(v: &[u8]) -> Result<H160, String> {
+pub fn pad_and_parse_h160(v: &Bytes) -> Result<H160, String> {
     if v.len() > 20 {
         return Err(format!(
             "H160: too long; expected 20, got {}, val: 0x{}",
@@ -70,8 +72,8 @@ pub fn pad_and_parse_h160(v: &[u8]) -> Result<H160, String> {
 ///
 /// In case the value is None it will assume a value of zero.
 pub fn parse_u256_slot_entry(
-    raw_key: &[u8],
-    raw_val: Option<&[u8]>,
+    raw_key: &Bytes,
+    raw_val: Option<&Bytes>,
 ) -> Result<(U256, U256), String> {
     let v =
         if let Some(val) = raw_val { U256::try_decode(val, "slot value")? } else { U256::zero() };
@@ -106,38 +108,38 @@ mod test {
     use rstest::rstest;
 
     #[rstest]
-    #[case::ok([0;20].to_vec(), Ok(H160::zero()))]
-    #[case::err([0;1].to_vec(), Err("H160: Invalid address format: 0x00".to_owned()))]
-    fn test_parse_h160(#[case] inp: Vec<u8>, #[case] exp: Result<H160, String>) {
+    #[case::ok([0;20].into(), Ok(H160::zero()))]
+    #[case::err([0;1].into(), Err("H160: Invalid address format: 0x00".to_owned()))]
+    fn test_parse_h160(#[case] inp: Bytes, #[case] exp: Result<H160, String>) {
         assert_eq!(H160::try_decode(&inp, "address"), exp);
     }
 
     #[rstest]
-    #[case::ok([0;20].to_vec(), Ok(H160::zero()))]
-    #[case::pad([0;1].to_vec(), Ok(H160::zero()))]
-    #[case::err([0;21].to_vec(), Err("H160: too long; expected 20, got 21, val: 0x000000000000000000000000000000000000000000".to_owned()))]
-    fn test_pad_and_parse_h160(#[case] inp: Vec<u8>, #[case] exp: Result<H160, String>) {
+    #[case::ok([0;20].into(), Ok(H160::zero()))]
+    #[case::pad([0;1].into(), Ok(H160::zero()))]
+    #[case::err([0;21].into(), Err("H160: too long; expected 20, got 21, val: 0x000000000000000000000000000000000000000000".to_owned()))]
+    fn test_pad_and_parse_h160(#[case] inp: Bytes, #[case] exp: Result<H160, String>) {
         assert_eq!(pad_and_parse_h160(&inp), exp);
     }
 
     #[rstest]
-    #[case::ok([0;32].to_vec(), Some([0;32].to_vec()), Ok((U256::from(0), U256::from(0))))]
-    #[case::ok_none_val([0;32].to_vec(), None, Ok((U256::from(0), U256::from(0))))]
-    #[case::key_bad([0;1].to_vec(), Some([0;32].to_vec()), Err("U256: Invalid slot key format: 0x00".to_owned()))]
-    #[case::val_bad([0;32].to_vec(), Some([0;1].to_vec()), Err("U256: Invalid slot value format: 0x00".to_owned()))]
+    #[case::ok([0;32].into(), Some([0;32].into()), Ok((U256::from(0), U256::from(0))))]
+    #[case::ok_none_val([0;32].into(), None, Ok((U256::from(0), U256::from(0))))]
+    #[case::key_bad([0;1].into(), Some([0;32].into()), Err("U256: Invalid slot key format: 0x00".to_owned()))]
+    #[case::val_bad([0;32].into(), Some([0;1].into()), Err("U256: Invalid slot value format: 0x00".to_owned()))]
     fn test_parse_u256_slot_entry(
-        #[case] key: Vec<u8>,
-        #[case] val: Option<Vec<u8>>,
+        #[case] key: Bytes,
+        #[case] val: Option<Bytes>,
         #[case] exp: Result<(U256, U256), String>,
     ) {
-        assert_eq!(parse_u256_slot_entry(&key, val.as_deref()), exp);
+        assert_eq!(parse_u256_slot_entry(&key, val.as_ref()), exp);
     }
 
     #[rstest]
-    #[case::ok([0;32].to_vec(), Ok(H256::zero()))]
-    #[case::pad([0;1].to_vec(), Ok(H256::zero()))]
-    #[case::err([0;33].to_vec(), Err("Byte slice too long: Expected 32, got 33, val: 0x000000000000000000000000000000000000000000000000000000000000000000".to_owned()))]
-    fn test_pad_and_parse_bytes32(#[case] inp: Vec<u8>, #[case] exp: Result<H256, String>) {
+    #[case::ok([0;32].into(), Ok(H256::zero()))]
+    #[case::pad([0;1].into(), Ok(H256::zero()))]
+    #[case::err([0;33].into(), Err("Byte slice too long: Expected 32, got 33, val: 0x000000000000000000000000000000000000000000000000000000000000000000".to_owned()))]
+    fn test_pad_and_parse_bytes32(#[case] inp: Bytes, #[case] exp: Result<H256, String>) {
         assert_eq!(pad_and_parse_32bytes(&inp), exp);
     }
 }

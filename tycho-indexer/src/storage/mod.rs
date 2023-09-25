@@ -41,10 +41,10 @@
 //! ## Literal Types
 //!
 //! For the representation of various literals, we utilize a variable-length
-//! byte type (`Vec<u8>`) This decision predominantly arises from the uncertain
+//! byte type (`Bytes`) This decision predominantly arises from the uncertain
 //! nature of their size, which may not necessarily fit into a smaller data
 //! type, such as `int64`. Therefore, literals encompassing but not limited to,
-//! hashes, balances, codes, and values, are facilitated by the `Vec<u8>`
+//! hashes, balances, codes, and values, are facilitated by the `Bytes`
 //! structure.
 //!
 //! To enhance readability and clarity, we've introduced multiple type aliases.
@@ -80,50 +80,42 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
+    hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem},
-    serde_helpers::{deserialize_hex, serialize_hex},
 };
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
 /// blockchain.
-pub type Address = Vec<u8>;
+pub type Address = Bytes;
 
 /// Block hash literal type to uniquely identify a block in the chain and
 /// likely across chains.
-pub type BlockHash = Vec<u8>;
+pub type BlockHash = Bytes;
+
+/// Transaction hash literal type to uniquely identify a transaction in the
+/// chain and likely across chains.
+pub type TxHash = Bytes;
 
 /// Smart contract code is represented as a byte vector containing opcodes.
-pub type Code = Vec<u8>;
+pub type Code = Bytes;
+
+/// The hash of a contract's code is used to identify it.
+pub type CodeHash = Bytes;
 
 /// The balance of an account is a big endian serialised integer of variable size.
-pub type Balance = Vec<u8>;
+pub type Balance = Bytes;
 
 /// Key literal type of the contract store.
-pub type StoreKey = Vec<u8>;
+pub type StoreKey = Bytes;
 
 /// Value literal type of the contract store.
-pub type StoreVal = Vec<u8>;
+pub type StoreVal = Bytes;
 
 /// A binary key value store for an account.
 pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
 
 /// Multiple key values stores grouped by account address.
 pub type AccountToContractStore = HashMap<Address, ContractStore>;
-
-/// A slice into an [Address].
-pub type AddressRef<'a> = &'a [u8];
-
-/// A slice into a [BlockHash].
-pub type BlockHashRef<'a> = &'a [u8];
-
-/// A slice into a transaction hash.
-pub type TxHashRef<'a> = &'a [u8];
-
-/// A slice into [Code].
-pub type CodeRef<'a> = &'a [u8];
-
-/// A slice into a [Balance] value.
-pub type BalanceRef<'a> = &'a [u8];
 
 /// Identifies a block in storage.
 #[derive(Debug, Clone, PartialEq)]
@@ -194,7 +186,7 @@ pub trait StorableBlock<S, N, I>: Sized + Send + Sync + 'static {
     /// # Returns
     ///
     /// The `Chain` that the block is associated with
-    fn chain(&self) -> Chain;
+    fn chain(&self) -> &Chain;
 }
 
 /// Lays out the necessary interface needed to store and retrieve transactions
@@ -213,7 +205,7 @@ pub trait StorableTransaction<S, N, I>: Sized + Send + Sync + 'static {
     /// Converts a transaction from storage representation (`S`) to transaction
     /// form. This function uses the original block hash, where the
     /// transaction resides, for this conversion.
-    fn from_storage(val: S, block_hash: BlockHashRef) -> Result<Self, StorageError>;
+    fn from_storage(val: S, block_hash: &BlockHash) -> Result<Self, StorageError>;
 
     /// Converts a transaction object to its storable representation (`N`),
     /// while also associating it with a specific block through a database ID
@@ -223,11 +215,11 @@ pub trait StorableTransaction<S, N, I>: Sized + Send + Sync + 'static {
     /// Returns the block hash associated with a transaction. This is
     /// necessary to ensure that transactions can be traced back to the blocks
     /// from which they originated.
-    fn block_hash(&self) -> BlockHashRef;
+    fn block_hash(&self) -> BlockHash;
 
     /// Returns the hash associated with this transaction, which
     /// uniquely identifies it.
-    fn hash(&self) -> TxHashRef;
+    fn hash(&self) -> TxHash;
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -318,7 +310,7 @@ pub trait ChainGateway {
     /// - An Ok result containing the transaction. Might fail if the transaction does not exist yet.
     async fn get_tx(
         &self,
-        hash: &[u8],
+        hash: &TxHash,
         db: &mut Self::DB,
     ) -> Result<Self::Transaction, StorageError>;
 }
@@ -347,7 +339,7 @@ pub trait ExtractionStateGateway {
     async fn get_state(
         &self,
         name: &str,
-        chain: Chain,
+        chain: &Chain,
         conn: &mut Self::DB,
     ) -> Result<ExtractionState, StorageError>;
 
@@ -402,8 +394,7 @@ pub enum VersionKind {
 }
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ContractId {
-    #[serde(serialize_with = "serialize_hex", deserialize_with = "deserialize_hex")]
-    pub address: Vec<u8>,
+    pub address: Address,
     pub chain: Chain,
 }
 
@@ -411,6 +402,10 @@ pub struct ContractId {
 impl ContractId {
     pub fn new(chain: Chain, address: Address) -> Self {
         Self { address, chain }
+    }
+
+    pub fn address(&self) -> &Address {
+        &self.address
     }
 }
 
@@ -534,7 +529,7 @@ pub trait ProtocolGateway {
     async fn get_tokens(
         &self,
         chain: Chain,
-        address: Option<&[AddressRef]>,
+        address: Option<&[&Address]>,
     ) -> Result<Vec<Self::Token>, StorageError>;
 
     /// Saves multiple tokens to storage.
@@ -576,9 +571,9 @@ pub trait StorableContract<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(
         val: S,
         chain: Chain,
-        balance_modify_tx: TxHashRef,
-        code_modify_tx: TxHashRef,
-        creation_tx: Option<TxHashRef>,
+        balance_modify_tx: &TxHash,
+        code_modify_tx: &TxHash,
+        creation_tx: Option<&TxHash>,
     ) -> Result<Self, StorageError>;
 
     /// Transforms the state of the contract into it's storable form.
@@ -590,7 +585,7 @@ pub trait StorableContract<S, N, I>: Sized + Send + Sync + 'static {
     fn to_storage(&self, chain_id: I, creation_ts: NaiveDateTime, tx_id: Option<I>) -> N;
 
     /// Get the chain where this contract resides.
-    fn chain(&self) -> Chain;
+    fn chain(&self) -> &Chain;
 
     /// Get the transaction hash that created this contract if it exists.
     ///
@@ -600,10 +595,10 @@ pub trait StorableContract<S, N, I>: Sized + Send + Sync + 'static {
     /// it during indexing is hard. Thus this is optional but should be always
     /// set when the contract creation is actually observed. Contracts with this
     /// field unset will not be deleted on during a revert.
-    fn creation_tx(&self) -> Option<TxHashRef>;
+    fn creation_tx(&self) -> Option<TxHash>;
 
     /// Get a reference to the address of this contract.
-    fn address(&self) -> AddressRef;
+    fn address(&self) -> Address;
 
     /// Get a copy of this contract's store in it's storable form.
     fn store(&self) -> ContractStore;
@@ -649,11 +644,11 @@ pub trait ContractDelta: std::fmt::Debug + Clone + Sized + Send + Sync + 'static
     /// - Result containing the instance of the `ContractDelta` implementation if successful, and a
     ///   `StorageError` if there was an issue reading from storage.
     fn from_storage(
-        chain: Chain,
-        address: AddressRef,
+        chain: &Chain,
+        address: &Address,
         slots: Option<&ContractStore>,
-        balance: Option<BalanceRef>,
-        code: Option<CodeRef>,
+        balance: Option<&Balance>,
+        code: Option<&Code>,
         change: ChangeType,
     ) -> Result<Self, StorageError>;
 
@@ -667,13 +662,13 @@ pub trait ContractDelta: std::fmt::Debug + Clone + Sized + Send + Sync + 'static
     ///
     /// # Returns
     /// - An Option that contains new bytes if the balance has been changed, or None otherwise.
-    fn dirty_balance(&self) -> Option<Vec<u8>>;
+    fn dirty_balance(&self) -> Option<Balance>;
 
     /// Retrieves the potentially dirty (i.e., updated) code of the contract.
     ///
     /// # Returns
     /// - An Option that contains a byte slice if the code has been changed, or None otherwise.
-    fn dirty_code(&self) -> Option<&[u8]>;
+    fn dirty_code(&self) -> Option<&Code>;
 
     /// Retrieves the slots of the contract which had changes.
     ///
@@ -704,7 +699,7 @@ pub trait ContractStateGateway {
     async fn get_contract(
         &self,
         id: &ContractId,
-        version: &Option<&Version>,
+        version: Option<&Version>,
         include_slots: bool,
         db: &mut Self::DB,
     ) -> Result<Self::ContractState, StorageError>;
@@ -730,8 +725,8 @@ pub trait ContractStateGateway {
     /// successful, or a `StorageError` if the operation fails.
     async fn get_contracts(
         &self,
-        chain: Chain,
-        addresses: Option<&[AddressRef]>,
+        chain: &Chain,
+        addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
         db: &mut Self::DB,
@@ -768,7 +763,7 @@ pub trait ContractStateGateway {
     ///
     /// - `chain`: The blockchain which the contracts belong to.
     /// - `new`: A reference to a slice of tuples where each tuple has a transaction hash
-    ///   (`TxHashRef`) and a reference to the state delta (`&Self::Delta`) for that transaction.
+    ///   (`TxHash`) and a reference to the state delta (`&Self::Delta`) for that transaction.
     /// - `db`: A mutable reference to the connected database where the updated contracts will be
     ///   stored.
     ///
@@ -780,8 +775,8 @@ pub trait ContractStateGateway {
     /// the one specified.
     async fn update_contracts(
         &self,
-        chain: Chain,
-        new: &[(TxHashRef, &Self::Delta)],
+        chain: &Chain,
+        new: &[(TxHash, &Self::Delta)],
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -803,7 +798,7 @@ pub trait ContractStateGateway {
     async fn delete_contract(
         &self,
         id: &ContractId,
-        at_tx: TxHashRef<'_>,
+        at_tx: &TxHash,
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -847,7 +842,7 @@ pub trait ContractStateGateway {
     ///     - There was an error with the database
     async fn get_account_delta(
         &self,
-        chain: Chain,
+        chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         db: &mut Self::DB,
