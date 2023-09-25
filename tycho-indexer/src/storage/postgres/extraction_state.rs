@@ -30,7 +30,7 @@ where
             Ok(Some(orm_state)) => {
                 let state = ExtractionState::new(
                     orm_state.name,
-                    chain.clone(),
+                    *chain,
                     orm_state.attributes,
                     &orm_state.cursor.unwrap_or_default(),
                 );
@@ -98,7 +98,7 @@ mod test {
     use diesel_async::{AsyncConnection, RunQueryDsl};
 
     use super::*;
-    use crate::{extractor::evm, hex_bytes::Bytes};
+    use crate::extractor::evm;
 
     async fn setup_db() -> AsyncPgConnection {
         // Creates a DB connecton

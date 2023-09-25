@@ -1,6 +1,7 @@
 use crate::{
+    hex_bytes::Bytes,
     models,
-    storage::{BlockIdentifier, ContractId, BlockHash, TxHash, Address, Balance, Code, CodeHash}, hex_bytes::Bytes,
+    storage::{Address, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ContractId, TxHash},
 };
 
 use super::schema::{

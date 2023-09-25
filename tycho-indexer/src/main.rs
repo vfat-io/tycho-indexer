@@ -17,13 +17,13 @@ use tokio::task::JoinHandle;
 use tracing::info;
 
 mod extractor;
+mod hex_bytes;
 mod models;
 mod pb;
 mod serde_helpers;
 mod services;
 mod storage;
 mod substreams;
-mod hex_bytes;
 
 use crate::{
     extractor::{evm, evm::BlockAccountChanges, ExtractionError},

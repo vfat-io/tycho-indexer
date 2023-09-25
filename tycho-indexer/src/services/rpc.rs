@@ -54,9 +54,7 @@ impl RequestHandler {
                 .map(|id| id.address)
                 .collect::<Vec<Address>>()
         });
-        let addresses = addresses
-            .as_ref()
-            .map(|ids| ids.as_slice());
+        let addresses = addresses.as_deref();
 
         // Get the contract states from the database
         // TODO support additional tvl_gt and intertia_min_gt filters

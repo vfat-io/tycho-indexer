@@ -206,12 +206,9 @@ where
     ///
     /// * `val` - The enum variant to lookup.
     fn get_id(&self, val: &E) -> i64 {
-        *self
-            .map_id
-            .get(val)
-            .unwrap_or_else(|| {
-                panic!("Unexpected cache miss for enum {:?}, entries: {:?}", val, self.map_id)
-            })
+        *self.map_id.get(val).unwrap_or_else(|| {
+            panic!("Unexpected cache miss for enum {:?}, entries: {:?}", val, self.map_id)
+        })
     }
 
     /// Retrieves the corresponding enum variant for a database ID. Panics on

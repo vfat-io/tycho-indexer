@@ -422,7 +422,7 @@ where
                         update.clone()
                     } else {
                         D::from_storage(
-                            &chain,
+                            chain,
                             &acc.address,
                             None,
                             None,
@@ -462,7 +462,7 @@ where
                 .iter()
                 .map(|acc| {
                     let update = D::from_storage(
-                        &chain,
+                        chain,
                         &acc.address,
                         None,
                         None,
@@ -879,7 +879,7 @@ where
 
                 let mut contract = Self::ContractState::from_storage(
                     contract_orm,
-                    chain.clone(),
+                    *chain,
                     &balance_tx,
                     &code_tx,
                     creation_tx.as_ref(),
@@ -1041,7 +1041,7 @@ where
             if let Some(new_code) = delta.dirty_code() {
                 let hash = keccak256(new_code.clone());
                 let new = orm::NewContractCode {
-                    code: &new_code,
+                    code: new_code,
                     hash: hash.into(),
                     account_id,
                     modify_tx: tx_id,
@@ -1220,7 +1220,7 @@ where
                     ChangeType::Update
                 };
                 let update = Self::Delta::from_storage(
-                    &chain,
+                    chain,
                     &address,
                     slots,
                     balance_deltas.get(&id),
@@ -1690,9 +1690,7 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
-        let addresses = ids
-            .as_ref()
-            .map(|outer| outer.as_slice());
+        let addresses = ids.as_deref();
 
         let results = gw
             .get_contracts(&Chain::Ethereum, addresses, version.as_ref(), true, &mut conn)
@@ -1968,9 +1966,7 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
-        let addresses: Option<&[Address]> = addresses
-            .as_ref()
-            .map(|outer| outer.as_slice());
+        let addresses: Option<&[Address]> = addresses.as_deref();
 
         let res = gw
             .get_contract_slots(&Chain::Ethereum, addresses, version.as_ref(), &mut conn)

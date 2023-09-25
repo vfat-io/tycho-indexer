@@ -5,8 +5,8 @@ use tracing::instrument;
 
 use super::{orm, schema, PostgresGateway};
 use crate::storage::{
-    BlockIdentifier, ChainGateway, ContractDelta, StorableBlock, StorableContract,
-    StorableTransaction, StorageError, TxHash, BlockHash,
+    BlockHash, BlockIdentifier, ChainGateway, ContractDelta, StorableBlock, StorableContract,
+    StorableTransaction, StorageError, TxHash,
 };
 
 #[async_trait]
@@ -115,7 +115,7 @@ where
             .await
             .map(|(orm_tx, block_hash)| TX::from_storage(orm_tx, &block_hash))
             .map_err(|err| {
-                StorageError::from_diesel(err, "Transaction", &hex::encode(&hash), None)
+                StorageError::from_diesel(err, "Transaction", &hex::encode(hash), None)
             })?
     }
 }

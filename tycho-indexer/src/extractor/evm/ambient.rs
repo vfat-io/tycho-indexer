@@ -87,7 +87,7 @@ impl AmbientPgGateway {
     ) -> Result<(), StorageError> {
         let state = ExtractionState::new(
             self.name.to_string(),
-            self.chain.clone(),
+            self.chain,
             None,
             new_cursor.as_bytes(),
         );

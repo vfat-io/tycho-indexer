@@ -159,8 +159,7 @@ pub mod pg {
         }
 
         fn creation_tx(&self) -> Option<TxHash> {
-            self.creation_tx
-                .map(|v| v.into())
+            self.creation_tx.map(|v| v.into())
         }
 
         fn address(&self) -> Address {
@@ -170,7 +169,7 @@ pub mod pg {
         fn store(&self) -> ContractStore {
             self.slots
                 .iter()
-                .map(|(s, v)| (s.clone().into(), Some(v.clone().into())))
+                .map(|(s, v)| ((*s).into(), Some((*v).into())))
                 .collect()
         }
 
@@ -201,10 +200,9 @@ pub mod pg {
         fn dirty_slots(&self) -> ContractStore {
             self.slots
                 .iter()
-                .map(|(s, v)| (s.clone().into(), Some(v.clone().into())))
+                .map(|(s, v)| ((*s).into(), Some((*v).into())))
                 .collect()
-
-            }
+        }
 
         fn from_storage(
             chain: &Chain,
@@ -226,7 +224,7 @@ pub mod pg {
 
             let update = evm::AccountUpdate::new(
                 H160::try_decode(address, "address").map_err(StorageError::DecodeError)?,
-                chain.clone(),
+                *chain,
                 slots,
                 match balance {
                     // match expr is required so the error can be raised

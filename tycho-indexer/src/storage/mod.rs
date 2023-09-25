@@ -762,8 +762,8 @@ pub trait ContractStateGateway {
     /// # Arguments
     ///
     /// - `chain`: The blockchain which the contracts belong to.
-    /// - `new`: A reference to a slice of tuples where each tuple has a transaction hash
-    ///   (`TxHash`) and a reference to the state delta (`&Self::Delta`) for that transaction.
+    /// - `new`: A reference to a slice of tuples where each tuple has a transaction hash (`TxHash`)
+    ///   and a reference to the state delta (`&Self::Delta`) for that transaction.
     /// - `db`: A mutable reference to the connected database where the updated contracts will be
     ///   stored.
     ///
