@@ -86,8 +86,8 @@ async fn main() -> Result<(), ExtractionError> {
     extractor_handles.push(ambient_handle.clone());
     info!("Extractor {} started!", ambient_handle.get_id());
 
-    info!("Starting ws service");
-    let (server_handle, server_task) = ServicesBuilder::new()
+    info!("Starting WS and RPC service");
+    let (server_handle, server_task) = ServicesBuilder::new(evm_gw, pool)
         .prefix("v1")
         .bind("127.0.0.1")
         .port(4242)
