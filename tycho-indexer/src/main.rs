@@ -190,7 +190,7 @@ mod cli_tests {
             spkg: "package.spkg".to_string(),
             module: "module_name".to_string(),
             start_block: 17361664,
-            stop_block: "17361674".to_string(),
+            stop_block: "17362664".to_string(),
         };
 
         assert_eq!(args, expected_args);
