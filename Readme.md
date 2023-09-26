@@ -67,17 +67,22 @@ rustup target add wasm32-unknown-unknown
 ```bash
 cd substreams/ethereum-abmient
 substreams protogen substreams.yaml --exclude-paths="sf/substreams,google"
+cd ../..
 ```
-6. To compile the substreams into a spkgs, run:
+6. To compile the substreams into a spkgs, run the build script:
+```bash
+./stable-build.sh
+```
+or alternatively:
+
 ```bash
 cargo build --package substreams-ethereum-ambient --target wasm32-unknown-unknown --profile substreams
 substreams pack substreams/ethereum-ambient/substreams.yaml
 ```
-7. Alternatively you can run the `./stable-build.sh` script which will build all substreams crates and pack them. The spkgs artifacts will be placed under `./target`.
+
 7. To test the substreams (requires the SUBSTREAMS_API_TOKEN env variable set previously), run:
 ```bash
-cd ../..
-RUST_LOG=info cargo run -- --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.2.0.spkg
+RUST_LOG=info cargo run -- --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg
 ```
 
 ### Protobuf
@@ -114,7 +119,7 @@ export DATABASE_URL=postgres://postgres:mypassword@localhost:5432/tycho_indexer_
 ```
 5. Setup/update the database:
 ```bash
-diesel migration run
+diesel migration run --migration-dir ./tycho-indexer/migrations
 ```
 6. We use [pgFormatter](https://github.com/darold/pgFormatter) to keep SQL files consistently formatted.
 
@@ -155,7 +160,7 @@ If you are working in VSCode, we recommend you install the [rust-analyzer](https
 
 If you have to change the database schema, please make sure the down migration is included and test it by executing:
 ```bash
-diesel migration redo
+diesel migration redo --migration-dir ./tycho-indexer/migrations
 ```
 
 # Architecture
