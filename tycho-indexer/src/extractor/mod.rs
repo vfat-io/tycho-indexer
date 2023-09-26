@@ -7,6 +7,7 @@ use crate::{
     storage::StorageError,
 };
 use async_trait::async_trait;
+use mockall::automock;
 use prost::DecodeError;
 use thiserror::Error;
 
@@ -30,10 +31,10 @@ pub enum ExtractionError {
     ServiceError(String),
 }
 
+#[automock]
 #[async_trait]
-pub trait Extractor<G, M>: Send + Sync
+pub trait Extractor<M>: Send + Sync
 where
-    G: Send + Sync,
     M: NormalisedMessage,
 {
     fn get_id(&self) -> ExtractorIdentity;
