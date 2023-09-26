@@ -506,6 +506,7 @@ where
             .await?
             .into_iter()
             .collect();
+        #[allow(clippy::mutable_key_type)]
         let accounts: HashSet<_> = slots
             .iter()
             .flat_map(|(_, contract_slots)| contract_slots.keys())
@@ -598,6 +599,7 @@ where
                 .distinct_on((account::id, slot))
                 .into_boxed();
             if let Some(addresses) = contracts {
+                #[allow(clippy::mutable_key_type)]
                 let filter_val: HashSet<_> = addresses.iter().collect();
                 q = q.filter(account::address.eq_any(filter_val));
             }
