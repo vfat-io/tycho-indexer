@@ -36,25 +36,23 @@ use crate::{
 extern crate pretty_assertions;
 
 /// Tycho Indexer using Substreams
-/// 
+///
 /// Extracts state from the Ethereum blockchain and stores it in a Postgres database.
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
-#[clap(
-    version = "0.1.0",
-)]
+#[clap(version = "0.1.0")]
 struct CliArgs {
     /// Substreams API endpoint URL
     #[clap(name = "endpoint", long)]
     endpoint_url: String,
 
     /// Substreams API token
-    /// 
+    ///
     /// Defaults to SUBSTREAMS_API_TOKEN env var.
     #[clap(long, env, hide_env_values = true, alias = "api_token")]
     substreams_api_token: String,
 
     /// DB Connection Url
-    /// 
+    ///
     /// Defaults to DATABASE_URL env var.
     #[clap(long, env, hide_env_values = true, alias = "db_url")]
     database_url: String,
@@ -72,7 +70,7 @@ struct CliArgs {
     start_block: i64,
 
     /// Substreams stop block
-    /// 
+    ///
     /// If prefixed with a `+` the value is interpreted as an increment to the start block.
     #[clap(long, default_value = "17362664")]
     stop_block: String,
