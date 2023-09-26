@@ -85,12 +85,8 @@ impl AmbientPgGateway {
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
-        let state = ExtractionState::new(
-            self.name.to_string(),
-            self.chain,
-            None,
-            new_cursor.as_bytes(),
-        );
+        let state =
+            ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
         self.state_gateway
             .save_state(&state, conn)
             .await?;
