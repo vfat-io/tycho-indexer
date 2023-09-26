@@ -129,14 +129,18 @@ async fn start_ambient_extractor(
     (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle<BlockAccountChanges>),
     ExtractionError,
 > {
-    let ambient_gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool, evm_gw);
+    let ambient_name = "vm:ambient";
+    let ambient_gw = AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, evm_gw);
     let extractor =
-        AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, ambient_gw).await?;
+        AmbientContractExtractor::new(ambient_name, Chain::Ethereum, ambient_gw).await?;
 
+    let start_block = args.start_block;
+    let stop_block = args.stop_block();
+    let spkg = &args.spkg;
+    info!(%ambient_name, %start_block, %stop_block, block_span = stop_block - start_block, %spkg, "Starting Ambient extractor");
     let builder = ExtractorRunnerBuilder::new(&args.spkg, Arc::new(extractor))
-        .start_block(args.start_block)
-        // Run over first 1000 blocks for testing
-        .end_block(args.stop_block());
+        .start_block(start_block)
+        .end_block(stop_block);
     builder.run().await
 }
 
@@ -186,7 +190,7 @@ mod cli_tests {
             spkg: "package.spkg".to_string(),
             module: "module_name".to_string(),
             start_block: 17361664,
-            stop_block: "17362664".to_string(),
+            stop_block: "17361674".to_string(),
         };
 
         assert_eq!(args, expected_args);

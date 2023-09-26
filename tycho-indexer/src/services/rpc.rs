@@ -402,4 +402,30 @@ mod tests {
         assert_eq!(state.accounts.len(), 1);
         assert_eq!(state.accounts[0], expected);
     }
+
+    #[test]
+    async fn test_msg() {
+        // Define the contract address and endpoint
+        let endpoint = "http://127.0.0.1:4242/v1/contract_state";
+    
+        // Create the request body using the StateRequestBody struct
+        let request_body = StateRequestBody {
+            contract_ids: Some(vec![ContractId::new(
+                Chain::Ethereum,
+                hex::decode("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap(),
+            )]),
+            version: Version::default(),
+        };
+    
+        // Serialize the request body to JSON
+        let json_data = serde_json::to_string(&request_body).expect("Failed to serialize to JSON");
+    
+        // Print the curl command
+        println!(
+            "curl -X POST -H \"Content-Type: application/json\" -d '{}' {}",
+            json_data, endpoint
+        );
+    }
+
+    
 }

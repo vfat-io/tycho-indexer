@@ -3,6 +3,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
+use actix_web_opentelemetry::RequestTracing;
 use diesel_async::{pooled_connection::bb8::Pool, AsyncPgConnection};
 use tokio::task::JoinHandle;
 
@@ -82,6 +83,7 @@ impl<M: NormalisedMessage> ServicesBuilder<M> {
                     web::resource(format!("/{}/ws", self.prefix))
                         .route(web::get().to(ws::WsActor::<M>::ws_index)),
                 )
+                .wrap(RequestTracing::new())
         })
         .bind((self.bind, self.port))
         .map_err(|err| ExtractionError::ServiceError(err.to_string()))?
