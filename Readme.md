@@ -80,9 +80,65 @@ cargo build --package substreams-ethereum-ambient --target wasm32-unknown-unknow
 substreams pack substreams/ethereum-ambient/substreams.yaml
 ```
 
-7. To test the substreams (requires the SUBSTREAMS_API_TOKEN env variable set previously), run:
+7. Run `tycho-indexer` locally using cli:
 ```bash
-RUST_LOG=info cargo run -- --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg
+RUST_LOG=info cargo run -- \
+    --endpoint https://mainnet.eth.streamingfast.io:443 \
+    --module map_changes \
+    --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg \
+    --start-block 17361664 \
+    --stop-block +1000
+```
+The `substreams-api-token` and `database-url` default to their respective environment variables. You can also specify them as command line arguments. More info about tycho cli:
+```bash
+$ cargo run -- --help
+Tycho Indexer using Substreams
+
+Extracts state from the Ethereum blockchain and stores it in a Postgres database.
+
+Usage: tycho-indexer [OPTIONS] --endpoint <endpoint> --substreams-api-token <SUBSTREAMS_API_TOKEN> --database-url <DATABASE_URL> --spkg <SPKG> --module <MODULE>
+
+Options:
+      --endpoint <endpoint>
+          Substreams API endpoint URL
+
+      --substreams-api-token <SUBSTREAMS_API_TOKEN>
+          Substreams API token
+          
+          Defaults to SUBSTREAMS_API_TOKEN env var.
+          
+          [env: SUBSTREAMS_API_TOKEN]
+
+      --database-url <DATABASE_URL>
+          DB Connection Url
+          
+          Defaults to DATABASE_URL env var.
+          
+          [env: DATABASE_URL]
+
+      --spkg <SPKG>
+          Substreams Package file
+
+      --module <MODULE>
+          Substreams Module name
+
+      --start-block <START_BLOCK>
+          Substreams start block
+          
+          [default: 17361664]
+
+      --stop-block <STOP_BLOCK>
+          Substreams stop block
+          
+          If prefixed with a `+` the value is interpreted as an increment to the start block.
+          
+          [default: 17362664]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
 ```
 
 ### Protobuf

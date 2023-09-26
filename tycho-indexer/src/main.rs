@@ -36,23 +36,27 @@ use crate::{
 extern crate pretty_assertions;
 
 /// Tycho Indexer using Substreams
+/// 
+/// Extracts state from the Ethereum blockchain and stores it in a Postgres database.
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
 #[clap(
     version = "0.1.0",
-    about = "Extracts Ambient contract state. Requires the environment variable \
-    SUBSTREAMS_API_TOKEN and DATABASE_URL to be set."
 )]
-struct Args {
+struct CliArgs {
     /// Substreams API endpoint URL
     #[clap(name = "endpoint", long)]
     endpoint_url: String,
 
     /// Substreams API token
-    #[clap(long, env, alias = "api_token")]
+    /// 
+    /// Defaults to SUBSTREAMS_API_TOKEN env var.
+    #[clap(long, env, hide_env_values = true, alias = "api_token")]
     substreams_api_token: String,
 
     /// DB Connection Url
-    #[clap(long, env, alias = "db_url")]
+    /// 
+    /// Defaults to DATABASE_URL env var.
+    #[clap(long, env, hide_env_values = true, alias = "db_url")]
     database_url: String,
 
     /// Substreams Package file
@@ -68,11 +72,13 @@ struct Args {
     start_block: i64,
 
     /// Substreams stop block
+    /// 
+    /// If prefixed with a `+` the value is interpreted as an increment to the start block.
     #[clap(long, default_value = "17362664")]
     stop_block: String,
 }
 
-impl Args {
+impl CliArgs {
     fn stop_block(&self) -> i64 {
         if self.stop_block.starts_with('+') {
             let increment: i64 = self.stop_block[1..]
@@ -92,7 +98,7 @@ async fn main() -> Result<(), ExtractionError> {
     // Set up the subscriber
     tracing_subscriber::fmt::init();
 
-    let args = Args::parse();
+    let args = CliArgs::parse();
 
     let pool = postgres::connect(&args.database_url).await?;
     postgres::ensure_chains(&[Chain::Ethereum], pool.clone()).await;
@@ -122,7 +128,7 @@ async fn main() -> Result<(), ExtractionError> {
 }
 
 async fn start_ambient_extractor(
-    args: &Args,
+    args: &CliArgs,
     pool: Pool<AsyncPgConnection>,
     evm_gw: EVMStateGateway<AsyncPgConnection>,
 ) -> Result<
@@ -161,7 +167,7 @@ async fn shutdown_handler<M: NormalisedMessage>(
 mod cli_tests {
     use std::env;
 
-    use super::Args;
+    use super::CliArgs;
     use clap::Parser;
 
     #[tokio::test]
@@ -169,7 +175,7 @@ mod cli_tests {
         // Set the SUBSTREAMS_API_TOKEN environment variable for testing.
         env::set_var("SUBSTREAMS_API_TOKEN", "your_api_token");
         env::set_var("DATABASE_URL", "my_db");
-        let args = Args::try_parse_from(vec![
+        let args = CliArgs::try_parse_from(vec![
             "tycho-indexer",
             "--endpoint",
             "http://example.com",
@@ -183,7 +189,7 @@ mod cli_tests {
         env::remove_var("DATABASE_URL");
         assert!(args.is_ok());
         let args = args.unwrap();
-        let expected_args = Args {
+        let expected_args = CliArgs {
             endpoint_url: "http://example.com".to_string(),
             substreams_api_token: "your_api_token".to_string(),
             database_url: "my_db".to_string(),
@@ -198,7 +204,7 @@ mod cli_tests {
 
     #[tokio::test]
     async fn test_arg_parsing_missing_val() {
-        let args = Args::try_parse_from(vec![
+        let args = CliArgs::try_parse_from(vec![
             "tycho-indexer",
             "--spkg",
             "package.spkg",
