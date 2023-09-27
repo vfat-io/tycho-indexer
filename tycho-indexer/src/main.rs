@@ -17,6 +17,7 @@ use tokio::task::JoinHandle;
 use tracing::info;
 
 mod extractor;
+mod hex_bytes;
 mod models;
 mod pb;
 mod serde_helpers;

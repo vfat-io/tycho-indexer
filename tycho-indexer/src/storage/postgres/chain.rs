@@ -5,8 +5,8 @@ use tracing::instrument;
 
 use super::{orm, schema, PostgresGateway};
 use crate::storage::{
-    BlockIdentifier, ChainGateway, ContractDelta, StorableBlock, StorableContract,
-    StorableTransaction, StorageError,
+    BlockHash, BlockIdentifier, ChainGateway, ContractDelta, StorableBlock, StorableContract,
+    StorableTransaction, StorageError, TxHash,
 };
 
 #[async_trait]
@@ -60,7 +60,7 @@ where
             BlockIdentifier::Hash(block_hash) => orm::Block::by_hash(block_hash, conn).await,
         }
         .map_err(|err| StorageError::from_diesel(err, "Block", &block_id.to_string(), None))?;
-        let chain = self.get_chain(orm_block.chain_id);
+        let chain = self.get_chain(&orm_block.chain_id);
         B::from_storage(orm_block, chain)
     }
 
@@ -104,19 +104,18 @@ where
     #[instrument(skip_all)]
     async fn get_tx(
         &self,
-        hash: &[u8],
+        hash: &TxHash,
         conn: &mut Self::DB,
     ) -> Result<Self::Transaction, StorageError> {
-        let hash = Vec::from(hash);
         schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::hash.eq(&hash))
             .select((orm::Transaction::as_select(), schema::block::hash))
-            .first::<(orm::Transaction, Vec<u8>)>(conn)
+            .first::<(orm::Transaction, BlockHash)>(conn)
             .await
             .map(|(orm_tx, block_hash)| TX::from_storage(orm_tx, &block_hash))
             .map_err(|err| {
-                StorageError::from_diesel(err, "Transaction", &hex::encode(&hash), None)
+                StorageError::from_diesel(err, "Transaction", &hex::encode(hash), None)
             })?
     }
 }
@@ -194,7 +193,7 @@ mod test {
             .await
             .unwrap();
         let retrieved_block = gw
-            .get_block(&BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
+            .get_block(&BlockIdentifier::Hash(block.hash.into()), &mut conn)
             .await
             .unwrap();
 
@@ -223,7 +222,7 @@ mod test {
             .await
             .unwrap();
         let retrieved_block = gw
-            .get_block(&BlockIdentifier::Hash(Vec::from(block.hash.as_bytes())), &mut conn)
+            .get_block(&BlockIdentifier::Hash(block.hash.into()), &mut conn)
             .await
             .unwrap();
 
@@ -250,7 +249,7 @@ mod test {
         let exp = transaction("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945");
 
         let tx = gw
-            .get_tx(exp.hash.as_bytes(), &mut conn)
+            .get_tx(&exp.hash.into(), &mut conn)
             .await
             .unwrap();
 
@@ -271,7 +270,7 @@ mod test {
             .await
             .unwrap();
         let retrieved_tx = gw
-            .get_tx(tx.hash.as_bytes(), &mut conn)
+            .get_tx(&tx.hash.into(), &mut conn)
             .await
             .unwrap();
 
@@ -300,7 +299,7 @@ mod test {
             .await
             .unwrap();
         let retrieved_tx = gw
-            .get_tx(tx.hash.as_bytes(), &mut conn)
+            .get_tx(&tx.hash.into(), &mut conn)
             .await
             .unwrap();
 

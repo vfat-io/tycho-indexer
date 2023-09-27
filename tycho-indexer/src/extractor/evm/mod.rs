@@ -3,6 +3,7 @@ pub mod storage;
 mod utils;
 
 use crate::{
+    hex_bytes::Bytes,
     models::{Chain, ExtractorIdentity, NormalisedMessage},
     storage::{ChangeType, StateGatewayType},
 };
@@ -60,7 +61,7 @@ pub struct Account {
     pub title: String,
     pub slots: HashMap<U256, U256>,
     pub balance: U256,
-    pub code: Vec<u8>,
+    pub code: Bytes,
     pub code_hash: H256,
     pub balance_modify_tx: H256,
     pub code_modify_tx: H256,
@@ -75,7 +76,7 @@ impl Account {
         title: String,
         slots: HashMap<U256, U256>,
         balance: U256,
-        code: Vec<u8>,
+        code: Bytes,
         code_hash: H256,
         balance_modify_tx: H256,
         code_modify_tx: H256,
@@ -142,7 +143,7 @@ pub struct AccountUpdate {
     pub chain: Chain,
     pub slots: HashMap<U256, U256>,
     pub balance: Option<U256>,
-    pub code: Option<Vec<u8>>,
+    pub code: Option<Bytes>,
     pub change: ChangeType,
 }
 
@@ -153,7 +154,7 @@ impl AccountUpdate {
         chain: Chain,
         slots: HashMap<U256, U256>,
         balance: Option<U256>,
-        code: Option<Vec<u8>>,
+        code: Option<Bytes>,
         change: ChangeType,
     ) -> Self {
         Self { address, chain, slots, balance, code, change }
@@ -198,6 +199,7 @@ impl AccountUpdate {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn is_update(&self) -> bool {
         self.change == ChangeType::Update
     }
@@ -249,7 +251,7 @@ impl AccountUpdateWithTx {
         chain: Chain,
         slots: HashMap<U256, U256>,
         balance: Option<U256>,
-        code: Option<Vec<u8>>,
+        code: Option<Bytes>,
         change: ChangeType,
         tx: Transaction,
     ) -> Self {
@@ -346,14 +348,14 @@ impl Transaction {
         block_hash: &H256,
     ) -> Result<Self, ExtractionError> {
         let to = if !msg.to.is_empty() {
-            Some(pad_and_parse_h160(&msg.to).map_err(ExtractionError::DecodeError)?)
+            Some(pad_and_parse_h160(&msg.to.into()).map_err(ExtractionError::DecodeError)?)
         } else {
             None
         };
         Ok(Self {
             hash: pad_and_parse_32bytes(&msg.hash).map_err(ExtractionError::DecodeError)?,
             block_hash: *block_hash,
-            from: pad_and_parse_h160(&msg.from).map_err(ExtractionError::DecodeError)?,
+            from: pad_and_parse_h160(&msg.from.into()).map_err(ExtractionError::DecodeError)?,
             to,
             index: msg.index,
         })
@@ -369,7 +371,7 @@ impl AccountUpdateWithTx {
     ) -> Result<Self, ExtractionError> {
         let change = msg.change().into();
         let update = AccountUpdateWithTx::new(
-            pad_and_parse_h160(&msg.address).map_err(ExtractionError::DecodeError)?,
+            pad_and_parse_h160(&msg.address.into()).map_err(ExtractionError::DecodeError)?,
             chain,
             msg.slots
                 .into_iter()
@@ -387,7 +389,7 @@ impl AccountUpdateWithTx {
             } else {
                 None
             },
-            if !msg.code.is_empty() { Some(msg.code) } else { None },
+            if !msg.code.is_empty() { Some(msg.code.into()) } else { None },
             change,
             *tx,
         );
@@ -613,7 +615,7 @@ mod test {
             "0xe688b84b23f322a994a53dbf8e15fa82cdb71127".into(),
             fixtures::evm_slots([]),
             U256::from(10000),
-            code,
+            code.into(),
             code_hash,
             H256::zero(),
             H256::zero(),
@@ -630,7 +632,7 @@ mod test {
             Chain::Ethereum,
             fixtures::evm_slots([]),
             Some(U256::from(10000)),
-            Some(code),
+            Some(code.into()),
             ChangeType::Update,
             fixtures::transaction01(),
         )
@@ -761,7 +763,7 @@ mod test {
                             (3250766788, 3520254932),
                         ]),
                         balance: Some(U256::from(1903326068)),
-                        code: Some(vec![129, 130, 131, 132]),
+                        code: Some(vec![129, 130, 131, 132].into()),
                         change: ChangeType::Update,
                     },
                     tx,
@@ -775,7 +777,7 @@ mod test {
                             (2442302356, 2711790500),
                         ]),
                         balance: Some(U256::from(4059231220u64)),
-                        code: Some(vec![1, 2, 3, 4]),
+                        code: Some(vec![1, 2, 3, 4].into()),
                         change: ChangeType::Update,
                     },
                     tx,
@@ -822,7 +824,7 @@ mod test {
                         (2442302356, 2711790500),
                     ]),
                     balance: Some(U256::from(4059231220u64)),
-                    code: Some(vec![1, 2, 3, 4]),
+                    code: Some(vec![1, 2, 3, 4].into()),
                     change: ChangeType::Update,
                 },
             )]

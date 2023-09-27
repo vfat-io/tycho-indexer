@@ -7,18 +7,17 @@ use crate::{
     },
     models::Chain,
     storage::{
-        AddressRef, BalanceRef, CodeRef, ContractDelta, ContractId, ContractStore, StorableBlock,
-        StorableContract, StorableTransaction, StorageError, TxHashRef,
+        ContractDelta, ContractId, ContractStore, StorableBlock, StorableContract,
+        StorableTransaction, StorageError,
     },
 };
 
 use chrono::NaiveDateTime;
-use ethers::prelude::*;
 
 pub mod pg {
-    use ethers::abi::AbiEncode;
+    use ethers::types::{H160, H256, U256};
 
-    use crate::storage::{postgres::orm, ChangeType};
+    use crate::storage::{postgres::orm, Address, Balance, BlockHash, ChangeType, Code, TxHash};
 
     use super::*;
 
@@ -39,9 +38,9 @@ pub mod pg {
         fn from_storage(val: orm::Block, chain: Chain) -> Result<Self, StorageError> {
             Ok(evm::Block {
                 number: val.number as u64,
-                hash: H256::try_decode(val.hash.as_slice(), "block hash")
+                hash: H256::try_decode(&val.hash, "block hash")
                     .map_err(StorageError::DecodeError)?,
-                parent_hash: H256::try_decode(val.parent_hash.as_slice(), "parent hash")
+                parent_hash: H256::try_decode(&val.parent_hash, "parent hash")
                     .map_err(|err| StorageError::DecodeError(err.to_string()))?,
                 chain,
                 ts: val.ts,
@@ -50,8 +49,8 @@ pub mod pg {
 
         fn to_storage(&self, chain_id: i64) -> orm::NewBlock {
             orm::NewBlock {
-                hash: Vec::from(self.hash.as_bytes()),
-                parent_hash: Vec::from(self.parent_hash.as_bytes()),
+                hash: self.hash.into(),
+                parent_hash: self.parent_hash.into(),
                 chain_id,
                 main: false,
                 number: self.number as i64,
@@ -59,13 +58,16 @@ pub mod pg {
             }
         }
 
-        fn chain(&self) -> Chain {
-            self.chain
+        fn chain(&self) -> &Chain {
+            &self.chain
         }
     }
 
     impl StorableTransaction<orm::Transaction, orm::NewTransaction, i64> for evm::Transaction {
-        fn from_storage(val: orm::Transaction, block_hash: &[u8]) -> Result<Self, StorageError> {
+        fn from_storage(
+            val: orm::Transaction,
+            block_hash: &BlockHash,
+        ) -> Result<Self, StorageError> {
             let to = if !val.to.is_empty() {
                 Some(H160::try_decode(&val.to, "tx receiver").map_err(StorageError::DecodeError)?)
             } else {
@@ -81,23 +83,25 @@ pub mod pg {
         }
 
         fn to_storage(&self, block_id: i64) -> orm::NewTransaction {
-            let to: Vec<u8> =
-                if let Some(h) = self.to { Vec::from(h.as_bytes()) } else { Vec::new() };
+            let to: Address = self
+                .to
+                .map(|v| v.into())
+                .unwrap_or_default();
             orm::NewTransaction {
-                hash: Vec::from(self.hash.as_bytes()),
+                hash: self.hash.into(),
                 block_id,
-                from: Vec::from(self.from.as_bytes()),
+                from: self.from.into(),
                 to,
                 index: self.index as i64,
             }
         }
 
-        fn block_hash(&self) -> &[u8] {
-            self.block_hash.as_bytes()
+        fn block_hash(&self) -> BlockHash {
+            self.block_hash.into()
         }
 
-        fn hash(&self) -> &[u8] {
-            self.hash.as_bytes()
+        fn hash(&self) -> BlockHash {
+            self.hash.into()
         }
     }
 
@@ -105,9 +109,9 @@ pub mod pg {
         fn from_storage(
             val: orm::Contract,
             chain: Chain,
-            balance_modify_tx: TxHashRef,
-            code_modify_tx: TxHashRef,
-            creation_tx: Option<TxHashRef>,
+            balance_modify_tx: &TxHash,
+            code_modify_tx: &TxHash,
+            creation_tx: Option<&TxHash>,
         ) -> Result<Self, StorageError> {
             Ok(evm::Account::new(
                 chain,
@@ -139,35 +143,33 @@ pub mod pg {
         ) -> orm::NewContract {
             orm::NewContract {
                 title: self.title.clone(),
-                address: self.address.as_bytes().to_vec(),
+                address: self.address.into(),
                 chain_id,
                 creation_tx: tx_id,
                 created_at: Some(creation_ts),
                 deleted_at: None,
-                balance: self.balance.encode(),
+                balance: self.balance.into(),
                 code: self.code.clone(),
-                code_hash: self.code_hash.as_bytes().to_vec(),
+                code_hash: self.code_hash.into(),
             }
         }
 
-        fn chain(&self) -> Chain {
-            self.chain
+        fn chain(&self) -> &Chain {
+            &self.chain
         }
 
-        fn creation_tx(&self) -> Option<TxHashRef> {
-            self.creation_tx
-                .as_ref()
-                .map(|h| h.as_bytes())
+        fn creation_tx(&self) -> Option<TxHash> {
+            self.creation_tx.map(|v| v.into())
         }
 
-        fn address(&self) -> AddressRef {
-            self.address.as_bytes()
+        fn address(&self) -> Address {
+            self.address.into()
         }
 
         fn store(&self) -> ContractStore {
             self.slots
                 .iter()
-                .map(|(s, v)| (s.encode(), Some(v.encode())))
+                .map(|(s, v)| ((*s).into(), Some((*v).into())))
                 .collect()
         }
 
@@ -175,7 +177,7 @@ pub mod pg {
             self.slots = store
                 .iter()
                 .map(|(rk, rv)| {
-                    parse_u256_slot_entry(rk, rv.as_deref()).map_err(StorageError::DecodeError)
+                    parse_u256_slot_entry(rk, rv.as_ref()).map_err(StorageError::DecodeError)
                 })
                 .collect::<Result<HashMap<_, _>, _>>()?;
             Ok(())
@@ -184,38 +186,37 @@ pub mod pg {
 
     impl ContractDelta for evm::AccountUpdate {
         fn contract_id(&self) -> ContractId {
-            ContractId::new(self.chain, self.address.as_bytes().to_vec())
+            ContractId::new(self.chain, self.address.into())
         }
 
-        fn dirty_balance(&self) -> Option<Vec<u8>> {
-            self.balance.map(|b| b.encode())
+        fn dirty_balance(&self) -> Option<Balance> {
+            self.balance.map(|b| b.into())
         }
 
-        fn dirty_code(&self) -> Option<&[u8]> {
-            self.code.as_deref()
+        fn dirty_code(&self) -> Option<&Code> {
+            self.code.as_ref()
         }
 
         fn dirty_slots(&self) -> ContractStore {
             self.slots
                 .iter()
-                .map(|(s, v)| (s.encode(), Some(v.encode())))
+                .map(|(s, v)| ((*s).into(), Some((*v).into())))
                 .collect()
         }
 
         fn from_storage(
-            chain: Chain,
-            address: AddressRef,
+            chain: &Chain,
+            address: &Address,
             slots: Option<&ContractStore>,
-            balance: Option<BalanceRef>,
-            code: Option<CodeRef>,
+            balance: Option<&Balance>,
+            code: Option<&Code>,
             change: ChangeType,
         ) -> Result<Self, StorageError> {
             let slots = slots
                 .map(|s| {
                     s.iter()
                         .map(|(s, v)| {
-                            parse_u256_slot_entry(s, v.as_deref())
-                                .map_err(StorageError::DecodeError)
+                            parse_u256_slot_entry(s, v.as_ref()).map_err(StorageError::DecodeError)
                         })
                         .collect::<Result<HashMap<U256, U256>, StorageError>>()
                 })
@@ -223,7 +224,7 @@ pub mod pg {
 
             let update = evm::AccountUpdate::new(
                 H160::try_decode(address, "address").map_err(StorageError::DecodeError)?,
-                chain,
+                *chain,
                 slots,
                 match balance {
                     // match expr is required so the error can be raised
@@ -232,7 +233,7 @@ pub mod pg {
                         .map_err(|err| StorageError::DecodeError(err.to_string()))?,
                     _ => None,
                 },
-                code.map(|v| v.to_vec()),
+                code.cloned(),
                 change,
             );
             Ok(update)

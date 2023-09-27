@@ -254,6 +254,7 @@ pub enum Response {
     SubscriptionEnded { subscription_id: Uuid },
 }
 
+/// Handle incoming messages from the extractor and forward them to the WS connection
 impl<M> StreamHandler<Result<Arc<M>, ws::ProtocolError>> for WsActor<M>
 where
     M: NormalisedMessage,

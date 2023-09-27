@@ -205,13 +205,10 @@ where
     /// # Arguments
     ///
     /// * `val` - The enum variant to lookup.
-    fn get_id(&self, val: E) -> i64 {
-        *self
-            .map_id
-            .get(&val)
-            .unwrap_or_else(|| {
-                panic!("Unexpected cache miss for enum {:?}, entries: {:?}", val, self.map_id)
-            })
+    fn get_id(&self, val: &E) -> i64 {
+        *self.map_id.get(val).unwrap_or_else(|| {
+            panic!("Unexpected cache miss for enum {:?}, entries: {:?}", val, self.map_id)
+        })
     }
 
     /// Retrieves the corresponding enum variant for a database ID. Panics on
@@ -220,10 +217,10 @@ where
     /// # Arguments
     ///
     /// * `id` - The database ID to lookup.
-    fn get_chain(&self, id: i64) -> E {
+    fn get_chain(&self, id: &i64) -> E {
         *self
             .map_enum
-            .get(&id)
+            .get(id)
             .unwrap_or_else(|| {
                 panic!("Unexpected cache miss for id {}, entries: {:?}", id, self.map_enum)
             })
@@ -314,11 +311,11 @@ where
         Self::with_cache(cache)
     }
 
-    fn get_chain_id(&self, chain: Chain) -> i64 {
+    fn get_chain_id(&self, chain: &Chain) -> i64 {
         self.chain_id_cache.get_id(chain)
     }
 
-    fn get_chain(&self, id: i64) -> Chain {
+    fn get_chain(&self, id: &i64) -> Chain {
         self.chain_id_cache.get_chain(id)
     }
 
@@ -456,6 +453,8 @@ pub mod db_fixtures {
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
+
+    use crate::storage::Code;
 
     use super::schema;
 
@@ -663,7 +662,7 @@ pub mod db_fixtures {
         conn: &mut AsyncPgConnection,
         account_id: i64,
         modify_tx: i64,
-        code: Vec<u8>,
+        code: Code,
     ) -> i64 {
         let ts = schema::transaction::table
             .inner_join(schema::block::table)

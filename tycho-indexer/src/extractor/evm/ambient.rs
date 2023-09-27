@@ -85,7 +85,8 @@ impl AmbientPgGateway {
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
-        let state = ExtractionState::new(&self.name, self.chain, None, new_cursor.as_bytes());
+        let state =
+            ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
         self.state_gateway
             .save_state(&state, conn)
             .await?;
@@ -116,18 +117,16 @@ impl AmbientPgGateway {
                     .await?;
             }
         }
+        let collected_changes: Vec<_> = changes
+            .tx_updates
+            .iter()
+            .filter(|&u| u.is_update())
+            .map(|u| (u.tx.hash.into(), &u.update))
+            .collect();
+        let changes_slice = collected_changes.as_slice();
+
         self.state_gateway
-            .update_contracts(
-                self.chain,
-                changes
-                    .tx_updates
-                    .iter()
-                    .filter(|&u| u.is_update())
-                    .map(|u| (u.tx.hash.as_bytes(), &u.update))
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-                conn,
-            )
+            .update_contracts(&self.chain, changes_slice, conn)
             .await?;
         self.save_cursor(new_cursor, conn)
             .await?;
@@ -149,7 +148,7 @@ impl AmbientPgGateway {
         let address = H160(AMBIENT_CONTRACT);
         let account_updates = self
             .state_gateway
-            .get_account_delta(self.chain, None, &target, conn)
+            .get_account_delta(&self.chain, None, &target, conn)
             .await?
             .into_iter()
             .filter_map(|u| if u.address == address { Some((u.address, u)) } else { None })
@@ -175,7 +174,7 @@ impl AmbientPgGateway {
     async fn get_last_cursor(&self, conn: &mut AsyncPgConnection) -> Result<Vec<u8>, StorageError> {
         let state = self
             .state_gateway
-            .get_state(&self.name, self.chain, conn)
+            .get_state(&self.name, &self.chain, conn)
             .await?;
         Ok(state.cursor)
     }
@@ -316,10 +315,7 @@ where
         })?;
         let changes = self
             .gateway
-            .revert(
-                &BlockIdentifier::Hash(block_hash.as_bytes().to_vec()),
-                inp.last_valid_cursor.as_ref(),
-            )
+            .revert(&BlockIdentifier::Hash(block_hash.into()), inp.last_valid_cursor.as_ref())
             .await?;
         self.update_cursor(inp.last_valid_cursor)
             .await;
@@ -427,7 +423,7 @@ mod test {
             .returning(|| Ok("cursor".into()));
         gw.expect_revert()
             .withf(|v, cursor| {
-                v == &BlockIdentifier::Hash(hex::decode(&evm::fixtures::HASH_256_0[2..]).unwrap()) &&
+                v == &BlockIdentifier::Hash(evm::fixtures::HASH_256_0.into()) &&
                     cursor == "cursor@400"
             })
             .times(1)
@@ -497,8 +493,12 @@ mod gateway_test {
     async fn test_get_cursor() {
         let (gw, mut conn) = setup_gw().await;
         let evm_gw = gw.state_gateway.clone();
-        let state =
-            ExtractionState::new("vm:ambient", Chain::Ethereum, None, "cursor@420".as_bytes());
+        let state = ExtractionState::new(
+            "vm:ambient".to_string(),
+            Chain::Ethereum,
+            None,
+            "cursor@420".as_bytes(),
+        );
         evm_gw
             .save_state(&state, &mut conn)
             .await
@@ -522,7 +522,7 @@ mod gateway_test {
                 "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
                 evm::fixtures::evm_slots([(1, 200)]),
                 U256::from(1000),
-                vec![0, 0, 0, 0],
+                vec![0, 0, 0, 0].into(),
                 "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
                     .parse()
                     .unwrap(),
@@ -547,7 +547,7 @@ mod gateway_test {
                     Chain::Ethereum,
                     HashMap::new(),
                     None,
-                    Some(vec![0, 0, 0, 0]),
+                    Some(vec![0, 0, 0, 0].into()),
                     ChangeType::Creation,
                     evm::fixtures::transaction01(),
                 ),
@@ -603,8 +603,8 @@ mod gateway_test {
 
         let res = evm_gw
             .get_contract(
-                &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.to_vec()),
-                &None,
+                &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
+                None,
                 true,
                 &mut conn,
             )
@@ -645,8 +645,8 @@ mod gateway_test {
         assert_eq!(changes.account_updates[&ambient_address], exp_change);
         let account = evm_gw
             .get_contract(
-                &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.to_vec()),
-                &None,
+                &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
+                None,
                 true,
                 &mut conn,
             )

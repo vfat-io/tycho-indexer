@@ -21,7 +21,7 @@ where
     async fn get_state(
         &self,
         name: &str,
-        chain: Chain,
+        chain: &Chain,
         conn: &mut Self::DB,
     ) -> Result<ExtractionState, StorageError> {
         let block_chain_id = self.get_chain_id(chain);
@@ -29,8 +29,8 @@ where
         match orm::ExtractionState::by_name(name, block_chain_id, conn).await {
             Ok(Some(orm_state)) => {
                 let state = ExtractionState::new(
-                    &orm_state.name,
-                    chain,
+                    orm_state.name,
+                    *chain,
                     orm_state.attributes,
                     &orm_state.cursor.unwrap_or_default(),
                 );
@@ -46,7 +46,7 @@ where
         state: &ExtractionState,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        let block_chain_id = self.get_chain_id(state.chain);
+        let block_chain_id = self.get_chain_id(&state.chain);
         match orm::ExtractionState::by_name(&state.name, block_chain_id, conn).await {
             Ok(Some(_)) => {
                 let update_form = orm::ExtractionStateForm {
@@ -149,11 +149,11 @@ mod test {
     async fn test_save_new_state() {
         // Adds a ExtractionState to the DB named "test_extractor" and asserts for it
         let mut conn = setup_db().await;
-        let extractor_name = "test_extractor";
+        let extractor_name = "test_extractor".to_string();
 
         let gateway = get_dgw(&mut conn).await;
         let state = ExtractionState::new(
-            extractor_name,
+            extractor_name.clone(),
             Chain::Ethereum,
             Some(serde_json::json!({"test": "test"})),
             "10".to_owned().as_bytes(),
@@ -166,14 +166,14 @@ mod test {
             .unwrap();
 
         let query_res: orm::ExtractionState = schema::extraction_state::table
-            .filter(schema::extraction_state::name.eq(extractor_name))
+            .filter(schema::extraction_state::name.eq(extractor_name.clone()))
             .select(orm::ExtractionState::as_select())
             .first(&mut conn)
             .await
             .unwrap();
 
-        assert_eq!(&query_res.name, extractor_name);
-        assert_eq!(&query_res.version, "0.1.0");
+        assert_eq!(query_res.name, extractor_name);
+        assert_eq!(query_res.version, "0.1.0".to_string());
         assert_eq!(&query_res.cursor.unwrap(), "10".as_bytes());
     }
 
@@ -185,7 +185,7 @@ mod test {
         let extractor_name = "setup_extractor";
 
         let state = gateway
-            .get_state(extractor_name, Chain::Ethereum, &mut conn)
+            .get_state(extractor_name, &Chain::Ethereum, &mut conn)
             .await
             .unwrap();
 
@@ -201,7 +201,7 @@ mod test {
         let extractor_name = "missing_extractor";
 
         let _ = gateway
-            .get_state(extractor_name, Chain::Ethereum, &mut conn)
+            .get_state(extractor_name, &Chain::Ethereum, &mut conn)
             .await
             .expect_err("Expected an error when loading a non-existing state");
     }
@@ -210,10 +210,10 @@ mod test {
     async fn test_update_state() {
         let mut conn = setup_db().await;
         let gateway = get_dgw(&mut conn).await;
-        let extractor_name = "setup_extractor";
+        let extractor_name = "setup_extractor".to_string();
 
         let state = ExtractionState::new(
-            extractor_name,
+            extractor_name.clone(),
             Chain::Ethereum,
             Some(serde_json::json!({"test": "test"})),
             "20".as_bytes(),
@@ -225,7 +225,7 @@ mod test {
             .expect("Failed to save state!");
         assert_eq!(
             gateway
-                .get_state(extractor_name, Chain::Ethereum, &mut conn)
+                .get_state(&extractor_name, &Chain::Ethereum, &mut conn)
                 .await
                 .unwrap()
                 .cursor,
