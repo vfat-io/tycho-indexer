@@ -354,12 +354,12 @@ mod tests {
         let example_bytes = Bytes::from_str("0x0123456789abcdef").unwrap();
 
         conn.batch_execute(
-            r#"
+            r"
             CREATE TEMPORARY TABLE bytes_table (
                 id SERIAL PRIMARY KEY,
                 data BYTEA NOT NULL
             );
-        "#,
+        ",
         )
         .await
         .unwrap();

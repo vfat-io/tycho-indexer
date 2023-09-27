@@ -6,7 +6,8 @@ use crate::{
     extractor::evm::Account,
     models::Chain,
     storage::{
-        self, Address, BlockHash, BlockIdentifier, BlockOrTimestamp, ContractId, ContractStateGateway, StorageError,
+        self, Address, BlockHash, BlockIdentifier, BlockOrTimestamp, ContractId,
+        ContractStateGateway, StorageError,
     },
 };
 use actix_web::{web, HttpResponse};
@@ -166,7 +167,13 @@ struct Block {
 
 #[cfg(test)]
 mod tests {
-    use crate::{storage::{postgres::{self, db_fixtures}, Code}, hex_bytes::Bytes};
+    use crate::{
+        hex_bytes::Bytes,
+        storage::{
+            postgres::{self, db_fixtures},
+            Code,
+        },
+    };
     use actix_web::test;
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
