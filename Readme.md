@@ -67,17 +67,78 @@ rustup target add wasm32-unknown-unknown
 ```bash
 cd substreams/ethereum-abmient
 substreams protogen substreams.yaml --exclude-paths="sf/substreams,google"
+cd ../..
 ```
-6. To compile the substreams into a spkgs, run:
+6. To compile the substreams into a spkgs, run the build script:
+```bash
+./stable-build.sh
+```
+or alternatively:
+
 ```bash
 cargo build --package substreams-ethereum-ambient --target wasm32-unknown-unknown --profile substreams
 substreams pack substreams/ethereum-ambient/substreams.yaml
 ```
-7. Alternatively you can run the `./stable-build.sh` script which will build all substreams crates and pack them. The spkgs artifacts will be placed under `./target`.
-7. To test the substreams (requires the SUBSTREAMS_API_TOKEN env variable set previously), run:
+
+7. Run `tycho-indexer` locally using cli:
 ```bash
-cd ../..
-RUST_LOG=info cargo run -- --endpoint https://mainnet.eth.streamingfast.io:443 --module map_changes --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.2.0.spkg
+RUST_LOG=info cargo run -- \
+    --endpoint https://mainnet.eth.streamingfast.io:443 \
+    --module map_changes \
+    --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg \
+    --start-block 17361664 \
+    --stop-block +1000
+```
+The `substreams-api-token` and `database-url` default to their respective environment variables. You can also specify them as command line arguments. More info about tycho cli:
+```bash
+$ cargo run -- --help
+Tycho Indexer using Substreams
+
+Extracts state from the Ethereum blockchain and stores it in a Postgres database.
+
+Usage: tycho-indexer [OPTIONS] --endpoint <endpoint> --substreams-api-token <SUBSTREAMS_API_TOKEN> --database-url <DATABASE_URL> --spkg <SPKG> --module <MODULE>
+
+Options:
+      --endpoint <endpoint>
+          Substreams API endpoint URL
+
+      --substreams-api-token <SUBSTREAMS_API_TOKEN>
+          Substreams API token
+          
+          Defaults to SUBSTREAMS_API_TOKEN env var.
+          
+          [env: SUBSTREAMS_API_TOKEN]
+
+      --database-url <DATABASE_URL>
+          DB Connection Url
+          
+          Defaults to DATABASE_URL env var.
+          
+          [env: DATABASE_URL]
+
+      --spkg <SPKG>
+          Substreams Package file
+
+      --module <MODULE>
+          Substreams Module name
+
+      --start-block <START_BLOCK>
+          Substreams start block
+          
+          [default: 17361664]
+
+      --stop-block <STOP_BLOCK>
+          Substreams stop block
+          
+          If prefixed with a `+` the value is interpreted as an increment to the start block.
+          
+          [default: 17362664]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
 ```
 
 ### Protobuf
@@ -114,7 +175,7 @@ export DATABASE_URL=postgres://postgres:mypassword@localhost:5432/tycho_indexer_
 ```
 5. Setup/update the database:
 ```bash
-diesel migration run
+diesel migration run --migration-dir ./tycho-indexer/migrations
 ```
 6. We use [pgFormatter](https://github.com/darold/pgFormatter) to keep SQL files consistently formatted.
 
@@ -155,7 +216,7 @@ If you are working in VSCode, we recommend you install the [rust-analyzer](https
 
 If you have to change the database schema, please make sure the down migration is included and test it by executing:
 ```bash
-diesel migration redo
+diesel migration redo --migration-dir ./tycho-indexer/migrations
 ```
 
 # Architecture
