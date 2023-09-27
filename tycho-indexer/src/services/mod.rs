@@ -3,39 +3,44 @@
 use std::{collections::HashMap, sync::Arc};
 
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
+use actix_web_opentelemetry::RequestTracing;
+use diesel_async::{pooled_connection::bb8::Pool, AsyncPgConnection};
 use tokio::task::JoinHandle;
 
 use crate::{
-    extractor::{runner::ExtractorHandle, ExtractionError},
+    extractor::{evm, runner::ExtractorHandle, ExtractionError},
     models::NormalisedMessage,
+    storage::postgres::PostgresGateway,
 };
-
-use self::ws::{AppState, MessageSenderMap, WsActor};
 
 mod rpc;
 mod ws;
+
+pub type EvmPostgresGateway =
+    PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>;
 
 pub struct ServicesBuilder<M> {
     prefix: String,
     port: u16,
     bind: String,
-    extractor_handles: MessageSenderMap<M>,
+    extractor_handles: ws::MessageSenderMap<M>,
+    db_gateway: Arc<EvmPostgresGateway>,
+    db_connection_pool: Pool<AsyncPgConnection>,
 }
 
-impl<M> Default for ServicesBuilder<M> {
-    fn default() -> Self {
+impl<M: NormalisedMessage> ServicesBuilder<M> {
+    pub fn new(
+        db_gateway: Arc<EvmPostgresGateway>,
+        db_connection_pool: Pool<AsyncPgConnection>,
+    ) -> Self {
         Self {
             prefix: "v1".to_owned(),
             port: 4242,
             bind: "0.0.0.0".to_owned(),
             extractor_handles: HashMap::new(),
+            db_gateway,
+            db_connection_pool,
         }
-    }
-}
-
-impl<M: NormalisedMessage> ServicesBuilder<M> {
-    pub fn new() -> Self {
-        Self::default()
     }
 
     pub fn register_extractor(mut self, handle: ExtractorHandle<M>) -> Self {
@@ -63,14 +68,22 @@ impl<M: NormalisedMessage> ServicesBuilder<M> {
     pub fn run(
         self,
     ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
-        let app_state = web::Data::new(AppState::<M>::new(self.extractor_handles));
+        let ws_data = web::Data::new(ws::WsData::<M>::new(self.extractor_handles));
+        let rpc_data =
+            web::Data::new(rpc::RpcHandler::new(self.db_gateway, self.db_connection_pool));
         let server = HttpServer::new(move || {
             App::new()
-                .app_data(app_state.clone())
+                .app_data(rpc_data.clone())
                 .service(
-                    web::resource(format!("/{}/ws/", self.prefix))
-                        .route(web::get().to(WsActor::<M>::ws_index)),
+                    web::resource(format!("/{}/contract_state", self.prefix))
+                        .route(web::post().to(rpc::contract_state)),
                 )
+                .app_data(ws_data.clone())
+                .service(
+                    web::resource(format!("/{}/ws", self.prefix))
+                        .route(web::get().to(ws::WsActor::<M>::ws_index)),
+                )
+                .wrap(RequestTracing::new())
         })
         .bind((self.bind, self.port))
         .map_err(|err| ExtractionError::ServiceError(err.to_string()))?

@@ -64,12 +64,12 @@ pub type MessageSenderMap<M> = HashMap<ExtractorIdentity, Arc<dyn MessageSender<
 
 /// Shared application data between all connections
 /// Parameters are hidden behind a Mutex to allow for sharing between threads
-pub struct AppState<M> {
+pub struct WsData<M> {
     /// There is one extractor subscriber per extractor identity
     pub subscribers: Arc<Mutex<MessageSenderMap<M>>>,
 }
 
-impl<M> AppState<M> {
+impl<M> WsData<M> {
     pub fn new(extractors: MessageSenderMap<M>) -> Self {
         Self { subscribers: Arc::new(Mutex::new(extractors)) }
     }
@@ -85,7 +85,7 @@ pub struct WsActor<M> {
     /// Client must send ping at least once per 10 seconds (CLIENT_TIMEOUT), otherwise we drop the
     /// connection.
     heartbeat: Instant,
-    app_state: web::Data<AppState<M>>,
+    app_state: web::Data<WsData<M>>,
     subscriptions: HashMap<Uuid, SpawnHandle>,
 }
 
@@ -93,7 +93,7 @@ impl<M> WsActor<M>
 where
     M: NormalisedMessage,
 {
-    fn new(app_state: web::Data<AppState<M>>) -> Self {
+    fn new(app_state: web::Data<WsData<M>>) -> Self {
         Self {
             id: Uuid::new_v4(),
             heartbeat: Instant::now(),
@@ -107,7 +107,7 @@ where
     pub async fn ws_index(
         req: HttpRequest,
         stream: web::Payload,
-        data: web::Data<AppState<M>>,
+        data: web::Data<WsData<M>>,
     ) -> Result<HttpResponse, Error> {
         ws::start(WsActor::new(data), &req, stream)
     }
@@ -430,7 +430,7 @@ mod tests {
             .try_init()
             .unwrap_or_else(|_| debug!("Subscriber already initialized"));
 
-        let app_state = web::Data::new(AppState::<DummyMessage>::new(HashMap::new()));
+        let app_state = web::Data::new(WsData::<DummyMessage>::new(HashMap::new()));
         let server = start(move || {
             App::new()
                 .wrap(RequestTracing::new())
@@ -579,7 +579,7 @@ mod tests {
         let extractor_id = ExtractorIdentity::new(Chain::Ethereum, "dummy");
         let extractor_id2 = ExtractorIdentity::new(Chain::Ethereum, "dummy2");
 
-        let app_state = web::Data::new(AppState::<DummyMessage>::new(HashMap::new()));
+        let app_state = web::Data::new(WsData::<DummyMessage>::new(HashMap::new()));
 
         let message_sender = Arc::new(MyMessageSender::new(extractor_id.clone()));
         let message_sender2 = Arc::new(MyMessageSender::new(extractor_id2.clone()));

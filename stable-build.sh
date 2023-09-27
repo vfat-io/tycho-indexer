@@ -5,16 +5,17 @@ set -e
 
 SUBSTREAM_PKGS=$(cargo ws list | grep -i substreams)
 WORKDIR=$(pwd)
-for package in $SUBSTREAM_PKGS
-do
-   echo "Building wasm package: $package"
-   cargo build --package $package --target wasm32-unknown-unknown --profile substreams
+TYCHO_INDEXER=tycho-indexer
 
-   echo "Packaging into spkg..."
-   cd $(echo $package | sed 's/-/\//1' )
-        substreams pack -o $WORKDIR/target/spkg/$package.spkg
-   cd -
+for PACKAGE in $SUBSTREAM_PKGS
+do
+   echo "Building wasm package: $PACKAGE"
+   cargo build --package $PACKAGE --target wasm32-unknown-unknown --profile substreams
+
+   YAML_PATH=$(echo $PACKAGE | sed 's/-/\//1' )/substreams.yaml
+   echo "Packaging into spkg using $YAML_PATH:"
+   substreams pack $YAML_PATH
 done
 
-echo "Building tycho"
-cargo build --package tycho-indexer --release
+echo "Building tycho: $TYCHO_INDEXER"
+cargo build --package $TYCHO_INDEXER --release

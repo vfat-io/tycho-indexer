@@ -251,7 +251,7 @@ where
 }
 
 #[async_trait]
-impl<G> Extractor<G, evm::BlockAccountChanges> for AmbientContractExtractor<G>
+impl<G> Extractor<evm::BlockAccountChanges> for AmbientContractExtractor<G>
 where
     G: AmbientGateway,
 {

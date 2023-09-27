@@ -41,7 +41,7 @@ pub struct ProtocolType {
     implementation_type: ImplementationType,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct ExtractorIdentity {
     pub chain: Chain,
     pub name: String,

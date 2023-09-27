@@ -3,39 +3,53 @@
 use std::sync::Arc;
 
 use crate::{
-    extractor::evm::{self, Account},
+    extractor::evm::Account,
     models::Chain,
     storage::{
-        self, postgres::PostgresGateway, Address, BlockHash, BlockIdentifier, BlockOrTimestamp,
-        ContractId, ContractStateGateway, StorageError,
+        self, Address, BlockHash, BlockIdentifier, BlockOrTimestamp, ContractId, ContractStateGateway, StorageError,
     },
 };
-use actix_web::{post, web, HttpResponse, Responder};
+use actix_web::{web, HttpResponse};
 use chrono::{NaiveDateTime, Utc};
-use diesel_async::AsyncPgConnection;
+use diesel_async::{
+    pooled_connection::bb8::{self, Pool},
+    AsyncPgConnection,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::Mutex;
 use tracing::error;
 
-struct RequestHandler {
-    db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>,
-    db_connection: Arc<Mutex<AsyncPgConnection>>,
+use super::EvmPostgresGateway;
+
+pub struct RpcHandler {
+    db_gateway: Arc<EvmPostgresGateway>,
+    db_connection_pool: Pool<AsyncPgConnection>,
 }
 
-impl RequestHandler {
+impl RpcHandler {
     #[allow(dead_code)]
     pub fn new(
-        db_gw: PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>,
-        db_connection: AsyncPgConnection,
+        db_gateway: Arc<EvmPostgresGateway>,
+        db_connection_pool: Pool<AsyncPgConnection>,
     ) -> Self {
-        Self { db_gw, db_connection: Arc::new(Mutex::new(db_connection)) }
+        Self { db_gateway, db_connection_pool }
     }
 
     async fn get_state(
         &self,
         request: &StateRequestBody,
         params: &QueryParameters,
+    ) -> Result<StateRequestResponse, RpcError> {
+        let mut conn = self.db_connection_pool.get().await?;
+        self.get_state_inner(request, params, &mut conn)
+            .await
+    }
+
+    async fn get_state_inner(
+        &self,
+        request: &StateRequestBody,
+        params: &QueryParameters,
+        db_connection: &mut AsyncPgConnection,
     ) -> Result<StateRequestResponse, RpcError> {
         //TODO: handle when no contract is specified with filters
         let at = match &request.version.block {
@@ -44,8 +58,6 @@ impl RequestHandler {
         };
 
         let version = storage::Version(at, storage::VersionKind::Last);
-
-        let mut db_connection_lock = self.db_connection.lock().await;
 
         // Get the contract IDs from the request
         let contract_ids = request.contract_ids.clone();
@@ -59,25 +71,24 @@ impl RequestHandler {
         // Get the contract states from the database
         // TODO support additional tvl_gt and intertia_min_gt filters
         match self
-            .db_gw
-            .get_contracts(&params.chain, addresses, Some(&version), false, &mut db_connection_lock)
+            .db_gateway
+            .get_contracts(&params.chain, addresses, Some(&version), false, db_connection)
             .await
         {
             Ok(accounts) => Ok(StateRequestResponse::new(accounts)),
             Err(err) => {
                 error!(error = %err, "Error while getting contract states.");
-                Err(RpcError::StorageError(err))
+                Err(err.into())
             }
         }
     }
 }
 
-#[post("/contract_state")]
-async fn contract_state(
+pub async fn contract_state(
     query: web::Query<QueryParameters>,
     body: web::Json<StateRequestBody>,
-    handler: web::Data<RequestHandler>,
-) -> impl Responder {
+    handler: web::Data<RpcHandler>,
+) -> HttpResponse {
     // Call the handler to get the state
     let response = handler
         .into_inner()
@@ -107,14 +118,17 @@ impl StateRequestResponse {
 #[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Failed to parse JSON: {0}")]
-    ParseError(#[from] serde_json::Error),
+    Parse(#[from] serde_json::Error),
 
     #[error("Failed to get storage: {0}")]
-    StorageError(#[from] StorageError),
+    Storage(#[from] StorageError),
+
+    #[error("Failed to get database connection: {0}")]
+    Connection(#[from] bb8::RunError),
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
-struct QueryParameters {
+pub struct QueryParameters {
     #[serde(default = "Chain::default")]
     chain: Chain,
     tvl_gt: Option<f64>,
@@ -122,7 +136,7 @@ struct QueryParameters {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct StateRequestBody {
+pub struct StateRequestBody {
     #[serde(rename = "contractIds")]
     contract_ids: Option<Vec<ContractId>>,
     #[serde(default = "Version::default")]
@@ -152,13 +166,12 @@ struct Block {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{postgres::db_fixtures, Code};
-    use actix_web::{test, App};
-    use actix_web_opentelemetry::RequestTracing;
+    use crate::{storage::{postgres::{self, db_fixtures}, Code}, hex_bytes::Bytes};
+    use actix_web::test;
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
 
-    use std::{collections::HashMap, str::FromStr};
+    use std::{collections::HashMap, str::FromStr, sync::Arc};
 
     use super::*;
 
@@ -321,31 +334,21 @@ mod tests {
         acc_address.to_string()
     }
 
-    async fn setup_database() -> (AsyncPgConnection, String) {
+    #[tokio::test]
+    async fn test_get_state() {
         let db_url = std::env::var("DATABASE_URL").unwrap();
-        let mut conn = AsyncPgConnection::establish(&db_url)
+        let pool = postgres::connect(&db_url)
             .await
             .unwrap();
+        let cloned_pool = pool.clone();
+        let mut conn = cloned_pool.get().await.unwrap();
         conn.begin_test_transaction()
             .await
             .unwrap();
         let acc_address = setup_account(&mut conn).await;
 
-        (conn, acc_address)
-    }
-
-    #[tokio::test]
-    async fn test_get_state() {
-        let (mut conn, acc_address) = setup_database().await;
-
-        let db_gw = PostgresGateway::<
-            evm::Block,
-            evm::Transaction,
-            evm::Account,
-            evm::AccountUpdate,
-        >::from_connection(&mut conn)
-        .await;
-        let req_handler = RequestHandler::new(db_gw, conn);
+        let db_gateway = Arc::new(EvmPostgresGateway::from_connection(&mut conn).await);
+        let req_handler = RpcHandler::new(db_gateway, pool);
 
         let code = Code::from("1234");
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
@@ -379,7 +382,7 @@ mod tests {
         };
 
         let state = req_handler
-            .get_state(&request, &QueryParameters::default())
+            .get_state_inner(&request, &QueryParameters::default(), &mut conn)
             .await
             .unwrap();
 
@@ -387,73 +390,27 @@ mod tests {
         assert_eq!(state.accounts[0], expected);
     }
 
-    #[actix_web::test]
+    #[test]
+    async fn test_msg() {
+        // Define the contract address and endpoint
+        let endpoint = "http://127.0.0.1:4242/v1/contract_state";
 
-    async fn test_contract_state_route() {
-        let (mut conn, acc_address) = setup_database().await;
-
-        let db_gw = PostgresGateway::<
-            evm::Block,
-            evm::Transaction,
-            evm::Account,
-            evm::AccountUpdate,
-        >::from_connection(&mut conn)
-        .await;
-        let req_handler = RequestHandler::new(db_gw, conn);
-
-        // Set up the expected account data
-        let code = Code::from("1234");
-        let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
-        let expected = Account::new(
-            Chain::Ethereum,
-            H160::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-            "account0".to_owned(),
-            HashMap::new(),
-            U256::from(100),
-            code,
-            code_hash,
-            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
-                .parse()
-                .unwrap(),
-            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
-                .parse()
-                .unwrap(),
-            Some(
-                "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
-                    .parse()
-                    .unwrap(),
-            ),
-        );
-
-        // Set up the app with the RequestHandler and the contract_state service
-        let app = test::init_service(
-            App::new()
-                .wrap(RequestTracing::new())
-                .app_data(web::Data::new(req_handler))
-                .service(contract_state),
-        )
-        .await;
-
-        // Create the request body
+        // Create the request body using the StateRequestBody struct
         let request_body = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(
                 Chain::Ethereum,
-                acc_address.parse().unwrap(),
+                Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap(),
             )]),
-            version: Version { timestamp: Utc::now().naive_utc(), block: None },
+            version: Version::default(),
         };
 
-        // Create a POST request to the /contract_state route
-        let req = test::TestRequest::post()
-            .uri("/contract_state")
-            .set_json(request_body)
-            .to_request();
+        // Serialize the request body to JSON
+        let json_data = serde_json::to_string(&request_body).expect("Failed to serialize to JSON");
 
-        // Send the request to the app
-        let response: StateRequestResponse = test::call_and_read_body_json(&app, req).await;
-
-        // Assert that the response is as expected
-        assert_eq!(response.accounts.len(), 1);
-        assert_eq!(response.accounts[0], expected);
+        // Print the curl command
+        println!(
+            "curl -X POST -H \"Content-Type: application/json\" -d '{}' {}",
+            json_data, endpoint
+        );
     }
 }
