@@ -16,8 +16,10 @@ COPY . .
 RUN rustup target add wasm32-unknown-unknown && ./stable-build.sh
 
 FROM debian:bookworm
-WORKDIR /the/workdir/path
+WORKDIR /opt/tycho-indexer
 COPY --from=build /build/target/release/tycho-indexer ./tycho-indexer
-COPY --from=build /build/target/spkg/*.spkg ./
+COPY --from=build /build/substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg ./substreams/substreams-ethereum-ambient-v0.3.0.spkg
 RUN apt-get update && apt-get install -y libpq-dev && rm -rf /var/lib/apt/lists/*
-ENTRYPOINT ["./tycho-indexer"]
+ENTRYPOINT ["/opt/tycho-indexer/tycho-indexer --endpoint https://mainnet.eth.streamingfast.io:443 \
+    --module map_changes \
+    --spkg /opt/tycho-indexer/substreams/substreams-ethereum-ambient-v0.3.0.spkg"]

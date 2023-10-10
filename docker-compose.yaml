@@ -9,3 +9,9 @@ services:
       POSTGRES_USER: postgres
     ports:
       - "5432:5432"
+  tycho-indexer:
+    image: ${TYCHO_IMAGE}
+    restart: always
+    environment:
+      SUBSTREAMS_API_TOKEN: ""
+      DATABASE_URL: "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0"
