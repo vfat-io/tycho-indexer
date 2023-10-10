@@ -12,6 +12,14 @@ services:
   tycho-indexer:
     image: ${TYCHO_IMAGE}
     restart: always
+    depends_on:
+    - db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     environment:
-      SUBSTREAMS_API_TOKEN: ""
-      DATABASE_URL: "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0"
+      SUBSTREAMS_API_TOKEN: changeme
+      STREAMINGFAST_KEY: changeme
+      DATABASE_URL: postgres://postgres:mypassword@db:5432/tycho_indexer_0
