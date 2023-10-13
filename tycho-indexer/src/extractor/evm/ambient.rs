@@ -1,5 +1,5 @@
 use diesel_async::{
-    pooled_connection::bb8::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
+    pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
 };
 use ethers::types::{H160, H256};
@@ -454,6 +454,7 @@ mod gateway_test {
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
     use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
+    use diesel_async::pooled_connection::deadpool::Object;
     use ethers::types::U256;
 
     use super::*;
@@ -469,10 +470,11 @@ mod gateway_test {
             .expect("test db should be available");
         // We need a dedicated connection so we don't use the pool as this would actually insert
         // data.
-        let mut conn = pool
-            .dedicated_connection()
+        let conn = pool
+            .get()
             .await
             .expect("pool should get a connection");
+        let mut conn = Object::take(conn);
         conn.begin_test_transaction()
             .await
             .expect("starting test transaction should succeed");
