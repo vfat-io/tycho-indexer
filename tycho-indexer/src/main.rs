@@ -67,13 +67,15 @@ struct CliArgs {
     module: String,
 
     /// Substreams start block
-    #[clap(long, default_value = "17361664")]
+    /// Defaults to START_BLOCK env var or default_value below.
+    #[clap(long, env, default_value = "17361664")]
     start_block: i64,
 
     /// Substreams stop block
     ///
     /// If prefixed with a `+` the value is interpreted as an increment to the start block.
-    #[clap(long, default_value = "17362664")]
+    /// Defaults to STOP_BLOCK env var or default_value below.
+    #[clap(long, env, default_value = "17362664")]
     stop_block: String,
 }
 

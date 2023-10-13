@@ -1,7 +1,7 @@
 version: '3.1'
 services:
   db:
-    image: postgres
+    image: postgres:15.3
     restart: always
     environment:
       POSTGRES_PASSWORD: mypassword
@@ -9,3 +9,20 @@ services:
       POSTGRES_USER: postgres
     ports:
       - "5432:5432"
+  tycho-indexer:
+    image: ${TYCHO_IMAGE}
+    restart: no
+    depends_on:
+    - db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      SUBSTREAMS_API_TOKEN: changeme
+      STREAMINGFAST_KEY: changeme
+      DATABASE_URL: postgres://postgres:mypassword@db:5432/tycho_indexer_0
+      START_BLOCK: 17361664
+      STOP_BLOCK: 0
+      RUST_LOG: info

@@ -65,7 +65,7 @@ rustup target add wasm32-unknown-unknown
 ```
 5. To compile protobuf files please install [buf](https://docs.buf.build/installation). To generate protobuf definition for a substream crate:
 ```bash
-cd substreams/ethereum-abmient
+cd substreams/ethereum-ambient
 substreams protogen substreams.yaml --exclude-paths="sf/substreams,google"
 cd ../..
 ```
