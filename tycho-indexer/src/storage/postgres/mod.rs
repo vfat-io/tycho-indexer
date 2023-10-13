@@ -140,7 +140,7 @@ use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, str::FromS
 
 use diesel::prelude::*;
 use diesel_async::{
-    pooled_connection::{bb8::Pool, AsyncDieselConnectionManager},
+    pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
     AsyncPgConnection, RunQueryDsl,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
@@ -358,9 +358,8 @@ where
 /// - `Err`: Contains a `StorageError` if there was an issue creating the connection pool.
 pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageError> {
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url);
-    let pool = Pool::builder()
-        .build(config)
-        .await
+    let pool = Pool::builder(config)
+        .build()
         .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
     run_migrations(db_url);
     Ok(pool)

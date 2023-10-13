@@ -1,5 +1,5 @@
 #![doc = include_str!("../../Readme.md")]
-use diesel_async::{pooled_connection::bb8::Pool, AsyncPgConnection};
+use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use extractor::{
     evm::{
         ambient::{AmbientContractExtractor, AmbientPgGateway},

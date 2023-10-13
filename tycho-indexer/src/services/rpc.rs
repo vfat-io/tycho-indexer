@@ -13,7 +13,7 @@ use crate::{
 use actix_web::{web, HttpResponse};
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::{
-    pooled_connection::bb8::{self, Pool},
+    pooled_connection::deadpool::{self, Pool},
     AsyncPgConnection,
 };
 use serde::{Deserialize, Serialize};
@@ -125,7 +125,7 @@ pub enum RpcError {
     Storage(#[from] StorageError),
 
     #[error("Failed to get database connection: {0}")]
-    Connection(#[from] bb8::RunError),
+    Connection(#[from] deadpool::PoolError),
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
