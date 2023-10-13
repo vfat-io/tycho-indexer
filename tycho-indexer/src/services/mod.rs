@@ -4,7 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
-use diesel_async::{pooled_connection::bb8::Pool, AsyncPgConnection};
+use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use tokio::task::JoinHandle;
 
 use crate::{
