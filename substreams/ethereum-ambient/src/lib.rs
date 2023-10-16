@@ -261,21 +261,18 @@ fn map_changes(
             tx_change.contract_changes.clear();
         }
     }
-    // if there were some changes set the block, if not save some
-    // unnecessary bytes by making a 0 bytes msg
-    if !block_changes.changes.is_empty() {
-        block_changes.block = Some(tycho::Block {
-            number: block.number,
-            hash: block.hash.clone(),
-            parent_hash: block
-                .header
-                .as_ref()
-                .expect("Block header not present")
-                .parent_hash
-                .clone(),
-            ts: block.timestamp_seconds(),
-        });
-    }
+
+    block_changes.block = Some(tycho::Block {
+        number: block.number,
+        hash: block.hash.clone(),
+        parent_hash: block
+            .header
+            .as_ref()
+            .expect("Block header not present")
+            .parent_hash
+            .clone(),
+        ts: block.timestamp_seconds(),
+    });
 
     Ok(block_changes)
 }
