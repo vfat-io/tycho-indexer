@@ -18,7 +18,7 @@ use diesel_async::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::error;
+use tracing::{error, debug, info, instrument};
 
 use super::EvmPostgresGateway;
 
@@ -28,7 +28,6 @@ pub struct RpcHandler {
 }
 
 impl RpcHandler {
-    #[allow(dead_code)]
     pub fn new(
         db_gateway: Arc<EvmPostgresGateway>,
         db_connection_pool: Pool<AsyncPgConnection>,
@@ -36,12 +35,15 @@ impl RpcHandler {
         Self { db_gateway, db_connection_pool }
     }
 
+    #[instrument(skip(self, request, params))]
     async fn get_state(
         &self,
         request: &StateRequestBody,
-        params: &QueryParameters,
+        params: &StateRequestParameters,
     ) -> Result<StateRequestResponse, RpcError> {
         let mut conn = self.db_connection_pool.get().await?;
+
+        info!(?request, ?params, "Getting contract state.");
         self.get_state_inner(request, params, &mut conn)
             .await
     }
@@ -49,13 +51,19 @@ impl RpcHandler {
     async fn get_state_inner(
         &self,
         request: &StateRequestBody,
-        params: &QueryParameters,
+        params: &StateRequestParameters,
         db_connection: &mut AsyncPgConnection,
     ) -> Result<StateRequestResponse, RpcError> {
         //TODO: handle when no contract is specified with filters
         let at = match &request.version.block {
-            Some(b) => BlockOrTimestamp::Block(BlockIdentifier::Hash(b.hash.clone())),
-            None => BlockOrTimestamp::Timestamp(request.version.timestamp),
+            Some(b) => {
+                info!(block = ?b, "Getting contract state at block.");
+                BlockOrTimestamp::Block(BlockIdentifier::Hash(b.hash.clone()))
+            },
+            None => {
+                info!(timestamp = ?request.version.timestamp, "Getting contract state at timestamp.");
+                BlockOrTimestamp::Timestamp(request.version.timestamp)
+            },
         };
 
         let version = storage::Version(at, storage::VersionKind::Last);
@@ -67,6 +75,7 @@ impl RpcHandler {
                 .map(|id| id.address)
                 .collect::<Vec<Address>>()
         });
+        debug!(?addresses, "Getting contract states.");
         let addresses = addresses.as_deref();
 
         // Get the contract states from the database
@@ -86,7 +95,7 @@ impl RpcHandler {
 }
 
 pub async fn contract_state(
-    query: web::Query<QueryParameters>,
+    query: web::Query<StateRequestParameters>,
     body: web::Json<StateRequestBody>,
     handler: web::Data<RpcHandler>,
 ) -> HttpResponse {
@@ -129,11 +138,11 @@ pub enum RpcError {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
-pub struct QueryParameters {
+pub struct StateRequestParameters {
     #[serde(default = "Chain::default")]
     chain: Chain,
-    tvl_gt: Option<f64>,
-    intertia_min_gt: Option<f64>,
+    tvl_gt: Option<u64>,
+    intertia_min_gt: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -389,7 +398,7 @@ mod tests {
         };
 
         let state = req_handler
-            .get_state_inner(&request, &QueryParameters::default(), &mut conn)
+            .get_state_inner(&request, &StateRequestParameters::default(), &mut conn)
             .await
             .unwrap();
 
