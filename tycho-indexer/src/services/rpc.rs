@@ -18,7 +18,7 @@ use diesel_async::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{error, debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 use super::EvmPostgresGateway;
 
@@ -59,11 +59,11 @@ impl RpcHandler {
             Some(b) => {
                 info!(block = ?b, "Getting contract state at block.");
                 BlockOrTimestamp::Block(BlockIdentifier::Hash(b.hash.clone()))
-            },
+            }
             None => {
                 info!(timestamp = ?request.version.timestamp, "Getting contract state at timestamp.");
                 BlockOrTimestamp::Timestamp(request.version.timestamp)
-            },
+            }
         };
 
         let version = storage::Version(at, storage::VersionKind::Last);
