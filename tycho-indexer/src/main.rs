@@ -73,23 +73,28 @@ struct CliArgs {
 
     /// Substreams stop block
     ///
+    /// Optional. If not provided, the extractor will run until the latest block.
     /// If prefixed with a `+` the value is interpreted as an increment to the start block.
-    /// Defaults to STOP_BLOCK env var or default_value below.
-    #[clap(long, env, default_value = "17362664")]
-    stop_block: String,
+    /// Defaults to STOP_BLOCK env var or None.
+    #[clap(long, env)]
+    stop_block: Option<String>,
 }
 
 impl CliArgs {
-    fn stop_block(&self) -> i64 {
-        if self.stop_block.starts_with('+') {
-            let increment: i64 = self.stop_block[1..]
-                .parse()
-                .expect("Invalid increment value");
-            self.start_block + increment
+    fn stop_block(&self) -> Option<i64> {
+        if let Some(s) = &self.stop_block {
+            if s.starts_with('+') {
+                let increment: i64 = s
+                    .strip_prefix('+')
+                    .expect("stripped stop block value")
+                    .parse()
+                    .expect("stop block value");
+                Some(self.start_block + increment)
+            } else {
+                Some(s.parse().expect("stop block value"))
+            }
         } else {
-            self.stop_block
-                .parse()
-                .expect("Invalid stop block value")
+            None
         }
     }
 }
@@ -116,13 +121,19 @@ async fn main() -> Result<(), ExtractionError> {
     extractor_handles.push(ambient_handle.clone());
     info!("Extractor {} started!", ambient_handle.get_id());
 
-    info!("Starting WS and RPC service");
+    // TODO: read from env variable
+    let server_addr = "127.0.0.1";
+    let server_port = 4242;
+    let server_version_prefix = "v1";
+    let server_url = format!("http://{}:{}", server_addr, server_port);
     let (server_handle, server_task) = ServicesBuilder::new(evm_gw, pool)
-        .prefix("v1")
-        .bind("127.0.0.1")
-        .port(4242)
+        .prefix(server_version_prefix)
+        .bind(server_addr)
+        .port(server_port)
         .register_extractor(ambient_handle)
         .run()?;
+    info!(server_url, "Http and Ws server started");
+
     let shutdown_task = tokio::spawn(shutdown_handler(server_handle, extractor_handles));
     let (res, _, _) = select_all([ambient_task, server_task, shutdown_task]).await;
     res.expect("Extractor- nor ServiceTasks should panic!")
@@ -144,10 +155,13 @@ async fn start_ambient_extractor(
     let start_block = args.start_block;
     let stop_block = args.stop_block();
     let spkg = &args.spkg;
-    info!(%ambient_name, %start_block, %stop_block, block_span = stop_block - start_block, %spkg, "Starting Ambient extractor");
-    let builder = ExtractorRunnerBuilder::new(&args.spkg, Arc::new(extractor))
-        .start_block(start_block)
-        .end_block(stop_block);
+    let block_span = stop_block.map(|stop| stop - start_block);
+    info!(%ambient_name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Ambient extractor");
+    let mut builder =
+        ExtractorRunnerBuilder::new(&args.spkg, Arc::new(extractor)).start_block(start_block);
+    if let Some(stop_block) = stop_block {
+        builder = builder.end_block(stop_block)
+    };
     builder.run().await
 }
 
@@ -173,6 +187,9 @@ mod cli_tests {
 
     #[tokio::test]
     async fn test_arg_parsing_long() {
+        // Save previous values of the environment variables.
+        let prev_api_token = env::var("SUBSTREAMS_API_TOKEN");
+        let prev_db_url = env::var("DATABASE_URL");
         // Set the SUBSTREAMS_API_TOKEN environment variable for testing.
         env::set_var("SUBSTREAMS_API_TOKEN", "your_api_token");
         env::set_var("DATABASE_URL", "my_db");
@@ -186,8 +203,18 @@ mod cli_tests {
             "module_name",
         ]);
 
-        env::remove_var("SUBSTREAMS_API_TOKEN");
-        env::remove_var("DATABASE_URL");
+        // Restore the environment variables.
+        if let Ok(val) = prev_api_token {
+            env::set_var("SUBSTREAMS_API_TOKEN", val);
+        } else {
+            env::remove_var("SUBSTREAMS_API_TOKEN");
+        }
+        if let Ok(val) = prev_db_url {
+            env::set_var("DATABASE_URL", val);
+        } else {
+            env::remove_var("DATABASE_URL");
+        }
+
         assert!(args.is_ok());
         let args = args.unwrap();
         let expected_args = CliArgs {
@@ -197,7 +224,7 @@ mod cli_tests {
             spkg: "package.spkg".to_string(),
             module: "module_name".to_string(),
             start_block: 17361664,
-            stop_block: "17362664".to_string(),
+            stop_block: None,
         };
 
         assert_eq!(args, expected_args);
