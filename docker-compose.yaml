@@ -26,3 +26,9 @@ services:
       START_BLOCK: 17361664
       STOP_BLOCK: 0
       RUST_LOG: info
+    ports:
+      - "4242:4242"
+    volumes:
+      - ./wait-for-postgres.sh:/usr/wait-for-postgres.sh
+    entrypoint: ["/usr/wait-for-postgres.sh", "db"]
+    command: ["/opt/tycho-indexer/tycho-indexer", "--endpoint", "https://mainnet.eth.streamingfast.io:443", "--module", "map_changes", "--spkg", "/opt/tycho-indexer/substreams/substreams-ethereum-ambient-v0.3.0.spkg"]
