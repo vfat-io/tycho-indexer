@@ -73,7 +73,7 @@ impl RpcHandler {
         // TODO support additional tvl_gt and intertia_min_gt filters
         match self
             .db_gateway
-            .get_contracts(&params.chain, addresses, Some(&version), false, db_connection)
+            .get_contracts(&params.chain, addresses, Some(&version), true, db_connection)
             .await
         {
             Ok(accounts) => Ok(StateRequestResponse::new(accounts)),
