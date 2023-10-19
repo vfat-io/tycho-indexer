@@ -1,4 +1,4 @@
-FROM rust:1.72-bookworm AS build
+FROM rust:1.72-bookworm AS chef
 ARG TARGETPLATFORM
 WORKDIR /build
 RUN apt-get update && apt-get install -y libpq-dev jq
@@ -10,6 +10,17 @@ RUN ARCH=$(echo $TARGETPLATFORM | sed -e 's/\//_/g') && \
     echo ARCH: $ARCH, LINK: $LINK && \
     curl -L  $LINK  | tar zxf - -C /usr/local/bin/
 RUN cargo install cargo-workspaces
+RUN cargo install cargo-chef 
+COPY rust-toolchain.toml .
+RUN rustup update 1.72
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS build
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --package tycho-indexer --release --recipe-path recipe.json
 COPY . .
 # the hack below is probably needed because of rust-toolchain.toml
 # will fix this later we have time to optimise the build
