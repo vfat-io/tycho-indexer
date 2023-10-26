@@ -122,7 +122,7 @@ async fn main() -> Result<(), ExtractionError> {
     info!("Extractor {} started!", ambient_handle.get_id());
 
     // TODO: read from env variable
-    let server_addr = "127.0.0.1";
+    let server_addr = "0.0.0.0";
     let server_port = 4242;
     let server_version_prefix = "v1";
     let server_url = format!("http://{}:{}", server_addr, server_port);
