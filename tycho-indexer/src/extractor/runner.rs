@@ -87,6 +87,7 @@ pub struct ExtractorRunner<M> {
     extractor: Arc<dyn Extractor<M>>,
     substreams: SubstreamsStream,
     subscriptions: Arc<Mutex<SubscriptionsMap<M>>>,
+    next_subscriber_id: u64,
     control_rx: Receiver<ControlMessage<M>>,
 }
 
@@ -94,6 +95,14 @@ impl<M> ExtractorRunner<M>
 where
     M: NormalisedMessage,
 {
+    pub fn new(
+        extractor: Arc<dyn Extractor<M>>,
+        substreams: SubstreamsStream,
+        subscriptions: Arc<Mutex<SubscriptionsMap<M>>>,
+        control_rx: Receiver<ControlMessage<M>>,
+    ) -> Self {
+        ExtractorRunner { extractor, substreams, subscriptions, next_subscriber_id: 0, control_rx }
+    }
     pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
         let id = self.extractor.get_id().clone();
 
@@ -166,9 +175,10 @@ where
 
     #[instrument(skip_all)]
     async fn subscribe(&mut self, sender: Sender<Arc<M>>) {
-        let subscriber_id = self.subscriptions.lock().await.len() as u64;
+        let subscriber_id = self.next_subscriber_id;
+        self.next_subscriber_id += 1;
         tracing::Span::current().record("subscriber_id", subscriber_id);
-        info!("New subscription.");
+        info!("New subscription with id {}", subscriber_id);
         self.subscriptions
             .lock()
             .await
@@ -289,12 +299,12 @@ where
 
         let id = self.extractor.get_id();
         let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
-        let runner = ExtractorRunner {
-            extractor: self.extractor,
-            substreams: stream,
-            subscriptions: Arc::new(Mutex::new(HashMap::new())),
-            control_rx: ctrl_rx,
-        };
+        let runner = ExtractorRunner::new(
+            self.extractor,
+            stream,
+            Arc::new(Mutex::new(HashMap::new())),
+            ctrl_rx,
+        );
 
         let handle = runner.run();
         Ok((handle, ExtractorHandle::new(id, ctrl_tx)))
