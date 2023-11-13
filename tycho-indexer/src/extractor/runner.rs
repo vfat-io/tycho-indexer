@@ -178,7 +178,7 @@ where
     // TODO: add message tracing_id to the log
     #[instrument(skip_all)]
     async fn propagate_msg(subscribers: &Arc<Mutex<SubscriptionsMap<M>>>, message: M) {
-        debug!(msg = %message, "Propagating message to subscribers.");
+        info!(msg = %message, "Propagating message to subscribers.");
         let arced_message = Arc::new(message);
 
         let mut to_remove = Vec::new();
@@ -190,12 +190,12 @@ where
             match sender.send(arced_message.clone()).await {
                 Ok(_) => {
                     // Message sent successfully
-                    info!(subscriber_id = %counter, "Message sent successfully.");
+                    debug!(subscriber_id = %counter, "Message sent successfully.");
                 }
                 Err(err) => {
                     // Receiver has been dropped, mark for removal
                     to_remove.push(*counter);
-                    error!(error = %err, subscriber_id = %counter, "Subscriber {} has been dropped", counter);
+                    error!(error = %err, "Error while sending message to subscriber {}", counter);
                 }
             }
         }
@@ -203,6 +203,7 @@ where
         // Remove inactive subscribers
         for counter in to_remove {
             subscribers.remove(&counter);
+            debug!("Subscriber {} has been dropped", counter);
         }
     }
 }
