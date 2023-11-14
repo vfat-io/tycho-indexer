@@ -16,7 +16,7 @@ use diesel_async::{
     pooled_connection::deadpool::{self, Pool},
     AsyncPgConnection,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as DeError, Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
@@ -55,16 +55,7 @@ impl RpcHandler {
         db_connection: &mut AsyncPgConnection,
     ) -> Result<StateRequestResponse, RpcError> {
         //TODO: handle when no contract is specified with filters
-        let at = match &request.version.block {
-            Some(b) => {
-                info!(block = ?b, "Getting contract state at block.");
-                BlockOrTimestamp::Block(BlockIdentifier::Hash(b.hash.clone()))
-            }
-            None => {
-                info!(timestamp = ?request.version.timestamp, "Getting contract state at timestamp.");
-                BlockOrTimestamp::Timestamp(request.version.timestamp)
-            }
-        };
+        let at = validate_version(&request.version)?;
 
         let version = storage::Version(at, storage::VersionKind::Last);
 
@@ -113,7 +104,6 @@ pub async fn contract_state(
         }
     }
 }
-
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct StateRequestResponse {
     accounts: Vec<Account>,
@@ -155,23 +145,41 @@ pub struct StateRequestBody {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Version {
-    timestamp: NaiveDateTime,
+    timestamp: Option<NaiveDateTime>,
     block: Option<Block>,
 }
 
 impl Default for Version {
     fn default() -> Self {
-        Version { timestamp: Utc::now().naive_utc(), block: None }
+        Version { timestamp: Some(Utc::now().naive_utc()), block: None }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Block {
-    hash: BlockHash,
-    #[serde(rename = "parentHash")]
-    parent_hash: BlockHash,
-    chain: Chain,
-    number: i64,
+    hash: Option<BlockHash>,
+    chain: Option<Chain>,
+    number: Option<i64>,
+}
+
+fn validate_version(version: &Version) -> Result<BlockOrTimestamp, RpcError> {
+    match (&version.timestamp, &version.block) {
+        (_, Some(block)) => {
+            // If a full block is provided, we prioritize hash over number and chain
+            let block_identifier = if let Some(hash) = &block.hash {
+                BlockIdentifier::Hash(hash.clone())
+            } else if let (Some(chain), Some(number)) = (&block.chain, &block.number) {
+                BlockIdentifier::Number((*chain, *number))
+            } else {
+                return Err(RpcError::Parse(DeError::custom("Insufficient block information")));
+            };
+            Ok(BlockOrTimestamp::Block(block_identifier))
+        }
+        (Some(timestamp), None) => Ok(BlockOrTimestamp::Timestamp(*timestamp)),
+        (None, None) => {
+            Err(RpcError::Parse(DeError::custom("Missing timestamp or block identifier")))
+        }
+    }
 }
 
 #[cfg(test)]
