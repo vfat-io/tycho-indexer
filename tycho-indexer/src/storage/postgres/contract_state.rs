@@ -550,6 +550,7 @@ where
                 }
             }
         }
+        new_entries.sort_by_key(|k| k.ordinal);
         diesel::insert_into(schema::contract_storage::table)
             .values(&new_entries)
             .execute(conn)
@@ -1980,17 +1981,17 @@ mod test {
 
     #[tokio::test]
     async fn test_upsert_slots() {
-        /// Since HashMaps do not guarantee a consistent iteration order, this test
-        /// aims to expose any logic in upsert_slots() that incorrectly relies on a certain
-        /// iteration order.
-        ///
-        /// It runs multiple times in a loop to increase the likelihood of encountering
-        /// different iteration orders. This approach helps in identifying cases where
-        /// varying iteration orders might cause the code to behave unexpectedly or
-        /// incorrectly.
-        ///
-        /// The test will be marked as failed if any of the iterations fail, indicating a reliance
-        /// on iteration order in the upsert_slots function.
+        // Since HashMaps do not guarantee a consistent iteration order, this test
+        // aims to expose any logic in upsert_slots() that incorrectly relies on a certain
+        // iteration order.
+        //
+        // It runs multiple times in a loop to increase the likelihood of encountering
+        // different iteration orders. This approach helps in identifying cases where
+        // varying iteration orders might cause the code to behave unexpectedly or
+        // incorrectly.
+        //
+        // The test will be marked as failed if any of the iterations fail, indicating a reliance
+        // on iteration order in the upsert_slots function.
         let mut test_failed = false;
 
         for _ in 0..10 {
