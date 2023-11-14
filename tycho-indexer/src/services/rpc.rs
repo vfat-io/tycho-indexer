@@ -225,8 +225,6 @@ mod tests {
 
         let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092".into();
         let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".into();
-        let parent_block_hash =
-            "8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815".into();
         let block_number = 213;
 
         let expected_timestamp =
@@ -235,12 +233,11 @@ mod tests {
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
             version: Version {
-                timestamp: expected_timestamp,
+                timestamp: Some(expected_timestamp),
                 block: Some(Block {
-                    hash: block_hash,
-                    parent_hash: parent_block_hash,
-                    chain: Chain::Ethereum,
-                    number: block_number,
+                    hash: Some(block_hash),
+                    chain: Some(Chain::Ethereum),
+                    number: Some(block_number),
                 }),
             },
         };
@@ -267,8 +264,6 @@ mod tests {
         let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".into();
-        let parent_block_hash =
-            "8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815".into();
         let block_number = 213;
         let expected_timestamp =
             NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
@@ -276,17 +271,66 @@ mod tests {
         let expected = StateRequestBody {
             contract_ids: None,
             version: Version {
-                timestamp: expected_timestamp,
+                timestamp: Some(expected_timestamp),
                 block: Some(Block {
-                    hash: block_hash,
-                    parent_hash: parent_block_hash,
-                    chain: Chain::Ethereum,
-                    number: block_number,
+                    hash: Some(block_hash),
+                    chain: Some(Chain::Ethereum),
+                    number: Some(block_number),
                 }),
             },
         };
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    async fn test_validate_version_priority() {
+        let json_str = r#"
+    {
+        "version": {
+            "timestamp": "2069-01-01T04:20:00",
+            "block": {
+                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#;
+
+        let body: StateRequestBody = serde_json::from_str(json_str).unwrap();
+
+        let version = validate_version(&body.version).unwrap();
+        assert_eq!(
+            version,
+            BlockOrTimestamp::Block(BlockIdentifier::Hash(
+                Bytes::from_str("24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4")
+                    .unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    async fn test_validate_version_with_block_number() {
+        let json_str = r#"
+    {
+        "version": {
+            "block": {
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#;
+
+        let body: StateRequestBody = serde_json::from_str(json_str).unwrap();
+
+        let version = validate_version(&body.version).unwrap();
+        assert_eq!(
+            version,
+            BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 213)))
+        );
     }
 
     #[test]
@@ -308,16 +352,18 @@ mod tests {
 
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
-            version: Version { timestamp: Utc::now().naive_utc(), block: None },
+            version: Version { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
 
         let time_difference = expected
             .version
             .timestamp
+            .unwrap()
             .timestamp_millis() -
             result
                 .version
                 .timestamp
+                .unwrap()
                 .timestamp_millis();
 
         // Allowing a small time delta (1 second)
@@ -402,7 +448,7 @@ mod tests {
                 Chain::Ethereum,
                 acc_address.parse().unwrap(),
             )]),
-            version: Version { timestamp: Utc::now().naive_utc(), block: None },
+            version: Version { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
 
         let state = req_handler
