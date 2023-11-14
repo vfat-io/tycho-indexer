@@ -471,6 +471,17 @@ CREATE OR REPLACE FUNCTION invalidate_previous_entry_contract_storage()
     RETURNS TRIGGER
     AS $$
 BEGIN
+    -- Get previous value from latest storage entry.
+    NEW.previous_value =(
+        SELECT
+            value
+        FROM
+            contract_storage
+        WHERE
+            valid_to IS NULL
+            AND account_id = NEW.account_id
+            AND slot = NEW.slot
+        LIMIT 1);
     -- Update the 'valid_to' field of the last valid entry when a new one is inserted.
     UPDATE
         contract_storage
@@ -480,15 +491,6 @@ BEGIN
         valid_to IS NULL
         AND account_id = NEW.account_id
         AND slot = NEW.slot;
-    NEW.previous_value =(
-        SELECT
-            value
-        FROM
-            contract_storage
-        WHERE
-            account_id = NEW.account_id
-            AND slot = NEW.slot
-        LIMIT 1);
     RETURN NEW;
 END;
 $$
