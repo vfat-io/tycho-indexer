@@ -59,7 +59,7 @@ impl std::fmt::Display for ExtractorIdentity {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ExtractionState {
     pub name: String,
     pub chain: Chain,
