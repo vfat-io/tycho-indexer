@@ -21,7 +21,63 @@ use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
 use super::EvmPostgresGateway;
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct StateRequestResponse {
+    accounts: Vec<Account>,
+}
 
+impl StateRequestResponse {
+    fn new(accounts: Vec<Account>) -> Self {
+        Self { accounts }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum RpcError {
+    #[error("Failed to parse JSON: {0}")]
+    Parse(#[from] serde_json::Error),
+
+    #[error("Failed to get storage: {0}")]
+    Storage(#[from] StorageError),
+
+    #[error("Failed to get database connection: {0}")]
+    Connection(#[from] deadpool::PoolError),
+}
+
+#[derive(Serialize, Deserialize, Default, Debug)]
+pub struct StateRequestParameters {
+    #[serde(default = "Chain::default")]
+    chain: Chain,
+    tvl_gt: Option<u64>,
+    intertia_min_gt: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct StateRequestBody {
+    #[serde(rename = "contractIds")]
+    contract_ids: Option<Vec<ContractId>>,
+    #[serde(default = "Version::default")]
+    version: Version,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Version {
+    timestamp: Option<NaiveDateTime>,
+    block: Option<Block>,
+}
+
+impl Default for Version {
+    fn default() -> Self {
+        Version { timestamp: Some(Utc::now().naive_utc()), block: None }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Block {
+    hash: Option<BlockHash>,
+    chain: Option<Chain>,
+    number: Option<i64>,
+}
 pub struct RpcHandler {
     db_gateway: Arc<EvmPostgresGateway>,
     db_connection_pool: Pool<AsyncPgConnection>,
@@ -103,63 +159,6 @@ pub async fn contract_state(
             HttpResponse::InternalServerError().finish()
         }
     }
-}
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct StateRequestResponse {
-    accounts: Vec<Account>,
-}
-
-impl StateRequestResponse {
-    fn new(accounts: Vec<Account>) -> Self {
-        Self { accounts }
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum RpcError {
-    #[error("Failed to parse JSON: {0}")]
-    Parse(#[from] serde_json::Error),
-
-    #[error("Failed to get storage: {0}")]
-    Storage(#[from] StorageError),
-
-    #[error("Failed to get database connection: {0}")]
-    Connection(#[from] deadpool::PoolError),
-}
-
-#[derive(Serialize, Deserialize, Default, Debug)]
-pub struct StateRequestParameters {
-    #[serde(default = "Chain::default")]
-    chain: Chain,
-    tvl_gt: Option<u64>,
-    intertia_min_gt: Option<u64>,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct StateRequestBody {
-    #[serde(rename = "contractIds")]
-    contract_ids: Option<Vec<ContractId>>,
-    #[serde(default = "Version::default")]
-    version: Version,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Version {
-    timestamp: Option<NaiveDateTime>,
-    block: Option<Block>,
-}
-
-impl Default for Version {
-    fn default() -> Self {
-        Version { timestamp: Some(Utc::now().naive_utc()), block: None }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Block {
-    hash: Option<BlockHash>,
-    chain: Option<Chain>,
-    number: Option<i64>,
 }
 
 fn validate_version(version: &Version) -> Result<BlockOrTimestamp, RpcError> {
