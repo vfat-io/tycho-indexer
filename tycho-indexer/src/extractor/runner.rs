@@ -12,7 +12,7 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
 
-use super::Extractor;
+use super::{Extractor, ExtractorMsg};
 use crate::{
     extractor::ExtractionError,
     models::{ExtractorIdentity, NormalisedMessage},
@@ -23,30 +23,27 @@ use crate::{
     },
 };
 
-pub enum ControlMessage<M> {
+pub enum ControlMessage {
     Stop,
-    Subscribe(Sender<Arc<M>>),
+    Subscribe(Sender<ExtractorMsg>),
 }
 
 /// A trait for a message sender that can be used to subscribe to messages
 ///
 /// Extracted out of the [ExtractorHandle] to allow for easier testing
 #[async_trait]
-pub trait MessageSender<M: NormalisedMessage>: Send + Sync {
-    async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>>;
+pub trait MessageSender: Send + Sync {
+    async fn subscribe(&self) -> Result<Receiver<ExtractorMsg>, SendError<ControlMessage>>;
 }
 
 #[derive(Clone)]
-pub struct ExtractorHandle<M> {
+pub struct ExtractorHandle {
     id: ExtractorIdentity,
-    control_tx: Sender<ControlMessage<M>>,
+    control_tx: Sender<ControlMessage>,
 }
 
-impl<M> ExtractorHandle<M>
-where
-    M: NormalisedMessage,
-{
-    fn new(id: ExtractorIdentity, control_tx: Sender<ControlMessage<M>>) -> Self {
+impl ExtractorHandle {
+    fn new(id: ExtractorIdentity, control_tx: Sender<ControlMessage>) -> Self {
         Self { id, control_tx }
     }
 
@@ -65,12 +62,9 @@ where
 }
 
 #[async_trait]
-impl<M> MessageSender<M> for ExtractorHandle<M>
-where
-    M: NormalisedMessage,
-{
+impl MessageSender for ExtractorHandle {
     #[instrument(skip(self))]
-    async fn subscribe(&self) -> Result<Receiver<Arc<M>>, SendError<ControlMessage<M>>> {
+    async fn subscribe(&self) -> Result<Receiver<ExtractorMsg>, SendError<ControlMessage>> {
         let (tx, rx) = mpsc::channel(1);
         self.control_tx
             .send(ControlMessage::Subscribe(tx))
@@ -81,25 +75,22 @@ where
 }
 
 // Define the SubscriptionsMap type alias
-type SubscriptionsMap<M> = HashMap<u64, Sender<Arc<M>>>;
+type SubscriptionsMap = HashMap<u64, Sender<ExtractorMsg>>;
 
-pub struct ExtractorRunner<M> {
-    extractor: Arc<dyn Extractor<M>>,
+pub struct ExtractorRunner {
+    extractor: Arc<dyn Extractor>,
     substreams: SubstreamsStream,
-    subscriptions: Arc<Mutex<SubscriptionsMap<M>>>,
+    subscriptions: Arc<Mutex<SubscriptionsMap>>,
     next_subscriber_id: u64,
-    control_rx: Receiver<ControlMessage<M>>,
+    control_rx: Receiver<ControlMessage>,
 }
 
-impl<M> ExtractorRunner<M>
-where
-    M: NormalisedMessage,
-{
+impl ExtractorRunner {
     pub fn new(
-        extractor: Arc<dyn Extractor<M>>,
+        extractor: Arc<dyn Extractor>,
         substreams: SubstreamsStream,
-        subscriptions: Arc<Mutex<SubscriptionsMap<M>>>,
-        control_rx: Receiver<ControlMessage<M>>,
+        subscriptions: Arc<Mutex<SubscriptionsMap>>,
+        control_rx: Receiver<ControlMessage>,
     ) -> Self {
         ExtractorRunner { extractor, substreams, subscriptions, next_subscriber_id: 0, control_rx }
     }
@@ -174,7 +165,7 @@ where
     }
 
     #[instrument(skip_all)]
-    async fn subscribe(&mut self, sender: Sender<Arc<M>>) {
+    async fn subscribe(&mut self, sender: Sender<ExtractorMsg>) {
         let subscriber_id = self.next_subscriber_id;
         self.next_subscriber_id += 1;
         tracing::Span::current().record("subscriber_id", subscriber_id);
@@ -187,9 +178,10 @@ where
 
     // TODO: add message tracing_id to the log
     #[instrument(skip_all)]
-    async fn propagate_msg(subscribers: &Arc<Mutex<SubscriptionsMap<M>>>, message: M) {
+    async fn propagate_msg(subscribers: &Arc<Mutex<SubscriptionsMap>>, message: ExtractorMsg) {
         info!(msg = %message, "Propagating message to subscribers.");
-        let arced_message = Arc::new(message);
+        // TODO: rename variable here instead
+        let arced_message = message;
 
         let mut to_remove = Vec::new();
 
@@ -218,23 +210,20 @@ where
     }
 }
 
-pub struct ExtractorRunnerBuilder<M> {
+pub struct ExtractorRunnerBuilder {
     spkg_file: String,
     endpoint_url: String,
     module_name: String,
     start_block: i64,
     end_block: i64,
     token: String,
-    extractor: Arc<dyn Extractor<M>>,
+    extractor: Arc<dyn Extractor>,
 }
 
-pub type HandleResult<M> = (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle<M>);
+pub type HandleResult = (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle);
 
-impl<M> ExtractorRunnerBuilder<M>
-where
-    M: NormalisedMessage,
-{
-    pub fn new(spkg: &str, extractor: Arc<dyn Extractor<M>>) -> Self {
+impl ExtractorRunnerBuilder {
+    pub fn new(spkg: &str, extractor: Arc<dyn Extractor>) -> Self {
         Self {
             spkg_file: spkg.to_owned(),
             endpoint_url: "https://mainnet.eth.streamingfast.io:443".to_owned(),
@@ -275,7 +264,7 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn run(self) -> Result<HandleResult<M>, ExtractionError> {
+    pub async fn run(self) -> Result<HandleResult, ExtractionError> {
         let content = std::fs::read(&self.spkg_file)
             .context(format_err!("read package from file '{}'", self.spkg_file))
             .map_err(|err| ExtractionError::SubstreamsError(err.to_string()))?;
@@ -337,6 +326,7 @@ mod test {
         }
     }
 
+    #[typetag::serde]
     impl NormalisedMessage for DummyMessage {
         fn source(&self) -> ExtractorIdentity {
             self.extractor_id.clone()
@@ -355,11 +345,9 @@ mod test {
     }
 
     #[async_trait]
-    impl MessageSender<DummyMessage> for MyMessageSender {
-        async fn subscribe(
-            &self,
-        ) -> Result<Receiver<Arc<DummyMessage>>, SendError<ControlMessage<DummyMessage>>> {
-            let (tx, rx) = mpsc::channel(1);
+    impl MessageSender for MyMessageSender {
+        async fn subscribe(&self) -> Result<Receiver<ExtractorMsg>, SendError<ControlMessage>> {
+            let (tx, rx) = mpsc::channel::<ExtractorMsg>(1);
             let extractor_id = self.extractor_id.clone();
 
             // Spawn a task that sends a DummyMessage every 100ms
@@ -387,7 +375,7 @@ mod test {
     #[tokio::test]
     async fn test_extractor_runner_builder() {
         // Mock the Extractor
-        let mut mock_extractor = MockExtractor::<DummyMessage>::new();
+        let mut mock_extractor = MockExtractor::new();
         mock_extractor
             .expect_get_cursor()
             .returning(|| "cursor@0".to_string());
