@@ -81,7 +81,7 @@ use thiserror::Error;
 
 use crate::{
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem},
+    models::{Chain, ExtractionState, ProtocolComponent, ProtocolState, ProtocolSystem},
 };
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
@@ -473,7 +473,7 @@ pub trait ProtocolGateway {
         chain: Chain,
         system: Option<ProtocolSystem>,
         ids: Option<&[&str]>,
-    ) -> Result<Vec<ProtocolComponent>, StorageError>;
+    ) -> Result<Vec<ProtocolComponent<Self::Token>>, StorageError>;
 
     /// Stores new found ProtocolComponents.
     ///
@@ -488,7 +488,10 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
     /// - component with same is id already present.
-    async fn upsert_components(&self, new: &[&ProtocolComponent]) -> Result<(), StorageError>;
+    async fn upsert_components(
+        &self,
+        new: &[&ProtocolComponent<Self::Token>],
+    ) -> Result<(), StorageError>;
 
     /// Retrieve protocol component states
     ///
@@ -506,17 +509,15 @@ pub trait ProtocolGateway {
     /// - `system` The protocol system this component belongs to
     /// - `id` The external id of the component e.g. address, or the pair
     /// - `at` The version at which the state is valid at.
-    /*
-    // TODO: implement once needed
-    type ProtocolState;
     async fn get_states(
         &self,
         chain: Chain,
         at: Option<Version>,
         system: Option<ProtocolSystem>,
         id: Option<&[&str]>,
-    ) -> Result<VersionedResult<Self::ProtocolState>, StorageError>;
-     */
+    ) -> Result<Vec<ProtocolState>, StorageError>;
+
+    async fn update_state(&self, chain: Chain, new: &[(TxHash, ProtocolState)], db: &mut Self::DB);
 
     /// Retrieves a tokens from storage
     ///

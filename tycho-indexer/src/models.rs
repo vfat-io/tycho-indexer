@@ -1,6 +1,10 @@
+use std::collections::HashMap;
+
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use strum_macros::{Display, EnumString};
+
+use crate::hex_bytes::Bytes;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
@@ -90,4 +94,24 @@ pub trait NormalisedMessage:
 }
 
 #[allow(dead_code)]
-pub struct ProtocolComponent {}
+pub struct ProtocolComponent<T> {
+    // an id for this component, could be hex repr of contract address
+    id: String,
+    // what system this component belongs to
+    protocol_system: ProtocolSystem,
+    // more metadata information about the components general type (swap, lend, bridge, etc.)
+    protocol_type: ProtocolType,
+    // holds the tokens tradable
+    tokens: Vec<T>,
+    // allows to express some validation over the attributes if necessary
+    attribute_schema: Bytes,
+}
+
+pub struct ProtocolState {
+    // associates the back to a component, which has metadata like type, tokens , etc.
+    component_id: String,
+    // holds all the protocol specific attributes, validates by the components schema
+    attributes: HashMap<String, Bytes>,
+    // via transaction, we can trace back when this state became valid
+    modify_tx: Bytes,
+}
