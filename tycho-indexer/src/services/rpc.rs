@@ -16,7 +16,7 @@ use diesel_async::{
     pooled_connection::deadpool::{self, Pool},
     AsyncPgConnection,
 };
-use serde::{de::Error as DeError, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
@@ -35,7 +35,7 @@ impl StateRequestResponse {
 #[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Failed to parse JSON: {0}")]
-    Parse(#[from] serde_json::Error),
+    Parse(String),
 
     #[error("Failed to get storage: {0}")]
     Storage(#[from] StorageError),
@@ -69,6 +69,28 @@ struct Version {
 impl Default for Version {
     fn default() -> Self {
         Version { timestamp: Some(Utc::now().naive_utc()), block: None }
+    }
+}
+
+impl TryFrom<&Version> for BlockOrTimestamp {
+    type Error = RpcError;
+
+    fn try_from(version: &Version) -> Result<Self, Self::Error> {
+        match (&version.timestamp, &version.block) {
+            (_, Some(block)) => {
+                // If a full block is provided, we prioritize hash over number and chain
+                let block_identifier = match (&block.hash, &block.chain, &block.number) {
+                    (Some(hash), _, _) => BlockIdentifier::Hash(hash.clone()),
+                    (_, Some(chain), Some(number)) => BlockIdentifier::Number((*chain, *number)),
+                    _ => return Err(RpcError::Parse("Insufficient block information".to_owned())),
+                };
+                Ok(BlockOrTimestamp::Block(block_identifier))
+            }
+            (Some(timestamp), None) => Ok(BlockOrTimestamp::Timestamp(*timestamp)),
+            (None, None) => {
+                Err(RpcError::Parse("Missing timestamp or block identifier".to_owned()))
+            }
+        }
     }
 }
 
@@ -111,7 +133,7 @@ impl RpcHandler {
         db_connection: &mut AsyncPgConnection,
     ) -> Result<StateRequestResponse, RpcError> {
         //TODO: handle when no contract is specified with filters
-        let at = validate_version(&request.version)?;
+        let at = BlockOrTimestamp::try_from(&request.version)?;
 
         let version = storage::Version(at, storage::VersionKind::Last);
 
@@ -157,26 +179,6 @@ pub async fn contract_state(
         Err(err) => {
             error!(error = %err, ?body, ?query, "Error while getting contract state.");
             HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
-fn validate_version(version: &Version) -> Result<BlockOrTimestamp, RpcError> {
-    match (&version.timestamp, &version.block) {
-        (_, Some(block)) => {
-            // If a full block is provided, we prioritize hash over number and chain
-            let block_identifier = if let Some(hash) = &block.hash {
-                BlockIdentifier::Hash(hash.clone())
-            } else if let (Some(chain), Some(number)) = (&block.chain, &block.number) {
-                BlockIdentifier::Number((*chain, *number))
-            } else {
-                return Err(RpcError::Parse(DeError::custom("Insufficient block information")));
-            };
-            Ok(BlockOrTimestamp::Block(block_identifier))
-        }
-        (Some(timestamp), None) => Ok(BlockOrTimestamp::Timestamp(*timestamp)),
-        (None, None) => {
-            Err(RpcError::Parse(DeError::custom("Missing timestamp or block identifier")))
         }
     }
 }
@@ -300,7 +302,7 @@ mod tests {
 
         let body: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
-        let version = validate_version(&body.version).unwrap();
+        let version = BlockOrTimestamp::try_from(&body.version).unwrap();
         assert_eq!(
             version,
             BlockOrTimestamp::Block(BlockIdentifier::Hash(
@@ -325,7 +327,7 @@ mod tests {
 
         let body: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
-        let version = validate_version(&body.version).unwrap();
+        let version = BlockOrTimestamp::try_from(&body.version).unwrap();
         assert_eq!(
             version,
             BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 213)))
