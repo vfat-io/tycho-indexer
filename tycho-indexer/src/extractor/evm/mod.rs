@@ -228,6 +228,7 @@ impl std::fmt::Display for BlockAccountChanges {
     }
 }
 
+#[typetag::serde]
 impl NormalisedMessage for BlockAccountChanges {
     fn source(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.extractor)

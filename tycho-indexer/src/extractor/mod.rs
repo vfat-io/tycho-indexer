@@ -1,6 +1,8 @@
 pub mod evm;
 pub mod runner;
 
+use std::sync::Arc;
+
 use crate::{
     models::{ExtractorIdentity, NormalisedMessage},
     pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
@@ -31,12 +33,11 @@ pub enum ExtractionError {
     ServiceError(String),
 }
 
+pub type ExtractorMsg = Arc<dyn NormalisedMessage>;
+
 #[automock]
 #[async_trait]
-pub trait Extractor<M>: Send + Sync
-where
-    M: NormalisedMessage,
-{
+pub trait Extractor: Send + Sync {
     fn get_id(&self) -> ExtractorIdentity;
 
     async fn get_cursor(&self) -> String;
@@ -44,9 +45,12 @@ where
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
-    ) -> Result<Option<M>, ExtractionError>;
+    ) -> Result<Option<ExtractorMsg>, ExtractionError>;
 
-    async fn handle_revert(&self, inp: BlockUndoSignal) -> Result<Option<M>, ExtractionError>;
+    async fn handle_revert(
+        &self,
+        inp: BlockUndoSignal,
+    ) -> Result<Option<ExtractorMsg>, ExtractionError>;
 
     async fn handle_progress(&self, inp: ModulesProgress) -> Result<(), ExtractionError>;
 }

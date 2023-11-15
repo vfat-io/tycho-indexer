@@ -87,9 +87,8 @@ impl ExtractionState {
     }
 }
 
-pub trait NormalisedMessage:
-    Serialize + DeserializeOwned + std::fmt::Debug + std::fmt::Display + Send + Sync + Clone + 'static
-{
+#[typetag::serde(tag = "type")]
+pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static {
     fn source(&self) -> ExtractorIdentity;
 }
 
