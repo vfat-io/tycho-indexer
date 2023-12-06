@@ -107,7 +107,7 @@ pub struct ProtocolComponent<T> {
 }
 
 pub struct ProtocolState {
-    // associates the back to a component, which has metadata like type, tokens , etc.
+    // associates back to a component, which has metadata like type, tokens , etc.
     component_id: String,
     // holds all the protocol specific attributes, validates by the components schema
     attributes: HashMap<String, Bytes>,
