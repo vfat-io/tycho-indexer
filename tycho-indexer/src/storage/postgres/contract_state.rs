@@ -392,7 +392,7 @@ where
             return Err(StorageError::Unexpected(format!(
                 "Found account that was deleted and created within range {} - {}!",
                 start_version_ts, target_version_ts
-            )))
+            )));
         }
 
         // The code below assumes that no account is deleted or created more
@@ -853,7 +853,7 @@ where
                 accounts.len(),
                 balances.len(),
                 codes.len(),
-            )))
+            )));
         }
 
         accounts
@@ -865,7 +865,7 @@ where
                         "Identity mismatch - while retrieving entries for account id: {} \
                             encountered balance for id {} and code for id {}",
                         &account.id, &balance.account_id, &code.account_id
-                    )))
+                    )));
                 }
 
                 // Note: it is safe to call unwrap here, as above we always
@@ -993,7 +993,7 @@ where
                         "Updating contracts of different chains with a single query  \
                     is not supported. Expected: {}, got: {}!",
                         chain, id.chain
-                    )))
+                    )));
                 }
                 Ok(id.address)
             })
@@ -1124,10 +1124,10 @@ where
                     "Account {} was already deleted at {:?}!",
                     hex::encode(account.address),
                     account.deleted_at,
-                )))
+                )));
             }
             // Noop if called twice on deleted contract
-            return Ok(())
+            return Ok(());
         };
         diesel::update(schema::account::table.filter(schema::account::id.eq(account.id)))
             .set((schema::account::deletion_tx.eq(tx.id), schema::account::deleted_at.eq(block_ts)))
@@ -1238,7 +1238,6 @@ where
                     .map(Ok),
             )
             .collect::<Result<HashMap<_, _>, _>>()?;
-
         Ok(deltas.into_values().collect())
     }
 
@@ -1335,7 +1334,7 @@ async fn version_to_ts(
 ) -> Result<NaiveDateTime, StorageError> {
     if let Some(Version(version, kind)) = start_version {
         if !matches!(kind, VersionKind::Last) {
-            return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", kind)))
+            return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", kind)));
         }
         coerce_block_or_ts(Some(version), conn).await
     } else {
@@ -1348,7 +1347,7 @@ async fn coerce_block_or_ts(
     conn: &mut AsyncPgConnection,
 ) -> Result<NaiveDateTime, StorageError> {
     if version.is_none() {
-        return Ok(Utc::now().naive_utc())
+        return Ok(Utc::now().naive_utc());
     }
     match version.unwrap() {
         BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(h, conn)
