@@ -14,7 +14,7 @@ use std::{
 use tracing::warn;
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
-use crate::pb::tycho::evm::v1 as substreams;
+use crate::{models::ProtocolState, pb::tycho::evm::v1 as substreams};
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
@@ -483,6 +483,106 @@ impl BlockStateChanges {
                 .into_iter()
                 .map(|(k, v)| (k, v.update))
                 .collect(),
+            new_pools: self.new_pools,
+        })
+    }
+}
+
+impl ProtocolState {
+    /// Merges this update with another one.
+    ///
+    /// The method combines two `ProtocolState` instances under certain
+    /// conditions:
+    /// - The block from which both updates came should be the same. If the updates are from
+    ///   different blocks, the method will return an error.
+    /// - The transactions for each of the updates should be distinct. If they come from the same
+    ///   transaction, the method will return an error.
+    /// - The order of the transaction matters. The transaction from `other` must have occurred
+    ///   later than the self transaction. If the self transaction has a higher index than `other`,
+    ///   the method will return an error.
+    ///
+    /// The merged update keeps the transaction of `other`.
+    ///
+    /// # Errors
+    /// This method will return `ExtractionError::Unknown` if any of the above
+    /// conditions is violated.
+    pub fn merge(&mut self, other: ProtocolState) -> Result<(), ExtractionError> {
+        if self.component_id != other.component_id {
+            return Err(ExtractionError::Unknown(format!(
+                "Can't merge ProtocolStates from differing identities; Expected {:?}, got {:?}",
+                self.component_id, other.component_id
+            )));
+        }
+        if self.modify_tx.block_hash != other.modify_tx.block_hash {
+            return Err(ExtractionError::Unknown(format!(
+                "Can't merge ProtocolStates from different blocks: 0x{:x} != 0x{:x}",
+                self.modify_tx.block_hash, other.modify_tx.block_hash,
+            )))
+        }
+        if self.modify_tx.hash == other.modify_tx.hash {
+            return Err(ExtractionError::Unknown(format!(
+                "Can't merge ProtocolStates from the same transaction: 0x{:x}",
+                self.modify_tx.hash
+            )))
+        }
+        if self.modify_tx.index > other.modify_tx.index {
+            return Err(ExtractionError::Unknown(format!(
+                "Can't merge ProtocolStates with lower transaction index: {} > {}",
+                self.modify_tx.index, other.modify_tx.index
+            )))
+        }
+        self.modify_tx = other.modify_tx;
+        self.attributes.extend(other.attributes);
+        Ok(())
+    }
+}
+
+/// A container for state updates grouped by transaction
+///
+/// Hold the detailed state changes for a block alongside with protocol
+/// component changes.
+#[derive(Debug, PartialEq)]
+pub struct BlockEntityChanges {
+    extractor: String,
+    chain: Chain,
+    pub block: Block,
+    pub state_updates: Vec<ProtocolState>,
+    pub new_pools: HashMap<H160, SwapPool>,
+}
+
+impl BlockEntityChanges {
+    /// Aggregates state updates.
+    ///
+    /// This function aggregates the state updates (`ProtocolState`) for
+    /// different protocol components into a new `BlockEntityChanges` object.
+    /// This new object should have only one final ProtocolState per component_id.
+    ///
+    /// After merging all updates, a `BlockEntityChanges` object is returned
+    /// which contains, amongst other data, the compacted state updates.
+    ///
+    /// # Errors
+    ///
+    /// This returns an error if there was a problem during merge. The error
+    /// type is `ExtractionError`.
+    pub fn aggregate_updates(self) -> Result<BlockEntityChanges, ExtractionError> {
+        let mut protocol_states: HashMap<String, ProtocolState> = HashMap::new();
+
+        for update in self.state_updates.into_iter() {
+            match protocol_states.entry(update.component_id.clone()) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().merge(update)?;
+                }
+                Entry::Vacant(e) => {
+                    e.insert(update);
+                }
+            }
+        }
+
+        Ok(BlockEntityChanges {
+            extractor: self.extractor,
+            chain: self.chain,
+            block: self.block,
+            state_updates: protocol_states.values().collect(),
             new_pools: self.new_pools,
         })
     }
