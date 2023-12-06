@@ -106,6 +106,7 @@ pub struct ProtocolComponent<T> {
     attribute_schema: Bytes,
 }
 
+#[allow(dead_code)]
 pub struct ProtocolState {
     // associates back to a component, which has metadata like type, tokens , etc.
     component_id: String,

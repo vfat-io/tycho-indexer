@@ -332,6 +332,7 @@ mod tests {
     use crate::{extractor::runner::ControlMessage, models::Chain};
 
     use super::*;
+    use crate::models::NormalisedMessage;
     use actix_rt::time::timeout;
     use actix_test::{start, start_with, TestServerConfig};
     use actix_web::App;
