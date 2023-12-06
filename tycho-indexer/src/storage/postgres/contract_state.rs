@@ -742,7 +742,8 @@ where
             let slots = self
                 .get_contract_slots(&id.chain, Some(&[account.address().clone()]), version, db)
                 .await?
-                .remove(&id.address).unwrap_or_default();
+                .remove(&id.address)
+                .unwrap_or_default();
             account.set_store(&slots)?;
         }
 
