@@ -67,6 +67,6 @@ message TransactionStateChanges {
 
 message BlockEntityChanges {
   Block block = 1;
-  repeated StateChanges changes = 2;
+  repeated TransactionStateChanges changes = 2;
   // TODO: add component changes
 }
