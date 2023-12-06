@@ -26,7 +26,7 @@ mod storage;
 mod substreams;
 
 use crate::{
-    extractor::{evm, evm::BlockAccountChanges, ExtractionError},
+    extractor::{evm, ExtractionError},
     models::NormalisedMessage,
     services::ServicesBuilder,
     storage::postgres::{self, PostgresGateway},

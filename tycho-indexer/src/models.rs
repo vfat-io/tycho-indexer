@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use strum_macros::{Display, EnumString};
 
