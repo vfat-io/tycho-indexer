@@ -13,17 +13,17 @@ use crate::{
     models::{Chain, ExtractionState},
     storage::{BlockIdentifier, StorageError},
 };
-
+#[derive(PartialEq)]
 enum WriteOp {
     UpsertBlock(evm::Block),
     UpsertTx(evm::Transaction),
     SaveExtractionState(ExtractionState),
     InsertContract(evm::Account),
     UpdateContracts(Vec<(H256, evm::AccountUpdate)>),
-    RevertContractState(BlockIdentifier),
+    RevertContractState(BlockIdentifier), //add a tx here
 }
 
-struct Transaction {
+struct DBTransaction {
     block: evm::Block,
     operations: Vec<WriteOp>,
     tx: oneshot::Sender<Result<(), StorageError>>,
@@ -62,24 +62,28 @@ struct Transaction {
 /// Read Operations
 /// The class does provide read operations for completeness, but it will not consider any
 /// cached changes while reading. Any reads are direct pass throughs to the database.
-struct WriteThroughCache {
+struct DBCacheWriteExecutor {
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
     persisted_block: evm::Block,
+    /// The `pending_block` field denotes the most recent block that is pending processing in this
+    /// cache context. It's important to note that this is distinct from the blockchain's
+    /// concept of a pending block. Typically, this block corresponds to the latest block that
+    /// has been validated and confirmed on the blockchain.
     pending_block: Option<evm::Block>,
-    pending_txns: Vec<Transaction>,
-    rx: mpsc::Receiver<Transaction>,
+    pending_db_txs: Vec<DBTransaction>,
+    rx: mpsc::Receiver<DBTransaction>,
 }
 
-impl WriteThroughCache {
-    pub async fn write(&mut self, tx: Transaction) -> Result<(), StorageError> {
-        let incoming = tx.block;
+impl DBCacheWriteExecutor {
+    pub async fn write(&mut self, db_tx: DBTransaction) -> Result<(), StorageError> {
+        let incoming = db_tx.block;
         match self.pending_block {
             Some(pending) => {
                 if pending.hash == incoming.hash {
-                    self.pending_txns.push(tx);
+                    self.pending_db_txs.push(db_tx);
                 } else if incoming.number < pending.number {
                     let mut conn = self
                         .pool
@@ -89,7 +93,7 @@ impl WriteThroughCache {
 
                     conn.transaction(|conn| {
                         async {
-                            self.execute_tx(tx.operations, conn)
+                            self.execute_many_write_ops(db_tx.operations, conn)
                                 .await
                         }
                         .scope_boxed()
@@ -99,18 +103,18 @@ impl WriteThroughCache {
                     // TODO: handle errors
                     self.flush().await;
                 } else {
-                    return Err(StorageError::Unexpected("Invalid cache state!".into()))
+                    return Err(StorageError::Unexpected("Invalid cache state!".into()));
                 }
             }
             None => {
-                self.pending_block = Some(tx.block);
-                self.pending_txns.push(tx);
+                self.pending_block = Some(db_tx.block);
+                self.pending_db_txs.push(db_tx);
             }
         }
         Ok(())
     }
 
-    async fn execute_tx(
+    async fn execute_many_write_ops(
         &mut self,
         ops: Vec<WriteOp>,
         conn: &mut AsyncPgConnection,
@@ -126,34 +130,42 @@ impl WriteThroughCache {
         todo!();
     }
 
+    /// Commits the current cached state to the database in a single batch operation.
+    /// Extracts and deduplicates write operations from `pending_db_txs`, executes them,
+    /// updates `persisted_block` with `pending_block`, and sets `pending_block` to `None`.
     async fn flush(&mut self) {
-        // We flush e.g if any historical data is requested that
-        // can't be satisfied from the internal cache.
-        // This should only happen during reverts or if someone
-        // requests data that is not yet in the database
         let mut conn = self
             .pool
             .get()
             .await
             .expect("pool should be connected");
 
-        let txns = std::mem::take(&mut self.pending_txns);
-        for tx in txns.into_iter() {
-            conn.transaction(|conn| {
-                async {
-                    self.execute_tx(tx.operations, conn)
-                        .await
-                }
-                .scope_boxed()
-            })
-            .await
-            .expect("tx ok");
+        let db_txs = std::mem::take(&mut self.pending_db_txs);
+        let mut db_operations: Vec<WriteOp> = Vec::new();
 
-            // TODO: once executed, remove any duplicated operations from the remaining transactions
+        for db_tx in db_txs.into_iter() {
+            for op in db_tx.operations {
+                // TODO: It's more efficient to use a hashset here
+                if !db_operations.contains(&op) {
+                    // Only insert into db_operations if it was not already in seen_operations
+                    db_operations.push(op);
+                }
+            }
         }
 
+        // Send the batch to the database
+        conn.transaction(|conn| {
+            async {
+                self.execute_many_write_ops(db_operations, conn)
+                    .await
+            }
+            .scope_boxed()
+        })
+        .await
+        .expect("tx ok");
+
         self.persisted_block = self.pending_block.unwrap();
-        self.pending_block = None
+        self.pending_block = None;
     }
 
     pub fn run(self) -> JoinHandle<()> {
@@ -163,7 +175,7 @@ impl WriteThroughCache {
 }
 
 pub struct CachedGateway {
-    tx: mpsc::Sender<Transaction>,
+    tx: mpsc::Sender<DBTransaction>,
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
 }
