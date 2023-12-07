@@ -499,7 +499,7 @@ impl ProtocolState {
         let mut attributes = HashMap::new();
         for attribute in msg.attributes.into_iter() {
             let name = String::from(&attribute.name.into());
-            attributes.put(name, attribute.value)
+            attributes.insert(name, attribute.value)
         }
 
         Ok(Self { component_id, attributes, modify_tx: *tx })
@@ -624,6 +624,7 @@ impl BlockEntityChanges {
                 }
             }
         }
+        let temp = protocol_states.values();
 
         Ok(BlockEntityChanges {
             extractor: self.extractor,
