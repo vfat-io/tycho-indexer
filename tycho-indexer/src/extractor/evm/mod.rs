@@ -489,6 +489,22 @@ impl BlockStateChanges {
 }
 
 impl ProtocolState {
+    /// Parses protocol state from tychos protobuf StateChanges message
+    pub fn try_from_message(
+        msg: substreams::StateChanges,
+        tx: &Transaction,
+    ) -> Result<Self, ExtractionError> {
+        let component_id = String::from(&msg.to.into());
+
+        let mut attributes = HashMap::new();
+        for attribute in msg.attributes.into_iter() {
+            let name = String::from(&attribute.name.into());
+            attributes.put(name, attribute.value)
+        }
+
+        Ok(Self { component_id, attributes, modify_tx: *tx })
+    }
+
     /// Merges this update with another one.
     ///
     /// The method combines two `ProtocolState` instances under certain
@@ -551,6 +567,37 @@ pub struct BlockEntityChanges {
 }
 
 impl BlockEntityChanges {
+    /// Parse from tychos protobuf message
+    pub fn try_from_message(
+        msg: substreams::BlockEntityChanges,
+        extractor: &str,
+        chain: Chain,
+    ) -> Result<Self, ExtractionError> {
+        if let Some(block) = msg.block {
+            let block = Block::try_from_message(block, chain)?;
+            let mut state_updates = Vec::new();
+
+            for change in msg.changes.into_iter() {
+                if let Some(tx) = change.tx {
+                    let tx = Transaction::try_from_message(tx, &block.hash)?;
+                    for sc in change.contract_changes.into_iter() {
+                        let update = ProtocolState::try_from_message(sc, &tx)?;
+                        state_updates.push(update);
+                    }
+                }
+            }
+            state_updates.sort_unstable_by_key(|update| update.modify_tx.index);
+            return Ok(Self {
+                extractor: extractor.to_owned(),
+                chain,
+                block,
+                state_updates,
+                new_pools: HashMap::new(),
+            })
+        }
+        Err(ExtractionError::Empty)
+    }
+
     /// Aggregates state updates.
     ///
     /// This function aggregates the state updates (`ProtocolState`) for
