@@ -57,7 +57,7 @@ message Attribute {
 
 message StateChanges {
   bytes component_id = 1;
-  repeated Attribute = 2;
+  repeated Attribute attribute = 2;
 }
 
 message TransactionStateChanges {
@@ -67,6 +67,6 @@ message TransactionStateChanges {
 
 message BlockEntityChanges {
   Block block = 1;
-  repeated StateChanges = 2;
+  repeated TransactionStateChanges changes = 2;
   // TODO: add component changes
 }
