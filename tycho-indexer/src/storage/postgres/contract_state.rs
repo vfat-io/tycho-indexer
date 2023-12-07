@@ -1241,7 +1241,7 @@ where
         Ok(deltas.into_values().collect())
     }
 
-    async fn revert_contract_state(
+    async fn revert_state(
         &self,
         to: &BlockIdentifier,
         conn: &mut AsyncPgConnection,
@@ -2320,7 +2320,7 @@ mod test {
         .collect();
         let gw = EvmGateway::from_connection(&mut conn).await;
 
-        gw.revert_contract_state(&BlockIdentifier::Hash(block1_hash), &mut conn)
+        gw.revert_state(&BlockIdentifier::Hash(block1_hash), &mut conn)
             .await
             .unwrap();
 

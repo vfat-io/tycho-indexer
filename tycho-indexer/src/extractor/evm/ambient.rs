@@ -155,7 +155,7 @@ impl AmbientPgGateway {
             .collect();
 
         self.state_gateway
-            .revert_contract_state(to, conn)
+            .revert_state(to, conn)
             .await?;
 
         self.save_cursor(new_cursor, conn)
