@@ -51,7 +51,7 @@ message BlockContractChanges {
 }
 
 message Attribute {
-  bytes attribute_name = 1;
+  bytes name = 1;
   bytes value = 2;
 }
 
