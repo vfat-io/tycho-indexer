@@ -1,3 +1,7 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+use std::ops::{Deref, DerefMut};
+
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
@@ -9,9 +13,9 @@ use tokio::{
 };
 
 use crate::{
-    extractor::evm::{self, EVMStateGateway},
+    extractor::evm::{self, AccountUpdate, EVMStateGateway},
     models::{Chain, ExtractionState},
-    storage::{BlockIdentifier, StorageError},
+    storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
 };
 #[derive(PartialEq)]
 enum WriteOp {
@@ -22,11 +26,15 @@ enum WriteOp {
     UpdateContracts(Vec<(H256, evm::AccountUpdate)>),
     RevertContractState(BlockIdentifier), //add a tx here
 }
-
 struct DBTransaction {
     block: evm::Block,
     operations: Vec<WriteOp>,
     tx: oneshot::Sender<Result<(), StorageError>>,
+}
+
+enum DBCacheMessage {
+    Write(DBTransaction),
+    Flush(oneshot::Sender<Result<(), StorageError>>),
 }
 
 /// # Write Cache
@@ -74,7 +82,7 @@ struct DBCacheWriteExecutor {
     /// has been validated and confirmed on the blockchain.
     pending_block: Option<evm::Block>,
     pending_db_txs: Vec<DBTransaction>,
-    rx: mpsc::Receiver<DBTransaction>,
+    rx: mpsc::Receiver<DBCacheMessage>,
 }
 
 impl DBCacheWriteExecutor {
@@ -168,14 +176,29 @@ impl DBCacheWriteExecutor {
         self.pending_block = None;
     }
 
-    pub fn run(self) -> JoinHandle<()> {
-        // read from rx and call write
-        todo!()
+    pub fn run(mut self) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            while let Some(message) = self.rx.recv().await {
+                match message {
+                    DBCacheMessage::Write(db_tx) => {
+                        // Process the write transaction
+                        self.write(db_tx)
+                            .await
+                            .expect("write through cache should succeed");
+                    }
+                    DBCacheMessage::Flush(sender) => {
+                        // Flush the current state and send back the result
+                        let flush_result = self.flush().await;
+                        let _ = sender.send(Ok(flush_result));
+                    }
+                }
+            }
+        })
     }
 }
 
 pub struct CachedGateway {
-    tx: mpsc::Sender<DBTransaction>,
+    tx: mpsc::Sender<DBCacheMessage>,
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
 }
@@ -183,11 +206,47 @@ pub struct CachedGateway {
 impl CachedGateway {
     // TODO: implement the usual gateway methods here, but they are translated into write ops, for
     // reads call the gateway directly
-    pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
-        todo!()
+    // pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
+    //     todo!()
+    // }
+    pub async fn get_account_delta(
+        &self,
+        chain: &Chain,
+        start_version: Option<&BlockOrTimestamp>,
+        end_version: &BlockOrTimestamp,
+        db: &mut AsyncPgConnection,
+    ) -> Result<Vec<AccountUpdate>, StorageError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .send(DBCacheMessage::Flush(tx))
+            .await;
+        let _ = rx.await;
+        self.state_gateway
+            .get_account_delta(chain, start_version, end_version, db)
+            .await
     }
 }
 
-pub fn new_cached_gateway() -> Result<(JoinHandle<()>, CachedGateway), StorageError> {
+// These two implementation allow to inherit EVMStateGateway methods. If CachedGateway doesn't
+// implement the called method and EVMStateGateway does, then the call will be forwarded to
+// EVMStateGateway.
+impl Deref for CachedGateway {
+    type Target = EVMStateGateway<AsyncPgConnection>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state_gateway
+    }
+}
+
+impl DerefMut for CachedGateway {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state_gateway
+    }
+}
+
+pub fn new_cached_gateway(
+    pool: Pool<AsyncPgConnection>,
+) -> Result<(JoinHandle<()>, CachedGateway), StorageError> {
     todo!()
 }
