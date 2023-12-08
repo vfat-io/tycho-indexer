@@ -494,12 +494,18 @@ impl ProtocolState {
         msg: substreams::StateChanges,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
-        let component_id = String::from(&msg.to.into());
+        let component_id = match String::from_utf8(msg.component_id) {
+            Ok(s) => s,
+            Err(err) => return Err(ExtractionError::DecodeError(err.to_string())),
+        };
 
         let mut attributes = HashMap::new();
         for attribute in msg.attributes.into_iter() {
-            let name = String::from(&attribute.name.into());
-            attributes.insert(name, attribute.value)
+            let name = match String::from_utf8(attribute.name) {
+                Ok(s) => s,
+                Err(err) => return Err(ExtractionError::DecodeError(err.to_string())),
+            };
+            attributes.insert(name, Bytes::from(attribute.value));
         }
 
         Ok(Self { component_id, attributes, modify_tx: *tx })
@@ -580,7 +586,7 @@ impl BlockEntityChanges {
             for change in msg.changes.into_iter() {
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
-                    for sc in change.contract_changes.into_iter() {
+                    for sc in change.state_changes.into_iter() {
                         let update = ProtocolState::try_from_message(sc, &tx)?;
                         state_updates.push(update);
                     }
@@ -624,13 +630,15 @@ impl BlockEntityChanges {
                 }
             }
         }
-        let temp = protocol_states.values();
 
         Ok(BlockEntityChanges {
             extractor: self.extractor,
             chain: self.chain,
             block: self.block,
-            state_updates: protocol_states.values().collect(),
+            state_updates: protocol_states
+                .values()
+                .cloned()
+                .collect::<Vec<_>>(),
             new_pools: self.new_pools,
         })
     }
@@ -994,5 +1002,36 @@ mod test {
         let res = msg.aggregate_updates().unwrap();
 
         assert_eq!(res, block_account_changes());
+    }
+
+    #[rstest]
+    fn test_merge_protocol_state() {
+        let attributes1: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from("1000_u256")),
+            ("reserve2".to_owned(), Bytes::from("500_u256")),
+        ]
+        .into_iter()
+        .collect();
+        let mut state1 = ProtocolState {
+            component_id: "State1".to_owned(),
+            attributes: attributes1,
+            modify_tx: fixtures::transaction01(),
+        };
+
+        let attributes2: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from("900_u256")),
+            ("reserve2".to_owned(), Bytes::from("550_u256")),
+        ]
+        .into_iter()
+        .collect();
+        let state2 = ProtocolState {
+            component_id: "State1".to_owned(),
+            attributes: attributes2,
+            modify_tx: fixtures::transaction02(HASH_256_1, HASH_256_0, 11),
+        };
+
+        let res = state1.merge(state2);
+
+        assert!(res.is_ok())
     }
 }

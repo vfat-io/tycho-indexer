@@ -108,7 +108,7 @@ pub struct ProtocolComponent<T> {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ProtocolState {
     // associates back to a component, which has metadata like type, tokens , etc.
     pub component_id: String,
