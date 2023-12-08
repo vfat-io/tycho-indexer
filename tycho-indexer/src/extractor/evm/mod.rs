@@ -531,7 +531,7 @@ impl ProtocolState {
     pub fn merge(&mut self, other: ProtocolState) -> Result<(), ExtractionError> {
         if self.component_id != other.component_id {
             return Err(ExtractionError::Unknown(format!(
-                "Can't merge ProtocolStates from differing identities; Expected {:?}, got {:?}",
+                "Can't merge ProtocolStates from differing identities; Expected {}, got {}",
                 self.component_id, other.component_id
             )));
         }
@@ -860,16 +860,16 @@ mod test {
 
     #[rstest]
     #[case::diff_block(
-        fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
-        Err(ExtractionError::Unknown(format!("Can't merge AccountUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
+    fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
+    Err(ExtractionError::Unknown(format ! ("Can't merge AccountUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
     )]
     #[case::same_tx(
-        fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
-        Err(ExtractionError::Unknown(format!("Can't merge AccountUpdates from the same transaction: 0x{:x}", H256::zero())))
+    fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
+    Err(ExtractionError::Unknown(format ! ("Can't merge AccountUpdates from the same transaction: 0x{:x}", H256::zero())))
     )]
     #[case::lower_idx(
-        fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
-        Err(ExtractionError::Unknown("Can't merge AccountUpdates with lower transaction index: 10 > 1".to_owned()))
+    fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
+    Err(ExtractionError::Unknown("Can't merge AccountUpdates with lower transaction index: 10 > 1".to_owned()))
     )]
     fn test_merge_account_update_w_tx(
         #[case] tx: Transaction,
@@ -1007,8 +1007,9 @@ mod test {
     #[rstest]
     fn test_merge_protocol_state() {
         let attributes1: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from("1000_u256")),
-            ("reserve2".to_owned(), Bytes::from("500_u256")),
+            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+            ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
         ]
         .into_iter()
         .collect();
@@ -1019,19 +1020,110 @@ mod test {
         };
 
         let attributes2: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from("900_u256")),
-            ("reserve2".to_owned(), Bytes::from("550_u256")),
+            ("reserve1".to_owned(), Bytes::from(U256::from(900))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(550))),
+            ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
         ]
         .into_iter()
         .collect();
         let state2 = ProtocolState {
             component_id: "State1".to_owned(),
-            attributes: attributes2,
+            attributes: attributes2.clone(),
             modify_tx: fixtures::transaction02(HASH_256_1, HASH_256_0, 11),
         };
 
         let res = state1.merge(state2);
 
-        assert!(res.is_ok())
+        assert!(res.is_ok());
+        let expected_attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(900))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(550))),
+            ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
+            ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(state1.attributes, expected_attributes);
+    }
+
+    #[rstest]
+    #[case::diff_block(
+    fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
+    Err(ExtractionError::Unknown(format ! ("Can't merge ProtocolStates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
+    )]
+    #[case::same_tx(
+    fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
+    Err(ExtractionError::Unknown(format ! ("Can't merge ProtocolStates from the same transaction: 0x{:x}", H256::zero())))
+    )]
+    #[case::lower_idx(
+    fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
+    Err(ExtractionError::Unknown("Can't merge ProtocolStates with lower transaction index: 10 > 1".to_owned()))
+    )]
+    fn test_merge_pool_state_errors(
+        #[case] tx: Transaction,
+        #[case] exp: Result<(), ExtractionError>,
+    ) {
+        let attributes1: HashMap<String, Bytes> =
+            vec![("static_attribute".to_owned(), Bytes::from(U256::from(1)))]
+                .into_iter()
+                .collect();
+        let mut state1 = ProtocolState {
+            component_id: "State1".to_owned(),
+            attributes: attributes1,
+            modify_tx: fixtures::transaction01(),
+        };
+
+        let attributes2: HashMap<String, Bytes> =
+            vec![("new_attribute".to_owned(), Bytes::from(U256::from(1)))]
+                .into_iter()
+                .collect();
+        let state2 = ProtocolState {
+            component_id: "State1".to_owned(),
+            attributes: attributes2.clone(),
+            modify_tx: tx,
+        };
+
+        let res = state1.merge(state2);
+
+        assert_eq!(res, exp);
+    }
+
+    #[rstest]
+    fn test_protocol_state_wrong_id() {
+        let attributes1: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+            ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
+        ]
+        .into_iter()
+        .collect();
+        let mut state1 = ProtocolState {
+            component_id: "State1".to_owned(),
+            attributes: attributes1,
+            modify_tx: fixtures::transaction01(),
+        };
+
+        let attributes2: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(900))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(550))),
+            ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
+        ]
+        .into_iter()
+        .collect();
+        let state2 = ProtocolState {
+            component_id: "State2".to_owned(),
+            attributes: attributes2.clone(),
+            modify_tx: fixtures::transaction02(HASH_256_1, HASH_256_0, 11),
+        };
+
+        let res = state1.merge(state2);
+
+        assert_eq!(
+            res,
+            Err(ExtractionError::Unknown(
+                "Can't merge ProtocolStates from differing identities; Expected State1, got State2"
+                    .to_owned()
+            ))
+        );
     }
 }
