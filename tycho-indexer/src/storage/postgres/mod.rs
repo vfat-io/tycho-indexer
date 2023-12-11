@@ -135,6 +135,7 @@ pub mod chain;
 pub mod contract_state;
 pub mod extraction_state;
 pub mod orm;
+mod protocol_state;
 pub mod schema;
 
 use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, str::FromStr, sync::Arc};
@@ -251,7 +252,7 @@ impl StorageError {
             ) => {
                 if let Some(col) = details.column_name() {
                     if col == "id" {
-                        return StorageError::DuplicateEntry(entity.to_owned(), id.to_owned())
+                        return StorageError::DuplicateEntry(entity.to_owned(), id.to_owned());
                     }
                 }
                 StorageError::Unexpected(err_string)
@@ -262,7 +263,7 @@ impl StorageError {
                         entity.to_owned(),
                         id.to_owned(),
                         related_entitiy,
-                    )
+                    );
                 }
                 StorageError::NotFound(entity.to_owned(), id.to_owned())
             }
