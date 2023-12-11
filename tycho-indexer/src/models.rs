@@ -1,10 +1,15 @@
+use actix_web::body::MessageBody;
+use ethers::types::H160;
 use std::collections::HashMap;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use crate::extractor::evm::Transaction;
+use crate::extractor::ExtractionError;
 use strum_macros::{Display, EnumString};
 
 use crate::hex_bytes::Bytes;
+use crate::pb::tycho::evm::v1 as substreams;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
@@ -19,17 +24,20 @@ pub enum Chain {
 }
 
 #[allow(dead_code)]
+#[derive(PartialEq, Debug)]
 pub enum ProtocolSystem {
     Ambient,
 }
 
 #[allow(dead_code)]
+#[derive(PartialEq, Debug)]
 pub enum ImplementationType {
     Vm,
     Custom,
 }
 
 #[allow(dead_code)]
+#[derive(PartialEq, Debug)]
 pub enum FinancialType {
     Swap,
     Lend,
@@ -38,6 +46,7 @@ pub enum FinancialType {
 }
 
 #[allow(dead_code)]
+#[derive(PartialEq, Debug)]
 pub struct ProtocolType {
     name: String,
     attribute_schema: serde_json::Value,
@@ -183,4 +192,101 @@ pub struct ProtocolState {
     attributes: HashMap<String, Bytes>,
     // via transaction, we can trace back when this state became valid
     modify_tx: Bytes,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use actix_web::body::MessageBody;
+    use ethers::types::{H160, H256};
+    use rstest::rstest;
+
+    fn create_transaction() -> Transaction {
+        Transaction {
+            hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000011121314,
+            ),
+            block_hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000031323334,
+            ),
+            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
+            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            index: 2,
+        }
+    }
+
+    #[rstest]
+    fn test_try_from_message_protocol_component() {
+        // Sample data for testing
+        let msg = substreams::ProtocolComponent {
+            id: b"component_id".to_vec(),
+            tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
+            contracts: vec![b"contract1".to_vec(), b"contract2".to_vec()],
+        };
+
+        // Sample parameters for testing
+        let protocol_system = ProtocolSystem::Ambient;
+        let protocol_type = ProtocolType {
+            name: "Pool".to_string(),
+            attribute_schema: serde_json::Value::default(),
+            financial_type: crate::models::FinancialType::Psm,
+            implementation_type: crate::models::ImplementationType::Custom,
+        };
+        let chain = Chain::Ethereum;
+
+        // Call the try_from_message method
+        let result = ProtocolComponent::<String>::try_from_message(
+            msg,
+            ProtocolSystem::Ambient,
+            ProtocolType {
+                name: "Pool".to_string(),
+                attribute_schema: serde_json::Value::default(),
+                financial_type: crate::models::FinancialType::Psm,
+                implementation_type: crate::models::ImplementationType::Custom,
+            },
+            Chain::Ethereum,
+        );
+
+        // Assert the result
+        assert!(result.is_ok());
+
+        // Unwrap the result for further assertions
+        let protocol_component = result.unwrap();
+
+        // Assert specific properties of the protocol component
+        assert_eq!(protocol_component.id, "component_id");
+        assert_eq!(protocol_component.protocol_system, protocol_system);
+        assert_eq!(protocol_component.protocol_type, protocol_type);
+        assert_eq!(protocol_component.chain, chain);
+        assert_eq!(protocol_component.tokens, vec!["token1".to_string(), "token2".to_string()]);
+        assert_eq!(
+            protocol_component.contract_ids,
+            vec!["contract1".to_string(), "contract2".to_string()]
+        );
+        assert_eq!(protocol_component.attribute_schema, Bytes::default());
+    }
+
+    #[rstest]
+    fn test_try_from_message_tvl_change() {
+        let tx = create_transaction();
+        let expected_balance: f64 = 3000.0;
+        let mut msg_balance = expected_balance.to_le_bytes().to_vec();
+
+        let expected_token = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+        let msg_token = expected_token
+            .try_into_bytes()
+            .unwrap()
+            .to_vec();
+
+        let msg = substreams::TvlUpdate {
+            balance: msg_balance.to_vec(),
+            token: msg_token,
+            component_id: Vec::default(),
+        };
+        let from_message = TvlChange::try_from_message(msg, &tx).unwrap();
+
+        assert_eq!(from_message.new_balance, expected_balance);
+        assert_eq!(from_message.tx, tx.hash.to_string());
+        assert_eq!(from_message.token, expected_token);
+    }
 }
