@@ -70,8 +70,6 @@
 //! for these enums. Following this approach paves the way for initializing a
 //! cross-chain compatible gateway (For instance, refer
 //! [enum_dispatch](https://docs.rs/enum_dispatch/latest/enum_dispatch/) crate).
-pub mod postgres;
-
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use async_trait::async_trait;
@@ -83,6 +81,8 @@ use crate::{
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolComponent, ProtocolState, ProtocolSystem},
 };
+
+pub mod postgres;
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
 /// blockchain.
@@ -392,6 +392,7 @@ pub enum VersionKind {
     #[allow(dead_code)]
     Index(i64),
 }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ContractId {
     pub address: Address,
@@ -429,6 +430,7 @@ impl Version {
         Self(BlockOrTimestamp::Timestamp(ts), VersionKind::Last)
     }
 }
+
 /// Lays out the necessary interface needed to store and retrieve tokens from
 /// storage.
 ///
@@ -454,10 +456,10 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
 /// This trait defines how to retrieve protocol components, state as well as
 /// tokens from storage.
 #[async_trait]
-pub trait ProtocolGateway {
+pub trait ProtocolStateGateway {
     type DB;
     type Token;
-    // TODO: at this later type ProtocolState;
+    type ProtocolState;
 
     /// Retrieve ProtocolComponent from the db
     ///
@@ -470,7 +472,7 @@ pub trait ProtocolGateway {
     /// Ok, if found else Err
     async fn get_components(
         &self,
-        chain: Chain,
+        chain: &Chain,
         system: Option<ProtocolSystem>,
         ids: Option<&[&str]>,
     ) -> Result<Vec<ProtocolComponent<Self::Token>>, StorageError>;
@@ -546,6 +548,39 @@ pub trait ProtocolGateway {
     /// Ok if all tokens could be inserted, Err if at least one token failed to
     /// insert.
     async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError>;
+
+    /// Retrieve protocol component state changes
+    ///
+    /// Fetches all state changes that occurred for the given protocol system
+    ///
+    /// # Parameters
+    /// - `chain` The chain of the component
+    /// - `system` The protocol system this component belongs to
+    /// - `id` The external id of the component e.g. address, or the pair
+    /// - `start_version` The version at which to start looking for changes at.
+    /// - `end_version` The version at which to stop looking for changes.
+    ///
+    /// # Return
+    /// A ProtocolState containing all state changes, Err if no changes were found.
+    async fn get_state_delta(
+        &self,
+        chain: &Chain,
+        system: Option<ProtocolSystem>,
+        id: Option<&[&str]>,
+        start_version: Option<&BlockOrTimestamp>,
+        end_version: &BlockOrTimestamp,
+    ) -> Result<ProtocolState, StorageError>;
+
+    /// Reverts the protocol states in storage.
+    ///
+    /// Deletes all protocol states that were set after the given block.
+    ///
+    /// # Parameters
+    /// - `to` The block at which the we must revert to.
+    ///
+    /// # Return
+    /// Ok if the revert was successful, Err if it was not.
+    async fn revert_protocol_state(&self, to: &BlockIdentifier) -> Result<(), StorageError>;
 }
 
 /// Lays out the necessary interface needed to store and retrieve contracts from
@@ -871,7 +906,7 @@ pub trait ContractStateGateway {
 pub trait StateGateway<DB>:
     ExtractionStateGateway<DB = DB>
     + ChainGateway<DB = DB>
-    // + ProtocolGateway<DB = DB>
+    + ProtocolStateGateway<DB = DB>
     + ExtractionStateGateway<DB = DB>
     + ContractStateGateway<DB = DB>
     + Send
