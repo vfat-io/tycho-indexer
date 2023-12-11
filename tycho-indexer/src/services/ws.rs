@@ -1,4 +1,5 @@
 //! This module contains Tycho Websocket implementation
+#[allow(unused_imports)]
 use crate::{
     extractor::{runner::MessageSender, ExtractorMsg},
     models::{ExtractorIdentity, NormalisedMessage},
@@ -117,7 +118,7 @@ impl WsActor {
             if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
                 warn!("Websocket Client heartbeat failed, disconnecting!");
                 ctx.stop();
-                return
+                return;
             }
             // Send ping
             ctx.ping(b"");
@@ -404,7 +405,7 @@ mod tests {
                         .is_err()
                     {
                         debug!("Receiver dropped");
-                        break
+                        break;
                     }
                 }
                 .instrument(info_span!("DummyMessageSender", extractor_id = %extractor_id))
@@ -486,7 +487,7 @@ mod tests {
                 .map_err(|_| "Failed to receive message".to_string())?;
 
             if criteria(&response_msg) {
-                return Ok(response_msg)
+                return Ok(response_msg);
             } else {
                 debug!("Message did not meet criteria, waiting for the correct message");
             }
@@ -500,7 +501,7 @@ mod tests {
         let criteria = move |msg: &Message| {
             if let Message::Text(text) = msg {
                 if let Ok(message) = serde_json::from_str::<DummyMessage>(text) {
-                    return message.extractor_id == extractor_id
+                    return message.extractor_id == extractor_id;
                 }
             }
             false

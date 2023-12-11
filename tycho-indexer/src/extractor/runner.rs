@@ -13,6 +13,7 @@ use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
 
 use super::{Extractor, ExtractorMsg};
+#[allow(unused_imports)]
 use crate::{
     extractor::ExtractionError,
     models::{ExtractorIdentity, NormalisedMessage},
@@ -362,7 +363,7 @@ mod test {
                         .is_err()
                     {
                         debug!("Receiver dropped");
-                        break
+                        break;
                     }
                 }
                 .instrument(info_span!("DummyMessageSender", extractor_id = %extractor_id))

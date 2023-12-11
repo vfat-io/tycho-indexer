@@ -14,6 +14,7 @@ use crate::{
     storage::{BlockIdentifier, StorageError},
 };
 
+#[allow(dead_code)]
 enum WriteOp {
     UpsertBlock(evm::Block),
     UpsertTx(evm::Transaction),
@@ -22,7 +23,7 @@ enum WriteOp {
     UpdateContracts(Vec<(H256, evm::AccountUpdate)>),
     RevertContractState(BlockIdentifier),
 }
-
+#[allow(dead_code)]
 struct Transaction {
     block: evm::Block,
     operations: Vec<WriteOp>,
@@ -62,6 +63,7 @@ struct Transaction {
 /// Read Operations
 /// The class does provide read operations for completeness, but it will not consider any
 /// cached changes while reading. Any reads are direct pass throughs to the database.
+#[allow(dead_code)]
 struct WriteThroughCache {
     name: String,
     chain: Chain,
@@ -72,7 +74,7 @@ struct WriteThroughCache {
     pending_txns: Vec<Transaction>,
     rx: mpsc::Receiver<Transaction>,
 }
-
+#[allow(dead_code)]
 impl WriteThroughCache {
     pub async fn write(&mut self, tx: Transaction) -> Result<(), StorageError> {
         let incoming = tx.block;
@@ -99,7 +101,7 @@ impl WriteThroughCache {
                     // TODO: handle errors
                     self.flush().await;
                 } else {
-                    return Err(StorageError::Unexpected("Invalid cache state!".into()))
+                    return Err(StorageError::Unexpected("Invalid cache state!".into()));
                 }
             }
             None => {
@@ -112,16 +114,16 @@ impl WriteThroughCache {
 
     async fn execute_tx(
         &mut self,
-        ops: Vec<WriteOp>,
-        conn: &mut AsyncPgConnection,
+        #[allow(unused_variables)] ops: Vec<WriteOp>,
+        #[allow(unused_variables)] conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         todo!();
     }
 
     async fn execute_write(
         &mut self,
-        operation: WriteOp,
-        conn: &mut AsyncPgConnection,
+        #[allow(unused_variables)] operation: WriteOp,
+        #[allow(unused_variables)] conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         todo!();
     }
@@ -162,6 +164,7 @@ impl WriteThroughCache {
     }
 }
 
+#[allow(dead_code)]
 pub struct CachedGateway {
     tx: mpsc::Sender<Transaction>,
     pool: Pool<AsyncPgConnection>,
@@ -171,11 +174,16 @@ pub struct CachedGateway {
 impl CachedGateway {
     // TODO: implement the usual gateway methods here, but they are translated into write ops, for
     // reads call the gateway directly
-    pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
+    #[allow(dead_code)]
+    pub async fn upsert_block(
+        &self,
+        #[allow(unused_variables)] new: &evm::Block,
+    ) -> Result<(), StorageError> {
         todo!()
     }
 }
 
+#[allow(dead_code)]
 pub fn new_cached_gateway() -> Result<(JoinHandle<()>, CachedGateway), StorageError> {
     todo!()
 }

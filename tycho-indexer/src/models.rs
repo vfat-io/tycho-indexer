@@ -1,15 +1,11 @@
-use actix_web::body::MessageBody;
-use ethers::types::H160;
+#[allow(unused_imports)]
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
-use crate::extractor::evm::Transaction;
-use crate::extractor::ExtractionError;
+use crate::extractor::{evm::Transaction, ExtractionError};
 use strum_macros::{Display, EnumString};
 
-use crate::hex_bytes::Bytes;
-use crate::pb::tycho::evm::v1 as substreams;
+use crate::{hex_bytes::Bytes, pb::tycho::evm::v1 as substreams};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
@@ -150,7 +146,7 @@ impl ProtocolComponent<String> {
             })
             .collect::<Vec<_>>();
 
-        return Ok(Self {
+        Ok(Self {
             id,
             protocol_type,
             protocol_system,
@@ -158,7 +154,7 @@ impl ProtocolComponent<String> {
             contract_ids,
             attribute_schema: Bytes::default(),
             chain,
-        });
+        })
     }
 }
 
@@ -185,6 +181,7 @@ impl TvlChange<String> {
     }
 }
 
+#[allow(dead_code)]
 pub struct ProtocolState {
     // associates the back to a component, which has metadata like type, tokens , etc.
     component_id: String,
@@ -197,6 +194,7 @@ pub struct ProtocolState {
 #[cfg(test)]
 mod test {
     use super::*;
+    #[allow(unused_imports)]
     use actix_web::body::MessageBody;
     use ethers::types::{H160, H256};
     use rstest::rstest;
@@ -270,7 +268,7 @@ mod test {
     fn test_try_from_message_tvl_change() {
         let tx = create_transaction();
         let expected_balance: f64 = 3000.0;
-        let mut msg_balance = expected_balance.to_le_bytes().to_vec();
+        let msg_balance = expected_balance.to_le_bytes().to_vec();
 
         let expected_token = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
         let msg_token = expected_token

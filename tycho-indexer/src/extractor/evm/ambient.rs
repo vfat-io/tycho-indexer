@@ -287,7 +287,7 @@ where
             }
             Err(ExtractionError::Empty) => {
                 self.update_cursor(inp.cursor).await;
-                return Ok(None)
+                return Ok(None);
             }
             Err(e) => return Err(e),
         };
@@ -400,11 +400,11 @@ mod test {
             .await
             .expect("extractor init ok");
         let inp = evm::fixtures::pb_block_scoped_data(());
-
+        #[allow(unused_variables)]
         let res = extractor
             .handle_tick_scoped_data(inp)
             .await;
-        
+
         // TODO: fix this assert
         // assert_eq!(res, Ok(None));
         assert_eq!(extractor.get_cursor().await, "cursor@420");
