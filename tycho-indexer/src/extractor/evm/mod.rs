@@ -751,11 +751,28 @@ pub mod fixtures {
             }],
         }
     }
+
+    pub fn pb_state_changes() -> crate::pb::tycho::evm::v1::StateChanges {
+        use crate::pb::tycho::evm::v1::*;
+        let id = "test".to_owned().into_bytes();
+        let res1_name = "reserve1".to_owned().into_bytes();
+        let res2_name = "reserve2".to_owned().into_bytes();
+        let res1_value = 1000_u64.to_be_bytes().to_vec();
+        let res2_value = 500_u64.to_be_bytes().to_vec();
+        StateChanges {
+            component_id: id,
+            attributes: vec![
+                Attribute { name: res1_name, value: res1_value },
+                Attribute { name: res2_name, value: res2_value },
+            ],
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::extractor::evm::fixtures::transaction01;
     use rstest::rstest;
 
     const HASH_256_0: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -1125,5 +1142,29 @@ mod test {
                     .to_owned()
             ))
         );
+    }
+
+    fn protocol_state() -> ProtocolState {
+        let res1_value = 1000_u64.to_be_bytes().to_vec();
+        let res2_value = 500_u64.to_be_bytes().to_vec();
+        ProtocolState {
+            component_id: "test".to_string(),
+            attributes: vec![
+                ("reserve1".to_owned(), Bytes::from(res1_value)),
+                ("reserve2".to_owned(), Bytes::from(res2_value)),
+            ]
+            .into_iter()
+            .collect(),
+            modify_tx: transaction01(),
+        }
+    }
+
+    #[rstest]
+    fn test_protocol_state_parse_msg() {
+        let msg = fixtures::pb_state_changes();
+
+        let res = ProtocolState::try_from_message(msg, &fixtures::transaction01()).unwrap();
+
+        assert_eq!(res, protocol_state());
     }
 }
