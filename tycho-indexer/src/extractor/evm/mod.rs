@@ -490,6 +490,8 @@ impl BlockStateChanges {
     }
 }
 
+// TODO: remove dead code check skip once extractor is implemented
+#[allow(dead_code)]
 impl ProtocolState {
     /// Parses protocol state from tychos protobuf StateChanges message
     pub fn try_from_message(
@@ -574,6 +576,8 @@ pub struct BlockEntityChanges {
     pub new_pools: HashMap<H160, SwapPool>,
 }
 
+// TODO: remove dead code check skip once extractor is implemented
+#[allow(dead_code)]
 impl BlockEntityChanges {
     /// Parse from tychos protobuf message
     pub fn try_from_message(
