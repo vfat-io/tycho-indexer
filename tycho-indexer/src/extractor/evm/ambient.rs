@@ -401,7 +401,7 @@ mod test {
             .expect("extractor init ok");
         let inp = evm::fixtures::pb_block_scoped_data(());
 
-        let res = extractor
+        let _res = extractor
             .handle_tick_scoped_data(inp)
             .await;
 

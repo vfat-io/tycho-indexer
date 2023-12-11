@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use strum_macros::{Display, EnumString};
 
@@ -63,7 +63,7 @@ impl std::fmt::Display for ExtractorIdentity {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ExtractionState {
     pub name: String,
     pub chain: Chain,
@@ -105,6 +105,7 @@ pub struct ProtocolComponent<T> {
     // allows to express some validation over the attributes if necessary
     attribute_schema: Bytes,
 }
+#[allow(dead_code)]
 
 pub struct ProtocolState {
     // associates the back to a component, which has metadata like type, tokens , etc.
