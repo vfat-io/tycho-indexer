@@ -100,10 +100,80 @@ pub struct ProtocolComponent<T> {
     protocol_system: ProtocolSystem,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
     protocol_type: ProtocolType,
+    // Blockchain the component belongs to
+    chain: Chain,
     // holds the tokens tradable
     tokens: Vec<T>,
+    // ID's referring to related contracts
+    contract_ids: Vec<String>,
     // allows to express some validation over the attributes if necessary
     attribute_schema: Bytes,
+}
+
+impl ProtocolComponent<String> {
+    #[allow(dead_code)]
+    pub fn try_from_message(
+        msg: substreams::ProtocolComponent,
+        protocol_system: ProtocolSystem,
+        protocol_type: ProtocolType,
+        chain: Chain,
+    ) -> Result<Self, ExtractionError> {
+        let id = String::from_utf8(msg.id)
+            .map_err(|error| ExtractionError::DecodeError(error.to_string()))
+            .unwrap();
+        let tokens = msg
+            .tokens
+            .into_iter()
+            .map(|t| {
+                String::from_utf8(t)
+                    .map_err(|error| ExtractionError::DecodeError(error.to_string()))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        let contract_ids = msg
+            .contracts
+            .into_iter()
+            .map(|contract_id| {
+                String::from_utf8(contract_id)
+                    .map_err(|error| ExtractionError::DecodeError(error.to_string()))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        return Ok(Self {
+            id,
+            protocol_type,
+            protocol_system,
+            tokens,
+            contract_ids,
+            attribute_schema: Bytes::default(),
+            chain,
+        });
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct TvlChange<T> {
+    token: T,
+    new_balance: f64,
+    // tx where the this balance was observed
+    tx: String,
+}
+
+impl TvlChange<String> {
+    #[allow(dead_code)]
+    pub fn try_from_message(
+        msg: substreams::TvlUpdate,
+        tx: &Transaction,
+    ) -> Result<Self, ExtractionError> {
+        Ok(Self {
+            token: String::from_utf8(msg.token)
+                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
+            new_balance: f64::from_bits(u64::from_le_bytes(msg.balance.try_into().unwrap())),
+            tx: tx.hash.to_string(),
+        })
+    }
 }
 
 pub struct ProtocolState {
