@@ -229,7 +229,7 @@ impl DBCacheWriteExecutor {
                             // Only executes if it was not already in seen_operations
                             match self
                                 .execute_write_op(op.clone(), conn)
-                    .await
+                                .await
                             {
                                 Ok(_) => {
                                     seen_operations.push(op.clone());
@@ -287,7 +287,7 @@ impl DBCacheWriteExecutor {
             WriteOp::SaveExtractionState(state) => {
                 self.state_gateway
                     .save_state(&state, conn)
-                            .await
+                    .await
             }
             WriteOp::InsertContract(contract) => {
                 self.state_gateway
@@ -309,7 +309,7 @@ impl DBCacheWriteExecutor {
                     .revert_state(&block, conn)
                     .await
             }
-            }
+        }
     }
 }
 
@@ -366,4 +366,291 @@ pub fn new_cached_gateway(
     pool: Pool<AsyncPgConnection>,
 ) -> Result<(JoinHandle<()>, CachedGateway), StorageError> {
     todo!()
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        extractor::{evm, evm::EVMStateGateway},
+        models::{Chain, ExtractionState},
+        storage::{
+            postgres::{
+                cache::{DBCacheMessage, DBCacheWriteExecutor, DBTransaction, WriteOp},
+                db_fixtures, PostgresGateway,
+            },
+            BlockIdentifier, StorageError,
+        },
+    };
+    use diesel_async::{
+        pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
+        AsyncConnection, AsyncPgConnection,
+    };
+    use ethers::{prelude::H256, types::H160};
+    use std::{str::FromStr, sync::Arc};
+    use tokio::sync::{
+        mpsc,
+        oneshot::{self, error::TryRecvError},
+    };
+
+    async fn setup_gateway() -> (EVMStateGateway<AsyncPgConnection>, Pool<AsyncPgConnection>) {
+        let database_url =
+            std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+        let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
+        let pool = Pool::builder(config)
+            .max_size(1)
+            .build()
+            .unwrap();
+
+        let mut connection = pool
+            .get()
+            .await
+            .expect("Failed to get a connection from the pool");
+        connection
+            .begin_test_transaction()
+            .await
+            .expect("Failed to start test transaction");
+        db_fixtures::insert_chain(&mut connection, "ethereum").await;
+
+        let gateway = PostgresGateway::<
+            evm::Block,
+            evm::Transaction,
+            evm::Account,
+            evm::AccountUpdate,
+        >::from_connection(&mut connection)
+        .await;
+
+        (Arc::new(gateway), pool)
+    }
+
+    #[tokio::test]
+    async fn test_write_and_flush() {
+        let (gateway, connection_pool) = setup_gateway().await;
+        let (tx, rx) = mpsc::channel(10);
+
+        let write_executor = DBCacheWriteExecutor::new(
+            "ethereum".to_owned(),
+            Chain::Ethereum,
+            connection_pool.clone(),
+            gateway.clone(),
+            rx,
+        );
+
+        let handle = write_executor.run();
+        let block = get_sample_block(1);
+
+        // Send Write message
+        let os_rx = send_write_message(&tx, block, vec![WriteOp::UpsertBlock(block)]).await;
+
+        // Send Flush message
+        let os_rx_flush = send_flush_message(&tx).await;
+
+        os_rx
+            .await
+            .expect("Response from channel ok")
+            .expect("DB transaction not sent");
+
+        os_rx_flush
+            .await
+            .expect("Response from channel ok")
+            .expect("DB transaction not flushed");
+        handle.abort();
+
+        // Assert that block_1 has been sent
+        let block_id = BlockIdentifier::Number((Chain::Ethereum, 1));
+        let mut connection = connection_pool
+            .get()
+            .await
+            .expect("Failed to get a connection from the pool");
+        let fetched_block = gateway
+            .get_block(&block_id, &mut connection)
+            .await
+            .expect("Failed to fetch block");
+
+        assert_eq!(fetched_block, block);
+    }
+
+    #[tokio::test]
+    async fn test_writes_and_new_blocks() {
+        let (gateway, connection_pool) = setup_gateway().await;
+        let (tx, rx) = mpsc::channel(10);
+
+        let write_executor = DBCacheWriteExecutor::new(
+            "ethereum".to_owned(),
+            Chain::Ethereum,
+            connection_pool.clone(),
+            gateway.clone(),
+            rx,
+        );
+
+        let handle = write_executor.run();
+        let block_1 = get_sample_block(1);
+        let tx_1 = get_sample_transaction(1);
+        let extraction_state_1 = get_sample_extraction(1);
+
+        // Send first block message
+        let os_rx_1 = send_write_message(
+            &tx,
+            block_1,
+            vec![
+                WriteOp::UpsertBlock(block_1),
+                WriteOp::UpsertTx(tx_1),
+                WriteOp::SaveExtractionState(extraction_state_1.clone()),
+            ],
+        )
+        .await;
+
+        // Send second block message
+        let block_2 = get_sample_block(2);
+        let os_rx_2 = send_write_message(&tx, block_2, vec![WriteOp::UpsertBlock(block_2)]).await;
+
+        os_rx_1
+            .await
+            .expect("Response from channel ok")
+            .expect("DB transaction not sent");
+
+        // Send third block message
+        let block_3 = get_sample_block(3);
+        let mut os_rx_3 =
+            send_write_message(&tx, block_3, vec![WriteOp::UpsertBlock(block_3)]).await;
+
+        os_rx_2
+            .await
+            .expect("Response from channel ok")
+            .expect("DB transaction not sent");
+
+        match os_rx_3.try_recv() {
+            Err(TryRecvError::Empty) => (), // Correct, block_3 is still in pending db transactions
+            Ok(_) => panic!("Expected the channel to be empty, but found a message"),
+            Err(e) => panic!("Expected TryRecvError::Empty, found different error: {:?}", e),
+        }
+        handle.abort();
+
+        // Assert that block_1 has been sent
+        let mut connection = connection_pool
+            .get()
+            .await
+            .expect("Failed to get a connection from the pool");
+
+        let block_id = BlockIdentifier::Number((Chain::Ethereum, 1));
+        let fetched_block = gateway
+            .get_block(&block_id, &mut connection)
+            .await
+            .expect("Failed to fetch block");
+
+        let block_id = BlockIdentifier::Number((Chain::Ethereum, 1));
+        let fetched_tx = gateway
+            .get_tx(&tx_1.hash.as_bytes().into(), &mut connection)
+            .await
+            .expect("Failed to fetch block");
+
+        let fetched_extraction_state = gateway
+            .get_state("vm:test", &Chain::Ethereum, &mut connection)
+            .await
+            .expect("Failed to fetch block");
+
+        assert_eq!(fetched_block, block_1);
+        assert_eq!(fetched_tx, tx_1);
+        assert_eq!(fetched_extraction_state, extraction_state_1);
+    }
+
+    fn get_sample_block(version: usize) -> evm::Block {
+        match version {
+            1 => evm::Block {
+                number: 1,
+                chain: Chain::Ethereum,
+                hash: "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
+                    .parse()
+                    .expect("Invalid hash"),
+                parent_hash: H256::zero(),
+                ts: "2020-01-01T01:00:00"
+                    .parse()
+                    .expect("Invalid timestamp"),
+            },
+            2 => evm::Block {
+                number: 2,
+                chain: Chain::Ethereum,
+                hash: "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
+                    .parse()
+                    .expect("Invalid hash"),
+                parent_hash: "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
+                    .parse()
+                    .expect("Invalid hash"),
+                ts: "2020-01-01T02:00:00"
+                    .parse()
+                    .expect("Invalid timestamp"),
+            },
+            3 => evm::Block {
+                number: 3,
+                chain: Chain::Ethereum,
+                hash: "0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741"
+                    .parse()
+                    .expect("Invalid hash"),
+                parent_hash: "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
+                    .parse()
+                    .expect("Invalid hash"),
+                ts: "2020-01-01T03:00:00"
+                    .parse()
+                    .expect("Invalid timestamp"),
+            },
+            _ => panic!("Block version not found"),
+        }
+    }
+
+    fn get_sample_transaction(version: usize) -> evm::Transaction {
+        match version {
+            1 => evm::Transaction {
+                hash: H256::from_str(
+                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+                )
+                .expect("tx hash ok"),
+                block_hash: H256::from_str(
+                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                )
+                .expect("block hash ok"),
+                from: H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980")
+                    .expect("from ok"),
+                to: Some(
+                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").expect("to ok"),
+                ),
+                index: 1,
+            },
+            _ => panic!("Block version not found"),
+        }
+    }
+
+    fn get_sample_extraction(version: usize) -> ExtractionState {
+        match version {
+            1 => ExtractionState::new(
+                "vm:test".to_string(),
+                Chain::Ethereum,
+                None,
+                "cursor@420".as_bytes(),
+            ),
+            _ => panic!("Block version not found"),
+        }
+    }
+
+    async fn send_write_message(
+        tx: &mpsc::Sender<DBCacheMessage>,
+        block: evm::Block,
+        operations: Vec<WriteOp>,
+    ) -> oneshot::Receiver<Result<(), StorageError>> {
+        let (os_tx, os_rx) = oneshot::channel();
+        let db_transaction = DBTransaction { block, operations, tx: os_tx };
+
+        tx.send(DBCacheMessage::Write(db_transaction))
+            .await
+            .expect("Failed to send write message through mpsc channel");
+        os_rx
+    }
+
+    async fn send_flush_message(
+        tx: &mpsc::Sender<DBCacheMessage>,
+    ) -> oneshot::Receiver<Result<(), StorageError>> {
+        let (os_tx, os_rx) = oneshot::channel();
+        tx.send(DBCacheMessage::Flush(os_tx))
+            .await
+            .expect("Failed to send flush message through mpsc channel");
+        os_rx
+    }
 }
