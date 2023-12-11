@@ -767,6 +767,43 @@ pub mod fixtures {
             ],
         }
     }
+
+    pub fn pb_block_entity_changes() -> crate::pb::tycho::evm::v1::BlockEntityChanges {
+        use crate::pb::tycho::evm::v1::*;
+        let id1 = "test1".to_owned().into_bytes();
+        let id2 = "test2".to_owned().into_bytes();
+        let res1_name = "reserve1".to_owned().into_bytes();
+        let res2_name = "reserve2".to_owned().into_bytes();
+        let res1_value = 1000_u64.to_be_bytes().to_vec();
+        let res2_value = 500_u64.to_be_bytes().to_vec();
+        BlockEntityChanges {
+            block: Some(Block {
+                hash: vec![0x31, 0x32, 0x33, 0x34],
+                parent_hash: vec![0x21, 0x22, 0x23, 0x24],
+                number: 1,
+                ts: 1000,
+            }),
+
+            changes: vec![TransactionStateChanges {
+                tx: Some(Transaction {
+                    hash: vec![0x11, 0x12, 0x13, 0x14],
+                    from: vec![0x41, 0x42, 0x43, 0x44],
+                    to: vec![0x51, 0x52, 0x53, 0x54],
+                    index: 2,
+                }),
+                state_changes: vec![
+                    StateChanges {
+                        component_id: id1,
+                        attributes: vec![Attribute { name: res1_name, value: res1_value }],
+                    },
+                    StateChanges {
+                        component_id: id2,
+                        attributes: vec![Attribute { name: res2_name, value: res2_value }],
+                    },
+                ],
+            }],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1166,5 +1203,64 @@ mod test {
         let res = ProtocolState::try_from_message(msg, &fixtures::transaction01()).unwrap();
 
         assert_eq!(res, protocol_state());
+    }
+
+    fn block_entity_changes() -> BlockEntityChanges {
+        let tx = Transaction {
+            hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000011121314,
+            ),
+            block_hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000031323334,
+            ),
+            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
+            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            index: 2,
+        };
+        let attr1: HashMap<String, Bytes> =
+            vec![("reserve1".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec()))]
+                .into_iter()
+                .collect();
+        let attr2: HashMap<String, Bytes> =
+            vec![("reserve2".to_owned(), Bytes::from(500_u64.to_be_bytes().to_vec()))]
+                .into_iter()
+                .collect();
+        BlockEntityChanges {
+            extractor: "test".to_string(),
+            chain: Chain::Ethereum,
+            block: Block {
+                number: 1,
+                hash: H256::from_low_u64_be(
+                    0x0000000000000000000000000000000000000000000000000000000031323334,
+                ),
+                parent_hash: H256::from_low_u64_be(
+                    0x0000000000000000000000000000000000000000000000000000000021222324,
+                ),
+                chain: Chain::Ethereum,
+                ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+            },
+            state_updates: vec![
+                ProtocolState {
+                    component_id: "test1".to_owned(),
+                    attributes: attr1,
+                    modify_tx: tx,
+                },
+                ProtocolState {
+                    component_id: "test2".to_owned(),
+                    attributes: attr2,
+                    modify_tx: tx,
+                },
+            ],
+            new_pools: HashMap::new(),
+        }
+    }
+
+    #[rstest]
+    fn test_block_entity_changes_parse_msg() {
+        let msg = fixtures::pb_block_entity_changes();
+
+        let res = BlockEntityChanges::try_from_message(msg, "test", Chain::Ethereum).unwrap();
+
+        assert_eq!(res, block_entity_changes());
     }
 }
