@@ -2,11 +2,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
-
 use crate::extractor::evm::Transaction;
 use strum_macros::{Display, EnumString};
 
+use crate::extractor::ExtractionError;
 use crate::{hex_bytes::Bytes, pb::tycho::evm::v1 as substreams};
 
 #[derive(
