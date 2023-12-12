@@ -167,7 +167,7 @@ cargo install diesel_cli --no-default-features --features postgres
 ```
 3. Start up the postgres db service
 ```bash
-docker-compose up -d
+docker-compose up -d db
 ```
 4. Set the env var for the DB connection:
 ```
