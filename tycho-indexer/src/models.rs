@@ -1,6 +1,11 @@
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
+use crate::extractor::evm::Transaction;
 use strum_macros::{Display, EnumString};
+
+use crate::hex_bytes::Bytes;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
@@ -59,7 +64,7 @@ impl std::fmt::Display for ExtractorIdentity {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ExtractionState {
     pub name: String,
     pub chain: Chain,
@@ -83,11 +88,31 @@ impl ExtractionState {
     }
 }
 
-pub trait NormalisedMessage:
-    Serialize + DeserializeOwned + std::fmt::Debug + std::fmt::Display + Send + Sync + Clone + 'static
-{
+#[typetag::serde(tag = "type")]
+pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static {
     fn source(&self) -> ExtractorIdentity;
 }
 
 #[allow(dead_code)]
-pub struct ProtocolComponent {}
+pub struct ProtocolComponent<T> {
+    // an id for this component, could be hex repr of contract address
+    id: String,
+    // what system this component belongs to
+    protocol_system: ProtocolSystem,
+    // more metadata information about the components general type (swap, lend, bridge, etc.)
+    protocol_type: ProtocolType,
+    // holds the tokens tradable
+    tokens: Vec<T>,
+    // allows to express some validation over the attributes if necessary
+    attribute_schema: Bytes,
+}
+
+#[allow(dead_code)]
+pub struct ProtocolState {
+    // associates back to a component, which has metadata like type, tokens , etc.
+    pub component_id: String,
+    // holds all the protocol specific attributes, validates by the components schema
+    pub attributes: HashMap<String, Bytes>,
+    // via transaction, we can trace back when this state became valid
+    pub modify_tx: Transaction,
+}
