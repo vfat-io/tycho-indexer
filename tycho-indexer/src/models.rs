@@ -5,8 +5,7 @@ use std::collections::HashMap;
 use crate::extractor::evm::Transaction;
 use strum_macros::{Display, EnumString};
 
-use crate::extractor::ExtractionError;
-use crate::{hex_bytes::Bytes, pb::tycho::evm::v1 as substreams};
+use crate::{extractor::ExtractionError, hex_bytes::Bytes, pb::tycho::evm::v1 as substreams};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
