@@ -115,7 +115,7 @@ pub struct ProtocolComponent<T> {
     // ID's referring to related contracts
     contract_ids: Vec<ContractId>,
     // allows to express some validation over the attributes if necessary
-    static_attributes: Bytes,
+    static_attributes: HashMap<String, Bytes>,
 }
 
 impl ProtocolComponent<String> {
@@ -158,7 +158,7 @@ impl ProtocolComponent<String> {
             protocol_system,
             tokens,
             contract_ids,
-            static_attributes: Bytes::default(),
+            static_attributes: HashMap::new(),
             chain,
         })
     }
@@ -169,7 +169,7 @@ pub struct TvlChange<T> {
     token: T,
     new_balance: f64,
     // tx where the this balance was observed
-    tx: String,
+    modify_tx: String,
     component_id: String,
 }
 
@@ -182,7 +182,7 @@ impl TvlChange<String> {
             token: String::from_utf8(msg.token)
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
             new_balance: f64::from_bits(u64::from_le_bytes(msg.balance.try_into().unwrap())),
-            tx: tx.hash.to_string(),
+            modify_tx: tx.hash.to_string(),
             component_id: String::from_utf8(msg.component_id)
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
         })
@@ -262,7 +262,7 @@ mod test {
             protocol_component.contract_ids,
             vec![ContractId("contract1".to_string()), ContractId("contract2".to_string())]
         );
-        assert_eq!(protocol_component.static_attributes, Bytes::default());
+        assert_eq!(protocol_component.static_attributes, HashMap::default());
     }
 
     #[rstest]
@@ -289,7 +289,7 @@ mod test {
         let from_message = TvlChange::try_from_message(msg, &tx).unwrap();
 
         assert_eq!(from_message.new_balance, expected_balance);
-        assert_eq!(from_message.tx, tx.hash.to_string());
+        assert_eq!(from_message.modify_tx, tx.hash.to_string());
         assert_eq!(from_message.token, expected_token);
         assert_eq!(from_message.component_id, expected_component_id);
     }
