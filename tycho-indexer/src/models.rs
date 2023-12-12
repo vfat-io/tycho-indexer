@@ -163,7 +163,7 @@ pub struct TvlChange<T> {
 
 impl TvlChange<String> {
     pub fn try_from_message(
-        msg: substreams::TvlUpdate,
+        msg: substreams::BalanceChange,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
         Ok(Self {
@@ -262,7 +262,7 @@ mod test {
             .unwrap()
             .to_vec();
 
-        let msg = substreams::TvlUpdate {
+        let msg = substreams::BalanceChange {
             balance: msg_balance.to_vec(),
             token: msg_token,
             component_id: Vec::default(),

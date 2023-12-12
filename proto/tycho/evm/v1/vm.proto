@@ -46,7 +46,7 @@ message ProtocolComponent {
   repeated bytes contracts = 3;
 }
 
-message TVLUpdate {
+message BalanceChange {
   bytes token = 1;
   bytes balance = 2;
   bytes component_id = 3;
@@ -56,7 +56,7 @@ message TransactionChanges {
   Transaction tx = 1;
   repeated ContractChange contract_changes = 2;
   repeated ProtocolComponent components = 3;
-  repeated TVLUpdate tvl = 4;
+  repeated BalanceChange tvl = 4;
 }
 
 message BlockContractChanges {

@@ -61,7 +61,7 @@ pub struct ProtocolComponent {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct TvlUpdate {
+pub struct BalanceChange {
     #[prost(bytes = "vec", tag = "1")]
     pub token: ::prost::alloc::vec::Vec<u8>,
     #[prost(bytes = "vec", tag = "2")]
@@ -79,7 +79,7 @@ pub struct TransactionChanges {
     #[prost(message, repeated, tag = "3")]
     pub components: ::prost::alloc::vec::Vec<ProtocolComponent>,
     #[prost(message, repeated, tag = "4")]
-    pub tvl: ::prost::alloc::vec::Vec<TvlUpdate>,
+    pub tvl: ::prost::alloc::vec::Vec<BalanceChange>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
