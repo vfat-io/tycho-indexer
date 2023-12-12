@@ -305,8 +305,7 @@ mod test {
     use serde::{Deserialize, Serialize};
     use tracing::info_span;
 
-    use crate::extractor::MockExtractor;
-    use crate::models::NormalisedMessage;
+    use crate::{extractor::MockExtractor, models::NormalisedMessage};
 
     use super::*;
 
