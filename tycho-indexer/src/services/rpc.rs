@@ -21,7 +21,85 @@ use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
 use super::EvmPostgresGateway;
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct StateRequestResponse {
+    accounts: Vec<Account>,
+}
 
+impl StateRequestResponse {
+    fn new(accounts: Vec<Account>) -> Self {
+        Self { accounts }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum RpcError {
+    #[error("Failed to parse JSON: {0}")]
+    Parse(String),
+
+    #[error("Failed to get storage: {0}")]
+    Storage(#[from] StorageError),
+
+    #[error("Failed to get database connection: {0}")]
+    Connection(#[from] deadpool::PoolError),
+}
+
+#[derive(Serialize, Deserialize, Default, Debug)]
+pub struct StateRequestParameters {
+    #[serde(default = "Chain::default")]
+    chain: Chain,
+    tvl_gt: Option<u64>,
+    intertia_min_gt: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct StateRequestBody {
+    #[serde(rename = "contractIds")]
+    contract_ids: Option<Vec<ContractId>>,
+    #[serde(default = "Version::default")]
+    version: Version,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Version {
+    timestamp: Option<NaiveDateTime>,
+    block: Option<Block>,
+}
+
+impl Default for Version {
+    fn default() -> Self {
+        Version { timestamp: Some(Utc::now().naive_utc()), block: None }
+    }
+}
+
+impl TryFrom<&Version> for BlockOrTimestamp {
+    type Error = RpcError;
+
+    fn try_from(version: &Version) -> Result<Self, Self::Error> {
+        match (&version.timestamp, &version.block) {
+            (_, Some(block)) => {
+                // If a full block is provided, we prioritize hash over number and chain
+                let block_identifier = match (&block.hash, &block.chain, &block.number) {
+                    (Some(hash), _, _) => BlockIdentifier::Hash(hash.clone()),
+                    (_, Some(chain), Some(number)) => BlockIdentifier::Number((*chain, *number)),
+                    _ => return Err(RpcError::Parse("Insufficient block information".to_owned())),
+                };
+                Ok(BlockOrTimestamp::Block(block_identifier))
+            }
+            (Some(timestamp), None) => Ok(BlockOrTimestamp::Timestamp(*timestamp)),
+            (None, None) => {
+                Err(RpcError::Parse("Missing timestamp or block identifier".to_owned()))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Block {
+    hash: Option<BlockHash>,
+    chain: Option<Chain>,
+    number: Option<i64>,
+}
 pub struct RpcHandler {
     db_gateway: Arc<EvmPostgresGateway>,
     db_connection_pool: Pool<AsyncPgConnection>,
@@ -55,16 +133,7 @@ impl RpcHandler {
         db_connection: &mut AsyncPgConnection,
     ) -> Result<StateRequestResponse, RpcError> {
         //TODO: handle when no contract is specified with filters
-        let at = match &request.version.block {
-            Some(b) => {
-                info!(block = ?b, "Getting contract state at block.");
-                BlockOrTimestamp::Block(BlockIdentifier::Hash(b.hash.clone()))
-            }
-            None => {
-                info!(timestamp = ?request.version.timestamp, "Getting contract state at timestamp.");
-                BlockOrTimestamp::Timestamp(request.version.timestamp)
-            }
-        };
+        let at = BlockOrTimestamp::try_from(&request.version)?;
 
         let version = storage::Version(at, storage::VersionKind::Last);
 
@@ -114,66 +183,6 @@ pub async fn contract_state(
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct StateRequestResponse {
-    accounts: Vec<Account>,
-}
-
-impl StateRequestResponse {
-    fn new(accounts: Vec<Account>) -> Self {
-        Self { accounts }
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum RpcError {
-    #[error("Failed to parse JSON: {0}")]
-    Parse(#[from] serde_json::Error),
-
-    #[error("Failed to get storage: {0}")]
-    Storage(#[from] StorageError),
-
-    #[error("Failed to get database connection: {0}")]
-    Connection(#[from] deadpool::PoolError),
-}
-
-#[derive(Serialize, Deserialize, Default, Debug)]
-pub struct StateRequestParameters {
-    #[serde(default = "Chain::default")]
-    chain: Chain,
-    tvl_gt: Option<u64>,
-    intertia_min_gt: Option<u64>,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct StateRequestBody {
-    #[serde(rename = "contractIds")]
-    contract_ids: Option<Vec<ContractId>>,
-    #[serde(default = "Version::default")]
-    version: Version,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Version {
-    timestamp: NaiveDateTime,
-    block: Option<Block>,
-}
-
-impl Default for Version {
-    fn default() -> Self {
-        Version { timestamp: Utc::now().naive_utc(), block: None }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Block {
-    hash: BlockHash,
-    #[serde(rename = "parentHash")]
-    parent_hash: BlockHash,
-    chain: Chain,
-    number: i64,
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -217,8 +226,6 @@ mod tests {
 
         let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092".into();
         let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".into();
-        let parent_block_hash =
-            "8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815".into();
         let block_number = 213;
 
         let expected_timestamp =
@@ -227,12 +234,11 @@ mod tests {
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
             version: Version {
-                timestamp: expected_timestamp,
+                timestamp: Some(expected_timestamp),
                 block: Some(Block {
-                    hash: block_hash,
-                    parent_hash: parent_block_hash,
-                    chain: Chain::Ethereum,
-                    number: block_number,
+                    hash: Some(block_hash),
+                    chain: Some(Chain::Ethereum),
+                    number: Some(block_number),
                 }),
             },
         };
@@ -259,8 +265,6 @@ mod tests {
         let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".into();
-        let parent_block_hash =
-            "8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815".into();
         let block_number = 213;
         let expected_timestamp =
             NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
@@ -268,17 +272,66 @@ mod tests {
         let expected = StateRequestBody {
             contract_ids: None,
             version: Version {
-                timestamp: expected_timestamp,
+                timestamp: Some(expected_timestamp),
                 block: Some(Block {
-                    hash: block_hash,
-                    parent_hash: parent_block_hash,
-                    chain: Chain::Ethereum,
-                    number: block_number,
+                    hash: Some(block_hash),
+                    chain: Some(Chain::Ethereum),
+                    number: Some(block_number),
                 }),
             },
         };
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    async fn test_validate_version_priority() {
+        let json_str = r#"
+    {
+        "version": {
+            "timestamp": "2069-01-01T04:20:00",
+            "block": {
+                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#;
+
+        let body: StateRequestBody = serde_json::from_str(json_str).unwrap();
+
+        let version = BlockOrTimestamp::try_from(&body.version).unwrap();
+        assert_eq!(
+            version,
+            BlockOrTimestamp::Block(BlockIdentifier::Hash(
+                Bytes::from_str("24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4")
+                    .unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    async fn test_validate_version_with_block_number() {
+        let json_str = r#"
+    {
+        "version": {
+            "block": {
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#;
+
+        let body: StateRequestBody = serde_json::from_str(json_str).unwrap();
+
+        let version = BlockOrTimestamp::try_from(&body.version).unwrap();
+        assert_eq!(
+            version,
+            BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 213)))
+        );
     }
 
     #[test]
@@ -300,16 +353,18 @@ mod tests {
 
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
-            version: Version { timestamp: Utc::now().naive_utc(), block: None },
+            version: Version { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
 
         let time_difference = expected
             .version
             .timestamp
+            .unwrap()
             .timestamp_millis() -
             result
                 .version
                 .timestamp
+                .unwrap()
                 .timestamp_millis();
 
         // Allowing a small time delta (1 second)
@@ -394,7 +449,7 @@ mod tests {
                 Chain::Ethereum,
                 acc_address.parse().unwrap(),
             )]),
-            version: Version { timestamp: Utc::now().naive_utc(), block: None },
+            version: Version { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
 
         let state = req_handler
