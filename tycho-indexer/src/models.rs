@@ -158,6 +158,7 @@ pub struct TvlChange<T> {
     new_balance: f64,
     // tx where the this balance was observed
     tx: String,
+    component_id: String,
 }
 
 impl TvlChange<String> {
@@ -170,6 +171,8 @@ impl TvlChange<String> {
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
             new_balance: f64::from_bits(u64::from_le_bytes(msg.balance.try_into().unwrap())),
             tx: tx.hash.to_string(),
+            component_id: String::from_utf8(msg.component_id)
+                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
         })
     }
 }
@@ -260,16 +263,21 @@ mod test {
             .try_into_bytes()
             .unwrap()
             .to_vec();
-
+        let expected_component_id = "DIANA-THALES";
+        let msg_component_id = expected_component_id
+            .try_into_bytes()
+            .unwrap()
+            .to_vec();
         let msg = substreams::BalanceChange {
             balance: msg_balance.to_vec(),
             token: msg_token,
-            component_id: Vec::default(),
+            component_id: msg_component_id,
         };
         let from_message = TvlChange::try_from_message(msg, &tx).unwrap();
 
         assert_eq!(from_message.new_balance, expected_balance);
         assert_eq!(from_message.tx, tx.hash.to_string());
         assert_eq!(from_message.token, expected_token);
+        assert_eq!(from_message.component_id, expected_component_id);
     }
 }
