@@ -158,19 +158,13 @@ impl ProtocolComponent<String> {
             })
             .collect::<Result<Vec<String>, _>>()?;
 
-        let values = msg
+        let values: Vec<_> = msg
             .static_attributes
             .into_iter()
-            .map(|attr| {
-                Bytes::try_from(attr.value)
-                    .map_err(|error| ExtractionError::DecodeError(error.to_string()))
-            })
-            .collect::<Result<Vec<Bytes>, _>>()?;
-
-        let attribute_map: HashMap<_, _> = keys
-            .into_iter()
-            .zip(values.into_iter())
+            .map(|attr| Bytes::from(attr.value))
             .collect();
+
+        let attribute_map: HashMap<_, _> = keys.into_iter().zip(values).collect();
 
         Ok(Self {
             id,
