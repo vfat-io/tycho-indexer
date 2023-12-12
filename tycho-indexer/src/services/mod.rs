@@ -2,10 +2,8 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-#[allow(unused_imports)]
 use crate::{
     extractor::{evm, runner::ExtractorHandle, ExtractionError},
-    models::NormalisedMessage,
     storage::postgres::PostgresGateway,
 };
 use actix_web::{dev::ServerHandle, web, App, HttpServer};

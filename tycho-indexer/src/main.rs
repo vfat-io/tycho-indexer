@@ -24,10 +24,8 @@ mod serde_helpers;
 mod services;
 mod storage;
 mod substreams;
-#[allow(unused_imports)]
 use crate::{
     extractor::{evm, ExtractionError},
-    models::NormalisedMessage,
     services::ServicesBuilder,
     storage::postgres::{self, PostgresGateway},
 };

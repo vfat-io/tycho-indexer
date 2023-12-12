@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(unused_variables)]
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
@@ -113,16 +114,16 @@ impl WriteThroughCache {
 
     async fn execute_tx(
         &mut self,
-        #[allow(unused_variables)] ops: Vec<WriteOp>,
-        #[allow(unused_variables)] conn: &mut AsyncPgConnection,
+        ops: Vec<WriteOp>,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         todo!();
     }
 
     async fn execute_write(
         &mut self,
-        #[allow(unused_variables)] operation: WriteOp,
-        #[allow(unused_variables)] conn: &mut AsyncPgConnection,
+        operation: WriteOp,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         todo!();
     }
@@ -172,10 +173,7 @@ pub struct CachedGateway {
 impl CachedGateway {
     // TODO: implement the usual gateway methods here, but they are translated into write ops, for
     // reads call the gateway directly
-    pub async fn upsert_block(
-        &self,
-        #[allow(unused_variables)] new: &evm::Block,
-    ) -> Result<(), StorageError> {
+    pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
         todo!()
     }
 }

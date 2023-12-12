@@ -13,10 +13,9 @@ use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
 
 use super::{Extractor, ExtractorMsg};
-#[allow(unused_imports)]
 use crate::{
     extractor::ExtractionError,
-    models::{ExtractorIdentity, NormalisedMessage},
+    models::ExtractorIdentity,
     pb::sf::substreams::v1::Package,
     substreams::{
         stream::{BlockResponse, SubstreamsStream},
@@ -307,6 +306,7 @@ mod test {
     use tracing::info_span;
 
     use crate::extractor::MockExtractor;
+    use crate::models::NormalisedMessage;
 
     use super::*;
 

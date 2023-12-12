@@ -1,3 +1,4 @@
+#![allow(unused_variables)]
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
@@ -400,7 +401,7 @@ mod test {
             .await
             .expect("extractor init ok");
         let inp = evm::fixtures::pb_block_scoped_data(());
-        #[allow(unused_variables)]
+
         let res = extractor
             .handle_tick_scoped_data(inp)
             .await;
@@ -425,8 +426,8 @@ mod test {
             .returning(|| Ok("cursor".into()));
         gw.expect_revert()
             .withf(|v, cursor| {
-                v == &BlockIdentifier::Hash(evm::fixtures::HASH_256_0.into()) &&
-                    cursor == "cursor@400"
+                v == &BlockIdentifier::Hash(evm::fixtures::HASH_256_0.into())
+                    && cursor == "cursor@400"
             })
             .times(1)
             .returning(|_, _| Ok(evm::BlockAccountChanges::default()));

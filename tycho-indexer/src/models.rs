@@ -1,6 +1,5 @@
 #![allow(dead_code)]
-#[allow(unused_imports)]
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::extractor::{evm::Transaction, ExtractionError};
