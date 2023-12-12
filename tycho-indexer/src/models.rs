@@ -20,18 +20,18 @@ pub enum Chain {
     ZkSync,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ProtocolSystem {
     Ambient,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ImplementationType {
     Vm,
     Custom,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum FinancialType {
     Swap,
     Lend,
@@ -39,7 +39,7 @@ pub enum FinancialType {
     Psm,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct ProtocolType {
     name: String,
     attribute_schema: serde_json::Value,
@@ -187,7 +187,6 @@ pub struct ProtocolState {
 #[cfg(test)]
 mod test {
     use super::*;
-    #[allow(unused_imports)]
     use actix_web::body::MessageBody;
     use ethers::types::{H160, H256};
     use rstest::rstest;
@@ -214,28 +213,22 @@ mod test {
             tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
             contracts: vec![b"contract1".to_vec(), b"contract2".to_vec()],
         };
+        let expected_chain = Chain::Ethereum;
+        let expected_protocol_system = ProtocolSystem::Ambient;
 
-        // Sample parameters for testing
-        let protocol_system = ProtocolSystem::Ambient;
         let protocol_type = ProtocolType {
             name: "Pool".to_string(),
             attribute_schema: serde_json::Value::default(),
             financial_type: crate::models::FinancialType::Psm,
             implementation_type: crate::models::ImplementationType::Custom,
         };
-        let chain = Chain::Ethereum;
 
         // Call the try_from_message method
         let result = ProtocolComponent::<String>::try_from_message(
             msg,
-            ProtocolSystem::Ambient,
-            ProtocolType {
-                name: "Pool".to_string(),
-                attribute_schema: serde_json::Value::default(),
-                financial_type: crate::models::FinancialType::Psm,
-                implementation_type: crate::models::ImplementationType::Custom,
-            },
-            Chain::Ethereum,
+            expected_protocol_system.clone(),
+            protocol_type.clone(),
+            expected_chain,
         );
 
         // Assert the result
@@ -246,9 +239,9 @@ mod test {
 
         // Assert specific properties of the protocol component
         assert_eq!(protocol_component.id, "component_id");
-        assert_eq!(protocol_component.protocol_system, protocol_system);
+        assert_eq!(protocol_component.protocol_system, expected_protocol_system);
         assert_eq!(protocol_component.protocol_type, protocol_type);
-        assert_eq!(protocol_component.chain, chain);
+        assert_eq!(protocol_component.chain, expected_chain);
         assert_eq!(protocol_component.tokens, vec!["token1".to_string(), "token2".to_string()]);
         assert_eq!(
             protocol_component.contract_ids,
