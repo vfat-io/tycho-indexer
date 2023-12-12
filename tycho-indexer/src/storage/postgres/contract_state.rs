@@ -743,7 +743,7 @@ where
                 .get_contract_slots(&id.chain, Some(&[account.address().clone()]), version, db)
                 .await?
                 .remove(&id.address)
-                .unwrap_or_else(HashMap::new);
+                .unwrap_or_default();
             account.set_store(&slots)?;
         }
 

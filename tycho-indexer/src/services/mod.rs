@@ -9,7 +9,6 @@ use tokio::task::JoinHandle;
 
 use crate::{
     extractor::{evm, runner::ExtractorHandle, ExtractionError},
-    models::NormalisedMessage,
     storage::postgres::PostgresGateway,
 };
 
