@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #[allow(unused_imports)]
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
@@ -19,20 +20,17 @@ pub enum Chain {
     ZkSync,
 }
 
-#[allow(dead_code)]
 #[derive(PartialEq, Debug)]
 pub enum ProtocolSystem {
     Ambient,
 }
 
-#[allow(dead_code)]
 #[derive(PartialEq, Debug)]
 pub enum ImplementationType {
     Vm,
     Custom,
 }
 
-#[allow(dead_code)]
 #[derive(PartialEq, Debug)]
 pub enum FinancialType {
     Swap,
@@ -41,7 +39,6 @@ pub enum FinancialType {
     Psm,
 }
 
-#[allow(dead_code)]
 #[derive(PartialEq, Debug)]
 pub struct ProtocolType {
     name: String,
@@ -97,7 +94,6 @@ pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync +
     fn source(&self) -> ExtractorIdentity;
 }
 
-#[allow(dead_code)]
 pub struct ProtocolComponent<T> {
     // an id for this component, could be hex repr of contract address
     id: String,
@@ -116,7 +112,6 @@ pub struct ProtocolComponent<T> {
 }
 
 impl ProtocolComponent<String> {
-    #[allow(dead_code)]
     pub fn try_from_message(
         msg: substreams::ProtocolComponent,
         protocol_system: ProtocolSystem,
@@ -167,7 +162,6 @@ pub struct TvlChange<T> {
 }
 
 impl TvlChange<String> {
-    #[allow(dead_code)]
     pub fn try_from_message(
         msg: substreams::TvlUpdate,
         tx: &Transaction,
@@ -181,7 +175,6 @@ impl TvlChange<String> {
     }
 }
 
-#[allow(dead_code)]
 pub struct ProtocolState {
     // associates the back to a component, which has metadata like type, tokens , etc.
     component_id: String,
