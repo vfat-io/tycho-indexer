@@ -107,7 +107,7 @@ pub struct ProtocolComponent<T> {
     // ID's referring to related contracts
     contract_ids: Vec<String>,
     // allows to express some validation over the attributes if necessary
-    attribute_schema: Bytes,
+    static_attributes: Bytes,
 }
 
 impl ProtocolComponent<String> {
@@ -146,7 +146,7 @@ impl ProtocolComponent<String> {
             protocol_system,
             tokens,
             contract_ids,
-            attribute_schema: Bytes::default(),
+            static_attributes: Bytes::default(),
             chain,
         })
     }
@@ -249,7 +249,7 @@ mod test {
             protocol_component.contract_ids,
             vec!["contract1".to_string(), "contract2".to_string()]
         );
-        assert_eq!(protocol_component.attribute_schema, Bytes::default());
+        assert_eq!(protocol_component.static_attributes, Bytes::default());
     }
 
     #[rstest]
