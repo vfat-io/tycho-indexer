@@ -15,7 +15,7 @@ use tracing::{debug, error, info, instrument, trace, warn, Instrument};
 use super::{Extractor, ExtractorMsg};
 use crate::{
     extractor::ExtractionError,
-    models::{ExtractorIdentity, NormalisedMessage},
+    models::ExtractorIdentity,
     pb::sf::substreams::v1::Package,
     substreams::{
         stream::{BlockResponse, SubstreamsStream},
@@ -305,7 +305,7 @@ mod test {
     use serde::{Deserialize, Serialize};
     use tracing::info_span;
 
-    use crate::extractor::MockExtractor;
+    use crate::{extractor::MockExtractor, models::NormalisedMessage};
 
     use super::*;
 
