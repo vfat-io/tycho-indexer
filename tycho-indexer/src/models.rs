@@ -114,7 +114,7 @@ pub struct ProtocolComponent<T> {
     tokens: Vec<T>,
     // ID's referring to related contracts
     contract_ids: Vec<ContractId>,
-    // allows to express some validation over the attributes if necessary
+    // allows to express some validation over the static attributes if necessary
     static_attributes: HashMap<String, Bytes>,
 }
 
@@ -152,13 +152,26 @@ impl ProtocolComponent<String> {
             })
             .collect::<Vec<_>>();
 
+        let attribute_map: HashMap<_, _> = msg
+            .static_attributes
+            .into_iter()
+            .map(|attr| {
+                (
+                    String::from_utf8(attr.name)
+                        .map_err(|error| ExtractionError::DecodeError(error.to_string()))
+                        .unwrap(),
+                    Bytes::from(attr.value),
+                )
+            })
+            .collect();
+
         Ok(Self {
             id,
             protocol_type,
             protocol_system,
             tokens,
             contract_ids,
-            static_attributes: HashMap::new(),
+            static_attributes: attribute_map,
             chain,
         })
     }
@@ -202,6 +215,7 @@ pub struct ProtocolState {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::pb::tycho::evm::v1::Attribute;
     use actix_web::body::MessageBody;
     use ethers::types::{H160, H256};
     use rstest::rstest;
@@ -222,14 +236,31 @@ mod test {
 
     #[rstest]
     fn test_try_from_message_protocol_component() {
+        let balance_key = "balance";
+        let factory_address_key = "factory_address";
+        let balance_value = b"50000";
+        let factory_address = b"0x0fwe0g240g20";
+
         // Sample data for testing
+        let static_att = vec![
+            Attribute { name: balance_key.as_bytes().to_vec(), value: balance_value.to_vec() },
+            Attribute {
+                name: factory_address_key.as_bytes().to_vec(),
+                value: factory_address.to_vec(),
+            },
+        ];
         let msg = substreams::ProtocolComponent {
             id: b"component_id".to_vec(),
             tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
             contracts: vec![b"contract1".to_vec(), b"contract2".to_vec()],
+            static_attributes: static_att,
         };
         let expected_chain = Chain::Ethereum;
         let expected_protocol_system = ProtocolSystem::Ambient;
+        let mut expected_attribute_map = HashMap::new();
+        expected_attribute_map.insert(balance_key.to_string(), Bytes::from(balance_value.to_vec()));
+        expected_attribute_map
+            .insert(factory_address_key.to_string(), Bytes::from(factory_address.to_vec()));
 
         let protocol_type = ProtocolType {
             name: "Pool".to_string(),
@@ -262,7 +293,7 @@ mod test {
             protocol_component.contract_ids,
             vec![ContractId("contract1".to_string()), ContractId("contract2".to_string())]
         );
-        assert_eq!(protocol_component.static_attributes, HashMap::default());
+        assert_eq!(protocol_component.static_attributes, expected_attribute_map);
     }
 
     #[rstest]

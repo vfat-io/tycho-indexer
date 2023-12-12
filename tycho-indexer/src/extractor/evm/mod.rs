@@ -602,6 +602,10 @@ pub mod fixtures {
                         vec![99, 111, 110, 116, 114, 97, 99, 116, 49],
                         vec![99, 111, 110, 116, 114, 97, 99, 116, 50],
                     ],
+                    static_attributes: vec![
+                        Attribute { name: b"key1".to_vec(), value: b"value1".to_vec() },
+                        Attribute { name: b"key2".to_vec(), value: b"value2".to_vec() },
+                    ],
                 }],
                 tvl: vec![BalanceChange {
                     token: vec![
