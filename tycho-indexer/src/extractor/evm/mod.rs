@@ -4,7 +4,7 @@ mod utils;
 
 use crate::{
     hex_bytes::Bytes,
-    models::{Chain, ExtractorIdentity, NormalisedMessage},
+    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolState},
     storage::{ChangeType, StateGatewayType},
 };
 use std::{
@@ -281,19 +281,19 @@ impl AccountUpdateWithTx {
             return Err(ExtractionError::Unknown(format!(
                 "Can't merge AccountUpdates from different blocks: 0x{:x} != 0x{:x}",
                 self.tx.block_hash, other.tx.block_hash,
-            )))
+            )));
         }
         if self.tx.hash == other.tx.hash {
             return Err(ExtractionError::Unknown(format!(
                 "Can't merge AccountUpdates from the same transaction: 0x{:x}",
                 self.tx.hash
-            )))
+            )));
         }
         if self.tx.index > other.tx.index {
             return Err(ExtractionError::Unknown(format!(
                 "Can't merge AccountUpdates with lower transaction index: {} > {}",
                 self.tx.index, other.tx.index
-            )))
+            )));
         }
         self.tx = other.tx;
         self.update.merge(other.update)
@@ -438,7 +438,7 @@ impl BlockStateChanges {
                 block,
                 tx_updates,
                 new_pools: HashMap::new(),
-            })
+            });
         }
         Err(ExtractionError::Empty)
     }

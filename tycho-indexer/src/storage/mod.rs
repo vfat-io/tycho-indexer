@@ -451,6 +451,26 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
     fn contract_id(&self) -> ContractId;
 }
 
+/// Lays out the necessary interface needed to store and retrieve protocol states from
+/// storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   protocol state.
+/// * `N`: This represents the storage-specific data type used when converting from the protocol
+///   state to storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the token.
+pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
+    fn from_storage(val: S, contract: ContractId) -> Result<Self, StorageError>;
+
+    fn to_storage(&self, contract_id: I) -> N;
+
+    fn contract_id(&self) -> ContractId;
+}
+
 /// Store and retrieve protocol related structs.
 ///
 /// This trait defines how to retrieve protocol components, state as well as
@@ -513,7 +533,7 @@ pub trait ProtocolStateGateway {
     /// - `at` The version at which the state is valid at.
     async fn get_states(
         &self,
-        chain: Chain,
+        chain: &Chain,
         at: Option<Version>,
         system: Option<ProtocolSystem>,
         id: Option<&[&str]>,
@@ -914,5 +934,14 @@ pub trait StateGateway<DB>:
 {
 }
 
-pub type StateGatewayType<DB, B, TX, C, D> =
-    Arc<dyn StateGateway<DB, Transaction = TX, Block = B, ContractState = C, Delta = D>>;
+pub type StateGatewayType<DB, B, TX, C, D> = Arc<
+    dyn StateGateway<
+        DB,
+        Transaction = TX,
+        Block = B,
+        ContractState = C,
+        Delta = D,
+        Token = T,
+        ProtocolState = PS,
+    >,
+>;

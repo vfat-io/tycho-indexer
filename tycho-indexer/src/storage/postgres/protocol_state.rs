@@ -1,25 +1,29 @@
 use async_trait::async_trait;
+use diesel_async::AsyncPgConnection;
 
 use crate::{
     models::{Chain, ProtocolComponent, ProtocolState, ProtocolSystem},
     storage::{
         postgres::{orm, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolStateGateway,
-        StorableBlock, StorableContract, StorableTransaction, StorageError, TxHash, Version,
+        StorableBlock, StorableContract, StorableProtocolState, StorableToken, StorableTransaction,
+        StorageError, TxHash, Version,
     },
 };
 
 #[async_trait]
-impl<B, TX, A, D> ProtocolStateGateway for PostgresGateway<B, TX, A, D>
+impl<B, TX, A, D, T, PS> ProtocolStateGateway for PostgresGateway<B, TX, A, D, T, PS>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
+    T: StorableToken<orm::Token, orm::NewToken, i64>,
+    PS: StorableProtocolState,
 {
-    type DB = ();
-    type Token = ();
-    type ProtocolState = ();
+    type DB = AsyncPgConnection;
+    type Token = T;
+    type ProtocolState = PS;
 
     async fn get_components(
         &self,
@@ -39,12 +43,12 @@ where
 
     async fn get_states(
         &self,
-        chain: Chain,
+        chain: &Chain,
         at: Option<Version>,
         system: Option<ProtocolSystem>,
         id: Option<&[&str]>,
     ) -> Result<Vec<ProtocolState>, StorageError> {
-        todo!()
+        let block_chain_id = self.get_chain_id(chain);
     }
 
     async fn update_state(&self, chain: Chain, new: &[(TxHash, ProtocolState)], db: &mut Self::DB) {

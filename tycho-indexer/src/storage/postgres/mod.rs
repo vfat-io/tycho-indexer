@@ -130,14 +130,6 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-pub mod cache;
-pub mod chain;
-pub mod contract_state;
-pub mod extraction_state;
-pub mod orm;
-mod protocol_state;
-pub mod schema;
-
 use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, str::FromStr, sync::Arc};
 
 use diesel::prelude::*;
@@ -148,10 +140,20 @@ use diesel_async::{
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use tracing::{debug, info};
 
-use super::{
-    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableTransaction, StorageError,
-};
 use crate::models::Chain;
+
+use super::{
+    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableProtocolState,
+    StorableToken, StorableTransaction, StorageError,
+};
+
+pub mod cache;
+pub mod chain;
+pub mod contract_state;
+pub mod extraction_state;
+pub mod orm;
+mod protocol_state;
+pub mod schema;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
@@ -272,7 +274,7 @@ impl StorageError {
     }
 }
 
-pub struct PostgresGateway<B, TX, A, D> {
+pub struct PostgresGateway<B, TX, A, D, T, PS> {
     chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
@@ -280,12 +282,14 @@ pub struct PostgresGateway<B, TX, A, D> {
     _phantom_delta: PhantomData<D>,
 }
 
-impl<B, TX, A, D> PostgresGateway<B, TX, A, D>
+impl<B, TX, A, D, T, PS> PostgresGateway<B, TX, A, D, T, PS>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
+    T: StorableToken<orm::Token, orm::NewToken, i64>,
+    PS: StorableProtocolState,
 {
     pub fn with_cache(cache: Arc<ChainEnumCache>) -> Self {
         Self {
