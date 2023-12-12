@@ -136,33 +136,40 @@ impl ProtocolComponent<String> {
             .map(|t| {
                 String::from_utf8(t)
                     .map_err(|error| ExtractionError::DecodeError(error.to_string()))
-                    .unwrap()
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let contract_ids = msg
             .contracts
             .into_iter()
-            .map(|contract_id| {
-                ContractId(
-                    String::from_utf8(contract_id)
-                        .map_err(|error| ExtractionError::DecodeError(error.to_string()))
-                        .unwrap(),
-                )
+            .map(|contract_id| match String::from_utf8(contract_id) {
+                Ok(id) => Ok(ContractId(id)),
+                Err(err) => Err(ExtractionError::DecodeError(err.to_string())),
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let attribute_map: HashMap<_, _> = msg
+        let keys = msg
+            .static_attributes
+            .clone()
+            .into_iter()
+            .map(|attr| {
+                String::from_utf8(attr.name)
+                    .map_err(|error| ExtractionError::DecodeError(error.to_string()))
+            })
+            .collect::<Result<Vec<String>, _>>()?;
+
+        let values = msg
             .static_attributes
             .into_iter()
             .map(|attr| {
-                (
-                    String::from_utf8(attr.name)
-                        .map_err(|error| ExtractionError::DecodeError(error.to_string()))
-                        .unwrap(),
-                    Bytes::from(attr.value),
-                )
+                Bytes::try_from(attr.value)
+                    .map_err(|error| ExtractionError::DecodeError(error.to_string()))
             })
+            .collect::<Result<Vec<Bytes>, _>>()?;
+
+        let attribute_map: HashMap<_, _> = keys
+            .into_iter()
+            .zip(values.into_iter())
             .collect();
 
         Ok(Self {
