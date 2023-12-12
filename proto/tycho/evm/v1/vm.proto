@@ -63,3 +63,24 @@ message BlockContractChanges {
   Block block = 1;
   repeated TransactionChanges changes = 2;
 }
+
+message Attribute {
+  bytes name = 1;
+  bytes value = 2;
+}
+
+message StateChanges {
+  bytes component_id = 1;
+  repeated Attribute attributes = 2;
+}
+
+message TransactionStateChanges {
+  Transaction tx = 1;
+  repeated StateChanges state_changes = 2;
+}
+
+message BlockEntityChanges {
+  Block block = 1;
+  repeated TransactionStateChanges changes = 2;
+  // TODO: add component changes
+}
