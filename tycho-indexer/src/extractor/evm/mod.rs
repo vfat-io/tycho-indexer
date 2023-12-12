@@ -882,7 +882,7 @@ mod test {
         )
     }
 
-    #[rstest]
+    #[test]
     fn test_account_from_update_w_tx() {
         let update = update_w_tx();
         let exp = account01();
@@ -890,7 +890,7 @@ mod test {
         assert_eq!(Account::from(&update), exp);
     }
 
-    #[rstest]
+    #[test]
     fn test_merge_account_update() {
         let mut update_left = update_balance();
         let update_right = update_slots();
@@ -902,7 +902,7 @@ mod test {
         assert_eq!(update_left, exp);
     }
 
-    #[rstest]
+    #[test]
     fn test_merge_account_update_wrong_address() {
         let mut update_left = update_balance();
         let mut update_right = update_slots();
@@ -1005,7 +1005,7 @@ mod test {
         }
     }
 
-    #[rstest]
+    #[test]
     fn test_block_state_changes_parse_msg() {
         let msg = fixtures::pb_block_contract_changes();
 
@@ -1052,7 +1052,7 @@ mod test {
         }
     }
 
-    #[rstest]
+    #[test]
     fn test_block_state_changes_aggregate() {
         let mut msg = block_state_changes();
         let block_hash = "0x0000000000000000000000000000000000000000000000000000000031323334";
@@ -1065,7 +1065,7 @@ mod test {
         assert_eq!(res, block_account_changes());
     }
 
-    #[rstest]
+    #[test]
     fn test_merge_protocol_state() {
         let attributes1: HashMap<String, Bytes> = vec![
             ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
@@ -1149,7 +1149,7 @@ mod test {
         assert_eq!(res, exp);
     }
 
-    #[rstest]
+    #[test]
     fn test_protocol_state_wrong_id() {
         let attributes1: HashMap<String, Bytes> = vec![
             ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
@@ -1203,7 +1203,7 @@ mod test {
         }
     }
 
-    #[rstest]
+    #[test]
     fn test_protocol_state_parse_msg() {
         let msg = fixtures::pb_state_changes();
 
@@ -1262,7 +1262,7 @@ mod test {
         }
     }
 
-    #[rstest]
+    #[test]
     fn test_block_entity_changes_parse_msg() {
         let msg = fixtures::pb_block_entity_changes();
 
@@ -1271,7 +1271,7 @@ mod test {
         assert_eq!(res, block_entity_changes());
     }
 
-    #[rstest]
+    #[test]
     fn test_block_entity_changes_aggregate() {
         let mut block_changes = block_entity_changes();
         let block_hash = "0x0000000000000000000000000000000000000000000000000000000031323334";
