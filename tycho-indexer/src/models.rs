@@ -92,10 +92,18 @@ impl ExtractionState {
 pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static {
     fn source(&self) -> ExtractorIdentity;
 }
+/// A type representing the unique identifier for a contract. It can represent an on-chain address
+/// or in the case of a one-to-many relationship it could be something like 'USDC-ETH'. This is for
+/// example the case with arbiturm, where one component is responsible for multiple contracts.
+///
+/// `ContractId` is a simple wrapper around a `String` to ensure type safety
+/// and clarity when working with contract identifiers.
+#[derive(PartialEq, Debug)]
+pub struct ContractId(String);
 
 pub struct ProtocolComponent<T> {
     // an id for this component, could be hex repr of contract address
-    id: String,
+    id: ContractId,
     // what system this component belongs to
     protocol_system: ProtocolSystem,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
@@ -105,7 +113,7 @@ pub struct ProtocolComponent<T> {
     // holds the tokens tradable
     tokens: Vec<T>,
     // ID's referring to related contracts
-    contract_ids: Vec<String>,
+    contract_ids: Vec<ContractId>,
     // allows to express some validation over the attributes if necessary
     static_attributes: Bytes,
 }
@@ -117,9 +125,11 @@ impl ProtocolComponent<String> {
         protocol_type: ProtocolType,
         chain: Chain,
     ) -> Result<Self, ExtractionError> {
-        let id = String::from_utf8(msg.id)
-            .map_err(|error| ExtractionError::DecodeError(error.to_string()))
-            .unwrap();
+        let id = ContractId(
+            String::from_utf8(msg.id)
+                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
+        );
+
         let tokens = msg
             .tokens
             .into_iter()
@@ -134,9 +144,11 @@ impl ProtocolComponent<String> {
             .contracts
             .into_iter()
             .map(|contract_id| {
-                String::from_utf8(contract_id)
-                    .map_err(|error| ExtractionError::DecodeError(error.to_string()))
-                    .unwrap()
+                ContractId(
+                    String::from_utf8(contract_id)
+                        .map_err(|error| ExtractionError::DecodeError(error.to_string()))
+                        .unwrap(),
+                )
             })
             .collect::<Vec<_>>();
 
@@ -241,14 +253,14 @@ mod test {
         let protocol_component = result.unwrap();
 
         // Assert specific properties of the protocol component
-        assert_eq!(protocol_component.id, "component_id");
+        assert_eq!(protocol_component.id.0, "component_id");
         assert_eq!(protocol_component.protocol_system, expected_protocol_system);
         assert_eq!(protocol_component.protocol_type, protocol_type);
         assert_eq!(protocol_component.chain, expected_chain);
         assert_eq!(protocol_component.tokens, vec!["token1".to_string(), "token2".to_string()]);
         assert_eq!(
             protocol_component.contract_ids,
-            vec!["contract1".to_string(), "contract2".to_string()]
+            vec![ContractId("contract1".to_string()), ContractId("contract2".to_string())]
         );
         assert_eq!(protocol_component.static_attributes, Bytes::default());
     }
