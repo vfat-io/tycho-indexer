@@ -841,7 +841,7 @@ pub trait ContractStateGateway {
     /// Errors if:
     ///     - The versions can't be located in storage.
     ///     - There was an error with the database
-    async fn get_account_delta(
+    async fn get_accounts_delta(
         &self,
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,

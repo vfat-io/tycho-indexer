@@ -325,7 +325,7 @@ impl CachedGateway {
     // pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
     //     todo!()
     // }
-    pub async fn get_account_delta(
+    pub async fn get_accounts_delta(
         &self,
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
@@ -340,7 +340,7 @@ impl CachedGateway {
             .await;
         let _ = rx.await;
         self.state_gateway
-            .get_account_delta(chain, start_version, end_version, db)
+            .get_accounts_delta(chain, start_version, end_version, db)
             .await
     }
 }
