@@ -20,26 +20,29 @@ pub enum Chain {
 }
 
 /// Represents the ecosystem to which a `ProtocolComponent` belongs.
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize, Copy)]
 pub enum ProtocolSystem {
+    #[default]
     Ambient,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 pub enum ImplementationType {
+    #[default]
     Vm,
     Custom,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 pub enum FinancialType {
+    #[default]
     Swap,
     Lend,
     Leverage,
     Psm,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 /// Represents the functionality of a component.
 /// `ProtocolSystems` are composed of various `ProtocolComponents`, and components that behave
 /// similarly are grouped under a specific `ProtocolType` (i.e. Pool, Factory) within a
