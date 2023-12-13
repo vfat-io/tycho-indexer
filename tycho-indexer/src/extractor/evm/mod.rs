@@ -1,13 +1,4 @@
 #![allow(dead_code)]
-pub mod ambient;
-pub mod storage;
-mod utils;
-
-use crate::{
-    hex_bytes::Bytes,
-    models::{Chain, ExtractorIdentity, NormalisedMessage},
-    storage::{ChangeType, StateGatewayType},
-};
 use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
@@ -30,7 +21,6 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 use crate::{
     hex_bytes::Bytes,
     models::{Chain, ExtractorIdentity, NormalisedMessage},
-    pb::tycho::evm::v1 as substreams,
     storage::{ChangeType, StateGatewayType},
 };
 
@@ -976,7 +966,6 @@ pub mod fixtures {
 
 #[cfg(test)]
 mod test {
-    use rstest::rstest;
 
     use crate::extractor::evm::fixtures::transaction01;
 
@@ -1568,7 +1557,7 @@ mod test {
         let from_message = TvlChange::try_from_message(msg, &tx).unwrap();
 
         assert_eq!(from_message.new_balance, expected_balance);
-        assert_eq!(from_message.modify_tx, tx.hash.to_string());
+        assert_eq!(from_message.modify_tx, tx.hash);
         assert_eq!(from_message.token, expected_token);
         assert_eq!(from_message.component_id, expected_component_id);
     }
