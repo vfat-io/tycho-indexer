@@ -165,7 +165,7 @@ export LIBRARY_PATH=<PATH-TO-LIB>:$LIBRARY_PATH
 ```bash
 cargo install diesel_cli --no-default-features --features postgres
 ```
-3. Start up a the postgres db service
+3. Start up the postgres db service
 ```bash
 docker-compose up -d db
 ```
