@@ -449,7 +449,7 @@ impl ProtocolComponent<String> {
         let contract_ids = msg
             .contracts
             .into_iter()
-            .map(|contract_id| ContractId(contract_id))
+            .map(ContractId)
             .collect::<Vec<_>>();
 
         let keys = msg
