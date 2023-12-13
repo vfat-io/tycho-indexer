@@ -452,7 +452,7 @@ pub struct ProtocolComponent {
     // what system this component belongs to
     protocol_system: ProtocolSystem,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
-    protocol_type: ProtocolType,
+    protocol_type_id: String,
     // Blockchain the component belongs to
     chain: Chain,
     // holds the tokens tradable
@@ -478,6 +478,8 @@ impl ProtocolComponent {
         protocol_system: ProtocolSystem,
         protocol_type: ProtocolType,
         chain: Chain,
+        protocol_system: ProtocolSystem,
+        protocol_type_id: String,
     ) -> Result<Self, ExtractionError> {
         let id = ContractId(msg.id);
 
@@ -504,7 +506,7 @@ impl ProtocolComponent {
 
         Ok(Self {
             id,
-            protocol_type,
+            protocol_type_id,
             protocol_system,
             tokens,
             contract_ids,
@@ -533,6 +535,8 @@ impl BlockStateChanges {
         msg: substreams::BlockContractChanges,
         extractor: &str,
         chain: Chain,
+        protocol_system: ProtocolSystem,
+        protocol_type_id: String,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
@@ -1497,13 +1501,7 @@ mod test {
         expected_attribute_map.insert(balance_key.to_string(), Bytes::from(balance_value.to_vec()));
         expected_attribute_map
             .insert(factory_address_key.to_string(), Bytes::from(factory_address.to_vec()));
-
-        let protocol_type = ProtocolType {
-            name: "Pool".to_string(),
-            attribute_schema: serde_json::Value::default(),
-            financial_type: FinancialType::Psm,
-            implementation_type: ImplementationType::Custom,
-        };
+        let protocol_type_id = String::from("id-1");
 
         // Call the try_from_message method
         let result = ProtocolComponent::try_from_message(
@@ -1511,6 +1509,8 @@ mod test {
             expected_protocol_system.clone(),
             protocol_type.clone(),
             expected_chain,
+            expected_protocol_system.clone(),
+            protocol_type_id.clone(),
         );
 
         // Assert the result
@@ -1522,7 +1522,7 @@ mod test {
         // Assert specific properties of the protocol component
         assert_eq!(protocol_component.id, ContractId("component_id".to_string()));
         assert_eq!(protocol_component.protocol_system, expected_protocol_system);
-        assert_eq!(protocol_component.protocol_type, protocol_type);
+        assert_eq!(protocol_component.protocol_type_id, protocol_type_id);
         assert_eq!(protocol_component.chain, expected_chain);
         assert_eq!(protocol_component.tokens, vec!["token1".to_string(), "token2".to_string()]);
         assert_eq!(
