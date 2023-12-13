@@ -449,14 +449,11 @@ impl ProtocolComponent<String> {
         let contract_ids = msg
             .contracts
             .into_iter()
-            .map(|contract_id| match String::from_utf8(contract_id) {
-                Ok(id) => Ok(ContractId(id)),
-                Err(err) => Err(ExtractionError::DecodeError(err.to_string())),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|contract_id| ContractId(contract_id))
+            .collect::<Vec<_>>();
 
         let keys = msg
-            .static_attributes
+            .static_att
             .clone()
             .into_iter()
             .map(|attr| {
@@ -466,7 +463,7 @@ impl ProtocolComponent<String> {
             .collect::<Result<Vec<String>, _>>()?;
 
         let values: Vec<_> = msg
-            .static_attributes
+            .static_att
             .into_iter()
             .map(|attr| Bytes::from(attr.value))
             .collect();
@@ -697,13 +694,10 @@ pub mod fixtures {
                         .unwrap(),
                     ],
                     contracts: vec![
-                        "DIANA-THALES".encode(),
-                        hex::decode(
-                            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
-                        )
-                        .unwrap(),
+                        "DIANA-THALES".to_string(),
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
                     ],
-                    static_attributes: vec![
+                    static_att: vec![
                         Attribute { name: b"key1".to_vec(), value: b"value1".to_vec() },
                         Attribute { name: b"key2".to_vec(), value: b"value2".to_vec() },
                     ],
@@ -1013,8 +1007,8 @@ mod test {
         let msg = substreams::ProtocolComponent {
             id: b"component_id".to_vec(),
             tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
-            contracts: vec![b"contract1".to_vec(), b"contract2".to_vec()],
-            static_attributes: static_att,
+            contracts: vec!["contract1".to_string(), "contract2".to_string()],
+            static_att,
         };
         let expected_chain = Chain::Ethereum;
         let expected_protocol_system = ProtocolSystem::Ambient;
