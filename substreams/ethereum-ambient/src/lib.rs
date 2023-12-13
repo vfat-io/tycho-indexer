@@ -1,9 +1,9 @@
 mod pb;
 
-use std::collections::{hash_map::Entry, HashMap};
-
+use ethabi::{decode, ParamType, Token};
 use hex_literal::hex;
 use pb::tycho::evm::v1::{self as tycho, ChangeType};
+use std::collections::{hash_map::Entry, HashMap};
 use substreams_ethereum::pb::eth::{self};
 
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
@@ -98,6 +98,112 @@ fn map_changes(
             })
             .collect::<Vec<_>>();
         storage_changes.sort_unstable_by_key(|change| change.ordinal);
+
+        // Extract token pair creations
+        const INIT_POOL_CODE: u8 = 71;
+
+        if block_tx.to == AMBIENT_CONTRACT {
+            let user_cmd: String = "a15112f9".to_string();
+            let block_tx_hex_string: String = hex::encode(&block_tx.input)[0..8].to_string();
+            if block_tx_hex_string == user_cmd {
+                let user_cmd_external_abi_types = &[
+                    // index of the proxy sidecar the command is being called on
+                    ParamType::Uint(16),
+                    // call data for internal UserCmd method
+                    ParamType::Bytes,
+                ];
+                let user_cmd_internal_abi_types = &[
+                    ParamType::Uint(8),
+                    ParamType::Address,
+                    ParamType::Address,
+                    ParamType::Uint(256),
+                    ParamType::Uint(128),
+                ];
+
+                // Decode external call to UserCmd
+                if let Ok(external_params) =
+                    decode(user_cmd_external_abi_types, &block_tx.input[4..])
+                {
+                    let cmd_bytes = match &external_params[1] {
+                        Token::Bytes(bytes) => bytes.clone(),
+                        _ => {
+                            panic!("Unexpected type for cmd_bytes: {:?}", &external_params[1]);
+                        }
+                    };
+
+                    // Decode internal call to UserCmd
+                    if let Ok(internal_params) = decode(user_cmd_external_abi_types, &cmd_bytes) {
+                        let command_code = match &internal_params[0] {
+                            Token::Uint(uint) => uint.as_u64() as u8,
+                            _ => {
+                                panic!(
+                                    "Unexpected type for command_code: {:?}",
+                                    &internal_params[0]
+                                );
+                            }
+                        };
+
+                        if command_code == INIT_POOL_CODE {
+                            let internal_calldata = match &internal_params[1] {
+                                Token::Bytes(bytes) => bytes.clone(),
+                                _ => {
+                                    panic!(
+                                        "Unexpected type for cmd string: {:?}",
+                                        &internal_params[0]
+                                    );
+                                }
+                            };
+
+                            if let Ok(params) =
+                                decode(user_cmd_internal_abi_types, &internal_calldata)
+                            {
+                                let base = match &params[1] {
+                                    Token::Address(addr) => addr.to_fixed_bytes().to_vec(),
+                                    _ => {
+                                        panic!("Unexpected type for base: {:?}", &params[1]);
+                                    }
+                                };
+
+                                let quote = match &params[2] {
+                                    Token::Address(addr) => addr.to_fixed_bytes().to_vec(),
+                                    _ => {
+                                        panic!("Unexpected type for quote: {:?}", &params[1]);
+                                    }
+                                };
+
+                                let pool_index = match &params[3] {
+                                    Token::Uint(uint) => uint.as_u64() as u32,
+                                    _ => {
+                                        panic!("Unexpected type for pool_index: {:?}", &params[2]);
+                                    }
+                                };
+
+                                let static_attribute = tycho::Attribute {
+                                    name: String::from("pool_index")
+                                        .as_bytes()
+                                        .to_vec(),
+                                    value: pool_index.to_be_bytes().to_vec(),
+                                };
+
+                                let new_component = tycho::ProtocolComponent {
+                                    id: block_tx.hash.clone(),
+                                    tokens: vec![base, quote],
+                                    contracts: vec![],
+                                    static_att: vec![static_attribute],
+                                };
+                                tx_change
+                                    .components
+                                    .push(new_component.into());
+                            } else {
+                                panic!("Failed to decode ABI.");
+                            }
+                        }
+                    }
+                } else {
+                    panic!("Failed to decode ABI.");
+                }
+            }
+        }
 
         // Note: some contracts change slot values and change them back to their
         //  original value before the transactions ends we remember the initial
@@ -245,7 +351,7 @@ fn map_changes(
             });
 
             // reuse changed_contracts hash map by draining it, next iteration
-            // will start empty. This avoids a costly realliocation
+            // will start empty. This avoids a costly reallocation
             for (_, change) in changed_contracts.drain() {
                 tx_change
                     .contract_changes
