@@ -1,12 +1,11 @@
 #![allow(dead_code)]
-use ethers::types::H160;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::extractor::evm::Transaction;
 use strum_macros::{Display, EnumString};
 
-use crate::{hex_bytes::Bytes};
+use crate::hex_bytes::Bytes;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
@@ -117,15 +116,6 @@ pub struct ProtocolComponent<T> {
     pub contract_ids: Vec<ContractId>,
     // allows to express some validation over the static attributes if necessary
     pub static_attributes: HashMap<String, Bytes>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct TvlChange {
-    pub token: H160,
-    pub new_balance: f64,
-    // tx where the this balance was observed
-    pub modify_tx: String,
-    pub component_id: String,
 }
 
 #[allow(dead_code)]

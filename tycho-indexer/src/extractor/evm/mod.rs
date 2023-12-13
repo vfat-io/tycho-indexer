@@ -398,6 +398,14 @@ impl AccountUpdateWithTx {
         Ok(update)
     }
 }
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct TvlChange {
+    pub token: H160,
+    pub new_balance: f64,
+    // tx where the this balance was observed
+    pub modify_tx: String,
+    pub component_id: String,
+}
 
 impl TvlChange {
     pub fn try_from_message(
