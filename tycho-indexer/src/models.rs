@@ -114,7 +114,7 @@ pub struct ProtocolComponent<T> {
     pub tokens: Vec<T>,
     // ID's referring to related contracts
     pub contract_ids: Vec<ContractId>,
-    // allows to express some validation over the static attributes if necessary
+    // Just stores static attributes
     pub static_attributes: HashMap<String, Bytes>,
 }
 
