@@ -14,7 +14,7 @@ use std::{
 use tracing::warn;
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
-use crate::models::{ContractId, ProtocolComponent, ProtocolSystem, ProtocolType, TvlChange};
+use crate::models::{ContractId, ProtocolComponent, ProtocolSystem, ProtocolType};
 use crate::pb::tycho::evm::v1 as substreams;
 use chrono::NaiveDateTime;
 use ethers::{
@@ -575,6 +575,7 @@ impl BlockStateChanges {
 #[cfg(test)]
 pub mod fixtures {
     use super::*;
+    use ethers::abi::AbiEncode;
     use prost::Message;
 
     pub const HASH_256_0: &str =
@@ -684,7 +685,7 @@ pub mod fixtures {
                     .unwrap(),
                     tokens: vec![
                         hex::decode(
-                            "0xe688b84b23f322a994A53dbF8E15FA82CDB71127".trim_start_matches("0x"),
+                            "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".trim_start_matches("0x"),
                         )
                         .unwrap(),
                         hex::decode(
@@ -693,7 +694,7 @@ pub mod fixtures {
                         .unwrap(),
                     ],
                     contracts: vec![
-                        hex::decode("DIANA-THALES").unwrap(),
+                        "DIANA-THALES".encode(),
                         hex::decode(
                             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
                         )
@@ -710,7 +711,7 @@ pub mod fixtures {
                     )
                     .unwrap(),
                     balance: 50000000.encode_to_vec(),
-                    component_id: hex::decode("WETH-CAI").unwrap(),
+                    component_id: "WETH-CAI".encode(),
                 }],
             }],
         }
