@@ -1049,7 +1049,7 @@ mod test {
         let expected_balance: f64 = 3000.0;
         let msg_balance = expected_balance.to_le_bytes().to_vec();
 
-        let expected_token = H160::from_str(&"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
+        let expected_token = H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
         let msg_token = expected_token.0.to_vec();
         let expected_component_id = "DIANA-THALES";
         let msg_component_id = expected_component_id
