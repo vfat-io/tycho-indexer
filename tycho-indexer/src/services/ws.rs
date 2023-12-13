@@ -1,7 +1,7 @@
 //! This module contains Tycho Websocket implementation
 use crate::{
-    extractor::runner::MessageSender,
-    models::{ExtractorIdentity, NormalisedMessage},
+    extractor::{runner::MessageSender, ExtractorMsg},
+    models::ExtractorIdentity,
 };
 use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
@@ -59,17 +59,17 @@ impl Serialize for WebsocketError {
     }
 }
 
-pub type MessageSenderMap<M> = HashMap<ExtractorIdentity, Arc<dyn MessageSender<M> + Send + Sync>>;
+pub type MessageSenderMap = HashMap<ExtractorIdentity, Arc<dyn MessageSender + Send + Sync>>;
 
 /// Shared application data between all connections
 /// Parameters are hidden behind a Mutex to allow for sharing between threads
-pub struct WsData<M> {
+pub struct WsData {
     /// There is one extractor subscriber per extractor identity
-    pub subscribers: Arc<Mutex<MessageSenderMap<M>>>,
+    pub subscribers: Arc<Mutex<MessageSenderMap>>,
 }
 
-impl<M> WsData<M> {
-    pub fn new(extractors: MessageSenderMap<M>) -> Self {
+impl WsData {
+    pub fn new(extractors: MessageSenderMap) -> Self {
         Self { subscribers: Arc::new(Mutex::new(extractors)) }
     }
 }
@@ -79,20 +79,17 @@ impl<M> WsData<M> {
 /// This actor is responsible for:
 /// - Receiving adn forwarding messages from the extractor
 /// - Receiving and handling commands from the client
-pub struct WsActor<M> {
+pub struct WsActor {
     id: Uuid,
     /// Client must send ping at least once per 10 seconds (CLIENT_TIMEOUT), otherwise we drop the
     /// connection.
     heartbeat: Instant,
-    app_state: web::Data<WsData<M>>,
+    app_state: web::Data<WsData>,
     subscriptions: HashMap<Uuid, SpawnHandle>,
 }
 
-impl<M> WsActor<M>
-where
-    M: NormalisedMessage,
-{
-    fn new(app_state: web::Data<WsData<M>>) -> Self {
+impl WsActor {
+    fn new(app_state: web::Data<WsData>) -> Self {
         Self {
             id: Uuid::new_v4(),
             heartbeat: Instant::now(),
@@ -106,7 +103,7 @@ where
     pub async fn ws_index(
         req: HttpRequest,
         stream: web::Payload,
-        data: web::Data<WsData<M>>,
+        data: web::Data<WsData>,
     ) -> Result<HttpResponse, Error> {
         ws::start(WsActor::new(data), &req, stream)
     }
@@ -216,10 +213,7 @@ where
     }
 }
 
-impl<M> Actor for WsActor<M>
-where
-    M: NormalisedMessage,
-{
+impl Actor for WsActor {
     type Context = ws::WebsocketContext<Self>;
 
     #[instrument(skip_all, fields(WsActor.id = %self.id), name = "WsActor::started")]
@@ -257,12 +251,9 @@ pub enum Response {
 }
 
 /// Handle incoming messages from the extractor and forward them to the WS connection
-impl<M> StreamHandler<Result<Arc<M>, ws::ProtocolError>> for WsActor<M>
-where
-    M: NormalisedMessage,
-{
+impl StreamHandler<Result<ExtractorMsg, ws::ProtocolError>> for WsActor {
     #[instrument(skip_all, fields(WsActor.id = %self.id))]
-    fn handle(&mut self, msg: Result<Arc<M>, ws::ProtocolError>, ctx: &mut Self::Context) {
+    fn handle(&mut self, msg: Result<ExtractorMsg, ws::ProtocolError>, ctx: &mut Self::Context) {
         debug!("Message received from extractor");
         match msg {
             Ok(message) => {
@@ -277,10 +268,7 @@ where
 }
 
 /// Handle incoming messages from the WS connection
-impl<M> StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsActor<M>
-where
-    M: NormalisedMessage,
-{
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsActor {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         debug!("Websocket message received");
         match msg {
@@ -344,6 +332,7 @@ mod tests {
     use crate::{extractor::runner::ControlMessage, models::Chain};
 
     use super::*;
+    use crate::models::NormalisedMessage;
     use actix_rt::time::timeout;
     use actix_test::{start, start_with, TestServerConfig};
     use actix_web::App;
@@ -381,6 +370,7 @@ mod tests {
         }
     }
 
+    #[typetag::serde]
     impl NormalisedMessage for DummyMessage {
         fn source(&self) -> ExtractorIdentity {
             self.extractor_id.clone()
@@ -398,11 +388,9 @@ mod tests {
     }
 
     #[async_trait]
-    impl MessageSender<DummyMessage> for MyMessageSender {
-        async fn subscribe(
-            &self,
-        ) -> Result<Receiver<Arc<DummyMessage>>, SendError<ControlMessage<DummyMessage>>> {
-            let (tx, rx) = mpsc::channel(1);
+    impl MessageSender for MyMessageSender {
+        async fn subscribe(&self) -> Result<Receiver<ExtractorMsg>, SendError<ControlMessage>> {
+            let (tx, rx) = mpsc::channel::<ExtractorMsg>(1);
             let extractor_id = self.extractor_id.clone();
 
             // Spawn a task that sends a DummyMessage every 100ms
@@ -434,14 +422,12 @@ mod tests {
             .try_init()
             .unwrap_or_else(|_| debug!("Subscriber already initialized"));
 
-        let app_state = web::Data::new(WsData::<DummyMessage>::new(HashMap::new()));
+        let app_state = web::Data::new(WsData::new(HashMap::new()));
         let server = start(move || {
             App::new()
                 .wrap(RequestTracing::new())
                 .app_data(app_state.clone())
-                .service(
-                    web::resource("/ws/").route(web::get().to(WsActor::<DummyMessage>::ws_index)),
-                )
+                .service(web::resource("/ws/").route(web::get().to(WsActor::ws_index)))
         });
 
         let url = server
@@ -583,7 +569,7 @@ mod tests {
         let extractor_id = ExtractorIdentity::new(Chain::Ethereum, "dummy");
         let extractor_id2 = ExtractorIdentity::new(Chain::Ethereum, "dummy2");
 
-        let app_state = web::Data::new(WsData::<DummyMessage>::new(HashMap::new()));
+        let app_state = web::Data::new(WsData::new(HashMap::new()));
 
         let message_sender = Arc::new(MyMessageSender::new(extractor_id.clone()));
         let message_sender2 = Arc::new(MyMessageSender::new(extractor_id2.clone()));
@@ -601,10 +587,7 @@ mod tests {
                 App::new()
                     .wrap(RequestTracing::new())
                     .app_data(app_state.clone())
-                    .service(
-                        web::resource("/ws/")
-                            .route(web::get().to(WsActor::<DummyMessage>::ws_index)),
-                    )
+                    .service(web::resource("/ws/").route(web::get().to(WsActor::ws_index)))
             },
         );
 

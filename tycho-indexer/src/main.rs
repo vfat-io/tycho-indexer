@@ -26,8 +26,7 @@ mod storage;
 mod substreams;
 
 use crate::{
-    extractor::{evm, evm::BlockAccountChanges, ExtractionError},
-    models::NormalisedMessage,
+    extractor::{evm, ExtractionError},
     services::ServicesBuilder,
     storage::postgres::{self, PostgresGateway},
 };
@@ -143,10 +142,7 @@ async fn start_ambient_extractor(
     args: &CliArgs,
     pool: Pool<AsyncPgConnection>,
     evm_gw: EVMStateGateway<AsyncPgConnection>,
-) -> Result<
-    (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle<BlockAccountChanges>),
-    ExtractionError,
-> {
+) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
     let ambient_name = "vm:ambient";
     let ambient_gw = AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, evm_gw);
     let extractor =
@@ -165,9 +161,9 @@ async fn start_ambient_extractor(
     builder.run().await
 }
 
-async fn shutdown_handler<M: NormalisedMessage>(
+async fn shutdown_handler(
     server_handle: ServerHandle,
-    extractors: Vec<ExtractorHandle<M>>,
+    extractors: Vec<ExtractorHandle>,
 ) -> Result<(), ExtractionError> {
     // listen for ctrl-c
     tokio::signal::ctrl_c().await.unwrap();

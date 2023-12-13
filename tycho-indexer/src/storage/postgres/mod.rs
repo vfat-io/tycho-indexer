@@ -130,6 +130,7 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
+pub mod cache;
 pub mod chain;
 pub mod contract_state;
 pub mod extraction_state;
