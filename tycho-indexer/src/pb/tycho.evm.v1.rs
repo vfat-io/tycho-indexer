@@ -120,9 +120,10 @@ pub struct TransactionStateChanges {
 pub struct BlockEntityChanges {
     #[prost(message, optional, tag="1")]
     pub block: ::core::option::Option<Block>,
-    /// TODO: add component changes
     #[prost(message, repeated, tag="2")]
     pub changes: ::prost::alloc::vec::Vec<TransactionStateChanges>,
+    #[prost(message, repeated, tag="3")]
+    pub components: ::prost::alloc::vec::Vec<ProtocolComponent>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
