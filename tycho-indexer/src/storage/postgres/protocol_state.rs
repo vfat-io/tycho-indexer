@@ -74,11 +74,16 @@ where
         id: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
+        conn: &mut Self::DB,
     ) -> Result<ProtocolState, StorageError> {
         todo!()
     }
 
-    async fn revert_protocol_state(&self, to: &BlockIdentifier) -> Result<(), StorageError> {
+    async fn revert_protocol_state(
+        &self,
+        to: &BlockIdentifier,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
         todo!()
     }
 }
