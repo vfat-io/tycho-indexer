@@ -15,8 +15,10 @@ use std::{
 use tracing::warn;
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
-use crate::models::{ContractId, ProtocolComponent, ProtocolSystem, ProtocolType};
-use crate::pb::tycho::evm::v1 as substreams;
+use crate::{
+    models::{ContractId, ProtocolComponent, ProtocolSystem, ProtocolType},
+    pb::tycho::evm::v1 as substreams,
+};
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
@@ -722,11 +724,13 @@ pub mod fixtures {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::models::{
-        ContractId, FinancialType, ImplementationType, ProtocolComponent, ProtocolSystem,
-        ProtocolType,
+    use crate::{
+        models::{
+            ContractId, FinancialType, ImplementationType, ProtocolComponent, ProtocolSystem,
+            ProtocolType,
+        },
+        pb::tycho::evm::v1::Attribute,
     };
-    use crate::pb::tycho::evm::v1::Attribute;
     use actix_web::body::MessageBody;
     use rstest::rstest;
     use std::str::FromStr;
