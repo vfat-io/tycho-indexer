@@ -70,8 +70,6 @@
 //! for these enums. Following this approach paves the way for initializing a
 //! cross-chain compatible gateway (For instance, refer
 //! [enum_dispatch](https://docs.rs/enum_dispatch/latest/enum_dispatch/) crate).
-pub mod postgres;
-
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use async_trait::async_trait;
@@ -80,9 +78,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
+    extractor::evm::ProtocolState,
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ProtocolComponent, ProtocolState, ProtocolSystem},
+    models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem},
 };
+
+pub mod postgres;
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
 /// blockchain.
@@ -392,6 +393,7 @@ pub enum VersionKind {
     #[allow(dead_code)]
     Index(i64),
 }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ContractId {
     pub address: Address,
@@ -429,6 +431,7 @@ impl Version {
         Self(BlockOrTimestamp::Timestamp(ts), VersionKind::Last)
     }
 }
+
 /// Lays out the necessary interface needed to store and retrieve tokens from
 /// storage.
 ///
@@ -869,15 +872,14 @@ pub trait ContractStateGateway {
 }
 
 pub trait StateGateway<DB>:
-    ExtractionStateGateway<DB = DB>
-    + ChainGateway<DB = DB>
-    // + ProtocolGateway<DB = DB>
-    + ExtractionStateGateway<DB = DB>
-    + ContractStateGateway<DB = DB>
-    + Send
-    + Sync
-{
-}
+ExtractionStateGateway<DB=DB>
++ ChainGateway<DB=DB>
+// + ProtocolGateway<DB = DB>
++ ExtractionStateGateway<DB=DB>
++ ContractStateGateway<DB=DB>
++ Send
++ Sync
+{}
 
 pub type StateGatewayType<DB, B, TX, C, D> =
     Arc<dyn StateGateway<DB, Transaction = TX, Block = B, ContractState = C, Delta = D>>;

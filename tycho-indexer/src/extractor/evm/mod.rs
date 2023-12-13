@@ -15,7 +15,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
     hex_bytes::Bytes,
-    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolState},
+    models::{Chain, ExtractorIdentity, NormalisedMessage},
     pb::tycho::evm::v1 as substreams,
     storage::{ChangeType, StateGatewayType},
 };
@@ -488,6 +488,17 @@ impl BlockStateChanges {
             new_pools: self.new_pools,
         })
     }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, PartialEq, Clone)]
+pub struct ProtocolState {
+    // associates back to a component, which has metadata like type, tokens , etc.
+    pub component_id: String,
+    // holds all the protocol specific attributes, validates by the components schema
+    pub attributes: HashMap<String, Bytes>,
+    // via transaction, we can trace back when this state became valid
+    pub modify_tx: Transaction,
 }
 
 // TODO: remove dead code check skip once extractor is implemented
