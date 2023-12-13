@@ -40,10 +40,10 @@ pub enum FinancialType {
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct ProtocolType {
-    name: String,
-    attribute_schema: serde_json::Value,
-    financial_type: FinancialType,
-    implementation_type: ImplementationType,
+    pub name: String,
+    pub attribute_schema: serde_json::Value,
+    pub financial_type: FinancialType,
+    pub implementation_type: ImplementationType,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -99,23 +99,23 @@ pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync +
 /// `ContractId` is a simple wrapper around a `String` to ensure type safety
 /// and clarity when working with contract identifiers.
 #[derive(PartialEq, Debug)]
-pub struct ContractId(String);
+pub struct ContractId(pub String);
 
 pub struct ProtocolComponent<T> {
     // an id for this component, could be hex repr of contract address
-    id: ContractId,
+    pub id: ContractId,
     // what system this component belongs to
-    protocol_system: ProtocolSystem,
+    pub protocol_system: ProtocolSystem,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
-    protocol_type: ProtocolType,
+    pub protocol_type: ProtocolType,
     // Blockchain the component belongs to
-    chain: Chain,
+    pub chain: Chain,
     // holds the tokens tradable
-    tokens: Vec<T>,
+    pub tokens: Vec<T>,
     // ID's referring to related contracts
-    contract_ids: Vec<ContractId>,
+    pub contract_ids: Vec<ContractId>,
     // allows to express some validation over the static attributes if necessary
-    static_attributes: HashMap<String, Bytes>,
+    pub static_attributes: HashMap<String, Bytes>,
 }
 
 impl ProtocolComponent<String> {
@@ -180,11 +180,11 @@ impl ProtocolComponent<String> {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct TvlChange<T> {
-    token: T,
-    new_balance: f64,
+    pub token: T,
+    pub new_balance: f64,
     // tx where the this balance was observed
-    modify_tx: String,
-    component_id: String,
+    pub modify_tx: String,
+    pub component_id: String,
 }
 
 impl TvlChange<String> {
