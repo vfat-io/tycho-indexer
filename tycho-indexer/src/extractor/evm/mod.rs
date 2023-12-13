@@ -567,6 +567,7 @@ impl BlockStateChanges {
 #[cfg(test)]
 pub mod fixtures {
     use super::*;
+    use prost::Message;
 
     pub const HASH_256_0: &str =
         "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -669,14 +670,26 @@ pub mod fixtures {
                     },
                 ],
                 components: vec![ProtocolComponent {
-                    id: vec![99, 111, 109, 112, 111, 110, 101, 110, 116, 95, 105, 100],
+                    id: hex::decode(
+                        "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".trim_start_matches("0x"),
+                    )
+                    .unwrap(),
                     tokens: vec![
-                        vec![116, 111, 107, 101, 110, 49],
-                        vec![116, 111, 107, 101, 110, 50],
+                        hex::decode(
+                            "0xe688b84b23f322a994A53dbF8E15FA82CDB71127".trim_start_matches("0x"),
+                        )
+                        .unwrap(),
+                        hex::decode(
+                            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
+                        )
+                        .unwrap(),
                     ],
                     contracts: vec![
-                        vec![99, 111, 110, 116, 114, 97, 99, 116, 49],
-                        vec![99, 111, 110, 116, 114, 97, 99, 116, 50],
+                        hex::decode("DIANA-THALES").unwrap(),
+                        hex::decode(
+                            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
+                        )
+                        .unwrap(),
                     ],
                     static_attributes: vec![
                         Attribute { name: b"key1".to_vec(), value: b"value1".to_vec() },
@@ -684,13 +697,12 @@ pub mod fixtures {
                     ],
                 }],
                 tvl: vec![BalanceChange {
-                    token: vec![
-                        48, 120, 67, 48, 50, 97, 97, 65, 51, 57, 98, 50, 50, 51, 70, 69, 56, 68,
-                        48, 65, 48, 101, 53, 67, 52, 70, 50, 55, 101, 65, 68, 57, 48, 56, 51, 67,
-                        55, 53, 54, 67, 99, 50,
-                    ],
-                    balance: vec![0, 0, 0, 0, 0, 112, 167, 64],
-                    component_id: vec![68, 73, 65, 78, 65, 45, 84, 72, 65, 76, 69, 83],
+                    token: hex::decode(
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
+                    )
+                    .unwrap(),
+                    balance: 50000000.encode_to_vec(),
+                    component_id: hex::decode("WETH-CAI").unwrap(),
                 }],
             }],
         }
