@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::extractor::evm::Transaction;
 use strum_macros::{Display, EnumString};
 
 use crate::hex_bytes::Bytes;
@@ -107,11 +108,12 @@ pub struct ProtocolComponent<T> {
 }
 #[allow(dead_code)]
 
+#[allow(dead_code)]
 pub struct ProtocolState {
-    // associates the back to a component, which has metadata like type, tokens , etc.
-    component_id: String,
+    // associates back to a component, which has metadata like type, tokens , etc.
+    pub component_id: String,
     // holds all the protocol specific attributes, validates by the components schema
-    attributes: HashMap<String, Bytes>,
+    pub attributes: HashMap<String, Bytes>,
     // via transaction, we can trace back when this state became valid
-    modify_tx: Bytes,
+    pub modify_tx: Transaction,
 }
