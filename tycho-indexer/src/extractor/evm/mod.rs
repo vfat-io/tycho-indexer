@@ -5,6 +5,7 @@ use std::{
     ops::Deref,
 };
 
+use crate::{models::ProtocolSystem, pb::tycho::evm::v1 as substreams};
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
@@ -223,7 +224,31 @@ pub struct BlockAccountChanges {
     chain: Chain,
     pub block: Block,
     pub account_updates: HashMap<H160, AccountUpdate>,
-    pub new_pools: HashMap<H160, SwapPool>,
+    pub new_protocol_components: Vec<ProtocolComponent>,
+    pub deleted_protocol_components: Vec<ProtocolComponent>,
+    pub tvl_changes: HashMap<String, TvlChange>,
+}
+
+impl BlockAccountChanges {
+    pub fn new(
+        extractor: &str,
+        chain: Chain,
+        block: Block,
+        account_updates: HashMap<H160, AccountUpdate>,
+        new_components: Vec<ProtocolComponent>,
+        deleted_protocol_components: Vec<ProtocolComponent>,
+        tvl_change: HashMap<String, TvlChange>,
+    ) -> Self {
+        BlockAccountChanges {
+            extractor: extractor.to_owned(),
+            chain,
+            block,
+            account_updates,
+            new_protocol_components: new_components,
+            deleted_protocol_components,
+            tvl_changes: tvl_change,
+        }
+    }
 }
 
 impl std::fmt::Display for BlockAccountChanges {
@@ -322,7 +347,8 @@ pub struct BlockStateChanges {
     chain: Chain,
     pub block: Block,
     pub tx_updates: Vec<AccountUpdateWithTx>,
-    pub new_pools: HashMap<H160, SwapPool>,
+    pub protocol_components: Vec<ProtocolComponent>,
+    pub tvl_changes: Vec<TvlChange>,
 }
 
 pub type EVMStateGateway<DB> = StateGatewayType<DB, Block, Transaction, Account, AccountUpdate>;
@@ -475,8 +501,6 @@ pub struct ContractId(pub String);
 impl ProtocolComponent {
     pub fn try_from_message(
         msg: substreams::ProtocolComponent,
-        protocol_system: ProtocolSystem,
-        protocol_type: ProtocolType,
         chain: Chain,
         protocol_system: ProtocolSystem,
         protocol_type_id: String,
@@ -541,6 +565,7 @@ impl BlockStateChanges {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
             let mut tx_updates = Vec::new();
+            let mut protocol_components = Vec::new();
 
             for change in msg.changes.into_iter() {
                 if let Some(tx) = change.tx {
@@ -548,6 +573,15 @@ impl BlockStateChanges {
                     for el in change.contract_changes.into_iter() {
                         let update = AccountUpdateWithTx::try_from_message(el, &tx, chain)?;
                         tx_updates.push(update);
+                    }
+                    for component_msg in change.components.into_iter() {
+                        let component = ProtocolComponent::try_from_message(
+                            component_msg,
+                            chain,
+                            protocol_system,
+                            protocol_type_id.clone(),
+                        )?;
+                        protocol_components.push(component);
                     }
                 }
             }
@@ -557,7 +591,8 @@ impl BlockStateChanges {
                 chain,
                 block,
                 tx_updates,
-                new_pools: HashMap::new(),
+                protocol_components,
+                tvl_changes: Vec::new(),
             });
         }
         Err(ExtractionError::Empty)
@@ -595,16 +630,18 @@ impl BlockStateChanges {
             }
         }
 
-        Ok(BlockAccountChanges {
-            extractor: self.extractor,
-            chain: self.chain,
-            block: self.block,
-            account_updates: account_updates
+        Ok(BlockAccountChanges::new(
+            &self.extractor,
+            self.chain,
+            self.block,
+            account_updates
                 .into_iter()
                 .map(|(k, v)| (k, v.update))
                 .collect(),
-            new_pools: self.new_pools,
-        })
+            self.protocol_components,
+            Vec::new(),
+            HashMap::new(),
+        ))
     }
 }
 
@@ -969,6 +1006,10 @@ pub mod fixtures {
 mod test {
     use std::str::FromStr;
 
+    use crate::extractor::evm::fixtures::transaction01;
+
+    use super::*;
+    use crate::{models::ProtocolSystem, pb::tycho::evm::v1::Attribute};
     use actix_web::body::MessageBody;
     use rstest::rstest;
 
@@ -1117,6 +1158,24 @@ mod test {
             to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
             index: 2,
         };
+        let protocol_component = ProtocolComponent {
+            id: ContractId("component_id".to_string()),
+            protocol_system: ProtocolSystem::Ambient,
+            protocol_type_id: String::from("id-1"),
+            chain: Chain::Ethereum,
+            tokens: vec!["token1".to_string(), "token2".to_string()],
+            contract_ids: vec![
+                ContractId("DIANA-THALES".to_string()),
+                ContractId("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
+            ],
+            static_attributes: [
+                ("key1".to_string(), Bytes::from(b"value1".to_vec())),
+                ("key2".to_string(), Bytes::from(b"value2".to_vec())),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+        };
         BlockStateChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
@@ -1161,7 +1220,8 @@ mod test {
                     tx,
                 },
             ],
-            new_pools: HashMap::new(),
+            protocol_components: vec![protocol_component],
+            tvl_changes: Vec::new(),
         }
     }
 
@@ -1169,17 +1229,41 @@ mod test {
     fn test_block_state_changes_parse_msg() {
         let msg = fixtures::pb_block_contract_changes();
 
-        let res = BlockStateChanges::try_from_message(msg, "test", Chain::Ethereum).unwrap();
-
+        let res = BlockStateChanges::try_from_message(
+            msg,
+            "test",
+            Chain::Ethereum,
+            ProtocolSystem::Ambient,
+            String::from("id-1"),
+        )
+        .unwrap();
         assert_eq!(res, block_state_changes());
     }
 
     fn block_account_changes() -> BlockAccountChanges {
         let address = H160::from_low_u64_be(0x0000000000000000000000000000000061626364);
-        BlockAccountChanges {
-            extractor: "test".to_string(),
+        let protocol_component = ProtocolComponent {
+            id: ContractId("component_id".to_string()),
+            protocol_system: ProtocolSystem::Ambient,
+            protocol_type_id: String::from("id-1"),
             chain: Chain::Ethereum,
-            block: Block {
+            tokens: vec!["token1".to_string(), "token2".to_string()],
+            contract_ids: vec![
+                ContractId("DIANA-THALES".to_string()),
+                ContractId("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
+            ],
+            static_attributes: [
+                ("key1".to_string(), Bytes::from(b"value1".to_vec())),
+                ("key2".to_string(), Bytes::from(b"value2".to_vec())),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+        };
+        BlockAccountChanges::new(
+            &"test".to_string(),
+            Chain::Ethereum,
+            Block {
                 number: 1,
                 hash: H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000031323334,
@@ -1190,7 +1274,7 @@ mod test {
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
-            account_updates: vec![(
+            vec![(
                 address,
                 AccountUpdate {
                     address: H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
@@ -1208,8 +1292,10 @@ mod test {
             )]
             .into_iter()
             .collect(),
-            new_pools: HashMap::new(),
-        }
+            vec![protocol_component],
+            Vec::new(),
+            HashMap::new(),
+        )
     }
 
     #[test]
@@ -1506,8 +1592,6 @@ mod test {
         // Call the try_from_message method
         let result = ProtocolComponent::try_from_message(
             msg,
-            expected_protocol_system.clone(),
-            protocol_type.clone(),
             expected_chain,
             expected_protocol_system.clone(),
             protocol_type_id.clone(),
