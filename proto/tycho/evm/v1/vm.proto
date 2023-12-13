@@ -44,7 +44,7 @@ message ProtocolComponent {
   bytes id = 1;
   repeated bytes tokens = 2;
   repeated string contracts = 3;
-  repeated Attribute static_att= 4;
+  repeated Attribute static_att = 4;
 }
 
 message BalanceChange {
@@ -83,5 +83,5 @@ message TransactionStateChanges {
 message BlockEntityChanges {
   Block block = 1;
   repeated TransactionStateChanges changes = 2;
-  // TODO: add component changes
+  repeated ProtocolComponent components = 3;
 }
