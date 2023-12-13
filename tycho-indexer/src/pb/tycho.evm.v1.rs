@@ -51,11 +51,37 @@ pub struct ContractChange {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ProtocolComponent {
+    #[prost(bytes="vec", tag="1")]
+    pub id: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", repeated, tag="2")]
+    pub tokens: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+    #[prost(string, repeated, tag="3")]
+    pub contracts: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(message, repeated, tag="4")]
+    pub static_att: ::prost::alloc::vec::Vec<Attribute>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BalanceChange {
+    #[prost(bytes="vec", tag="1")]
+    pub token: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", tag="2")]
+    pub balance: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", tag="3")]
+    pub component_id: ::prost::alloc::vec::Vec<u8>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionChanges {
     #[prost(message, optional, tag="1")]
     pub tx: ::core::option::Option<Transaction>,
     #[prost(message, repeated, tag="2")]
     pub contract_changes: ::prost::alloc::vec::Vec<ContractChange>,
+    #[prost(message, repeated, tag="3")]
+    pub components: ::prost::alloc::vec::Vec<ProtocolComponent>,
+    #[prost(message, repeated, tag="4")]
+    pub tvl: ::prost::alloc::vec::Vec<BalanceChange>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

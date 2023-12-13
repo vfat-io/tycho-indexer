@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-
+#![allow(dead_code)]
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::extractor::evm::Transaction;
 use strum_macros::{Display, EnumString};
@@ -19,18 +19,18 @@ pub enum Chain {
     ZkSync,
 }
 
-#[allow(dead_code)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ProtocolSystem {
     Ambient,
 }
 
-#[allow(dead_code)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ImplementationType {
     Vm,
     Custom,
 }
 
-#[allow(dead_code)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum FinancialType {
     Swap,
     Lend,
@@ -38,12 +38,12 @@ pub enum FinancialType {
     Psm,
 }
 
-#[allow(dead_code)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct ProtocolType {
-    name: String,
-    attribute_schema: serde_json::Value,
-    financial_type: FinancialType,
-    implementation_type: ImplementationType,
+    pub name: String,
+    pub attribute_schema: serde_json::Value,
+    pub financial_type: FinancialType,
+    pub implementation_type: ImplementationType,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -64,7 +64,7 @@ impl std::fmt::Display for ExtractorIdentity {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ExtractionState {
     pub name: String,
     pub chain: Chain,
@@ -91,20 +91,6 @@ impl ExtractionState {
 #[typetag::serde(tag = "type")]
 pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static {
     fn source(&self) -> ExtractorIdentity;
-}
-
-#[allow(dead_code)]
-pub struct ProtocolComponent<T> {
-    // an id for this component, could be hex repr of contract address
-    id: String,
-    // what system this component belongs to
-    protocol_system: ProtocolSystem,
-    // more metadata information about the components general type (swap, lend, bridge, etc.)
-    protocol_type: ProtocolType,
-    // holds the tokens tradable
-    tokens: Vec<T>,
-    // allows to express some validation over the attributes if necessary
-    attribute_schema: Bytes,
 }
 
 #[allow(dead_code)]
