@@ -1,13 +1,10 @@
 #![allow(dead_code)]
+
 use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
 };
 
-use crate::{
-    models::{ProtocolSystem, ProtocolType},
-    pb::tycho::evm::v1 as substreams,
-};
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
@@ -20,7 +17,8 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
     hex_bytes::Bytes,
-    models::{Chain, ExtractorIdentity, NormalisedMessage},
+    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolSystem, ProtocolType},
+    pb::tycho::evm::v1 as substreams,
     storage::{ChangeType, StateGatewayType},
 };
 
@@ -403,6 +401,7 @@ impl AccountUpdateWithTx {
         Ok(update)
     }
 }
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct TvlChange {
     token: H160,
@@ -426,6 +425,7 @@ impl TvlChange {
         })
     }
 }
+
 pub struct ProtocolComponent {
     // an id for this component, could be hex repr of contract address
     id: ContractId,
@@ -607,7 +607,7 @@ pub struct ProtocolState {
     // holds all the protocol specific attributes, validates by the components schema
     pub attributes: HashMap<String, Bytes>,
     // via transaction, we can trace back when this state became valid
-    pub modify_tx: Transaction,
+    pub modify_tx: H256,
 }
 
 // TODO: remove dead code check skip once extractor is implemented
@@ -631,7 +631,7 @@ impl ProtocolState {
             })
             .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
 
-        Ok(Self { component_id, attributes, modify_tx: *tx })
+        Ok(Self { component_id, attributes, modify_tx: tx.hash })
     }
 
     /// Merges this update with another one.
@@ -658,28 +658,95 @@ impl ProtocolState {
                 self.component_id, other.component_id
             )));
         }
-        if self.modify_tx.block_hash != other.modify_tx.block_hash {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates from different blocks: 0x{:x} != 0x{:x}",
-                self.modify_tx.block_hash, other.modify_tx.block_hash,
-            )));
-        }
-        if self.modify_tx.hash == other.modify_tx.hash {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates from the same transaction: 0x{:x}",
-                self.modify_tx.hash
-            )));
-        }
-        if self.modify_tx.index > other.modify_tx.index {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates with lower transaction index: {} > {}",
-                self.modify_tx.index, other.modify_tx.index
-            )));
-        }
         self.modify_tx = other.modify_tx;
         self.attributes.extend(other.attributes);
         Ok(())
     }
+}
+
+/// Updates grouped by their respective transaction.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProtocolStatesWithTx {
+    pub protocol_states: HashMap<String, ProtocolState>,
+    pub tx: Transaction,
+}
+
+impl ProtocolStatesWithTx {
+    /// Parses protocol state from tychos protobuf TransactionStateChanges message
+    pub fn try_from_message(
+        msg: Vec<substreams::StateChanges>,
+        tx: Transaction,
+    ) -> Result<Self, ExtractionError> {
+        let mut protocol_states = HashMap::new();
+        for state_msg in msg {
+            let state = ProtocolState::try_from_message(state_msg, &tx)?;
+            protocol_states.insert(state.clone().component_id, state);
+        }
+        Ok(Self { protocol_states, tx })
+    }
+
+    /// Merges this update with another one.
+    ///
+    /// The method combines two `ProtocolStatesWithTx` instances under certain
+    /// conditions:
+    /// - The block from which both updates came should be the same. If the updates are from
+    ///   different blocks, the method will return an error.
+    /// - The transactions for each of the updates should be distinct. If they come from the same
+    ///   transaction, the method will return an error.
+    /// - The order of the transaction matters. The transaction from `other` must have occurred
+    ///   later than the self transaction. If the self transaction has a higher index than `other`,
+    ///   the method will return an error.
+    ///
+    /// The merged update keeps the transaction of `other`.
+    ///
+    /// # Errors
+    /// This method will return `ExtractionError::MergeError` if any of the above
+    /// conditions is violated.
+    pub fn merge(&mut self, other: &ProtocolStatesWithTx) -> Result<(), ExtractionError> {
+        if self.tx.block_hash != other.tx.block_hash {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge ProtocolStates from different blocks: 0x{:x} != 0x{:x}",
+                self.tx.block_hash, other.tx.block_hash,
+            )));
+        }
+        if self.tx.hash == other.tx.hash {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge ProtocolStates from the same transaction: 0x{:x}",
+                self.tx.hash
+            )));
+        }
+        if self.tx.index > other.tx.index {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge ProtocolStates with lower transaction index: {} > {}",
+                self.tx.index, other.tx.index
+            )));
+        }
+        self.tx = other.tx;
+        for (key, value) in other.protocol_states {
+            match self.protocol_states.entry(key) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().merge(value)?;
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(value);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A container for state updates grouped by protocol component.
+///
+/// Hold a single update per component. This is a condensed form of
+/// [BlockEntityChanges].
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+pub struct BlockEntityChangesResult {
+    extractor: String,
+    chain: Chain,
+    pub block: Block,
+    pub state_updates: HashMap<String, ProtocolState>,
+    pub new_pools: HashMap<H160, SwapPool>,
 }
 
 /// A container for state updates grouped by transaction
@@ -691,7 +758,7 @@ pub struct BlockEntityChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
-    pub state_updates: Vec<ProtocolState>,
+    pub state_updates: Vec<ProtocolStatesWithTx>,
     pub new_pools: HashMap<H160, SwapPool>,
 }
 
@@ -711,13 +778,12 @@ impl BlockEntityChanges {
             for change in msg.changes.into_iter() {
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
-                    for sc in change.state_changes.into_iter() {
-                        let update = ProtocolState::try_from_message(sc, &tx)?;
-                        state_updates.push(update);
-                    }
+                    let tx_update =
+                        ProtocolStatesWithTx::try_from_message(change.state_changes, tx)?;
+                    state_updates.push(tx_update);
                 }
             }
-            state_updates.sort_unstable_by_key(|update| update.modify_tx.index);
+            state_updates.sort_unstable_by_key(|update| update.tx.index);
             return Ok(Self {
                 extractor: extractor.to_owned(),
                 chain,
@@ -732,38 +798,32 @@ impl BlockEntityChanges {
     /// Aggregates state updates.
     ///
     /// This function aggregates the state updates (`ProtocolState`) for
-    /// different protocol components into a new `BlockEntityChanges` object.
+    /// different protocol components into a `BlockEntityChangesResult` object.
     /// This new object should have only one final ProtocolState per component_id.
     ///
-    /// After merging all updates, a `BlockEntityChanges` object is returned
+    /// After merging all updates, a `BlockEntityChangesResult` object is returned
     /// which contains, amongst other data, the compacted state updates.
     ///
     /// # Errors
     ///
     /// This returns an error if there was a problem during merge. The error
     /// type is `ExtractionError`.
-    pub fn aggregate_updates(self) -> Result<BlockEntityChanges, ExtractionError> {
-        let mut protocol_states: HashMap<String, ProtocolState> = HashMap::new();
+    pub fn aggregate_updates(self) -> Result<BlockEntityChangesResult, ExtractionError> {
+        let base = ProtocolStatesWithTx::default();
 
-        for update in self.state_updates.into_iter() {
-            match protocol_states.entry(update.component_id.clone()) {
-                Entry::Occupied(mut e) => {
-                    e.get_mut().merge(update)?;
-                }
-                Entry::Vacant(e) => {
-                    e.insert(update);
-                }
-            }
-        }
+        let aggregated_states: ProtocolStatesWithTx =
+            self.state_updates
+                .iter()
+                .fold(base, |mut acc_state, new_state| {
+                    acc_state.merge(new_state)?;
+                    acc_state
+                });
 
-        Ok(BlockEntityChanges {
+        Ok(BlockEntityChangesResult {
             extractor: self.extractor,
             chain: self.chain,
             block: self.block,
-            state_updates: protocol_states
-                .values()
-                .cloned()
-                .collect::<Vec<_>>(),
+            state_updates: aggregated_states.protocol_states,
             new_pools: self.new_pools,
         })
     }
@@ -771,9 +831,10 @@ impl BlockEntityChanges {
 
 #[cfg(test)]
 pub mod fixtures {
-    use super::*;
     use ethers::abi::AbiEncode;
     use prost::Message;
+
+    use super::*;
 
     pub const HASH_256_0: &str =
         "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -941,7 +1002,6 @@ pub mod fixtures {
                 number: 1,
                 ts: 1000,
             }),
-
             changes: vec![TransactionStateChanges {
                 tx: Some(Transaction {
                     hash: vec![0x11, 0x12, 0x13, 0x14],
@@ -959,6 +1019,7 @@ pub mod fixtures {
                         attributes: vec![Attribute { name: res2_name, value: res2_value }],
                     },
                 ],
+                components: vec![],
             }],
         }
     }
@@ -966,17 +1027,18 @@ pub mod fixtures {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
 
-    use crate::extractor::evm::fixtures::transaction01;
+    use actix_web::body::MessageBody;
+    use rstest::rstest;
 
-    use super::*;
     use crate::{
+        extractor::evm::fixtures::transaction01,
         models::{FinancialType, ImplementationType, ProtocolSystem, ProtocolType},
         pb::tycho::evm::v1::Attribute,
     };
-    use actix_web::body::MessageBody;
-    use rstest::rstest;
-    use std::str::FromStr;
+
+    use super::*;
 
     const HASH_256_0: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
     const HASH_256_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
@@ -1236,7 +1298,7 @@ mod test {
         let mut state1 = ProtocolState {
             component_id: "State1".to_owned(),
             attributes: attributes1,
-            modify_tx: fixtures::transaction01(),
+            modify_tx: fixtures::transaction01().hash,
         };
 
         let attributes2: HashMap<String, Bytes> = vec![
@@ -1249,7 +1311,7 @@ mod test {
         let state2 = ProtocolState {
             component_id: "State1".to_owned(),
             attributes: attributes2.clone(),
-            modify_tx: fixtures::transaction02(HASH_256_1, HASH_256_0, 11),
+            modify_tx: fixtures::transaction02(HASH_256_1, HASH_256_0, 11).hash,
         };
 
         let res = state1.merge(state2);
@@ -1409,12 +1471,12 @@ mod test {
                 ProtocolState {
                     component_id: "test1".to_owned(),
                     attributes: attr1,
-                    modify_tx: tx,
+                    modify_tx: tx.hash,
                 },
                 ProtocolState {
                     component_id: "test1".to_owned(),
                     attributes: attr2,
-                    modify_tx: tx,
+                    modify_tx: tx.hash,
                 },
             ],
             new_pools: HashMap::new(),
@@ -1436,7 +1498,7 @@ mod test {
         let block_hash = "0x0000000000000000000000000000000000000000000000000000000031323334";
         // use a different tx so merge works
         let new_tx = fixtures::transaction02(HASH_256_1, block_hash, 5);
-        block_changes.state_updates[1].modify_tx = new_tx;
+        block_changes.state_updates[1].tx = new_tx;
 
         let mut expected_result = block_entity_changes();
         let expected_attributes: HashMap<String, Bytes> = vec![
@@ -1448,9 +1510,8 @@ mod test {
         expected_result.state_updates = vec![ProtocolState {
             component_id: "test1".to_owned(),
             attributes: expected_attributes,
-            modify_tx: new_tx,
+            modify_tx: new_tx.hash,
         }];
-        dbg!(&expected_result);
 
         let res = block_changes
             .aggregate_updates()
