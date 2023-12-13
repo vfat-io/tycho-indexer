@@ -406,7 +406,7 @@ pub struct TvlChange {
     token: H160,
     new_balance: f64,
     // tx where the this balance was observed
-    modify_tx: String,
+    modify_tx: H256,
     component_id: String,
 }
 
@@ -418,7 +418,7 @@ impl TvlChange {
         Ok(Self {
             token: pad_and_parse_h160(&msg.token.into()).map_err(ExtractionError::DecodeError)?,
             new_balance: f64::from_bits(u64::from_le_bytes(msg.balance.try_into().unwrap())),
-            modify_tx: tx.hash.to_string(),
+            modify_tx: tx.hash,
             component_id: String::from_utf8(msg.component_id)
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
         })
