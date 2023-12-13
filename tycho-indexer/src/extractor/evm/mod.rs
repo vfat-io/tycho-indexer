@@ -498,19 +498,18 @@ impl ProtocolState {
         msg: substreams::StateChanges,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
-        let component_id = match String::from_utf8(msg.component_id) {
-            Ok(s) => s,
-            Err(err) => return Err(ExtractionError::DecodeError(err.to_string())),
-        };
+        let component_id = String::from_utf8(msg.component_id)
+            .map_err(|err| ExtractionError::DecodeError(err.to_string()))?;
 
-        let mut attributes = HashMap::new();
-        for attribute in msg.attributes.into_iter() {
-            let name = match String::from_utf8(attribute.name) {
-                Ok(s) => s,
-                Err(err) => return Err(ExtractionError::DecodeError(err.to_string())),
-            };
-            attributes.insert(name, Bytes::from(attribute.value));
-        }
+        let attributes = msg
+            .attributes
+            .into_iter()
+            .map(|attribute| {
+                let name = String::from_utf8(attribute.name)
+                    .map_err(|err| ExtractionError::DecodeError(err.to_string()))?;
+                Ok((name, Bytes::from(attribute.value)))
+            })
+            .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
 
         Ok(Self { component_id, attributes, modify_tx: *tx })
     }
