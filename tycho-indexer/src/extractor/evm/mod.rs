@@ -16,7 +16,7 @@ use tracing::warn;
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
-    models::{ContractId, ProtocolComponent, ProtocolSystem, ProtocolType},
+    models::{ProtocolSystem, ProtocolType},
     pb::tycho::evm::v1 as substreams,
 };
 use chrono::NaiveDateTime;
@@ -403,11 +403,11 @@ impl AccountUpdateWithTx {
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct TvlChange {
-    pub token: H160,
-    pub new_balance: f64,
+    token: H160,
+    new_balance: f64,
     // tx where the this balance was observed
-    pub modify_tx: String,
-    pub component_id: String,
+    modify_tx: String,
+    component_id: String,
 }
 
 impl TvlChange {
@@ -424,8 +424,33 @@ impl TvlChange {
         })
     }
 }
+pub struct ProtocolComponent {
+    // an id for this component, could be hex repr of contract address
+    id: ContractId,
+    // what system this component belongs to
+    protocol_system: ProtocolSystem,
+    // more metadata information about the components general type (swap, lend, bridge, etc.)
+    protocol_type: ProtocolType,
+    // Blockchain the component belongs to
+    chain: Chain,
+    // holds the tokens tradable
+    tokens: Vec<String>,
+    // ID's referring to related contracts
+    contract_ids: Vec<ContractId>,
+    // Just stores static attributes
+    static_attributes: HashMap<String, Bytes>,
+}
 
-impl ProtocolComponent<String> {
+/// A type representing the unique identifier for a contract. It can represent an on-chain address
+/// or in the case of a one-to-many relationship it could be something like 'USDC-ETH'. This is for
+/// example the case with ambient, where one component is responsible for multiple contracts.
+///
+/// `ContractId` is a simple wrapper around a `String` to ensure type safety
+/// and clarity when working with contract identifiers.
+#[derive(PartialEq, Debug)]
+pub struct ContractId(pub String);
+
+impl ProtocolComponent {
     pub fn try_from_message(
         msg: substreams::ProtocolComponent,
         protocol_system: ProtocolSystem,
@@ -719,10 +744,7 @@ pub mod fixtures {
 mod test {
     use super::*;
     use crate::{
-        models::{
-            ContractId, FinancialType, ImplementationType, ProtocolComponent, ProtocolSystem,
-            ProtocolType,
-        },
+        models::{FinancialType, ImplementationType, ProtocolSystem, ProtocolType},
         pb::tycho::evm::v1::Attribute,
     };
     use actix_web::body::MessageBody;
@@ -1025,7 +1047,7 @@ mod test {
         };
 
         // Call the try_from_message method
-        let result = ProtocolComponent::<String>::try_from_message(
+        let result = ProtocolComponent::try_from_message(
             msg,
             expected_protocol_system.clone(),
             protocol_type.clone(),

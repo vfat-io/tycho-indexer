@@ -81,7 +81,7 @@ use thiserror::Error;
 
 use crate::{
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ProtocolComponent, ProtocolState, ProtocolSystem},
+    models::{Chain, ExtractionState, ProtocolState, ProtocolSystem},
 };
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
@@ -473,7 +473,7 @@ pub trait ProtocolGateway {
         chain: Chain,
         system: Option<ProtocolSystem>,
         ids: Option<&[&str]>,
-    ) -> Result<Vec<ProtocolComponent<Self::Token>>, StorageError>;
+    ) -> Result<Vec<Self::Token>, StorageError>;
 
     /// Stores new found ProtocolComponents.
     ///
@@ -488,10 +488,7 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
     /// - component with same is id already present.
-    async fn upsert_components(
-        &self,
-        new: &[&ProtocolComponent<Self::Token>],
-    ) -> Result<(), StorageError>;
+    async fn upsert_components(&self, new: &[Self::Token]) -> Result<(), StorageError>;
 
     /// Retrieve protocol component states
     ///

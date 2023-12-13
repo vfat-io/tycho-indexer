@@ -92,31 +92,6 @@ impl ExtractionState {
 pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static {
     fn source(&self) -> ExtractorIdentity;
 }
-/// A type representing the unique identifier for a contract. It can represent an on-chain address
-/// or in the case of a one-to-many relationship it could be something like 'USDC-ETH'. This is for
-/// example the case with ambient, where one component is responsible for multiple contracts.
-///
-/// `ContractId` is a simple wrapper around a `String` to ensure type safety
-/// and clarity when working with contract identifiers.
-#[derive(PartialEq, Debug)]
-pub struct ContractId(pub String);
-
-pub struct ProtocolComponent<T> {
-    // an id for this component, could be hex repr of contract address
-    pub id: ContractId,
-    // what system this component belongs to
-    pub protocol_system: ProtocolSystem,
-    // more metadata information about the components general type (swap, lend, bridge, etc.)
-    pub protocol_type: ProtocolType,
-    // Blockchain the component belongs to
-    pub chain: Chain,
-    // holds the tokens tradable
-    pub tokens: Vec<T>,
-    // ID's referring to related contracts
-    pub contract_ids: Vec<ContractId>,
-    // Just stores static attributes
-    pub static_attributes: HashMap<String, Bytes>,
-}
 
 #[allow(dead_code)]
 pub struct ProtocolState {
