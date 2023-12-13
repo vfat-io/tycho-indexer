@@ -178,7 +178,7 @@ impl AccountUpdate {
     ///
     /// # Errors
     ///
-    /// It returns an `ExtractionError::Unknown` error if `self.address` and
+    /// It returns an `ExtractionError::MergeError` error if `self.address` and
     /// `other.address` are not identical.
     ///
     /// # Arguments
@@ -187,7 +187,7 @@ impl AccountUpdate {
     /// of `other` will overwrite those of `self`.
     fn merge(&mut self, other: AccountUpdate) -> Result<(), ExtractionError> {
         if self.address != other.address {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge AccountUpdates from differing identities; Expected {:#020x}, got {:#020x}",
                 self.address, other.address
             )));
@@ -276,23 +276,23 @@ impl AccountUpdateWithTx {
     /// The merged update keeps the transaction of `other`.
     ///
     /// # Errors
-    /// This method will return `ExtractionError::Unknown` if any of the above
+    /// This method will return `ExtractionError::MergeError` if any of the above
     /// conditions is violated.
     pub fn merge(&mut self, other: AccountUpdateWithTx) -> Result<(), ExtractionError> {
         if self.tx.block_hash != other.tx.block_hash {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge AccountUpdates from different blocks: 0x{:x} != 0x{:x}",
                 self.tx.block_hash, other.tx.block_hash,
             )));
         }
         if self.tx.hash == other.tx.hash {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge AccountUpdates from the same transaction: 0x{:x}",
                 self.tx.hash
             )));
         }
         if self.tx.index > other.tx.index {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge AccountUpdates with lower transaction index: {} > {}",
                 self.tx.index, other.tx.index
             )));
@@ -540,29 +540,29 @@ impl ProtocolState {
     /// The merged update keeps the transaction of `other`.
     ///
     /// # Errors
-    /// This method will return `ExtractionError::Unknown` if any of the above
+    /// This method will return `ExtractionError::MergeError` if any of the above
     /// conditions is violated.
     pub fn merge(&mut self, other: ProtocolState) -> Result<(), ExtractionError> {
         if self.component_id != other.component_id {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge ProtocolStates from differing identities; Expected {}, got {}",
                 self.component_id, other.component_id
             )));
         }
         if self.modify_tx.block_hash != other.modify_tx.block_hash {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge ProtocolStates from different blocks: 0x{:x} != 0x{:x}",
                 self.modify_tx.block_hash, other.modify_tx.block_hash,
             )));
         }
         if self.modify_tx.hash == other.modify_tx.hash {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge ProtocolStates from the same transaction: 0x{:x}",
                 self.modify_tx.hash
             )));
         }
         if self.modify_tx.index > other.modify_tx.index {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge ProtocolStates with lower transaction index: {} > {}",
                 self.modify_tx.index, other.modify_tx.index
             )));
@@ -917,7 +917,7 @@ mod test {
         let mut update_left = update_balance();
         let mut update_right = update_slots();
         update_right.address = H160::zero();
-        let exp = Err(ExtractionError::Unknown(
+        let exp = Err(ExtractionError::MergeError(
             "Can't merge AccountUpdates from differing identities; \
             Expected 0xe688b84b23f322a994a53dbf8e15fa82cdb71127, \
             got 0x0000000000000000000000000000000000000000"
@@ -932,15 +932,15 @@ mod test {
     #[rstest]
     #[case::diff_block(
     fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
-    Err(ExtractionError::Unknown(format ! ("Can't merge AccountUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
+    Err(ExtractionError::MergeError(format ! ("Can't merge AccountUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
     )]
     #[case::same_tx(
     fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
-    Err(ExtractionError::Unknown(format ! ("Can't merge AccountUpdates from the same transaction: 0x{:x}", H256::zero())))
+    Err(ExtractionError::MergeError(format ! ("Can't merge AccountUpdates from the same transaction: 0x{:x}", H256::zero())))
     )]
     #[case::lower_idx(
     fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
-    Err(ExtractionError::Unknown("Can't merge AccountUpdates with lower transaction index: 10 > 1".to_owned()))
+    Err(ExtractionError::MergeError("Can't merge AccountUpdates with lower transaction index: 10 > 1".to_owned()))
     )]
     fn test_merge_account_update_w_tx(
         #[case] tx: Transaction,
@@ -1120,15 +1120,15 @@ mod test {
     #[rstest]
     #[case::diff_block(
     fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
-    Err(ExtractionError::Unknown(format ! ("Can't merge ProtocolStates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
+    Err(ExtractionError::MergeError(format ! ("Can't merge ProtocolStates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
     )]
     #[case::same_tx(
     fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
-    Err(ExtractionError::Unknown(format ! ("Can't merge ProtocolStates from the same transaction: 0x{:x}", H256::zero())))
+    Err(ExtractionError::MergeError(format ! ("Can't merge ProtocolStates from the same transaction: 0x{:x}", H256::zero())))
     )]
     #[case::lower_idx(
     fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
-    Err(ExtractionError::Unknown("Can't merge ProtocolStates with lower transaction index: 10 > 1".to_owned()))
+    Err(ExtractionError::MergeError("Can't merge ProtocolStates with lower transaction index: 10 > 1".to_owned()))
     )]
     fn test_merge_pool_state_errors(
         #[case] tx: Transaction,
@@ -1191,7 +1191,7 @@ mod test {
 
         assert_eq!(
             res,
-            Err(ExtractionError::Unknown(
+            Err(ExtractionError::MergeError(
                 "Can't merge ProtocolStates from differing identities; Expected State1, got State2"
                     .to_owned()
             ))
