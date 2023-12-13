@@ -183,11 +183,11 @@ impl DBCacheWriteExecutor {
                     })
                     .await?;
 
-                    //Notify that it
+                    // Notify that this transaction was correctly send to the db
                     new_db_tx
                         .tx
                         .send(Ok(()))
-                        .expect("response");
+                        .expect("Should successfully notify sender");
                 } else if new_db_tx.block.parent_hash == pending.hash {
                     // New database transaction for the next block
                     self.flush().await;
@@ -345,7 +345,7 @@ impl CachedGateway {
     }
 }
 
-// These two implementation allow to inherit EVMStateGateway methods. If CachedGateway doesn't
+// These two implementations allow us to inherit EVMStateGateway methods. If CachedGateway doesn't
 // implement the called method and EVMStateGateway does, then the call will be forwarded to
 // EVMStateGateway.
 impl Deref for CachedGateway {
