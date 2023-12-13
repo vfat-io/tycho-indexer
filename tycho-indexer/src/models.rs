@@ -94,7 +94,7 @@ pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync +
 }
 /// A type representing the unique identifier for a contract. It can represent an on-chain address
 /// or in the case of a one-to-many relationship it could be something like 'USDC-ETH'. This is for
-/// example the case with arbiturm, where one component is responsible for multiple contracts.
+/// example the case with ambient, where one component is responsible for multiple contracts.
 ///
 /// `ContractId` is a simple wrapper around a `String` to ensure type safety
 /// and clarity when working with contract identifiers.
