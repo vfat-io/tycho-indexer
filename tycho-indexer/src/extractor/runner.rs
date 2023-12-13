@@ -362,7 +362,7 @@ mod test {
                         .is_err()
                     {
                         debug!("Receiver dropped");
-                        break
+                        break;
                     }
                 }
                 .instrument(info_span!("DummyMessageSender", extractor_id = %extractor_id))

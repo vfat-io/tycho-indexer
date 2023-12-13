@@ -80,7 +80,7 @@ use thiserror::Error;
 use crate::{
     extractor::evm::ProtocolState,
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem},
+    models::{Chain, ExtractionState, ProtocolSystem},
 };
 
 pub mod postgres;
@@ -476,7 +476,7 @@ pub trait ProtocolGateway {
         chain: Chain,
         system: Option<ProtocolSystem>,
         ids: Option<&[&str]>,
-    ) -> Result<Vec<ProtocolComponent<Self::Token>>, StorageError>;
+    ) -> Result<Vec<Self::Token>, StorageError>;
 
     /// Stores new found ProtocolComponents.
     ///
@@ -491,10 +491,7 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
     /// - component with same is id already present.
-    async fn upsert_components(
-        &self,
-        new: &[&ProtocolComponent<Self::Token>],
-    ) -> Result<(), StorageError>;
+    async fn upsert_components(&self, new: &[Self::Token]) -> Result<(), StorageError>;
 
     /// Retrieve protocol component states
     ///

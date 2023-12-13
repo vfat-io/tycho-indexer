@@ -2,15 +2,14 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use actix_web::{dev::ServerHandle, web, App, HttpServer};
-use actix_web_opentelemetry::RequestTracing;
-use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-use tokio::task::JoinHandle;
-
 use crate::{
     extractor::{evm, runner::ExtractorHandle, ExtractionError},
     storage::postgres::PostgresGateway,
 };
+use actix_web::{dev::ServerHandle, web, App, HttpServer};
+use actix_web_opentelemetry::RequestTracing;
+use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
+use tokio::task::JoinHandle;
 
 mod rpc;
 mod ws;

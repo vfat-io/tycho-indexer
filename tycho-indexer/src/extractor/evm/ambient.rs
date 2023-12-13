@@ -1,3 +1,4 @@
+#![allow(unused_variables)]
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,

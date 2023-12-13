@@ -1,8 +1,13 @@
+#![allow(dead_code)]
 use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
 };
 
+use crate::{
+    models::{ProtocolSystem, ProtocolType},
+    pb::tycho::evm::v1 as substreams,
+};
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
@@ -16,7 +21,6 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 use crate::{
     hex_bytes::Bytes,
     models::{Chain, ExtractorIdentity, NormalisedMessage},
-    pb::tycho::evm::v1 as substreams,
     storage::{ChangeType, StateGatewayType},
 };
 
@@ -399,6 +403,111 @@ impl AccountUpdateWithTx {
         Ok(update)
     }
 }
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct TvlChange {
+    token: H160,
+    new_balance: f64,
+    // tx where the this balance was observed
+    modify_tx: H256,
+    component_id: String,
+}
+
+impl TvlChange {
+    pub fn try_from_message(
+        msg: substreams::BalanceChange,
+        tx: &Transaction,
+    ) -> Result<Self, ExtractionError> {
+        Ok(Self {
+            token: pad_and_parse_h160(&msg.token.into()).map_err(ExtractionError::DecodeError)?,
+            new_balance: f64::from_bits(u64::from_le_bytes(msg.balance.try_into().unwrap())),
+            modify_tx: tx.hash,
+            component_id: String::from_utf8(msg.component_id)
+                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
+        })
+    }
+}
+pub struct ProtocolComponent {
+    // an id for this component, could be hex repr of contract address
+    id: ContractId,
+    // what system this component belongs to
+    protocol_system: ProtocolSystem,
+    // more metadata information about the components general type (swap, lend, bridge, etc.)
+    protocol_type: ProtocolType,
+    // Blockchain the component belongs to
+    chain: Chain,
+    // holds the tokens tradable
+    tokens: Vec<String>,
+    // ID's referring to related contracts
+    contract_ids: Vec<ContractId>,
+    // Just stores static attributes
+    static_attributes: HashMap<String, Bytes>,
+}
+
+/// A type representing the unique identifier for a contract. It can represent an on-chain address
+/// or in the case of a one-to-many relationship it could be something like 'USDC-ETH'. This is for
+/// example the case with ambient, where one component is responsible for multiple contracts.
+///
+/// `ContractId` is a simple wrapper around a `String` to ensure type safety
+/// and clarity when working with contract identifiers.
+#[derive(PartialEq, Debug)]
+pub struct ContractId(pub String);
+
+impl ProtocolComponent {
+    pub fn try_from_message(
+        msg: substreams::ProtocolComponent,
+        protocol_system: ProtocolSystem,
+        protocol_type: ProtocolType,
+        chain: Chain,
+    ) -> Result<Self, ExtractionError> {
+        let id = ContractId(
+            String::from_utf8(msg.id)
+                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
+        );
+
+        let tokens = msg
+            .tokens
+            .into_iter()
+            .map(|t| {
+                String::from_utf8(t)
+                    .map_err(|error| ExtractionError::DecodeError(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let contract_ids = msg
+            .contracts
+            .into_iter()
+            .map(ContractId)
+            .collect::<Vec<_>>();
+
+        let keys = msg
+            .static_att
+            .clone()
+            .into_iter()
+            .map(|attr| {
+                String::from_utf8(attr.name)
+                    .map_err(|error| ExtractionError::DecodeError(error.to_string()))
+            })
+            .collect::<Result<Vec<String>, _>>()?;
+
+        let values: Vec<_> = msg
+            .static_att
+            .into_iter()
+            .map(|attr| Bytes::from(attr.value))
+            .collect();
+
+        let attribute_map: HashMap<_, _> = keys.into_iter().zip(values).collect();
+
+        Ok(Self {
+            id,
+            protocol_type,
+            protocol_system,
+            tokens,
+            contract_ids,
+            static_attributes: attribute_map,
+            chain,
+        })
+    }
+}
 
 impl From<substreams::ChangeType> for ChangeType {
     fn from(value: substreams::ChangeType) -> Self {
@@ -663,6 +772,8 @@ impl BlockEntityChanges {
 #[cfg(test)]
 pub mod fixtures {
     use super::*;
+    use ethers::abi::AbiEncode;
+    use prost::Message;
 
     pub const HASH_256_0: &str =
         "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -764,6 +875,38 @@ pub mod fixtures {
                         change: ChangeType::Update.into(),
                     },
                 ],
+                components: vec![ProtocolComponent {
+                    id: hex::decode(
+                        "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".trim_start_matches("0x"),
+                    )
+                    .unwrap(),
+                    tokens: vec![
+                        hex::decode(
+                            "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".trim_start_matches("0x"),
+                        )
+                        .unwrap(),
+                        hex::decode(
+                            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
+                        )
+                        .unwrap(),
+                    ],
+                    contracts: vec![
+                        "DIANA-THALES".to_string(),
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
+                    ],
+                    static_att: vec![
+                        Attribute { name: b"key1".to_vec(), value: b"value1".to_vec() },
+                        Attribute { name: b"key2".to_vec(), value: b"value2".to_vec() },
+                    ],
+                }],
+                tvl: vec![BalanceChange {
+                    token: hex::decode(
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
+                    )
+                    .unwrap(),
+                    balance: 50000000.encode_to_vec(),
+                    component_id: "WETH-CAI".encode(),
+                }],
             }],
         }
     }
@@ -823,11 +966,17 @@ pub mod fixtures {
 
 #[cfg(test)]
 mod test {
-    use rstest::rstest;
 
     use crate::extractor::evm::fixtures::transaction01;
 
     use super::*;
+    use crate::{
+        models::{FinancialType, ImplementationType, ProtocolSystem, ProtocolType},
+        pb::tycho::evm::v1::Attribute,
+    };
+    use actix_web::body::MessageBody;
+    use rstest::rstest;
+    use std::str::FromStr;
 
     const HASH_256_0: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
     const HASH_256_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
@@ -1309,5 +1458,107 @@ mod test {
 
         assert_eq!(res, expected_result);
         assert_eq!(res.state_updates.len(), 1);
+    }
+
+    fn create_transaction() -> Transaction {
+        Transaction {
+            hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000011121314,
+            ),
+            block_hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000031323334,
+            ),
+            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
+            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            index: 2,
+        }
+    }
+
+    #[rstest]
+    fn test_try_from_message_protocol_component() {
+        let balance_key = "balance";
+        let factory_address_key = "factory_address";
+        let balance_value = b"50000";
+        let factory_address = b"0x0fwe0g240g20";
+
+        // Sample data for testing
+        let static_att = vec![
+            Attribute { name: balance_key.as_bytes().to_vec(), value: balance_value.to_vec() },
+            Attribute {
+                name: factory_address_key.as_bytes().to_vec(),
+                value: factory_address.to_vec(),
+            },
+        ];
+        let msg = substreams::ProtocolComponent {
+            id: b"component_id".to_vec(),
+            tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
+            contracts: vec!["contract1".to_string(), "contract2".to_string()],
+            static_att,
+        };
+        let expected_chain = Chain::Ethereum;
+        let expected_protocol_system = ProtocolSystem::Ambient;
+        let mut expected_attribute_map = HashMap::new();
+        expected_attribute_map.insert(balance_key.to_string(), Bytes::from(balance_value.to_vec()));
+        expected_attribute_map
+            .insert(factory_address_key.to_string(), Bytes::from(factory_address.to_vec()));
+
+        let protocol_type = ProtocolType {
+            name: "Pool".to_string(),
+            attribute_schema: serde_json::Value::default(),
+            financial_type: FinancialType::Psm,
+            implementation_type: ImplementationType::Custom,
+        };
+
+        // Call the try_from_message method
+        let result = ProtocolComponent::try_from_message(
+            msg,
+            expected_protocol_system.clone(),
+            protocol_type.clone(),
+            expected_chain,
+        );
+
+        // Assert the result
+        assert!(result.is_ok());
+
+        // Unwrap the result for further assertions
+        let protocol_component = result.unwrap();
+
+        // Assert specific properties of the protocol component
+        assert_eq!(protocol_component.id, ContractId("component_id".to_string()));
+        assert_eq!(protocol_component.protocol_system, expected_protocol_system);
+        assert_eq!(protocol_component.protocol_type, protocol_type);
+        assert_eq!(protocol_component.chain, expected_chain);
+        assert_eq!(protocol_component.tokens, vec!["token1".to_string(), "token2".to_string()]);
+        assert_eq!(
+            protocol_component.contract_ids,
+            vec![ContractId("contract1".to_string()), ContractId("contract2".to_string())]
+        );
+        assert_eq!(protocol_component.static_attributes, expected_attribute_map);
+    }
+
+    #[rstest]
+    fn test_try_from_message_tvl_change() {
+        let tx = create_transaction();
+        let expected_balance: f64 = 3000.0;
+        let msg_balance = expected_balance.to_le_bytes().to_vec();
+
+        let expected_token = H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
+        let msg_token = expected_token.0.to_vec();
+        let expected_component_id = "DIANA-THALES";
+        let msg_component_id = expected_component_id
+            .try_into_bytes()
+            .unwrap()
+            .to_vec();
+        let msg = substreams::BalanceChange {
+            balance: msg_balance.to_vec(),
+            token: msg_token,
+            component_id: msg_component_id,
+        };
+        let from_message = TvlChange::try_from_message(msg, &tx).unwrap();
+
+        assert_eq!(from_message.new_balance, expected_balance);
+        assert_eq!(from_message.modify_tx, tx.hash);
+        assert_eq!(from_message.token, expected_token);
+        assert_eq!(from_message.component_id, expected_component_id);
     }
 }
