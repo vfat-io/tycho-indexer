@@ -1,7 +1,7 @@
 //! This module contains Tycho Websocket implementation
 use crate::{
     extractor::{runner::MessageSender, ExtractorMsg},
-    models::{ExtractorIdentity, NormalisedMessage},
+    models::ExtractorIdentity,
 };
 use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
@@ -332,6 +332,7 @@ mod tests {
     use crate::{extractor::runner::ControlMessage, models::Chain};
 
     use super::*;
+    use crate::models::NormalisedMessage;
     use actix_rt::time::timeout;
     use actix_test::{start, start_with, TestServerConfig};
     use actix_web::App;

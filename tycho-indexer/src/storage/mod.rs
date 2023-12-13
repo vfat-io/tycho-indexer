@@ -78,9 +78,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
+    extractor::evm::ProtocolState,
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ProtocolComponent, ProtocolState, ProtocolSystem},
+    models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem},
 };
+
+pub mod postgres;
 
 pub mod postgres;
 
@@ -362,7 +365,7 @@ pub trait ExtractionStateGateway {
 
 /// Point in time as either block or timestamp. If a block is chosen it
 /// timestamp attribute is used.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockOrTimestamp {
     Block(BlockIdentifier),
     Timestamp(NaiveDateTime),
@@ -924,15 +927,14 @@ pub trait ContractStateGateway {
 }
 
 pub trait StateGateway<DB>:
-    ExtractionStateGateway<DB = DB>
-    + ChainGateway<DB = DB>
-    + ProtocolStateGateway<DB = DB>
-    + ExtractionStateGateway<DB = DB>
-    + ContractStateGateway<DB = DB>
-    + Send
-    + Sync
-{
-}
+ExtractionStateGateway<DB=DB>
++ ChainGateway<DB=DB>
++ ProtocolGateway<DB = DB>
++ ExtractionStateGateway<DB=DB>
++ ContractStateGateway<DB=DB>
++ Send
++ Sync
+{}
 
 pub type StateGatewayType<DB, B, TX, C, D> = Arc<
     dyn StateGateway<

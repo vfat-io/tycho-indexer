@@ -1,28 +1,30 @@
-pub mod ambient;
-pub mod storage;
-mod utils;
-
-use crate::{
-    hex_bytes::Bytes,
-    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolState},
-    storage::{ChangeType, StateGatewayType},
-};
 use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
 };
-use tracing::warn;
-use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
-use crate::pb::tycho::evm::v1 as substreams;
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
     utils::keccak256,
 };
 use serde::{Deserialize, Serialize};
+use tracing::warn;
+
+use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
+
+use crate::{
+    hex_bytes::Bytes,
+    models::{Chain, ExtractorIdentity, NormalisedMessage},
+    pb::tycho::evm::v1 as substreams,
+    storage::{ChangeType, StateGatewayType},
+};
 
 use super::ExtractionError;
+
+pub mod ambient;
+pub mod storage;
+mod utils;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SwapPool {}
@@ -176,7 +178,7 @@ impl AccountUpdate {
     ///
     /// # Errors
     ///
-    /// It returns an `ExtractionError::Unknown` error if `self.address` and
+    /// It returns an `ExtractionError::MergeError` error if `self.address` and
     /// `other.address` are not identical.
     ///
     /// # Arguments
@@ -185,7 +187,7 @@ impl AccountUpdate {
     /// of `other` will overwrite those of `self`.
     fn merge(&mut self, other: AccountUpdate) -> Result<(), ExtractionError> {
         if self.address != other.address {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge AccountUpdates from differing identities; Expected {:#020x}, got {:#020x}",
                 self.address, other.address
             )));
@@ -274,23 +276,23 @@ impl AccountUpdateWithTx {
     /// The merged update keeps the transaction of `other`.
     ///
     /// # Errors
-    /// This method will return `ExtractionError::Unknown` if any of the above
+    /// This method will return `ExtractionError::MergeError` if any of the above
     /// conditions is violated.
     pub fn merge(&mut self, other: AccountUpdateWithTx) -> Result<(), ExtractionError> {
         if self.tx.block_hash != other.tx.block_hash {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge AccountUpdates from different blocks: 0x{:x} != 0x{:x}",
                 self.tx.block_hash, other.tx.block_hash,
             )));
         }
         if self.tx.hash == other.tx.hash {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge AccountUpdates from the same transaction: 0x{:x}",
                 self.tx.hash
             )));
         }
         if self.tx.index > other.tx.index {
-            return Err(ExtractionError::Unknown(format!(
+            return Err(ExtractionError::MergeError(format!(
                 "Can't merge AccountUpdates with lower transaction index: {} > {}",
                 self.tx.index, other.tx.index
             )));
@@ -488,6 +490,176 @@ impl BlockStateChanges {
     }
 }
 
+#[allow(dead_code)]
+#[derive(Debug, PartialEq, Clone)]
+pub struct ProtocolState {
+    // associates back to a component, which has metadata like type, tokens , etc.
+    pub component_id: String,
+    // holds all the protocol specific attributes, validates by the components schema
+    pub attributes: HashMap<String, Bytes>,
+    // via transaction, we can trace back when this state became valid
+    pub modify_tx: Transaction,
+}
+
+// TODO: remove dead code check skip once extractor is implemented
+#[allow(dead_code)]
+impl ProtocolState {
+    /// Parses protocol state from tychos protobuf StateChanges message
+    pub fn try_from_message(
+        msg: substreams::StateChanges,
+        tx: &Transaction,
+    ) -> Result<Self, ExtractionError> {
+        let component_id = String::from_utf8(msg.component_id)
+            .map_err(|err| ExtractionError::DecodeError(err.to_string()))?;
+
+        let attributes = msg
+            .attributes
+            .into_iter()
+            .map(|attribute| {
+                let name = String::from_utf8(attribute.name)
+                    .map_err(|err| ExtractionError::DecodeError(err.to_string()))?;
+                Ok((name, Bytes::from(attribute.value)))
+            })
+            .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
+
+        Ok(Self { component_id, attributes, modify_tx: *tx })
+    }
+
+    /// Merges this update with another one.
+    ///
+    /// The method combines two `ProtocolState` instances under certain
+    /// conditions:
+    /// - The block from which both updates came should be the same. If the updates are from
+    ///   different blocks, the method will return an error.
+    /// - The transactions for each of the updates should be distinct. If they come from the same
+    ///   transaction, the method will return an error.
+    /// - The order of the transaction matters. The transaction from `other` must have occurred
+    ///   later than the self transaction. If the self transaction has a higher index than `other`,
+    ///   the method will return an error.
+    ///
+    /// The merged update keeps the transaction of `other`.
+    ///
+    /// # Errors
+    /// This method will return `ExtractionError::MergeError` if any of the above
+    /// conditions is violated.
+    pub fn merge(&mut self, other: ProtocolState) -> Result<(), ExtractionError> {
+        if self.component_id != other.component_id {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge ProtocolStates from differing identities; Expected {}, got {}",
+                self.component_id, other.component_id
+            )));
+        }
+        if self.modify_tx.block_hash != other.modify_tx.block_hash {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge ProtocolStates from different blocks: 0x{:x} != 0x{:x}",
+                self.modify_tx.block_hash, other.modify_tx.block_hash,
+            )));
+        }
+        if self.modify_tx.hash == other.modify_tx.hash {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge ProtocolStates from the same transaction: 0x{:x}",
+                self.modify_tx.hash
+            )));
+        }
+        if self.modify_tx.index > other.modify_tx.index {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge ProtocolStates with lower transaction index: {} > {}",
+                self.modify_tx.index, other.modify_tx.index
+            )));
+        }
+        self.modify_tx = other.modify_tx;
+        self.attributes.extend(other.attributes);
+        Ok(())
+    }
+}
+
+/// A container for state updates grouped by transaction
+///
+/// Hold the detailed state changes for a block alongside with protocol
+/// component changes.
+#[derive(Debug, PartialEq)]
+pub struct BlockEntityChanges {
+    extractor: String,
+    chain: Chain,
+    pub block: Block,
+    pub state_updates: Vec<ProtocolState>,
+    pub new_pools: HashMap<H160, SwapPool>,
+}
+
+// TODO: remove dead code check skip once extractor is implemented
+#[allow(dead_code)]
+impl BlockEntityChanges {
+    /// Parse from tychos protobuf message
+    pub fn try_from_message(
+        msg: substreams::BlockEntityChanges,
+        extractor: &str,
+        chain: Chain,
+    ) -> Result<Self, ExtractionError> {
+        if let Some(block) = msg.block {
+            let block = Block::try_from_message(block, chain)?;
+            let mut state_updates = Vec::new();
+
+            for change in msg.changes.into_iter() {
+                if let Some(tx) = change.tx {
+                    let tx = Transaction::try_from_message(tx, &block.hash)?;
+                    for sc in change.state_changes.into_iter() {
+                        let update = ProtocolState::try_from_message(sc, &tx)?;
+                        state_updates.push(update);
+                    }
+                }
+            }
+            state_updates.sort_unstable_by_key(|update| update.modify_tx.index);
+            return Ok(Self {
+                extractor: extractor.to_owned(),
+                chain,
+                block,
+                state_updates,
+                new_pools: HashMap::new(),
+            });
+        }
+        Err(ExtractionError::Empty)
+    }
+
+    /// Aggregates state updates.
+    ///
+    /// This function aggregates the state updates (`ProtocolState`) for
+    /// different protocol components into a new `BlockEntityChanges` object.
+    /// This new object should have only one final ProtocolState per component_id.
+    ///
+    /// After merging all updates, a `BlockEntityChanges` object is returned
+    /// which contains, amongst other data, the compacted state updates.
+    ///
+    /// # Errors
+    ///
+    /// This returns an error if there was a problem during merge. The error
+    /// type is `ExtractionError`.
+    pub fn aggregate_updates(self) -> Result<BlockEntityChanges, ExtractionError> {
+        let mut protocol_states: HashMap<String, ProtocolState> = HashMap::new();
+
+        for update in self.state_updates.into_iter() {
+            match protocol_states.entry(update.component_id.clone()) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().merge(update)?;
+                }
+                Entry::Vacant(e) => {
+                    e.insert(update);
+                }
+            }
+        }
+
+        Ok(BlockEntityChanges {
+            extractor: self.extractor,
+            chain: self.chain,
+            block: self.block,
+            state_updates: protocol_states
+                .values()
+                .cloned()
+                .collect::<Vec<_>>(),
+            new_pools: self.new_pools,
+        })
+    }
+}
+
 #[cfg(test)]
 pub mod fixtures {
     use super::*;
@@ -595,12 +767,67 @@ pub mod fixtures {
             }],
         }
     }
+
+    pub fn pb_state_changes() -> crate::pb::tycho::evm::v1::StateChanges {
+        use crate::pb::tycho::evm::v1::*;
+        let id = "test".to_owned().into_bytes();
+        let res1_name = "reserve1".to_owned().into_bytes();
+        let res2_name = "reserve2".to_owned().into_bytes();
+        let res1_value = 1000_u64.to_be_bytes().to_vec();
+        let res2_value = 500_u64.to_be_bytes().to_vec();
+        StateChanges {
+            component_id: id,
+            attributes: vec![
+                Attribute { name: res1_name, value: res1_value },
+                Attribute { name: res2_name, value: res2_value },
+            ],
+        }
+    }
+
+    pub fn pb_block_entity_changes() -> crate::pb::tycho::evm::v1::BlockEntityChanges {
+        use crate::pb::tycho::evm::v1::*;
+        let id = "test1".to_owned().into_bytes();
+        let res1_name = "reserve1".to_owned().into_bytes();
+        let res2_name = "reserve2".to_owned().into_bytes();
+        let res1_value = 1000_u64.to_be_bytes().to_vec();
+        let res2_value = 500_u64.to_be_bytes().to_vec();
+        BlockEntityChanges {
+            block: Some(Block {
+                hash: vec![0x31, 0x32, 0x33, 0x34],
+                parent_hash: vec![0x21, 0x22, 0x23, 0x24],
+                number: 1,
+                ts: 1000,
+            }),
+
+            changes: vec![TransactionStateChanges {
+                tx: Some(Transaction {
+                    hash: vec![0x11, 0x12, 0x13, 0x14],
+                    from: vec![0x41, 0x42, 0x43, 0x44],
+                    to: vec![0x51, 0x52, 0x53, 0x54],
+                    index: 2,
+                }),
+                state_changes: vec![
+                    StateChanges {
+                        component_id: id.clone(),
+                        attributes: vec![Attribute { name: res1_name, value: res1_value }],
+                    },
+                    StateChanges {
+                        component_id: id,
+                        attributes: vec![Attribute { name: res2_name, value: res2_value }],
+                    },
+                ],
+            }],
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use rstest::rstest;
+
+    use crate::extractor::evm::fixtures::transaction01;
+
+    use super::*;
 
     const HASH_256_0: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
     const HASH_256_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
@@ -665,7 +892,7 @@ mod test {
         )
     }
 
-    #[rstest]
+    #[test]
     fn test_account_from_update_w_tx() {
         let update = update_w_tx();
         let exp = account01();
@@ -673,7 +900,7 @@ mod test {
         assert_eq!(Account::from(&update), exp);
     }
 
-    #[rstest]
+    #[test]
     fn test_merge_account_update() {
         let mut update_left = update_balance();
         let update_right = update_slots();
@@ -685,12 +912,12 @@ mod test {
         assert_eq!(update_left, exp);
     }
 
-    #[rstest]
+    #[test]
     fn test_merge_account_update_wrong_address() {
         let mut update_left = update_balance();
         let mut update_right = update_slots();
         update_right.address = H160::zero();
-        let exp = Err(ExtractionError::Unknown(
+        let exp = Err(ExtractionError::MergeError(
             "Can't merge AccountUpdates from differing identities; \
             Expected 0xe688b84b23f322a994a53dbf8e15fa82cdb71127, \
             got 0x0000000000000000000000000000000000000000"
@@ -704,16 +931,16 @@ mod test {
 
     #[rstest]
     #[case::diff_block(
-        fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
-        Err(ExtractionError::Unknown(format!("Can't merge AccountUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
+    fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
+    Err(ExtractionError::MergeError(format ! ("Can't merge AccountUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
     )]
     #[case::same_tx(
-        fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
-        Err(ExtractionError::Unknown(format!("Can't merge AccountUpdates from the same transaction: 0x{:x}", H256::zero())))
+    fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
+    Err(ExtractionError::MergeError(format ! ("Can't merge AccountUpdates from the same transaction: 0x{:x}", H256::zero())))
     )]
     #[case::lower_idx(
-        fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
-        Err(ExtractionError::Unknown("Can't merge AccountUpdates with lower transaction index: 10 > 1".to_owned()))
+    fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
+    Err(ExtractionError::MergeError("Can't merge AccountUpdates with lower transaction index: 10 > 1".to_owned()))
     )]
     fn test_merge_account_update_w_tx(
         #[case] tx: Transaction,
@@ -788,7 +1015,7 @@ mod test {
         }
     }
 
-    #[rstest]
+    #[test]
     fn test_block_state_changes_parse_msg() {
         let msg = fixtures::pb_block_contract_changes();
 
@@ -835,7 +1062,7 @@ mod test {
         }
     }
 
-    #[rstest]
+    #[test]
     fn test_block_state_changes_aggregate() {
         let mut msg = block_state_changes();
         let block_hash = "0x0000000000000000000000000000000000000000000000000000000031323334";
@@ -846,5 +1073,241 @@ mod test {
         let res = msg.aggregate_updates().unwrap();
 
         assert_eq!(res, block_account_changes());
+    }
+
+    #[test]
+    fn test_merge_protocol_state() {
+        let attributes1: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+            ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
+        ]
+        .into_iter()
+        .collect();
+        let mut state1 = ProtocolState {
+            component_id: "State1".to_owned(),
+            attributes: attributes1,
+            modify_tx: fixtures::transaction01(),
+        };
+
+        let attributes2: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(900))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(550))),
+            ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
+        ]
+        .into_iter()
+        .collect();
+        let state2 = ProtocolState {
+            component_id: "State1".to_owned(),
+            attributes: attributes2.clone(),
+            modify_tx: fixtures::transaction02(HASH_256_1, HASH_256_0, 11),
+        };
+
+        let res = state1.merge(state2);
+
+        assert!(res.is_ok());
+        let expected_attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(900))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(550))),
+            ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
+            ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(state1.attributes, expected_attributes);
+    }
+
+    #[rstest]
+    #[case::diff_block(
+    fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
+    Err(ExtractionError::MergeError(format ! ("Can't merge ProtocolStates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
+    )]
+    #[case::same_tx(
+    fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
+    Err(ExtractionError::MergeError(format ! ("Can't merge ProtocolStates from the same transaction: 0x{:x}", H256::zero())))
+    )]
+    #[case::lower_idx(
+    fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
+    Err(ExtractionError::MergeError("Can't merge ProtocolStates with lower transaction index: 10 > 1".to_owned()))
+    )]
+    fn test_merge_pool_state_errors(
+        #[case] tx: Transaction,
+        #[case] exp: Result<(), ExtractionError>,
+    ) {
+        let attributes1: HashMap<String, Bytes> =
+            vec![("static_attribute".to_owned(), Bytes::from(U256::from(1)))]
+                .into_iter()
+                .collect();
+        let mut state1 = ProtocolState {
+            component_id: "State1".to_owned(),
+            attributes: attributes1,
+            modify_tx: fixtures::transaction01(),
+        };
+
+        let attributes2: HashMap<String, Bytes> =
+            vec![("new_attribute".to_owned(), Bytes::from(U256::from(1)))]
+                .into_iter()
+                .collect();
+        let state2 = ProtocolState {
+            component_id: "State1".to_owned(),
+            attributes: attributes2.clone(),
+            modify_tx: tx,
+        };
+
+        let res = state1.merge(state2);
+
+        assert_eq!(res, exp);
+    }
+
+    #[test]
+    fn test_protocol_state_wrong_id() {
+        let attributes1: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+            ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
+        ]
+        .into_iter()
+        .collect();
+        let mut state1 = ProtocolState {
+            component_id: "State1".to_owned(),
+            attributes: attributes1,
+            modify_tx: fixtures::transaction01(),
+        };
+
+        let attributes2: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(900))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(550))),
+            ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
+        ]
+        .into_iter()
+        .collect();
+        let state2 = ProtocolState {
+            component_id: "State2".to_owned(),
+            attributes: attributes2.clone(),
+            modify_tx: fixtures::transaction02(HASH_256_1, HASH_256_0, 11),
+        };
+
+        let res = state1.merge(state2);
+
+        assert_eq!(
+            res,
+            Err(ExtractionError::MergeError(
+                "Can't merge ProtocolStates from differing identities; Expected State1, got State2"
+                    .to_owned()
+            ))
+        );
+    }
+
+    fn protocol_state() -> ProtocolState {
+        let res1_value = 1000_u64.to_be_bytes().to_vec();
+        let res2_value = 500_u64.to_be_bytes().to_vec();
+        ProtocolState {
+            component_id: "test".to_string(),
+            attributes: vec![
+                ("reserve1".to_owned(), Bytes::from(res1_value)),
+                ("reserve2".to_owned(), Bytes::from(res2_value)),
+            ]
+            .into_iter()
+            .collect(),
+            modify_tx: transaction01(),
+        }
+    }
+
+    #[test]
+    fn test_protocol_state_parse_msg() {
+        let msg = fixtures::pb_state_changes();
+
+        let res = ProtocolState::try_from_message(msg, &fixtures::transaction01()).unwrap();
+
+        assert_eq!(res, protocol_state());
+    }
+
+    fn block_entity_changes() -> BlockEntityChanges {
+        let tx = Transaction {
+            hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000011121314,
+            ),
+            block_hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000031323334,
+            ),
+            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
+            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            index: 2,
+        };
+        let attr1: HashMap<String, Bytes> =
+            vec![("reserve1".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec()))]
+                .into_iter()
+                .collect();
+        let attr2: HashMap<String, Bytes> =
+            vec![("reserve2".to_owned(), Bytes::from(500_u64.to_be_bytes().to_vec()))]
+                .into_iter()
+                .collect();
+        BlockEntityChanges {
+            extractor: "test".to_string(),
+            chain: Chain::Ethereum,
+            block: Block {
+                number: 1,
+                hash: H256::from_low_u64_be(
+                    0x0000000000000000000000000000000000000000000000000000000031323334,
+                ),
+                parent_hash: H256::from_low_u64_be(
+                    0x0000000000000000000000000000000000000000000000000000000021222324,
+                ),
+                chain: Chain::Ethereum,
+                ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+            },
+            state_updates: vec![
+                ProtocolState {
+                    component_id: "test1".to_owned(),
+                    attributes: attr1,
+                    modify_tx: tx,
+                },
+                ProtocolState {
+                    component_id: "test1".to_owned(),
+                    attributes: attr2,
+                    modify_tx: tx,
+                },
+            ],
+            new_pools: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_block_entity_changes_parse_msg() {
+        let msg = fixtures::pb_block_entity_changes();
+
+        let res = BlockEntityChanges::try_from_message(msg, "test", Chain::Ethereum).unwrap();
+
+        assert_eq!(res, block_entity_changes());
+    }
+
+    #[test]
+    fn test_block_entity_changes_aggregate() {
+        let mut block_changes = block_entity_changes();
+        let block_hash = "0x0000000000000000000000000000000000000000000000000000000031323334";
+        // use a different tx so merge works
+        let new_tx = fixtures::transaction02(HASH_256_1, block_hash, 5);
+        block_changes.state_updates[1].modify_tx = new_tx;
+
+        let mut expected_result = block_entity_changes();
+        let expected_attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
+            ("reserve2".to_owned(), Bytes::from(500_u64.to_be_bytes().to_vec())),
+        ]
+        .into_iter()
+        .collect();
+        expected_result.state_updates = vec![ProtocolState {
+            component_id: "test1".to_owned(),
+            attributes: expected_attributes,
+            modify_tx: new_tx,
+        }];
+        dbg!(&expected_result);
+
+        let res = block_changes
+            .aggregate_updates()
+            .unwrap();
+
+        assert_eq!(res, expected_result);
+        assert_eq!(res.state_updates.len(), 1);
     }
 }
