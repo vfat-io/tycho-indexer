@@ -148,14 +148,14 @@ impl AmbientPgGateway {
         let address = H160(AMBIENT_CONTRACT);
         let account_updates = self
             .state_gateway
-            .get_account_delta(&self.chain, None, &target, conn)
+            .get_accounts_delta(&self.chain, None, &target, conn)
             .await?
             .into_iter()
             .filter_map(|u| if u.address == address { Some((u.address, u)) } else { None })
             .collect();
 
         self.state_gateway
-            .revert_contract_state(to, conn)
+            .revert_state(to, conn)
             .await?;
 
         self.save_cursor(new_cursor, conn)
@@ -287,7 +287,7 @@ where
             }
             Err(ExtractionError::Empty) => {
                 self.update_cursor(inp.cursor).await;
-                return Ok(None)
+                return Ok(None);
             }
             Err(e) => return Err(e),
         };
