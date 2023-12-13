@@ -80,8 +80,7 @@ use thiserror::Error;
 use crate::{
     extractor::evm::ProtocolState,
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem},
-    models::{Chain, ExtractionState, ProtocolState, ProtocolSystem},
+    models::{Chain, ExtractionState, ProtocolComponent, ProtocolState, ProtocolSystem},
 };
 
 pub mod postgres;
