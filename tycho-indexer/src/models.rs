@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use ethers::types::H160;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -179,8 +180,8 @@ impl ProtocolComponent<String> {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct TvlChange<T> {
-    pub token: T,
+pub struct TvlChange {
+    pub token: H160,
     pub new_balance: f64,
     // tx where the this balance was observed
     pub modify_tx: String,
