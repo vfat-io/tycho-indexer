@@ -15,18 +15,18 @@ pub enum Chain {
     ZkSync,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
 pub enum ProtocolSystem {
     Ambient,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
 pub enum ImplementationType {
     Vm,
     Custom,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
 pub enum FinancialType {
     Swap,
     Lend,
@@ -34,7 +34,7 @@ pub enum FinancialType {
     Psm,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
 pub struct ProtocolType {
     pub name: String,
     pub attribute_schema: serde_json::Value,

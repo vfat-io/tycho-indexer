@@ -426,6 +426,7 @@ impl TvlChange {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ProtocolComponent {
     // an id for this component, could be hex repr of contract address
     id: ContractId,
@@ -449,7 +450,7 @@ pub struct ProtocolComponent {
 ///
 /// `ContractId` is a simple wrapper around a `String` to ensure type safety
 /// and clarity when working with contract identifiers.
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
 pub struct ContractId(pub String);
 
 impl ProtocolComponent {
@@ -746,7 +747,7 @@ pub struct BlockEntityChangesResult {
     chain: Chain,
     pub block: Block,
     pub state_updates: HashMap<String, ProtocolState>,
-    pub new_pools: HashMap<H160, SwapPool>,
+    pub new_pools: HashMap<String, ProtocolComponent>,
 }
 
 /// A container for state updates grouped by transaction
@@ -759,7 +760,7 @@ pub struct BlockEntityChanges {
     chain: Chain,
     pub block: Block,
     pub state_updates: Vec<ProtocolStatesWithTx>,
-    pub new_pools: HashMap<H160, SwapPool>,
+    pub new_pools: HashMap<String, ProtocolComponent>,
 }
 
 // TODO: remove dead code check skip once extractor is implemented
@@ -770,10 +771,13 @@ impl BlockEntityChanges {
         msg: substreams::BlockEntityChanges,
         extractor: &str,
         chain: Chain,
+        protocol_system: ProtocolSystem,
+        protocol_type: ProtocolType,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
             let mut state_updates = Vec::new();
+            let mut new_pools = HashMap::new();
 
             for change in msg.changes.into_iter() {
                 if let Some(tx) = change.tx {
@@ -781,15 +785,25 @@ impl BlockEntityChanges {
                     let tx_update =
                         ProtocolStatesWithTx::try_from_message(change.state_changes, tx)?;
                     state_updates.push(tx_update);
+                    for component in change.components {
+                        let pool = ProtocolComponent::try_from_message(
+                            component,
+                            protocol_system.clone(),
+                            protocol_type.clone(),
+                            chain,
+                        )?;
+                        new_pools.insert(pool.clone().id.0, pool);
+                    }
                 }
             }
+
             state_updates.sort_unstable_by_key(|update| update.tx.index);
             return Ok(Self {
                 extractor: extractor.to_owned(),
                 chain,
                 block,
                 state_updates,
-                new_pools: HashMap::new(),
+                new_pools,
             });
         }
         Err(ExtractionError::Empty)
@@ -991,17 +1005,6 @@ pub mod fixtures {
 
     pub fn pb_block_entity_changes() -> crate::pb::tycho::evm::v1::BlockEntityChanges {
         use crate::pb::tycho::evm::v1::*;
-        let id1 = "State1".to_owned().into_bytes();
-        let id2 = "State2".to_owned().into_bytes();
-        let res_name = "reserve".to_owned().into_bytes();
-        let static_name = "static_attribute"
-            .to_owned()
-            .into_bytes();
-        let new_attr_name = "new".to_owned().into_bytes();
-        let res_value = 1000_u64.to_be_bytes().to_vec();
-        let static_value = 1_u64.to_be_bytes().to_vec();
-        let res_value_update = 600_u64.to_be_bytes().to_vec();
-        let new_attr_value = 0_u64.to_be_bytes().to_vec();
         BlockEntityChanges {
             block: Some(Block {
                 hash: vec![0x0, 0x0, 0x0, 0x0],
@@ -1019,24 +1022,48 @@ pub mod fixtures {
                     }),
                     state_changes: vec![
                         StateChanges {
-                            component_id: id1.clone(),
+                            component_id: "State1".to_owned().into_bytes(),
                             attributes: vec![
-                                Attribute { name: res_name.clone(), value: res_value.clone() },
                                 Attribute {
-                                    name: static_name.clone(),
-                                    value: static_value.clone(),
+                                    name: "reserve".to_owned().into_bytes(),
+                                    value: 1000_u64.to_be_bytes().to_vec(),
+                                },
+                                Attribute {
+                                    name: "static_attribute"
+                                        .to_owned()
+                                        .into_bytes(),
+                                    value: 1_u64.to_be_bytes().to_vec(),
                                 },
                             ],
                         },
                         StateChanges {
-                            component_id: id2,
+                            component_id: "State2".to_owned().into_bytes(),
                             attributes: vec![
-                                Attribute { name: res_name.clone(), value: res_value.clone() },
-                                Attribute { name: static_name, value: static_value },
+                                Attribute {
+                                    name: "reserve".to_owned().into_bytes(),
+                                    value: 1000_u64.to_be_bytes().to_vec(),
+                                },
+                                Attribute {
+                                    name: "static_attribute"
+                                        .to_owned()
+                                        .into_bytes(),
+                                    value: 1_u64.to_be_bytes().to_vec(),
+                                },
                             ],
                         },
                     ],
-                    components: vec![],
+                    components: vec![ProtocolComponent {
+                        id: "Pool".to_owned().into_bytes(),
+                        tokens: vec![
+                            "token0".to_owned().into_bytes(),
+                            "token1".to_owned().into_bytes(),
+                        ],
+                        contracts: vec!["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()],
+                        static_att: vec![Attribute {
+                            name: "key".to_owned().into_bytes(),
+                            value: 600_u64.to_be_bytes().to_vec(),
+                        }],
+                    }],
                 },
                 TransactionStateChanges {
                     tx: Some(Transaction {
@@ -1046,10 +1073,16 @@ pub mod fixtures {
                         index: 11,
                     }),
                     state_changes: vec![StateChanges {
-                        component_id: id1,
+                        component_id: "State1".to_owned().into_bytes(),
                         attributes: vec![
-                            Attribute { name: res_name, value: res_value_update },
-                            Attribute { name: new_attr_name, value: new_attr_value },
+                            Attribute {
+                                name: "reserve".to_owned().into_bytes(),
+                                value: 600_u64.to_be_bytes().to_vec(),
+                            },
+                            Attribute {
+                                name: "new".to_owned().into_bytes(),
+                                value: 0_u64.to_be_bytes().to_vec(),
+                            },
                         ],
                     }],
                     components: vec![],
@@ -1541,6 +1574,31 @@ mod test {
         )]
         .into_iter()
         .collect();
+        let static_attr: HashMap<String, Bytes> =
+            vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
+                .into_iter()
+                .collect();
+        let new_pools: HashMap<String, ProtocolComponent> = vec![(
+            "Pool".to_owned(),
+            ProtocolComponent {
+                id: ContractId("Pool".to_owned()),
+                protocol_system: ProtocolSystem::Ambient,
+                protocol_type: ProtocolType {
+                    name: "Pool".to_string(),
+                    attribute_schema: serde_json::Value::default(),
+                    financial_type: FinancialType::Psm,
+                    implementation_type: ImplementationType::Custom,
+                },
+                chain: Chain::Ethereum,
+                tokens: vec!["token0".to_owned(), "token1".to_owned()],
+                static_attributes: static_attr,
+                contract_ids: vec![ContractId(
+                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_owned(),
+                )],
+            },
+        )]
+        .into_iter()
+        .collect();
         BlockEntityChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
@@ -1559,15 +1617,28 @@ mod test {
                 protocol_state_with_tx(),
                 ProtocolStatesWithTx { protocol_states: state_updates, tx },
             ],
-            new_pools: HashMap::new(),
+            new_pools,
         }
     }
 
     #[test]
     fn test_block_entity_changes_parse_msg() {
         let msg = fixtures::pb_block_entity_changes();
+        let protocol_type = ProtocolType {
+            name: "Pool".to_string(),
+            attribute_schema: serde_json::Value::default(),
+            financial_type: FinancialType::Psm,
+            implementation_type: ImplementationType::Custom,
+        };
 
-        let res = BlockEntityChanges::try_from_message(msg, "test", Chain::Ethereum).unwrap();
+        let res = BlockEntityChanges::try_from_message(
+            msg,
+            "test",
+            Chain::Ethereum,
+            ProtocolSystem::Ambient,
+            protocol_type,
+        )
+        .unwrap();
 
         assert_eq!(res, block_entity_changes());
     }
@@ -1617,6 +1688,31 @@ mod test {
         ]
         .into_iter()
         .collect();
+        let static_attr: HashMap<String, Bytes> =
+            vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
+                .into_iter()
+                .collect();
+        let new_pools: HashMap<String, ProtocolComponent> = vec![(
+            "Pool".to_owned(),
+            ProtocolComponent {
+                id: ContractId("Pool".to_owned()),
+                protocol_system: ProtocolSystem::Ambient,
+                protocol_type: ProtocolType {
+                    name: "Pool".to_string(),
+                    attribute_schema: serde_json::Value::default(),
+                    financial_type: FinancialType::Psm,
+                    implementation_type: ImplementationType::Custom,
+                },
+                chain: Chain::Ethereum,
+                tokens: vec!["token0".to_owned(), "token1".to_owned()],
+                static_attributes: static_attr,
+                contract_ids: vec![ContractId(
+                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_owned(),
+                )],
+            },
+        )]
+        .into_iter()
+        .collect();
         BlockEntityChangesResult {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
@@ -1630,7 +1726,7 @@ mod test {
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
             state_updates,
-            new_pools: HashMap::new(),
+            new_pools,
         }
     }
 
