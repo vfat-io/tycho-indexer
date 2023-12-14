@@ -426,6 +426,25 @@ impl TvlChange {
         })
     }
 }
+
+/// Represents the static parts of a protocol component.
+///
+/// `ProtocolComponent` provides detailed descriptions of the functionalities a protocol
+/// such as swap pools that enables the exchange of two tokens.
+///
+/// A `ProtocolComponent` can be associated with an `Account`, and it has an identifier (`id`) that
+/// can be either the on-chain address or a custom one. It belongs to a specific `ProtocolSystem`
+/// and has a `ProtocolType`declaring its behaviour e.g., swap, lend, bridge. The component is
+/// associated with a specific `Chain` and holds information about tradable tokens, related contract
+/// IDs, and static attributes.
+///
+/// A `ProtocolComponent` can have a one-to-one or many-to-one relationship with components.
+/// For example, `UniswapV2` and `UniswapV3` have a one-to-one relationship one component (pool) one
+/// contract, while `Ambient` has a many-to-one relationship with a single component and multiple
+/// contracts.
+///
+/// The `ProtocolComponent` struct is designed to store static attributes related to the associated
+/// smart contract.
 pub struct ProtocolComponent {
     // an id for this component, could be hex repr of contract address
     id: ContractId,
@@ -601,6 +620,7 @@ impl BlockStateChanges {
 
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone)]
+/// Represents the dynamic data of `ProtocolComponent`.
 pub struct ProtocolState {
     // associates back to a component, which has metadata like type, tokens , etc.
     pub component_id: String,
