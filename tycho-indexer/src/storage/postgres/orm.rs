@@ -275,10 +275,10 @@ pub struct ProtocolComponent {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 /// Represents an account on a blockchain.
 ///
-/// An `Account` is identified by its blockchain (`Chain`) and address (`H160`). It may have a descriptive
-/// `title` and contains information about storage slots, balance, associated code (bytecode), code hash,
-/// and transaction hashes related to balance modification, code modification, and optional creation.
-/// Additional information about accounts.
+/// An `Account` is identified by its blockchain (`Chain`) and address (`H160`). It may have a
+/// descriptive `title` and contains information about storage slots, balance, associated code
+/// (bytecode), code hash, and transaction hashes related to balance modification, code
+/// modification, and optional creation. Additional information about accounts.
 /// - A Contract is also an Account, but an Account is not necessarily a Contract.
 /// - An account is considered a contract if it has associated code.
 pub struct Account {
