@@ -434,13 +434,13 @@ impl TvlChange {
 ///
 /// A `ProtocolComponent` can be associated with an `Account`, and it has an identifier (`id`) that
 /// can be either the on-chain address or a custom one. It belongs to a specific `ProtocolSystem`
-/// and has a `ProtocolTypeID` that associates it with a `ProtocolType` that describes its behaviour e.g., swap, lend, bridge. The component is
-/// associated with a specific `Chain` and holds information about tradable tokens, related contract
-/// IDs, and static attributes.
+/// and has a `ProtocolTypeID` that associates it with a `ProtocolType` that describes its behaviour
+/// e.g., swap, lend, bridge. The component is associated with a specific `Chain` and holds
+/// information about tradable tokens, related contract IDs, and static attributes.
 ///
-/// A `ProtocolComponent` can have a one-to-one or many-to-one relationship with components.
+/// A `ProtocolComponent` can have a one-to-one or one-to-many relationship with contracts.
 /// For example, `UniswapV2` and `UniswapV3` have a one-to-one relationship one component (pool) one
-/// contract, while `Ambient` has a many-to-one relationship with a single component and multiple
+/// contract, while `Ambient` has a one-to-many relationship with a single component and multiple
 /// contracts.
 ///
 /// The `ProtocolComponent` struct is designed to store static attributes related to the associated
