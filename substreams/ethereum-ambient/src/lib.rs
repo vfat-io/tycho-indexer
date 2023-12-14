@@ -191,9 +191,7 @@ fn map_changes(
                                     contracts: vec![],
                                     static_att: vec![static_attribute],
                                 };
-                                tx_change
-                                    .components
-                                    .push(new_component.into());
+                                tx_change.components.push(new_component);
                             } else {
                                 panic!("Failed to decode ABI.");
                             }
