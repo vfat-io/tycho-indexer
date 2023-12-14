@@ -975,7 +975,7 @@ pub mod fixtures {
 
     pub fn pb_state_changes() -> crate::pb::tycho::evm::v1::StateChanges {
         use crate::pb::tycho::evm::v1::*;
-        let id = "test".to_owned().into_bytes();
+        let id = "State1".to_owned().into_bytes();
         let res1_name = "reserve1".to_owned().into_bytes();
         let res2_name = "reserve2".to_owned().into_bytes();
         let res1_value = 1000_u64.to_be_bytes().to_vec();
@@ -1408,7 +1408,7 @@ mod test {
             ProtocolState {
                 component_id: "State1".to_owned(),
                 attributes: new_attributes,
-                modify_tx: new_tx.clone().hash,
+                modify_tx: new_tx.hash,
             },
         )]
         .into_iter()
@@ -1464,28 +1464,29 @@ mod test {
         assert_eq!(res, exp);
     }
 
+    fn protocol_state() -> ProtocolState {
+        let res1_value = 1000_u64.to_be_bytes().to_vec();
+        let res2_value = 500_u64.to_be_bytes().to_vec();
+        ProtocolState {
+            component_id: "State1".to_string(),
+            attributes: vec![
+                ("reserve1".to_owned(), Bytes::from(res1_value)),
+                ("reserve2".to_owned(), Bytes::from(res2_value)),
+            ]
+            .into_iter()
+            .collect(),
+            modify_tx: H256::zero(),
+        }
+    }
+
     #[test]
     fn test_protocol_state_wrong_id() {
-        let attributes1: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
-            ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
-        ]
-        .into_iter()
-        .collect();
-        let mut state1 = ProtocolState {
-            component_id: "State1".to_owned(),
-            attributes: attributes1,
-            modify_tx: H256::zero(),
-        };
+        let mut state1 = protocol_state();
 
-        let attributes2: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(900))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(550))),
-            ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
-        ]
-        .into_iter()
-        .collect();
+        let attributes2: HashMap<String, Bytes> =
+            vec![("reserve".to_owned(), Bytes::from(U256::from(900)))]
+                .into_iter()
+                .collect();
         let state2 = ProtocolState {
             component_id: "State2".to_owned(),
             attributes: attributes2.clone(),
@@ -1501,21 +1502,6 @@ mod test {
                     .to_owned()
             ))
         );
-    }
-
-    fn protocol_state() -> ProtocolState {
-        let res1_value = 1000_u64.to_be_bytes().to_vec();
-        let res2_value = 500_u64.to_be_bytes().to_vec();
-        ProtocolState {
-            component_id: "test".to_string(),
-            attributes: vec![
-                ("reserve1".to_owned(), Bytes::from(res1_value)),
-                ("reserve2".to_owned(), Bytes::from(res2_value)),
-            ]
-            .into_iter()
-            .collect(),
-            modify_tx: H256::zero(),
-        }
     }
 
     #[test]
@@ -1617,7 +1603,7 @@ mod test {
                 ProtocolState {
                     component_id: "State1".to_owned(),
                     attributes: attr1,
-                    modify_tx: tx.clone().hash,
+                    modify_tx: tx.hash,
                 },
             ),
             (
