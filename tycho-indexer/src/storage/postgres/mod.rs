@@ -257,11 +257,11 @@ impl StorageError {
                 StorageError::Unexpected(err_string)
             }
             diesel::result::Error::NotFound => {
-                if let Some(related_entitiy) = fetch_args {
+                if let Some(related_entity) = fetch_args {
                     return StorageError::NoRelatedEntity(
                         entity.to_owned(),
                         id.to_owned(),
-                        related_entitiy,
+                        related_entity,
                     )
                 }
                 StorageError::NotFound(entity.to_owned(), id.to_owned())

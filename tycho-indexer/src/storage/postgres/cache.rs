@@ -27,7 +27,7 @@ enum WriteOp {
     UpsertTx(evm::Transaction),
     SaveExtractionState(ExtractionState),
     InsertContract(evm::Account),
-    UpdateContracts(Vec<(TxHash, evm::AccountUpdate)>),
+    UpdateContracts(Vec<(TxHash, AccountUpdate)>),
     RevertContractState(BlockIdentifier),
 }
 
@@ -37,6 +37,16 @@ struct DBTransaction {
     block: evm::Block,
     operations: Vec<WriteOp>,
     tx: oneshot::Sender<Result<(), StorageError>>,
+}
+
+impl DBTransaction {
+    pub fn new(
+        block: evm::Block,
+        operations: Vec<WriteOp>,
+        tx: oneshot::Sender<Result<(), StorageError>>,
+    ) -> Self {
+        Self { block, operations, tx }
+    }
 }
 
 /// Represents different types of messages that can be sent to the DBCacheWriteExecutor.
@@ -236,6 +246,7 @@ impl DBCacheWriteExecutor {
                                     seen_operations.push(op.clone());
                                 }
                                 Err(e) => {
+                                    dbg!(&e);
                                     res = Err(e);
                                     break;
                                 }
@@ -321,11 +332,97 @@ pub struct CachedGateway {
 }
 
 impl CachedGateway {
-    // TODO: implement the usual gateway methods here, but they are translated into write ops, for
-    // reads call the gateway directly
-    // pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
-    //     todo!()
-    // }
+    #[allow(private_interfaces)]
+    pub fn new(
+        tx: mpsc::Sender<DBCacheMessage>,
+        pool: Pool<AsyncPgConnection>,
+        state_gateway: EVMStateGateway<AsyncPgConnection>,
+    ) -> Self {
+        CachedGateway { tx, pool, state_gateway }
+    }
+    pub async fn upsert_block(
+        &self,
+        new: &evm::Block,
+    ) -> oneshot::Receiver<Result<(), StorageError>> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx = DBTransaction::new(*new, vec![WriteOp::UpsertBlock(*new)], tx);
+        let _ = self
+            .tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await;
+        rx
+    }
+
+    pub async fn upsert_tx(
+        &self,
+        block: &evm::Block,
+        new: &evm::Transaction,
+    ) -> oneshot::Receiver<Result<(), StorageError>> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx = DBTransaction::new(*block, vec![WriteOp::UpsertTx(*new)], tx);
+        let _ = self
+            .tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await;
+        rx
+    }
+
+    pub async fn save_state(
+        &self,
+        block: &evm::Block,
+        new: &ExtractionState,
+    ) -> oneshot::Receiver<Result<(), StorageError>> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx = DBTransaction::new(*block, vec![WriteOp::SaveExtractionState(new.clone())], tx);
+        let _ = self
+            .tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await;
+        rx
+    }
+
+    pub async fn insert_contract(
+        &self,
+        block: &evm::Block,
+        new: &evm::Account,
+    ) -> oneshot::Receiver<Result<(), StorageError>> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx = DBTransaction::new(*block, vec![WriteOp::InsertContract(new.clone())], tx);
+        let _ = self
+            .tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await;
+        rx
+    }
+
+    pub async fn update_contracts(
+        &self,
+        block: &evm::Block,
+        new: &[(TxHash, AccountUpdate)],
+    ) -> oneshot::Receiver<Result<(), StorageError>> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx = DBTransaction::new(*block, vec![WriteOp::UpdateContracts(new.to_owned())], tx);
+        let _ = self
+            .tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await;
+        rx
+    }
+
+    pub async fn revert_state(
+        &self,
+        block: &evm::Block,
+        to: &BlockIdentifier,
+    ) -> oneshot::Receiver<Result<(), StorageError>> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx = DBTransaction::new(*block, vec![WriteOp::RevertContractState(to.clone())], tx);
+        let _ = self
+            .tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await;
+        rx
+    }
+
     pub async fn get_accounts_delta(
         &self,
         chain: &Chain,
@@ -361,12 +458,6 @@ impl DerefMut for CachedGateway {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.state_gateway
     }
-}
-
-pub fn new_cached_gateway(
-    pool: Pool<AsyncPgConnection>,
-) -> Result<(JoinHandle<()>, CachedGateway), StorageError> {
-    todo!()
 }
 
 #[cfg(test)]
