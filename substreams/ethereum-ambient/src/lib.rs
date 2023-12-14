@@ -113,11 +113,11 @@ fn map_changes(
                     ParamType::Bytes,
                 ];
                 let user_cmd_internal_abi_types = &[
-                    ParamType::Uint(8),
-                    ParamType::Address,
-                    ParamType::Address,
-                    ParamType::Uint(256),
-                    ParamType::Uint(128),
+                    ParamType::Uint(8),   // command
+                    ParamType::Address,   // base
+                    ParamType::Address,   // quote
+                    ParamType::Uint(256), // pool index
+                    ParamType::Uint(128), // price
                 ];
 
                 // Decode external call to UserCmd
@@ -132,7 +132,7 @@ fn map_changes(
                     };
 
                     // Decode internal call to UserCmd
-                    if let Ok(internal_params) = decode(user_cmd_external_abi_types, &cmd_bytes) {
+                    if let Ok(internal_params) = decode(user_cmd_internal_abi_types, &cmd_bytes) {
                         let command_code = match &internal_params[0] {
                             Token::Uint(uint) => uint.as_u64() as u8,
                             _ => {
@@ -144,61 +144,50 @@ fn map_changes(
                         };
 
                         if command_code == INIT_POOL_CODE {
-                            let internal_calldata = match &internal_params[1] {
-                                Token::Bytes(bytes) => bytes.clone(),
+                            let base = match &internal_params[1] {
+                                Token::Address(addr) => addr.to_fixed_bytes().to_vec(),
+                                _ => {
+                                    panic!("Unexpected type for base: {:?}", &internal_params[1]);
+                                }
+                            };
+
+                            let quote = match &internal_params[2] {
+                                Token::Address(addr) => addr.to_fixed_bytes().to_vec(),
+                                _ => {
+                                    panic!("Unexpected type for quote: {:?}", &internal_params[2]);
+                                }
+                            };
+
+                            let pool_index = match &internal_params[3] {
+                                Token::Uint(uint) => uint.as_u64() as u32,
                                 _ => {
                                     panic!(
-                                        "Unexpected type for cmd string: {:?}",
-                                        &internal_params[0]
+                                        "Unexpected type for pool_index: {:?}",
+                                        &internal_params[3]
                                     );
                                 }
                             };
 
-                            if let Ok(params) =
-                                decode(user_cmd_internal_abi_types, &internal_calldata)
-                            {
-                                let base = match &params[1] {
-                                    Token::Address(addr) => addr.to_fixed_bytes().to_vec(),
-                                    _ => {
-                                        panic!("Unexpected type for base: {:?}", &params[1]);
-                                    }
-                                };
+                            let static_attribute = tycho::Attribute {
+                                name: String::from("pool_index")
+                                    .as_bytes()
+                                    .to_vec(),
+                                value: pool_index.to_be_bytes().to_vec(),
+                            };
 
-                                let quote = match &params[2] {
-                                    Token::Address(addr) => addr.to_fixed_bytes().to_vec(),
-                                    _ => {
-                                        panic!("Unexpected type for quote: {:?}", &params[1]);
-                                    }
-                                };
-
-                                let pool_index = match &params[3] {
-                                    Token::Uint(uint) => uint.as_u64() as u32,
-                                    _ => {
-                                        panic!("Unexpected type for pool_index: {:?}", &params[2]);
-                                    }
-                                };
-
-                                let static_attribute = tycho::Attribute {
-                                    name: String::from("pool_index")
-                                        .as_bytes()
-                                        .to_vec(),
-                                    value: pool_index.to_be_bytes().to_vec(),
-                                };
-
-                                let new_component = tycho::ProtocolComponent {
-                                    id: block_tx.hash.clone(),
-                                    tokens: vec![base, quote],
-                                    contracts: vec![],
-                                    static_att: vec![static_attribute],
-                                };
-                                tx_change.components.push(new_component);
-                            } else {
-                                panic!("Failed to decode ABI.");
-                            }
+                            let new_component = tycho::ProtocolComponent {
+                                id: block_tx.hash.clone(),
+                                tokens: vec![base, quote],
+                                contracts: vec![],
+                                static_att: vec![static_attribute],
+                            };
+                            tx_change.components.push(new_component);
                         }
+                    } else {
+                        panic!("Failed to decode ABI internal call.");
                     }
                 } else {
-                    panic!("Failed to decode ABI.");
+                    panic!("Failed to decode ABI external call.");
                 }
             }
         }
