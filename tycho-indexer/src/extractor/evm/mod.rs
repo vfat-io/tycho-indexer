@@ -226,7 +226,7 @@ pub struct BlockAccountChanges {
     pub account_updates: HashMap<H160, AccountUpdate>,
     pub new_protocol_components: Vec<ProtocolComponent>,
     pub deleted_protocol_components: Vec<ProtocolComponent>,
-    pub tvl_changes: HashMap<String, TvlChange>,
+    pub tvl_changes: Vec<TvlChange>,
 }
 
 impl BlockAccountChanges {
@@ -237,7 +237,7 @@ impl BlockAccountChanges {
         account_updates: HashMap<H160, AccountUpdate>,
         new_components: Vec<ProtocolComponent>,
         deleted_protocol_components: Vec<ProtocolComponent>,
-        tvl_change: HashMap<String, TvlChange>,
+        tvl_change: Vec<TvlChange>,
     ) -> Self {
         BlockAccountChanges {
             extractor: extractor.to_owned(),
@@ -640,7 +640,7 @@ impl BlockStateChanges {
                 .collect(),
             self.protocol_components,
             Vec::new(),
-            HashMap::new(),
+            Vec::new(),
         ))
     }
 }
@@ -1168,13 +1168,10 @@ mod test {
                 ContractId("DIANA-THALES".to_string()),
                 ContractId("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
             ],
-            static_attributes: [
+            static_attributes: HashMap::from([
                 ("key1".to_string(), Bytes::from(b"value1".to_vec())),
                 ("key2".to_string(), Bytes::from(b"value2".to_vec())),
-            ]
-            .iter()
-            .cloned()
-            .collect(),
+            ]),
         };
         BlockStateChanges {
             extractor: "test".to_string(),
@@ -1294,7 +1291,7 @@ mod test {
             .collect(),
             vec![protocol_component],
             Vec::new(),
-            HashMap::new(),
+            Vec::new(),
         )
     }
 
