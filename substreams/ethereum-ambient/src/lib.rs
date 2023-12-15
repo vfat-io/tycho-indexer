@@ -169,16 +169,22 @@ fn map_changes(
                             };
 
                             let static_attribute = tycho::Attribute {
-                                name: String::from("pool_index")
-                                    .as_bytes()
-                                    .to_vec(),
+                                name: String::from("pool_index"),
                                 value: pool_index.to_be_bytes().to_vec(),
                             };
 
+                            let mut tokens: Vec<Vec<u8>> = vec![base.clone(), quote.clone()];
+                            tokens.sort();
+
                             let new_component = tycho::ProtocolComponent {
-                                id: block_tx.hash.clone(),
-                                tokens: vec![base, quote],
-                                contracts: vec![],
+                                id: format!(
+                                    "{}{}{}",
+                                    hex::encode(base.clone()),
+                                    hex::encode(quote.clone()),
+                                    pool_index
+                                ),
+                                tokens,
+                                contracts: vec![hex::encode(AMBIENT_CONTRACT)],
                                 static_att: vec![static_attribute],
                             };
                             tx_change.components.push(new_component);
