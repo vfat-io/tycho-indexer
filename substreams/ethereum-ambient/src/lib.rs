@@ -130,20 +130,12 @@ fn map_changes(
                             panic!("Unexpected type for cmd_bytes: {:?}", &external_params[1]);
                         }
                     };
-
-                    // Decode internal call to UserCmd
-                    if let Ok(internal_params) = decode(user_cmd_internal_abi_types, &cmd_bytes) {
-                        let command_code = match &internal_params[0] {
-                            Token::Uint(uint) => uint.as_u64() as u8,
-                            _ => {
-                                panic!(
-                                    "Unexpected type for command_code: {:?}",
-                                    &internal_params[0]
-                                );
-                            }
-                        };
-
-                        if command_code == INIT_POOL_CODE {
+                    // Call data is structured differently depending on the cmd code, so only
+                    // decode if this is an init pool code.
+                    if cmd_bytes[31] == INIT_POOL_CODE {
+                        // Decode internal call to UserCmd
+                        if let Ok(internal_params) = decode(user_cmd_internal_abi_types, &cmd_bytes)
+                        {
                             let base = match &internal_params[1] {
                                 Token::Address(addr) => addr.to_fixed_bytes().to_vec(),
                                 _ => {
@@ -182,9 +174,9 @@ fn map_changes(
                                 static_att: vec![static_attribute],
                             };
                             tx_change.components.push(new_component);
+                        } else {
+                            panic!("Failed to decode ABI internal call.");
                         }
-                    } else {
-                        panic!("Failed to decode ABI internal call.");
                     }
                 } else {
                     panic!("Failed to decode ABI external call.");
