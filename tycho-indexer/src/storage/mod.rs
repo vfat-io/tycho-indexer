@@ -81,9 +81,8 @@ use crate::{
     extractor::evm::ProtocolState,
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolComponent, ProtocolSystem},
+    storage::postgres::orm,
 };
-
-pub mod postgres;
 
 pub mod postgres;
 
@@ -479,10 +478,10 @@ pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
 /// This trait defines how to retrieve protocol components, state as well as
 /// tokens from storage.
 #[async_trait]
-pub trait ProtocolStateGateway {
+pub trait ProtocolGateway {
     type DB;
     type Token;
-    type ProtocolState;
+    type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
 
     /// Retrieve ProtocolComponent from the db
     ///
@@ -592,6 +591,7 @@ pub trait ProtocolStateGateway {
         id: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
+        conn: &mut Self::DB,
     ) -> Result<ProtocolState, StorageError>;
 
     /// Reverts the protocol states in storage.
@@ -603,7 +603,11 @@ pub trait ProtocolStateGateway {
     ///
     /// # Return
     /// Ok if the revert was successful, Err if it was not.
-    async fn revert_protocol_state(&self, to: &BlockIdentifier) -> Result<(), StorageError>;
+    async fn revert_protocol_state(
+        &self,
+        to: &BlockIdentifier,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 }
 
 /// Lays out the necessary interface needed to store and retrieve contracts from
@@ -927,23 +931,15 @@ pub trait ContractStateGateway {
 }
 
 pub trait StateGateway<DB>:
-ExtractionStateGateway<DB=DB>
-+ ChainGateway<DB=DB>
-+ ProtocolGateway<DB = DB>
-+ ExtractionStateGateway<DB=DB>
-+ ContractStateGateway<DB=DB>
-+ Send
-+ Sync
-{}
+    ExtractionStateGateway<DB = DB>
+    + ChainGateway<DB = DB>
+    + ProtocolGateway<DB = DB>
+    + ExtractionStateGateway<DB = DB>
+    + ContractStateGateway<DB = DB>
+    + Send
+    + Sync
+{
+}
 
-pub type StateGatewayType<DB, B, TX, C, D> = Arc<
-    dyn StateGateway<
-        DB,
-        Transaction = TX,
-        Block = B,
-        ContractState = C,
-        Delta = D,
-        Token = T,
-        ProtocolState = PS,
-    >,
->;
+pub type StateGatewayType<DB, B, TX, C, D, T> =
+    Arc<dyn StateGateway<DB, Transaction = TX, Block = B, ContractState = C, Delta = D, Token = T>>;

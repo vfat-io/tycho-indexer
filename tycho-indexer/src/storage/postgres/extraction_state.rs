@@ -4,20 +4,19 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::storage::{
     ContractDelta, ExtractionState, ExtractionStateGateway, StorableBlock, StorableContract,
-    StorableProtocolState, StorableToken, StorableTransaction,
+    StorableToken, StorableTransaction,
 };
 
 use super::{orm, schema, Chain, PostgresGateway, StorageError};
 
 #[async_trait]
-impl<B, TX, A, D, T, PS> ExtractionStateGateway for PostgresGateway<B, TX, A, D, T, PS>
+impl<B, TX, A, D, T> ExtractionStateGateway for PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
-    PS: StorableProtocolState,
 {
     type DB = AsyncPgConnection;
 
@@ -100,7 +99,7 @@ mod test {
     use diesel::prelude::*;
     use diesel_async::{AsyncConnection, RunQueryDsl};
 
-    use crate::{extractor::evm, models::ProtocolState};
+    use crate::extractor::evm;
 
     use super::*;
 
@@ -151,7 +150,6 @@ mod test {
         evm::Account,
         evm::AccountUpdate,
         evm::ERC20Token,
-        ProtocolState,
     > {
         PostgresGateway::<
             evm::Block,
@@ -159,7 +157,6 @@ mod test {
             evm::Account,
             evm::AccountUpdate,
             evm::ERC20Token,
-            ProtocolState,
         >::from_connection(conn)
         .await
     }

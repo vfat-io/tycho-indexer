@@ -645,12 +645,13 @@ where
 }
 
 #[async_trait]
-impl<B, TX, A, D> ContractStateGateway for PostgresGateway<B, TX, A, D>
+impl<B, TX, A, D, T> ContractStateGateway for PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
+    T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     type DB = AsyncPgConnection;
     type ContractState = A;

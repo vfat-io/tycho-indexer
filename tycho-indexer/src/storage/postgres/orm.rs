@@ -10,7 +10,9 @@ use crate::{
 };
 
 use super::schema::{
-    account, account_balance, block, chain, contract_code, extraction_state, transaction,
+    account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
+    protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
+    token, transaction,
 };
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -266,6 +268,36 @@ pub struct ProtocolComponent {
     pub deleted_at: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[diesel(belongs_to(ProtocolComponent))]
+#[diesel(table_name = protocol_state)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ProtocolState {
+    pub id: i64,
+    pub protocol_component_id: String,
+    pub state: Option<serde_json::Value>,
+    pub modify_tx: i64,
+    pub tvl: Option<i64>,
+    pub inertias: Option<Vec<Option<i64>>>,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
+    pub inserted_ts: NaiveDateTime,
+    pub modified_ts: NaiveDateTime,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = protocol_state)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolState {
+    pub protocol_component_id: String,
+    pub state: Option<serde_json::Value>,
+    pub modify_tx: i64,
+    pub tvl: Option<i64>,
+    pub inertias: Option<Vec<Option<i64>>>,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]

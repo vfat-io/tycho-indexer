@@ -152,7 +152,7 @@ pub mod chain;
 pub mod contract_state;
 pub mod extraction_state;
 pub mod orm;
-mod protocol_state;
+pub mod protocol_state;
 pub mod schema;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
@@ -274,7 +274,7 @@ impl StorageError {
     }
 }
 
-pub struct PostgresGateway<B, TX, A, D, T, PS> {
+pub struct PostgresGateway<B, TX, A, D, T> {
     chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
@@ -282,14 +282,13 @@ pub struct PostgresGateway<B, TX, A, D, T, PS> {
     _phantom_delta: PhantomData<D>,
 }
 
-impl<B, TX, A, D, T, PS> PostgresGateway<B, TX, A, D, T, PS>
+impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
-    PS: StorableProtocolState,
 {
     pub fn with_cache(cache: Arc<ChainEnumCache>) -> Self {
         Self {
@@ -328,18 +327,19 @@ where
     pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
         let cache = EnumTableCache::<Chain>::from_pool(pool.clone()).await?;
 
-        let gw = Arc::new(PostgresGateway::<B, TX, A, D>::with_cache(Arc::new(cache)));
+        let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(Arc::new(cache)));
 
         Ok(gw)
     }
 }
 
-impl<B, TX, A, D> StateGateway<AsyncPgConnection> for PostgresGateway<B, TX, A, D>
+impl<B, TX, A, D, T> StateGateway<AsyncPgConnection> for PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
+    T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     // No methods in here - this just ties everything together
 }

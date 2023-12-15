@@ -323,7 +323,8 @@ pub struct BlockStateChanges {
     pub new_pools: HashMap<H160, SwapPool>,
 }
 
-pub type EVMStateGateway<DB> = StateGatewayType<DB, Block, Transaction, Account, AccountUpdate>;
+pub type EVMStateGateway<DB> =
+    StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token>;
 
 impl Block {
     /// Parses block from tychos protobuf block message

@@ -2,28 +2,28 @@ use async_trait::async_trait;
 use diesel_async::AsyncPgConnection;
 
 use crate::{
-    models::{Chain, ProtocolComponent, ProtocolState, ProtocolSystem},
+    extractor::evm::ProtocolState,
+    models::{Chain, ProtocolComponent, ProtocolSystem},
     storage::{
         postgres::{orm, PostgresGateway},
-        Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolStateGateway,
-        StorableBlock, StorableContract, StorableProtocolState, StorableToken, StorableTransaction,
-        StorageError, TxHash, Version,
+        Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
+        StorableContract, StorableProtocolState, StorableToken, StorableTransaction, StorageError,
+        TxHash, Version,
     },
 };
 
 #[async_trait]
-impl<B, TX, A, D, T, PS> ProtocolStateGateway for PostgresGateway<B, TX, A, D, T, PS>
+impl<B, TX, A, D, T> ProtocolGateway for PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
-    PS: StorableProtocolState,
 {
     type DB = AsyncPgConnection;
     type Token = T;
-    type ProtocolState = PS;
+    type ProtocolState = dyn StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
 
     async fn get_components(
         &self,
