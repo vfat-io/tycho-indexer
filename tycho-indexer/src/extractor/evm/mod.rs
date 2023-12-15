@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
@@ -15,7 +17,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
     hex_bytes::Bytes,
-    models::{Chain, ExtractorIdentity, NormalisedMessage},
+    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolSystem, ProtocolType},
     pb::tycho::evm::v1 as substreams,
     storage::{ChangeType, StateGatewayType},
 };
@@ -401,6 +403,116 @@ impl AccountUpdateWithTx {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct TvlChange {
+    token: H160,
+    new_balance: f64,
+    // tx where the this balance was observed
+    modify_tx: H256,
+    component_id: String,
+}
+
+impl TvlChange {
+    pub fn try_from_message(
+        msg: substreams::BalanceChange,
+        tx: &Transaction,
+    ) -> Result<Self, ExtractionError> {
+        Ok(Self {
+            token: pad_and_parse_h160(&msg.token.into()).map_err(ExtractionError::DecodeError)?,
+            new_balance: f64::from_bits(u64::from_le_bytes(msg.balance.try_into().unwrap())),
+            modify_tx: tx.hash,
+            component_id: String::from_utf8(msg.component_id)
+                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
+        })
+    }
+}
+
+/// Represents the static parts of a protocol component.
+///
+/// `ProtocolComponent` provides detailed descriptions of the functionalities a protocol,
+/// for example, swap pools that enables the exchange of two tokens.
+///
+/// A `ProtocolComponent` can be associated with an `Account`, and it has an identifier (`id`) that
+/// can be either the on-chain address or a custom one. It belongs to a specific `ProtocolSystem`
+/// and has a `ProtocolTypeID` that associates it with a `ProtocolType` that describes its behaviour
+/// e.g., swap, lend, bridge. The component is associated with a specific `Chain` and holds
+/// information about tradable tokens, related contract IDs, and static attributes.
+///
+/// A `ProtocolComponent` can have a one-to-one or one-to-many relationship with contracts.
+/// For example, `UniswapV2` and `UniswapV3` have a one-to-one relationship one component (pool) one
+/// contract, while `Ambient` has a one-to-many relationship with a single component and multiple
+/// contracts.
+///
+/// The `ProtocolComponent` struct is designed to store static attributes related to the associated
+/// smart contract.
+pub struct ProtocolComponent {
+    // an id for this component, could be hex repr of contract address
+    id: ContractId,
+    // what system this component belongs to
+    protocol_system: ProtocolSystem,
+    // more metadata information about the components general type (swap, lend, bridge, etc.)
+    protocol_type: ProtocolType,
+    // Blockchain the component belongs to
+    chain: Chain,
+    // holds the tokens tradable
+    tokens: Vec<String>,
+    // ID's referring to related contracts
+    contract_ids: Vec<ContractId>,
+    // Just stores static attributes
+    static_attributes: HashMap<String, Bytes>,
+}
+
+/// A type representing the unique identifier for a contract. It can represent an on-chain address
+/// or in the case of a one-to-many relationship it could be something like 'USDC-ETH'. This is for
+/// example the case with ambient, where one component is responsible for multiple contracts.
+///
+/// `ContractId` is a simple wrapper around a `String` to ensure type safety
+/// and clarity when working with contract identifiers.
+#[derive(PartialEq, Debug)]
+pub struct ContractId(pub String);
+
+impl ProtocolComponent {
+    pub fn try_from_message(
+        msg: substreams::ProtocolComponent,
+        protocol_system: ProtocolSystem,
+        protocol_type: ProtocolType,
+        chain: Chain,
+    ) -> Result<Self, ExtractionError> {
+        let id = ContractId(msg.id);
+
+        let tokens = msg
+            .tokens
+            .into_iter()
+            .map(|t| {
+                String::from_utf8(t)
+                    .map_err(|error| ExtractionError::DecodeError(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let contract_ids = msg
+            .contracts
+            .into_iter()
+            .map(ContractId)
+            .collect::<Vec<_>>();
+
+        let static_attributes = msg
+            .static_att
+            .into_iter()
+            .map(|attribute| Ok((attribute.name, Bytes::from(attribute.value))))
+            .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
+
+        Ok(Self {
+            id,
+            protocol_type,
+            protocol_system,
+            tokens,
+            contract_ids,
+            static_attributes,
+            chain,
+        })
+    }
+}
+
 impl From<substreams::ChangeType> for ChangeType {
     fn from(value: substreams::ChangeType) -> Self {
         match value {
@@ -493,6 +605,7 @@ impl BlockStateChanges {
 
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone)]
+/// Represents the dynamic data of `ProtocolComponent`.
 pub struct ProtocolState {
     // associates back to a component, which has metadata like type, tokens , etc.
     pub component_id: String,
@@ -510,20 +623,13 @@ impl ProtocolState {
         msg: substreams::StateChanges,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
-        let component_id = String::from_utf8(msg.component_id)
-            .map_err(|err| ExtractionError::DecodeError(err.to_string()))?;
-
         let attributes = msg
             .attributes
             .into_iter()
-            .map(|attribute| {
-                let name = String::from_utf8(attribute.name)
-                    .map_err(|err| ExtractionError::DecodeError(err.to_string()))?;
-                Ok((name, Bytes::from(attribute.value)))
-            })
+            .map(|attribute| Ok((attribute.name, Bytes::from(attribute.value))))
             .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
 
-        Ok(Self { component_id, attributes, modify_tx: *tx })
+        Ok(Self { component_id: msg.component_id, attributes, modify_tx: *tx })
     }
 
     /// Merges this update with another one.
@@ -663,6 +769,9 @@ impl BlockEntityChanges {
 
 #[cfg(test)]
 pub mod fixtures {
+    use ethers::abi::AbiEncode;
+    use prost::Message;
+
     use super::*;
 
     pub const HASH_256_0: &str =
@@ -765,31 +874,54 @@ pub mod fixtures {
                         change: ChangeType::Update.into(),
                     },
                 ],
+                components: vec![ProtocolComponent {
+                    id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
+                    tokens: vec![
+                        hex::decode(
+                            "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".trim_start_matches("0x"),
+                        )
+                        .unwrap(),
+                        hex::decode(
+                            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
+                        )
+                        .unwrap(),
+                    ],
+                    contracts: vec![
+                        "DIANA-THALES".to_string(),
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
+                    ],
+                    static_att: vec![
+                        Attribute { name: "key1".to_owned(), value: b"value1".to_vec() },
+                        Attribute { name: "key2".to_owned(), value: b"value2".to_vec() },
+                    ],
+                }],
+                tvl: vec![BalanceChange {
+                    token: hex::decode(
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
+                    )
+                    .unwrap(),
+                    balance: 50000000.encode_to_vec(),
+                    component_id: "WETH-CAI".encode(),
+                }],
             }],
         }
     }
 
     pub fn pb_state_changes() -> crate::pb::tycho::evm::v1::StateChanges {
         use crate::pb::tycho::evm::v1::*;
-        let id = "test".to_owned().into_bytes();
-        let res1_name = "reserve1".to_owned().into_bytes();
-        let res2_name = "reserve2".to_owned().into_bytes();
         let res1_value = 1000_u64.to_be_bytes().to_vec();
         let res2_value = 500_u64.to_be_bytes().to_vec();
         StateChanges {
-            component_id: id,
+            component_id: "test".to_owned(),
             attributes: vec![
-                Attribute { name: res1_name, value: res1_value },
-                Attribute { name: res2_name, value: res2_value },
+                Attribute { name: "reserve1".to_owned(), value: res1_value },
+                Attribute { name: "reserve2".to_owned(), value: res2_value },
             ],
         }
     }
 
     pub fn pb_block_entity_changes() -> crate::pb::tycho::evm::v1::BlockEntityChanges {
         use crate::pb::tycho::evm::v1::*;
-        let id = "test1".to_owned().into_bytes();
-        let res1_name = "reserve1".to_owned().into_bytes();
-        let res2_name = "reserve2".to_owned().into_bytes();
         let res1_value = 1000_u64.to_be_bytes().to_vec();
         let res2_value = 500_u64.to_be_bytes().to_vec();
         BlockEntityChanges {
@@ -809,12 +941,18 @@ pub mod fixtures {
                 }),
                 state_changes: vec![
                     StateChanges {
-                        component_id: id.clone(),
-                        attributes: vec![Attribute { name: res1_name, value: res1_value }],
+                        component_id: "test1".to_owned(),
+                        attributes: vec![Attribute {
+                            name: "reserve1".to_owned(),
+                            value: res1_value,
+                        }],
                     },
                     StateChanges {
-                        component_id: id,
-                        attributes: vec![Attribute { name: res2_name, value: res2_value }],
+                        component_id: "test1".to_owned(),
+                        attributes: vec![Attribute {
+                            name: "reserve2".to_owned(),
+                            value: res2_value,
+                        }],
                     },
                 ],
             }],
@@ -824,9 +962,15 @@ pub mod fixtures {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
+    use actix_web::body::MessageBody;
     use rstest::rstest;
 
-    use crate::extractor::evm::fixtures::transaction01;
+    use crate::{
+        extractor::evm::fixtures::transaction01,
+        models::{FinancialType, ImplementationType},
+    };
 
     use super::*;
 
@@ -1302,7 +1446,6 @@ mod test {
             attributes: expected_attributes,
             modify_tx: new_tx,
         }];
-        dbg!(&expected_result);
 
         let res = block_changes
             .aggregate_updates()
@@ -1310,5 +1453,107 @@ mod test {
 
         assert_eq!(res, expected_result);
         assert_eq!(res.state_updates.len(), 1);
+    }
+
+    fn create_transaction() -> Transaction {
+        Transaction {
+            hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000011121314,
+            ),
+            block_hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000031323334,
+            ),
+            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
+            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            index: 2,
+        }
+    }
+
+    #[rstest]
+    fn test_try_from_message_protocol_component() {
+        let balance_key = "balance";
+        let factory_address_key = "factory_address";
+        let balance_value = b"50000";
+        let factory_address = b"0x0fwe0g240g20";
+
+        // Sample data for testing
+        let static_att = vec![
+            substreams::Attribute { name: balance_key.to_owned(), value: balance_value.to_vec() },
+            substreams::Attribute {
+                name: factory_address_key.to_owned(),
+                value: factory_address.to_vec(),
+            },
+        ];
+        let msg = substreams::ProtocolComponent {
+            id: "component_id".to_owned(),
+            tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
+            contracts: vec!["contract1".to_string(), "contract2".to_string()],
+            static_att,
+        };
+        let expected_chain = Chain::Ethereum;
+        let expected_protocol_system = ProtocolSystem::Ambient;
+        let mut expected_attribute_map = HashMap::new();
+        expected_attribute_map.insert(balance_key.to_string(), Bytes::from(balance_value.to_vec()));
+        expected_attribute_map
+            .insert(factory_address_key.to_string(), Bytes::from(factory_address.to_vec()));
+
+        let protocol_type = ProtocolType {
+            name: "Pool".to_string(),
+            attribute_schema: serde_json::Value::default(),
+            financial_type: FinancialType::Psm,
+            implementation_type: ImplementationType::Custom,
+        };
+
+        // Call the try_from_message method
+        let result = ProtocolComponent::try_from_message(
+            msg,
+            expected_protocol_system.clone(),
+            protocol_type.clone(),
+            expected_chain,
+        );
+
+        // Assert the result
+        assert!(result.is_ok());
+
+        // Unwrap the result for further assertions
+        let protocol_component = result.unwrap();
+
+        // Assert specific properties of the protocol component
+        assert_eq!(protocol_component.id, ContractId("component_id".to_string()));
+        assert_eq!(protocol_component.protocol_system, expected_protocol_system);
+        assert_eq!(protocol_component.protocol_type, protocol_type);
+        assert_eq!(protocol_component.chain, expected_chain);
+        assert_eq!(protocol_component.tokens, vec!["token1".to_string(), "token2".to_string()]);
+        assert_eq!(
+            protocol_component.contract_ids,
+            vec![ContractId("contract1".to_string()), ContractId("contract2".to_string())]
+        );
+        assert_eq!(protocol_component.static_attributes, expected_attribute_map);
+    }
+
+    #[rstest]
+    fn test_try_from_message_tvl_change() {
+        let tx = create_transaction();
+        let expected_balance: f64 = 3000.0;
+        let msg_balance = expected_balance.to_le_bytes().to_vec();
+
+        let expected_token = H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
+        let msg_token = expected_token.0.to_vec();
+        let expected_component_id = "DIANA-THALES";
+        let msg_component_id = expected_component_id
+            .try_into_bytes()
+            .unwrap()
+            .to_vec();
+        let msg = substreams::BalanceChange {
+            balance: msg_balance.to_vec(),
+            token: msg_token,
+            component_id: msg_component_id,
+        };
+        let from_message = TvlChange::try_from_message(msg, &tx).unwrap();
+
+        assert_eq!(from_message.new_balance, expected_balance);
+        assert_eq!(from_message.modify_tx, tx.hash);
+        assert_eq!(from_message.token, expected_token);
+        assert_eq!(from_message.component_id, expected_component_id);
     }
 }

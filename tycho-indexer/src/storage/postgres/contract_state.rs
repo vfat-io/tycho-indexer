@@ -54,7 +54,7 @@ where
 {
     /// Retrieves the changes in balance for all accounts of a chain.
     ///
-    /// See [ContractStateGateway::get_account_delta] for more information on
+    /// See [ContractStateGateway::get_accounts_delta] for more information on
     /// the mechanics of this method regarding version timestamps.
     ///
     /// # Returns
@@ -128,7 +128,7 @@ where
 
     /// Retrieves the changes in code for all accounts of a chain.
     ///
-    /// See [ContractStateGateway::get_account_delta] for more information on
+    /// See [ContractStateGateway::get_accounts_delta] for more information on
     /// the mechanics of this method regarding version timestamps.
     ///
     /// # Returns
@@ -202,7 +202,7 @@ where
 
     /// Retrieves the changes in slots for all accounts of a chain.
     ///
-    /// See [ContractStateGateway::get_account_delta] for more information on
+    /// See [ContractStateGateway::get_accounts_delta] for more information on
     /// the mechanics of this method regarding version timestamps.
     ///
     /// # Returns
@@ -1162,7 +1162,7 @@ where
         Ok(())
     }
 
-    async fn get_account_delta(
+    async fn get_accounts_delta(
         &self,
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
@@ -1242,11 +1242,10 @@ where
                     .map(Ok),
             )
             .collect::<Result<HashMap<_, _>, _>>()?;
-
         Ok(deltas.into_values().collect())
     }
 
-    async fn revert_contract_state(
+    async fn revert_state(
         &self,
         to: &BlockIdentifier,
         conn: &mut AsyncPgConnection,
@@ -2219,7 +2218,7 @@ mod test {
     )]
     #[case::no_start_version(None)]
     #[tokio::test]
-    async fn get_account_delta_backward(#[case] start_version: Option<BlockOrTimestamp>) {
+    async fn get_accounts_delta_backward(#[case] start_version: Option<BlockOrTimestamp>) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
@@ -2260,7 +2259,7 @@ mod test {
         ];
 
         let mut changes = gw
-            .get_account_delta(
+            .get_accounts_delta(
                 &Chain::Ethereum,
                 start_version.as_ref(),
                 &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
@@ -2274,7 +2273,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn get_account_delta_forward() {
+    async fn get_accounts_delta_forward() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
@@ -2315,7 +2314,7 @@ mod test {
         ];
 
         let mut changes = gw
-            .get_account_delta(
+            .get_accounts_delta(
                 &Chain::Ethereum,
                 Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1)))),
                 &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
@@ -2332,7 +2331,7 @@ mod test {
     #[case::forward("2020-01-01T00:00:00", "2020-01-01T01:00:00")]
     #[case::backward("2020-01-01T01:00:00", "2020-01-01T00:00:00")]
     #[tokio::test]
-    async fn get_account_delta_fail(#[case] start: &str, #[case] end: &str) {
+    async fn get_accounts_delta_fail(#[case] start: &str, #[case] end: &str) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let c1 = &orm::Account::by_address(
@@ -2353,7 +2352,7 @@ mod test {
         )));
 
         let res = gw
-            .get_account_delta(&Chain::Ethereum, Some(&start_version), &end_version, &mut conn)
+            .get_accounts_delta(&Chain::Ethereum, Some(&start_version), &end_version, &mut conn)
             .await;
 
         assert_eq!(res, exp);
@@ -2379,7 +2378,7 @@ mod test {
         .collect();
         let gw = EvmGateway::from_connection(&mut conn).await;
 
-        gw.revert_contract_state(&BlockIdentifier::Hash(block1_hash), &mut conn)
+        gw.revert_state(&BlockIdentifier::Hash(block1_hash), &mut conn)
             .await
             .unwrap();
 

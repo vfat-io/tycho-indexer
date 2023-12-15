@@ -24,7 +24,6 @@ mod serde_helpers;
 mod services;
 mod storage;
 mod substreams;
-
 use crate::{
     extractor::{evm, ExtractionError},
     services::ServicesBuilder,

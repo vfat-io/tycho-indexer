@@ -75,3 +75,16 @@ how to implement module handlers.
 You can also look into already existing substreams packages to see how it 
 is done. E.g. [ethereum-ambient](./ethereum-ambient/) provides a pretty good 
 example of how to get access to raw contract storage.
+
+
+# Tests
+
+To create a block test asset for ethereum do the following:
+
+- Follow [this tutorial](https://substreams.streamingfast.io/tutorials/overview/map_block_meta_module). Make sure you set up the substreams-explorer repo in the same directory as this repo.
+    - Comment out `image: ./ethereum.png` in `ethereum-explorer/substreams.yaml`
+    - Add `prost-types = "0.11.0"` to `ethereum-explorer/Cargo.toml`
+- Make sure you set up your key env vars.
+- Run `sh scripts/download-ethereum-block-to-s3 BLOCK_NUMBER`
+
+Do not commit the block files (they are quite big).
