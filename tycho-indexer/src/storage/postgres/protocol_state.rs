@@ -2,13 +2,12 @@ use async_trait::async_trait;
 use diesel_async::AsyncPgConnection;
 
 use crate::{
-    extractor::evm::ProtocolState,
-    models::{Chain, ProtocolComponent, ProtocolSystem},
+    extractor::evm::{ProtocolComponent, ProtocolState},
+    models::{Chain, ProtocolSystem},
     storage::{
         postgres::{orm, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableProtocolState, StorableToken, StorableTransaction, StorageError,
-        TxHash, Version,
+        StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
     },
 };
 
@@ -23,21 +22,18 @@ where
 {
     type DB = AsyncPgConnection;
     type Token = T;
-    type ProtocolState = dyn StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
+    type ProtocolState = ProtocolState;
 
     async fn get_components(
         &self,
         chain: &Chain,
         system: Option<ProtocolSystem>,
         ids: Option<&[&str]>,
-    ) -> Result<Vec<ProtocolComponent<Self::Token>>, StorageError> {
+    ) -> Result<Vec<ProtocolComponent>, StorageError> {
         todo!()
     }
 
-    async fn upsert_components(
-        &self,
-        new: &[&ProtocolComponent<Self::Token>],
-    ) -> Result<(), StorageError> {
+    async fn upsert_components(&self, new: &[&ProtocolComponent]) -> Result<(), StorageError> {
         todo!()
     }
 

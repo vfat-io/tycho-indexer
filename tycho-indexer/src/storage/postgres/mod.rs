@@ -280,6 +280,7 @@ pub struct PostgresGateway<B, TX, A, D, T> {
     _phantom_tx: PhantomData<TX>,
     _phantom_acc: PhantomData<A>,
     _phantom_delta: PhantomData<D>,
+    _phantom_token: PhantomData<T>,
 }
 
 impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
@@ -297,6 +298,7 @@ where
             _phantom_tx: PhantomData,
             _phantom_acc: PhantomData,
             _phantom_delta: PhantomData,
+            _phantom_token: PhantomData,
         }
     }
 

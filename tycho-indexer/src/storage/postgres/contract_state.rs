@@ -1387,8 +1387,13 @@ mod test {
 
     use super::*;
 
-    type EvmGateway =
-        PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>;
+    type EvmGateway = PostgresGateway<
+        evm::Block,
+        evm::Transaction,
+        evm::Account,
+        evm::AccountUpdate,
+        evm::ERC20Token,
+    >;
     type MaybeTS = Option<NaiveDateTime>;
 
     async fn setup_db() -> AsyncPgConnection {

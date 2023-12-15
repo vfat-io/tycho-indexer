@@ -276,7 +276,7 @@ pub struct ProtocolComponent {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolState {
     pub id: i64,
-    pub protocol_component_id: String,
+    pub protocol_component_id: i64,
     pub state: Option<serde_json::Value>,
     pub modify_tx: i64,
     pub tvl: Option<i64>,
@@ -291,7 +291,7 @@ pub struct ProtocolState {
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolState {
-    pub protocol_component_id: String,
+    pub protocol_component_id: i64,
     pub state: Option<serde_json::Value>,
     pub modify_tx: i64,
     pub tvl: Option<i64>,

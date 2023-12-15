@@ -1,4 +1,8 @@
 #![allow(unused_variables)]
+
+use std::{collections::HashMap, str::FromStr, sync::Arc};
+
+use async_trait::async_trait;
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
@@ -6,13 +10,9 @@ use diesel_async::{
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
-use async_trait::async_trait;
-use tokio::sync::Mutex;
-
-use super::EVMStateGateway;
 use crate::{
     extractor::{evm, ExtractionError, Extractor, ExtractorMsg},
     models::{Chain, ExtractionState, ExtractorIdentity},
@@ -22,6 +22,8 @@ use crate::{
     },
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
 };
+
+use super::EVMStateGateway;
 
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
@@ -94,7 +96,7 @@ impl AmbientPgGateway {
         Ok(())
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %changes.block.number))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn forward(
         &self,
         changes: &evm::BlockStateChanges,
@@ -134,7 +136,7 @@ impl AmbientPgGateway {
         Result::<(), StorageError>::Ok(())
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block = ?to))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? to))]
     async fn backward(
         &self,
         to: &BlockIdentifier,
@@ -188,7 +190,7 @@ impl AmbientGateway for AmbientPgGateway {
         self.get_last_cursor(&mut conn).await
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %changes.block.number))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn upsert_contract(
         &self,
         changes: &evm::BlockStateChanges,
@@ -206,7 +208,7 @@ impl AmbientGateway for AmbientPgGateway {
         Ok(())
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %to))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % to))]
     async fn revert(
         &self,
         to: &BlockIdentifier,
@@ -264,7 +266,7 @@ where
         String::from_utf8(self.inner.lock().await.cursor.clone()).expect("Cursor is utf8")
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name))]
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
@@ -301,7 +303,7 @@ where
         Ok(Some(msg))
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %inp.last_valid_block.as_ref().unwrap().number))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % inp.last_valid_block.as_ref().unwrap().number))]
     async fn handle_revert(
         &self,
         inp: BlockUndoSignal,
@@ -333,7 +335,6 @@ where
 
 #[cfg(test)]
 mod test {
-
     use crate::{extractor::evm, pb::sf::substreams::v1::BlockRef};
 
     use super::*;
@@ -456,9 +457,10 @@ mod gateway_test {
     //!
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
-    use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
     use diesel_async::pooled_connection::deadpool::Object;
     use ethers::types::U256;
+
+    use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
 
     use super::*;
 
@@ -487,6 +489,7 @@ mod gateway_test {
             evm::Transaction,
             evm::Account,
             evm::AccountUpdate,
+            evm::ERC20Token,
         >::from_connection(&mut conn)
         .await;
 
