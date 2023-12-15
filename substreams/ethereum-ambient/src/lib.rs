@@ -7,6 +7,8 @@ use std::collections::{hash_map::Entry, HashMap};
 use substreams_ethereum::pb::eth::{self};
 
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
+const INIT_POOL_CODE: u8 = 71;
+const USER_CMD_FN_SIG: [u8; 4] = [0xA1, 0x51, 0x12, 0xF9];
 
 struct SlotValue {
     new_value: Vec<u8>,
@@ -100,8 +102,6 @@ fn map_changes(
         storage_changes.sort_unstable_by_key(|change| change.ordinal);
 
         // Extract token pair creations
-        const INIT_POOL_CODE: u8 = 71;
-
         let ambient_calls = block_tx
             .calls
             .iter()
@@ -110,12 +110,10 @@ fn map_changes(
             .collect::<Vec<_>>();
 
         for call in ambient_calls {
-            let user_cmd: String = "a15112f9".to_string();
-            if call.input.len() < 8 {
+            if call.input.len() < 4 {
                 continue;
             }
-            let block_tx_hex_string: String = hex::encode(&call.input)[0..8].to_string();
-            if block_tx_hex_string == user_cmd {
+            if call.input[0..4] == USER_CMD_FN_SIG {
                 let user_cmd_external_abi_types = &[
                     // index of the proxy sidecar the command is being called on
                     ParamType::Uint(16),
