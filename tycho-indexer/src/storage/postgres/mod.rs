@@ -143,8 +143,8 @@ use tracing::{debug, info};
 use crate::models::Chain;
 
 use super::{
-    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableProtocolState,
-    StorableToken, StorableTransaction, StorageError,
+    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableToken,
+    StorableTransaction, StorageError,
 };
 
 pub mod cache;

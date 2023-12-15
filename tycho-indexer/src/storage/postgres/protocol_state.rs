@@ -1,8 +1,10 @@
+#![allow(unused_variables)]
+
 use async_trait::async_trait;
 use diesel_async::AsyncPgConnection;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState},
+    extractor::evm::ProtocolState,
     models::{Chain, ProtocolSystem},
     storage::{
         postgres::{orm, PostgresGateway},
@@ -24,18 +26,20 @@ where
     type Token = T;
     type ProtocolState = ProtocolState;
 
-    async fn get_components(
-        &self,
-        chain: &Chain,
-        system: Option<ProtocolSystem>,
-        ids: Option<&[&str]>,
-    ) -> Result<Vec<ProtocolComponent>, StorageError> {
-        todo!()
-    }
+    // TODO: uncomment to implement in ENG 2049
+    // async fn get_components(
+    //     &self,
+    //     chain: &Chain,
+    //     system: Option<ProtocolSystem>,
+    //     ids: Option<&[&str]>,
+    // ) -> Result<Vec<ProtocolComponent>, StorageError> {
+    //     todo!()
+    // }
 
-    async fn upsert_components(&self, new: &[&ProtocolComponent]) -> Result<(), StorageError> {
-        todo!()
-    }
+    // TODO: uncomment to implement in ENG 2049
+    // async fn upsert_components(&self, new: &[&ProtocolComponent]) -> Result<(), StorageError> {
+    //     todo!()
+    // }
 
     async fn get_states(
         &self,
@@ -45,6 +49,7 @@ where
         id: Option<&[&str]>,
     ) -> Result<Vec<ProtocolState>, StorageError> {
         let block_chain_id = self.get_chain_id(chain);
+        todo!()
     }
 
     async fn update_state(&self, chain: Chain, new: &[(TxHash, ProtocolState)], db: &mut Self::DB) {

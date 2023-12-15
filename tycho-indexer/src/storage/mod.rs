@@ -482,6 +482,8 @@ pub trait ProtocolGateway {
     type DB;
     type Token;
     type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
+    // TODO: uncomment below when StorableProtocolComponent is implemented (ENG 2049)
+    // type ProtocolComponent;
 
     /// Retrieve ProtocolComponent from the db
     ///
@@ -492,12 +494,13 @@ pub trait ProtocolGateway {
     ///
     /// # Returns
     /// Ok, if found else Err
-    async fn get_components(
-        &self,
-        chain: &Chain,
-        system: Option<ProtocolSystem>,
-        ids: Option<&[&str]>,
-    ) -> Result<Vec<Self::Token>, StorageError>;
+    // TODO: uncomment to implement in ENG 2049
+    // async fn get_components(
+    //     &self,
+    //     chain: &Chain,
+    //     system: Option<ProtocolSystem>,
+    //     ids: Option<&[&str]>,
+    // ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
     /// Stores new found ProtocolComponents.
     ///
@@ -512,7 +515,9 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
     /// - component with same is id already present.
-    async fn upsert_components(&self, new: &[Self::Token]) -> Result<(), StorageError>;
+    // TODO: uncomment to implement in ENG 2049
+    // async fn upsert_components(&self, new: &[Self::ProtocolComponent]) -> Result<(),
+    // StorageError>;
 
     /// Retrieve protocol component states
     ///
