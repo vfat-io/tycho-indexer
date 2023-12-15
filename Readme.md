@@ -255,6 +255,3 @@ Tycho is an indexer designed to process and store data, necessitating the saving
 
 ### Note
 This ER diagram includes only the most significant attributes for each entity. Triggers support much of the versioning logic. For precise details, please ensure to look at the actual [create.sql](./migrations_/create.sql) file.
-
-
-
