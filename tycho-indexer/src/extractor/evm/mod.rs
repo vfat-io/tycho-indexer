@@ -999,7 +999,7 @@ mod test {
     use crate::extractor::evm::fixtures::transaction01;
 
     use super::*;
-    use crate::{models::ProtocolSystem, pb::tycho::evm::v1::Attribute};
+    use crate::models::ProtocolSystem;
     use actix_web::body::MessageBody;
     use rstest::rstest;
 
