@@ -5,7 +5,6 @@ use std::{
     ops::Deref,
 };
 
-use crate::{models::ProtocolSystem, pb::tycho::evm::v1 as substreams};
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
@@ -18,7 +17,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
     hex_bytes::Bytes,
-    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolSystem, ProtocolType},
+    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolSystem},
     pb::tycho::evm::v1 as substreams,
     storage::{ChangeType, StateGatewayType},
 };
@@ -918,16 +917,7 @@ pub mod fixtures {
                 ],
                 components: vec![ProtocolComponent {
                     id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
-                    tokens: vec![
-                        hex::decode(
-                            "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".trim_start_matches("0x"),
-                        )
-                        .unwrap(),
-                        hex::decode(
-                            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
-                        )
-                        .unwrap(),
-                    ],
+                    tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
                     contracts: vec![
                         "DIANA-THALES".to_string(),
                         "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
@@ -1012,13 +1002,6 @@ mod test {
     use crate::{models::ProtocolSystem, pb::tycho::evm::v1::Attribute};
     use actix_web::body::MessageBody;
     use rstest::rstest;
-
-    use crate::{
-        extractor::evm::fixtures::transaction01,
-        models::{FinancialType, ImplementationType},
-    };
-
-    use super::*;
 
     const HASH_256_0: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
     const HASH_256_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
@@ -1159,7 +1142,7 @@ mod test {
             index: 2,
         };
         let protocol_component = ProtocolComponent {
-            id: ContractId("component_id".to_string()),
+            id: ContractId("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned()),
             protocol_system: ProtocolSystem::Ambient,
             protocol_type_id: String::from("id-1"),
             chain: Chain::Ethereum,
@@ -1240,7 +1223,7 @@ mod test {
     fn block_account_changes() -> BlockAccountChanges {
         let address = H160::from_low_u64_be(0x0000000000000000000000000000000061626364);
         let protocol_component = ProtocolComponent {
-            id: ContractId("component_id".to_string()),
+            id: ContractId("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned()),
             protocol_system: ProtocolSystem::Ambient,
             protocol_type_id: String::from("id-1"),
             chain: Chain::Ethereum,
