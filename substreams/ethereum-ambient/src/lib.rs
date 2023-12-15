@@ -1,6 +1,7 @@
 mod pb;
 
-use ethabi::{decode, ParamType, Token};
+use anyhow::anyhow;
+use ethabi::{decode, ParamType};
 use hex_literal::hex;
 use pb::tycho::evm::v1::{self as tycho, ChangeType};
 use std::collections::{hash_map::Entry, HashMap};
@@ -101,7 +102,6 @@ fn map_changes(
             .collect::<Vec<_>>();
         storage_changes.sort_unstable_by_key(|change| change.ordinal);
 
-        // Extract token pair creations
         let ambient_calls = block_tx
             .calls
             .iter()
@@ -130,41 +130,48 @@ fn map_changes(
 
                 // Decode external call to UserCmd
                 if let Ok(external_params) = decode(user_cmd_external_abi_types, &call.input[4..]) {
-                    let cmd_bytes = match &external_params[1] {
-                        Token::Bytes(bytes) => bytes.clone(),
-                        _ => {
-                            panic!("Unexpected type for cmd_bytes: {:?}", &external_params[1]);
-                        }
-                    };
+                    let cmd_bytes = external_params[1]
+                        .to_owned()
+                        .into_bytes()
+                        .ok_or_else(|| {
+                            anyhow!("Failed to convert to bytes: {:?}", &external_params[1])
+                        })?;
+
                     // Call data is structured differently depending on the cmd code, so only
                     // decode if this is an init pool code.
                     if cmd_bytes[31] == INIT_POOL_CODE {
                         // Decode internal call to UserCmd
                         if let Ok(internal_params) = decode(user_cmd_internal_abi_types, &cmd_bytes)
                         {
-                            let base = match &internal_params[1] {
-                                Token::Address(addr) => addr.to_fixed_bytes().to_vec(),
-                                _ => {
-                                    panic!("Unexpected type for base: {:?}", &internal_params[1]);
-                                }
-                            };
+                            let base = internal_params[1]
+                                .to_owned()
+                                .into_address()
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "Failed to convert to address: {:?}",
+                                        &internal_params[1]
+                                    )
+                                })?
+                                .to_fixed_bytes()
+                                .to_vec();
 
-                            let quote = match &internal_params[2] {
-                                Token::Address(addr) => addr.to_fixed_bytes().to_vec(),
-                                _ => {
-                                    panic!("Unexpected type for quote: {:?}", &internal_params[2]);
-                                }
-                            };
+                            let quote = internal_params[2]
+                                .to_owned()
+                                .into_address()
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "Failed to convert to address: {:?}",
+                                        &internal_params[2]
+                                    )
+                                })?
+                                .to_fixed_bytes()
+                                .to_vec();
 
-                            let pool_index = match &internal_params[3] {
-                                Token::Uint(uint) => uint.as_u64() as u32,
-                                _ => {
-                                    panic!(
-                                        "Unexpected type for pool_index: {:?}",
-                                        &internal_params[3]
-                                    );
-                                }
-                            };
+                            let pool_index = internal_params[3]
+                                .to_owned()
+                                .into_uint()
+                                .ok_or_else(|| anyhow!("Failed to convert to u32".to_string()))?
+                                .as_u32();
 
                             let static_attribute = tycho::Attribute {
                                 name: String::from("pool_index"),
@@ -187,11 +194,11 @@ fn map_changes(
                             };
                             tx_change.components.push(new_component);
                         } else {
-                            panic!("Failed to decode ABI internal call.");
+                            return Err(anyhow!("Failed to decode ABI internal call.".to_string()));
                         }
                     }
                 } else {
-                    panic!("Failed to decode ABI external call.");
+                    return Err(anyhow!("Failed to decode ABI external call.".to_string()));
                 }
             }
         }
