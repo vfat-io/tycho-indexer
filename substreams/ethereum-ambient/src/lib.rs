@@ -102,9 +102,19 @@ fn map_changes(
         // Extract token pair creations
         const INIT_POOL_CODE: u8 = 71;
 
-        if block_tx.to == AMBIENT_CONTRACT {
+        let ambient_calls = block_tx
+            .calls
+            .iter()
+            .filter(|call| !call.state_reverted)
+            .filter(|call| call.address == AMBIENT_CONTRACT)
+            .collect::<Vec<_>>();
+
+        for call in ambient_calls {
             let user_cmd: String = "a15112f9".to_string();
-            let block_tx_hex_string: String = hex::encode(&block_tx.input)[0..8].to_string();
+            if call.input.len() < 8 {
+                continue;
+            }
+            let block_tx_hex_string: String = hex::encode(&call.input)[0..8].to_string();
             if block_tx_hex_string == user_cmd {
                 let user_cmd_external_abi_types = &[
                     // index of the proxy sidecar the command is being called on
@@ -121,9 +131,7 @@ fn map_changes(
                 ];
 
                 // Decode external call to UserCmd
-                if let Ok(external_params) =
-                    decode(user_cmd_external_abi_types, &block_tx.input[4..])
-                {
+                if let Ok(external_params) = decode(user_cmd_external_abi_types, &call.input[4..]) {
                     let cmd_bytes = match &external_params[1] {
                         Token::Bytes(bytes) => bytes.clone(),
                         _ => {
