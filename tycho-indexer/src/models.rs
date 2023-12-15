@@ -19,6 +19,7 @@ pub enum Chain {
     ZkSync,
 }
 
+/// Represents the ecosystem to which a `ProtocolComponent` belongs.
 #[derive(PartialEq, Debug, Clone)]
 pub enum ProtocolSystem {
     Ambient,
@@ -39,6 +40,10 @@ pub enum FinancialType {
 }
 
 #[derive(PartialEq, Debug, Clone)]
+/// Represents the functionality of a component.
+/// `ProtocolSystems` are composed of various `ProtocolComponents`, and components that behave
+/// similarly are grouped under a specific `ProtocolType` (i.e. Pool, Factory) within a
+/// `ProtocolSystem`.
 pub struct ProtocolType {
     pub name: String,
     pub attribute_schema: serde_json::Value,
