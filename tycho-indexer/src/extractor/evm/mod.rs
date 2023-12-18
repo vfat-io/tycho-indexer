@@ -235,7 +235,7 @@ impl AccountUpdate {
 /// A container for account updates grouped by account.
 ///
 /// Hold a single update per account. This is a condensed form of
-/// [BlockStateChanges].
+/// [BlockContractChanges].
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct BlockAccountChanges {
     extractor: String,
@@ -360,7 +360,7 @@ impl Deref for AccountUpdateWithTx {
 /// Hold the detailed state changes for a block alongside with protocol
 /// component changes.
 #[derive(Debug, PartialEq)]
-pub struct BlockStateChanges {
+pub struct BlockContractChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
@@ -571,7 +571,7 @@ impl From<substreams::ChangeType> for ChangeType {
     }
 }
 
-impl BlockStateChanges {
+impl BlockContractChanges {
     /// Parse from tychos protobuf message
     pub fn try_from_message(
         msg: substreams::BlockContractChanges,
@@ -678,9 +678,9 @@ pub struct ProtocolState {
 // TODO: remove dead code check skip once extractor is implemented
 #[allow(dead_code)]
 impl ProtocolState {
-    /// Parses protocol state from tychos protobuf StateChanges message
+    /// Parses protocol state from tychos protobuf EntityChanges message
     pub fn try_from_message(
-        msg: substreams::StateChanges,
+        msg: substreams::EntityChanges,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
         let attributes = msg
@@ -730,9 +730,9 @@ pub struct ProtocolStatesWithTx {
 }
 
 impl ProtocolStatesWithTx {
-    /// Parses protocol state from tychos protobuf StateChanges message
+    /// Parses protocol state from tychos protobuf EntityChanges message
     pub fn try_from_message(
-        msg: Vec<substreams::StateChanges>,
+        msg: Vec<substreams::EntityChanges>,
         tx: Transaction,
     ) -> Result<Self, ExtractionError> {
         let mut protocol_states = HashMap::new();
@@ -840,7 +840,7 @@ impl BlockEntityChanges {
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
                     let tx_update =
-                        ProtocolStatesWithTx::try_from_message(change.state_changes, tx)?;
+                        ProtocolStatesWithTx::try_from_message(change.entity_changes, tx)?;
                     state_updates.push(tx_update);
                     for component in change.components {
                         let pool = ProtocolComponent::try_from_message(
@@ -967,7 +967,7 @@ pub mod fixtures {
                 ts: 1000,
             }),
 
-            changes: vec![TransactionChanges {
+            changes: vec![TransactionContractChanges {
                 tx: Some(Transaction {
                     hash: vec![0x11, 0x12, 0x13, 0x14],
                     from: vec![0x41, 0x42, 0x43, 0x44],
@@ -1032,11 +1032,11 @@ pub mod fixtures {
         }
     }
 
-    pub fn pb_state_changes() -> crate::pb::tycho::evm::v1::StateChanges {
+    pub fn pb_state_changes() -> crate::pb::tycho::evm::v1::EntityChanges {
         use crate::pb::tycho::evm::v1::*;
         let res1_value = 1000_u64.to_be_bytes().to_vec();
         let res2_value = 500_u64.to_be_bytes().to_vec();
-        StateChanges {
+        EntityChanges {
             component_id: "State1".to_owned(),
             attributes: vec![
                 Attribute { name: "reserve1".to_owned(), value: res1_value },
@@ -1055,15 +1055,15 @@ pub mod fixtures {
                 ts: 1000,
             }),
             changes: vec![
-                TransactionStateChanges {
+                TransactionEntityChanges {
                     tx: Some(Transaction {
                         hash: vec![0x0, 0x0, 0x0, 0x0],
                         from: vec![0x0, 0x0, 0x0, 0x0],
                         to: vec![0x0, 0x0, 0x0, 0x0],
                         index: 10,
                     }),
-                    state_changes: vec![
-                        StateChanges {
+                    entity_changes: vec![
+                        EntityChanges {
                             component_id: "State1".to_owned(),
                             attributes: vec![
                                 Attribute {
@@ -1076,7 +1076,7 @@ pub mod fixtures {
                                 },
                             ],
                         },
-                        StateChanges {
+                        EntityChanges {
                             component_id: "State2".to_owned(),
                             attributes: vec![
                                 Attribute {
@@ -1103,14 +1103,14 @@ pub mod fixtures {
                         }],
                     }],
                 },
-                TransactionStateChanges {
+                TransactionEntityChanges {
                     tx: Some(Transaction {
                         hash: vec![0x11, 0x12, 0x13, 0x14],
                         from: vec![0x41, 0x42, 0x43, 0x44],
                         to: vec![0x51, 0x52, 0x53, 0x54],
                         index: 11,
                     }),
-                    state_changes: vec![StateChanges {
+                    entity_changes: vec![EntityChanges {
                         component_id: "State1".to_owned(),
                         attributes: vec![
                             Attribute {
@@ -1267,7 +1267,7 @@ mod test {
         assert_eq!(res, exp);
     }
 
-    fn block_state_changes() -> BlockStateChanges {
+    fn block_state_changes() -> BlockContractChanges {
         let tx = Transaction {
             hash: H256::from_low_u64_be(
                 0x0000000000000000000000000000000000000000000000000000000011121314,
@@ -1294,7 +1294,7 @@ mod test {
                 ("key2".to_string(), Bytes::from(b"value2".to_vec())),
             ]),
         };
-        BlockStateChanges {
+        BlockContractChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
             block: Block {
@@ -1347,7 +1347,7 @@ mod test {
     fn test_block_state_changes_parse_msg() {
         let msg = fixtures::pb_block_contract_changes();
 
-        let res = BlockStateChanges::try_from_message(
+        let res = BlockContractChanges::try_from_message(
             msg,
             "test",
             Chain::Ethereum,

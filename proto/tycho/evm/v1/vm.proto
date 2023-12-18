@@ -53,7 +53,7 @@ message BalanceChange {
   bytes component_id = 3;
 }
 
-message TransactionChanges {
+message TransactionContractChanges {
   Transaction tx = 1;
   repeated ContractChange contract_changes = 2;
   repeated ProtocolComponent components = 3;
@@ -62,7 +62,7 @@ message TransactionChanges {
 
 message BlockContractChanges {
   Block block = 1;
-  repeated TransactionChanges changes = 2;
+  repeated TransactionContractChanges changes = 2;
 }
 
 message Attribute {
@@ -70,18 +70,18 @@ message Attribute {
   bytes value = 2;
 }
 
-message StateChanges {
+message EntityChanges {
   string component_id = 1;
   repeated Attribute attributes = 2;
 }
 
-message TransactionStateChanges {
+message TransactionEntityChanges {
   Transaction tx = 1;
-  repeated StateChanges state_changes = 2;
+  repeated EntityChanges entity_changes = 2;
   repeated ProtocolComponent components = 3;
 }
 
 message BlockEntityChanges {
   Block block = 1;
-  repeated TransactionStateChanges changes = 2;
+  repeated TransactionEntityChanges changes = 2;
 }

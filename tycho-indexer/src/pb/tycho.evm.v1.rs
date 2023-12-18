@@ -73,7 +73,7 @@ pub struct BalanceChange {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct TransactionChanges {
+pub struct TransactionContractChanges {
     #[prost(message, optional, tag="1")]
     pub tx: ::core::option::Option<Transaction>,
     #[prost(message, repeated, tag="2")]
@@ -89,7 +89,7 @@ pub struct BlockContractChanges {
     #[prost(message, optional, tag="1")]
     pub block: ::core::option::Option<Block>,
     #[prost(message, repeated, tag="2")]
-    pub changes: ::prost::alloc::vec::Vec<TransactionChanges>,
+    pub changes: ::prost::alloc::vec::Vec<TransactionContractChanges>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -101,7 +101,7 @@ pub struct Attribute {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StateChanges {
+pub struct EntityChanges {
     #[prost(string, tag="1")]
     pub component_id: ::prost::alloc::string::String,
     #[prost(message, repeated, tag="2")]
@@ -109,11 +109,11 @@ pub struct StateChanges {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct TransactionStateChanges {
+pub struct TransactionEntityChanges {
     #[prost(message, optional, tag="1")]
     pub tx: ::core::option::Option<Transaction>,
     #[prost(message, repeated, tag="2")]
-    pub state_changes: ::prost::alloc::vec::Vec<StateChanges>,
+    pub entity_changes: ::prost::alloc::vec::Vec<EntityChanges>,
     #[prost(message, repeated, tag="3")]
     pub components: ::prost::alloc::vec::Vec<ProtocolComponent>,
 }
@@ -123,7 +123,7 @@ pub struct BlockEntityChanges {
     #[prost(message, optional, tag="1")]
     pub block: ::core::option::Option<Block>,
     #[prost(message, repeated, tag="2")]
-    pub changes: ::prost::alloc::vec::Vec<TransactionStateChanges>,
+    pub changes: ::prost::alloc::vec::Vec<TransactionEntityChanges>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
