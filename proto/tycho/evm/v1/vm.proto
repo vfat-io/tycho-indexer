@@ -1,20 +1,8 @@
 syntax = "proto3";
 
+import "tycho/evm/v1/shared.proto";
+
 package tycho.evm.v1;
-
-message Block {
-  bytes hash = 1;
-  bytes parent_hash = 2;
-  uint64 number = 3;
-  uint64 ts = 4;
-}
-
-message Transaction {
-  bytes hash = 1;
-  bytes from = 2;
-  bytes to = 3;
-  uint64 index = 4;
-}
 
 message ContractSlot {
   bytes slot = 2;
@@ -40,19 +28,6 @@ message ContractChange {
   ChangeType change = 5;
 }
 
-message ProtocolComponent {
-  string id = 1;
-  repeated bytes tokens = 2;
-  repeated string contracts = 3;
-  repeated Attribute static_att = 4;
-}
-
-message BalanceChange {
-  bytes token = 1;
-  bytes balance = 2;
-  bytes component_id = 3;
-}
-
 message TransactionContractChanges {
   Transaction tx = 1;
   repeated ContractChange contract_changes = 2;
@@ -63,25 +38,4 @@ message TransactionContractChanges {
 message BlockContractChanges {
   Block block = 1;
   repeated TransactionContractChanges changes = 2;
-}
-
-message Attribute {
-  string name = 1;
-  bytes value = 2;
-}
-
-message EntityChanges {
-  string component_id = 1;
-  repeated Attribute attributes = 2;
-}
-
-message TransactionEntityChanges {
-  Transaction tx = 1;
-  repeated EntityChanges entity_changes = 2;
-  repeated ProtocolComponent components = 3;
-}
-
-message BlockEntityChanges {
-  Block block = 1;
-  repeated TransactionEntityChanges changes = 2;
 }

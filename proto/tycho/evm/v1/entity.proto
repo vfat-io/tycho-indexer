@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+import "tycho/evm/v1/shared.proto";
+
+package tycho.evm.v1;
+
+message EntityChanges {
+  string component_id = 1;
+  repeated Attribute attributes = 2;
+}
+
+message TransactionEntityChanges {
+  Transaction tx = 1;
+  repeated EntityChanges entity_changes = 2;
+  repeated ProtocolComponent components = 3;
+}
+
+message BlockEntityChanges {
+  Block block = 1;
+  repeated TransactionEntityChanges changes = 2;
+}
