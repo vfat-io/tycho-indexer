@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use diesel_async::{
@@ -471,6 +471,8 @@ mod gateway_test {
     //!
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
+    use std::collections::HashMap;
+
     use diesel_async::pooled_connection::deadpool::Object;
     use ethers::types::U256;
 
