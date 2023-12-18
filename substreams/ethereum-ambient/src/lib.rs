@@ -1,6 +1,6 @@
 mod pb;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use ethabi::{decode, ParamType};
 use hex_literal::hex;
 use pb::tycho::evm::v1::{self as tycho, ChangeType};
@@ -194,11 +194,11 @@ fn map_changes(
                             };
                             tx_change.components.push(new_component);
                         } else {
-                            return Err(anyhow!("Failed to decode ABI internal call.".to_string()));
+                            bail!("Failed to decode ABI internal call.".to_string());
                         }
                     }
                 } else {
-                    return Err(anyhow!("Failed to decode ABI external call.".to_string()));
+                    bail!("Failed to decode ABI external call.".to_string());
                 }
             }
         }
