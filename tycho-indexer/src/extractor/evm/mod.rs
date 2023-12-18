@@ -710,7 +710,7 @@ pub struct ProtocolStatesWithTx {
 }
 
 impl ProtocolStatesWithTx {
-    /// Parses protocol state from tychos protobuf TransactionStateChanges message
+    /// Parses protocol state from tychos protobuf StateChanges message
     pub fn try_from_message(
         msg: Vec<substreams::StateChanges>,
         tx: Transaction,
@@ -784,7 +784,7 @@ pub struct BlockEntityChangesResult {
     chain: Chain,
     pub block: Block,
     pub state_updates: HashMap<String, ProtocolState>,
-    pub new_pools: HashMap<String, ProtocolComponent>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
 /// A container for state updates grouped by transaction
@@ -797,7 +797,7 @@ pub struct BlockEntityChanges {
     chain: Chain,
     pub block: Block,
     pub state_updates: Vec<ProtocolStatesWithTx>,
-    pub new_pools: HashMap<String, ProtocolComponent>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
 // TODO: remove dead code check skip once extractor is implemented
@@ -814,7 +814,7 @@ impl BlockEntityChanges {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
             let mut state_updates = Vec::new();
-            let mut new_pools = HashMap::new();
+            let mut new_protocol_components = HashMap::new();
 
             for change in msg.changes.into_iter() {
                 if let Some(tx) = change.tx {
@@ -829,7 +829,7 @@ impl BlockEntityChanges {
                             protocol_system,
                             protocol_type_id.clone(),
                         )?;
-                        new_pools.insert(pool.clone().id.0, pool);
+                        new_protocol_components.insert(pool.clone().id.0, pool);
                     }
                 }
             }
@@ -840,7 +840,7 @@ impl BlockEntityChanges {
                 chain,
                 block,
                 state_updates,
-                new_pools,
+                new_protocol_components,
             });
         }
         Err(ExtractionError::Empty)
@@ -876,7 +876,7 @@ impl BlockEntityChanges {
             chain: self.chain,
             block: self.block,
             state_updates: aggregated_states.protocol_states,
-            new_pools: self.new_pools,
+            new_protocol_components: self.new_protocol_components,
         })
     }
 }
@@ -1634,7 +1634,7 @@ mod test {
             vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
                 .into_iter()
                 .collect();
-        let new_pools: HashMap<String, ProtocolComponent> = vec![(
+        let new_protocol_components: HashMap<String, ProtocolComponent> = vec![(
             "Pool".to_owned(),
             ProtocolComponent {
                 id: ContractId("Pool".to_owned()),
@@ -1668,7 +1668,7 @@ mod test {
                 protocol_state_with_tx(),
                 ProtocolStatesWithTx { protocol_states: state_updates, tx },
             ],
-            new_pools,
+            new_protocol_components,
         }
     }
 
@@ -1737,7 +1737,7 @@ mod test {
             vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
                 .into_iter()
                 .collect();
-        let new_pools: HashMap<String, ProtocolComponent> = vec![(
+        let new_protocol_components: HashMap<String, ProtocolComponent> = vec![(
             "Pool".to_owned(),
             ProtocolComponent {
                 id: ContractId("Pool".to_owned()),
@@ -1766,7 +1766,7 @@ mod test {
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
             state_updates,
-            new_pools,
+            new_protocol_components,
         }
     }
 
