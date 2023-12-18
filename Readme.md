@@ -154,6 +154,17 @@ buf export buf.build/streamingfast/substreams -o ./proto
 buf generate 
 ```
 
+##### Protobuf Linting
+1. To install the linter execute:
+```
+brew install bufbuild/buf/buf@1.28.1
+```
+2. Linting the files works like:
+```
+buf lint
+```
+It will return a list of errors that you need to fix. If not, then all the changes you made conform to the linter.
+
 ### Postgres & Diesel
 1. If you are on a mac, you might need to install postgres library first and add it to the library path:
 ```bash
