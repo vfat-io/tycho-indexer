@@ -691,39 +691,18 @@ impl ProtocolState {
         msg: substreams::EntityChanges,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
-        // let (updates, deletions): (HashMap<_, _>, HashMap<_, _>) = msg
-        //     .attributes
-        //     .into_iter()
-        //     .filter_map(|attribute| match attribute.change().into() {
-        //         ChangeType::Update | ChangeType::Creation => {
-        //             Some(((attribute.name, Bytes::from(attribute.value), None)))
-        //         }
-        //         ChangeType::Deletion => {
-        //             Some((None, (attribute.name, Bytes::from(attribute.value))))
-        //         }
-        //         _ => None,
-        //     })
-        //     .unzip();
-        let updates: HashMap<_, _> = msg
-            .attributes
-            .clone()
-            .into_iter()
-            .filter_map(|attribute| match attribute.change().into() {
-                ChangeType::Update | ChangeType::Creation => {
-                    Some((attribute.name, Bytes::from(attribute.value)))
-                }
-                _ => None,
-            })
-            .collect();
+        let (mut updates, mut deletions) = (HashMap::new(), HashMap::new());
 
-        let deletions: HashMap<_, _> = msg
-            .attributes
-            .into_iter()
-            .filter_map(|attribute| match attribute.change().into() {
-                ChangeType::Deletion => Some((attribute.name, Bytes::from(attribute.value))),
-                _ => None,
-            })
-            .collect();
+        for attribute in msg.attributes.into_iter() {
+            match attribute.change().into() {
+                ChangeType::Update | ChangeType::Creation => {
+                    updates.insert(attribute.name, Bytes::from(attribute.value));
+                }
+                ChangeType::Deletion => {
+                    deletions.insert(attribute.name, Bytes::from(attribute.value));
+                }
+            }
+        }
 
         Ok(Self {
             component_id: msg.component_id,
