@@ -16,19 +16,22 @@ pub enum Chain {
 }
 
 /// Represents the ecosystem to which a `ProtocolComponent` belongs.
-#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize, Copy)]
 pub enum ProtocolSystem {
+    #[default]
     Ambient,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 pub enum ImplementationType {
+    #[default]
     Vm,
     Custom,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 pub enum FinancialType {
+    #[default]
     Swap,
     Lend,
     Leverage,
@@ -39,7 +42,7 @@ pub enum FinancialType {
 /// `ProtocolSystems` are composed of various `ProtocolComponents`, and components that behave
 /// similarly are grouped under a specific `ProtocolType` (i.e. Pool, Factory) within a
 /// `ProtocolSystem`.
-#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ProtocolType {
     pub name: String,
     pub attribute_schema: serde_json::Value,

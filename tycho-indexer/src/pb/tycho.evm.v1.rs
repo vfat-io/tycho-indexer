@@ -52,8 +52,8 @@ pub struct ContractChange {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ProtocolComponent {
-    #[prost(bytes="vec", tag="1")]
-    pub id: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, tag="1")]
+    pub id: ::prost::alloc::string::String,
     #[prost(bytes="vec", repeated, tag="2")]
     pub tokens: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
     #[prost(string, repeated, tag="3")]
@@ -94,16 +94,16 @@ pub struct BlockContractChanges {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Attribute {
-    #[prost(bytes="vec", tag="1")]
-    pub name: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
     #[prost(bytes="vec", tag="2")]
     pub value: ::prost::alloc::vec::Vec<u8>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StateChanges {
-    #[prost(bytes="vec", tag="1")]
-    pub component_id: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, tag="1")]
+    pub component_id: ::prost::alloc::string::String,
     #[prost(message, repeated, tag="2")]
     pub attributes: ::prost::alloc::vec::Vec<Attribute>,
 }
