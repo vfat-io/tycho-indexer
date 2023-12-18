@@ -1020,7 +1020,7 @@ pub mod fixtures {
                         Attribute { name: "key2".to_owned(), value: b"value2".to_vec() },
                     ],
                 }],
-                tvl: vec![BalanceChange {
+                balance_changes: vec![BalanceChange {
                     token: hex::decode(
                         "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
                     )
@@ -1102,6 +1102,7 @@ pub mod fixtures {
                             value: 600_u64.to_be_bytes().to_vec(),
                         }],
                     }],
+                    balance_changes: vec![],
                 },
                 TransactionEntityChanges {
                     tx: Some(Transaction {
@@ -1124,6 +1125,7 @@ pub mod fixtures {
                         ],
                     }],
                     components: vec![],
+                    balance_changes: vec![],
                 },
             ],
         }

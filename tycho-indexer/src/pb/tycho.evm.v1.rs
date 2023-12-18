@@ -71,7 +71,7 @@ pub struct TransactionEntityChanges {
     #[prost(message, repeated, tag="3")]
     pub components: ::prost::alloc::vec::Vec<ProtocolComponent>,
     #[prost(message, repeated, tag="4")]
-    pub tvl: ::prost::alloc::vec::Vec<BalanceChange>,
+    pub balance_changes: ::prost::alloc::vec::Vec<BalanceChange>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -117,7 +117,7 @@ pub struct TransactionContractChanges {
     #[prost(message, repeated, tag="3")]
     pub components: ::prost::alloc::vec::Vec<ProtocolComponent>,
     #[prost(message, repeated, tag="4")]
-    pub tvl: ::prost::alloc::vec::Vec<BalanceChange>,
+    pub balance_changes: ::prost::alloc::vec::Vec<BalanceChange>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
