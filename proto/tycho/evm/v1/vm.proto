@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-import "tycho/evm/v1/common.proto";
-
 package tycho.evm.v1;
+
+import "tycho/evm/v1/common.proto";
 
 message ContractSlot {
   bytes slot = 2;
