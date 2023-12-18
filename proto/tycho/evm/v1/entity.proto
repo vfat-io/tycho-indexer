@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-import "tycho/evm/v1/shared.proto";
+import "tycho/evm/v1/common.proto";
 
 package tycho.evm.v1;
 
@@ -13,6 +13,7 @@ message TransactionEntityChanges {
   Transaction tx = 1;
   repeated EntityChanges entity_changes = 2;
   repeated ProtocolComponent components = 3;
+  repeated BalanceChange tvl = 4;
 }
 
 message BlockEntityChanges {

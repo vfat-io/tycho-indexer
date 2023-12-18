@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-import "tycho/evm/v1/shared.proto";
+import "tycho/evm/v1/common.proto";
 
 package tycho.evm.v1;
 
