@@ -85,11 +85,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Install Buf
-        run: |
-          npm install @bufbuild/buf@1.28.1
+      - uses: bufbuild/buf-setup-action@v1.28.1
 
-      - name: Check Protobuf Formatting
-        run: |
-          npx buf format --exit-code
+      - uses: bufbuild/buf-lint-action@v1
           
