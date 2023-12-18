@@ -17,7 +17,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
     hex_bytes::Bytes,
-    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolSystem, ProtocolType},
+    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolSystem},
     pb::tycho::evm::v1 as substreams,
     storage::{ChangeType, StateGatewayType},
 };
@@ -809,7 +809,7 @@ impl BlockEntityChanges {
         extractor: &str,
         chain: Chain,
         protocol_system: ProtocolSystem,
-        protocol_type: ProtocolType,
+        protocol_type_id: String,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
@@ -825,9 +825,9 @@ impl BlockEntityChanges {
                     for component in change.components {
                         let pool = ProtocolComponent::try_from_message(
                             component,
-                            protocol_system.clone(),
-                            protocol_type.clone(),
                             chain,
+                            protocol_system,
+                            protocol_type_id.clone(),
                         )?;
                         new_pools.insert(pool.clone().id.0, pool);
                     }
@@ -1044,45 +1044,41 @@ pub mod fixtures {
                     }),
                     state_changes: vec![
                         StateChanges {
-                            component_id: "State1".to_owned().into_bytes(),
+                            component_id: "State1".to_owned(),
                             attributes: vec![
                                 Attribute {
-                                    name: "reserve".to_owned().into_bytes(),
+                                    name: "reserve".to_owned(),
                                     value: 1000_u64.to_be_bytes().to_vec(),
                                 },
                                 Attribute {
-                                    name: "static_attribute"
-                                        .to_owned()
-                                        .into_bytes(),
+                                    name: "static_attribute".to_owned(),
                                     value: 1_u64.to_be_bytes().to_vec(),
                                 },
                             ],
                         },
                         StateChanges {
-                            component_id: "State2".to_owned().into_bytes(),
+                            component_id: "State2".to_owned(),
                             attributes: vec![
                                 Attribute {
-                                    name: "reserve".to_owned().into_bytes(),
+                                    name: "reserve".to_owned(),
                                     value: 1000_u64.to_be_bytes().to_vec(),
                                 },
                                 Attribute {
-                                    name: "static_attribute"
-                                        .to_owned()
-                                        .into_bytes(),
+                                    name: "static_attribute".to_owned(),
                                     value: 1_u64.to_be_bytes().to_vec(),
                                 },
                             ],
                         },
                     ],
                     components: vec![ProtocolComponent {
-                        id: "Pool".to_owned().into_bytes(),
+                        id: "Pool".to_owned(),
                         tokens: vec![
                             "token0".to_owned().into_bytes(),
                             "token1".to_owned().into_bytes(),
                         ],
                         contracts: vec!["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()],
                         static_att: vec![Attribute {
-                            name: "key".to_owned().into_bytes(),
+                            name: "key".to_owned(),
                             value: 600_u64.to_be_bytes().to_vec(),
                         }],
                     }],
@@ -1095,14 +1091,14 @@ pub mod fixtures {
                         index: 11,
                     }),
                     state_changes: vec![StateChanges {
-                        component_id: "State1".to_owned().into_bytes(),
+                        component_id: "State1".to_owned(),
                         attributes: vec![
                             Attribute {
-                                name: "reserve".to_owned().into_bytes(),
+                                name: "reserve".to_owned(),
                                 value: 600_u64.to_be_bytes().to_vec(),
                             },
                             Attribute {
-                                name: "new".to_owned().into_bytes(),
+                                name: "new".to_owned(),
                                 value: 0_u64.to_be_bytes().to_vec(),
                             },
                         ],
@@ -1121,11 +1117,7 @@ mod test {
     use actix_web::body::MessageBody;
     use rstest::rstest;
 
-    use crate::{
-        extractor::evm::fixtures::transaction01,
-        models::{FinancialType, ImplementationType, ProtocolSystem, ProtocolType},
-        pb::tycho::evm::v1::Attribute,
-    };
+    use crate::{extractor::evm::fixtures::transaction01, models::ProtocolSystem};
 
     use super::*;
 
@@ -1647,12 +1639,7 @@ mod test {
             ProtocolComponent {
                 id: ContractId("Pool".to_owned()),
                 protocol_system: ProtocolSystem::Ambient,
-                protocol_type: ProtocolType {
-                    name: "Pool".to_string(),
-                    attribute_schema: serde_json::Value::default(),
-                    financial_type: FinancialType::Psm,
-                    implementation_type: ImplementationType::Custom,
-                },
+                protocol_type_id: "Pool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec!["token0".to_owned(), "token1".to_owned()],
                 static_attributes: static_attr,
@@ -1688,19 +1675,13 @@ mod test {
     #[test]
     fn test_block_entity_changes_parse_msg() {
         let msg = fixtures::pb_block_entity_changes();
-        let protocol_type = ProtocolType {
-            name: "Pool".to_string(),
-            attribute_schema: serde_json::Value::default(),
-            financial_type: FinancialType::Psm,
-            implementation_type: ImplementationType::Custom,
-        };
 
         let res = BlockEntityChanges::try_from_message(
             msg,
             "test",
             Chain::Ethereum,
             ProtocolSystem::Ambient,
-            protocol_type,
+            "Pool".to_owned(),
         )
         .unwrap();
 
@@ -1761,12 +1742,7 @@ mod test {
             ProtocolComponent {
                 id: ContractId("Pool".to_owned()),
                 protocol_system: ProtocolSystem::Ambient,
-                protocol_type: ProtocolType {
-                    name: "Pool".to_string(),
-                    attribute_schema: serde_json::Value::default(),
-                    financial_type: FinancialType::Psm,
-                    implementation_type: ImplementationType::Custom,
-                },
+                protocol_type_id: "Pool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec!["token0".to_owned(), "token1".to_owned()],
                 static_attributes: static_attr,
