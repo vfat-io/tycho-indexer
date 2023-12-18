@@ -7,7 +7,6 @@ use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
 };
-
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
@@ -371,6 +370,18 @@ pub fn new_cached_gateway(
 
 #[cfg(test)]
 mod test {
+    use std::{str::FromStr, sync::Arc};
+
+    use diesel_async::{
+        pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
+        AsyncConnection, AsyncPgConnection,
+    };
+    use ethers::{prelude::H256, types::H160};
+    use tokio::sync::{
+        mpsc,
+        oneshot::{self, error::TryRecvError},
+    };
+
     use crate::{
         extractor::{evm, evm::EVMStateGateway},
         models::{Chain, ExtractionState},
@@ -381,16 +392,6 @@ mod test {
             },
             BlockIdentifier, StorageError,
         },
-    };
-    use diesel_async::{
-        pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
-        AsyncConnection, AsyncPgConnection,
-    };
-    use ethers::{prelude::H256, types::H160};
-    use std::{str::FromStr, sync::Arc};
-    use tokio::sync::{
-        mpsc,
-        oneshot::{self, error::TryRecvError},
     };
 
     async fn setup_gateway() -> (EVMStateGateway<AsyncPgConnection>, Pool<AsyncPgConnection>) {
@@ -417,6 +418,7 @@ mod test {
             evm::Transaction,
             evm::Account,
             evm::AccountUpdate,
+            evm::ERC20Token,
         >::from_connection(&mut connection)
         .await;
 

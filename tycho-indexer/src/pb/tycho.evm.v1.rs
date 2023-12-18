@@ -114,13 +114,14 @@ pub struct TransactionStateChanges {
     pub tx: ::core::option::Option<Transaction>,
     #[prost(message, repeated, tag="2")]
     pub state_changes: ::prost::alloc::vec::Vec<StateChanges>,
+    #[prost(message, repeated, tag="3")]
+    pub components: ::prost::alloc::vec::Vec<ProtocolComponent>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockEntityChanges {
     #[prost(message, optional, tag="1")]
     pub block: ::core::option::Option<Block>,
-    /// TODO: add component changes
     #[prost(message, repeated, tag="2")]
     pub changes: ::prost::alloc::vec::Vec<TransactionStateChanges>,
 }

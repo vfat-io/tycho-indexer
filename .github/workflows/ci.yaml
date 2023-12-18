@@ -77,3 +77,15 @@ jobs:
           RUSTFLAGS: -Dwarnings
 
       - run: cargo +nightly fmt --all --check
+
+  buf_formatting:
+    name: Protobuf Files Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - uses: bufbuild/buf-setup-action@v1.28.1
+
+      - uses: bufbuild/buf-lint-action@v1
+          

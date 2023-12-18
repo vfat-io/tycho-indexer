@@ -1,4 +1,8 @@
 #![allow(unused_variables)]
+
+use std::{str::FromStr, sync::Arc};
+
+use async_trait::async_trait;
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
@@ -6,22 +10,20 @@ use diesel_async::{
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
-use async_trait::async_trait;
-use tokio::sync::Mutex;
-
-use super::EVMStateGateway;
 use crate::{
     extractor::{evm, ExtractionError, Extractor, ExtractorMsg},
-    models::{Chain, ExtractionState, ExtractorIdentity},
+    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolSystem},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
     },
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
 };
+
+use super::EVMStateGateway;
 
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
@@ -33,6 +35,7 @@ pub struct AmbientContractExtractor<G> {
     gateway: G,
     name: String,
     chain: Chain,
+    protocol_system: ProtocolSystem,
     // TODO: There is not reason this needs to be shared
     // try removing the Mutex
     inner: Arc<Mutex<Inner>>,
@@ -94,7 +97,7 @@ impl AmbientPgGateway {
         Ok(())
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %changes.block.number))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn forward(
         &self,
         changes: &evm::BlockStateChanges,
@@ -134,7 +137,7 @@ impl AmbientPgGateway {
         Result::<(), StorageError>::Ok(())
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block = ?to))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? to))]
     async fn backward(
         &self,
         to: &BlockIdentifier,
@@ -162,13 +165,16 @@ impl AmbientPgGateway {
         self.save_cursor(new_cursor, conn)
             .await?;
 
-        let changes = evm::BlockAccountChanges {
-            chain: self.chain,
-            extractor: self.name.clone(),
+        let changes = evm::BlockAccountChanges::new(
+            &self.name,
+            self.chain,
             block,
             account_updates,
-            new_pools: HashMap::new(),
-        };
+            // TODO: get protocol components from gateway (in ENG-2049)
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
     }
 
@@ -188,7 +194,7 @@ impl AmbientGateway for AmbientPgGateway {
         self.get_last_cursor(&mut conn).await
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %changes.block.number))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn upsert_contract(
         &self,
         changes: &evm::BlockStateChanges,
@@ -206,7 +212,7 @@ impl AmbientGateway for AmbientPgGateway {
         Ok(())
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %to))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % to))]
     async fn revert(
         &self,
         to: &BlockIdentifier,
@@ -238,12 +244,14 @@ where
                 name: name.to_owned(),
                 chain,
                 inner: Arc::new(Mutex::new(Inner { cursor: Vec::new() })),
+                protocol_system: ProtocolSystem::Ambient,
             },
             Ok(cursor) => AmbientContractExtractor {
                 gateway,
                 name: name.to_owned(),
                 chain,
                 inner: Arc::new(Mutex::new(Inner { cursor })),
+                protocol_system: ProtocolSystem::Ambient,
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
@@ -264,7 +272,7 @@ where
         String::from_utf8(self.inner.lock().await.cursor.clone()).expect("Cursor is utf8")
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name))]
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
@@ -281,7 +289,15 @@ where
 
         debug!(?raw_msg, "Received message");
 
-        let msg = match evm::BlockStateChanges::try_from_message(raw_msg, &self.name, self.chain) {
+        // TODO: figure out how/where to get this ID from (in ENG-2049)
+        let protocol_type_id = String::from("id-1");
+        let msg = match evm::BlockStateChanges::try_from_message(
+            raw_msg,
+            &self.name,
+            self.chain,
+            self.protocol_system,
+            protocol_type_id,
+        ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
                 changes
@@ -301,7 +317,7 @@ where
         Ok(Some(msg))
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %inp.last_valid_block.as_ref().unwrap().number))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % inp.last_valid_block.as_ref().unwrap().number))]
     async fn handle_revert(
         &self,
         inp: BlockUndoSignal,
@@ -333,7 +349,6 @@ where
 
 #[cfg(test)]
 mod test {
-
     use crate::{extractor::evm, pb::sf::substreams::v1::BlockRef};
 
     use super::*;
@@ -456,9 +471,12 @@ mod gateway_test {
     //!
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
-    use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
+    use std::collections::HashMap;
+
     use diesel_async::pooled_connection::deadpool::Object;
     use ethers::types::U256;
+
+    use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
 
     use super::*;
 
@@ -487,6 +505,7 @@ mod gateway_test {
             evm::Transaction,
             evm::Account,
             evm::AccountUpdate,
+            evm::ERC20Token,
         >::from_connection(&mut conn)
         .await;
 
@@ -566,7 +585,8 @@ mod gateway_test {
                     evm::fixtures::transaction02(TX_HASH_0, evm::fixtures::HASH_256_0, 1),
                 ),
             ],
-            new_pools: HashMap::new(),
+            protocol_components: Vec::new(),
+            tvl_changes: Vec::new(),
         }
     }
 
@@ -591,7 +611,8 @@ mod gateway_test {
                 ChangeType::Update,
                 evm::fixtures::transaction02(TX_HASH_1, BLOCK_HASH_0, 1),
             )],
-            new_pools: HashMap::new(),
+            protocol_components: Vec::new(),
+            tvl_changes: Vec::new(),
         }
     }
 

@@ -1,20 +1,22 @@
-use crate::storage::{
-    ContractDelta, ExtractionState, ExtractionStateGateway, StorableBlock, StorableContract,
-    StorableTransaction,
-};
-
-use super::{orm, schema, Chain, PostgresGateway, StorageError};
 use async_trait::async_trait;
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
+use crate::storage::{
+    ContractDelta, ExtractionState, ExtractionStateGateway, StorableBlock, StorableContract,
+    StorableToken, StorableTransaction,
+};
+
+use super::{orm, schema, Chain, PostgresGateway, StorageError};
+
 #[async_trait]
-impl<B, TX, A, D> ExtractionStateGateway for PostgresGateway<B, TX, A, D>
+impl<B, TX, A, D, T> ExtractionStateGateway for PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
+    T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     type DB = AsyncPgConnection;
 
@@ -85,7 +87,7 @@ where
                     })?;
             }
             Err(err) => {
-                return Err(StorageError::from_diesel(err, "ExtractionState", &state.name, None))
+                return Err(StorageError::from_diesel(err, "ExtractionState", &state.name, None));
             }
         }
         Ok(())
@@ -97,8 +99,9 @@ mod test {
     use diesel::prelude::*;
     use diesel_async::{AsyncConnection, RunQueryDsl};
 
-    use super::*;
     use crate::extractor::evm;
+
+    use super::*;
 
     async fn setup_db() -> AsyncPgConnection {
         // Creates a DB connecton
@@ -141,8 +144,21 @@ mod test {
 
     async fn get_dgw(
         conn: &mut AsyncPgConnection,
-    ) -> PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate> {
-        PostgresGateway::<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>::from_connection(conn).await
+    ) -> PostgresGateway<
+        evm::Block,
+        evm::Transaction,
+        evm::Account,
+        evm::AccountUpdate,
+        evm::ERC20Token,
+    > {
+        PostgresGateway::<
+            evm::Block,
+            evm::Transaction,
+            evm::Account,
+            evm::AccountUpdate,
+            evm::ERC20Token,
+        >::from_connection(conn)
+        .await
     }
 
     #[tokio::test]
