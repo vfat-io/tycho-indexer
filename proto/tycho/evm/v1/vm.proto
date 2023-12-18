@@ -32,7 +32,7 @@ message TransactionContractChanges {
   Transaction tx = 1;
   repeated ContractChange contract_changes = 2;
   repeated ProtocolComponent components = 3;
-  repeated BalanceChange tvl = 4;
+  repeated BalanceChange balance_changes = 4;
 }
 
 message BlockContractChanges {
