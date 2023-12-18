@@ -65,6 +65,39 @@ pub struct BlockContractChanges {
     #[prost(message, repeated, tag="2")]
     pub changes: ::prost::alloc::vec::Vec<TransactionChanges>,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Attribute {
+    #[prost(bytes="vec", tag="1")]
+    pub name: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", tag="2")]
+    pub value: ::prost::alloc::vec::Vec<u8>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StateChanges {
+    #[prost(bytes="vec", tag="1")]
+    pub component_id: ::prost::alloc::vec::Vec<u8>,
+    #[prost(message, repeated, tag="2")]
+    pub attributes: ::prost::alloc::vec::Vec<Attribute>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TransactionStateChanges {
+    #[prost(message, optional, tag="1")]
+    pub tx: ::core::option::Option<Transaction>,
+    #[prost(message, repeated, tag="2")]
+    pub state_changes: ::prost::alloc::vec::Vec<StateChanges>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BlockEntityChanges {
+    #[prost(message, optional, tag="1")]
+    pub block: ::core::option::Option<Block>,
+    /// TODO: add component changes
+    #[prost(message, repeated, tag="2")]
+    pub changes: ::prost::alloc::vec::Vec<TransactionStateChanges>,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum ChangeType {
