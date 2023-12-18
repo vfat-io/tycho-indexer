@@ -97,7 +97,7 @@ impl AmbientPgGateway {
         Ok(())
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %changes.block.number))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn forward(
         &self,
         changes: &evm::BlockStateChanges,
@@ -137,7 +137,7 @@ impl AmbientPgGateway {
         Result::<(), StorageError>::Ok(())
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block = ?to))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? to))]
     async fn backward(
         &self,
         to: &BlockIdentifier,
@@ -194,7 +194,7 @@ impl AmbientGateway for AmbientPgGateway {
         self.get_last_cursor(&mut conn).await
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %changes.block.number))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn upsert_contract(
         &self,
         changes: &evm::BlockStateChanges,
@@ -212,7 +212,7 @@ impl AmbientGateway for AmbientPgGateway {
         Ok(())
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %to))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % to))]
     async fn revert(
         &self,
         to: &BlockIdentifier,
@@ -272,7 +272,7 @@ where
         String::from_utf8(self.inner.lock().await.cursor.clone()).expect("Cursor is utf8")
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name))]
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
@@ -317,7 +317,7 @@ where
         Ok(Some(msg))
     }
 
-    #[instrument(skip_all, fields(chain = %self.chain, name = %self.name, block_number = %inp.last_valid_block.as_ref().unwrap().number))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % inp.last_valid_block.as_ref().unwrap().number))]
     async fn handle_revert(
         &self,
         inp: BlockUndoSignal,
@@ -505,6 +505,7 @@ mod gateway_test {
             evm::Transaction,
             evm::Account,
             evm::AccountUpdate,
+            evm::ERC20Token,
         >::from_connection(&mut conn)
         .await;
 

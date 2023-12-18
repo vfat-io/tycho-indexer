@@ -14,8 +14,13 @@ use tokio::task::JoinHandle;
 mod rpc;
 mod ws;
 
-pub type EvmPostgresGateway =
-    PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>;
+pub type EvmPostgresGateway = PostgresGateway<
+    evm::Block,
+    evm::Transaction,
+    evm::Account,
+    evm::AccountUpdate,
+    evm::ERC20Token,
+>;
 
 pub struct ServicesBuilder {
     prefix: String,

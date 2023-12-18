@@ -1,4 +1,8 @@
+#![allow(unused_variables)]
+
 use std::collections::HashMap;
+
+use chrono::NaiveDateTime;
 
 use crate::{
     extractor::{
@@ -12,12 +16,17 @@ use crate::{
     },
 };
 
-use chrono::NaiveDateTime;
-
 pub mod pg {
     use ethers::types::{H160, H256, U256};
 
-    use crate::storage::{postgres::orm, Address, Balance, BlockHash, ChangeType, Code, TxHash};
+    use crate::storage::{
+        postgres::{
+            orm,
+            orm::{NewProtocolState, NewToken, Token},
+        },
+        Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState, StorableToken,
+        TxHash,
+    };
 
     use super::*;
 
@@ -185,25 +194,6 @@ pub mod pg {
     }
 
     impl ContractDelta for evm::AccountUpdate {
-        fn contract_id(&self) -> ContractId {
-            ContractId::new(self.chain, self.address.into())
-        }
-
-        fn dirty_balance(&self) -> Option<Balance> {
-            self.balance.map(|b| b.into())
-        }
-
-        fn dirty_code(&self) -> Option<&Code> {
-            self.code.as_ref()
-        }
-
-        fn dirty_slots(&self) -> ContractStore {
-            self.slots
-                .iter()
-                .map(|(s, v)| ((*s).into(), Some((*v).into())))
-                .collect()
-        }
-
         fn from_storage(
             chain: &Chain,
             address: &Address,
@@ -237,6 +227,63 @@ pub mod pg {
                 change,
             );
             Ok(update)
+        }
+
+        fn contract_id(&self) -> ContractId {
+            ContractId::new(self.chain, self.address.into())
+        }
+
+        fn dirty_balance(&self) -> Option<Balance> {
+            self.balance.map(|b| b.into())
+        }
+
+        fn dirty_code(&self) -> Option<&Code> {
+            self.code.as_ref()
+        }
+
+        fn dirty_slots(&self) -> ContractStore {
+            self.slots
+                .iter()
+                .map(|(s, v)| ((*s).into(), Some((*v).into())))
+                .collect()
+        }
+    }
+
+    impl StorableToken<orm::Token, orm::NewToken, i64> for evm::ERC20Token {
+        fn from_storage(val: Token, contract: ContractId) -> Result<Self, StorageError> {
+            // TODO: implementing this is planned for ENG 1717, uncomment below to start
+            // let address =
+            //     pad_and_parse_h160(contract.address()).map_err(StorageError::DecodeError)?;
+            // Ok(evm::ERC20Token::new(
+            //     address,
+            //     String::try_from(&val.symbol).map_err(StorageError::DecodeError)?,
+            // ))
+            todo!()
+        }
+
+        fn to_storage(&self, contract_id: i64) -> NewToken {
+            todo!()
+        }
+
+        fn contract_id(&self) -> ContractId {
+            todo!()
+        }
+    }
+
+    impl StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64> for evm::ProtocolState {
+        fn from_storage(
+            val: orm::ProtocolState,
+            contract: ContractId,
+        ) -> Result<Self, StorageError> {
+            todo!()
+        }
+
+        fn to_storage(&self, contract_id: i64) -> NewProtocolState {
+            todo!()
+        }
+
+        fn contract_id(&self) -> ContractId {
+            todo!()
         }
     }
 }

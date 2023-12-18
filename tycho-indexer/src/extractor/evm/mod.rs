@@ -31,8 +31,27 @@ mod utils;
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SwapPool {}
 
-#[allow(dead_code)]
-pub struct ERC20Token {}
+pub struct ERC20Token {
+    pub address: H160,
+    pub symbol: String,
+    pub decimals: u32,
+    pub tax: u64,
+    pub gas: Vec<Option<u64>>,
+    pub chain: Chain,
+}
+
+impl ERC20Token {
+    pub fn new(
+        address: H160,
+        symbol: String,
+        decimals: u32,
+        tax: u64,
+        gas: Vec<Option<u64>>,
+        chain: Chain,
+    ) -> Self {
+        ERC20Token { address, symbol, decimals, tax, gas, chain }
+    }
+}
 
 #[derive(Debug, PartialEq, Copy, Clone, Deserialize, Serialize, Default)]
 pub struct Block {
@@ -350,7 +369,8 @@ pub struct BlockStateChanges {
     pub tvl_changes: Vec<TvlChange>,
 }
 
-pub type EVMStateGateway<DB> = StateGatewayType<DB, Block, Transaction, Account, AccountUpdate>;
+pub type EVMStateGateway<DB> =
+    StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token>;
 
 impl Block {
     /// Parses block from tychos protobuf block message
