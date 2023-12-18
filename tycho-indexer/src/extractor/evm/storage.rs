@@ -251,7 +251,7 @@ pub mod pg {
 
     impl StorableToken<orm::Token, orm::NewToken, i64> for evm::ERC20Token {
         fn from_storage(val: Token, contract: ContractId) -> Result<Self, StorageError> {
-            // TODO: implementing this is planned for ENG 2049, uncomment below to start
+            // TODO: implementing this is planned for ENG 1717, uncomment below to start
             // let address =
             //     pad_and_parse_h160(contract.address()).map_err(StorageError::DecodeError)?;
             // Ok(evm::ERC20Token::new(
