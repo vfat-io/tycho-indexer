@@ -469,8 +469,7 @@ impl TvlChange {
 ///
 /// The `ProtocolComponent` struct is designed to store static attributes related to the associated
 /// smart contract.
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 pub struct ProtocolComponent {
     // an id for this component, could be hex repr of contract address
     id: ContractId,
@@ -645,7 +644,7 @@ impl BlockStateChanges {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
 /// Represents the dynamic data of `ProtocolComponent`.
 pub struct ProtocolState {
     // associates back to a component, which has metadata like type, tokens , etc.
@@ -653,7 +652,7 @@ pub struct ProtocolState {
     // holds all the protocol specific attributes, validates by the components schema
     pub attributes: HashMap<String, Bytes>,
     // via transaction, we can trace back when this state became valid
-    pub modify_tx: Transaction,
+    pub modify_tx: H256,
 }
 
 // TODO: remove dead code check skip once extractor is implemented
@@ -670,7 +669,7 @@ impl ProtocolState {
             .map(|attribute| Ok((attribute.name, Bytes::from(attribute.value))))
             .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
 
-        Ok(Self { component_id: msg.component_id, attributes, modify_tx: *tx })
+        Ok(Self { component_id: msg.component_id, attributes, modify_tx: tx.hash })
     }
 
     /// Merges this update with another one.
@@ -697,28 +696,95 @@ impl ProtocolState {
                 self.component_id, other.component_id
             )));
         }
-        if self.modify_tx.block_hash != other.modify_tx.block_hash {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates from different blocks: 0x{:x} != 0x{:x}",
-                self.modify_tx.block_hash, other.modify_tx.block_hash,
-            )));
-        }
-        if self.modify_tx.hash == other.modify_tx.hash {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates from the same transaction: 0x{:x}",
-                self.modify_tx.hash
-            )));
-        }
-        if self.modify_tx.index > other.modify_tx.index {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates with lower transaction index: {} > {}",
-                self.modify_tx.index, other.modify_tx.index
-            )));
-        }
         self.modify_tx = other.modify_tx;
         self.attributes.extend(other.attributes);
         Ok(())
     }
+}
+
+/// Updates grouped by their respective transaction.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ProtocolStatesWithTx {
+    pub protocol_states: HashMap<String, ProtocolState>,
+    pub tx: Transaction,
+}
+
+impl ProtocolStatesWithTx {
+    /// Parses protocol state from tychos protobuf StateChanges message
+    pub fn try_from_message(
+        msg: Vec<substreams::StateChanges>,
+        tx: Transaction,
+    ) -> Result<Self, ExtractionError> {
+        let mut protocol_states = HashMap::new();
+        for state_msg in msg {
+            let state = ProtocolState::try_from_message(state_msg, &tx)?;
+            protocol_states.insert(state.clone().component_id, state);
+        }
+        Ok(Self { protocol_states, tx })
+    }
+
+    /// Merges this update with another one.
+    ///
+    /// The method combines two `ProtocolStatesWithTx` instances under certain
+    /// conditions:
+    /// - The block from which both updates came should be the same. If the updates are from
+    ///   different blocks, the method will return an error.
+    /// - The transactions for each of the updates should be distinct. If they come from the same
+    ///   transaction, the method will return an error.
+    /// - The order of the transaction matters. The transaction from `other` must have occurred
+    ///   later than the self transaction. If the self transaction has a higher index than `other`,
+    ///   the method will return an error.
+    ///
+    /// The merged update keeps the transaction of `other`.
+    ///
+    /// # Errors
+    /// This method will return `ExtractionError::MergeError` if any of the above
+    /// conditions is violated.
+    pub fn merge(&mut self, other: ProtocolStatesWithTx) -> Result<(), ExtractionError> {
+        if self.tx.block_hash != other.tx.block_hash {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge ProtocolStates from different blocks: 0x{:x} != 0x{:x}",
+                self.tx.block_hash, other.tx.block_hash,
+            )));
+        }
+        if self.tx.hash == other.tx.hash {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge ProtocolStates from the same transaction: 0x{:x}",
+                self.tx.hash
+            )));
+        }
+        if self.tx.index > other.tx.index {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge ProtocolStates with lower transaction index: {} > {}",
+                self.tx.index, other.tx.index
+            )));
+        }
+        self.tx = other.tx;
+        for (key, value) in other.protocol_states {
+            match self.protocol_states.entry(key) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().merge(value)?;
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(value);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A container for state updates grouped by protocol component.
+///
+/// Hold a single update per component. This is a condensed form of
+/// [BlockEntityChanges].
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+pub struct BlockEntityChangesResult {
+    extractor: String,
+    chain: Chain,
+    pub block: Block,
+    pub state_updates: HashMap<String, ProtocolState>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
 /// A container for state updates grouped by transaction
@@ -730,8 +796,8 @@ pub struct BlockEntityChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
-    pub state_updates: Vec<ProtocolState>,
-    pub new_pools: HashMap<H160, SwapPool>,
+    pub state_updates: Vec<ProtocolStatesWithTx>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
 // TODO: remove dead code check skip once extractor is implemented
@@ -742,27 +808,39 @@ impl BlockEntityChanges {
         msg: substreams::BlockEntityChanges,
         extractor: &str,
         chain: Chain,
+        protocol_system: ProtocolSystem,
+        protocol_type_id: String,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
             let mut state_updates = Vec::new();
+            let mut new_protocol_components = HashMap::new();
 
             for change in msg.changes.into_iter() {
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
-                    for sc in change.state_changes.into_iter() {
-                        let update = ProtocolState::try_from_message(sc, &tx)?;
-                        state_updates.push(update);
+                    let tx_update =
+                        ProtocolStatesWithTx::try_from_message(change.state_changes, tx)?;
+                    state_updates.push(tx_update);
+                    for component in change.components {
+                        let pool = ProtocolComponent::try_from_message(
+                            component,
+                            chain,
+                            protocol_system,
+                            protocol_type_id.clone(),
+                        )?;
+                        new_protocol_components.insert(pool.clone().id.0, pool);
                     }
                 }
             }
-            state_updates.sort_unstable_by_key(|update| update.modify_tx.index);
+
+            state_updates.sort_unstable_by_key(|update| update.tx.index);
             return Ok(Self {
                 extractor: extractor.to_owned(),
                 chain,
                 block,
                 state_updates,
-                new_pools: HashMap::new(),
+                new_protocol_components,
             });
         }
         Err(ExtractionError::Empty)
@@ -771,39 +849,34 @@ impl BlockEntityChanges {
     /// Aggregates state updates.
     ///
     /// This function aggregates the state updates (`ProtocolState`) for
-    /// different protocol components into a new `BlockEntityChanges` object.
+    /// different protocol components into a `BlockEntityChangesResult` object.
     /// This new object should have only one final ProtocolState per component_id.
     ///
-    /// After merging all updates, a `BlockEntityChanges` object is returned
+    /// After merging all updates, a `BlockEntityChangesResult` object is returned
     /// which contains, amongst other data, the compacted state updates.
     ///
     /// # Errors
     ///
     /// This returns an error if there was a problem during merge. The error
     /// type is `ExtractionError`.
-    pub fn aggregate_updates(self) -> Result<BlockEntityChanges, ExtractionError> {
-        let mut protocol_states: HashMap<String, ProtocolState> = HashMap::new();
+    pub fn aggregate_updates(self) -> Result<BlockEntityChangesResult, ExtractionError> {
+        let base = ProtocolStatesWithTx::default();
 
-        for update in self.state_updates.into_iter() {
-            match protocol_states.entry(update.component_id.clone()) {
-                Entry::Occupied(mut e) => {
-                    e.get_mut().merge(update)?;
-                }
-                Entry::Vacant(e) => {
-                    e.insert(update);
-                }
-            }
-        }
+        let aggregated_states = self
+            .state_updates
+            .iter()
+            .try_fold(base, |mut acc_state, new_state| {
+                acc_state.merge(new_state.clone())?;
+                Ok::<_, ExtractionError>(acc_state.clone())
+            })
+            .unwrap();
 
-        Ok(BlockEntityChanges {
+        Ok(BlockEntityChangesResult {
             extractor: self.extractor,
             chain: self.chain,
             block: self.block,
-            state_updates: protocol_states
-                .values()
-                .cloned()
-                .collect::<Vec<_>>(),
-            new_pools: self.new_pools,
+            state_updates: aggregated_states.protocol_states,
+            new_protocol_components: self.new_protocol_components,
         })
     }
 }
@@ -944,7 +1017,7 @@ pub mod fixtures {
         let res1_value = 1000_u64.to_be_bytes().to_vec();
         let res2_value = 500_u64.to_be_bytes().to_vec();
         StateChanges {
-            component_id: "test".to_owned(),
+            component_id: "State1".to_owned(),
             attributes: vec![
                 Attribute { name: "reserve1".to_owned(), value: res1_value },
                 Attribute { name: "reserve2".to_owned(), value: res2_value },
@@ -954,40 +1027,85 @@ pub mod fixtures {
 
     pub fn pb_block_entity_changes() -> crate::pb::tycho::evm::v1::BlockEntityChanges {
         use crate::pb::tycho::evm::v1::*;
-        let res1_value = 1000_u64.to_be_bytes().to_vec();
-        let res2_value = 500_u64.to_be_bytes().to_vec();
         BlockEntityChanges {
             block: Some(Block {
-                hash: vec![0x31, 0x32, 0x33, 0x34],
+                hash: vec![0x0, 0x0, 0x0, 0x0],
                 parent_hash: vec![0x21, 0x22, 0x23, 0x24],
                 number: 1,
                 ts: 1000,
             }),
-
-            changes: vec![TransactionStateChanges {
-                tx: Some(Transaction {
-                    hash: vec![0x11, 0x12, 0x13, 0x14],
-                    from: vec![0x41, 0x42, 0x43, 0x44],
-                    to: vec![0x51, 0x52, 0x53, 0x54],
-                    index: 2,
-                }),
-                state_changes: vec![
-                    StateChanges {
-                        component_id: "test1".to_owned(),
-                        attributes: vec![Attribute {
-                            name: "reserve1".to_owned(),
-                            value: res1_value,
+            changes: vec![
+                TransactionStateChanges {
+                    tx: Some(Transaction {
+                        hash: vec![0x0, 0x0, 0x0, 0x0],
+                        from: vec![0x0, 0x0, 0x0, 0x0],
+                        to: vec![0x0, 0x0, 0x0, 0x0],
+                        index: 10,
+                    }),
+                    state_changes: vec![
+                        StateChanges {
+                            component_id: "State1".to_owned(),
+                            attributes: vec![
+                                Attribute {
+                                    name: "reserve".to_owned(),
+                                    value: 1000_u64.to_be_bytes().to_vec(),
+                                },
+                                Attribute {
+                                    name: "static_attribute".to_owned(),
+                                    value: 1_u64.to_be_bytes().to_vec(),
+                                },
+                            ],
+                        },
+                        StateChanges {
+                            component_id: "State2".to_owned(),
+                            attributes: vec![
+                                Attribute {
+                                    name: "reserve".to_owned(),
+                                    value: 1000_u64.to_be_bytes().to_vec(),
+                                },
+                                Attribute {
+                                    name: "static_attribute".to_owned(),
+                                    value: 1_u64.to_be_bytes().to_vec(),
+                                },
+                            ],
+                        },
+                    ],
+                    components: vec![ProtocolComponent {
+                        id: "Pool".to_owned(),
+                        tokens: vec![
+                            "token0".to_owned().into_bytes(),
+                            "token1".to_owned().into_bytes(),
+                        ],
+                        contracts: vec!["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()],
+                        static_att: vec![Attribute {
+                            name: "key".to_owned(),
+                            value: 600_u64.to_be_bytes().to_vec(),
                         }],
-                    },
-                    StateChanges {
-                        component_id: "test1".to_owned(),
-                        attributes: vec![Attribute {
-                            name: "reserve2".to_owned(),
-                            value: res2_value,
-                        }],
-                    },
-                ],
-            }],
+                    }],
+                },
+                TransactionStateChanges {
+                    tx: Some(Transaction {
+                        hash: vec![0x11, 0x12, 0x13, 0x14],
+                        from: vec![0x41, 0x42, 0x43, 0x44],
+                        to: vec![0x51, 0x52, 0x53, 0x54],
+                        index: 11,
+                    }),
+                    state_changes: vec![StateChanges {
+                        component_id: "State1".to_owned(),
+                        attributes: vec![
+                            Attribute {
+                                name: "reserve".to_owned(),
+                                value: 600_u64.to_be_bytes().to_vec(),
+                            },
+                            Attribute {
+                                name: "new".to_owned(),
+                                value: 0_u64.to_be_bytes().to_vec(),
+                            },
+                        ],
+                    }],
+                    components: vec![],
+                },
+            ],
         }
     }
 }
@@ -996,12 +1114,12 @@ pub mod fixtures {
 mod test {
     use std::str::FromStr;
 
-    use crate::extractor::evm::fixtures::transaction01;
-
-    use super::*;
-    use crate::models::ProtocolSystem;
     use actix_web::body::MessageBody;
     use rstest::rstest;
+
+    use crate::{extractor::evm::fixtures::transaction01, models::ProtocolSystem};
+
+    use super::*;
 
     const HASH_256_0: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
     const HASH_256_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
@@ -1303,7 +1421,7 @@ mod test {
         let mut state1 = ProtocolState {
             component_id: "State1".to_owned(),
             attributes: attributes1,
-            modify_tx: fixtures::transaction01(),
+            modify_tx: H256::zero(),
         };
 
         let attributes2: HashMap<String, Bytes> = vec![
@@ -1316,7 +1434,7 @@ mod test {
         let state2 = ProtocolState {
             component_id: "State1".to_owned(),
             attributes: attributes2.clone(),
-            modify_tx: fixtures::transaction02(HASH_256_1, HASH_256_0, 11),
+            modify_tx: HASH_256_1.parse().unwrap(),
         };
 
         let res = state1.merge(state2);
@@ -1333,6 +1451,81 @@ mod test {
         assert_eq!(state1.attributes, expected_attributes);
     }
 
+    fn protocol_state_with_tx() -> ProtocolStatesWithTx {
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
+            ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
+        ]
+        .into_iter()
+        .collect();
+        let states: HashMap<String, ProtocolState> = vec![
+            (
+                "State1".to_owned(),
+                ProtocolState {
+                    component_id: "State1".to_owned(),
+                    attributes: attributes.clone(),
+                    modify_tx: H256::zero(),
+                },
+            ),
+            (
+                "State2".to_owned(),
+                ProtocolState {
+                    component_id: "State2".to_owned(),
+                    attributes,
+                    modify_tx: H256::zero(),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        ProtocolStatesWithTx { protocol_states: states, tx: transaction01() }
+    }
+
+    #[test]
+    fn test_merge_protocol_state_with_tx() {
+        let mut base_state = protocol_state_with_tx();
+
+        let new_attributes: HashMap<String, Bytes> = vec![
+            ("reserve".to_owned(), Bytes::from(900_u64.to_be_bytes().to_vec())),
+            ("new_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
+        ]
+        .into_iter()
+        .collect();
+        let new_tx = fixtures::transaction02(HASH_256_1, HASH_256_0, 11);
+        let new_states: HashMap<String, ProtocolState> = vec![(
+            "State1".to_owned(),
+            ProtocolState {
+                component_id: "State1".to_owned(),
+                attributes: new_attributes,
+                modify_tx: new_tx.hash,
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let tx_update = ProtocolStatesWithTx { protocol_states: new_states, tx: new_tx };
+
+        let res = base_state.merge(tx_update);
+        dbg!(&res);
+        assert!(res.is_ok());
+        assert_eq!(base_state.protocol_states.len(), 2);
+        let expected_attributes: HashMap<String, Bytes> = vec![
+            ("reserve".to_owned(), Bytes::from(900_u64.to_be_bytes().to_vec())),
+            ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
+            ("new_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            base_state
+                .protocol_states
+                .get("State1")
+                .unwrap()
+                .attributes,
+            expected_attributes
+        );
+    }
+
     #[rstest]
     #[case::diff_block(
     fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
@@ -1346,61 +1539,47 @@ mod test {
     fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
     Err(ExtractionError::MergeError("Can't merge ProtocolStates with lower transaction index: 10 > 1".to_owned()))
     )]
-    fn test_merge_pool_state_errors(
+    fn test_merge_pool_state_with_tx_errors(
         #[case] tx: Transaction,
         #[case] exp: Result<(), ExtractionError>,
     ) {
-        let attributes1: HashMap<String, Bytes> =
-            vec![("static_attribute".to_owned(), Bytes::from(U256::from(1)))]
-                .into_iter()
-                .collect();
-        let mut state1 = ProtocolState {
-            component_id: "State1".to_owned(),
-            attributes: attributes1,
-            modify_tx: fixtures::transaction01(),
-        };
+        let mut base_state = protocol_state_with_tx();
 
-        let attributes2: HashMap<String, Bytes> =
-            vec![("new_attribute".to_owned(), Bytes::from(U256::from(1)))]
-                .into_iter()
-                .collect();
-        let state2 = ProtocolState {
-            component_id: "State1".to_owned(),
-            attributes: attributes2.clone(),
-            modify_tx: tx,
-        };
+        let mut new_state = protocol_state_with_tx();
+        new_state.tx = tx;
 
-        let res = state1.merge(state2);
+        let res = base_state.merge(new_state);
 
         assert_eq!(res, exp);
     }
 
+    fn protocol_state() -> ProtocolState {
+        let res1_value = 1000_u64.to_be_bytes().to_vec();
+        let res2_value = 500_u64.to_be_bytes().to_vec();
+        ProtocolState {
+            component_id: "State1".to_string(),
+            attributes: vec![
+                ("reserve1".to_owned(), Bytes::from(res1_value)),
+                ("reserve2".to_owned(), Bytes::from(res2_value)),
+            ]
+            .into_iter()
+            .collect(),
+            modify_tx: H256::zero(),
+        }
+    }
+
     #[test]
     fn test_protocol_state_wrong_id() {
-        let attributes1: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
-            ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
-        ]
-        .into_iter()
-        .collect();
-        let mut state1 = ProtocolState {
-            component_id: "State1".to_owned(),
-            attributes: attributes1,
-            modify_tx: fixtures::transaction01(),
-        };
+        let mut state1 = protocol_state();
 
-        let attributes2: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(900))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(550))),
-            ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
-        ]
-        .into_iter()
-        .collect();
+        let attributes2: HashMap<String, Bytes> =
+            vec![("reserve".to_owned(), Bytes::from(U256::from(900)))]
+                .into_iter()
+                .collect();
         let state2 = ProtocolState {
             component_id: "State2".to_owned(),
             attributes: attributes2.clone(),
-            modify_tx: fixtures::transaction02(HASH_256_1, HASH_256_0, 11),
+            modify_tx: HASH_256_1.parse().unwrap(),
         };
 
         let res = state1.merge(state2);
@@ -1412,21 +1591,6 @@ mod test {
                     .to_owned()
             ))
         );
-    }
-
-    fn protocol_state() -> ProtocolState {
-        let res1_value = 1000_u64.to_be_bytes().to_vec();
-        let res2_value = 500_u64.to_be_bytes().to_vec();
-        ProtocolState {
-            component_id: "test".to_string(),
-            attributes: vec![
-                ("reserve1".to_owned(), Bytes::from(res1_value)),
-                ("reserve2".to_owned(), Bytes::from(res2_value)),
-            ]
-            .into_iter()
-            .collect(),
-            modify_tx: transaction01(),
-        }
     }
 
     #[test]
@@ -1444,27 +1608,55 @@ mod test {
                 0x0000000000000000000000000000000000000000000000000000000011121314,
             ),
             block_hash: H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000031323334,
+                0x0000000000000000000000000000000000000000000000000000000000000000,
             ),
             from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
             to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
-            index: 2,
+            index: 11,
         };
-        let attr1: HashMap<String, Bytes> =
-            vec![("reserve1".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec()))]
+        let attr: HashMap<String, Bytes> = vec![
+            ("reserve".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec())),
+            ("new".to_owned(), Bytes::from(0_u64.to_be_bytes().to_vec())),
+        ]
+        .into_iter()
+        .collect();
+        let state_updates: HashMap<String, ProtocolState> = vec![(
+            "State1".to_owned(),
+            ProtocolState {
+                component_id: "State1".to_owned(),
+                attributes: attr,
+                modify_tx: tx.hash,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let static_attr: HashMap<String, Bytes> =
+            vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
                 .into_iter()
                 .collect();
-        let attr2: HashMap<String, Bytes> =
-            vec![("reserve2".to_owned(), Bytes::from(500_u64.to_be_bytes().to_vec()))]
-                .into_iter()
-                .collect();
+        let new_protocol_components: HashMap<String, ProtocolComponent> = vec![(
+            "Pool".to_owned(),
+            ProtocolComponent {
+                id: ContractId("Pool".to_owned()),
+                protocol_system: ProtocolSystem::Ambient,
+                protocol_type_id: "Pool".to_owned(),
+                chain: Chain::Ethereum,
+                tokens: vec!["token0".to_owned(), "token1".to_owned()],
+                static_attributes: static_attr,
+                contract_ids: vec![ContractId(
+                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_owned(),
+                )],
+            },
+        )]
+        .into_iter()
+        .collect();
         BlockEntityChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
             block: Block {
                 number: 1,
                 hash: H256::from_low_u64_be(
-                    0x0000000000000000000000000000000000000000000000000000000031323334,
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
                 ),
                 parent_hash: H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000021222324,
@@ -1473,18 +1665,10 @@ mod test {
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
             state_updates: vec![
-                ProtocolState {
-                    component_id: "test1".to_owned(),
-                    attributes: attr1,
-                    modify_tx: tx,
-                },
-                ProtocolState {
-                    component_id: "test1".to_owned(),
-                    attributes: attr2,
-                    modify_tx: tx,
-                },
+                protocol_state_with_tx(),
+                ProtocolStatesWithTx { protocol_states: state_updates, tx },
             ],
-            new_pools: HashMap::new(),
+            new_protocol_components,
         }
     }
 
@@ -1492,38 +1676,114 @@ mod test {
     fn test_block_entity_changes_parse_msg() {
         let msg = fixtures::pb_block_entity_changes();
 
-        let res = BlockEntityChanges::try_from_message(msg, "test", Chain::Ethereum).unwrap();
+        let res = BlockEntityChanges::try_from_message(
+            msg,
+            "test",
+            Chain::Ethereum,
+            ProtocolSystem::Ambient,
+            "Pool".to_owned(),
+        )
+        .unwrap();
 
         assert_eq!(res, block_entity_changes());
+    }
+
+    fn block_entity_changes_result() -> BlockEntityChangesResult {
+        let tx = Transaction {
+            hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000011121314,
+            ),
+            block_hash: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000000000000,
+            ),
+            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
+            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            index: 2,
+        };
+        let attr1: HashMap<String, Bytes> = vec![
+            ("reserve".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec())),
+            ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
+            ("new".to_owned(), Bytes::from(0_u64.to_be_bytes().to_vec())),
+        ]
+        .into_iter()
+        .collect();
+        let attr2: HashMap<String, Bytes> = vec![
+            ("reserve".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
+            ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
+        ]
+        .into_iter()
+        .collect();
+        let state_updates: HashMap<String, ProtocolState> = vec![
+            (
+                "State1".to_owned(),
+                ProtocolState {
+                    component_id: "State1".to_owned(),
+                    attributes: attr1,
+                    modify_tx: tx.hash,
+                },
+            ),
+            (
+                "State2".to_owned(),
+                ProtocolState {
+                    component_id: "State2".to_owned(),
+                    attributes: attr2,
+                    modify_tx: H256::zero(),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let static_attr: HashMap<String, Bytes> =
+            vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
+                .into_iter()
+                .collect();
+        let new_protocol_components: HashMap<String, ProtocolComponent> = vec![(
+            "Pool".to_owned(),
+            ProtocolComponent {
+                id: ContractId("Pool".to_owned()),
+                protocol_system: ProtocolSystem::Ambient,
+                protocol_type_id: "Pool".to_owned(),
+                chain: Chain::Ethereum,
+                tokens: vec!["token0".to_owned(), "token1".to_owned()],
+                static_attributes: static_attr,
+                contract_ids: vec![ContractId(
+                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_owned(),
+                )],
+            },
+        )]
+        .into_iter()
+        .collect();
+        BlockEntityChangesResult {
+            extractor: "test".to_string(),
+            chain: Chain::Ethereum,
+            block: Block {
+                number: 1,
+                hash: tx.block_hash,
+                parent_hash: H256::from_low_u64_be(
+                    0x0000000000000000000000000000000000000000000000000000000021222324,
+                ),
+                chain: Chain::Ethereum,
+                ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+            },
+            state_updates,
+            new_protocol_components,
+        }
     }
 
     #[test]
     fn test_block_entity_changes_aggregate() {
         let mut block_changes = block_entity_changes();
-        let block_hash = "0x0000000000000000000000000000000000000000000000000000000031323334";
+        let block_hash = "0x0000000000000000000000000000000000000000000000000000000000000000";
         // use a different tx so merge works
         let new_tx = fixtures::transaction02(HASH_256_1, block_hash, 5);
-        block_changes.state_updates[1].modify_tx = new_tx;
-
-        let mut expected_result = block_entity_changes();
-        let expected_attributes: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
-            ("reserve2".to_owned(), Bytes::from(500_u64.to_be_bytes().to_vec())),
-        ]
-        .into_iter()
-        .collect();
-        expected_result.state_updates = vec![ProtocolState {
-            component_id: "test1".to_owned(),
-            attributes: expected_attributes,
-            modify_tx: new_tx,
-        }];
+        block_changes.state_updates[0].tx = new_tx;
 
         let res = block_changes
             .aggregate_updates()
             .unwrap();
 
-        assert_eq!(res, expected_result);
-        assert_eq!(res.state_updates.len(), 1);
+        assert_eq!(res, block_entity_changes_result());
+        assert_eq!(res.state_updates.len(), 2);
     }
 
     fn create_transaction() -> Transaction {

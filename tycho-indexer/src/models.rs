@@ -1,11 +1,7 @@
 #![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
-use crate::extractor::evm::Transaction;
 use strum_macros::{Display, EnumString};
-
-use crate::hex_bytes::Bytes;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
@@ -42,11 +38,11 @@ pub enum FinancialType {
     Psm,
 }
 
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 /// Represents the functionality of a component.
 /// `ProtocolSystems` are composed of various `ProtocolComponents`, and components that behave
 /// similarly are grouped under a specific `ProtocolType` (i.e. Pool, Factory) within a
 /// `ProtocolSystem`.
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ProtocolType {
     pub name: String,
     pub attribute_schema: serde_json::Value,
@@ -99,14 +95,4 @@ impl ExtractionState {
 #[typetag::serde(tag = "type")]
 pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static {
     fn source(&self) -> ExtractorIdentity;
-}
-
-#[allow(dead_code)]
-pub struct ProtocolState {
-    // associates back to a component, which has metadata like type, tokens , etc.
-    pub component_id: String,
-    // holds all the protocol specific attributes, validates by the components schema
-    pub attributes: HashMap<String, Bytes>,
-    // via transaction, we can trace back when this state became valid
-    pub modify_tx: Transaction,
 }
