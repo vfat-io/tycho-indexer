@@ -15,7 +15,7 @@ use tracing::{debug, info, instrument};
 
 use crate::{
     extractor::{evm, ExtractionError, Extractor, ExtractorMsg},
-    models::{Chain, ExtractionState, ExtractorIdentity},
+    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolSystem},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
@@ -35,6 +35,7 @@ pub struct AmbientContractExtractor<G> {
     gateway: G,
     name: String,
     chain: Chain,
+    protocol_system: ProtocolSystem,
     // TODO: There is not reason this needs to be shared
     // try removing the Mutex
     inner: Arc<Mutex<Inner>>,
@@ -164,13 +165,16 @@ impl AmbientPgGateway {
         self.save_cursor(new_cursor, conn)
             .await?;
 
-        let changes = evm::BlockAccountChanges {
-            chain: self.chain,
-            extractor: self.name.clone(),
+        let changes = evm::BlockAccountChanges::new(
+            &self.name,
+            self.chain,
             block,
             account_updates,
-            new_pools: HashMap::new(),
-        };
+            // TODO: get protocol components from gateway (in ENG-2049)
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
     }
 
@@ -240,12 +244,14 @@ where
                 name: name.to_owned(),
                 chain,
                 inner: Arc::new(Mutex::new(Inner { cursor: Vec::new() })),
+                protocol_system: ProtocolSystem::Ambient,
             },
             Ok(cursor) => AmbientContractExtractor {
                 gateway,
                 name: name.to_owned(),
                 chain,
                 inner: Arc::new(Mutex::new(Inner { cursor })),
+                protocol_system: ProtocolSystem::Ambient,
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
@@ -283,7 +289,15 @@ where
 
         debug!(?raw_msg, "Received message");
 
-        let msg = match evm::BlockStateChanges::try_from_message(raw_msg, &self.name, self.chain) {
+        // TODO: figure out how/where to get this ID from (in ENG-2049)
+        let protocol_type_id = String::from("id-1");
+        let msg = match evm::BlockStateChanges::try_from_message(
+            raw_msg,
+            &self.name,
+            self.chain,
+            self.protocol_system,
+            protocol_type_id,
+        ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
                 changes
@@ -569,7 +583,8 @@ mod gateway_test {
                     evm::fixtures::transaction02(TX_HASH_0, evm::fixtures::HASH_256_0, 1),
                 ),
             ],
-            new_pools: HashMap::new(),
+            protocol_components: Vec::new(),
+            tvl_changes: Vec::new(),
         }
     }
 
@@ -594,7 +609,8 @@ mod gateway_test {
                 ChangeType::Update,
                 evm::fixtures::transaction02(TX_HASH_1, BLOCK_HASH_0, 1),
             )],
-            new_pools: HashMap::new(),
+            protocol_components: Vec::new(),
+            tvl_changes: Vec::new(),
         }
     }
 
