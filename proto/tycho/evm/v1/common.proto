@@ -16,9 +16,17 @@ message Transaction {
   uint64 index = 4;
 }
 
+enum ChangeType {
+  CHANGE_TYPE_UNSPECIFIED = 0;
+  CHANGE_TYPE_UPDATE = 1;
+  CHANGE_TYPE_CREATION = 2;
+  CHANGE_TYPE_DELETION = 3;
+}
+
 message Attribute {
   string name = 1;
   bytes value = 2;
+  ChangeType change = 3;
 }
 
 message ProtocolComponent {
@@ -26,6 +34,7 @@ message ProtocolComponent {
   repeated bytes tokens = 2;
   repeated string contracts = 3;
   repeated Attribute static_att = 4;
+  ChangeType change = 5;
 }
 
 message BalanceChange {

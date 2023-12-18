@@ -9,13 +9,6 @@ message ContractSlot {
   bytes value = 3;
 }
 
-enum ChangeType {
-  CHANGE_TYPE_UNSPECIFIED = 0;
-  CHANGE_TYPE_UPDATE = 1;
-  CHANGE_TYPE_CREATION = 2;
-  CHANGE_TYPE_DELETION = 3;
-}
-
 message ContractChange {
   bytes address = 1;
   // empty bytes indicates no change
@@ -31,7 +24,7 @@ message ContractChange {
 message TransactionContractChanges {
   Transaction tx = 1;
   repeated ContractChange contract_changes = 2;
-  repeated ProtocolComponent components = 3;
+  repeated ProtocolComponent component_changes = 3;
   repeated BalanceChange balance_changes = 4;
 }
 

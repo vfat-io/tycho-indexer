@@ -497,14 +497,16 @@ pub struct ProtocolComponent {
     protocol_system: ProtocolSystem,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
     protocol_type_id: String,
-    // Blockchain the component belongs to
+    // blockchain the component belongs to
     chain: Chain,
-    // holds the tokens tradable
+    // ids of the tokens tradable
     tokens: Vec<String>,
-    // ID's referring to related contracts
+    // ids of the related contracts
     contract_ids: Vec<ContractId>,
-    // Just stores static attributes
+    // stores the static attributes
     static_attributes: HashMap<String, Bytes>,
+    // the type of change (creation, deletion etc)
+    change: ChangeType,
 }
 
 /// A type representing the unique identifier for a contract. It can represent an on-chain address
@@ -523,10 +525,11 @@ impl ProtocolComponent {
         protocol_system: ProtocolSystem,
         protocol_type_id: String,
     ) -> Result<Self, ExtractionError> {
-        let id = ContractId(msg.id);
+        let id = ContractId(msg.id.clone());
 
         let tokens = msg
             .tokens
+            .clone()
             .into_iter()
             .map(|t| {
                 String::from_utf8(t)
@@ -536,12 +539,14 @@ impl ProtocolComponent {
 
         let contract_ids = msg
             .contracts
+            .clone()
             .into_iter()
             .map(ContractId)
             .collect::<Vec<_>>();
 
         let static_attributes = msg
             .static_att
+            .clone()
             .into_iter()
             .map(|attribute| Ok((attribute.name, Bytes::from(attribute.value))))
             .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
@@ -554,6 +559,7 @@ impl ProtocolComponent {
             contract_ids,
             static_attributes,
             chain,
+            change: msg.change().into(),
         })
     }
 }
@@ -592,7 +598,7 @@ impl BlockContractChanges {
                         let update = AccountUpdateWithTx::try_from_message(el, &tx, chain)?;
                         tx_updates.push(update);
                     }
-                    for component_msg in change.components.into_iter() {
+                    for component_msg in change.component_changes.into_iter() {
                         let component = ProtocolComponent::try_from_message(
                             component_msg,
                             chain,
@@ -667,10 +673,12 @@ impl BlockContractChanges {
 #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
 /// Represents the dynamic data of `ProtocolComponent`.
 pub struct ProtocolState {
-    // associates back to a component, which has metadata like type, tokens , etc.
+    // associates back to a component, which has metadata like type, tokens, etc.
     pub component_id: String,
-    // holds all the protocol specific attributes, validates by the components schema
-    pub attributes: HashMap<String, Bytes>,
+    // the update protocol specific attributes, validated by the components schema
+    pub updated_attributes: HashMap<String, Bytes>,
+    // the deleted protocol specific attributes
+    pub deleted_attributes: HashMap<String, Bytes>,
     // via transaction, we can trace back when this state became valid
     pub modify_tx: H256,
 }
@@ -683,26 +691,52 @@ impl ProtocolState {
         msg: substreams::EntityChanges,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
-        let attributes = msg
+        // let (updates, deletions): (HashMap<_, _>, HashMap<_, _>) = msg
+        //     .attributes
+        //     .into_iter()
+        //     .filter_map(|attribute| match attribute.change().into() {
+        //         ChangeType::Update | ChangeType::Creation => {
+        //             Some(((attribute.name, Bytes::from(attribute.value), None)))
+        //         }
+        //         ChangeType::Deletion => {
+        //             Some((None, (attribute.name, Bytes::from(attribute.value))))
+        //         }
+        //         _ => None,
+        //     })
+        //     .unzip();
+        let updates: HashMap<_, _> = msg
+            .attributes
+            .clone()
+            .into_iter()
+            .filter_map(|attribute| match attribute.change().into() {
+                ChangeType::Update | ChangeType::Creation => {
+                    Some((attribute.name, Bytes::from(attribute.value)))
+                }
+                _ => None,
+            })
+            .collect();
+
+        let deletions: HashMap<_, _> = msg
             .attributes
             .into_iter()
-            .map(|attribute| Ok((attribute.name, Bytes::from(attribute.value))))
-            .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
+            .filter_map(|attribute| match attribute.change().into() {
+                ChangeType::Deletion => Some((attribute.name, Bytes::from(attribute.value))),
+                _ => None,
+            })
+            .collect();
 
-        Ok(Self { component_id: msg.component_id, attributes, modify_tx: tx.hash })
+        Ok(Self {
+            component_id: msg.component_id,
+            updated_attributes: updates,
+            deleted_attributes: deletions,
+            modify_tx: tx.hash,
+        })
     }
 
     /// Merges this update with another one.
     ///
-    /// The method combines two `ProtocolState` instances under certain
-    /// conditions:
-    /// - The block from which both updates came should be the same. If the updates are from
-    ///   different blocks, the method will return an error.
-    /// - The transactions for each of the updates should be distinct. If they come from the same
-    ///   transaction, the method will return an error.
-    /// - The order of the transaction matters. The transaction from `other` must have occurred
-    ///   later than the self transaction. If the self transaction has a higher index than `other`,
-    ///   the method will return an error.
+    /// The method combines two `ProtocolState` instances if they are for the same
+    /// protocol component.
     ///
     /// The merged update keeps the transaction of `other`.
     ///
@@ -717,7 +751,16 @@ impl ProtocolState {
             )));
         }
         self.modify_tx = other.modify_tx;
-        self.attributes.extend(other.attributes);
+        for attr in other.deleted_attributes.keys() {
+            self.updated_attributes.remove(attr);
+        }
+        for attr in other.updated_attributes.keys() {
+            self.deleted_attributes.remove(attr);
+        }
+        self.updated_attributes
+            .extend(other.updated_attributes);
+        self.deleted_attributes
+            .extend(other.deleted_attributes);
         Ok(())
     }
 }
@@ -842,7 +885,7 @@ impl BlockEntityChanges {
                     let tx_update =
                         ProtocolStatesWithTx::try_from_message(change.entity_changes, tx)?;
                     state_updates.push(tx_update);
-                    for component in change.components {
+                    for component in change.component_changes {
                         let pool = ProtocolComponent::try_from_message(
                             component,
                             chain,
@@ -1008,7 +1051,7 @@ pub mod fixtures {
                         change: ChangeType::Update.into(),
                     },
                 ],
-                components: vec![ProtocolComponent {
+                component_changes: vec![ProtocolComponent {
                     id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
                     tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
                     contracts: vec![
@@ -1016,9 +1059,18 @@ pub mod fixtures {
                         "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
                     ],
                     static_att: vec![
-                        Attribute { name: "key1".to_owned(), value: b"value1".to_vec() },
-                        Attribute { name: "key2".to_owned(), value: b"value2".to_vec() },
+                        Attribute {
+                            name: "key1".to_owned(),
+                            value: b"value1".to_vec(),
+                            change: ChangeType::Creation.into(),
+                        },
+                        Attribute {
+                            name: "key2".to_owned(),
+                            value: b"value2".to_vec(),
+                            change: ChangeType::Creation.into(),
+                        },
                     ],
+                    change: ChangeType::Creation.into(),
                 }],
                 balance_changes: vec![BalanceChange {
                     token: hex::decode(
@@ -1039,8 +1091,16 @@ pub mod fixtures {
         EntityChanges {
             component_id: "State1".to_owned(),
             attributes: vec![
-                Attribute { name: "reserve1".to_owned(), value: res1_value },
-                Attribute { name: "reserve2".to_owned(), value: res2_value },
+                Attribute {
+                    name: "reserve1".to_owned(),
+                    value: res1_value,
+                    change: ChangeType::Update.into(),
+                },
+                Attribute {
+                    name: "reserve2".to_owned(),
+                    value: res2_value,
+                    change: ChangeType::Update.into(),
+                },
             ],
         }
     }
@@ -1069,10 +1129,12 @@ pub mod fixtures {
                                 Attribute {
                                     name: "reserve".to_owned(),
                                     value: 1000_u64.to_be_bytes().to_vec(),
+                                    change: ChangeType::Update.into(),
                                 },
                                 Attribute {
                                     name: "static_attribute".to_owned(),
                                     value: 1_u64.to_be_bytes().to_vec(),
+                                    change: ChangeType::Update.into(),
                                 },
                             ],
                         },
@@ -1082,15 +1144,17 @@ pub mod fixtures {
                                 Attribute {
                                     name: "reserve".to_owned(),
                                     value: 1000_u64.to_be_bytes().to_vec(),
+                                    change: ChangeType::Update.into(),
                                 },
                                 Attribute {
                                     name: "static_attribute".to_owned(),
                                     value: 1_u64.to_be_bytes().to_vec(),
+                                    change: ChangeType::Update.into(),
                                 },
                             ],
                         },
                     ],
-                    components: vec![ProtocolComponent {
+                    component_changes: vec![ProtocolComponent {
                         id: "Pool".to_owned(),
                         tokens: vec![
                             "token0".to_owned().into_bytes(),
@@ -1100,7 +1164,9 @@ pub mod fixtures {
                         static_att: vec![Attribute {
                             name: "key".to_owned(),
                             value: 600_u64.to_be_bytes().to_vec(),
+                            change: ChangeType::Creation.into(),
                         }],
+                        change: ChangeType::Creation.into(),
                     }],
                     balance_changes: vec![],
                 },
@@ -1117,17 +1183,41 @@ pub mod fixtures {
                             Attribute {
                                 name: "reserve".to_owned(),
                                 value: 600_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Update.into(),
                             },
                             Attribute {
                                 name: "new".to_owned(),
                                 value: 0_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Update.into(),
                             },
                         ],
                     }],
-                    components: vec![],
+                    component_changes: vec![],
                     balance_changes: vec![],
                 },
             ],
+        }
+    }
+
+    pub fn pb_protocol_component() -> crate::pb::tycho::evm::v1::ProtocolComponent {
+        use crate::pb::tycho::evm::v1::*;
+        ProtocolComponent {
+            id: "component_id".to_owned(),
+            tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
+            contracts: vec!["contract1".to_string(), "contract2".to_string()],
+            static_att: vec![
+                Attribute {
+                    name: "balance".to_owned(),
+                    value: 100_u64.to_be_bytes().to_vec(),
+                    change: ChangeType::Creation.into(),
+                },
+                Attribute {
+                    name: "factory_address".to_owned(),
+                    value: b"0x0fwe0g240g20".to_vec(),
+                    change: ChangeType::Creation.into(),
+                },
+            ],
+            change: ChangeType::Creation.into(),
         }
     }
 }
@@ -1295,6 +1385,7 @@ mod test {
                 ("key1".to_string(), Bytes::from(b"value1".to_vec())),
                 ("key2".to_string(), Bytes::from(b"value2".to_vec())),
             ]),
+            change: ChangeType::Creation,
         };
         BlockContractChanges {
             extractor: "test".to_string(),
@@ -1379,6 +1470,7 @@ mod test {
             .iter()
             .cloned()
             .collect(),
+            change: ChangeType::Creation,
         };
         BlockAccountChanges::new(
             "test",
@@ -1433,44 +1525,62 @@ mod test {
 
     #[test]
     fn test_merge_protocol_state() {
-        let attributes1: HashMap<String, Bytes> = vec![
+        let up_attributes1: HashMap<String, Bytes> = vec![
             ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
             ("reserve2".to_owned(), Bytes::from(U256::from(500))),
             ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
+            ("to_be_removed".to_owned(), Bytes::from(U256::from(1))),
         ]
         .into_iter()
         .collect();
+        let del_attributes1: HashMap<String, Bytes> =
+            vec![("to_add_back".to_owned(), Bytes::from(U256::from(0)))]
+                .into_iter()
+                .collect();
         let mut state1 = ProtocolState {
             component_id: "State1".to_owned(),
-            attributes: attributes1,
+            updated_attributes: up_attributes1,
+            deleted_attributes: del_attributes1,
             modify_tx: H256::zero(),
         };
 
-        let attributes2: HashMap<String, Bytes> = vec![
+        let up_attributes2: HashMap<String, Bytes> = vec![
             ("reserve1".to_owned(), Bytes::from(U256::from(900))),
             ("reserve2".to_owned(), Bytes::from(U256::from(550))),
             ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
+            ("to_add_back".to_owned(), Bytes::from(U256::from(200))),
         ]
         .into_iter()
         .collect();
+        let del_attributes2: HashMap<String, Bytes> =
+            vec![("to_be_removed".to_owned(), Bytes::from(U256::from(0)))]
+                .into_iter()
+                .collect();
         let state2 = ProtocolState {
             component_id: "State1".to_owned(),
-            attributes: attributes2.clone(),
+            updated_attributes: up_attributes2.clone(),
+            deleted_attributes: del_attributes2,
             modify_tx: HASH_256_1.parse().unwrap(),
         };
 
         let res = state1.merge(state2);
 
         assert!(res.is_ok());
-        let expected_attributes: HashMap<String, Bytes> = vec![
+        let expected_up_attributes: HashMap<String, Bytes> = vec![
             ("reserve1".to_owned(), Bytes::from(U256::from(900))),
             ("reserve2".to_owned(), Bytes::from(U256::from(550))),
             ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
             ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
+            ("to_add_back".to_owned(), Bytes::from(U256::from(200))),
         ]
         .into_iter()
         .collect();
-        assert_eq!(state1.attributes, expected_attributes);
+        assert_eq!(state1.updated_attributes, expected_up_attributes);
+        let expected_del_attributes: HashMap<String, Bytes> =
+            vec![("to_be_removed".to_owned(), Bytes::from(U256::from(0)))]
+                .into_iter()
+                .collect();
+        assert_eq!(state1.deleted_attributes, expected_del_attributes);
     }
 
     fn protocol_state_with_tx() -> ProtocolStatesWithTx {
@@ -1485,7 +1595,8 @@ mod test {
                 "State1".to_owned(),
                 ProtocolState {
                     component_id: "State1".to_owned(),
-                    attributes: attributes.clone(),
+                    updated_attributes: attributes.clone(),
+                    deleted_attributes: HashMap::new(),
                     modify_tx: H256::zero(),
                 },
             ),
@@ -1493,7 +1604,8 @@ mod test {
                 "State2".to_owned(),
                 ProtocolState {
                     component_id: "State2".to_owned(),
-                    attributes,
+                    updated_attributes: attributes,
+                    deleted_attributes: HashMap::new(),
                     modify_tx: H256::zero(),
                 },
             ),
@@ -1518,7 +1630,8 @@ mod test {
             "State1".to_owned(),
             ProtocolState {
                 component_id: "State1".to_owned(),
-                attributes: new_attributes,
+                updated_attributes: new_attributes,
+                deleted_attributes: HashMap::new(),
                 modify_tx: new_tx.hash,
             },
         )]
@@ -1528,7 +1641,7 @@ mod test {
         let tx_update = ProtocolStatesWithTx { protocol_states: new_states, tx: new_tx };
 
         let res = base_state.merge(tx_update);
-        dbg!(&res);
+
         assert!(res.is_ok());
         assert_eq!(base_state.protocol_states.len(), 2);
         let expected_attributes: HashMap<String, Bytes> = vec![
@@ -1543,7 +1656,7 @@ mod test {
                 .protocol_states
                 .get("State1")
                 .unwrap()
-                .attributes,
+                .updated_attributes,
             expected_attributes
         );
     }
@@ -1580,12 +1693,13 @@ mod test {
         let res2_value = 500_u64.to_be_bytes().to_vec();
         ProtocolState {
             component_id: "State1".to_string(),
-            attributes: vec![
+            updated_attributes: vec![
                 ("reserve1".to_owned(), Bytes::from(res1_value)),
                 ("reserve2".to_owned(), Bytes::from(res2_value)),
             ]
             .into_iter()
             .collect(),
+            deleted_attributes: HashMap::new(),
             modify_tx: H256::zero(),
         }
     }
@@ -1600,7 +1714,8 @@ mod test {
                 .collect();
         let state2 = ProtocolState {
             component_id: "State2".to_owned(),
-            attributes: attributes2.clone(),
+            updated_attributes: attributes2.clone(),
+            deleted_attributes: HashMap::new(),
             modify_tx: HASH_256_1.parse().unwrap(),
         };
 
@@ -1646,7 +1761,8 @@ mod test {
             "State1".to_owned(),
             ProtocolState {
                 component_id: "State1".to_owned(),
-                attributes: attr,
+                updated_attributes: attr,
+                deleted_attributes: HashMap::new(),
                 modify_tx: tx.hash,
             },
         )]
@@ -1668,6 +1784,7 @@ mod test {
                 contract_ids: vec![ContractId(
                     "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_owned(),
                 )],
+                change: ChangeType::Creation,
             },
         )]
         .into_iter()
@@ -1740,7 +1857,8 @@ mod test {
                 "State1".to_owned(),
                 ProtocolState {
                     component_id: "State1".to_owned(),
-                    attributes: attr1,
+                    updated_attributes: attr1,
+                    deleted_attributes: HashMap::new(),
                     modify_tx: tx.hash,
                 },
             ),
@@ -1748,7 +1866,8 @@ mod test {
                 "State2".to_owned(),
                 ProtocolState {
                     component_id: "State2".to_owned(),
-                    attributes: attr2,
+                    updated_attributes: attr2,
+                    deleted_attributes: HashMap::new(),
                     modify_tx: H256::zero(),
                 },
             ),
@@ -1771,6 +1890,7 @@ mod test {
                 contract_ids: vec![ContractId(
                     "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_owned(),
                 )],
+                change: ChangeType::Creation,
             },
         )]
         .into_iter()
@@ -1824,31 +1944,16 @@ mod test {
 
     #[rstest]
     fn test_try_from_message_protocol_component() {
-        let balance_key = "balance";
-        let factory_address_key = "factory_address";
-        let balance_value = b"50000";
-        let factory_address = b"0x0fwe0g240g20";
+        let msg = fixtures::pb_protocol_component();
 
-        // Sample data for testing
-        let static_att = vec![
-            substreams::Attribute { name: balance_key.to_owned(), value: balance_value.to_vec() },
-            substreams::Attribute {
-                name: factory_address_key.to_owned(),
-                value: factory_address.to_vec(),
-            },
-        ];
-        let msg = substreams::ProtocolComponent {
-            id: "component_id".to_owned(),
-            tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
-            contracts: vec!["contract1".to_string(), "contract2".to_string()],
-            static_att,
-        };
         let expected_chain = Chain::Ethereum;
         let expected_protocol_system = ProtocolSystem::Ambient;
-        let mut expected_attribute_map = HashMap::new();
-        expected_attribute_map.insert(balance_key.to_string(), Bytes::from(balance_value.to_vec()));
-        expected_attribute_map
-            .insert(factory_address_key.to_string(), Bytes::from(factory_address.to_vec()));
+        let expected_attribute_map: HashMap<String, Bytes> = vec![
+            ("balance".to_string(), Bytes::from(100_u64.to_be_bytes().to_vec())),
+            ("factory_address".to_string(), Bytes::from(b"0x0fwe0g240g20".to_vec())),
+        ]
+        .into_iter()
+        .collect();
         let protocol_type_id = String::from("id-1");
 
         // Call the try_from_message method

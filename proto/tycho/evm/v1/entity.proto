@@ -12,7 +12,7 @@ message EntityChanges {
 message TransactionEntityChanges {
   Transaction tx = 1;
   repeated EntityChanges entity_changes = 2;
-  repeated ProtocolComponent components = 3;
+  repeated ProtocolComponent component_changes = 3;
   repeated BalanceChange balance_changes = 4;
 }
 
