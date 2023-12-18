@@ -4,7 +4,7 @@ package sf.substreams.internal.v2;
 
 import "google/protobuf/any.proto";
 
-option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/intern/v2;pbssinternal";
+option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/internal/v2;pbssinternal";
 
 message StoreDeltas {
   repeated StoreDelta store_deltas = 1;

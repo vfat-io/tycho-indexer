@@ -2,10 +2,9 @@ syntax = "proto3";
 
 package sf.substreams.internal.v2;
 
-import "google/protobuf/any.proto";
 import "sf/substreams/v1/modules.proto";
 
-option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/intern/v2;pbssinternal";
+option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/internal/v2;pbssinternal";
 
 service Substreams {
   rpc ProcessRange(ProcessRangeRequest) returns (stream ProcessRangeResponse);
