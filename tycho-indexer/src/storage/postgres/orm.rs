@@ -312,6 +312,15 @@ impl ProtocolState {
             .get_results::<Self>(conn)
             .await
     }
+
+    pub async fn by_chain(chain_id: i64, conn: &mut AsyncPgConnection) -> QueryResult<Vec<Self>> {
+        protocol_state::table
+            .inner_join(protocol_component::table)
+            .filter(protocol_component::chain_id.eq(chain_id))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await
+    }
 }
 
 #[derive(Insertable)]
