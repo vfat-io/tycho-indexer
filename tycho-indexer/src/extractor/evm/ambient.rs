@@ -62,7 +62,7 @@ pub trait AmbientGateway: Send + Sync {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
     async fn upsert_contract(
         &self,
-        changes: &evm::BlockStateChanges,
+        changes: &evm::BlockContractChanges,
         new_cursor: &str,
     ) -> Result<(), StorageError>;
 
@@ -100,7 +100,7 @@ impl AmbientPgGateway {
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn forward(
         &self,
-        changes: &evm::BlockStateChanges,
+        changes: &evm::BlockContractChanges,
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
@@ -197,7 +197,7 @@ impl AmbientGateway for AmbientPgGateway {
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn upsert_contract(
         &self,
-        changes: &evm::BlockStateChanges,
+        changes: &evm::BlockContractChanges,
         new_cursor: &str,
     ) -> Result<(), StorageError> {
         let mut conn = self.pool.get().await.unwrap();
@@ -291,7 +291,7 @@ where
 
         // TODO: figure out how/where to get this ID from (in ENG-2049)
         let protocol_type_id = String::from("id-1");
-        let msg = match evm::BlockStateChanges::try_from_message(
+        let msg = match evm::BlockContractChanges::try_from_message(
             raw_msg,
             &self.name,
             self.chain,
@@ -560,8 +560,8 @@ mod gateway_test {
         }
     }
 
-    fn ambient_creation_and_update() -> evm::BlockStateChanges {
-        evm::BlockStateChanges {
+    fn ambient_creation_and_update() -> evm::BlockContractChanges {
+        evm::BlockContractChanges {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
             block: evm::Block::default(),
@@ -590,7 +590,7 @@ mod gateway_test {
         }
     }
 
-    fn ambient_update02() -> evm::BlockStateChanges {
+    fn ambient_update02() -> evm::BlockContractChanges {
         let block = evm::Block {
             number: 1,
             chain: Chain::Ethereum,
@@ -598,7 +598,7 @@ mod gateway_test {
             parent_hash: H256::zero(),
             ts: "2020-01-01T01:00:00".parse().unwrap(),
         };
-        evm::BlockStateChanges {
+        evm::BlockContractChanges {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
             block,

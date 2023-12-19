@@ -25,28 +25,12 @@ pub struct Transaction {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ContractSlot {
+pub struct Attribute {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
     #[prost(bytes="vec", tag="2")]
-    pub slot: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes="vec", tag="3")]
     pub value: ::prost::alloc::vec::Vec<u8>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ContractChange {
-    #[prost(bytes="vec", tag="1")]
-    pub address: ::prost::alloc::vec::Vec<u8>,
-    /// empty bytes indicates no change
-    #[prost(bytes="vec", tag="2")]
-    pub balance: ::prost::alloc::vec::Vec<u8>,
-    /// empty bytes indicates no change
-    #[prost(bytes="vec", tag="3")]
-    pub code: ::prost::alloc::vec::Vec<u8>,
-    /// empty sequence indicates no change
-    #[prost(message, repeated, tag="4")]
-    pub slots: ::prost::alloc::vec::Vec<ContractSlot>,
-    /// Whether this is an update, creation or deletion
-    #[prost(enumeration="ChangeType", tag="5")]
+    #[prost(enumeration="ChangeType", tag="3")]
     pub change: i32,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -60,6 +44,8 @@ pub struct ProtocolComponent {
     pub contracts: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(message, repeated, tag="4")]
     pub static_att: ::prost::alloc::vec::Vec<Attribute>,
+    #[prost(enumeration="ChangeType", tag="5")]
+    pub change: i32,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -70,60 +56,6 @@ pub struct BalanceChange {
     pub balance: ::prost::alloc::vec::Vec<u8>,
     #[prost(bytes="vec", tag="3")]
     pub component_id: ::prost::alloc::vec::Vec<u8>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct TransactionChanges {
-    #[prost(message, optional, tag="1")]
-    pub tx: ::core::option::Option<Transaction>,
-    #[prost(message, repeated, tag="2")]
-    pub contract_changes: ::prost::alloc::vec::Vec<ContractChange>,
-    #[prost(message, repeated, tag="3")]
-    pub components: ::prost::alloc::vec::Vec<ProtocolComponent>,
-    #[prost(message, repeated, tag="4")]
-    pub tvl: ::prost::alloc::vec::Vec<BalanceChange>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct BlockContractChanges {
-    #[prost(message, optional, tag="1")]
-    pub block: ::core::option::Option<Block>,
-    #[prost(message, repeated, tag="2")]
-    pub changes: ::prost::alloc::vec::Vec<TransactionChanges>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct Attribute {
-    #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(bytes="vec", tag="2")]
-    pub value: ::prost::alloc::vec::Vec<u8>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StateChanges {
-    #[prost(string, tag="1")]
-    pub component_id: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="2")]
-    pub attributes: ::prost::alloc::vec::Vec<Attribute>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct TransactionStateChanges {
-    #[prost(message, optional, tag="1")]
-    pub tx: ::core::option::Option<Transaction>,
-    #[prost(message, repeated, tag="2")]
-    pub state_changes: ::prost::alloc::vec::Vec<StateChanges>,
-    #[prost(message, repeated, tag="3")]
-    pub components: ::prost::alloc::vec::Vec<ProtocolComponent>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct BlockEntityChanges {
-    #[prost(message, optional, tag="1")]
-    pub block: ::core::option::Option<Block>,
-    #[prost(message, repeated, tag="2")]
-    pub changes: ::prost::alloc::vec::Vec<TransactionStateChanges>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -156,5 +88,79 @@ impl ChangeType {
             _ => None,
         }
     }
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct EntityChanges {
+    #[prost(string, tag="1")]
+    pub component_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
+    pub attributes: ::prost::alloc::vec::Vec<Attribute>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TransactionEntityChanges {
+    #[prost(message, optional, tag="1")]
+    pub tx: ::core::option::Option<Transaction>,
+    #[prost(message, repeated, tag="2")]
+    pub entity_changes: ::prost::alloc::vec::Vec<EntityChanges>,
+    #[prost(message, repeated, tag="3")]
+    pub component_changes: ::prost::alloc::vec::Vec<ProtocolComponent>,
+    #[prost(message, repeated, tag="4")]
+    pub balance_changes: ::prost::alloc::vec::Vec<BalanceChange>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BlockEntityChanges {
+    #[prost(message, optional, tag="1")]
+    pub block: ::core::option::Option<Block>,
+    #[prost(message, repeated, tag="2")]
+    pub changes: ::prost::alloc::vec::Vec<TransactionEntityChanges>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ContractSlot {
+    #[prost(bytes="vec", tag="2")]
+    pub slot: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", tag="3")]
+    pub value: ::prost::alloc::vec::Vec<u8>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ContractChange {
+    #[prost(bytes="vec", tag="1")]
+    pub address: ::prost::alloc::vec::Vec<u8>,
+    /// empty bytes indicates no change
+    #[prost(bytes="vec", tag="2")]
+    pub balance: ::prost::alloc::vec::Vec<u8>,
+    /// empty bytes indicates no change
+    #[prost(bytes="vec", tag="3")]
+    pub code: ::prost::alloc::vec::Vec<u8>,
+    /// empty sequence indicates no change
+    #[prost(message, repeated, tag="4")]
+    pub slots: ::prost::alloc::vec::Vec<ContractSlot>,
+    /// Whether this is an update, creation or deletion
+    #[prost(enumeration="ChangeType", tag="5")]
+    pub change: i32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TransactionContractChanges {
+    #[prost(message, optional, tag="1")]
+    pub tx: ::core::option::Option<Transaction>,
+    #[prost(message, repeated, tag="2")]
+    pub contract_changes: ::prost::alloc::vec::Vec<ContractChange>,
+    #[prost(message, repeated, tag="3")]
+    pub component_changes: ::prost::alloc::vec::Vec<ProtocolComponent>,
+    #[prost(message, repeated, tag="4")]
+    pub balance_changes: ::prost::alloc::vec::Vec<BalanceChange>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BlockContractChanges {
+    #[prost(message, optional, tag="1")]
+    pub block: ::core::option::Option<Block>,
+    #[prost(message, repeated, tag="2")]
+    pub changes: ::prost::alloc::vec::Vec<TransactionContractChanges>,
 }
 // @@protoc_insertion_point(module)
