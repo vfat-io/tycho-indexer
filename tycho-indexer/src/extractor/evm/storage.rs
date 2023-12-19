@@ -320,13 +320,13 @@ pub mod pg {
                 .updated_attributes
                 .iter()
                 .map(|(k, v)| {
-                    let s = hex::encode(&v);
+                    let s = hex::encode(v);
                     (k.clone(), serde_json::Value::String(s))
                 })
                 .collect();
 
             // Convert HashMap<String, serde_json::Value> to serde_json::Value struct
-            match serde_json::to_value(&serialized_map) {
+            match serde_json::to_value(serialized_map) {
                 Ok(value) => Some(value),
                 Err(_) => None,
             }
