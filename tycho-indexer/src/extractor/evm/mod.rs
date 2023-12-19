@@ -686,6 +686,15 @@ pub struct ProtocolState {
 // TODO: remove dead code check skip once extractor is implemented
 #[allow(dead_code)]
 impl ProtocolState {
+    pub fn new(component_id: String, attributes: HashMap<String, Bytes>, modify_tx: H256) -> Self {
+        Self {
+            component_id,
+            updated_attributes: attributes,
+            deleted_attributes: HashMap::new(),
+            modify_tx,
+        }
+    }
+
     /// Parses protocol state from tychos protobuf EntityChanges message
     pub fn try_from_message(
         msg: substreams::EntityChanges,
