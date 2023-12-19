@@ -287,6 +287,33 @@ pub struct ProtocolState {
     pub modified_ts: NaiveDateTime,
 }
 
+impl ProtocolState {
+    pub async fn by_id(
+        component_id: &ContractId,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
+        protocol_state::table
+            .inner_join(protocol_component::table)
+            .filter(protocol_component::external_id.eq(&component_id.address.to_string()))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await
+    }
+
+    pub async fn by_protocol_system(
+        protocol_system: &ProtocolSystem,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
+        protocol_state::table
+            .inner_join(protocol_component::table)
+            .inner_join(protocol_system::table)
+            .filter(protocol_system::name.eq(&protocol_system.name))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await
+    }
+}
+
 #[derive(Insertable)]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
