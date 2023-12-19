@@ -301,13 +301,16 @@ impl ProtocolState {
     }
 
     pub async fn by_protocol_system(
-        protocol_system: &ProtocolSystem,
+        system: &ProtocolSystem,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<Self>> {
         protocol_state::table
             .inner_join(protocol_component::table)
-            .inner_join(protocol_system::table)
-            .filter(protocol_system::name.eq(&protocol_system.name))
+            .inner_join(
+                protocol_system::table
+                    .on(protocol_component::protocol_system_id.eq(protocol_system::id)),
+            )
+            .filter(protocol_system::name.eq(&system.name))
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
