@@ -1,11 +1,13 @@
-mod pb;
+use std::collections::{hash_map::Entry, HashMap};
 
 use anyhow::{anyhow, bail};
 use ethabi::{decode, ParamType};
 use hex_literal::hex;
-use pb::tycho::evm::v1::{self as tycho, ChangeType};
-use std::collections::{hash_map::Entry, HashMap};
 use substreams_ethereum::pb::eth::{self};
+
+use pb::tycho::evm::v1::{self as tycho, ChangeType};
+
+mod pb;
 
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 const INIT_POOL_CODE: u8 = 71;
@@ -48,6 +50,7 @@ impl From<InterimContractChange> for tycho::ContractChange {
         }
     }
 }
+
 /// Extracts all contract changes relevant to vm simulations
 ///
 /// This implementation has currently two major limitations:
@@ -73,7 +76,7 @@ fn map_changes(
 ) -> Result<tycho::BlockContractChanges, substreams::errors::Error> {
     let mut block_changes = tycho::BlockContractChanges { block: None, changes: Vec::new() };
 
-    let mut tx_change = tycho::TransactionChanges::default();
+    let mut tx_change = tycho::TransactionContractChanges::default();
 
     let mut changed_contracts: HashMap<Vec<u8>, InterimContractChange> = HashMap::new();
 
@@ -176,6 +179,7 @@ fn map_changes(
                             let static_attribute = tycho::Attribute {
                                 name: String::from("pool_index"),
                                 value: pool_index.to_be_bytes().to_vec(),
+                                change: ChangeType::Creation.into(),
                             };
 
                             let mut tokens: Vec<Vec<u8>> = vec![base.clone(), quote.clone()];
@@ -191,8 +195,11 @@ fn map_changes(
                                 tokens,
                                 contracts: vec![hex::encode(AMBIENT_CONTRACT)],
                                 static_att: vec![static_attribute],
+                                change: ChangeType::Creation.into(),
                             };
-                            tx_change.components.push(new_component);
+                            tx_change
+                                .component_changes
+                                .push(new_component);
                         } else {
                             bail!("Failed to decode ABI internal call.".to_string());
                         }
