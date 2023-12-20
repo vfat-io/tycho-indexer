@@ -49,7 +49,7 @@ message Attribute {
 // A struct describing a part of the protocol.
 message ProtocolComponent {
   // A unique identifier for the component within the protocol.
-  // Can be a it's stringified address or a string describing the trading pair.
+  // Can be a stringified address or a string describing the trading pair.
   string id = 1;
   // Addresses of the ERC20 tokens used by the component.
   repeated bytes tokens = 2;
@@ -65,10 +65,10 @@ message ProtocolComponent {
 // A struct for following the changes of Total Value Locked (TVL) of a protocol component.
 // Note that if the ProtocolComponent contains multiple contracts, the TVL is tracked for the component as a whole.
 message BalanceChange {
-  // The address of the ERC20 token the balance changed of.
+  // The address of the ERC20 token whose balance changed.
   bytes token = 1;
   // The new balance of the token.
   bytes balance = 2;
-  // The id of the component the TVL is tracked for.
+  // The id of the component whose TVL is tracked.
   bytes component_id = 3;
 }
