@@ -1,10 +1,13 @@
 #![allow(unused_variables)]
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use diesel_async::AsyncPgConnection;
+use ethers::types::H256;
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{ContractId, ProtocolState},
     models::{Chain, ProtocolSystem},
     storage::{
         postgres::{orm, PostgresGateway},
@@ -12,6 +15,18 @@ use crate::{
         StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
     },
 };
+
+fn i64_to_txhash(value: i64) -> TxHash {
+    let mut array = [0; 32];
+    for (place, byte) in array
+        .iter_mut()
+        .zip(value.to_be_bytes().iter())
+    {
+        *place = *byte;
+    }
+
+    TxHash::from(array)
+}
 
 #[async_trait]
 impl<B, TX, A, D, T> ProtocolGateway for PostgresGateway<B, TX, A, D, T>
@@ -41,18 +56,80 @@ where
     //     todo!()
     // }
 
+    // Gets all protocol states from the db. A separate protocol state is returned for every state update.
     async fn get_states(
         &self,
         chain: &Chain,
         at: Option<Version>,
         system: Option<ProtocolSystem>,
-        id: Option<&[&str]>,
-    ) -> Result<Vec<ProtocolState>, StorageError> {
-        let block_chain_id = self.get_chain_id(chain);
-        todo!()
+        ids: Option<&[&str]>,
+        conn: &mut Self::DB,
+    ) -> Result<Vec<Self::ProtocolState>, StorageError> {
+        let chain_db_id = self.get_chain_id(chain);
+
+        async fn handle_states(
+            result: Result<Vec<orm::ProtocolState>, diesel::result::Error>,
+            context: &str,
+        ) -> Result<Vec<ProtocolState>, StorageError> {
+            match result {
+                Ok(states) => {
+                    let mut protocol_states = Vec::new();
+                    for state in states {
+                        let protocol_state = ProtocolState {
+                            component_id: state.protocol_component_id.to_string(),
+                            updated_attributes: match state.state {
+                                Some(val) => serde_json::from_value(val).map_err(|err| {
+                                    StorageError::DecodeError(format!(
+                                        "Failed to deserialize state attribute: {}",
+                                        err
+                                    ))
+                                })?,
+                                None => HashMap::new(),
+                            },
+                            deleted_attributes: HashMap::new(),
+                            modify_tx: i64_to_txhash(state.modify_tx).into(),
+                        };
+                        protocol_states.push(protocol_state);
+                    }
+                    Ok(protocol_states)
+                }
+                Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
+            }
+        }
+
+        let res = match (ids, system) {
+            (Some(ids), _) => {
+                handle_states(
+                    orm::ProtocolState::by_id(ids, chain_db_id, conn).await,
+                    ids.join(",").as_str(),
+                )
+                .await
+            }
+            (_, Some(system)) => {
+                handle_states(
+                    orm::ProtocolState::by_protocol_system(&system, chain_db_id, conn).await,
+                    system.to_string().as_str(),
+                )
+                .await
+            }
+            _ => {
+                handle_states(
+                    orm::ProtocolState::by_chain(chain_db_id, conn).await,
+                    chain.to_string().as_str(),
+                )
+                .await
+            }
+        };
+
+        res
     }
 
-    async fn update_state(&self, chain: Chain, new: &[(TxHash, ProtocolState)], db: &mut Self::DB) {
+    async fn update_state(
+        &self,
+        chain: Chain,
+        new: &[(TxHash, ProtocolState)],
+        conn: &mut Self::DB,
+    ) {
         todo!()
     }
 
@@ -60,11 +137,17 @@ where
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError> {
         todo!()
     }
 
-    async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError> {
+    async fn add_tokens(
+        &self,
+        chain: Chain,
+        token: &[&Self::Token],
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
         todo!()
     }
 

@@ -289,12 +289,12 @@ pub struct ProtocolState {
 
 impl ProtocolState {
     pub async fn by_id(
-        component_id: &ContractId,
+        component_ids: &[&str],
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<Self>> {
         protocol_state::table
             .inner_join(protocol_component::table)
-            .filter(protocol_component::external_id.eq(&component_id.address.to_string()))
+            .filter(protocol_component::external_id.eq_any(component_ids))
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await

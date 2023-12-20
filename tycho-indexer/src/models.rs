@@ -16,7 +16,7 @@ pub enum Chain {
 }
 
 /// Represents the ecosystem to which a `ProtocolComponent` belongs.
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize, Copy)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize, Copy, Display)]
 pub enum ProtocolSystem {
     #[default]
     Ambient,

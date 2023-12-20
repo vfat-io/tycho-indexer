@@ -543,9 +543,15 @@ pub trait ProtocolGateway {
         at: Option<Version>,
         system: Option<ProtocolSystem>,
         id: Option<&[&str]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolState>, StorageError>;
 
-    async fn update_state(&self, chain: Chain, new: &[(TxHash, ProtocolState)], db: &mut Self::DB);
+    async fn update_state(
+        &self,
+        chain: Chain,
+        new: &[(TxHash, ProtocolState)],
+        conn: &mut Self::DB,
+    );
 
     /// Retrieves a tokens from storage
     ///
@@ -559,6 +565,7 @@ pub trait ProtocolGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError>;
 
     /// Saves multiple tokens to storage.
@@ -573,7 +580,12 @@ pub trait ProtocolGateway {
     /// # Return
     /// Ok if all tokens could be inserted, Err if at least one token failed to
     /// insert.
-    async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError>;
+    async fn add_tokens(
+        &self,
+        chain: Chain,
+        token: &[&Self::Token],
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 
     /// Retrieve protocol component state changes
     ///
