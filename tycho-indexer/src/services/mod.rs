@@ -2,33 +2,36 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use crate::{
+    extractor::{evm, runner::ExtractorHandle, ExtractionError},
+    storage::postgres::PostgresGateway,
+};
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use tokio::task::JoinHandle;
 
-use crate::{
-    extractor::{evm, runner::ExtractorHandle, ExtractionError},
-    models::NormalisedMessage,
-    storage::postgres::PostgresGateway,
-};
-
 mod rpc;
 mod ws;
 
-pub type EvmPostgresGateway =
-    PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>;
+pub type EvmPostgresGateway = PostgresGateway<
+    evm::Block,
+    evm::Transaction,
+    evm::Account,
+    evm::AccountUpdate,
+    evm::ERC20Token,
+>;
 
-pub struct ServicesBuilder<M> {
+pub struct ServicesBuilder {
     prefix: String,
     port: u16,
     bind: String,
-    extractor_handles: ws::MessageSenderMap<M>,
+    extractor_handles: ws::MessageSenderMap,
     db_gateway: Arc<EvmPostgresGateway>,
     db_connection_pool: Pool<AsyncPgConnection>,
 }
 
-impl<M: NormalisedMessage> ServicesBuilder<M> {
+impl ServicesBuilder {
     pub fn new(
         db_gateway: Arc<EvmPostgresGateway>,
         db_connection_pool: Pool<AsyncPgConnection>,
@@ -43,7 +46,7 @@ impl<M: NormalisedMessage> ServicesBuilder<M> {
         }
     }
 
-    pub fn register_extractor(mut self, handle: ExtractorHandle<M>) -> Self {
+    pub fn register_extractor(mut self, handle: ExtractorHandle) -> Self {
         let id = handle.get_id();
         self.extractor_handles
             .insert(id, Arc::new(handle));
@@ -68,7 +71,7 @@ impl<M: NormalisedMessage> ServicesBuilder<M> {
     pub fn run(
         self,
     ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
-        let ws_data = web::Data::new(ws::WsData::<M>::new(self.extractor_handles));
+        let ws_data = web::Data::new(ws::WsData::new(self.extractor_handles));
         let rpc_data =
             web::Data::new(rpc::RpcHandler::new(self.db_gateway, self.db_connection_pool));
         let server = HttpServer::new(move || {
@@ -81,7 +84,7 @@ impl<M: NormalisedMessage> ServicesBuilder<M> {
                 .app_data(ws_data.clone())
                 .service(
                     web::resource(format!("/{}/ws", self.prefix))
-                        .route(web::get().to(ws::WsActor::<M>::ws_index)),
+                        .route(web::get().to(ws::WsActor::ws_index)),
                 )
                 .wrap(RequestTracing::new())
         })

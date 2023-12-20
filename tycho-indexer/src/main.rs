@@ -1,5 +1,18 @@
 #![doc = include_str!("../../Readme.md")]
+
+#[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions;
+
+use std::sync::Arc;
+
+use actix_web::dev::ServerHandle;
+use clap::Parser;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
+use futures03::future::select_all;
+use tokio::task::JoinHandle;
+use tracing::info;
+
 use extractor::{
     evm::{
         ambient::{AmbientContractExtractor, AmbientPgGateway},
@@ -7,14 +20,13 @@ use extractor::{
     },
     runner::{ExtractorHandle, ExtractorRunnerBuilder},
 };
-use futures03::future::select_all;
 use models::Chain;
 
-use actix_web::dev::ServerHandle;
-use clap::Parser;
-use std::sync::Arc;
-use tokio::task::JoinHandle;
-use tracing::info;
+use crate::{
+    extractor::{evm, ExtractionError},
+    services::ServicesBuilder,
+    storage::postgres::{self, PostgresGateway},
+};
 
 mod extractor;
 mod hex_bytes;
@@ -24,17 +36,6 @@ mod serde_helpers;
 mod services;
 mod storage;
 mod substreams;
-
-use crate::{
-    extractor::{evm, evm::BlockAccountChanges, ExtractionError},
-    models::NormalisedMessage,
-    services::ServicesBuilder,
-    storage::postgres::{self, PostgresGateway},
-};
-
-#[cfg(test)]
-#[macro_use]
-extern crate pretty_assertions;
 
 /// Tycho Indexer using Substreams
 ///
@@ -108,11 +109,14 @@ async fn main() -> Result<(), ExtractionError> {
 
     let pool = postgres::connect(&args.database_url).await?;
     postgres::ensure_chains(&[Chain::Ethereum], pool.clone()).await;
-    let evm_gw =
-        PostgresGateway::<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>::new(
-            pool.clone(),
-        )
-        .await?;
+    let evm_gw = PostgresGateway::<
+        evm::Block,
+        evm::Transaction,
+        evm::Account,
+        evm::AccountUpdate,
+        evm::ERC20Token,
+    >::new(pool.clone())
+    .await?;
 
     info!("Starting Tycho");
     let mut extractor_handles = Vec::new();
@@ -143,10 +147,7 @@ async fn start_ambient_extractor(
     args: &CliArgs,
     pool: Pool<AsyncPgConnection>,
     evm_gw: EVMStateGateway<AsyncPgConnection>,
-) -> Result<
-    (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle<BlockAccountChanges>),
-    ExtractionError,
-> {
+) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
     let ambient_name = "vm:ambient";
     let ambient_gw = AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, evm_gw);
     let extractor =
@@ -165,9 +166,9 @@ async fn start_ambient_extractor(
     builder.run().await
 }
 
-async fn shutdown_handler<M: NormalisedMessage>(
+async fn shutdown_handler(
     server_handle: ServerHandle,
-    extractors: Vec<ExtractorHandle<M>>,
+    extractors: Vec<ExtractorHandle>,
 ) -> Result<(), ExtractionError> {
     // listen for ctrl-c
     tokio::signal::ctrl_c().await.unwrap();
@@ -182,8 +183,9 @@ async fn shutdown_handler<M: NormalisedMessage>(
 mod cli_tests {
     use std::env;
 
-    use super::CliArgs;
     use clap::Parser;
+
+    use super::CliArgs;
 
     #[tokio::test]
     async fn test_arg_parsing_long() {

@@ -14,7 +14,8 @@ use crate::{
     storage::{
         AccountToContractStore, Address, Balance, BlockIdentifier, BlockOrTimestamp, ChangeType,
         Code, ContractDelta, ContractId, ContractStateGateway, ContractStore, StorableBlock,
-        StorableContract, StorableTransaction, StoreKey, StoreVal, TxHash, Version, VersionKind,
+        StorableContract, StorableToken, StorableTransaction, StoreKey, StoreVal, TxHash, Version,
+        VersionKind,
     },
 };
 
@@ -43,16 +44,17 @@ struct CreatedOrDeleted<T> {
 }
 
 // Private methods
-impl<B, TX, A, D> PostgresGateway<B, TX, A, D>
+impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
+    T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     /// Retrieves the changes in balance for all accounts of a chain.
     ///
-    /// See [ContractStateGateway::get_account_delta] for more information on
+    /// See [ContractStateGateway::get_accounts_delta] for more information on
     /// the mechanics of this method regarding version timestamps.
     ///
     /// # Returns
@@ -126,7 +128,7 @@ where
 
     /// Retrieves the changes in code for all accounts of a chain.
     ///
-    /// See [ContractStateGateway::get_account_delta] for more information on
+    /// See [ContractStateGateway::get_accounts_delta] for more information on
     /// the mechanics of this method regarding version timestamps.
     ///
     /// # Returns
@@ -200,7 +202,7 @@ where
 
     /// Retrieves the changes in slots for all accounts of a chain.
     ///
-    /// See [ContractStateGateway::get_account_delta] for more information on
+    /// See [ContractStateGateway::get_accounts_delta] for more information on
     /// the mechanics of this method regarding version timestamps.
     ///
     /// # Returns
@@ -392,7 +394,7 @@ where
             return Err(StorageError::Unexpected(format!(
                 "Found account that was deleted and created within range {} - {}!",
                 start_version_ts, target_version_ts
-            )))
+            )));
         }
 
         // The code below assumes that no account is deleted or created more
@@ -645,12 +647,13 @@ where
 }
 
 #[async_trait]
-impl<B, TX, A, D> ContractStateGateway for PostgresGateway<B, TX, A, D>
+impl<B, TX, A, D, T> ContractStateGateway for PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
+    T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     type DB = AsyncPgConnection;
     type ContractState = A;
@@ -744,7 +747,7 @@ where
                 .get_contract_slots(&id.chain, Some(&[account.address().clone()]), version, db)
                 .await?
                 .remove(&id.address)
-                .unwrap_or_else(HashMap::new);
+                .unwrap_or_default();
             account.set_store(&slots)?;
         }
 
@@ -854,7 +857,7 @@ where
                 accounts.len(),
                 balances.len(),
                 codes.len(),
-            )))
+            )));
         }
 
         accounts
@@ -866,7 +869,7 @@ where
                         "Identity mismatch - while retrieving entries for account id: {} \
                             encountered balance for id {} and code for id {}",
                         &account.id, &balance.account_id, &code.account_id
-                    )))
+                    )));
                 }
 
                 // Note: it is safe to call unwrap here, as above we always
@@ -994,7 +997,7 @@ where
                         "Updating contracts of different chains with a single query  \
                     is not supported. Expected: {}, got: {}!",
                         chain, id.chain
-                    )))
+                    )));
                 }
                 Ok(id.address)
             })
@@ -1125,10 +1128,10 @@ where
                     "Account {} was already deleted at {:?}!",
                     hex::encode(account.address),
                     account.deleted_at,
-                )))
+                )));
             }
             // Noop if called twice on deleted contract
-            return Ok(())
+            return Ok(());
         };
         diesel::update(schema::account::table.filter(schema::account::id.eq(account.id)))
             .set((schema::account::deletion_tx.eq(tx.id), schema::account::deleted_at.eq(block_ts)))
@@ -1159,7 +1162,7 @@ where
         Ok(())
     }
 
-    async fn get_account_delta(
+    async fn get_accounts_delta(
         &self,
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
@@ -1239,11 +1242,10 @@ where
                     .map(Ok),
             )
             .collect::<Result<HashMap<_, _>, _>>()?;
-
         Ok(deltas.into_values().collect())
     }
 
-    async fn revert_contract_state(
+    async fn revert_state(
         &self,
         to: &BlockIdentifier,
         conn: &mut AsyncPgConnection,
@@ -1336,7 +1338,7 @@ async fn version_to_ts(
 ) -> Result<NaiveDateTime, StorageError> {
     if let Some(Version(version, kind)) = start_version {
         if !matches!(kind, VersionKind::Last) {
-            return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", kind)))
+            return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", kind)));
         }
         coerce_block_or_ts(Some(version), conn).await
     } else {
@@ -1349,7 +1351,7 @@ async fn coerce_block_or_ts(
     conn: &mut AsyncPgConnection,
 ) -> Result<NaiveDateTime, StorageError> {
     if version.is_none() {
-        return Ok(Utc::now().naive_utc())
+        return Ok(Utc::now().naive_utc());
     }
     match version.unwrap() {
         BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(h, conn)
@@ -1377,15 +1379,21 @@ mod test {
     use ethers::types::{H160, H256, U256};
     use rstest::rstest;
 
-    use super::*;
     use crate::{
         extractor::evm::{self, Account},
         hex_bytes::Bytes,
         storage::postgres::db_fixtures,
     };
 
-    type EvmGateway =
-        PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>;
+    use super::*;
+
+    type EvmGateway = PostgresGateway<
+        evm::Block,
+        evm::Transaction,
+        evm::Account,
+        evm::AccountUpdate,
+        evm::ERC20Token,
+    >;
     type MaybeTS = Option<NaiveDateTime>;
 
     async fn setup_db() -> AsyncPgConnection {
@@ -1650,39 +1658,39 @@ mod test {
 
     #[rstest]
     #[case::empty(
-        None,
-        Some(Version::from_ts("2019-01-01T00:00:00".parse().unwrap())),
-        vec![],
+    None,
+    Some(Version::from_ts("2019-01-01T00:00:00".parse().unwrap())),
+    vec ! [],
     )]
     #[case::only_c2_block_1(
-        Some(vec![Bytes::from_str("94a3f312366b8d0a32a00986194053c0ed0cddb1").unwrap()]),
-        Some(Version::from_block_number(Chain::Ethereum, 1)),
-        vec![
-            account_c2(1)
-        ],
+    Some(vec ! [Bytes::from_str("94a3f312366b8d0a32a00986194053c0ed0cddb1").unwrap()]),
+    Some(Version::from_block_number(Chain::Ethereum, 1)),
+    vec ! [
+    account_c2(1)
+    ],
     )]
     #[case::all_ids_block_1(
-        None,
-        Some(Version::from_block_number(Chain::Ethereum, 1)),
-        vec![
-            account_c0(1),
-            account_c2(1)
-        ],
+    None,
+    Some(Version::from_block_number(Chain::Ethereum, 1)),
+    vec ! [
+    account_c0(1),
+    account_c2(1)
+    ],
     )]
     #[case::only_c0_latest(
-        Some(vec![Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap()]),
-        None,
-        vec![
-            account_c0(2)
-        ],
+    Some(vec ! [Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap()]),
+    None,
+    vec ! [
+    account_c0(2)
+    ],
     )]
     #[case::all_ids_latest(
-        None,
-        None,
-        vec![
-            account_c0(2),
-            account_c1(2)
-        ],
+    None,
+    None,
+    vec ! [
+    account_c0(2),
+    account_c1(2)
+    ],
     )]
     #[tokio::test]
     async fn test_get_contracts(
@@ -1889,76 +1897,76 @@ mod test {
 
     #[rstest]
     #[case::latest(
-        None,
-        None,
-        [(
-            Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee")
-                .unwrap(),
-            vec![
-                (bytes32(1u8), Some(bytes32(255u8))),
-                (bytes32(0u8), Some(bytes32(128u8))),
-            ]
-            .into_iter()
-            .collect(),
-        ),
-        (
-            Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f")
-                .unwrap(),
-            vec![
-                (bytes32(1u8), Some(bytes32(3u8))),
-                (bytes32(5u8), Some(bytes32(25u8))),
-                (bytes32(2u8), Some(bytes32(1u8))),
-                (bytes32(6u8), Some(bytes32(30u8))),
-                (bytes32(0u8), Some(bytes32(2u8))),
-            ]
-            .into_iter()
-            .collect(),
-        )]
-        .into_iter()
-        .collect())
+    None,
+    None,
+    [(
+    Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee")
+    .unwrap(),
+    vec ! [
+    (bytes32(1u8), Some(bytes32(255u8))),
+    (bytes32(0u8), Some(bytes32(128u8))),
+    ]
+    .into_iter()
+    .collect(),
+    ),
+    (
+    Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f")
+    .unwrap(),
+    vec ! [
+    (bytes32(1u8), Some(bytes32(3u8))),
+    (bytes32(5u8), Some(bytes32(25u8))),
+    (bytes32(2u8), Some(bytes32(1u8))),
+    (bytes32(6u8), Some(bytes32(30u8))),
+    (bytes32(0u8), Some(bytes32(2u8))),
+    ]
+    .into_iter()
+    .collect(),
+    )]
+    .into_iter()
+    .collect())
     ]
     #[case::latest_only_c0(
-        None,
-        Some(vec![Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee").unwrap()]), 
-        [(
-            Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee")
-                .unwrap(),
-            vec![
-                (bytes32(1u8), Some(bytes32(255u8))),
-                (bytes32(0u8), Some(bytes32(128u8))),
-            ]
-            .into_iter()
-            .collect(),
-        )]
-        .into_iter()
-        .collect())
+    None,
+    Some(vec ! [Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee").unwrap()]),
+    [(
+    Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee")
+    .unwrap(),
+    vec ! [
+    (bytes32(1u8), Some(bytes32(255u8))),
+    (bytes32(0u8), Some(bytes32(128u8))),
+    ]
+    .into_iter()
+    .collect(),
+    )]
+    .into_iter()
+    .collect())
     ]
     #[case::at_block_one(
-        Some(Version(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))), VersionKind::Last)),
-        None,
-        [(
-            Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f")
-                .unwrap(),
-            vec![
-                (bytes32(1u8), Some(bytes32(5u8))),
-                (bytes32(2u8), Some(bytes32(1u8))),
-                (bytes32(0u8), Some(bytes32(1u8))),
-            ],
-        ), (
-            Bytes::from_str("94a3F312366b8D0a32A00986194053C0ed0CdDb1").unwrap(), 
-            vec![
-                (bytes32(1u8), Some(bytes32(2u8))),
-                (bytes32(2u8), Some(bytes32(4u8)))
-            ],
-        )]
-        .into_iter()
-        .map(|(k, v)| (k, v.into_iter().collect::<HashMap<_, _>>()))
-        .collect::<HashMap<_, _>>()
+    Some(Version(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))), VersionKind::Last)),
+    None,
+    [(
+    Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f")
+    .unwrap(),
+    vec ! [
+    (bytes32(1u8), Some(bytes32(5u8))),
+    (bytes32(2u8), Some(bytes32(1u8))),
+    (bytes32(0u8), Some(bytes32(1u8))),
+    ],
+    ), (
+    Bytes::from_str("94a3F312366b8D0a32A00986194053C0ed0CdDb1").unwrap(),
+    vec ! [
+    (bytes32(1u8), Some(bytes32(2u8))),
+    (bytes32(2u8), Some(bytes32(4u8)))
+    ],
+    )]
+    .into_iter()
+    .map(| (k, v) | (k, v.into_iter().collect::< HashMap < _, _ >> ()))
+    .collect::< HashMap < _, _ >> ()
     )]
     #[case::before_block_one(
-        Some(Version(BlockOrTimestamp::Timestamp("2019-01-01T00:00:00".parse().unwrap()), VersionKind::Last)),
-        None,
-        HashMap::new())
+    Some(Version(BlockOrTimestamp::Timestamp("2019-01-01T00:00:00".parse().unwrap()), VersionKind::Last)),
+    None,
+    HashMap::new())
     ]
     #[tokio::test]
     async fn test_get_slots(
@@ -2211,11 +2219,11 @@ mod test {
 
     #[rstest]
     #[case::with_start_version(
-        Some(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))))
+    Some(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))))
     )]
     #[case::no_start_version(None)]
     #[tokio::test]
-    async fn get_account_delta_backward(#[case] start_version: Option<BlockOrTimestamp>) {
+    async fn get_accounts_delta_backward(#[case] start_version: Option<BlockOrTimestamp>) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
@@ -2256,7 +2264,7 @@ mod test {
         ];
 
         let mut changes = gw
-            .get_account_delta(
+            .get_accounts_delta(
                 &Chain::Ethereum,
                 start_version.as_ref(),
                 &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
@@ -2270,7 +2278,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn get_account_delta_forward() {
+    async fn get_accounts_delta_forward() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
@@ -2311,7 +2319,7 @@ mod test {
         ];
 
         let mut changes = gw
-            .get_account_delta(
+            .get_accounts_delta(
                 &Chain::Ethereum,
                 Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1)))),
                 &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
@@ -2328,7 +2336,7 @@ mod test {
     #[case::forward("2020-01-01T00:00:00", "2020-01-01T01:00:00")]
     #[case::backward("2020-01-01T01:00:00", "2020-01-01T00:00:00")]
     #[tokio::test]
-    async fn get_account_delta_fail(#[case] start: &str, #[case] end: &str) {
+    async fn get_accounts_delta_fail(#[case] start: &str, #[case] end: &str) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let c1 = &orm::Account::by_address(
@@ -2349,11 +2357,12 @@ mod test {
         )));
 
         let res = gw
-            .get_account_delta(&Chain::Ethereum, Some(&start_version), &end_version, &mut conn)
+            .get_accounts_delta(&Chain::Ethereum, Some(&start_version), &end_version, &mut conn)
             .await;
 
         assert_eq!(res, exp);
     }
+
     #[tokio::test]
     async fn test_revert() {
         let mut conn = setup_db().await;
@@ -2374,7 +2383,7 @@ mod test {
         .collect();
         let gw = EvmGateway::from_connection(&mut conn).await;
 
-        gw.revert_contract_state(&BlockIdentifier::Hash(block1_hash), &mut conn)
+        gw.revert_state(&BlockIdentifier::Hash(block1_hash), &mut conn)
             .await
             .unwrap();
 

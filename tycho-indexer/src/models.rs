@@ -1,5 +1,6 @@
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+#![allow(dead_code)]
 
+use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 
 #[derive(
@@ -14,31 +15,39 @@ pub enum Chain {
     ZkSync,
 }
 
-#[allow(dead_code)]
+/// Represents the ecosystem to which a `ProtocolComponent` belongs.
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize, Copy)]
 pub enum ProtocolSystem {
+    #[default]
     Ambient,
 }
 
-#[allow(dead_code)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 pub enum ImplementationType {
+    #[default]
     Vm,
     Custom,
 }
 
-#[allow(dead_code)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 pub enum FinancialType {
+    #[default]
     Swap,
     Lend,
     Leverage,
     Psm,
 }
 
-#[allow(dead_code)]
+/// Represents the functionality of a component.
+/// `ProtocolSystems` are composed of various `ProtocolComponents`, and components that behave
+/// similarly are grouped under a specific `ProtocolType` (i.e. Pool, Factory) within a
+/// `ProtocolSystem`.
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ProtocolType {
-    name: String,
-    attribute_schema: serde_json::Value,
-    financial_type: FinancialType,
-    implementation_type: ImplementationType,
+    pub name: String,
+    pub attribute_schema: serde_json::Value,
+    pub financial_type: FinancialType,
+    pub implementation_type: ImplementationType,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -59,7 +68,7 @@ impl std::fmt::Display for ExtractorIdentity {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ExtractionState {
     pub name: String,
     pub chain: Chain,
@@ -83,11 +92,7 @@ impl ExtractionState {
     }
 }
 
-pub trait NormalisedMessage:
-    Serialize + DeserializeOwned + std::fmt::Debug + std::fmt::Display + Send + Sync + Clone + 'static
-{
+#[typetag::serde(tag = "type")]
+pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static {
     fn source(&self) -> ExtractorIdentity;
 }
-
-#[allow(dead_code)]
-pub struct ProtocolComponent {}
