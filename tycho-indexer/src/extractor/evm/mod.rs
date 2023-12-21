@@ -502,7 +502,7 @@ pub struct ProtocolComponent {
     // ids of the tokens tradable
     tokens: Vec<String>,
     // ids of the related contracts
-    contract_ids: Vec<ContractId>,
+    contract_ids: Vec<H160>,
     // stores the static attributes
     static_attributes: HashMap<String, Bytes>,
     // the type of change (creation, deletion etc)
@@ -541,8 +541,9 @@ impl ProtocolComponent {
             .contracts
             .clone()
             .into_iter()
-            .map(ContractId)
-            .collect::<Vec<_>>();
+            .map(|c| pad_and_parse_h160(&c.into()).map_err(ExtractionError::DecodeError))
+            .collect::<Result<Vec<_>, ExtractionError>>()?;
+        print!("{:?}", contract_ids);
 
         let static_attributes = msg
             .static_att
@@ -551,7 +552,7 @@ impl ProtocolComponent {
             .map(|attribute| Ok((attribute.name, Bytes::from(attribute.value))))
             .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
 
-        Ok(Self {
+        let t = Self {
             id,
             protocol_type_id,
             protocol_system,
@@ -560,7 +561,9 @@ impl ProtocolComponent {
             static_attributes,
             chain,
             change: msg.change().into(),
-        })
+        };
+        print!("{:?}", t);
+        Ok(t)
     }
 }
 
@@ -927,6 +930,7 @@ impl BlockEntityChanges {
 pub mod fixtures {
     use ethers::abi::AbiEncode;
     use prost::Message;
+    use std::str::FromStr;
 
     use super::*;
 
@@ -1034,8 +1038,14 @@ pub mod fixtures {
                     id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
                     tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
                     contracts: vec![
-                        "DIANA-THALES".to_string(),
-                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
+                        H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                            .unwrap()
+                            .0
+                            .to_vec(),
+                        H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                            .unwrap()
+                            .0
+                            .to_vec(),
                     ],
                     static_att: vec![
                         Attribute {
@@ -1139,7 +1149,12 @@ pub mod fixtures {
                             "token0".to_owned().into_bytes(),
                             "token1".to_owned().into_bytes(),
                         ],
-                        contracts: vec!["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()],
+                        contracts: vec![H160::from_str(
+                            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                        )
+                        .unwrap()
+                        .0
+                        .to_vec()],
                         static_att: vec![Attribute {
                             name: "key".to_owned(),
                             value: 600_u64.to_be_bytes().to_vec(),
@@ -1183,7 +1198,16 @@ pub mod fixtures {
         ProtocolComponent {
             id: "component_id".to_owned(),
             tokens: vec![b"token1".to_vec(), b"token2".to_vec()],
-            contracts: vec!["contract1".to_string(), "contract2".to_string()],
+            contracts: vec![
+                H160::from_str("0x31fF2589Ee5275a2038beB855F44b9Be993aA804")
+                    .unwrap()
+                    .0
+                    .to_vec(),
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .unwrap()
+                    .0
+                    .to_vec(),
+            ],
             static_att: vec![
                 Attribute {
                     name: "balance".to_owned(),
@@ -1357,8 +1381,8 @@ mod test {
             chain: Chain::Ethereum,
             tokens: vec!["token1".to_string(), "token2".to_string()],
             contract_ids: vec![
-                ContractId("DIANA-THALES".to_string()),
-                ContractId("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
             ],
             static_attributes: HashMap::from([
                 ("key1".to_string(), Bytes::from(b"value1".to_vec())),
@@ -1439,8 +1463,8 @@ mod test {
             chain: Chain::Ethereum,
             tokens: vec!["token1".to_string(), "token2".to_string()],
             contract_ids: vec![
-                ContractId("DIANA-THALES".to_string()),
-                ContractId("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
             ],
             static_attributes: [
                 ("key1".to_string(), Bytes::from(b"value1".to_vec())),
@@ -1760,9 +1784,9 @@ mod test {
                 chain: Chain::Ethereum,
                 tokens: vec!["token0".to_owned(), "token1".to_owned()],
                 static_attributes: static_attr,
-                contract_ids: vec![ContractId(
-                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_owned(),
-                )],
+                contract_ids: vec![
+                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
+                ],
                 change: ChangeType::Creation,
             },
         )]
@@ -1866,9 +1890,9 @@ mod test {
                 chain: Chain::Ethereum,
                 tokens: vec!["token0".to_owned(), "token1".to_owned()],
                 static_attributes: static_attr,
-                contract_ids: vec![ContractId(
-                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_owned(),
-                )],
+                contract_ids: vec![
+                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
+                ],
                 change: ChangeType::Creation,
             },
         )]
@@ -1957,7 +1981,10 @@ mod test {
         assert_eq!(protocol_component.tokens, vec!["token1".to_string(), "token2".to_string()]);
         assert_eq!(
             protocol_component.contract_ids,
-            vec![ContractId("contract1".to_string()), ContractId("contract2".to_string())]
+            vec![
+                H160::from_str("0x31fF2589Ee5275a2038beB855F44b9Be993aA804").unwrap(),
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
+            ]
         );
         assert_eq!(protocol_component.static_attributes, expected_attribute_map);
     }

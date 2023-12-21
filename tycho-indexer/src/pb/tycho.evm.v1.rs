@@ -40,8 +40,8 @@ pub struct ProtocolComponent {
     pub id: ::prost::alloc::string::String,
     #[prost(bytes="vec", repeated, tag="2")]
     pub tokens: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
-    #[prost(string, repeated, tag="3")]
-    pub contracts: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(bytes="vec", repeated, tag="3")]
+    pub contracts: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
     #[prost(message, repeated, tag="4")]
     pub static_att: ::prost::alloc::vec::Vec<Attribute>,
     #[prost(enumeration="ChangeType", tag="5")]

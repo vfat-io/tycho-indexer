@@ -32,7 +32,7 @@ message Attribute {
 message ProtocolComponent {
   string id = 1;
   repeated bytes tokens = 2;
-  repeated string contracts = 3;
+  repeated bytes contracts = 3;
   repeated Attribute static_att = 4;
   ChangeType change = 5;
 }
