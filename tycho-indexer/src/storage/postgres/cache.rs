@@ -7,12 +7,11 @@ use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
 };
-
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
 };
-use tracing::{info, log::debug};
+use tracing::log::{debug, info};
 
 use crate::{
     extractor::evm::{self, AccountUpdate, EVMStateGateway},
@@ -133,7 +132,6 @@ impl DBCacheWriteExecutor {
             while let Some(message) = self.msg_receiver.recv().await {
                 match message {
                     DBCacheMessage::Write(db_tx) => {
-                        info!("New write message received!");
                         // Process the write transaction
                         self.write(db_tx).await;
                     }
@@ -166,12 +164,9 @@ impl DBCacheWriteExecutor {
     /// follow the sequence of the blockchain (e.g., if the block is too far ahead or does not
     /// connect with the last persisted block) or if we fail to send a transaction to the database.
     async fn write(&mut self, mut new_db_tx: DBTransaction) {
-        info!("WRITE");
         match self.pending_block {
             Some(pending) => {
-                info!("SOME");
                 if pending.hash == new_db_tx.block.hash {
-                    info!("ADDING TO CACHE");
                     // New database transaction for the same block are cached
                     self.pending_db_txs
                         .append(&mut new_db_tx.operations);
@@ -180,7 +175,6 @@ impl DBCacheWriteExecutor {
                         .send(Ok(()))
                         .expect("Should successfully notify sender");
                 } else if new_db_tx.block.number < pending.number {
-                    info!("OLD BLOCK");
                     // New database transaction for an old block are directly sent to the database
                     let mut conn = self
                         .pool
@@ -227,7 +221,7 @@ impl DBCacheWriteExecutor {
                         }
                     }
                 } else if new_db_tx.block.parent_hash == pending.hash {
-                    info!("New block received {} !", new_db_tx.block.parent_hash);
+                    debug!("New block received {} !", new_db_tx.block.parent_hash);
                     // New database transaction for the next block, we flush and cache it
                     self.flush().await;
                     self.pending_block = Some(new_db_tx.block);
@@ -239,7 +233,6 @@ impl DBCacheWriteExecutor {
                         .send(Ok(()))
                         .expect("Should successfully notify sender");
                 } else {
-                    info!("ERROR");
                     // Other cases send unexpected error
                     self.error_transmitter
                         .send(StorageError::Unexpected("Invalid cache state!".into()))
@@ -249,7 +242,6 @@ impl DBCacheWriteExecutor {
             }
             None => {
                 // This case happens at the start or after a Flush message
-                info!("NONE");
                 self.pending_block = Some(new_db_tx.block);
 
                 self.pending_db_txs
@@ -266,7 +258,6 @@ impl DBCacheWriteExecutor {
     /// Extracts write operations from `pending_db_txs`, remove duplicates, executes them,
     /// updates `persisted_block` with `pending_block`, and sets `pending_block` to `None`.
     async fn flush(&mut self) {
-        info!("FLUSHING!");
         let mut conn = self
             .pool
             .get()
@@ -275,14 +266,11 @@ impl DBCacheWriteExecutor {
 
         let db_txs = std::mem::take(&mut self.pending_db_txs);
         let mut seen_operations: Vec<WriteOp> = Vec::new();
-        info!("ENTERING TX!");
 
         match conn
             .transaction(|conn| {
                 async {
-                    info!("LOOPING!");
                     for op in db_txs.into_iter() {
-                        info!("EXECUTING!");
                         if !seen_operations.contains(&op) {
                             // Only executes if it was not already in seen_operations
                             match self
@@ -293,7 +281,6 @@ impl DBCacheWriteExecutor {
                                     seen_operations.push(op.clone());
                                 }
                                 Err(e) => {
-                                    info!("ERR {}", e);
                                     self.error_transmitter
                                         .send(e)
                                         .await
@@ -310,7 +297,6 @@ impl DBCacheWriteExecutor {
         {
             Ok(_) => {}
             Err(e) => {
-                info!("ERR {}", e);
                 self.error_transmitter
                     .send(e)
                     .await
@@ -320,7 +306,6 @@ impl DBCacheWriteExecutor {
 
         self.persisted_block = self.pending_block;
         self.pending_block = None;
-        info!("FLUSHED!");
     }
 
     /// Reverts the whole database state to `to`.
@@ -355,31 +340,26 @@ impl DBCacheWriteExecutor {
     ) -> Result<(), StorageError> {
         match operation {
             WriteOp::UpsertBlock(block) => {
-                info!("BLOCK");
                 self.state_gateway
                     .upsert_block(&block, conn)
                     .await
             }
             WriteOp::UpsertTx(transaction) => {
-                info!("TX");
                 self.state_gateway
                     .upsert_tx(&transaction, conn)
                     .await
             }
             WriteOp::SaveExtractionState(state) => {
-                info!("EXTRACTION");
                 self.state_gateway
                     .save_state(&state, conn)
                     .await
             }
             WriteOp::InsertContract(contract) => {
-                info!("CONTRACT");
                 self.state_gateway
                     .insert_contract(&contract, conn)
                     .await
             }
             WriteOp::UpdateContracts(contracts) => {
-                info!("UPDATE_CONTRACT");
                 let collected_changes: Vec<(TxHash, &AccountUpdate)> = contracts
                     .iter()
                     .map(|(tx, update)| (tx.clone(), update))
@@ -532,6 +512,18 @@ impl DerefMut for CachedGateway {
 
 #[cfg(test)]
 mod test {
+    use std::{str::FromStr, sync::Arc};
+
+    use diesel_async::{
+        pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
+        AsyncConnection, AsyncPgConnection,
+    };
+    use ethers::{prelude::H256, types::H160};
+    use tokio::sync::{
+        mpsc,
+        oneshot::{self, error::TryRecvError},
+    };
+
     use crate::{
         extractor::{evm, evm::EVMStateGateway},
         hex_bytes::Bytes,
@@ -589,13 +581,16 @@ mod test {
             .await
             .expect("Failed to get a connection from the pool");
         db_fixtures::insert_chain(&mut connection, "ethereum").await;
-        let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(PostgresGateway::<
-            evm::Block,
-            evm::Transaction,
-            evm::Account,
-            evm::AccountUpdate,
-        >::from_connection(&mut connection)
-            .await);
+        let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
+            PostgresGateway::<
+                evm::Block,
+                evm::Transaction,
+                evm::Account,
+                evm::AccountUpdate,
+                evm::ERC20Token,
+            >::from_connection(&mut connection)
+            .await,
+        );
         drop(connection);
         let (tx, rx) = mpsc::channel(10);
         let (err_tx, mut err_rx) = mpsc::channel(10);
@@ -658,13 +653,16 @@ mod test {
             .await
             .expect("Failed to get a connection from the pool");
         db_fixtures::insert_chain(&mut connection, "ethereum").await;
-        let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(PostgresGateway::<
-            evm::Block,
-            evm::Transaction,
-            evm::Account,
-            evm::AccountUpdate,
-        >::from_connection(&mut connection)
-            .await);
+        let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
+            PostgresGateway::<
+                evm::Block,
+                evm::Transaction,
+                evm::Account,
+                evm::AccountUpdate,
+                evm::ERC20Token,
+            >::from_connection(&mut connection)
+            .await,
+        );
         drop(connection);
         let (tx, rx) = mpsc::channel(10);
         let (err_tx, mut err_rx) = mpsc::channel(10);
@@ -781,13 +779,16 @@ mod test {
             .await
             .expect("Failed to get a connection from the pool");
         setup_data(&mut connection).await;
-        let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(PostgresGateway::<
-            evm::Block,
-            evm::Transaction,
-            evm::Account,
-            evm::AccountUpdate,
-        >::from_connection(&mut connection)
-            .await);
+        let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
+            PostgresGateway::<
+                evm::Block,
+                evm::Transaction,
+                evm::Account,
+                evm::AccountUpdate,
+                evm::ERC20Token,
+            >::from_connection(&mut connection)
+            .await,
+        );
         drop(connection);
         let (tx, rx) = mpsc::channel(10);
         let (err_tx, mut err_rx) = mpsc::channel(10);
@@ -879,13 +880,16 @@ mod test {
             .await
             .expect("Failed to get a connection from the pool");
         db_fixtures::insert_chain(&mut connection, "ethereum").await;
-        let gateway = Arc::new(PostgresGateway::<
-            evm::Block,
-            evm::Transaction,
-            evm::Account,
-            evm::AccountUpdate,
-        >::from_connection(&mut connection)
-            .await);
+        let gateway = Arc::new(
+            PostgresGateway::<
+                evm::Block,
+                evm::Transaction,
+                evm::Account,
+                evm::AccountUpdate,
+                evm::ERC20Token,
+            >::from_connection(&mut connection)
+            .await,
+        );
         drop(connection);
         let (tx, rx) = mpsc::channel(10);
         let (err_tx, mut err_rx) = mpsc::channel(10);

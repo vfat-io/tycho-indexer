@@ -3,19 +3,21 @@ use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use tracing::instrument;
 
-use super::{orm, schema, PostgresGateway};
 use crate::storage::{
     BlockHash, BlockIdentifier, ChainGateway, ContractDelta, StorableBlock, StorableContract,
-    StorableTransaction, StorageError, TxHash,
+    StorableToken, StorableTransaction, StorageError, TxHash,
 };
 
+use super::{orm, schema, PostgresGateway};
+
 #[async_trait]
-impl<B, TX, A, D> ChainGateway for PostgresGateway<B, TX, A, D>
+impl<B, TX, A, D, T> ChainGateway for PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
+    T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     type DB = AsyncPgConnection;
     type Block = B;
@@ -122,15 +124,22 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{extractor::evm, models::Chain, storage::postgres::db_fixtures};
+    use std::str::FromStr;
+
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256};
-    use std::str::FromStr;
+
+    use crate::{extractor::evm, models::Chain, storage::postgres::db_fixtures};
 
     use super::*;
 
-    type EVMGateway =
-        PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>;
+    type EVMGateway = PostgresGateway<
+        evm::Block,
+        evm::Transaction,
+        evm::Account,
+        evm::AccountUpdate,
+        evm::ERC20Token,
+    >;
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();

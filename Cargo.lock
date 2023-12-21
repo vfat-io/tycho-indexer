@@ -4322,6 +4322,10 @@ dependencies = [
 name = "substreams-ethereum-ambient"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
+ "bytes",
+ "ethabi 18.0.0",
+ "hex",
  "hex-literal 0.4.1",
  "prost",
  "substreams",

@@ -6,6 +6,7 @@ package:
 protobuf:
   files:
     - vm.proto
+    - common.proto
   importPaths:
     - ../../proto/tycho/evm/v1/
 
@@ -17,7 +18,7 @@ binaries:
 modules:
   - name: map_changes
     kind: map
-    inputs: 
+    inputs:
       - source: sf.ethereum.type.v2.Block
     output:
       type: proto:tycho.evm.state.v1.BlockContractChanges

@@ -2,21 +2,25 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use crate::{
+    extractor::{evm, runner::ExtractorHandle, ExtractionError},
+    storage::postgres::PostgresGateway,
+};
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use tokio::task::JoinHandle;
 
-use crate::{
-    extractor::{evm, runner::ExtractorHandle, ExtractionError},
-    storage::postgres::PostgresGateway,
-};
-
 mod rpc;
 mod ws;
 
-pub type EvmPostgresGateway =
-    PostgresGateway<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>;
+pub type EvmPostgresGateway = PostgresGateway<
+    evm::Block,
+    evm::Transaction,
+    evm::Account,
+    evm::AccountUpdate,
+    evm::ERC20Token,
+>;
 
 pub struct ServicesBuilder {
     prefix: String,

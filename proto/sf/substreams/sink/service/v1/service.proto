@@ -2,10 +2,9 @@ syntax = "proto3";
 
 package sf.substreams.sink.service.v1;
 
-option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/sink/service/v1;pbsinksvc";
-
 import "sf/substreams/v1/package.proto";
-import "sf/substreams/options.proto";
+
+option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/sink/service/v1;pbsinksvc";
 
 service Provider {
   rpc Deploy(DeployRequest) returns (DeployResponse);
@@ -35,7 +34,7 @@ message DeployResponse {
 
   // deployment_id is a short name (max 8 characters) that uniquely identifies your deployment
   string deployment_id = 2;
-  
+
   map<string, string> services = 3;
   string reason = 4;
   string motd = 5;
@@ -68,14 +67,14 @@ message InfoResponse {
 }
 
 message SinkProgress {
-    uint64 last_processed_block = 1;
+  uint64 last_processed_block = 1;
 }
 
 message PackageInfo {
-    string name = 1;
-    string version = 2;
-    string output_module_name = 3;
-    string output_module_hash = 4;
+  string name = 1;
+  string version = 2;
+  string output_module_name = 3;
+  string output_module_hash = 4;
 }
 
 message ListRequest {}
@@ -85,7 +84,7 @@ message ListResponse {
 }
 
 message DeploymentWithStatus {
-  string  id = 1;
+  string id = 1;
   DeploymentStatus status = 2;
   string reason = 3;
   PackageInfo package_info = 4;
@@ -97,7 +96,7 @@ enum DeploymentStatus {
   UNKNOWN = 0;
   RUNNING = 1;
   FAILING = 2;
-  PAUSED = 3;  
+  PAUSED = 3;
   STOPPED = 4;
 
   STARTING = 5;

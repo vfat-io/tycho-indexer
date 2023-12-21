@@ -1,3 +1,8 @@
+#![allow(unused_variables)]
+
+use std::{str::FromStr, sync::Arc};
+
+use async_trait::async_trait;
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
@@ -5,23 +10,22 @@ use diesel_async::{
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
-use std::{collections::HashMap, str::FromStr, sync::Arc};
-use tracing::{debug, info, instrument};
-
-use async_trait::async_trait;
 use tokio::sync::Mutex;
+use tracing::{debug, info, instrument};
 
 use super::{AccountUpdate, Block};
 use crate::{
     extractor::{evm, ExtractionError, Extractor, ExtractorMsg},
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ExtractorIdentity},
+    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolSystem},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
     },
     storage::{postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError},
 };
+
+use super::EVMStateGateway;
 
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
@@ -33,6 +37,7 @@ pub struct AmbientContractExtractor<G> {
     gateway: G,
     name: String,
     chain: Chain,
+    protocol_system: ProtocolSystem,
     // TODO: There is not reason this needs to be shared
     // try removing the Mutex
     inner: Arc<Mutex<Inner>>,
@@ -59,7 +64,7 @@ pub trait AmbientGateway: Send + Sync {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
     async fn upsert_contract(
         &self,
-        changes: &evm::BlockStateChanges,
+        changes: &evm::BlockContractChanges,
         new_cursor: &str,
     ) -> Result<(), StorageError>;
 
@@ -89,7 +94,7 @@ impl AmbientPgGateway {
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn forward(
         &self,
-        changes: &evm::BlockStateChanges,
+        changes: &evm::BlockContractChanges,
         new_cursor: &str,
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
@@ -120,14 +125,11 @@ impl AmbientPgGateway {
             .collect();
         let changes_slice: &[(Bytes, AccountUpdate)] = collected_changes.as_slice();
 
-        //TODO : should we await and catch errors?
-        let _ = self
-            .cached_gateway
+        self.cached_gateway
             .update_contracts(&changes.block, changes_slice)
-            .await;
-        let _ = self
-            .save_cursor(&changes.block, new_cursor)
-            .await;
+            .await?;
+        self.save_cursor(&changes.block, new_cursor)
+            .await?;
 
         Result::<(), StorageError>::Ok(())
     }
@@ -159,13 +161,16 @@ impl AmbientPgGateway {
         self.save_cursor(&block, new_cursor)
             .await?;
 
-        let changes = evm::BlockAccountChanges {
-            chain: self.chain,
-            extractor: self.name.clone(),
+        let changes = evm::BlockAccountChanges::new(
+            &self.name,
+            self.chain,
             block,
             account_updates,
-            new_pools: HashMap::new(),
-        };
+            // TODO: get protocol components from gateway (in ENG-2049)
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
     }
 
@@ -188,7 +193,7 @@ impl AmbientGateway for AmbientPgGateway {
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn upsert_contract(
         &self,
-        changes: &evm::BlockStateChanges,
+        changes: &evm::BlockContractChanges,
         new_cursor: &str,
     ) -> Result<(), StorageError> {
         let mut conn = self.pool.get().await.unwrap();
@@ -231,12 +236,14 @@ where
                 name: name.to_owned(),
                 chain,
                 inner: Arc::new(Mutex::new(Inner { cursor: Vec::new() })),
+                protocol_system: ProtocolSystem::Ambient,
             },
             Ok(cursor) => AmbientContractExtractor {
                 gateway,
                 name: name.to_owned(),
                 chain,
                 inner: Arc::new(Mutex::new(Inner { cursor })),
+                protocol_system: ProtocolSystem::Ambient,
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
@@ -274,7 +281,15 @@ where
 
         debug!(?raw_msg, "Received message");
 
-        let msg = match evm::BlockStateChanges::try_from_message(raw_msg, &self.name, self.chain) {
+        // TODO: figure out how/where to get this ID from (in ENG-2049)
+        let protocol_type_id = String::from("id-1");
+        let msg = match evm::BlockContractChanges::try_from_message(
+            raw_msg,
+            &self.name,
+            self.chain,
+            self.protocol_system,
+            protocol_type_id,
+        ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
                 changes
@@ -448,14 +463,18 @@ mod gateway_test {
     //!
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
+    use std::collections::HashMap;
+
     use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
-    use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+    use diesel_async::pooled_connection::{deadpool::Object, AsyncDieselConnectionManager};
     use ethers::types::U256;
     use mpsc::channel;
     use tokio::sync::{
         mpsc,
         mpsc::{error::TryRecvError::Empty, Receiver},
     };
+
+    use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
 
     use super::*;
 
@@ -480,13 +499,16 @@ mod gateway_test {
             .await
             .expect("starting test transaction should succeed");
         postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
-        let evm_gw = Arc::new(PostgresGateway::<
-            evm::Block,
-            evm::Transaction,
-            evm::Account,
-            evm::AccountUpdate,
-        >::from_connection(&mut conn)
-            .await);
+        let evm_gw = Arc::new(
+            PostgresGateway::<
+                evm::Block,
+                evm::Transaction,
+                evm::Account,
+                evm::AccountUpdate,
+                evm::ERC20Token,
+            >::from_connection(&mut conn)
+            .await,
+        );
 
         let (tx, rx) = channel(10);
         let (err_tx, err_rx) = channel(10);
@@ -564,8 +586,8 @@ mod gateway_test {
         }
     }
 
-    fn ambient_creation_and_update() -> evm::BlockStateChanges {
-        evm::BlockStateChanges {
+    fn ambient_creation_and_update() -> evm::BlockContractChanges {
+        evm::BlockContractChanges {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
             block: evm::Block::default(),
@@ -589,11 +611,12 @@ mod gateway_test {
                     evm::fixtures::transaction02(TX_HASH_0, evm::fixtures::HASH_256_0, 1),
                 ),
             ],
-            new_pools: HashMap::new(),
+            protocol_components: Vec::new(),
+            tvl_changes: Vec::new(),
         }
     }
 
-    fn ambient_update02() -> evm::BlockStateChanges {
+    fn ambient_update02() -> evm::BlockContractChanges {
         let block = evm::Block {
             number: 1,
             chain: Chain::Ethereum,
@@ -601,7 +624,7 @@ mod gateway_test {
             parent_hash: H256::zero(),
             ts: "2020-01-01T01:00:00".parse().unwrap(),
         };
-        evm::BlockStateChanges {
+        evm::BlockContractChanges {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
             block,
@@ -614,7 +637,8 @@ mod gateway_test {
                 ChangeType::Update,
                 evm::fixtures::transaction02(TX_HASH_1, BLOCK_HASH_0, 1),
             )],
-            new_pools: HashMap::new(),
+            protocol_components: Vec::new(),
+            tvl_changes: Vec::new(),
         }
     }
 

@@ -1,13 +1,19 @@
 #![doc = include_str!("../../Readme.md")]
 
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
+use futures03::future::select_all;
+
 use extractor::{
     evm::ambient::{AmbientContractExtractor, AmbientPgGateway},
     runner::{ExtractorHandle, ExtractorRunnerBuilder},
 };
-use futures03::future::select_all;
 use models::Chain;
 
+use crate::{
+    extractor::{evm, ExtractionError},
+    services::ServicesBuilder,
+    storage::postgres::{self, cache::CachedGateway, PostgresGateway},
+};
 use actix_web::dev::ServerHandle;
 use clap::Parser;
 use std::sync::Arc;
@@ -22,12 +28,6 @@ mod serde_helpers;
 mod services;
 mod storage;
 mod substreams;
-
-use crate::{
-    extractor::{evm, ExtractionError},
-    services::ServicesBuilder,
-    storage::postgres::{self, cache::CachedGateway, PostgresGateway},
-};
 
 #[cfg(test)]
 #[macro_use]
@@ -105,11 +105,14 @@ async fn main() -> Result<(), ExtractionError> {
 
     let pool = postgres::connect(&args.database_url).await?;
     postgres::ensure_chains(&[Chain::Ethereum], pool.clone()).await;
-    let evm_gw =
-        PostgresGateway::<evm::Block, evm::Transaction, evm::Account, evm::AccountUpdate>::new(
-            pool.clone(),
-        )
-        .await?;
+    let evm_gw = PostgresGateway::<
+        evm::Block,
+        evm::Transaction,
+        evm::Account,
+        evm::AccountUpdate,
+        evm::ERC20Token,
+    >::new(pool.clone())
+    .await?;
 
     info!("Starting Tycho");
     let mut extractor_handles = Vec::new();
@@ -200,8 +203,9 @@ async fn shutdown_handler(
 mod cli_tests {
     use std::env;
 
-    use super::CliArgs;
     use clap::Parser;
+
+    use super::CliArgs;
 
     #[tokio::test]
     #[ignore]

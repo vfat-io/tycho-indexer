@@ -1,3 +1,8 @@
+use chrono::NaiveDateTime;
+use diesel::prelude::*;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_derive_enum::DbEnum;
+
 use crate::{
     hex_bytes::Bytes,
     models,
@@ -6,15 +11,12 @@ use crate::{
 
 use super::schema::{
     account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
-    protocol_component, protocol_holds_token, protocol_system, protocol_type, token, transaction,
+    protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
+    token, transaction,
 };
-use chrono::NaiveDateTime;
-use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use diesel_derive_enum::DbEnum;
 
 #[derive(Identifiable, Queryable, Selectable)]
-#[diesel(table_name=chain)]
+#[diesel(table_name = chain)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Chain {
     pub id: i64,
@@ -94,7 +96,7 @@ impl ExtractionState {
 }
 
 #[derive(Insertable)]
-#[diesel(table_name=extraction_state)]
+#[diesel(table_name = extraction_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewExtractionState<'a> {
     pub name: &'a str,
@@ -115,7 +117,7 @@ pub struct ExtractionStateForm<'a> {
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
 #[diesel(belongs_to(Chain))]
-#[diesel(table_name=block)]
+#[diesel(table_name = block)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Block {
     pub id: i64,
@@ -163,7 +165,7 @@ impl Block {
 }
 
 #[derive(Insertable)]
-#[diesel(table_name=block)]
+#[diesel(table_name = block)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewBlock {
     pub hash: BlockHash,
@@ -176,7 +178,7 @@ pub struct NewBlock {
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Block))]
-#[diesel(table_name=transaction)]
+#[diesel(table_name = transaction)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Transaction {
     pub id: i64,
@@ -200,7 +202,7 @@ impl Transaction {
 }
 
 #[derive(Insertable)]
-#[diesel(table_name=transaction)]
+#[diesel(table_name = transaction)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewTransaction {
     pub hash: TxHash,
@@ -211,7 +213,7 @@ pub struct NewTransaction {
 }
 
 #[derive(Identifiable, Queryable, Selectable)]
-#[diesel(table_name=protocol_system)]
+#[diesel(table_name = protocol_system)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolSystem {
     pub id: i64,
@@ -237,7 +239,7 @@ pub enum ProtocolImplementationType {
 }
 
 #[derive(Identifiable, Queryable, Selectable)]
-#[diesel(table_name=protocol_type)]
+#[diesel(table_name = protocol_type)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolType {
     pub id: i64,
@@ -253,7 +255,7 @@ pub struct ProtocolType {
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
-#[diesel(table_name=protocol_component)]
+#[diesel(table_name = protocol_component)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolComponent {
     pub id: i64,
@@ -268,11 +270,49 @@ pub struct ProtocolComponent {
     pub modified_ts: NaiveDateTime,
 }
 
+#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[diesel(belongs_to(ProtocolComponent))]
+#[diesel(table_name = protocol_state)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ProtocolState {
+    pub id: i64,
+    pub protocol_component_id: i64,
+    pub state: Option<serde_json::Value>,
+    pub modify_tx: i64,
+    pub tvl: Option<i64>,
+    pub inertias: Option<Vec<Option<i64>>>,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
+    pub inserted_ts: NaiveDateTime,
+    pub modified_ts: NaiveDateTime,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = protocol_state)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolState {
+    pub protocol_component_id: i64,
+    pub state: Option<serde_json::Value>,
+    pub modify_tx: i64,
+    pub tvl: Option<i64>,
+    pub inertias: Option<Vec<Option<i64>>>,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
+}
+
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(Transaction, foreign_key = creation_tx))]
-#[diesel(table_name=account)]
+#[diesel(table_name = account)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+/// Represents an account on a blockchain.
+///
+/// An `Account` is identified by its blockchain (`Chain`) and address (`H160`). It may have a
+/// descriptive `title` and contains information about storage slots, balance, associated code
+/// (bytecode), code hash, and transaction hashes related to balance modification, code
+/// modification, and optional creation. Additional information about accounts.
+/// - A Contract is also an Account, but an Account is not necessarily a Contract.
+/// - An account is considered a contract if it has associated code.
 pub struct Account {
     pub id: i64,
     pub title: String,
@@ -325,7 +365,7 @@ impl Account {
 }
 
 #[derive(Insertable)]
-#[diesel(table_name=account)]
+#[diesel(table_name = account)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccount<'a> {
     pub title: &'a str,
@@ -338,7 +378,7 @@ pub struct NewAccount<'a> {
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
 #[diesel(belongs_to(Account))]
-#[diesel(table_name=token)]
+#[diesel(table_name = token)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Token {
     pub id: i64,
@@ -351,9 +391,20 @@ pub struct Token {
     pub modified_ts: NaiveDateTime,
 }
 
+#[derive(Insertable)]
+#[diesel(table_name = token)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewToken {
+    pub account_id: i64,
+    pub symbol: String,
+    pub decimals: i32,
+    pub tax: i64,
+    pub gas: Vec<Option<i64>>,
+}
+
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
-#[diesel(table_name=account_balance)]
+#[diesel(table_name = account_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct AccountBalance {
     pub id: i64,
@@ -382,7 +433,7 @@ impl AccountBalance {
 }
 
 #[derive(Insertable, Debug)]
-#[diesel(table_name=account_balance)]
+#[diesel(table_name = account_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccountBalance {
     pub balance: Balance,
@@ -394,7 +445,7 @@ pub struct NewAccountBalance {
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
-#[diesel(table_name=contract_code)]
+#[diesel(table_name = contract_code)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ContractCode {
     pub id: i64,
@@ -424,7 +475,7 @@ impl ContractCode {
 }
 
 #[derive(Insertable, Debug)]
-#[diesel(table_name=contract_code)]
+#[diesel(table_name = contract_code)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewContractCode<'a> {
     pub code: &'a Code,
@@ -495,7 +546,7 @@ impl NewContract {
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
-#[diesel(table_name=contract_storage)]
+#[diesel(table_name = contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ContractStorage {
     pub id: i64,
@@ -512,7 +563,7 @@ pub struct ContractStorage {
 }
 
 #[derive(Insertable)]
-#[diesel(table_name=contract_storage)]
+#[diesel(table_name = contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewSlot<'a> {
     pub slot: &'a Bytes,
@@ -533,7 +584,7 @@ pub struct Contract {
 #[diesel(primary_key(protocol_component_id, token_id))]
 #[diesel(belongs_to(ProtocolComponent))]
 #[diesel(belongs_to(Token))]
-#[diesel(table_name=protocol_holds_token)]
+#[diesel(table_name = protocol_holds_token)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolHoldsToken {
     protocol_component_id: i64,

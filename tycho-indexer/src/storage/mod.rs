@@ -70,8 +70,6 @@
 //! for these enums. Following this approach paves the way for initializing a
 //! cross-chain compatible gateway (For instance, refer
 //! [enum_dispatch](https://docs.rs/enum_dispatch/latest/enum_dispatch/) crate).
-pub mod postgres;
-
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use async_trait::async_trait;
@@ -80,9 +78,13 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
+    extractor::evm::ProtocolState,
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ProtocolComponent, ProtocolState, ProtocolSystem},
+    models::{Chain, ExtractionState, ProtocolSystem},
+    storage::postgres::orm,
 };
+
+pub mod postgres;
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
 /// blockchain.
@@ -392,6 +394,7 @@ pub enum VersionKind {
     #[allow(dead_code)]
     Index(i64),
 }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ContractId {
     pub address: Address,
@@ -429,6 +432,7 @@ impl Version {
         Self(BlockOrTimestamp::Timestamp(ts), VersionKind::Last)
     }
 }
+
 /// Lays out the necessary interface needed to store and retrieve tokens from
 /// storage.
 ///
@@ -449,6 +453,26 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
     fn contract_id(&self) -> ContractId;
 }
 
+/// Lays out the necessary interface needed to store and retrieve protocol states from
+/// storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   protocol state.
+/// * `N`: This represents the storage-specific data type used when converting from the protocol
+///   state to storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the token.
+pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
+    fn from_storage(val: S, contract: ContractId) -> Result<Self, StorageError>;
+
+    fn to_storage(&self, contract_id: I) -> N;
+
+    fn contract_id(&self) -> ContractId;
+}
+
 /// Store and retrieve protocol related structs.
 ///
 /// This trait defines how to retrieve protocol components, state as well as
@@ -457,7 +481,9 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
 pub trait ProtocolGateway {
     type DB;
     type Token;
-    // TODO: at this later type ProtocolState;
+    type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
+    // TODO: uncomment below when StorableProtocolComponent is implemented (ENG 1728)
+    // type ProtocolComponent;
 
     /// Retrieve ProtocolComponent from the db
     ///
@@ -468,16 +494,17 @@ pub trait ProtocolGateway {
     ///
     /// # Returns
     /// Ok, if found else Err
-    async fn get_components(
-        &self,
-        chain: Chain,
-        system: Option<ProtocolSystem>,
-        ids: Option<&[&str]>,
-    ) -> Result<Vec<ProtocolComponent<Self::Token>>, StorageError>;
+    // TODO: uncomment to implement in ENG 2030
+    // async fn get_components(
+    //     &self,
+    //     chain: &Chain,
+    //     system: Option<ProtocolSystem>,
+    //     ids: Option<&[&str]>,
+    // ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
     /// Stores new found ProtocolComponents.
     ///
-    /// Components are assumed to be immutable. Any state belonging to a
+    /// Components are assumed to bimmutable. Any state belonging to a
     /// component that is dynamic, should be made available on ProtocolState,
     /// not on the Component.
     ///
@@ -488,10 +515,9 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
     /// - component with same is id already present.
-    async fn upsert_components(
-        &self,
-        new: &[&ProtocolComponent<Self::Token>],
-    ) -> Result<(), StorageError>;
+    // TODO: uncomment to implement in ENG 2031
+    // async fn upsert_components(&self, new: &[Self::ProtocolComponent]) -> Result<(),
+    // StorageError>;
 
     /// Retrieve protocol component states
     ///
@@ -511,7 +537,7 @@ pub trait ProtocolGateway {
     /// - `at` The version at which the state is valid at.
     async fn get_states(
         &self,
-        chain: Chain,
+        chain: &Chain,
         at: Option<Version>,
         system: Option<ProtocolSystem>,
         id: Option<&[&str]>,
@@ -546,6 +572,44 @@ pub trait ProtocolGateway {
     /// Ok if all tokens could be inserted, Err if at least one token failed to
     /// insert.
     async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError>;
+
+    /// Retrieve protocol component state changes
+    ///
+    /// Fetches all state changes that occurred for the given protocol system
+    ///
+    /// # Parameters
+    /// - `chain` The chain of the component
+    /// - `system` The protocol system this component belongs to
+    /// - `id` The external id of the component e.g. address, or the pair
+    /// - `start_version` The version at which to start looking for changes at.
+    /// - `end_version` The version at which to stop looking for changes.
+    ///
+    /// # Return
+    /// A ProtocolState containing all state changes, Err if no changes were found.
+    async fn get_state_delta(
+        &self,
+        chain: &Chain,
+        system: Option<ProtocolSystem>,
+        id: Option<&[&str]>,
+        start_version: Option<&BlockOrTimestamp>,
+        end_version: &BlockOrTimestamp,
+        conn: &mut Self::DB,
+    ) -> Result<ProtocolState, StorageError>;
+
+    /// Reverts the protocol states in storage.
+    ///
+    /// Deletes all protocol states that were set after the given block.
+    ///
+    /// # Parameters
+    /// - `to` The block at which the we must revert to.
+    ///
+    /// # Return
+    /// Ok if the revert was successful, Err if it was not.
+    async fn revert_protocol_state(
+        &self,
+        to: &BlockIdentifier,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 }
 
 /// Lays out the necessary interface needed to store and retrieve contracts from
@@ -867,7 +931,7 @@ pub trait ContractStateGateway {
 pub trait StateGateway<DB>:
     ExtractionStateGateway<DB = DB>
     + ChainGateway<DB = DB>
-    // + ProtocolGateway<DB = DB>
+    + ProtocolGateway<DB = DB>
     + ExtractionStateGateway<DB = DB>
     + ContractStateGateway<DB = DB>
     + Send
@@ -875,5 +939,14 @@ pub trait StateGateway<DB>:
 {
 }
 
-pub type StateGatewayType<DB, B, TX, C, D> =
-    Arc<dyn StateGateway<DB, Transaction = TX, Block = B, ContractState = C, Delta = D>>;
+pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
+    dyn StateGateway<
+        DB,
+        Transaction = TX,
+        Block = B,
+        ContractState = C,
+        Delta = D,
+        Token = T,
+        ProtocolState = ProtocolState,
+    >,
+>;
