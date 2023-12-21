@@ -501,7 +501,7 @@ pub struct ProtocolComponent {
     chain: Chain,
     // ids of the tokens tradable
     tokens: Vec<String>,
-    // ids of the related contracts
+    // addresses of the related contracts
     contract_ids: Vec<H160>,
     // stores the static attributes
     static_attributes: HashMap<String, Bytes>,
