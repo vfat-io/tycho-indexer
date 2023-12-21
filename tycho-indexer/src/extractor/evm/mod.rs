@@ -543,7 +543,6 @@ impl ProtocolComponent {
             .into_iter()
             .map(|c| pad_and_parse_h160(&c.into()).map_err(ExtractionError::DecodeError))
             .collect::<Result<Vec<_>, ExtractionError>>()?;
-        print!("{:?}", contract_ids);
 
         let static_attributes = msg
             .static_att
@@ -552,7 +551,7 @@ impl ProtocolComponent {
             .map(|attribute| Ok((attribute.name, Bytes::from(attribute.value))))
             .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
 
-        let t = Self {
+        Ok(Self {
             id,
             protocol_type_id,
             protocol_system,
@@ -561,9 +560,7 @@ impl ProtocolComponent {
             static_attributes,
             chain,
             change: msg.change().into(),
-        };
-        print!("{:?}", t);
-        Ok(t)
+        })
     }
 }
 
