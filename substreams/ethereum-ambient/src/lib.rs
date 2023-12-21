@@ -5,7 +5,7 @@ use ethabi::{decode, ParamType};
 use hex_literal::hex;
 use substreams_ethereum::pb::eth::{self};
 
-use pb::tycho::evm::v1::{self as tycho, ChangeType};
+use pb::tycho::evm::v1::{self as tycho};
 
 mod pb;
 
@@ -179,7 +179,7 @@ fn map_changes(
                             let static_attribute = tycho::Attribute {
                                 name: String::from("pool_index"),
                                 value: pool_index.to_be_bytes().to_vec(),
-                                change: ChangeType::Creation.into(),
+                                change: tycho::ChangeType::Creation.into(),
                             };
 
                             let mut tokens: Vec<Vec<u8>> = vec![base.clone(), quote.clone()];
@@ -195,7 +195,7 @@ fn map_changes(
                                 tokens,
                                 contracts: vec![AMBIENT_CONTRACT.to_vec()],
                                 static_att: vec![static_attribute],
-                                change: ChangeType::Creation.into(),
+                                change: tycho::ChangeType::Creation.into(),
                             };
                             tx_change
                                 .component_changes
@@ -257,9 +257,9 @@ fn map_changes(
                         code: Vec::new(),
                         slots,
                         change: if created_accounts.contains_key(&storage_change.address) {
-                            ChangeType::Creation
+                            tycho::ChangeType::Creation
                         } else {
-                            ChangeType::Update
+                            tycho::ChangeType::Update
                         },
                     });
                 }
@@ -298,9 +298,9 @@ fn map_changes(
                             code: Vec::new(),
                             slots: HashMap::new(),
                             change: if created_accounts.contains_key(&balance_change.address) {
-                                ChangeType::Creation
+                                tycho::ChangeType::Creation
                             } else {
-                                ChangeType::Update
+                                tycho::ChangeType::Update
                             },
                         });
                     }
@@ -337,9 +337,9 @@ fn map_changes(
                         code: code_change.new_code.clone(),
                         slots: HashMap::new(),
                         change: if created_accounts.contains_key(&code_change.address) {
-                            ChangeType::Creation
+                            tycho::ChangeType::Creation
                         } else {
-                            ChangeType::Update
+                            tycho::ChangeType::Update
                         },
                     });
                 }
