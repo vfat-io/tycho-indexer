@@ -25,8 +25,6 @@ use crate::{
     storage::{postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError},
 };
 
-use super::EVMStateGateway;
-
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
 struct Inner {
@@ -466,15 +464,13 @@ mod gateway_test {
     use std::collections::HashMap;
 
     use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
-    use diesel_async::pooled_connection::{deadpool::Object, AsyncDieselConnectionManager};
+    use diesel_async::pooled_connection::AsyncDieselConnectionManager;
     use ethers::types::U256;
     use mpsc::channel;
     use tokio::sync::{
         mpsc,
         mpsc::{error::TryRecvError::Empty, Receiver},
     };
-
-    use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
 
     use super::*;
 

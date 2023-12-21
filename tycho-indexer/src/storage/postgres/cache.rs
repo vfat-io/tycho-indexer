@@ -319,7 +319,7 @@ impl DBCacheWriteExecutor {
 
         self.persisted_block = Some(
             self.state_gateway
-                .get_block(&to, &mut conn)
+                .get_block(to, &mut conn)
                 .await
                 .expect("get block ok"),
         );
@@ -521,7 +521,7 @@ mod test {
     use ethers::{prelude::H256, types::H160};
     use tokio::sync::{
         mpsc,
-        oneshot::{self, error::TryRecvError},
+        oneshot::{self},
     };
 
     use crate::{
@@ -539,17 +539,8 @@ mod test {
             StorageError::NotFound,
         },
     };
-    use diesel_async::{
-        pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
-        AsyncConnection, AsyncPgConnection,
-    };
-    use ethers::{prelude::H256, types::H160};
-    use std::{str::FromStr, sync::Arc};
-    use tokio::sync::{
-        mpsc,
-        mpsc::error::TryRecvError::Empty,
-        oneshot::{self},
-    };
+
+    use tokio::sync::mpsc::error::TryRecvError::Empty;
 
     async fn setup_gateway() -> Pool<AsyncPgConnection> {
         let database_url =
