@@ -74,7 +74,7 @@ impl From<InterimContractChange> for tycho::ContractChange {
 fn map_changes(
     block: eth::v2::Block,
 ) -> Result<tycho::BlockContractChanges, substreams::errors::Error> {
-    let mut block_changes = tycho::BlockContractChanges { block: None, changes: Vec::new() };
+    let mut block_changes = tycho::BlockContractChanges::default();
 
     let mut tx_change = tycho::TransactionContractChanges::default();
 
@@ -193,7 +193,7 @@ fn map_changes(
                                     pool_index
                                 ),
                                 tokens,
-                                contracts: vec![hex::encode(AMBIENT_CONTRACT)],
+                                contracts: vec![AMBIENT_CONTRACT.to_vec()],
                                 static_att: vec![static_attribute],
                                 change: ChangeType::Creation.into(),
                             };
@@ -241,7 +241,7 @@ fn map_changes(
                         }
                     }
                 }
-                // Intialise a new contract change after obsering a storage change
+                // Intialise a new contract change after observing a storage change
                 Entry::Vacant(e) => {
                     let mut slots = HashMap::new();
                     slots.insert(
