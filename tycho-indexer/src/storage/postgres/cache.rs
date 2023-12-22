@@ -138,11 +138,15 @@ impl DBCacheWriteExecutor {
                     DBCacheMessage::Flush(sender) => {
                         // Flush the current state and send back the result
                         let flush_result = self.flush().await;
-                        let _ = sender.send(Ok(flush_result));
+                        sender
+                            .send(flush_result)
+                            .expect("Should successfully notify sender");
                     }
                     DBCacheMessage::Revert(to, sender) => {
                         let revert_result = self.revert(&to).await;
-                        let _ = sender.send(revert_result);
+                        sender
+                            .send(revert_result)
+                            .expect("Should successfully notify sender");
                     }
                 }
             }
@@ -182,7 +186,7 @@ impl DBCacheWriteExecutor {
                         .await
                         .expect("pool should be connected");
 
-                    match conn
+                    let res = conn
                         .transaction(|conn| {
                             async {
                                 for op in new_db_tx.operations {
@@ -190,8 +194,7 @@ impl DBCacheWriteExecutor {
                                         Err(StorageError::DuplicateEntry(entity, id)) => {
                                             // As this db transaction is old. It can contain already
                                             // stored blocks or txs, we log the duplicate entry
-                                            // error and
-                                            // continue
+                                            // error and continue
                                             debug!("Duplicate entry for {} with id {}", entity, id);
                                         }
                                         Err(e) => {
@@ -204,31 +207,19 @@ impl DBCacheWriteExecutor {
                             }
                             .scope_boxed()
                         })
-                        .await
-                    {
-                        Ok(_) => {
-                            // Notify that this transaction was correctly send to the db
-                            new_db_tx
-                                .tx
-                                .send(Ok(()))
-                                .expect("Should successfully notify sender");
-                        }
-                        Err(e) => {
-                            // Forward error to the sender and in the error channel
-                            new_db_tx
-                                .tx
-                                .send(Err(e.clone()))
-                                .expect("Should successfully notify sender");
-                            self.error_transmitter
-                                .send(e)
-                                .await
-                                .expect("Should successfully notify error");
-                        }
-                    }
+                        .await;
+
+                    // Forward the result to the sender
+                    new_db_tx
+                        .tx
+                        .send(res)
+                        .expect("Should successfully notify sender");
                 } else if new_db_tx.block.parent_hash == pending.hash {
                     debug!("New block received {} !", new_db_tx.block.parent_hash);
                     // New database transaction for the next block, we flush and cache it
-                    self.flush().await;
+                    self.flush()
+                        .await
+                        .expect("Flush should succeed");
                     self.pending_block = Some(new_db_tx.block);
 
                     self.pending_db_txs
@@ -246,7 +237,8 @@ impl DBCacheWriteExecutor {
                 }
             }
             None => {
-                // This case happens at the start or after a Flush message
+                // if self.pending_block == None, this case can happen when we start Tycho or after
+                // a call to flush().
                 self.pending_block = Some(new_db_tx.block);
 
                 self.pending_db_txs
@@ -262,7 +254,7 @@ impl DBCacheWriteExecutor {
     /// Commits the current cached state to the database in a single batch operation.
     /// Extracts write operations from `pending_db_txs`, remove duplicates, executes them,
     /// updates `persisted_block` with `pending_block`, and sets `pending_block` to `None`.
-    async fn flush(&mut self) {
+    async fn flush(&mut self) -> Result<(), StorageError> {
         let mut conn = self
             .pool
             .get()
@@ -272,50 +264,41 @@ impl DBCacheWriteExecutor {
         let db_txs = std::mem::take(&mut self.pending_db_txs);
         let mut seen_operations: Vec<WriteOp> = Vec::new();
 
-        match conn
-            .transaction(|conn| {
-                async {
-                    for op in db_txs.into_iter() {
-                        if !seen_operations.contains(&op) {
-                            // Only executes if it was not already in seen_operations
-                            match self
-                                .execute_write_op(op.clone(), conn)
-                                .await
-                            {
-                                Ok(_) => {
-                                    seen_operations.push(op.clone());
-                                }
-                                Err(e) => {
-                                    self.error_transmitter
-                                        .send(e)
-                                        .await
-                                        .expect("Should successfully notify error");
-                                }
-                            };
-                        }
+        conn.transaction(|conn| {
+            async {
+                for op in db_txs.into_iter() {
+                    if !seen_operations.contains(&op) {
+                        // Only executes if it is not already in seen_operations
+                        match self
+                            .execute_write_op(op.clone(), conn)
+                            .await
+                        {
+                            Ok(_) => {
+                                seen_operations.push(op.clone());
+                            }
+                            Err(e) => {
+                                // If and error happens, revert the whole transaction
+                                return Err(e);
+                            }
+                        };
                     }
-                    Result::<(), StorageError>::Ok(())
                 }
-                .scope_boxed()
-            })
-            .await
-        {
-            Ok(_) => {}
-            Err(e) => {
-                self.error_transmitter
-                    .send(e)
-                    .await
-                    .expect("Should successfully notify error");
+                Result::<(), StorageError>::Ok(())
             }
-        };
+            .scope_boxed()
+        })
+        .await?;
 
         self.persisted_block = self.pending_block;
         self.pending_block = None;
+        Ok(())
     }
 
     /// Reverts the whole database state to `to`.
     async fn revert(&mut self, to: &BlockIdentifier) -> Result<(), StorageError> {
-        self.flush().await;
+        self.flush()
+            .await
+            .expect("Flush should succeed");
         let mut conn = self
             .pool
             .get()
@@ -482,7 +465,9 @@ impl CachedGateway {
         db: &mut AsyncPgConnection,
     ) -> Result<Vec<AccountUpdate>, StorageError> {
         //TODO: handle multiple extractors reverts
-        self.flush().await?;
+        self.flush()
+            .await
+            .expect("Flush should succeed");
         self.state_gateway
             .get_accounts_delta(chain, start_version, end_version, db)
             .await
