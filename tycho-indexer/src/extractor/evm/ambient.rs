@@ -53,7 +53,7 @@ pub struct AmbientPgGateway {
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
-    cached_gateway: CachedGateway,
+    state_gateway: CachedGateway,
 }
 
 #[automock]
@@ -75,14 +75,14 @@ pub trait AmbientGateway: Send + Sync {
 
 impl AmbientPgGateway {
     pub fn new(name: &str, chain: Chain, pool: Pool<AsyncPgConnection>, gw: CachedGateway) -> Self {
-        AmbientPgGateway { name: name.to_owned(), chain, pool, cached_gateway: gw }
+        AmbientPgGateway { name: name.to_owned(), chain, pool, state_gateway: gw }
     }
 
     #[instrument(skip_all)]
     async fn save_cursor(&self, block: &Block, new_cursor: &str) -> Result<(), StorageError> {
         let state =
             ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
-        self.cached_gateway
+        self.state_gateway
             .save_state(block, &state)
             .await?;
         Ok(())
@@ -95,18 +95,18 @@ impl AmbientPgGateway {
         new_cursor: &str,
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
-        self.cached_gateway
+        self.state_gateway
             .upsert_block(&changes.block)
             .await?;
         for update in changes.tx_updates.iter() {
             debug!(tx_hash = ?update.tx.hash, "Processing transaction");
-            self.cached_gateway
+            self.state_gateway
                 .upsert_tx(&changes.block, &update.tx)
                 .await?;
             if update.is_creation() {
                 let new: evm::Account = update.into();
                 info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
-                self.cached_gateway
+                self.state_gateway
                     .insert_contract(&changes.block, &new)
                     .await?;
             }
@@ -119,7 +119,7 @@ impl AmbientPgGateway {
             .collect();
         let changes_slice: &[(Bytes, AccountUpdate)] = collected_changes.as_slice();
 
-        self.cached_gateway
+        self.state_gateway
             .update_contracts(&changes.block, changes_slice)
             .await?;
         self.save_cursor(&changes.block, new_cursor)
@@ -136,19 +136,19 @@ impl AmbientPgGateway {
         conn: &mut AsyncPgConnection,
     ) -> Result<evm::BlockAccountChanges, StorageError> {
         let block = self
-            .cached_gateway
+            .state_gateway
             .get_block(to, conn)
             .await?;
         let target = BlockOrTimestamp::Block(to.clone());
         let address = H160(AMBIENT_CONTRACT);
         let account_updates = self
-            .cached_gateway
+            .state_gateway
             .get_accounts_delta(&self.chain, None, &target, conn)
             .await?
             .into_iter()
             .filter_map(|u| if u.address == address { Some((u.address, u)) } else { None })
             .collect();
-        self.cached_gateway
+        self.state_gateway
             .revert_state(to)
             .await?;
 
@@ -170,7 +170,7 @@ impl AmbientPgGateway {
 
     async fn get_last_cursor(&self, conn: &mut AsyncPgConnection) -> Result<Vec<u8>, StorageError> {
         let state = self
-            .cached_gateway
+            .state_gateway
             .get_state(&self.name, &self.chain, conn)
             .await?;
         Ok(state.cursor)
@@ -524,7 +524,7 @@ mod gateway_test {
     #[tokio::test]
     async fn test_get_cursor() {
         let (gw, mut err_rx, pool) = setup_gw().await;
-        let evm_gw = gw.cached_gateway.clone();
+        let evm_gw = gw.state_gateway.clone();
         let state = ExtractionState::new(
             "vm:ambient".to_string(),
             Chain::Ethereum,
@@ -644,7 +644,7 @@ mod gateway_test {
             .await
             .expect("upsert should succeed");
 
-        let cached_gw: CachedGateway = gw.cached_gateway;
+        let cached_gw: CachedGateway = gw.state_gateway;
         cached_gw.flush().await;
 
         let maybe_err = err_rx
@@ -750,7 +750,7 @@ mod gateway_test {
 
         assert_eq!(changes.account_updates.len(), 1);
         assert_eq!(changes.account_updates[&ambient_address], exp_change);
-        let cached_gw: CachedGateway = gw.cached_gateway;
+        let cached_gw: CachedGateway = gw.state_gateway;
         let account = cached_gw
             .get_contract(
                 &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
