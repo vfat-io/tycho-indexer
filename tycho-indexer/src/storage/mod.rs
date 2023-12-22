@@ -224,7 +224,7 @@ pub trait StorableTransaction<S, N, I>: Sized + Send + Sync + 'static {
     fn hash(&self) -> TxHash;
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Clone)]
 pub enum StorageError {
     #[error("Could not find {0} with id `{1}`!")]
     NotFound(String, String),
@@ -932,7 +932,6 @@ pub trait StateGateway<DB>:
     ExtractionStateGateway<DB = DB>
     + ChainGateway<DB = DB>
     + ProtocolGateway<DB = DB>
-    + ExtractionStateGateway<DB = DB>
     + ContractStateGateway<DB = DB>
     + Send
     + Sync

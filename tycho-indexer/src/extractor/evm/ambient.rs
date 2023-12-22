@@ -82,10 +82,9 @@ impl AmbientPgGateway {
     async fn save_cursor(&self, block: &Block, new_cursor: &str) -> Result<(), StorageError> {
         let state =
             ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
-        let _ = self
-            .cached_gateway
+        self.cached_gateway
             .save_state(block, &state)
-            .await;
+            .await?;
         Ok(())
     }
 
@@ -96,23 +95,20 @@ impl AmbientPgGateway {
         new_cursor: &str,
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
-        let _ = self
-            .cached_gateway
+        self.cached_gateway
             .upsert_block(&changes.block)
-            .await;
+            .await?;
         for update in changes.tx_updates.iter() {
             debug!(tx_hash = ?update.tx.hash, "Processing transaction");
-            let _ = self
-                .cached_gateway
+            self.cached_gateway
                 .upsert_tx(&changes.block, &update.tx)
-                .await;
+                .await?;
             if update.is_creation() {
                 let new: evm::Account = update.into();
                 info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
-                let _ = self
-                    .cached_gateway
+                self.cached_gateway
                     .insert_contract(&changes.block, &new)
-                    .await;
+                    .await?;
             }
         }
         let collected_changes: Vec<(Bytes, AccountUpdate)> = changes
@@ -673,56 +669,99 @@ mod gateway_test {
         assert_eq!(maybe_err, Empty);
     }
 
-    // #[tokio::test]
-    // async fn test_revert() {
-    //     let (gw, mut err_rx, pool) = setup_gw().await;
-    //     let msg0 = ambient_creation_and_update();
-    //     let msg1 = ambient_update02();
-    //     gw.forward(&msg0, "cursor@0")
-    //         .await
-    //         .expect("upsert should succeed");
-    //     gw.forward(&msg1, "cursor@1")
-    //         .await
-    //         .expect("upsert should succeed");
-    //     let ambient_address = H160(AMBIENT_CONTRACT);
-    //     let exp_change = evm::AccountUpdate::new(
-    //         ambient_address,
-    //         Chain::Ethereum,
-    //         evm::fixtures::evm_slots([(42, 0)]),
-    //         Some(U256::from(1000)),
-    //         None,
-    //         ChangeType::Update,
-    //     );
-    //     let exp_account = ambient_account(0);
-    //
-    //     let mut conn = pool
-    //         .get()
-    //         .await
-    //         .expect("pool should get a connection");
-    //
-    //     let changes = gw
-    //         .backward(&BlockIdentifier::Number((Chain::Ethereum, 0)), "cursor@2", &mut conn)
-    //         .await
-    //         .expect("revert should succeed");
-    //
-    //     let maybe_err = err_rx
-    //         .try_recv()
-    //         .expect_err("Error channel should be empty");
-    //
-    //     assert_eq!(changes.account_updates.len(), 1);
-    //     assert_eq!(changes.account_updates[&ambient_address], exp_change);
-    //     let cached_gw: CachedGateway = gw.cached_gateway;
-    //     let account = cached_gw
-    //         .get_contract(
-    //             &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
-    //             None,
-    //             true,
-    //             &mut conn,
-    //         )
-    //         .await
-    //         .expect("test successfully retrieved ambient contract");
-    //     assert_eq!(account, exp_account);
-    //     // Assert no error happened
-    //     assert_eq!(maybe_err, Empty);
-    // }
+    #[tokio::test]
+    async fn test_revert() {
+        let db_url = std::env::var("DATABASE_URL").expect("database url should be set for testing");
+        let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url);
+        // We need a dedicated connection, so we don't use the pool as this would actually insert
+        // data. For this, we create a pool of 1 connection.
+        let pool = Pool::builder(config)
+            .max_size(1)
+            .build()
+            .unwrap();
+        let mut conn = pool
+            .get()
+            .await
+            .expect("pool should get a connection");
+        conn.begin_test_transaction()
+            .await
+            .expect("starting test transaction should succeed");
+        postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        let evm_gw = Arc::new(
+            PostgresGateway::<
+                evm::Block,
+                evm::Transaction,
+                evm::Account,
+                evm::AccountUpdate,
+                evm::ERC20Token,
+            >::from_connection(&mut conn)
+            .await,
+        );
+
+        let (tx, rx) = channel(10);
+        let (err_tx, mut err_rx) = channel(10);
+
+        let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
+            "ethereum".to_owned(),
+            Chain::Ethereum,
+            pool.clone(),
+            evm_gw.clone(),
+            rx,
+            err_tx,
+        );
+
+        let handle = write_executor.run();
+        let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
+
+        let gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool.clone(), cached_gw);
+
+        let msg0 = ambient_creation_and_update();
+        let msg1 = ambient_update02();
+        gw.forward(&msg0, "cursor@0")
+            .await
+            .expect("upsert should succeed");
+        gw.forward(&msg1, "cursor@1")
+            .await
+            .expect("upsert should succeed");
+        let ambient_address = H160(AMBIENT_CONTRACT);
+        let exp_change = evm::AccountUpdate::new(
+            ambient_address,
+            Chain::Ethereum,
+            evm::fixtures::evm_slots([(42, 0)]),
+            Some(U256::from(1000)),
+            None,
+            ChangeType::Update,
+        );
+        let exp_account = ambient_account(0);
+
+        let mut conn = pool
+            .get()
+            .await
+            .expect("pool should get a connection");
+
+        let changes = gw
+            .backward(&BlockIdentifier::Number((Chain::Ethereum, 0)), "cursor@2", &mut conn)
+            .await
+            .expect("revert should succeed");
+
+        let maybe_err = err_rx
+            .try_recv()
+            .expect_err("Error channel should be empty");
+
+        assert_eq!(changes.account_updates.len(), 1);
+        assert_eq!(changes.account_updates[&ambient_address], exp_change);
+        let cached_gw: CachedGateway = gw.cached_gateway;
+        let account = cached_gw
+            .get_contract(
+                &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
+                None,
+                true,
+                &mut conn,
+            )
+            .await
+            .expect("test successfully retrieved ambient contract");
+        assert_eq!(account, exp_account);
+        // Assert no error happened
+        assert_eq!(maybe_err, Empty);
+    }
 }

@@ -214,6 +214,11 @@ impl DBCacheWriteExecutor {
                                 .expect("Should successfully notify sender");
                         }
                         Err(e) => {
+                            // Forward error to the sender and in the error channel
+                            new_db_tx
+                                .tx
+                                .send(Err(e.clone()))
+                                .expect("Should successfully notify sender");
                             self.error_transmitter
                                 .send(e)
                                 .await
@@ -391,12 +396,12 @@ impl CachedGateway {
     pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*new, vec![WriteOp::UpsertBlock(*new)], tx);
-        let _ = self
-            .tx
+        self.tx
             .send(DBCacheMessage::Write(db_tx))
-            .await;
+            .await
+            .expect("Send message to receiver ok");
         rx.await
-            .expect("Send message to receiver ok")
+            .expect("Receive confirmation ok")
     }
 
     pub async fn upsert_tx(
@@ -406,12 +411,12 @@ impl CachedGateway {
     ) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::UpsertTx(*new)], tx);
-        let _ = self
-            .tx
+        self.tx
             .send(DBCacheMessage::Write(db_tx))
-            .await;
+            .await
+            .expect("Send message to receiver ok");
         rx.await
-            .expect("Send message to receiver ok")
+            .expect("Receive confirmation ok")
     }
 
     pub async fn save_state(
@@ -421,12 +426,12 @@ impl CachedGateway {
     ) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::SaveExtractionState(new.clone())], tx);
-        let _ = self
-            .tx
+        self.tx
             .send(DBCacheMessage::Write(db_tx))
-            .await;
+            .await
+            .expect("Send message to receiver ok");
         rx.await
-            .expect("Send message to receiver ok")
+            .expect("Receive confirmation ok")
     }
 
     pub async fn insert_contract(
@@ -436,12 +441,12 @@ impl CachedGateway {
     ) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::InsertContract(new.clone())], tx);
-        let _ = self
-            .tx
+        self.tx
             .send(DBCacheMessage::Write(db_tx))
-            .await;
+            .await
+            .expect("Send message to receiver ok");
         rx.await
-            .expect("Send message to receiver ok")
+            .expect("Receive confirmation ok")
     }
 
     pub async fn update_contracts(
@@ -451,22 +456,22 @@ impl CachedGateway {
     ) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::UpdateContracts(new.to_owned())], tx);
-        let _ = self
-            .tx
+        self.tx
             .send(DBCacheMessage::Write(db_tx))
-            .await;
+            .await
+            .expect("Send message to receiver ok");
         rx.await
-            .expect("Send message to receiver ok")
+            .expect("Receive confirmation ok")
     }
 
     pub async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
+        self.tx
             .send(DBCacheMessage::Revert(to.clone(), tx))
-            .await;
+            .await
+            .expect("Send message to receiver ok");
         rx.await
-            .expect("Send message to receiver ok")
+            .expect("Receive confirmation ok")
     }
 
     pub async fn get_accounts_delta(
@@ -477,19 +482,20 @@ impl CachedGateway {
         db: &mut AsyncPgConnection,
     ) -> Result<Vec<AccountUpdate>, StorageError> {
         //TODO: handle multiple extractors reverts
-        self.flush().await;
+        self.flush().await?;
         self.state_gateway
             .get_accounts_delta(chain, start_version, end_version, db)
             .await
     }
 
-    pub async fn flush(&self) {
+    pub async fn flush(&self) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
+        self.tx
             .send(DBCacheMessage::Flush(tx))
-            .await;
-        let _ = rx.await;
+            .await
+            .expect("Send message to receiver ok");
+        rx.await
+            .expect("Receive confirmation ok")
     }
 }
 
