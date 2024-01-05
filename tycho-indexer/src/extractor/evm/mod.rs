@@ -1063,6 +1063,7 @@ pub mod fixtures {
                         },
                     ],
                     change: ChangeType::Creation.into(),
+                    protocol_type: None, // TODO
                 }],
                 balance_changes: vec![BalanceChange {
                     token: hex::decode(
@@ -1170,6 +1171,7 @@ pub mod fixtures {
                             change: ChangeType::Creation.into(),
                         }],
                         change: ChangeType::Creation.into(),
+                        protocol_type: None, //TODO
                     }],
                     balance_changes: vec![],
                 },
@@ -1239,6 +1241,7 @@ pub mod fixtures {
                 },
             ],
             change: ChangeType::Creation.into(),
+            protocol_type: None, //TODO
         }
     }
 }
