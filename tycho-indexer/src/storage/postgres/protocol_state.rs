@@ -1,15 +1,17 @@
 #![allow(unused_variables)]
 
 use async_trait::async_trait;
-use diesel_async::AsyncPgConnection;
+use diesel::IntoSql;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
     extractor::evm::ProtocolState,
     models::{Chain, ProtocolSystem},
     storage::{
-        postgres::{orm, PostgresGateway},
-        Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+        postgres::{orm, orm::NewProtocolSystem, schema::block::dsl::block, PostgresGateway},
+        Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ProtocolGateway,
+        StorableBlock, StorableContract, StorableToken, StorableTransaction, StorageError, TxHash,
+        Version,
     },
 };
 
@@ -86,5 +88,68 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         todo!()
+    }
+
+    async fn _get_or_create_protocol_system_id(&self, new: ProtocolSystem, conn: &mut Self::DB) {
+        use super::schema::protocol_system::dsl::*;
+
+        let new_protocol_system = NewProtocolSystem { name: new.to_string() };
+        let a = diesel::insert_into(protocol_system)
+            .values(&new_protocol_system)
+            .on_conflict_do_nothing()
+            .execute(conn)
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
+            });
+        let b = 1;
+        let c = protocol_system
+            .load::<ProtocolSystem>(&conn)
+            .expect("Error loading ProtocolSystem");
+        let b = 1;
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
+
+    use diesel_async::AsyncConnection;
+    use ethers::types::{H160, H256};
+
+    use crate::{extractor::evm, models::Chain, storage::postgres::db_fixtures};
+
+    use super::*;
+
+    type EVMGateway = PostgresGateway<
+        evm::Block,
+        evm::Transaction,
+        evm::Account,
+        evm::AccountUpdate,
+        evm::ERC20Token,
+    >;
+
+    async fn setup_db() -> AsyncPgConnection {
+        let db_url = std::env::var("DATABASE_URL").unwrap();
+        let mut conn = AsyncPgConnection::establish(&db_url)
+            .await
+            .unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
+
+        conn
+    }
+
+    #[tokio::test]
+    async fn test_get_or_create_protocol_system_id() {
+        let mut conn = setup_db().await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let protocol_system_id = gw
+            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            .await;
+
+        // assert_eq!(protocol_system_id, 1);
     }
 }

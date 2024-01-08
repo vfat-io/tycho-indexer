@@ -221,6 +221,12 @@ pub struct ProtocolSystem {
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
+#[derive(Insertable)]
+#[diesel(table_name=protocol_system)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolSystem {
+    pub name: String,
+}
 
 #[derive(Debug, DbEnum)]
 #[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialProtocolType"]
