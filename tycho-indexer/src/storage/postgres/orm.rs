@@ -290,18 +290,21 @@ pub struct ProtocolState {
 impl ProtocolState {
     pub async fn by_id(
         component_ids: &[&str],
+        chain_id: i64,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<Self>> {
         protocol_state::table
             .inner_join(protocol_component::table)
             .filter(protocol_component::external_id.eq_any(component_ids))
+            .filter(protocol_component::chain_id.eq(chain_id))
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
     }
 
     pub async fn by_protocol_system(
-        system: &ProtocolSystem,
+        system: &models::ProtocolSystem,
+        chain_id: i64,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<Self>> {
         protocol_state::table
@@ -310,7 +313,8 @@ impl ProtocolState {
                 protocol_system::table
                     .on(protocol_component::protocol_system_id.eq(protocol_system::id)),
             )
-            .filter(protocol_system::name.eq(&system.name))
+            .filter(protocol_system::name.eq(&system.to_string().as_str()))
+            .filter(protocol_component::chain_id.eq(chain_id))
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
