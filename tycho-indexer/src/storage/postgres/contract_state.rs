@@ -1372,7 +1372,7 @@ async fn coerce_block_or_ts(
 mod test {
     //! Tests for PostgresGateway's ContractStateGateway methods
     //!
-    //! The tests below test the functionalit using the concrete EVM types.
+    //! The tests below test the functionality using the concrete EVM types.
     use std::str::FromStr;
 
     use diesel_async::{AsyncConnection, RunQueryDsl};

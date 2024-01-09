@@ -4,10 +4,9 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use diesel_async::AsyncPgConnection;
-use ethers::types::H256;
 
 use crate::{
-    extractor::evm::{ContractId, ProtocolState},
+    extractor::evm::ProtocolState,
     models::{Chain, ProtocolSystem},
     storage::{
         postgres::{orm, PostgresGateway},
@@ -97,7 +96,7 @@ where
             }
         }
 
-        let res = match (ids, system) {
+        match (ids, system) {
             (Some(ids), _) => {
                 handle_states(
                     orm::ProtocolState::by_id(ids, chain_db_id, conn).await,
@@ -119,9 +118,7 @@ where
                 )
                 .await
             }
-        };
-
-        res
+        }
     }
 
     async fn update_state(
