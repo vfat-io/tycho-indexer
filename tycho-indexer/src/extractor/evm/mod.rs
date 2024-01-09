@@ -1063,6 +1063,12 @@ pub mod fixtures {
                         },
                     ],
                     change: ChangeType::Creation.into(),
+                    protocol_type: Some(ProtocolType {
+                        name: "WeightedPool".to_string(),
+                        financial_type: 0,
+                        attribute_schema: vec![],
+                        implementation_type: 0,
+                    }),
                 }],
                 balance_changes: vec![BalanceChange {
                     token: hex::decode(
@@ -1170,6 +1176,12 @@ pub mod fixtures {
                             change: ChangeType::Creation.into(),
                         }],
                         change: ChangeType::Creation.into(),
+                        protocol_type: Some(ProtocolType {
+                            name: "WeightedPool".to_string(),
+                            financial_type: 0,
+                            attribute_schema: vec![],
+                            implementation_type: 0,
+                        }),
                     }],
                     balance_changes: vec![],
                 },
@@ -1239,6 +1251,12 @@ pub mod fixtures {
                 },
             ],
             change: ChangeType::Creation.into(),
+            protocol_type: Some(ProtocolType {
+                name: "WeightedPool".to_string(),
+                financial_type: 0,
+                attribute_schema: vec![],
+                implementation_type: 0,
+            }),
         }
     }
 }
