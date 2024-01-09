@@ -1,6 +1,7 @@
 #![allow(unused_variables)]
 
 use async_trait::async_trait;
+use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
@@ -135,7 +136,7 @@ mod test {
         extractor::evm,
         storage::postgres::{
             orm::{FinancialProtocolType, ProtocolImplementationType, ProtocolType},
-            PostgresGateway,
+            schema, PostgresGateway,
         },
     };
 
@@ -150,7 +151,8 @@ mod test {
     >;
 
     async fn setup_db() -> AsyncPgConnection {
-        let db_url = std::env::var("DATABASE_URL").unwrap();
+        // let db_url = std::env::var("DATABASE_URL").unwrap();
+        let db_url = "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0".to_string();
         let mut conn = AsyncPgConnection::establish(&db_url)
             .await
             .unwrap();
@@ -183,5 +185,17 @@ mod test {
         gw.upsert_protocol_types(protocol_types_slice.as_slice(), &mut conn)
             .await
             .unwrap();
+
+        let inserted_data = schema::protocol_type::table
+            .filter(schema::protocol_type::name.eq("Protocol"))
+            .select(schema::protocol_type::all_columns)
+            .first::<orm::ProtocolType>(&mut conn)
+            .await // Use optional() to handle the case when the record is not found
+            .unwrap();
+
+        assert_eq!(inserted_data.name, "Protocol".to_string());
+        assert_eq!(inserted_data.financial_type, FinancialProtocolType::Debt);
+        assert_eq!(inserted_data.attribute_schema, None);
+        assert_eq!(inserted_data.implementation, ProtocolImplementationType::Custom);
     }
 }

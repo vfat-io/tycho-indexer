@@ -222,7 +222,7 @@ pub struct ProtocolSystem {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Debug, DbEnum, Clone)]
+#[derive(Debug, DbEnum, Clone, PartialEq)]
 #[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialProtocolType"]
 pub enum FinancialProtocolType {
     Swap,
@@ -231,7 +231,7 @@ pub enum FinancialProtocolType {
     Leverage,
 }
 
-#[derive(Debug, DbEnum, Clone)]
+#[derive(Debug, DbEnum, Clone, PartialEq)]
 #[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolImplementationType"]
 pub enum ProtocolImplementationType {
     Custom,
