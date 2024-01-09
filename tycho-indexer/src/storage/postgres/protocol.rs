@@ -1,7 +1,6 @@
 #![allow(unused_variables)]
 
 use async_trait::async_trait;
-use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
@@ -134,12 +133,9 @@ mod test {
 
     use crate::{
         extractor::evm,
-        storage::{
-            postgres::{
-                orm::{FinancialProtocolType, ProtocolImplementationType, ProtocolType},
-                schema, PostgresGateway,
-            },
-            BlockHash,
+        storage::postgres::{
+            orm::{FinancialProtocolType, ProtocolImplementationType, ProtocolType},
+            PostgresGateway,
         },
     };
 
