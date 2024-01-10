@@ -510,10 +510,10 @@ pub trait ProtocolGateway {
     /// # Returns
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
-    /// - type with same is id already present.
+    /// - type with same id is already present.
     async fn upsert_protocol_types(
         &self,
-        new: &[&ProtocolType],
+        new: &ProtocolType,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 

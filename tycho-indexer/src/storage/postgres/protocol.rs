@@ -49,32 +49,26 @@ where
 
     async fn upsert_protocol_types(
         &self,
-        new: &[&ProtocolType],
+        new: &ProtocolType,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::protocol_type::dsl::*;
 
-        for new_protocol_type in new {
-            let values = NewProtocolType {
-                name: new_protocol_type.name.to_string(),
-                financial_type: new_protocol_type.financial_type.clone(),
-                attribute_schema: new_protocol_type
-                    .attribute_schema
-                    .clone(),
-                implementation: new_protocol_type.implementation.clone(),
-            };
+        let values = NewProtocolType {
+            name: new.name.to_string(),
+            financial_type: new.financial_type.clone(),
+            attribute_schema: new.attribute_schema.clone(),
+            implementation: new.implementation.clone(),
+        };
 
-            diesel::insert_into(protocol_type)
-                .values(&values)
-                .on_conflict(id)
-                .do_update()
-                .set(&values)
-                .execute(conn)
-                .await
-                .map_err(|err| {
-                    StorageError::from_diesel(err, "ProtocolType", &new_protocol_type.name, None)
-                })?;
-        }
+        diesel::insert_into(protocol_type)
+            .values(&values)
+            .on_conflict(id)
+            .do_update()
+            .set(&values)
+            .execute(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", &new.name, None))?;
 
         Ok(())
     }
@@ -152,8 +146,7 @@ mod test {
     >;
 
     async fn setup_db() -> AsyncPgConnection {
-        // let db_url = std::env::var("DATABASE_URL").unwrap();
-        let db_url = "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0".to_string();
+        let db_url = std::env::var("DATABASE_URL").unwrap();
         let mut conn = AsyncPgConnection::establish(&db_url)
             .await
             .unwrap();
@@ -172,7 +165,7 @@ mod test {
         let t = NaiveTime::from_hms_milli_opt(12, 34, 56, 789).unwrap();
         let dt = NaiveDateTime::new(d, t);
 
-        let protocol_types: Vec<ProtocolType> = vec![ProtocolType {
+        let protocol_type = ProtocolType {
             id: 1,
             name: "Protocol".to_string(),
             financial_type: FinancialProtocolType::Debt,
@@ -180,10 +173,9 @@ mod test {
             implementation: ProtocolImplementationType::Custom,
             inserted_ts: dt,
             modified_ts: dt,
-        }];
+        };
 
-        let protocol_types_slice: Vec<&ProtocolType> = protocol_types.iter().collect();
-        gw.upsert_protocol_types(protocol_types_slice.as_slice(), &mut conn)
+        gw.upsert_protocol_types(&protocol_type, &mut conn)
             .await
             .unwrap();
 
