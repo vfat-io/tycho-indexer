@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-// Gateway helper functions:
+// decode Protocol State query results
 async fn decode_protocol_states(
     result: Result<Vec<orm::ProtocolState>, diesel::result::Error>,
     context: &str,
@@ -89,8 +89,8 @@ where
     //     todo!()
     // }
 
-    // Gets all protocol states from the db. A separate protocol state is returned for every state
-    // update.
+    // Gets all protocol states from the db filtered by chain, component ids and/or protocol system.
+    // A separate protocol state is returned for each state update.
     async fn get_states(
         &self,
         chain: &Chain,
@@ -192,7 +192,9 @@ mod test {
         },
     };
     use diesel_async::AsyncConnection;
+    use ethers::types::U256;
     use rstest::rstest;
+    use serde_json::Value;
 
     use super::*;
 
@@ -268,7 +270,31 @@ mod test {
             txn[0],
         )
         .await;
-        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[0]).await;
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+        ]
+        .into_iter()
+        .collect();
+        let state: Value =
+            serde_json::to_value(&attributes).expect("Failed to convert attributes to json");
+        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[0], state).await;
+    }
+
+    fn protocol_state() -> ProtocolState {
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+        ]
+        .into_iter()
+        .collect();
+        ProtocolState::new(
+            "state1".to_owned(),
+            attributes,
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+                .parse()
+                .unwrap(),
+        )
     }
 
     #[rstest]
@@ -276,13 +302,8 @@ mod test {
     async fn test_get_states() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
-        let expected = vec![ProtocolState::new(
-            "state1".to_owned(),
-            HashMap::new(),
-            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
-                .parse()
-                .unwrap(),
-        )];
+
+        let expected = vec![protocol_state()];
 
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
