@@ -3,28 +3,62 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use diesel_async::AsyncPgConnection;
+use diesel::prelude::*;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
     extractor::evm::ProtocolState,
+    hex_bytes::Bytes,
     models::{Chain, ProtocolSystem},
     storage::{
-        postgres::{orm, PostgresGateway},
+        postgres::{orm, schema, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
         StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
     },
 };
 
-fn i64_to_txhash(value: i64) -> TxHash {
-    let mut array = [0; 32];
-    for (place, byte) in array
-        .iter_mut()
-        .zip(value.to_be_bytes().iter())
-    {
-        *place = *byte;
+// Gateway helper functions:
+async fn decode_protocol_states(
+    result: Result<Vec<orm::ProtocolState>, diesel::result::Error>,
+    context: &str,
+    conn: &mut AsyncPgConnection,
+) -> Result<Vec<ProtocolState>, StorageError> {
+    match result {
+        Ok(states) => {
+            let mut protocol_states = Vec::new();
+            for state in states {
+                let component_id = schema::protocol_component::table
+                    .filter(schema::protocol_component::id.eq(state.protocol_component_id))
+                    .select(schema::protocol_component::external_id)
+                    .first::<String>(conn)
+                    .await
+                    .expect("Failed to find matching protocol component in db");
+                let tx_hash = schema::transaction::table
+                    .filter(schema::transaction::id.eq(state.modify_tx))
+                    .select(schema::transaction::hash)
+                    .first::<Bytes>(conn)
+                    .await
+                    .expect("Failed to find matching protocol component in db");
+                let protocol_state = ProtocolState {
+                    component_id,
+                    updated_attributes: match state.state {
+                        Some(val) => serde_json::from_value(val).map_err(|err| {
+                            StorageError::DecodeError(format!(
+                                "Failed to deserialize state attribute: {}",
+                                err
+                            ))
+                        })?,
+                        None => HashMap::new(),
+                    },
+                    deleted_attributes: HashMap::new(),
+                    modify_tx: tx_hash.into(),
+                };
+                protocol_states.push(protocol_state);
+            }
+            Ok(protocol_states)
+        }
+        Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
     }
-
-    TxHash::from(array)
 }
 
 #[async_trait]
@@ -55,7 +89,8 @@ where
     //     todo!()
     // }
 
-    // Gets all protocol states from the db. A separate protocol state is returned for every state update.
+    // Gets all protocol states from the db. A separate protocol state is returned for every state
+    // update.
     async fn get_states(
         &self,
         chain: &Chain,
@@ -66,55 +101,28 @@ where
     ) -> Result<Vec<Self::ProtocolState>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
 
-        async fn handle_states(
-            result: Result<Vec<orm::ProtocolState>, diesel::result::Error>,
-            context: &str,
-        ) -> Result<Vec<ProtocolState>, StorageError> {
-            match result {
-                Ok(states) => {
-                    let mut protocol_states = Vec::new();
-                    for state in states {
-                        let protocol_state = ProtocolState {
-                            component_id: state.protocol_component_id.to_string(),
-                            updated_attributes: match state.state {
-                                Some(val) => serde_json::from_value(val).map_err(|err| {
-                                    StorageError::DecodeError(format!(
-                                        "Failed to deserialize state attribute: {}",
-                                        err
-                                    ))
-                                })?,
-                                None => HashMap::new(),
-                            },
-                            deleted_attributes: HashMap::new(),
-                            modify_tx: i64_to_txhash(state.modify_tx).into(),
-                        };
-                        protocol_states.push(protocol_state);
-                    }
-                    Ok(protocol_states)
-                }
-                Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
-            }
-        }
-
         match (ids, system) {
             (Some(ids), _) => {
-                handle_states(
+                decode_protocol_states(
                     orm::ProtocolState::by_id(ids, chain_db_id, conn).await,
                     ids.join(",").as_str(),
+                    conn,
                 )
                 .await
             }
             (_, Some(system)) => {
-                handle_states(
+                decode_protocol_states(
                     orm::ProtocolState::by_protocol_system(&system, chain_db_id, conn).await,
                     system.to_string().as_str(),
+                    conn,
                 )
                 .await
             }
             _ => {
-                handle_states(
+                decode_protocol_states(
                     orm::ProtocolState::by_chain(chain_db_id, conn).await,
                     chain.to_string().as_str(),
+                    conn,
                 )
                 .await
             }
