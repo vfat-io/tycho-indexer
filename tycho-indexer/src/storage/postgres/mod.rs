@@ -463,7 +463,10 @@ pub mod db_fixtures {
 
     use crate::storage::Code;
 
-    use super::schema;
+    use super::{
+        orm::{FinancialProtocolType, ProtocolImplementationType},
+        schema,
+    };
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -732,5 +735,92 @@ pub mod db_fixtures {
                 .await
                 .expect("delete storage table ok");
         }
+    }
+
+    // Insert a new Protocol System
+    pub async fn insert_protocol_system(conn: &mut AsyncPgConnection, name: &str) -> i64 {
+        diesel::insert_into(schema::protocol_system::table)
+            .values(schema::protocol_system::name.eq(name))
+            .returning(schema::protocol_system::id)
+            .get_result(conn)
+            .await
+            .unwrap()
+    }
+
+    // Insert a new Protocol Type
+    pub async fn insert_protocol_type(
+        conn: &mut AsyncPgConnection,
+        name: &str,
+        finantial_type: FinancialProtocolType,
+        implementation_type: ProtocolImplementationType,
+    ) -> i64 {
+        diesel::insert_into(schema::protocol_type::table)
+            .values((
+                schema::protocol_type::name.eq(name),
+                schema::protocol_type::financial_type.eq(finantial_type),
+                schema::protocol_type::implementation.eq(implementation_type),
+            ))
+            .returning(schema::protocol_type::id)
+            .get_result(conn)
+            .await
+            .unwrap()
+    }
+
+    // Insert a new Protocol Component
+    pub async fn insert_protocol_component(
+        conn: &mut AsyncPgConnection,
+        id: &str,
+        chain_id: i64,
+        system_id: i64,
+        type_id: i64,
+        tx_id: i64,
+    ) -> i64 {
+        let ts: NaiveDateTime = schema::transaction::table
+            .inner_join(schema::block::table)
+            .filter(schema::transaction::id.eq(tx_id))
+            .select(schema::block::ts)
+            .first::<NaiveDateTime>(conn)
+            .await
+            .expect("setup tx id not found");
+
+        let query = diesel::insert_into(schema::protocol_component::table).values((
+            schema::protocol_component::external_id.eq(id),
+            schema::protocol_component::chain_id.eq(chain_id),
+            schema::protocol_component::protocol_type_id.eq(type_id),
+            schema::protocol_component::protocol_system_id.eq(system_id),
+            schema::protocol_component::creation_tx.eq(tx_id),
+            schema::protocol_component::created_at.eq(ts),
+        ));
+        query
+            .returning(schema::protocol_component::id)
+            .get_result(conn)
+            .await
+            .unwrap()
+    }
+
+    // Insert a new Protocol State
+    pub async fn insert_protocol_state(
+        conn: &mut AsyncPgConnection,
+        component_id: i64,
+        tx_id: i64,
+    ) {
+        let ts: NaiveDateTime = schema::transaction::table
+            .inner_join(schema::block::table)
+            .filter(schema::transaction::id.eq(tx_id))
+            .select(schema::block::ts)
+            .first::<NaiveDateTime>(conn)
+            .await
+            .expect("setup tx id not found");
+
+        let query = diesel::insert_into(schema::protocol_state::table).values((
+            schema::protocol_state::protocol_component_id.eq(component_id),
+            schema::protocol_state::modify_tx.eq(tx_id),
+            schema::protocol_state::modified_ts.eq(ts),
+            schema::protocol_state::valid_from.eq(ts),
+        ));
+        query
+            .execute(conn)
+            .await
+            .expect("protocol state insert ok");
     }
 }

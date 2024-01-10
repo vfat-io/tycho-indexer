@@ -176,3 +176,116 @@ where
         todo!()
     }
 }
+
+#[cfg(test)]
+mod test {
+    //! Tests for PostgresGateway's ProtocolGateway methods
+    //!
+    //! The tests below test the functionality using the concrete EVM types.
+
+    use crate::extractor::evm;
+    use crate::storage::postgres::orm::{FinancialProtocolType, ProtocolImplementationType};
+    use crate::storage::postgres::{db_fixtures, PostgresGateway};
+    use diesel_async::AsyncConnection;
+    use rstest::rstest;
+
+    use super::*;
+
+    type EVMGateway = PostgresGateway<
+        evm::Block,
+        evm::Transaction,
+        evm::Account,
+        evm::AccountUpdate,
+        evm::ERC20Token,
+    >;
+
+    async fn setup_db() -> AsyncPgConnection {
+        let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        let mut conn = AsyncPgConnection::establish(&db_url)
+            .await
+            .unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
+        conn
+    }
+
+    /// This sets up the data needed to test the gateway. The setup is structured such that each
+    /// protocol state's historical changes are kept together this makes it easy to reason about
+    /// that change an account should have at each version Please not that if you change
+    /// something here, also update the state fixtures right below, which contain protocol states
+    /// at each version.     
+    async fn setup_data(conn: &mut AsyncPgConnection) {
+        let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let txn = db_fixtures::insert_txns(
+            conn,
+            &[
+                (
+                    blk[0],
+                    1i64,
+                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+                ),
+                (
+                    blk[0],
+                    2i64,
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                ),
+                // ----- Block 01 LAST
+                (
+                    blk[1],
+                    1i64,
+                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
+                ),
+                (
+                    blk[1],
+                    2i64,
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                ),
+                // ----- Block 02 LAST
+            ],
+        )
+        .await;
+        let protocol_system_id = db_fixtures::insert_protocol_system(conn, "Ambient").await;
+        let protocol_type_id = db_fixtures::insert_protocol_type(
+            conn,
+            "Pool",
+            FinancialProtocolType::Swap,
+            ProtocolImplementationType::Custom,
+        )
+        .await;
+        let protocol_component_id = db_fixtures::insert_protocol_component(
+            conn,
+            "state1",
+            chain_id,
+            protocol_system_id,
+            protocol_type_id,
+            txn[0],
+        )
+        .await;
+        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[0]).await;
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_states() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let expected = vec![ProtocolState::new(
+            "state1".to_owned(),
+            HashMap::new(),
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+                .parse()
+                .unwrap(),
+        )];
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        let result = gateway
+            .get_states(&Chain::Ethereum, None, None, None, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(result, expected)
+    }
+}
