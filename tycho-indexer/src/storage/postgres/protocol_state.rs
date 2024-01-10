@@ -1,14 +1,19 @@
 #![allow(unused_variables)]
 
 use async_trait::async_trait;
-use diesel::IntoSql;
+
+use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
     extractor::evm::ProtocolState,
     models::{Chain, ProtocolSystem},
     storage::{
-        postgres::{orm, orm::NewProtocolSystem, schema::block::dsl::block, PostgresGateway},
+        postgres::{
+            orm,
+            orm::{NewProtocolSystemType, ProtocolSystemType},
+            PostgresGateway,
+        },
         Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ProtocolGateway,
         StorableBlock, StorableContract, StorableToken, StorableTransaction, StorageError, TxHash,
         Version,
@@ -90,34 +95,53 @@ where
         todo!()
     }
 
-    async fn _get_or_create_protocol_system_id(&self, new: ProtocolSystem, conn: &mut Self::DB) {
-        use super::schema::protocol_system::dsl::*;
+    async fn _get_or_create_protocol_system_id(
+        &self,
+        new: ProtocolSystem,
+        conn: &mut Self::DB,
+    ) -> Result<NewProtocolSystemType, StorageError> {
+        use super::schema::protocol_system_type::dsl::*;
+        use crate::storage::postgres::schema;
+        let new_system = ProtocolSystemType::from(new.clone());
 
-        let new_protocol_system = NewProtocolSystem { name: new.to_string() };
-        let a = diesel::insert_into(protocol_system)
-            .values(&new_protocol_system)
-            .on_conflict_do_nothing()
-            .execute(conn)
-            .await
-            .map_err(|err| {
-                StorageError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
-            });
-        let b = 1;
-        let c = protocol_system
-            .load::<ProtocolSystem>(&conn)
-            .expect("Error loading ProtocolSystem");
-        let b = 1;
+        let existing_entry = schema::protocol_system_type::table
+            .filter(protocol_enum.eq(new_system.clone()))
+            .first::<NewProtocolSystemType>(conn)
+            .await;
+
+        if let Ok(entry) = existing_entry {
+            println!("OK");
+            return Ok(entry);
+        } else {
+            let new_entry =
+                NewProtocolSystemType { id: 0 as i64, protocol_enum: new_system.clone() };
+            println!("Error");
+            diesel::insert_into(schema::protocol_system_type::table)
+                .values(&new_entry)
+                .on_conflict(protocol_enum)
+                .do_update()
+                .set(protocol_enum.eq(new_system.clone()))
+                .execute(conn)
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolSystemEnum", &new.to_string(), None)
+                })?;
+            println!("Error");
+            Ok(schema::protocol_system_type::table
+                .filter(protocol_enum.eq(new_system.clone()))
+                .first::<NewProtocolSystemType>(conn)
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolSystemEnum", &new.to_string(), None)
+                })?)
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
+    use crate::extractor::evm;
     use diesel_async::AsyncConnection;
-    use ethers::types::{H160, H256};
-
-    use crate::{extractor::evm, models::Chain, storage::postgres::db_fixtures};
 
     use super::*;
 
@@ -148,8 +172,8 @@ mod test {
 
         let protocol_system_id = gw
             ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
-            .await;
-
+            .await
+            .unwrap();
         // assert_eq!(protocol_system_id, 1);
     }
 }
