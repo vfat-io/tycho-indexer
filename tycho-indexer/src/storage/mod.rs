@@ -956,23 +956,3 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         ProtocolState = ProtocolState,
     >,
 >;
-
-impl ToSql<ProtocolSystem, Pg> for MyEnum {
-    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
-        match *self {
-            MyEnum::Foo => out.write_all(b"foo")?,
-            MyEnum::Bar => out.write_all(b"bar")?,
-        }
-        Ok(IsNull::No)
-    }
-}
-
-impl FromSql<MyType, Pg> for MyEnum {
-    fn from_sql(bytes: PgValue<'_>) -> deserialize::Result<Self> {
-        match bytes.as_bytes() {
-            b"foo" => Ok(MyEnum::Foo),
-            b"bar" => Ok(MyEnum::Bar),
-            _ => Err("Unrecognized enum variant".into()),
-        }
-    }
-}
