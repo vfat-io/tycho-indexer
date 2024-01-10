@@ -77,6 +77,40 @@ impl Transaction {
     }
 }
 
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
+pub enum FinancialType {
+    #[default]
+    Swap,
+    Psm,
+    Debt,
+    Leverage,
+}
+
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
+pub enum ImplementationType {
+    #[default]
+    Vm,
+    Custom,
+}
+#[derive(Debug, PartialEq, Clone, Default, Deserialize, Serialize)]
+pub struct ProtocolType {
+    pub name: String,
+    pub financial_type: FinancialType,
+    pub attribute_schema: serde_json::Value,
+    pub implementation: ImplementationType,
+}
+
+impl ProtocolType {
+    pub fn new(
+        name: String,
+        financial_type: FinancialType,
+        attribute_schema: serde_json::Value,
+        implementation: ImplementationType,
+    ) -> Self {
+        ProtocolType { name, financial_type, attribute_schema, implementation }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
     pub chain: Chain,
@@ -370,7 +404,7 @@ pub struct BlockContractChanges {
 }
 
 pub type EVMStateGateway<DB> =
-    StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token>;
+    StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token, ProtocolType>;
 
 impl Block {
     /// Parses block from tychos protobuf block message

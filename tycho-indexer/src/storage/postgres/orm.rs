@@ -226,9 +226,9 @@ pub struct ProtocolSystem {
 #[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialProtocolType"]
 pub enum FinancialProtocolType {
     Swap,
-    Lend,
-    Leverage,
     Psm,
+    Debt,
+    Leverage,
 }
 
 #[derive(Debug, DbEnum, Clone, PartialEq)]

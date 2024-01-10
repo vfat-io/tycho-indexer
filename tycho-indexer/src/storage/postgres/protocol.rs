@@ -15,22 +15,25 @@ use crate::{
             PostgresGateway,
         },
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+        StorableContract, StorableProtocolType, StorableToken, StorableTransaction, StorageError,
+        TxHash, Version,
     },
 };
 
 #[async_trait]
-impl<B, TX, A, D, T> ProtocolGateway for PostgresGateway<B, TX, A, D, T>
+impl<B, TX, A, D, T, PT> ProtocolGateway for PostgresGateway<B, TX, A, D, T, PT>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
+    PT: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>,
 {
     type DB = AsyncPgConnection;
     type Token = T;
     type ProtocolState = ProtocolState;
+    type ProtocolType = PT;
 
     // TODO: uncomment to implement in ENG 2049
     // async fn get_components(
@@ -47,19 +50,14 @@ where
     //     todo!()
     // }
 
-    async fn upsert_protocol_types(
+    async fn upsert_protocol_type(
         &self,
-        new: &ProtocolType,
+        new: &Self::ProtocolType,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::protocol_type::dsl::*;
 
-        let values = NewProtocolType {
-            name: new.name.to_string(),
-            financial_type: new.financial_type.clone(),
-            attribute_schema: new.attribute_schema.clone(),
-            implementation: new.implementation.clone(),
-        };
+        let values: orm::NewProtocolType = new.to_storage();
 
         diesel::insert_into(protocol_type)
             .values(&values)
@@ -68,7 +66,7 @@ where
             .set(&values)
             .execute(conn)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", &new.name, None))?;
+            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", &values.name, None))?;
 
         Ok(())
     }
@@ -126,13 +124,14 @@ mod test {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 
     use diesel_async::AsyncConnection;
+    use serde_json::json;
 
     use crate::{
-        extractor::evm,
-        storage::postgres::{
-            orm::{FinancialProtocolType, ProtocolImplementationType, ProtocolType},
-            schema, PostgresGateway,
+        extractor::{
+            evm,
+            evm::{FinancialType, ImplementationType},
         },
+        storage::postgres::{orm, schema, PostgresGateway},
     };
 
     use super::*;
@@ -143,6 +142,7 @@ mod test {
         evm::Account,
         evm::AccountUpdate,
         evm::ERC20Token,
+        evm::ProtocolType,
     >;
 
     async fn setup_db() -> AsyncPgConnection {
@@ -165,17 +165,14 @@ mod test {
         let t = NaiveTime::from_hms_milli_opt(12, 34, 56, 789).unwrap();
         let dt = NaiveDateTime::new(d, t);
 
-        let protocol_type = ProtocolType {
-            id: 1,
+        let protocol_type = evm::ProtocolType {
             name: "Protocol".to_string(),
-            financial_type: FinancialProtocolType::Debt,
-            attribute_schema: None,
-            implementation: ProtocolImplementationType::Custom,
-            inserted_ts: dt,
-            modified_ts: dt,
+            financial_type: FinancialType::Debt,
+            attribute_schema: json!({"attribute": "schema"}),
+            implementation: ImplementationType::Custom,
         };
 
-        gw.upsert_protocol_types(&protocol_type, &mut conn)
+        gw.upsert_protocol_type(&protocol_type, &mut conn)
             .await
             .unwrap();
 
@@ -187,8 +184,8 @@ mod test {
             .unwrap();
 
         assert_eq!(inserted_data.name, "Protocol".to_string());
-        assert_eq!(inserted_data.financial_type, FinancialProtocolType::Debt);
+        assert_eq!(inserted_data.financial_type, FinancialType::Debt);
         assert_eq!(inserted_data.attribute_schema, None);
-        assert_eq!(inserted_data.implementation, ProtocolImplementationType::Custom);
+        assert_eq!(inserted_data.implementation, ImplementationType::Custom);
     }
 }

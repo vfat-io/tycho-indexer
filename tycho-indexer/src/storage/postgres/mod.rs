@@ -143,8 +143,8 @@ use tracing::{debug, info};
 use crate::models::Chain;
 
 use super::{
-    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableToken,
-    StorableTransaction, StorageError,
+    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableProtocolType,
+    StorableToken, StorableTransaction, StorageError,
 };
 
 pub mod cache;
@@ -274,22 +274,24 @@ impl StorageError {
     }
 }
 
-pub struct PostgresGateway<B, TX, A, D, T> {
+pub struct PostgresGateway<B, TX, A, D, T, PT> {
     chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
     _phantom_acc: PhantomData<A>,
     _phantom_delta: PhantomData<D>,
     _phantom_token: PhantomData<T>,
+    _phantom_protocol_type: PhantomData<PT>,
 }
 
-impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
+impl<B, TX, A, D, T, PT> PostgresGateway<B, TX, A, D, T, PT>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
+    PT: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>,
 {
     pub fn with_cache(cache: Arc<ChainEnumCache>) -> Self {
         Self {
@@ -299,6 +301,7 @@ where
             _phantom_acc: PhantomData,
             _phantom_delta: PhantomData,
             _phantom_token: PhantomData,
+            _phantom_protocol_type: PhantomData,
         }
     }
 
@@ -329,19 +332,20 @@ where
     pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
         let cache = EnumTableCache::<Chain>::from_pool(pool.clone()).await?;
 
-        let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(Arc::new(cache)));
+        let gw = Arc::new(PostgresGateway::<B, TX, A, D, T, PT>::with_cache(Arc::new(cache)));
 
         Ok(gw)
     }
 }
 
-impl<B, TX, A, D, T> StateGateway<AsyncPgConnection> for PostgresGateway<B, TX, A, D, T>
+impl<B, TX, A, D, T, PT> StateGateway<AsyncPgConnection> for PostgresGateway<B, TX, A, D, T, PT>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
+    PT: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>,
 {
     // No methods in here - this just ties everything together
 }

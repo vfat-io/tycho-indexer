@@ -506,6 +506,7 @@ mod gateway_test {
             evm::Account,
             evm::AccountUpdate,
             evm::ERC20Token,
+            evm::ProtocolType,
         >::from_connection(&mut conn)
         .await;
 

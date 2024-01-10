@@ -17,15 +17,21 @@ use crate::{
 };
 
 pub mod pg {
+    use crate::extractor::evm::{FinancialType, ImplementationType};
+    use actix_web_actors::ws::CloseCode::Protocol;
     use ethers::types::{H160, H256, U256};
+    use serde_json::json;
 
     use crate::storage::{
         postgres::{
             orm,
-            orm::{NewProtocolState, NewToken, Token},
+            orm::{
+                FinancialProtocolType, NewProtocolState, NewToken, ProtocolImplementationType,
+                Token,
+            },
         },
-        Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState, StorableToken,
-        TxHash,
+        Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState, StorableProtocolType,
+        StorableToken, TxHash,
     };
 
     use super::*;
@@ -111,6 +117,20 @@ pub mod pg {
 
         fn hash(&self) -> BlockHash {
             self.hash.into()
+        }
+    }
+    impl StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64> for evm::ProtocolType {
+        fn from_storage(val: orm::ProtocolType) -> Result<Self, StorageError> {
+            Ok(Self::new(val.name, FinancialType::Swap, json!({}), ImplementationType::Vm))
+        }
+
+        fn to_storage(&self) -> orm::NewProtocolType {
+            orm::NewProtocolType {
+                name: self.name.into(),
+                implementation: ProtocolImplementationType::Custom,
+                attribute_schema: self.attribute_schema.into(),
+                financial_type: FinancialProtocolType::Debt,
+            }
         }
     }
 

@@ -419,6 +419,7 @@ mod test {
             evm::Account,
             evm::AccountUpdate,
             evm::ERC20Token,
+            evm::ProtocolType,
         >::from_connection(&mut connection)
         .await;
 
