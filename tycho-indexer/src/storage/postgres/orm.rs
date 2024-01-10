@@ -11,8 +11,8 @@ use crate::{
 
 use super::schema::{
     account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
-    protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
-    token, transaction,
+    protocol_component, protocol_holds_token, protocol_state, protocol_system,
+    protocol_system_type, protocol_type, token, transaction,
 };
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -221,11 +221,27 @@ pub struct ProtocolSystem {
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
-#[derive(Insertable)]
-#[diesel(table_name=protocol_system)]
+
+#[derive(Debug, DbEnum, PartialEq, Clone)]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolSystemType"]
+pub enum ProtocolSystemType {
+    Ambient,
+}
+
+impl From<models::ProtocolSystem> for ProtocolSystemType {
+    fn from(value: models::ProtocolSystem) -> Self {
+        match value {
+            models::ProtocolSystem::Ambient => ProtocolSystemType::Ambient,
+        }
+    }
+}
+
+#[derive(Insertable, Queryable, Selectable, Debug, PartialEq)]
+#[diesel(table_name=protocol_system_type)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewProtocolSystem {
-    pub name: String,
+pub struct NewProtocolSystemType {
+    pub id: i64,
+    pub protocol_enum: ProtocolSystemType,
 }
 
 #[derive(Debug, DbEnum)]

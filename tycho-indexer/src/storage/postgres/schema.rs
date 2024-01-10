@@ -1,5 +1,4 @@
 // @generated automatically by Diesel CLI.
-
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "financial_protocol_type"))]
@@ -12,6 +11,10 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "protocol_implementation_type"))]
     pub struct ProtocolImplementationType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "protocol_system_name"))]
+    pub struct ProtocolSystemType;
 }
 
 diesel::table! {
@@ -234,6 +237,24 @@ diesel::table! {
         modified_ts -> Timestamptz,
     }
 }
+
+diesel::table! {
+    use diesel::sql_types::Int8;
+    use super::sql_types::ProtocolSystemType;
+    protocol_system_type(id) {
+        id -> Int8,
+        protocol_enum -> ProtocolSystemType,
+    }
+}
+
+//diesel::table! {
+//    use diesel::sql_types::Int8;
+//    use crate::models::ProtocolSystemMapping;
+//    protocol_system_type(id) {
+//        id -> Int8,
+//        protocol_enum -> ProtocolSystemMapping,
+//    }
+//}
 
 diesel::joinable!(account -> chain (chain_id));
 diesel::joinable!(account_balance -> account (account_id));
