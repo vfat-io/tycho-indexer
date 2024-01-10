@@ -183,9 +183,14 @@ mod test {
     //!
     //! The tests below test the functionality using the concrete EVM types.
 
-    use crate::extractor::evm;
-    use crate::storage::postgres::orm::{FinancialProtocolType, ProtocolImplementationType};
-    use crate::storage::postgres::{db_fixtures, PostgresGateway};
+    use crate::{
+        extractor::evm,
+        storage::postgres::{
+            db_fixtures,
+            orm::{FinancialProtocolType, ProtocolImplementationType},
+            PostgresGateway,
+        },
+    };
     use diesel_async::AsyncConnection;
     use rstest::rstest;
 
