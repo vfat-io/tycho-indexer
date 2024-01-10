@@ -224,6 +224,27 @@ pub trait StorableTransaction<S, N, I>: Sized + Send + Sync + 'static {
     fn hash(&self) -> TxHash;
 }
 
+/// Lays out the necessary interface needed to store and retrieve protocol types
+/// from storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   transaction.
+/// * `N`: This represents the storage-specific data type used when converting from the protocol
+///   type to storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the transaction.
+pub trait StorableProtocolType<S, N, I>: Sized + Send + Sync + 'static {
+    /// Converts a protocol type from storage representation (`S`) to protocol type
+    /// form.
+    fn from_storage(val: S) -> Result<Self, crate::storage::StorageError>;
+
+    /// Converts a protocol type object to its storable representation (`N`).
+    fn to_storage(&self) -> N;
+}
+
 #[derive(Error, Debug, PartialEq)]
 pub enum StorageError {
     #[error("Could not find {0} with id `{1}`!")]
@@ -482,6 +503,9 @@ pub trait ProtocolGateway {
     type DB;
     type Token;
     type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
+
+    type ProtocolType: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>;
+
     // TODO: uncomment below when StorableProtocolComponent is implemented (ENG 1728)
     // type ProtocolComponent;
 
@@ -511,9 +535,9 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
     /// - type with same id is already present.
-    async fn upsert_protocol_types(
+    async fn upsert_protocol_type(
         &self,
-        new: &ProtocolType,
+        new: &Self::ProtocolType,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -954,7 +978,7 @@ pub trait StateGateway<DB>:
 {
 }
 
-pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
+pub type StateGatewayType<DB, B, TX, C, D, T, PT> = Arc<
     dyn StateGateway<
         DB,
         Transaction = TX,
@@ -963,5 +987,6 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         Delta = D,
         Token = T,
         ProtocolState = ProtocolState,
+        ProtocolType = PT,
     >,
 >;
