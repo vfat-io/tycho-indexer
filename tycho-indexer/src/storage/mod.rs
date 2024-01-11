@@ -81,7 +81,7 @@ use crate::{
     extractor::evm::ProtocolState,
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolSystem},
-    storage::postgres::{orm, orm::ProtocolType},
+    storage::postgres::orm,
 };
 
 pub mod postgres;

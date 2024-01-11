@@ -96,7 +96,7 @@ pub enum ImplementationType {
 pub struct ProtocolType {
     pub name: String,
     pub financial_type: FinancialType,
-    pub attribute_schema: serde_json::Value,
+    pub attribute_schema: Option<serde_json::Value>,
     pub implementation: ImplementationType,
 }
 
@@ -104,7 +104,7 @@ impl ProtocolType {
     pub fn new(
         name: String,
         financial_type: FinancialType,
-        attribute_schema: serde_json::Value,
+        attribute_schema: Option<serde_json::Value>,
         implementation: ImplementationType,
     ) -> Self {
         ProtocolType { name, financial_type, attribute_schema, implementation }

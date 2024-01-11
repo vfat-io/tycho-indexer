@@ -131,7 +131,11 @@ mod test {
             evm,
             evm::{FinancialType, ImplementationType},
         },
-        storage::postgres::{orm, schema, PostgresGateway},
+        storage::postgres::{
+            orm,
+            orm::{FinancialProtocolType, ProtocolImplementationType},
+            schema, PostgresGateway,
+        },
     };
 
     use super::*;
@@ -168,7 +172,7 @@ mod test {
         let protocol_type = evm::ProtocolType {
             name: "Protocol".to_string(),
             financial_type: FinancialType::Debt,
-            attribute_schema: json!({"attribute": "schema"}),
+            attribute_schema: Some(json!({"attribute": "schema"})),
             implementation: ImplementationType::Custom,
         };
 
@@ -180,12 +184,12 @@ mod test {
             .filter(schema::protocol_type::name.eq("Protocol"))
             .select(schema::protocol_type::all_columns)
             .first::<orm::ProtocolType>(&mut conn)
-            .await // Use optional() to handle the case when the record is not found
+            .await
             .unwrap();
 
         assert_eq!(inserted_data.name, "Protocol".to_string());
-        assert_eq!(inserted_data.financial_type, FinancialType::Debt);
-        assert_eq!(inserted_data.attribute_schema, None);
-        assert_eq!(inserted_data.implementation, ImplementationType::Custom);
+        assert_eq!(inserted_data.financial_type, FinancialProtocolType::Debt);
+        assert_eq!(inserted_data.attribute_schema, Some(json!({"attribute": "schema"})));
+        assert_eq!(inserted_data.implementation, ProtocolImplementationType::Custom);
     }
 }

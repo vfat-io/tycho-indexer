@@ -18,9 +18,7 @@ use crate::{
 
 pub mod pg {
     use crate::extractor::evm::{FinancialType, ImplementationType};
-    use actix_web_actors::ws::CloseCode::Protocol;
     use ethers::types::{H160, H256, U256};
-    use serde_json::json;
 
     use crate::storage::{
         postgres::{
@@ -121,15 +119,39 @@ pub mod pg {
     }
     impl StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64> for evm::ProtocolType {
         fn from_storage(val: orm::ProtocolType) -> Result<Self, StorageError> {
-            Ok(Self::new(val.name, FinancialType::Swap, json!({}), ImplementationType::Vm))
+            let financial_type: FinancialType = match val.financial_type {
+                FinancialProtocolType::Swap => FinancialType::Swap,
+                FinancialProtocolType::Psm => FinancialType::Psm,
+                FinancialProtocolType::Debt => FinancialType::Debt,
+                FinancialProtocolType::Leverage => FinancialType::Leverage,
+            };
+            let implementation_type: ImplementationType = match val.implementation {
+                ProtocolImplementationType::Custom => ImplementationType::Custom,
+                ProtocolImplementationType::Vm => ImplementationType::Vm,
+            };
+
+            Ok(Self::new(val.name, financial_type, val.attribute_schema, implementation_type))
         }
 
         fn to_storage(&self) -> orm::NewProtocolType {
+            let financial_protocol_type: FinancialProtocolType = match self.financial_type {
+                FinancialType::Swap => FinancialProtocolType::Swap,
+                FinancialType::Psm => FinancialProtocolType::Psm,
+                FinancialType::Debt => FinancialProtocolType::Debt,
+                FinancialType::Leverage => FinancialProtocolType::Leverage,
+            };
+
+            let protocol_implementation_type: ProtocolImplementationType = match self.implementation
+            {
+                ImplementationType::Custom => ProtocolImplementationType::Custom,
+                ImplementationType::Vm => ProtocolImplementationType::Vm,
+            };
+
             orm::NewProtocolType {
-                name: self.name.into(),
-                implementation: ProtocolImplementationType::Custom,
-                attribute_schema: self.attribute_schema.into(),
-                financial_type: FinancialProtocolType::Debt,
+                name: self.name.clone(),
+                implementation: protocol_implementation_type,
+                attribute_schema: self.attribute_schema.clone(),
+                financial_type: financial_protocol_type,
             }
         }
     }

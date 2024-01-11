@@ -115,6 +115,7 @@ async fn main() -> Result<(), ExtractionError> {
         evm::Account,
         evm::AccountUpdate,
         evm::ERC20Token,
+        evm::ProtocolType,
     >::new(pool.clone())
     .await?;
 
