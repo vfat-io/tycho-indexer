@@ -546,12 +546,12 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolState>, StorageError>;
 
-    async fn update_state(
+    async fn update_states(
         &self,
-        chain: Chain,
-        new: &[(TxHash, ProtocolState)],
+        chain: &Chain,
+        new: &[ProtocolState],
         conn: &mut Self::DB,
-    );
+    ) -> Result<(), StorageError>;
 
     /// Retrieves a tokens from storage
     ///

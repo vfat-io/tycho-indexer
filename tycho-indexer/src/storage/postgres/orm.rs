@@ -199,6 +199,18 @@ impl Transaction {
             .first::<Self>(conn)
             .await
     }
+
+    pub async fn by_hashes(
+        hashes: &[&[u8]],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(Self, NaiveDateTime)>> {
+        transaction::table
+            .inner_join(block::table)
+            .filter(transaction::hash.eq_any(hashes))
+            .select((Self::as_select(), block::ts))
+            .get_results::<(Self, NaiveDateTime)>(conn)
+            .await
+    }
 }
 
 #[derive(Insertable)]
@@ -268,6 +280,19 @@ pub struct ProtocolComponent {
     pub deleted_at: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+impl ProtocolComponent {
+    pub async fn by_external_ids(
+        external_ids: &[&str],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
+        protocol_component::table
+            .filter(protocol_component::external_id.eq_any(external_ids))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await
+    }
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]

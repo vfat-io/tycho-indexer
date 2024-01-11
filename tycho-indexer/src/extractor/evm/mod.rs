@@ -26,7 +26,7 @@ use super::ExtractionError;
 
 pub mod ambient;
 pub mod storage;
-mod utils;
+pub mod utils;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SwapPool {}

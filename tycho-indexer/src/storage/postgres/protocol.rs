@@ -3,17 +3,20 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use ethers::types::H256;
+use serde_json::Value;
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{utils::TryDecode, ProtocolState},
     hex_bytes::Bytes,
     models::{Chain, ProtocolSystem},
     storage::{
         postgres::{orm, schema, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+        StorableContract, StorableToken, StorableTransaction, StorageError, Version,
     },
 };
 
@@ -129,13 +132,75 @@ where
         }
     }
 
-    async fn update_state(
+    async fn update_states(
         &self,
-        chain: Chain,
-        new: &[(TxHash, ProtocolState)],
+        chain: &Chain,
+        new: &[ProtocolState],
         conn: &mut Self::DB,
-    ) {
-        todo!()
+    ) -> Result<(), StorageError> {
+        let chain_db_id = self.get_chain_id(chain);
+        let txns: HashMap<H256, (i64, NaiveDateTime)> = orm::Transaction::by_hashes(
+            new.iter()
+                .map(|state| state.modify_tx.as_bytes())
+                .collect::<Vec<&[u8]>>()
+                .as_slice(),
+            conn,
+        )
+        .await?
+        .into_iter()
+        .map(|(tx, ts)| {
+            (H256::try_decode(&tx.hash, "tx hash").expect("Failed to decode tx hash"), (tx.id, ts))
+        })
+        .collect();
+
+        let components: HashMap<String, i64> = orm::ProtocolComponent::by_external_ids(
+            new.iter()
+                .map(|state| state.component_id.as_str())
+                .collect::<Vec<&str>>()
+                .as_slice(),
+            conn,
+        )
+        .await?
+        .into_iter()
+        .map(|component| (component.external_id.clone(), component.id))
+        .collect();
+
+        let mut state_data = Vec::new();
+
+        for state in new {
+            let tx_db = *txns
+                .get(&state.modify_tx)
+                .expect("Failed to find tx");
+            let component_db_id = *components
+                .get(&state.component_id)
+                .expect("Failed to find component");
+            let attributes: Option<Value> = if !state.updated_attributes.is_empty() {
+                Some(
+                    serde_json::to_value(&state.updated_attributes)
+                        .expect("Failed to convert attributes to json"),
+                )
+            } else {
+                None
+            };
+            let new = orm::NewProtocolState {
+                protocol_component_id: component_db_id,
+                state: attributes,
+                modify_tx: tx_db.0,
+                tvl: None,
+                inertias: None,
+                valid_from: tx_db.1,
+                valid_to: None,
+            };
+            state_data.push(new);
+        }
+
+        if !state_data.is_empty() {
+            diesel::insert_into(schema::protocol_state::table)
+                .values(&state_data)
+                .execute(conn)
+                .await?;
+        }
+        Ok(())
     }
 
     async fn get_tokens(
