@@ -258,7 +258,6 @@ mod test {
     };
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
-    use rstest::rstest;
     use serde_json::Value;
 
     use super::*;
@@ -362,7 +361,6 @@ mod test {
         )
     }
 
-    #[rstest]
     #[tokio::test]
     async fn test_get_states() {
         let mut conn = setup_db().await;
@@ -378,5 +376,36 @@ mod test {
             .unwrap();
 
         assert_eq!(result, expected)
+    }
+
+    #[tokio::test]
+    async fn test_update_states() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+        let chain = Chain::Ethereum;
+
+        let mut new_state = protocol_state();
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(700))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(700))),
+        ]
+        .into_iter()
+        .collect();
+        new_state.updated_attributes = attributes;
+
+        // update the protocol state
+        gateway
+            .update_states(&chain, &[new_state.clone()], &mut conn)
+            .await
+            .expect("Failed to update protocol states");
+
+        // check the orginal state and the updated one both exist in the db
+        let db_states = gateway
+            .get_states(&chain, None, None, Some(&[new_state.component_id.as_str()]), &mut conn)
+            .await
+            .expect("Failed ");
+        assert_eq!(db_states.len(), 2)
     }
 }
