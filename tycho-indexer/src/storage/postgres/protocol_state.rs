@@ -11,7 +11,7 @@ use crate::{
     storage::{
         postgres::{
             orm,
-            orm::{NewProtocolSystemType, ProtocolSystemType},
+            orm::{NewProtocolSystemType, ProtocolSystemDBEnum, ProtocolSystemType},
             PostgresGateway,
         },
         Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ProtocolGateway,

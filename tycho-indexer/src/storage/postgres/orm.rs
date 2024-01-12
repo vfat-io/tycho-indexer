@@ -222,16 +222,16 @@ pub struct ProtocolSystem {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Debug, DbEnum, PartialEq, Clone)]
+#[derive(Debug, DbEnum, Clone)]
 #[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolSystemType"]
-pub enum ProtocolSystemType {
+pub enum ProtocolSystemDBEnum {
     Ambient,
 }
 
-impl From<models::ProtocolSystem> for ProtocolSystemType {
+impl From<models::ProtocolSystem> for ProtocolSystemDBEnum {
     fn from(value: models::ProtocolSystem) -> Self {
         match value {
-            models::ProtocolSystem::Ambient => ProtocolSystemType::Ambient,
+            models::ProtocolSystem::Ambient => ProtocolSystemDBEnum::Ambient,
         }
     }
 }
