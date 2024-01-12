@@ -17,6 +17,7 @@ use crate::{
 };
 
 pub mod pg {
+    use crate::extractor::evm::utils::pad_and_parse_h160;
     use ethers::types::{H160, H256, U256};
 
     use crate::storage::{
@@ -251,22 +252,34 @@ pub mod pg {
 
     impl StorableToken<orm::Token, orm::NewToken, i64> for evm::ERC20Token {
         fn from_storage(val: Token, contract: ContractId) -> Result<Self, StorageError> {
-            // TODO: implementing this is planned for ENG 1717, uncomment below to start
-            // let address =
-            //     pad_and_parse_h160(contract.address()).map_err(StorageError::DecodeError)?;
-            // Ok(evm::ERC20Token::new(
-            //     address,
-            //     String::try_from(&val.symbol).map_err(StorageError::DecodeError)?,
-            // ))
-            todo!()
+            let address =
+                pad_and_parse_h160(contract.address()).map_err(StorageError::DecodeError)?;
+            Ok(evm::ERC20Token::new(
+                address,
+                val.symbol,
+                val.decimals as u32,
+                val.tax as u64,
+                val.gas
+                    .into_iter()
+                    .map(|item| item.map(|i| i as u64))
+                    .collect(),
+                contract.chain,
+            ))
         }
 
-        fn to_storage(&self, contract_id: i64) -> NewToken {
-            todo!()
-        }
-
-        fn contract_id(&self) -> ContractId {
-            todo!()
+        fn to_storage(&self, contract_id: i64) -> orm::NewToken {
+            NewToken {
+                account_id: contract_id,
+                symbol: self.symbol.clone(),
+                decimals: self.decimals as i32,
+                tax: self.tax as i64,
+                gas: self
+                    .gas
+                    .clone()
+                    .into_iter()
+                    .map(|item| item.map(|i| i as i64))
+                    .collect(),
+            }
         }
     }
 
@@ -285,5 +298,54 @@ pub mod pg {
         fn contract_id(&self) -> ContractId {
             todo!()
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        extractor::evm::{utils::pad_and_parse_h160, ERC20Token},
+        storage::{postgres::orm::Token, Address, StorableToken},
+    };
+
+    #[test]
+    fn test_storable_token_from_storage() {
+        let token_address: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".into();
+        let orm_token = Token {
+            id: 1,
+            account_id: 1,
+            symbol: String::from("WETH"),
+            decimals: 18,
+            tax: 0,
+            gas: vec![],
+            inserted_ts: Default::default(),
+            modified_ts: Default::default(),
+        };
+        let contract_id = ContractId::new(Chain::Ethereum, token_address.clone());
+        let result = ERC20Token::from_storage(orm_token, contract_id);
+        assert!(result.is_ok());
+
+        let token = result.unwrap();
+        assert_eq!(token.address, pad_and_parse_h160(&token_address).unwrap());
+        assert_eq!(token.symbol, String::from("WETH"));
+        assert_eq!(token.decimals, 18);
+    }
+    #[test]
+    fn test_storable_token_to_storage() {
+        let token_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".into();
+        let erc_token = ERC20Token {
+            address: pad_and_parse_h160(&token_address).unwrap(),
+            symbol: "WETH".into(),
+            decimals: 18,
+            tax: 0,
+            gas: vec![],
+            chain: Chain::Ethereum,
+        };
+
+        let new_token = erc_token.to_storage(22);
+        assert_eq!(new_token.account_id, 22);
+        assert_eq!(new_token.symbol, erc_token.symbol);
+        assert_eq!(new_token.decimals, erc_token.decimals as i32);
     }
 }
