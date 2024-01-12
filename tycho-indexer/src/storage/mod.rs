@@ -526,15 +526,13 @@ pub trait ProtocolGateway {
     //     ids: Option<&[&str]>,
     // ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
-    /// Stores new found ProtocolTypes or update if existing.
+    /// Stores new found ProtocolTypes or updates if existing.
     ///
     /// # Parameters
     /// - `new`  The new protocol types.
     ///
     /// # Returns
-    /// Ok if stored successfully, may error if:
-    /// - related entities are not in store yet.
-    /// - type with same id is already present.
+    /// Ok if stored successfully.
     async fn upsert_protocol_type(
         &self,
         new: &Self::ProtocolType,
