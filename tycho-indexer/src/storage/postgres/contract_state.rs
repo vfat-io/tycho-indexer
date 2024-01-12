@@ -44,14 +44,13 @@ struct CreatedOrDeleted<T> {
 }
 
 // Private methods
-impl<B, TX, A, D, T, PT> PostgresGateway<B, TX, A, D, T, PT>
+impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
-    PT: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>,
 {
     /// Retrieves the changes in balance for all accounts of a chain.
     ///
@@ -648,14 +647,13 @@ where
 }
 
 #[async_trait]
-impl<B, TX, A, D, T, PT> ContractStateGateway for PostgresGateway<B, TX, A, D, T, PT>
+impl<B, TX, A, D, T> ContractStateGateway for PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
-    PT: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>,
 {
     type DB = AsyncPgConnection;
     type ContractState = A;
@@ -1395,7 +1393,6 @@ mod test {
         evm::Account,
         evm::AccountUpdate,
         evm::ERC20Token,
-        evm::ProtocolType,
     >;
     type MaybeTS = Option<NaiveDateTime>;
 

@@ -78,7 +78,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{ProtocolState, ProtocolType},
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolSystem},
     storage::postgres::orm,
@@ -978,7 +978,7 @@ pub trait StateGateway<DB>:
 {
 }
 
-pub type StateGatewayType<DB, B, TX, C, D, T, PT> = Arc<
+pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
     dyn StateGateway<
         DB,
         Transaction = TX,
@@ -987,6 +987,6 @@ pub type StateGatewayType<DB, B, TX, C, D, T, PT> = Arc<
         Delta = D,
         Token = T,
         ProtocolState = ProtocolState,
-        ProtocolType = PT,
+        ProtocolType = ProtocolType,
     >,
 >;

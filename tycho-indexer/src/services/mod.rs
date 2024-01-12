@@ -20,7 +20,6 @@ pub type EvmPostgresGateway = PostgresGateway<
     evm::Account,
     evm::AccountUpdate,
     evm::ERC20Token,
-    evm::ProtocolType,
 >;
 
 pub struct ServicesBuilder {

@@ -6,14 +6,10 @@ use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{ProtocolState, ProtocolType},
     models::{Chain, ProtocolSystem},
     storage::{
-        postgres::{
-            orm,
-            orm::{NewProtocolType, ProtocolType},
-            PostgresGateway,
-        },
+        postgres::{orm, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
         StorableContract, StorableProtocolType, StorableToken, StorableTransaction, StorageError,
         TxHash, Version,
@@ -21,19 +17,18 @@ use crate::{
 };
 
 #[async_trait]
-impl<B, TX, A, D, T, PT> ProtocolGateway for PostgresGateway<B, TX, A, D, T, PT>
+impl<B, TX, A, D, T> ProtocolGateway for PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
-    PT: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>,
 {
     type DB = AsyncPgConnection;
     type Token = T;
     type ProtocolState = ProtocolState;
-    type ProtocolType = PT;
+    type ProtocolType = ProtocolType;
 
     // TODO: uncomment to implement in ENG 2049
     // async fn get_components(
@@ -146,7 +141,6 @@ mod test {
         evm::Account,
         evm::AccountUpdate,
         evm::ERC20Token,
-        evm::ProtocolType,
     >;
 
     async fn setup_db() -> AsyncPgConnection {

@@ -5,20 +5,19 @@ use tracing::instrument;
 
 use crate::storage::{
     BlockHash, BlockIdentifier, ChainGateway, ContractDelta, StorableBlock, StorableContract,
-    StorableProtocolType, StorableToken, StorableTransaction, StorageError, TxHash,
+    StorableToken, StorableTransaction, StorageError, TxHash,
 };
 
 use super::{orm, schema, PostgresGateway};
 
 #[async_trait]
-impl<B, TX, A, D, T, PT> ChainGateway for PostgresGateway<B, TX, A, D, T, PT>
+impl<B, TX, A, D, T> ChainGateway for PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
     TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
-    PT: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>,
 {
     type DB = AsyncPgConnection;
     type Block = B;
@@ -140,7 +139,6 @@ mod test {
         evm::Account,
         evm::AccountUpdate,
         evm::ERC20Token,
-        evm::ProtocolType,
     >;
 
     async fn setup_db() -> AsyncPgConnection {

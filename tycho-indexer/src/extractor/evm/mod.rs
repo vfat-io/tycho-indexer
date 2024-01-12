@@ -404,7 +404,7 @@ pub struct BlockContractChanges {
 }
 
 pub type EVMStateGateway<DB> =
-    StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token, ProtocolType>;
+    StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token>;
 
 impl Block {
     /// Parses block from tychos protobuf block message
