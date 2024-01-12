@@ -243,6 +243,14 @@ pub struct NewProtocolSystemType {
     pub id: i64,
     pub protocol_enum: ProtocolSystemType,
 }
+#[derive(Queryable, Selectable, Debug)]
+#[diesel(table_name=protocol_system_type)]
+#[diesel(primary_key(id))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ProtocolSystemType {
+    pub id: i64,
+    pub protocol_enum: ProtocolSystemDBEnum,
+}
 
 #[derive(Debug, DbEnum)]
 #[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialProtocolType"]
