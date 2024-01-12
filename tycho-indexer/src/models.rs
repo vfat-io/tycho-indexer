@@ -16,6 +16,7 @@ pub enum Chain {
 }
 
 /// Represents the ecosystem to which a `ProtocolComponent` belongs.
+/// If you add a new enum type. Please, also add it to the migration and the orms
 #[derive(PartialEq, Debug, Clone, Display, Default, Deserialize, Serialize, Copy)]
 pub enum ProtocolSystem {
     #[default]
