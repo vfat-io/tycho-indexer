@@ -14,7 +14,7 @@ pub mod sql_types {
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "protocol_system_name"))]
-    pub struct ProtocolSystemType;
+    pub struct ProtocolSystemTypeEnum;
 }
 
 diesel::table! {
@@ -240,10 +240,10 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::Int8;
-    use super::sql_types::ProtocolSystemType;
+    use super::sql_types::ProtocolSystemTypeEnum;
     protocol_system_type(id) {
         id -> Int8,
-        protocol_enum -> ProtocolSystemType,
+        protocol_enum -> ProtocolSystemTypeEnum,
     }
 }
 

@@ -223,15 +223,15 @@ pub struct ProtocolSystem {
 }
 
 #[derive(Debug, DbEnum, Clone)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolSystemType"]
-pub enum ProtocolSystemDBEnum {
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolSystemTypeEnum"]
+pub enum ProtocolSystemTypeEnum {
     Ambient,
 }
 
-impl From<models::ProtocolSystem> for ProtocolSystemDBEnum {
+impl From<models::ProtocolSystem> for ProtocolSystemTypeEnum {
     fn from(value: models::ProtocolSystem) -> Self {
         match value {
-            models::ProtocolSystem::Ambient => ProtocolSystemDBEnum::Ambient,
+            models::ProtocolSystem::Ambient => ProtocolSystemTypeEnum::Ambient,
         }
     }
 }
@@ -240,7 +240,7 @@ impl From<models::ProtocolSystem> for ProtocolSystemDBEnum {
 #[diesel(table_name=protocol_system_type)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolSystemType {
-    pub protocol_enum: ProtocolSystemDBEnum,
+    pub protocol_enum: ProtocolSystemTypeEnum,
 }
 #[derive(Queryable, Selectable, Debug)]
 #[diesel(table_name=protocol_system_type)]
@@ -248,7 +248,7 @@ pub struct NewProtocolSystemType {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolSystemType {
     pub id: i64,
-    pub protocol_enum: ProtocolSystemDBEnum,
+    pub protocol_enum: ProtocolSystemTypeEnum,
 }
 
 #[derive(Debug, DbEnum)]

@@ -11,7 +11,7 @@ use crate::{
     storage::{
         postgres::{
             orm,
-            orm::{NewProtocolSystemType, ProtocolSystemDBEnum, ProtocolSystemType},
+            orm::{NewProtocolSystemType, ProtocolSystemType, ProtocolSystemTypeEnum},
             PostgresGateway,
         },
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
@@ -100,7 +100,7 @@ where
         conn: &mut Self::DB,
     ) -> Result<i64, StorageError> {
         use super::schema::protocol_system_type::dsl::*;
-        let new_system = ProtocolSystemDBEnum::from(new);
+        let new_system = ProtocolSystemTypeEnum::from(new);
 
         let existing_entry = protocol_system_type
             .filter(protocol_enum.eq(new_system.clone()))
