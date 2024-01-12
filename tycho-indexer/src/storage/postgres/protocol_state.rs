@@ -161,5 +161,11 @@ mod test {
             .await
             .unwrap();
         assert_eq!(protocol_system_id, 1);
+
+        let protocol_system_id = gw
+            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(protocol_system_id, 1);
     }
 }
