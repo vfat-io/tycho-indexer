@@ -1,8 +1,6 @@
-CREATE TYPE protocol_system_type_enum AS ENUM(
+CREATE TYPE protocol_system_type AS ENUM(
     'ambient'
 );
 
-CREATE TABLE protocol_system_type (
-    "id" BIGSERIAL PRIMARY KEY,
-    "protocol_enum" protocol_system_type_enum UNIQUE NOT NULL
-);
+ALTER TABLE protocol_system
+ALTER COLUMN "name" TYPE protocol_system_type USING "name"::protocol_system_type;

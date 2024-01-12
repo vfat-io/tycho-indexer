@@ -9,11 +9,7 @@ use crate::{
     extractor::evm::ProtocolState,
     models::{Chain, ProtocolSystem},
     storage::{
-        postgres::{
-            orm,
-            orm::{NewProtocolSystemType, ProtocolSystemType, ProtocolSystemTypeEnum},
-            PostgresGateway,
-        },
+        postgres::{orm, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
         StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
     },
@@ -99,25 +95,25 @@ where
         new: ProtocolSystem,
         conn: &mut Self::DB,
     ) -> Result<i64, StorageError> {
-        use super::schema::protocol_system_type::dsl::*;
-        let new_system = ProtocolSystemTypeEnum::from(new);
+        use super::schema::protocol_system::dsl::*;
+        let new_system = orm::ProtocolSystemType::from(new);
 
-        let existing_entry = protocol_system_type
-            .filter(protocol_enum.eq(new_system.clone()))
-            .first::<ProtocolSystemType>(conn)
+        let existing_entry = protocol_system
+            .filter(name.eq(new_system.clone()))
+            .first::<orm::ProtocolSystem>(conn)
             .await;
 
         if let Ok(entry) = existing_entry {
             return Ok(entry.id);
         } else {
-            let new_entry = NewProtocolSystemType { protocol_enum: new_system };
+            let new_entry = orm::NewProtocolSystem { name: new_system };
 
-            let inserted_protocol_system = diesel::insert_into(protocol_system_type)
+            let inserted_protocol_system = diesel::insert_into(protocol_system)
                 .values(&new_entry)
-                .get_result::<ProtocolSystemType>(conn)
+                .get_result::<orm::ProtocolSystem>(conn)
                 .await
                 .map_err(|err| {
-                    StorageError::from_diesel(err, "ProtocolSystemEnum", &new.to_string(), None)
+                    StorageError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
                 })?;
             Ok(inserted_protocol_system.id)
         }

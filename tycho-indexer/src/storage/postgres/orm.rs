@@ -11,8 +11,8 @@ use crate::{
 
 use super::schema::{
     account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
-    protocol_component, protocol_holds_token, protocol_state, protocol_system,
-    protocol_system_type, protocol_type, token, transaction,
+    protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
+    token, transaction,
 };
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -217,38 +217,30 @@ pub struct NewTransaction {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolSystem {
     pub id: i64,
-    pub name: String,
+    pub name: ProtocolSystemType,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
 
+#[derive(Insertable, Debug)]
+#[diesel(table_name=protocol_system)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolSystem {
+    pub name: ProtocolSystemType,
+}
+
 #[derive(Debug, DbEnum, Clone)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolSystemTypeEnum"]
-pub enum ProtocolSystemTypeEnum {
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolSystemType"]
+pub enum ProtocolSystemType {
     Ambient,
 }
 
-impl From<models::ProtocolSystem> for ProtocolSystemTypeEnum {
+impl From<models::ProtocolSystem> for ProtocolSystemType {
     fn from(value: models::ProtocolSystem) -> Self {
         match value {
-            models::ProtocolSystem::Ambient => ProtocolSystemTypeEnum::Ambient,
+            models::ProtocolSystem::Ambient => ProtocolSystemType::Ambient,
         }
     }
-}
-
-#[derive(Insertable, Debug)]
-#[diesel(table_name=protocol_system_type)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewProtocolSystemType {
-    pub protocol_enum: ProtocolSystemTypeEnum,
-}
-#[derive(Queryable, Selectable, Debug)]
-#[diesel(table_name=protocol_system_type)]
-#[diesel(primary_key(id))]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct ProtocolSystemType {
-    pub id: i64,
-    pub protocol_enum: ProtocolSystemTypeEnum,
 }
 
 #[derive(Debug, DbEnum)]

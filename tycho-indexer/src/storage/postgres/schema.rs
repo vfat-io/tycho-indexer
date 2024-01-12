@@ -13,8 +13,8 @@ pub mod sql_types {
     pub struct ProtocolImplementationType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "protocol_system_name"))]
-    pub struct ProtocolSystemTypeEnum;
+    #[diesel(postgres_type(name = "protocol_system_type"))]
+    pub struct ProtocolSystemType;
 }
 
 diesel::table! {
@@ -185,10 +185,13 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::ProtocolSystemType;
+
     protocol_system (id) {
         id -> Int8,
         #[max_length = 255]
-        name -> Varchar,
+        name -> ProtocolSystemType,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
     }
@@ -235,15 +238,6 @@ diesel::table! {
         block_id -> Int8,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::Int8;
-    use super::sql_types::ProtocolSystemTypeEnum;
-    protocol_system_type(id) {
-        id -> Int8,
-        protocol_enum -> ProtocolSystemTypeEnum,
     }
 }
 
