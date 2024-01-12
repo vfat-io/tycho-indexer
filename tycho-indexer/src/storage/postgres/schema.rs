@@ -241,15 +241,6 @@ diesel::table! {
     }
 }
 
-//diesel::table! {
-//    use diesel::sql_types::Int8;
-//    use crate::models::ProtocolSystemMapping;
-//    protocol_system_type(id) {
-//        id -> Int8,
-//        protocol_enum -> ProtocolSystemMapping,
-//    }
-//}
-
 diesel::joinable!(account -> chain (chain_id));
 diesel::joinable!(account_balance -> account (account_id));
 diesel::joinable!(account_balance -> transaction (modify_tx));
