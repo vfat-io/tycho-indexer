@@ -236,12 +236,11 @@ impl From<models::ProtocolSystem> for ProtocolSystemDBEnum {
     }
 }
 
-#[derive(Insertable, Queryable, Selectable, Debug, PartialEq)]
+#[derive(Insertable, Debug)]
 #[diesel(table_name=protocol_system_type)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolSystemType {
-    pub id: i64,
-    pub protocol_enum: ProtocolSystemType,
+    pub protocol_enum: ProtocolSystemDBEnum,
 }
 #[derive(Queryable, Selectable, Debug)]
 #[diesel(table_name=protocol_system_type)]
