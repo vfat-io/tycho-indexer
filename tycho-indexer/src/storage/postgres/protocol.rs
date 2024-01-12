@@ -6,8 +6,8 @@ use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
-    extractor::evm::{ProtocolState, ProtocolType},
-    models::{Chain, ProtocolSystem},
+    extractor::evm::ProtocolState,
+    models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
         postgres::{orm, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
@@ -122,10 +122,9 @@ mod test {
     use serde_json::json;
 
     use crate::{
-        extractor::{
-            evm,
-            evm::{FinancialType, ImplementationType},
-        },
+        extractor::evm,
+        models,
+        models::{FinancialType, ImplementationType},
         storage::postgres::{
             orm,
             orm::{FinancialProtocolType, ProtocolImplementationType},
@@ -163,7 +162,7 @@ mod test {
         let t = NaiveTime::from_hms_milli_opt(12, 34, 56, 789).unwrap();
         let dt = NaiveDateTime::new(d, t);
 
-        let protocol_type = evm::ProtocolType {
+        let protocol_type = models::ProtocolType {
             name: "Protocol".to_string(),
             financial_type: FinancialType::Debt,
             attribute_schema: Some(json!({"attribute": "schema"})),
@@ -186,7 +185,7 @@ mod test {
         assert_eq!(inserted_data.attribute_schema, Some(json!({"attribute": "schema"})));
         assert_eq!(inserted_data.implementation, ProtocolImplementationType::Custom);
 
-        let updated_protocol_type = evm::ProtocolType {
+        let updated_protocol_type = models::ProtocolType {
             name: "Protocol".to_string(),
             financial_type: FinancialType::Leverage,
             attribute_schema: Some(json!({"attribute": "another_schema"})),

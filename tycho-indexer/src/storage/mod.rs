@@ -78,9 +78,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    extractor::evm::{ProtocolState, ProtocolType},
+    extractor::evm::ProtocolState,
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ProtocolSystem},
+    models::{Chain, ExtractionState, ProtocolSystem, ProtocolType},
     storage::postgres::orm,
 };
 

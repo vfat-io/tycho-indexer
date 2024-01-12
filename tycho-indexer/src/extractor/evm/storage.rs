@@ -17,7 +17,10 @@ use crate::{
 };
 
 pub mod pg {
-    use crate::extractor::evm::{FinancialType, ImplementationType};
+    use crate::{
+        models,
+        models::{FinancialType, ImplementationType},
+    };
     use ethers::types::{H160, H256, U256};
 
     use crate::storage::{
@@ -117,7 +120,7 @@ pub mod pg {
             self.hash.into()
         }
     }
-    impl StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64> for evm::ProtocolType {
+    impl StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64> for models::ProtocolType {
         fn from_storage(val: orm::ProtocolType) -> Result<Self, StorageError> {
             let financial_type: FinancialType = match val.financial_type {
                 FinancialProtocolType::Swap => FinancialType::Swap,
