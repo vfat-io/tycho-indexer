@@ -1,12 +1,17 @@
-mod pb;
-
 use std::collections::{hash_map::Entry, HashMap};
 
+use anyhow::{anyhow, bail};
+use ethabi::{decode, ParamType};
 use hex_literal::hex;
-use pb::tycho::evm::v1::{self as tycho, ChangeType};
 use substreams_ethereum::pb::eth::{self};
 
+use pb::tycho::evm::v1::{self as tycho};
+
+mod pb;
+
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
+const INIT_POOL_CODE: u8 = 71;
+const USER_CMD_FN_SIG: [u8; 4] = [0xA1, 0x51, 0x12, 0xF9];
 
 struct SlotValue {
     new_value: Vec<u8>,
@@ -45,6 +50,7 @@ impl From<InterimContractChange> for tycho::ContractChange {
         }
     }
 }
+
 /// Extracts all contract changes relevant to vm simulations
 ///
 /// This implementation has currently two major limitations:
@@ -68,9 +74,9 @@ impl From<InterimContractChange> for tycho::ContractChange {
 fn map_changes(
     block: eth::v2::Block,
 ) -> Result<tycho::BlockContractChanges, substreams::errors::Error> {
-    let mut block_changes = tycho::BlockContractChanges { block: None, changes: Vec::new() };
+    let mut block_changes = tycho::BlockContractChanges::default();
 
-    let mut tx_change = tycho::TransactionChanges::default();
+    let mut tx_change = tycho::TransactionContractChanges::default();
 
     let mut changed_contracts: HashMap<Vec<u8>, InterimContractChange> = HashMap::new();
 
@@ -98,6 +104,117 @@ fn map_changes(
             })
             .collect::<Vec<_>>();
         storage_changes.sort_unstable_by_key(|change| change.ordinal);
+
+        let ambient_calls = block_tx
+            .calls
+            .iter()
+            .filter(|call| !call.state_reverted)
+            .filter(|call| call.address == AMBIENT_CONTRACT)
+            .collect::<Vec<_>>();
+
+        for call in ambient_calls {
+            if call.input.len() < 4 {
+                continue;
+            }
+            if call.input[0..4] == USER_CMD_FN_SIG {
+                let user_cmd_external_abi_types = &[
+                    // index of the proxy sidecar the command is being called on
+                    ParamType::Uint(16),
+                    // call data for internal UserCmd method
+                    ParamType::Bytes,
+                ];
+                let user_cmd_internal_abi_types = &[
+                    ParamType::Uint(8),   // command
+                    ParamType::Address,   // base
+                    ParamType::Address,   // quote
+                    ParamType::Uint(256), // pool index
+                    ParamType::Uint(128), // price
+                ];
+
+                // Decode external call to UserCmd
+                if let Ok(external_params) = decode(user_cmd_external_abi_types, &call.input[4..]) {
+                    let cmd_bytes = external_params[1]
+                        .to_owned()
+                        .into_bytes()
+                        .ok_or_else(|| {
+                            anyhow!("Failed to convert to bytes: {:?}", &external_params[1])
+                        })?;
+
+                    // Call data is structured differently depending on the cmd code, so only
+                    // decode if this is an init pool code.
+                    if cmd_bytes[31] == INIT_POOL_CODE {
+                        // Decode internal call to UserCmd
+                        if let Ok(internal_params) = decode(user_cmd_internal_abi_types, &cmd_bytes)
+                        {
+                            let base = internal_params[1]
+                                .to_owned()
+                                .into_address()
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "Failed to convert to address: {:?}",
+                                        &internal_params[1]
+                                    )
+                                })?
+                                .to_fixed_bytes()
+                                .to_vec();
+
+                            let quote = internal_params[2]
+                                .to_owned()
+                                .into_address()
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "Failed to convert to address: {:?}",
+                                        &internal_params[2]
+                                    )
+                                })?
+                                .to_fixed_bytes()
+                                .to_vec();
+
+                            let pool_index = internal_params[3]
+                                .to_owned()
+                                .into_uint()
+                                .ok_or_else(|| anyhow!("Failed to convert to u32".to_string()))?
+                                .as_u32();
+
+                            let static_attribute = tycho::Attribute {
+                                name: String::from("pool_index"),
+                                value: pool_index.to_be_bytes().to_vec(),
+                                change: tycho::ChangeType::Creation.into(),
+                            };
+
+                            let mut tokens: Vec<Vec<u8>> = vec![base.clone(), quote.clone()];
+                            tokens.sort();
+
+                            let new_component = tycho::ProtocolComponent {
+                                id: format!(
+                                    "{}{}{}",
+                                    hex::encode(base.clone()),
+                                    hex::encode(quote.clone()),
+                                    pool_index
+                                ),
+                                tokens,
+                                contracts: vec![AMBIENT_CONTRACT.to_vec()],
+                                static_att: vec![static_attribute],
+                                change: tycho::ChangeType::Creation.into(),
+                                protocol_type: Some(tycho::ProtocolType {
+                                    name: "Ambient".to_string(),
+                                    attribute_schema: vec![],
+                                    financial_type: 0,
+                                    implementation_type: 0,
+                                }),
+                            };
+                            tx_change
+                                .component_changes
+                                .push(new_component);
+                        } else {
+                            bail!("Failed to decode ABI internal call.".to_string());
+                        }
+                    }
+                } else {
+                    bail!("Failed to decode ABI external call.".to_string());
+                }
+            }
+        }
 
         // Note: some contracts change slot values and change them back to their
         //  original value before the transactions ends we remember the initial
@@ -130,7 +247,7 @@ fn map_changes(
                         }
                     }
                 }
-                // Intialise a new contract change after obsering a storage change
+                // Intialise a new contract change after observing a storage change
                 Entry::Vacant(e) => {
                     let mut slots = HashMap::new();
                     slots.insert(
@@ -146,9 +263,9 @@ fn map_changes(
                         code: Vec::new(),
                         slots,
                         change: if created_accounts.contains_key(&storage_change.address) {
-                            ChangeType::Creation
+                            tycho::ChangeType::Creation
                         } else {
-                            ChangeType::Update
+                            tycho::ChangeType::Update
                         },
                     });
                 }
@@ -187,9 +304,9 @@ fn map_changes(
                             code: Vec::new(),
                             slots: HashMap::new(),
                             change: if created_accounts.contains_key(&balance_change.address) {
-                                ChangeType::Creation
+                                tycho::ChangeType::Creation
                             } else {
-                                ChangeType::Update
+                                tycho::ChangeType::Update
                             },
                         });
                     }
@@ -226,9 +343,9 @@ fn map_changes(
                         code: code_change.new_code.clone(),
                         slots: HashMap::new(),
                         change: if created_accounts.contains_key(&code_change.address) {
-                            ChangeType::Creation
+                            tycho::ChangeType::Creation
                         } else {
-                            ChangeType::Update
+                            tycho::ChangeType::Update
                         },
                     });
                 }
@@ -245,7 +362,7 @@ fn map_changes(
             });
 
             // reuse changed_contracts hash map by draining it, next iteration
-            // will start empty. This avoids a costly realliocation
+            // will start empty. This avoids a costly reallocation
             for (_, change) in changed_contracts.drain() {
                 tx_change
                     .contract_changes

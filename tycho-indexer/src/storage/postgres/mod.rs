@@ -152,7 +152,7 @@ pub mod chain;
 pub mod contract_state;
 pub mod extraction_state;
 pub mod orm;
-pub mod protocol_state;
+pub mod protocol;
 pub mod schema;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");

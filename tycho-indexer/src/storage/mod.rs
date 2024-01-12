@@ -482,7 +482,7 @@ pub trait ProtocolGateway {
     type DB;
     type Token;
     type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
-    // TODO: uncomment below when StorableProtocolComponent is implemented (ENG 2049)
+    // TODO: uncomment below when StorableProtocolComponent is implemented (ENG 1728)
     // type ProtocolComponent;
 
     /// Retrieve ProtocolComponent from the db
@@ -494,7 +494,7 @@ pub trait ProtocolGateway {
     ///
     /// # Returns
     /// Ok, if found else Err
-    // TODO: uncomment to implement in ENG 2049
+    // TODO: uncomment to implement in ENG 2030
     // async fn get_components(
     //     &self,
     //     chain: &Chain,
@@ -504,7 +504,7 @@ pub trait ProtocolGateway {
 
     /// Stores new found ProtocolComponents.
     ///
-    /// Components are assumed to be immutable. Any state belonging to a
+    /// Components are assumed to bimmutable. Any state belonging to a
     /// component that is dynamic, should be made available on ProtocolState,
     /// not on the Component.
     ///
@@ -515,7 +515,7 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully, may error if:
     /// - related entities are not in store yet.
     /// - component with same is id already present.
-    // TODO: uncomment to implement in ENG 2049
+    // TODO: uncomment to implement in ENG 2031
     // async fn upsert_components(&self, new: &[Self::ProtocolComponent]) -> Result<(),
     // StorageError>;
 

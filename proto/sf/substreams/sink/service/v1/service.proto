@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package sf.substreams.sink.service.v1;
 
-import "sf/substreams/options.proto";
 import "sf/substreams/v1/package.proto";
 
 option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/sink/service/v1;pbsinksvc";
