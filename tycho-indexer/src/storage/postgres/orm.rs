@@ -224,7 +224,7 @@ pub struct ProtocolSystem {
 
 #[derive(Debug, DbEnum, Clone, PartialEq)]
 #[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialProtocolType"]
-pub enum FinancialProtocolType {
+pub enum FinancialType {
     Swap,
     Psm,
     Debt,
@@ -233,7 +233,7 @@ pub enum FinancialProtocolType {
 
 #[derive(Debug, DbEnum, Clone, PartialEq)]
 #[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolImplementationType"]
-pub enum ProtocolImplementationType {
+pub enum ImplementationType {
     Custom,
     Vm,
 }
@@ -244,9 +244,9 @@ pub enum ProtocolImplementationType {
 pub struct ProtocolType {
     pub id: i64,
     pub name: String,
-    pub financial_type: FinancialProtocolType,
+    pub financial_type: FinancialType,
     pub attribute_schema: Option<serde_json::Value>,
-    pub implementation: ProtocolImplementationType,
+    pub implementation: ImplementationType,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
@@ -256,9 +256,9 @@ pub struct ProtocolType {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolType {
     pub name: String,
-    pub financial_type: FinancialProtocolType,
+    pub financial_type: FinancialType,
     pub attribute_schema: Option<serde_json::Value>,
-    pub implementation: ProtocolImplementationType,
+    pub implementation: ImplementationType,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]

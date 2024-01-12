@@ -125,11 +125,7 @@ mod test {
         extractor::evm,
         models,
         models::{FinancialType, ImplementationType},
-        storage::postgres::{
-            orm,
-            orm::{FinancialProtocolType, ProtocolImplementationType},
-            schema, PostgresGateway,
-        },
+        storage::postgres::{orm, schema, PostgresGateway},
     };
 
     use super::*;
@@ -181,9 +177,9 @@ mod test {
             .unwrap();
 
         assert_eq!(inserted_data.name, "Protocol".to_string());
-        assert_eq!(inserted_data.financial_type, FinancialProtocolType::Debt);
+        assert_eq!(inserted_data.financial_type, orm::FinancialType::Debt);
         assert_eq!(inserted_data.attribute_schema, Some(json!({"attribute": "schema"})));
-        assert_eq!(inserted_data.implementation, ProtocolImplementationType::Custom);
+        assert_eq!(inserted_data.implementation, orm::ImplementationType::Custom);
 
         let updated_protocol_type = models::ProtocolType {
             name: "Protocol".to_string(),
@@ -205,11 +201,11 @@ mod test {
 
         assert_eq!(newly_inserted_data.len(), 1);
         assert_eq!(newly_inserted_data[0].name, "Protocol".to_string());
-        assert_eq!(newly_inserted_data[0].financial_type, FinancialProtocolType::Leverage);
+        assert_eq!(newly_inserted_data[0].financial_type, orm::FinancialType::Leverage);
         assert_eq!(
             newly_inserted_data[0].attribute_schema,
             Some(json!({"attribute": "another_schema"}))
         );
-        assert_eq!(newly_inserted_data[0].implementation, ProtocolImplementationType::Vm);
+        assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
     }
 }
