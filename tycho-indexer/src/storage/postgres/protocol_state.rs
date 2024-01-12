@@ -99,51 +99,37 @@ where
         &self,
         new: ProtocolSystem,
         conn: &mut Self::DB,
-    ) -> Result<NewProtocolSystemType, StorageError> {
+    ) -> Result<i64, StorageError> {
         use super::schema::protocol_system_type::dsl::*;
-        use crate::storage::postgres::schema;
-        let new_system = ProtocolSystemType::from(new.clone());
+        let new_system = ProtocolSystemDBEnum::from(new.clone());
 
-        let existing_entry = schema::protocol_system_type::table
+        let existing_entry = protocol_system_type
             .filter(protocol_enum.eq(new_system.clone()))
-            .first::<NewProtocolSystemType>(conn)
+            .first::<ProtocolSystemType>(conn)
             .await;
 
         if let Ok(entry) = existing_entry {
-            println!("OK");
-            return Ok(entry);
+            return Ok(entry.id);
         } else {
-            let new_entry =
-                NewProtocolSystemType { id: 0 as i64, protocol_enum: new_system.clone() };
-            println!("Error");
-            diesel::insert_into(schema::protocol_system_type::table)
+            let new_entry = NewProtocolSystemType { protocol_enum: new_system };
+
+            let inserted_protocol_system = diesel::insert_into(protocol_system_type)
                 .values(&new_entry)
-                .on_conflict(protocol_enum)
-                .do_update()
-                .set(protocol_enum.eq(new_system.clone()))
-                .execute(conn)
+                .get_result::<ProtocolSystemType>(conn)
                 .await
                 .map_err(|err| {
                     StorageError::from_diesel(err, "ProtocolSystemEnum", &new.to_string(), None)
                 })?;
-            println!("Error");
-            Ok(schema::protocol_system_type::table
-                .filter(protocol_enum.eq(new_system.clone()))
-                .first::<NewProtocolSystemType>(conn)
-                .await
-                .map_err(|err| {
-                    StorageError::from_diesel(err, "ProtocolSystemEnum", &new.to_string(), None)
-                })?)
+            Ok(inserted_protocol_system.id)
         }
     }
 }
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use crate::extractor::evm;
     use diesel_async::AsyncConnection;
-
-    use super::*;
 
     type EVMGateway = PostgresGateway<
         evm::Block,
@@ -174,6 +160,6 @@ mod test {
             ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
             .await
             .unwrap();
-        // assert_eq!(protocol_system_id, 1);
+        assert_eq!(protocol_system_id, 1);
     }
 }

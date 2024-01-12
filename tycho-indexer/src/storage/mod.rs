@@ -615,7 +615,7 @@ pub trait ProtocolGateway {
         &self,
         protocol_system: ProtocolSystem,
         conn: &mut Self::DB,
-    ) -> Result<orm::NewProtocolSystemType, StorageError>;
+    ) -> Result<i64, StorageError>;
 }
 
 /// Lays out the necessary interface needed to store and retrieve contracts from
