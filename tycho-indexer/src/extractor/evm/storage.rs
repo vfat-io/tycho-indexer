@@ -5,7 +5,6 @@ use crate::{
         evm,
         evm::utils::{parse_u256_slot_entry, TryDecode},
     },
-    hex_bytes::Bytes,
     models,
     models::Chain,
     storage,
@@ -288,9 +287,7 @@ pub mod pg {
             let mut static_attributes: HashMap<String, Bytes> = HashMap::default();
 
             if let Some(json_value) = val.attributes {
-                println!("Getting some");
                 if let Value::Object(map) = json_value {
-                    println!("Getting some more");
                     static_attributes = map
                         .into_iter()
                         .map(|(key, value)| {
@@ -394,7 +391,7 @@ mod test {
     use super::*;
     use crate::{models::ProtocolSystem, storage::postgres::orm};
 
-    use crate::storage::StorableComponent;
+    use crate::{hex_bytes::Bytes, storage::StorableComponent};
     use chrono::Utc;
     use ethers::prelude::H160;
     use std::str::FromStr;
@@ -418,6 +415,7 @@ mod test {
             inserted_ts: Default::default(),
             modified_ts: Default::default(),
         };
+
         let tokens = vec![
             H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
             H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
@@ -444,10 +442,15 @@ mod test {
         assert_eq!(protocol_component.tokens, tokens);
         assert_eq!(protocol_component.contract_ids, contract_ids);
 
-        let expected_attributes: HashMap<String, Bytes> = maplit::hashmap! {
-            "key1".to_string() => Bytes::from(bytes::Bytes::from(atts.get("key1").unwrap().to_string())),
-            "key2".to_string() => Bytes::from(bytes::Bytes::from(atts.get("key2").unwrap().to_string())),
-        };
+        let mut expected_attributes = HashMap::new();
+        expected_attributes.insert(
+            "key1".to_string(),
+            Bytes::from(bytes::Bytes::from(atts.get("key1").unwrap().to_string())),
+        );
+        expected_attributes.insert(
+            "key2".to_string(),
+            Bytes::from(bytes::Bytes::from(atts.get("key2").unwrap().to_string())),
+        );
 
         assert_eq!(protocol_component.static_attributes, expected_attributes);
     }
