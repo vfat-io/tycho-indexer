@@ -286,15 +286,11 @@ pub mod pg {
         ) -> Result<Self, StorageError> {
             let mut static_attributes: HashMap<String, Bytes> = HashMap::default();
 
-            if let Some(json_value) = val.attributes {
-                if let Value::Object(map) = json_value {
-                    static_attributes = map
-                        .into_iter()
-                        .map(|(key, value)| {
-                            (key, Bytes::from(bytes::Bytes::from(value.to_string())))
-                        })
-                        .collect();
-                }
+            if let Some(Value::Object(map)) = val.attributes {
+                static_attributes = map
+                    .into_iter()
+                    .map(|(key, value)| (key, Bytes::from(bytes::Bytes::from(value.to_string()))))
+                    .collect();
             }
 
             Ok(evm::ProtocolComponent {
