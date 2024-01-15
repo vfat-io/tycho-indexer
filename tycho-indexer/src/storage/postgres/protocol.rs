@@ -160,7 +160,6 @@ mod test {
 
     use super::*;
 
-
     type EVMGateway = PostgresGateway<
         evm::Block,
         evm::Transaction,

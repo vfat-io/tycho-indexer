@@ -29,7 +29,7 @@ CREATE TYPE implementation_type AS ENUM(
 );
 
 ALTER TABLE protocol_type
-ALTER COLUMN implementation TYPE implementation_type
+ALTER COLUMN "implementation" TYPE implementation_type
 USING protocol_implementation_type::text::implementation_type;
 
 DROP TYPE protocol_implementation_type;
