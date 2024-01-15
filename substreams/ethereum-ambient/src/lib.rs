@@ -196,6 +196,12 @@ fn map_changes(
                                 contracts: vec![AMBIENT_CONTRACT.to_vec()],
                                 static_att: vec![static_attribute],
                                 change: tycho::ChangeType::Creation.into(),
+                                protocol_type: Some(tycho::ProtocolType {
+                                    name: "Ambient".to_string(),
+                                    attribute_schema: vec![],
+                                    financial_type: 0,
+                                    implementation_type: 0,
+                                }),
                             };
                             tx_change
                                 .component_changes
