@@ -318,7 +318,7 @@ mod test {
             symbol: String::from("WETH"),
             decimals: 18,
             tax: 0,
-            gas: vec![],
+            gas: vec![Some(64), None],
             inserted_ts: Default::default(),
             modified_ts: Default::default(),
         };
@@ -330,6 +330,7 @@ mod test {
         assert_eq!(token.address, pad_and_parse_h160(&token_address).unwrap());
         assert_eq!(token.symbol, String::from("WETH"));
         assert_eq!(token.decimals, 18);
+        assert_eq!(token.gas, vec![Some(64), None]);
     }
     #[test]
     fn test_storable_token_to_storage() {
@@ -339,7 +340,7 @@ mod test {
             symbol: "WETH".into(),
             decimals: 18,
             tax: 0,
-            gas: vec![],
+            gas: vec![Some(64), None],
             chain: Chain::Ethereum,
         };
 
@@ -347,5 +348,6 @@ mod test {
         assert_eq!(new_token.account_id, 22);
         assert_eq!(new_token.symbol, erc_token.symbol);
         assert_eq!(new_token.decimals, erc_token.decimals as i32);
+        assert_eq!(new_token.gas, vec![Some(64), None]);
     }
 }
