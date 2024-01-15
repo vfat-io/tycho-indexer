@@ -251,7 +251,7 @@ pub struct ProtocolType {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Clone)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
@@ -268,6 +268,19 @@ pub struct ProtocolComponent {
     pub deleted_at: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+#[derive(Insertable)]
+#[diesel(belongs_to(Chain))]
+#[diesel(belongs_to(ProtocolType))]
+#[diesel(belongs_to(ProtocolSystem))]
+#[diesel(table_name = protocol_component)]
+pub struct NewProtocolComponent {
+    pub external_id: String,
+    pub chain_id: i64,
+    pub protocol_type_id: i64,
+    pub protocol_system_id: i64,
+    pub attributes: Option<serde_json::Value>,
+    pub created_at: NaiveDateTime,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
