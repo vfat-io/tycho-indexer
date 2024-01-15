@@ -1,7 +1,9 @@
 #![allow(unused_variables)]
 
 use async_trait::async_trait;
-use diesel_async::AsyncPgConnection;
+
+use diesel::prelude::*;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
     extractor::evm::ProtocolState,
@@ -86,5 +88,79 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         todo!()
+    }
+
+    async fn _get_or_create_protocol_system_id(
+        &self,
+        new: ProtocolSystem,
+        conn: &mut Self::DB,
+    ) -> Result<i64, StorageError> {
+        use super::schema::protocol_system::dsl::*;
+        let new_system = orm::ProtocolSystemType::from(new);
+
+        let existing_entry = protocol_system
+            .filter(name.eq(new_system.clone()))
+            .first::<orm::ProtocolSystem>(conn)
+            .await;
+
+        if let Ok(entry) = existing_entry {
+            return Ok(entry.id);
+        } else {
+            let new_entry = orm::NewProtocolSystem { name: new_system };
+
+            let inserted_protocol_system = diesel::insert_into(protocol_system)
+                .values(&new_entry)
+                .get_result::<orm::ProtocolSystem>(conn)
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
+                })?;
+            Ok(inserted_protocol_system.id)
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::extractor::evm;
+    use diesel_async::AsyncConnection;
+
+    type EVMGateway = PostgresGateway<
+        evm::Block,
+        evm::Transaction,
+        evm::Account,
+        evm::AccountUpdate,
+        evm::ERC20Token,
+    >;
+
+    async fn setup_db() -> AsyncPgConnection {
+        let db_url = std::env::var("DATABASE_URL").unwrap();
+        let mut conn = AsyncPgConnection::establish(&db_url)
+            .await
+            .unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
+
+        conn
+    }
+
+    #[tokio::test]
+    async fn test_get_or_create_protocol_system_id() {
+        let mut conn = setup_db().await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let protocol_system_id = gw
+            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(protocol_system_id, 1);
+
+        let protocol_system_id = gw
+            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(protocol_system_id, 1);
     }
 }

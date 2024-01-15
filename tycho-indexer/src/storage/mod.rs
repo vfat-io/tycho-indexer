@@ -608,6 +608,12 @@ pub trait ProtocolGateway {
         to: &BlockIdentifier,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
+
+    async fn _get_or_create_protocol_system_id(
+        &self,
+        protocol_system: ProtocolSystem,
+        conn: &mut Self::DB,
+    ) -> Result<i64, StorageError>;
 }
 
 /// Lays out the necessary interface needed to store and retrieve contracts from
