@@ -470,8 +470,6 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(val: S, contract: ContractId) -> Result<Self, StorageError>;
 
     fn to_storage(&self, contract_id: I) -> N;
-
-    fn contract_id(&self) -> ContractId;
 }
 
 /// Lays out the necessary interface needed to store and retrieve protocol states from
