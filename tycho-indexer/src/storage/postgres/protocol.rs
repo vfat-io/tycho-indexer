@@ -1,7 +1,5 @@
 #![allow(unused_variables)]
 
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -13,7 +11,8 @@ use crate::{
     storage::{
         postgres::{orm, schema, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+        StorableContract, StorableProtocolState, StorableToken, StorableTransaction, StorageError,
+        TxHash, Version,
     },
 };
 
@@ -39,20 +38,7 @@ async fn decode_protocol_states(
                     .first::<Bytes>(conn)
                     .await
                     .expect("Failed to find matching protocol component in db");
-                let protocol_state = ProtocolState {
-                    component_id,
-                    updated_attributes: match state.state {
-                        Some(val) => serde_json::from_value(val).map_err(|err| {
-                            StorageError::DecodeError(format!(
-                                "Failed to deserialize state attribute: {}",
-                                err
-                            ))
-                        })?,
-                        None => HashMap::new(),
-                    },
-                    deleted_attributes: HashMap::new(),
-                    modify_tx: tx_hash.into(),
-                };
+                let protocol_state = ProtocolState::from_storage(state, component_id, &tx_hash)?;
                 protocol_states.push(protocol_state);
             }
             Ok(protocol_states)
@@ -182,6 +168,8 @@ mod test {
     //! Tests for PostgresGateway's ProtocolGateway methods
     //!
     //! The tests below test the functionality using the concrete EVM types.
+
+    use std::collections::HashMap;
 
     use crate::{
         extractor::evm,

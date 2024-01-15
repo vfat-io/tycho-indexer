@@ -18,18 +18,14 @@ use crate::{
 
 pub mod pg {
     use ethers::types::{H160, H256, U256};
-    use serde_json::Value;
 
-    use crate::{
-        hex_bytes::Bytes,
-        storage::{
-            postgres::{
-                orm,
-                orm::{NewToken, Token},
-            },
-            Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState, StorableToken,
-            TxHash,
+    use crate::storage::{
+        postgres::{
+            orm,
+            orm::{NewToken, Token},
         },
+        Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState, StorableToken,
+        TxHash,
     };
 
     use super::*;
@@ -280,14 +276,15 @@ pub mod pg {
             component_id: String,
             tx_hash: &TxHash,
         ) -> Result<Self, StorageError> {
-            let mut attr: HashMap<String, Bytes> = HashMap::new();
-            if let Some(Value::Object(state)) = &val.state {
-                for (k, v) in state.iter() {
-                    if let Value::String(s) = v {
-                        attr.insert(k.clone(), Bytes::from(s.as_str()));
-                    }
-                }
-            }
+            let attr = match val.state {
+                Some(val) => serde_json::from_value(val).map_err(|err| {
+                    StorageError::DecodeError(format!(
+                        "Failed to deserialize state attribute: {}",
+                        err
+                    ))
+                })?,
+                None => HashMap::new(),
+            };
             Ok(evm::ProtocolState::new(
                 component_id,
                 attr,
