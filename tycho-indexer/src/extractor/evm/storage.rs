@@ -310,14 +310,25 @@ pub mod pg {
             chain_id: i64,
             protocol_system_id: i64,
             creation_ts: NaiveDateTime,
-        ) -> Result<orm::NewProtocolComponent, std::num::ParseIntError> {
-            let protocol_type_id = self.protocol_type_id.parse::<i64>()?;
+        ) -> Result<orm::NewProtocolComponent, StorageError> {
+            let protocol_type_id = self
+                .protocol_type_id
+                .parse::<i64>()
+                .map_err(|err| {
+                    StorageError::DecodeError(
+                        "Could not parse protocol type id in StorableComponent".to_string(),
+                    )
+                })?;
             Ok(orm::NewProtocolComponent {
                 external_id: self.id.0.clone(),
                 chain_id,
                 protocol_type_id,
                 protocol_system_id,
-                attributes: Some(serde_json::to_value(&self.static_attributes).unwrap()),
+                attributes: Some(serde_json::to_value(&self.static_attributes).map_err(|err| {
+                    StorageError::DecodeError(
+                        "Could not convert attributes in StorableComponent".to_string(),
+                    )
+                })?),
                 created_at: creation_ts,
             })
         }
@@ -465,12 +476,24 @@ mod test {
             contract_ids: vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)],
             static_attributes: {
                 let mut map = HashMap::new();
-                map.insert("key1".to_string(), Bytes::from("value1"));
-                map.insert("key2".to_string(), Bytes::from("value2"));
+                map.insert("key1".to_string(), Bytes::from(bytes::Bytes::from("value1")));
+                map.insert("key2".to_string(), Bytes::from(bytes::Bytes::from("value2")));
                 map
             },
             change: Default::default(),
         };
+
+        println!(
+            "{:?}",
+            std::str::from_utf8(
+                &protocol_component
+                    .static_attributes
+                    .get("key1")
+                    .unwrap()
+                    .0
+            )
+            .unwrap()
+        );
 
         let chain_id = 1;
         let protocol_system_id = 2;
@@ -494,7 +517,9 @@ mod test {
         assert_eq!(new_protocol_component.protocol_system_id, protocol_system_id);
 
         let expected_attributes: serde_json::Value =
-            serde_json::from_str(r#"{ "key1": "value1", "key2": "value2" }"#).unwrap();
+            serde_json::from_str(r#"{ "key1": "0x76616c756531", "key2": "0x76616c756532" }"#)
+                .unwrap();
+
         assert_eq!(new_protocol_component.attributes, Some(expected_attributes));
 
         assert_eq!(new_protocol_component.created_at, creation_ts);

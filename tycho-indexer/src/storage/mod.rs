@@ -698,7 +698,7 @@ pub trait StorableComponent<S, N, I>: Sized + Send + Sync + 'static {
         chain_id: i64,
         protocol_system_id: i64,
         creation_ts: NaiveDateTime,
-    ) -> Result<N, std::num::ParseIntError>;
+    ) -> Result<N, StorageError>;
 }
 
 #[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize)]
