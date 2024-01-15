@@ -17,21 +17,22 @@ use crate::{
 };
 
 pub mod pg {
-    use crate::extractor::evm::utils::pad_and_parse_h160;
-    use ethers::types::{H160, H256, U256};
-    use serde_json::Value;
-
     use crate::{
+        extractor::evm::utils::pad_and_parse_h160,
         hex_bytes::Bytes,
+        models,
+        models::{FinancialType, ImplementationType},
         storage::{
             postgres::{
                 orm,
                 orm::{NewToken, Token},
             },
-            Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState, StorableToken,
-            TxHash,
+            Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState,
+            StorableProtocolType, StorableToken, TxHash,
         },
     };
+    use ethers::types::{H160, H256, U256};
+    use serde_json::Value;
 
     use super::*;
 
@@ -116,6 +117,43 @@ pub mod pg {
 
         fn hash(&self) -> BlockHash {
             self.hash.into()
+        }
+    }
+    impl StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64> for models::ProtocolType {
+        fn from_storage(val: orm::ProtocolType) -> Result<Self, StorageError> {
+            let financial_type: FinancialType = match val.financial_type {
+                orm::FinancialType::Swap => FinancialType::Swap,
+                orm::FinancialType::Psm => FinancialType::Psm,
+                orm::FinancialType::Debt => FinancialType::Debt,
+                orm::FinancialType::Leverage => FinancialType::Leverage,
+            };
+            let implementation_type: ImplementationType = match val.implementation {
+                orm::ImplementationType::Custom => ImplementationType::Custom,
+                orm::ImplementationType::Vm => ImplementationType::Vm,
+            };
+
+            Ok(Self::new(val.name, financial_type, val.attribute_schema, implementation_type))
+        }
+
+        fn to_storage(&self) -> orm::NewProtocolType {
+            let financial_protocol_type: orm::FinancialType = match self.financial_type {
+                FinancialType::Swap => orm::FinancialType::Swap,
+                FinancialType::Psm => orm::FinancialType::Psm,
+                FinancialType::Debt => orm::FinancialType::Debt,
+                FinancialType::Leverage => orm::FinancialType::Leverage,
+            };
+
+            let protocol_implementation_type: orm::ImplementationType = match self.implementation {
+                ImplementationType::Custom => orm::ImplementationType::Custom,
+                ImplementationType::Vm => orm::ImplementationType::Vm,
+            };
+
+            orm::NewProtocolType {
+                name: self.name.clone(),
+                implementation: protocol_implementation_type,
+                attribute_schema: self.attribute_schema.clone(),
+                financial_type: financial_protocol_type,
+            }
         }
     }
 

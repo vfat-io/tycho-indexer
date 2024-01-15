@@ -23,34 +23,6 @@ pub enum ProtocolSystem {
     Ambient,
 }
 
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
-pub enum ImplementationType {
-    #[default]
-    Vm,
-    Custom,
-}
-
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
-pub enum FinancialType {
-    #[default]
-    Swap,
-    Lend,
-    Leverage,
-    Psm,
-}
-
-/// Represents the functionality of a component.
-/// `ProtocolSystems` are composed of various `ProtocolComponents`, and components that behave
-/// similarly are grouped under a specific `ProtocolType` (i.e. Pool, Factory) within a
-/// `ProtocolSystem`.
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
-pub struct ProtocolType {
-    pub name: String,
-    pub attribute_schema: serde_json::Value,
-    pub financial_type: FinancialType,
-    pub implementation_type: ImplementationType,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct ExtractorIdentity {
     pub chain: Chain,
@@ -96,4 +68,39 @@ impl ExtractionState {
 #[typetag::serde(tag = "type")]
 pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static {
     fn source(&self) -> ExtractorIdentity;
+}
+
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
+pub enum ImplementationType {
+    #[default]
+    Vm,
+    Custom,
+}
+
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
+pub enum FinancialType {
+    #[default]
+    Swap,
+    Psm,
+    Debt,
+    Leverage,
+}
+
+#[derive(Debug, PartialEq, Clone, Default, Deserialize, Serialize)]
+pub struct ProtocolType {
+    pub name: String,
+    pub financial_type: FinancialType,
+    pub attribute_schema: Option<serde_json::Value>,
+    pub implementation: ImplementationType,
+}
+
+impl ProtocolType {
+    pub fn new(
+        name: String,
+        financial_type: FinancialType,
+        attribute_schema: Option<serde_json::Value>,
+        implementation: ImplementationType,
+    ) -> Self {
+        ProtocolType { name, financial_type, attribute_schema, implementation }
+    }
 }
