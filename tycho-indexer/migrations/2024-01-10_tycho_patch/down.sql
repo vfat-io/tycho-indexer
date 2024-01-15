@@ -15,9 +15,9 @@ CREATE TYPE financial_protocol_type AS ENUM(
     'leverage'
 );
 
-ALTER TABLE your_table
-ALTER COLUMN your_column TYPE financial_protocol_type
-USING your_column::text::financial_protocol_type;
+ALTER TABLE protocol_type
+ALTER COLUMN protocol_type TYPE financial_protocol_type
+USING protocol_type::text::financial_protocol_type;
 
 DROP TYPE financial_type;
 
