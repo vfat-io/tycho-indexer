@@ -12,6 +12,7 @@ mod pb;
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 const INIT_POOL_CODE: u8 = 71;
 const USER_CMD_FN_SIG: [u8; 4] = [0xA1, 0x51, 0x12, 0xF9];
+const SWAP_FN_SIG: [u8; 4] = [0x3d, 0x71, 0x9c, 0xd9];
 
 struct SlotValue {
     new_value: Vec<u8>,
@@ -213,6 +214,18 @@ fn map_changes(
                 } else {
                     bail!("Failed to decode ABI external call.".to_string());
                 }
+            } else if call.input[0..4] == SWAP_FN_SIG {
+                // Handle TVL changes caused by calling the swap function
+                let balance_change = tycho::BalanceChange {
+                    token: format!(
+                        "{}{}{}",
+                        hex::encode(base.clone()),
+                        hex::encode(quote.clone()),
+                        pool_index
+                    ),
+                    balance,
+                    component_id: AMBIENT_CONTRACT.to_vec(),
+                };
             }
         }
 

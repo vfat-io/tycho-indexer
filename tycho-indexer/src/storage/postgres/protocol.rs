@@ -2,6 +2,7 @@
 #![allow(unused_imports)]
 
 use async_trait::async_trait;
+
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
@@ -112,12 +113,41 @@ where
     ) -> Result<(), StorageError> {
         todo!()
     }
+
+    async fn _get_or_create_protocol_system_id(
+        &self,
+        new: ProtocolSystem,
+        conn: &mut Self::DB,
+    ) -> Result<i64, StorageError> {
+        use super::schema::protocol_system::dsl::*;
+        let new_system = orm::ProtocolSystemType::from(new);
+
+        let existing_entry = protocol_system
+            .filter(name.eq(new_system.clone()))
+            .first::<orm::ProtocolSystem>(conn)
+            .await;
+
+        if let Ok(entry) = existing_entry {
+            return Ok(entry.id);
+        } else {
+            let new_entry = orm::NewProtocolSystem { name: new_system };
+
+            let inserted_protocol_system = diesel::insert_into(protocol_system)
+                .values(&new_entry)
+                .get_result::<orm::ProtocolSystem>(conn)
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
+                })?;
+            Ok(inserted_protocol_system.id)
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-
     use diesel_async::AsyncConnection;
     use serde_json::json;
 
@@ -129,6 +159,7 @@ mod test {
     };
 
     use super::*;
+
 
     type EVMGateway = PostgresGateway<
         evm::Block,
@@ -146,7 +177,26 @@ mod test {
         conn.begin_test_transaction()
             .await
             .unwrap();
+
         conn
+    }
+
+    #[tokio::test]
+    async fn test_get_or_create_protocol_system_id() {
+        let mut conn = setup_db().await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let protocol_system_id = gw
+            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(protocol_system_id, 1);
+
+        let protocol_system_id = gw
+            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(protocol_system_id, 1);
     }
 
     #[tokio::test]

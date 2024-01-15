@@ -18,19 +18,20 @@ use crate::{
 
 pub mod pg {
     use crate::{
+        hex_bytes::Bytes,
         models,
         models::{FinancialType, ImplementationType},
+        storage::{
+            postgres::{
+                orm,
+                orm::{NewProtocolState, NewToken, Token},
+            },
+            Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState,
+            StorableProtocolType, StorableToken, TxHash,
+        },
     };
     use ethers::types::{H160, H256, U256};
-
-    use crate::storage::{
-        postgres::{
-            orm,
-            orm::{NewProtocolState, NewToken, Token},
-        },
-        Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState, StorableProtocolType,
-        StorableToken, TxHash,
-    };
+    use serde_json::Value;
 
     use super::*;
 
@@ -314,17 +315,59 @@ pub mod pg {
     impl StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64> for evm::ProtocolState {
         fn from_storage(
             val: orm::ProtocolState,
-            contract: ContractId,
+            component_id: String,
+            tx_hash: &TxHash,
         ) -> Result<Self, StorageError> {
-            todo!()
+            let mut attr: HashMap<String, Bytes> = HashMap::new();
+            if let Some(Value::Object(state)) = &val.state {
+                for (k, v) in state.iter() {
+                    if let Value::String(s) = v {
+                        attr.insert(k.clone(), Bytes::from(s.as_str()));
+                    }
+                }
+            }
+            Ok(evm::ProtocolState::new(
+                component_id,
+                attr,
+                H256::try_decode(tx_hash, "tx hash").map_err(StorageError::DecodeError)?,
+            ))
         }
 
-        fn to_storage(&self, contract_id: i64) -> NewProtocolState {
-            todo!()
+        fn to_storage(
+            &self,
+            protocol_component_id: i64,
+            tx_id: i64,
+            block_ts: NaiveDateTime,
+        ) -> orm::NewProtocolState {
+            orm::NewProtocolState {
+                protocol_component_id,
+                state: self.convert_attributes_to_json(),
+                modify_tx: tx_id,
+                tvl: None,
+                inertias: None,
+                valid_from: block_ts,
+                valid_to: None,
+            }
         }
+    }
 
-        fn contract_id(&self) -> ContractId {
-            todo!()
+    impl evm::ProtocolState {
+        fn convert_attributes_to_json(&self) -> Option<serde_json::Value> {
+            // Convert Bytes to String and then to serde_json Value
+            let serialized_map: HashMap<String, serde_json::Value> = self
+                .updated_attributes
+                .iter()
+                .map(|(k, v)| {
+                    let s = hex::encode(v);
+                    (k.clone(), serde_json::Value::String(s))
+                })
+                .collect();
+
+            // Convert HashMap<String, serde_json::Value> to serde_json::Value struct
+            match serde_json::to_value(serialized_map) {
+                Ok(value) => Some(value),
+                Err(_) => None,
+            }
         }
     }
 }
