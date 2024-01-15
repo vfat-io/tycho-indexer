@@ -19,7 +19,7 @@ CREATE TYPE financial_type AS ENUM(
 
 ALTER TABLE protocol_type
 ALTER COLUMN financial_type TYPE financial_type
-USING financial_type::text::financial_type;
+USING protocol_type::text::financial_type;
 
 DROP TYPE financial_protocol_type;
 
@@ -30,6 +30,6 @@ CREATE TYPE implementation_type AS ENUM(
 
 ALTER TABLE protocol_type
 ALTER COLUMN "implementation" TYPE implementation_type
-USING protocol_implementation_type::text::implementation_type;
+USING protocol_type::text::implementation_type;
 
 DROP TYPE protocol_implementation_type;

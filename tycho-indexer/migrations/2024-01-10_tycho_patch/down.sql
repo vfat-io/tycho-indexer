@@ -5,7 +5,7 @@ CREATE TYPE protocol_implementation_type AS ENUM(
 
 ALTER TABLE protocol_type
 ALTER COLUMN "implementation" TYPE protocol_implementation_type
-USING implementation_type::text::protocol_implementation_type;
+USING protocol_type::text::protocol_implementation_type;
 
 DROP TYPE implementation_type;
 
