@@ -24,7 +24,7 @@ pub mod pg {
         storage::{
             postgres::{
                 orm,
-                orm::{NewProtocolState, NewToken, Token},
+                orm::{NewToken, Token},
             },
             Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState,
             StorableProtocolType, StorableToken, TxHash,
