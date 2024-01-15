@@ -84,7 +84,8 @@ impl AmbientPgGateway {
             ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
         self.state_gateway
             .save_state(block, &state)
-            .await?;
+            .await
+            .expect("Received signal ok")?;
         Ok(())
     }
 
@@ -97,18 +98,21 @@ impl AmbientPgGateway {
         debug!("Upserting block");
         self.state_gateway
             .upsert_block(&changes.block)
-            .await?;
+            .await
+            .expect("Received signal ok")?;
         for update in changes.tx_updates.iter() {
             debug!(tx_hash = ?update.tx.hash, "Processing transaction");
             self.state_gateway
                 .upsert_tx(&changes.block, &update.tx)
-                .await?;
+                .await
+                .expect("Received signal ok")?;
             if update.is_creation() {
                 let new: evm::Account = update.into();
                 info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
                 self.state_gateway
                     .insert_contract(&changes.block, &new)
-                    .await?;
+                    .await
+                    .expect("Received signal ok")?;
             }
         }
         let collected_changes: Vec<(Bytes, AccountUpdate)> = changes
@@ -121,7 +125,8 @@ impl AmbientPgGateway {
 
         self.state_gateway
             .update_contracts(&changes.block, changes_slice)
-            .await?;
+            .await
+            .expect("Received signal ok")?;
         self.save_cursor(&changes.block, new_cursor)
             .await?;
 
@@ -150,7 +155,8 @@ impl AmbientPgGateway {
             .collect();
         self.state_gateway
             .revert_state(to)
-            .await?;
+            .await
+            .expect("Received signal ok")?;
 
         self.save_cursor(&block, new_cursor)
             .await?;
@@ -427,8 +433,8 @@ mod test {
             .returning(|| Ok("cursor".into()));
         gw.expect_revert()
             .withf(|v, cursor| {
-                v == &BlockIdentifier::Hash(evm::fixtures::HASH_256_0.into()) &&
-                    cursor == "cursor@400"
+                v == &BlockIdentifier::Hash(evm::fixtures::HASH_256_0.into())
+                    && cursor == "cursor@400"
             })
             .times(1)
             .returning(|_, _| Ok(evm::BlockAccountChanges::default()));
@@ -645,7 +651,11 @@ mod gateway_test {
             .expect("upsert should succeed");
 
         let cached_gw: CachedGateway = gw.state_gateway;
-        cached_gw.flush().await;
+        cached_gw
+            .flush()
+            .await
+            .expect("Received signal ok")
+            .expect("Flush ok");
 
         let maybe_err = err_rx
             .try_recv()

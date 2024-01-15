@@ -8,7 +8,10 @@ use diesel_async::{
     AsyncPgConnection,
 };
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc,
+        oneshot::{self, error::RecvError},
+    },
     task::JoinHandle,
 };
 use tracing::log::{debug, info};
@@ -376,7 +379,10 @@ impl CachedGateway {
     ) -> Self {
         CachedGateway { tx, pool, state_gateway }
     }
-    pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
+    pub async fn upsert_block(
+        &self,
+        new: &evm::Block,
+    ) -> Result<Result<(), StorageError>, RecvError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*new, vec![WriteOp::UpsertBlock(*new)], tx);
         self.tx
@@ -384,14 +390,13 @@ impl CachedGateway {
             .await
             .expect("Send message to receiver ok");
         rx.await
-            .expect("Receive confirmation ok")
     }
 
     pub async fn upsert_tx(
         &self,
         block: &evm::Block,
         new: &evm::Transaction,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Result<(), StorageError>, RecvError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::UpsertTx(*new)], tx);
         self.tx
@@ -399,14 +404,13 @@ impl CachedGateway {
             .await
             .expect("Send message to receiver ok");
         rx.await
-            .expect("Receive confirmation ok")
     }
 
     pub async fn save_state(
         &self,
         block: &evm::Block,
         new: &ExtractionState,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Result<(), StorageError>, RecvError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::SaveExtractionState(new.clone())], tx);
         self.tx
@@ -414,14 +418,13 @@ impl CachedGateway {
             .await
             .expect("Send message to receiver ok");
         rx.await
-            .expect("Receive confirmation ok")
     }
 
     pub async fn insert_contract(
         &self,
         block: &evm::Block,
         new: &evm::Account,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Result<(), StorageError>, RecvError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::InsertContract(new.clone())], tx);
         self.tx
@@ -429,14 +432,13 @@ impl CachedGateway {
             .await
             .expect("Send message to receiver ok");
         rx.await
-            .expect("Receive confirmation ok")
     }
 
     pub async fn update_contracts(
         &self,
         block: &evm::Block,
         new: &[(TxHash, AccountUpdate)],
-    ) -> Result<(), StorageError> {
+    ) -> Result<Result<(), StorageError>, RecvError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::UpdateContracts(new.to_owned())], tx);
         self.tx
@@ -444,17 +446,18 @@ impl CachedGateway {
             .await
             .expect("Send message to receiver ok");
         rx.await
-            .expect("Receive confirmation ok")
     }
 
-    pub async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError> {
+    pub async fn revert_state(
+        &self,
+        to: &BlockIdentifier,
+    ) -> Result<Result<(), StorageError>, RecvError> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(DBCacheMessage::Revert(to.clone(), tx))
             .await
             .expect("Send message to receiver ok");
         rx.await
-            .expect("Receive confirmation ok")
     }
 
     pub async fn get_accounts_delta(
@@ -467,20 +470,20 @@ impl CachedGateway {
         //TODO: handle multiple extractors reverts
         self.flush()
             .await
+            .expect("Received signal ok")
             .expect("Flush should succeed");
         self.state_gateway
             .get_accounts_delta(chain, start_version, end_version, db)
             .await
     }
 
-    pub async fn flush(&self) -> Result<(), StorageError> {
+    pub async fn flush(&self) -> Result<Result<(), StorageError>, RecvError> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(DBCacheMessage::Flush(tx))
             .await
             .expect("Send message to receiver ok");
         rx.await
-            .expect("Receive confirmation ok")
     }
 }
 
@@ -597,7 +600,11 @@ mod test {
             .expect("Transaction cached");
 
         // Send flush message
-        let os_rx_flush = send_flush_message(&tx).await;
+        let (os_tx_flush, os_rx_flush) = oneshot::channel();
+        tx.send(DBCacheMessage::Flush(os_tx_flush))
+            .await
+            .expect("Failed to send flush message through mpsc channel");
+
         os_rx_flush
             .await
             .expect("Response from channel ok")
@@ -894,10 +901,12 @@ mod test {
         cached_gw
             .upsert_block(&block_1)
             .await
+            .expect("Received signal ok")
             .expect("Upsert block 1 ok");
         cached_gw
             .upsert_tx(&block_1, &tx_1)
             .await
+            .expect("Received signal ok")
             .expect("Upsert tx 1 ok");
 
         // Send second block messages
@@ -905,6 +914,7 @@ mod test {
         cached_gw
             .upsert_block(&block_2)
             .await
+            .expect("Received signal ok")
             .expect("Upsert block 2 ok");
 
         // Send third block messages
@@ -912,6 +922,7 @@ mod test {
         cached_gw
             .upsert_block(&block_3)
             .await
+            .expect("Received signal ok")
             .expect("Upsert block 3 ok");
 
         let maybe_err = err_rx
@@ -1052,16 +1063,6 @@ mod test {
         tx.send(DBCacheMessage::Write(db_transaction))
             .await
             .expect("Failed to send write message through mpsc channel");
-        os_rx
-    }
-
-    async fn send_flush_message(
-        tx: &mpsc::Sender<DBCacheMessage>,
-    ) -> oneshot::Receiver<Result<(), StorageError>> {
-        let (os_tx, os_rx) = oneshot::channel();
-        tx.send(DBCacheMessage::Flush(os_tx))
-            .await
-            .expect("Failed to send flush message through mpsc channel");
         os_rx
     }
 
