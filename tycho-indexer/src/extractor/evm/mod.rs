@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     ops::Deref,
 };
 
@@ -675,7 +675,7 @@ pub struct ProtocolState {
     // the update protocol specific attributes, validated by the components schema
     pub updated_attributes: HashMap<String, Bytes>,
     // the deleted protocol specific attributes
-    pub deleted_attributes: HashMap<String, Bytes>,
+    pub deleted_attributes: HashSet<String>,
     // via transaction, we can trace back when this state became valid
     pub modify_tx: H256,
 }
@@ -687,7 +687,7 @@ impl ProtocolState {
         Self {
             component_id,
             updated_attributes: attributes,
-            deleted_attributes: HashMap::new(),
+            deleted_attributes: HashSet::new(),
             modify_tx,
         }
     }
@@ -697,7 +697,7 @@ impl ProtocolState {
         msg: substreams::EntityChanges,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
-        let (mut updates, mut deletions) = (HashMap::new(), HashMap::new());
+        let (mut updates, mut deletions) = (HashMap::new(), HashSet::new());
 
         for attribute in msg.attributes.into_iter() {
             match attribute.change().into() {
@@ -705,7 +705,7 @@ impl ProtocolState {
                     updates.insert(attribute.name, Bytes::from(attribute.value));
                 }
                 ChangeType::Deletion => {
-                    deletions.insert(attribute.name, Bytes::from(attribute.value));
+                    deletions.insert(attribute.name);
                 }
             }
         }
@@ -736,8 +736,8 @@ impl ProtocolState {
             )));
         }
         self.modify_tx = other.modify_tx;
-        for attr in other.deleted_attributes.keys() {
-            self.updated_attributes.remove(attr);
+        for attr in other.deleted_attributes.clone() {
+            self.updated_attributes.remove(&attr);
         }
         for attr in other.updated_attributes.keys() {
             self.deleted_attributes.remove(attr);
@@ -1587,10 +1587,9 @@ mod test {
         ]
         .into_iter()
         .collect();
-        let del_attributes1: HashMap<String, Bytes> =
-            vec![("to_add_back".to_owned(), Bytes::from(U256::from(0)))]
-                .into_iter()
-                .collect();
+        let del_attributes1: HashSet<String> = vec!["to_add_back".to_owned()]
+            .into_iter()
+            .collect();
         let mut state1 = ProtocolState {
             component_id: "State1".to_owned(),
             updated_attributes: up_attributes1,
@@ -1606,10 +1605,9 @@ mod test {
         ]
         .into_iter()
         .collect();
-        let del_attributes2: HashMap<String, Bytes> =
-            vec![("to_be_removed".to_owned(), Bytes::from(U256::from(0)))]
-                .into_iter()
-                .collect();
+        let del_attributes2: HashSet<String> = vec!["to_be_removed".to_owned()]
+            .into_iter()
+            .collect();
         let state2 = ProtocolState {
             component_id: "State1".to_owned(),
             updated_attributes: up_attributes2.clone(),
@@ -1630,10 +1628,9 @@ mod test {
         .into_iter()
         .collect();
         assert_eq!(state1.updated_attributes, expected_up_attributes);
-        let expected_del_attributes: HashMap<String, Bytes> =
-            vec![("to_be_removed".to_owned(), Bytes::from(U256::from(0)))]
-                .into_iter()
-                .collect();
+        let expected_del_attributes: HashSet<String> = vec!["to_be_removed".to_owned()]
+            .into_iter()
+            .collect();
         assert_eq!(state1.deleted_attributes, expected_del_attributes);
     }
 
@@ -1650,7 +1647,7 @@ mod test {
                 ProtocolState {
                     component_id: "State1".to_owned(),
                     updated_attributes: attributes.clone(),
-                    deleted_attributes: HashMap::new(),
+                    deleted_attributes: HashSet::new(),
                     modify_tx: H256::zero(),
                 },
             ),
@@ -1659,7 +1656,7 @@ mod test {
                 ProtocolState {
                     component_id: "State2".to_owned(),
                     updated_attributes: attributes,
-                    deleted_attributes: HashMap::new(),
+                    deleted_attributes: HashSet::new(),
                     modify_tx: H256::zero(),
                 },
             ),
@@ -1685,7 +1682,7 @@ mod test {
             ProtocolState {
                 component_id: "State1".to_owned(),
                 updated_attributes: new_attributes,
-                deleted_attributes: HashMap::new(),
+                deleted_attributes: HashSet::new(),
                 modify_tx: new_tx.hash,
             },
         )]
@@ -1753,7 +1750,7 @@ mod test {
             ]
             .into_iter()
             .collect(),
-            deleted_attributes: HashMap::new(),
+            deleted_attributes: HashSet::new(),
             modify_tx: H256::zero(),
         }
     }
@@ -1769,7 +1766,7 @@ mod test {
         let state2 = ProtocolState {
             component_id: "State2".to_owned(),
             updated_attributes: attributes2.clone(),
-            deleted_attributes: HashMap::new(),
+            deleted_attributes: HashSet::new(),
             modify_tx: HASH_256_1.parse().unwrap(),
         };
 
@@ -1816,7 +1813,7 @@ mod test {
             ProtocolState {
                 component_id: "State1".to_owned(),
                 updated_attributes: attr,
-                deleted_attributes: HashMap::new(),
+                deleted_attributes: HashSet::new(),
                 modify_tx: tx.hash,
             },
         )]
@@ -1914,7 +1911,7 @@ mod test {
                 ProtocolState {
                     component_id: "State1".to_owned(),
                     updated_attributes: attr1,
-                    deleted_attributes: HashMap::new(),
+                    deleted_attributes: HashSet::new(),
                     modify_tx: tx.hash,
                 },
             ),
@@ -1923,7 +1920,7 @@ mod test {
                 ProtocolState {
                     component_id: "State2".to_owned(),
                     updated_attributes: attr2,
-                    deleted_attributes: HashMap::new(),
+                    deleted_attributes: HashSet::new(),
                     modify_tx: H256::zero(),
                 },
             ),

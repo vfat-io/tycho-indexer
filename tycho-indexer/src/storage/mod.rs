@@ -466,11 +466,7 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
 ///   `to_storage` method, thereby providing a flexible way for different databases to interact with
 ///   the token.
 pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
-    fn from_storage(
-        val: S,
-        component_id: ContractId,
-        tx_hash: &TxHash,
-    ) -> Result<Self, StorageError>;
+    fn from_storage(val: S, component_id: String, tx_hash: &TxHash) -> Result<Self, StorageError>;
 
     fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> N;
 }
