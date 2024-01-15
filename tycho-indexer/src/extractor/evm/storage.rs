@@ -277,7 +277,7 @@ pub mod pg {
     impl StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64> for evm::ProtocolState {
         fn from_storage(
             val: orm::ProtocolState,
-            component_id: ContractId,
+            component_id: String,
             tx_hash: &TxHash,
         ) -> Result<Self, StorageError> {
             let mut attr: HashMap<String, Bytes> = HashMap::new();
@@ -289,7 +289,7 @@ pub mod pg {
                 }
             }
             Ok(evm::ProtocolState::new(
-                component_id.address.to_string(),
+                component_id,
                 attr,
                 H256::try_decode(tx_hash, "tx hash").map_err(StorageError::DecodeError)?,
             ))
