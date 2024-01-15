@@ -1,31 +1,33 @@
 #![allow(unused_variables)]
 
-use std::collections::HashMap;
-
-use chrono::NaiveDateTime;
-
 use crate::{
     extractor::{
         evm,
         evm::utils::{parse_u256_slot_entry, TryDecode},
     },
+    hex_bytes::Bytes,
+    models,
     models::Chain,
+    storage,
     storage::{
-        ContractDelta, ContractId, ContractStore, StorableBlock, StorableContract,
-        StorableTransaction, StorageError,
+        ContractDelta, ContractStore, StorableBlock, StorableContract, StorableTransaction,
+        StorageError,
     },
 };
+use chrono::NaiveDateTime;
+use std::collections::HashMap;
 
 pub mod pg {
     use ethers::types::{H160, H256, U256};
+    use serde_json::Value;
 
     use crate::storage::{
         postgres::{
             orm,
-            orm::{NewProtocolState, NewToken, Token},
+            orm::{NewToken, Token},
         },
-        Address, Balance, BlockHash, ChangeType, Code, StorableProtocolState, StorableToken,
-        TxHash,
+        Address, Balance, BlockHash, ChangeType, Code, StorableComponent, StorableProtocolState,
+        StorableToken, TxHash,
     };
 
     use super::*;
@@ -229,8 +231,8 @@ pub mod pg {
             Ok(update)
         }
 
-        fn contract_id(&self) -> ContractId {
-            ContractId::new(self.chain, self.address.into())
+        fn contract_id(&self) -> storage::ContractId {
+            storage::ContractId::new(self.chain, self.address.into())
         }
 
         fn dirty_balance(&self) -> Option<Balance> {
@@ -250,7 +252,7 @@ pub mod pg {
     }
 
     impl StorableToken<orm::Token, orm::NewToken, i64> for evm::ERC20Token {
-        fn from_storage(val: Token, contract: ContractId) -> Result<Self, StorageError> {
+        fn from_storage(val: Token, contract: storage::ContractId) -> Result<Self, StorageError> {
             // TODO: implementing this is planned for ENG 1717, uncomment below to start
             // let address =
             //     pad_and_parse_h160(contract.address()).map_err(StorageError::DecodeError)?;
@@ -265,25 +267,192 @@ pub mod pg {
             todo!()
         }
 
-        fn contract_id(&self) -> ContractId {
+        fn contract_id(&self) -> storage::ContractId {
             todo!()
         }
     }
 
+    impl StorableComponent<orm::ProtocolComponent, orm::NewProtocolComponent, i64>
+        for evm::ProtocolComponent
+    {
+        fn from_storage(
+            val: orm::ProtocolComponent,
+            tokens: Vec<H160>,
+            contract_ids: Vec<H160>,
+            chain: Chain,
+            protocol_system: models::ProtocolSystem,
+        ) -> Result<Self, StorageError> {
+            let mut static_attributes: HashMap<String, Bytes> = HashMap::default();
+
+            if let Some(json_value) = val.attributes {
+                println!("Getting some");
+                if let Value::Object(map) = json_value {
+                    println!("Getting some more");
+                    static_attributes = map
+                        .into_iter()
+                        .map(|(key, value)| {
+                            (key, Bytes::from(bytes::Bytes::from(value.to_string())))
+                        })
+                        .collect();
+                }
+            }
+
+            Ok(evm::ProtocolComponent {
+                id: evm::ContractId(val.external_id),
+                protocol_system,
+                protocol_type_id: val.protocol_type_id.to_string(),
+                chain,
+                tokens,
+                contract_ids,
+                static_attributes,
+                change: Default::default(),
+            })
+        }
+
+        fn to_storage(
+            &self,
+            chain_id: i64,
+            protocol_system_id: i64,
+            creation_ts: NaiveDateTime,
+        ) -> Result<orm::NewProtocolComponent, std::num::ParseIntError> {
+            let protocol_type_id = self.protocol_type_id.parse::<i64>()?;
+            Ok(orm::NewProtocolComponent {
+                external_id: self.id.0.clone(),
+                chain_id,
+                protocol_type_id,
+                protocol_system_id,
+                attributes: Some(serde_json::to_value(&self.static_attributes).unwrap()),
+                created_at: creation_ts,
+            })
+        }
+    }
     impl StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64> for evm::ProtocolState {
         fn from_storage(
             val: orm::ProtocolState,
-            contract: ContractId,
+            contract: storage::ContractId,
         ) -> Result<Self, StorageError> {
             todo!()
         }
 
-        fn to_storage(&self, contract_id: i64) -> NewProtocolState {
+        fn to_storage(&self, contract_id: i64) -> orm::NewProtocolState {
             todo!()
         }
 
-        fn contract_id(&self) -> ContractId {
+        fn contract_id(&self) -> storage::ContractId {
             todo!()
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{models::ProtocolSystem, storage::postgres::orm};
+
+    use crate::storage::StorableComponent;
+    use chrono::Utc;
+    use ethers::prelude::H160;
+    use std::str::FromStr;
+
+    #[tokio::test]
+    async fn test_from_storage() {
+        let atts = serde_json::json!({
+            "key1": "value1",
+            "key2": "value2"
+        });
+
+        let val = orm::ProtocolComponent {
+            id: 0,
+            chain_id: 0,
+            external_id: "sample_external_id".to_string(),
+            protocol_type_id: 42,
+            attributes: Some(atts.clone()),
+            protocol_system_id: 0,
+            created_at: Default::default(),
+            deleted_at: None,
+            inserted_ts: Default::default(),
+            modified_ts: Default::default(),
+        };
+        let tokens = vec![
+            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+        ];
+        let contract_ids = vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)];
+        let chain = Chain::Ethereum;
+        let protocol_system = ProtocolSystem::Ambient;
+
+        let result = evm::ProtocolComponent::from_storage(
+            val.clone(),
+            tokens.clone(),
+            contract_ids.clone(),
+            chain,
+            protocol_system,
+        );
+
+        assert!(result.is_ok());
+
+        let protocol_component = result.unwrap();
+
+        assert_eq!(protocol_component.id, evm::ContractId(val.external_id.to_string()));
+        assert_eq!(protocol_component.protocol_type_id, val.protocol_type_id.to_string());
+        assert_eq!(protocol_component.chain, chain);
+        assert_eq!(protocol_component.tokens, tokens);
+        assert_eq!(protocol_component.contract_ids, contract_ids);
+
+        let expected_attributes: HashMap<String, Bytes> = maplit::hashmap! {
+            "key1".to_string() => Bytes::from(bytes::Bytes::from(atts.get("key1").unwrap().to_string())),
+            "key2".to_string() => Bytes::from(bytes::Bytes::from(atts.get("key2").unwrap().to_string())),
+        };
+
+        assert_eq!(protocol_component.static_attributes, expected_attributes);
+    }
+
+    #[test]
+    fn test_to_storage() {
+        let protocol_component = evm::ProtocolComponent {
+            id: evm::ContractId("sample_contract_id".to_string()),
+            protocol_system: ProtocolSystem::Ambient,
+            protocol_type_id: "42".to_string(),
+            chain: Chain::Ethereum,
+            tokens: vec![
+                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+            ],
+            contract_ids: vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)],
+            static_attributes: {
+                let mut map = HashMap::new();
+                map.insert("key1".to_string(), Bytes::from("value1"));
+                map.insert("key2".to_string(), Bytes::from("value2"));
+                map
+            },
+            change: Default::default(),
+        };
+
+        let chain_id = 1;
+        let protocol_system_id = 2;
+        let creation_ts = Utc::now().naive_utc();
+
+        let result = protocol_component.to_storage(chain_id, protocol_system_id, creation_ts);
+
+        assert!(result.is_ok());
+
+        let new_protocol_component = result.unwrap();
+
+        assert_eq!(new_protocol_component.external_id, protocol_component.id.0);
+        assert_eq!(new_protocol_component.chain_id, chain_id);
+
+        let parsed_protocol_type_id = protocol_component
+            .protocol_type_id
+            .parse::<i64>()
+            .unwrap();
+        assert_eq!(new_protocol_component.protocol_type_id, parsed_protocol_type_id);
+
+        assert_eq!(new_protocol_component.protocol_system_id, protocol_system_id);
+
+        let expected_attributes: serde_json::Value =
+            serde_json::from_str(r#"{ "key1": "value1", "key2": "value2" }"#).unwrap();
+        assert_eq!(new_protocol_component.attributes, Some(expected_attributes));
+
+        assert_eq!(new_protocol_component.created_at, creation_ts);
     }
 }
