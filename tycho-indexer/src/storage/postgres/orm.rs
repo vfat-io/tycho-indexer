@@ -244,7 +244,7 @@ impl From<models::ProtocolSystem> for ProtocolSystemType {
 }
 
 #[derive(Debug, DbEnum, Clone, PartialEq)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialProtocolType"]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialType"]
 pub enum FinancialType {
     Swap,
     Psm,
@@ -253,7 +253,7 @@ pub enum FinancialType {
 }
 
 #[derive(Debug, DbEnum, Clone, PartialEq)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolImplementationType"]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ImplementationType"]
 pub enum ImplementationType {
     Custom,
     Vm,
