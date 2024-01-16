@@ -329,7 +329,6 @@ pub mod pg {
                         "Could not convert attributes in StorableComponent".to_string(),
                     )
                 })?),
-                created_at: creation_ts,
             })
         }
     }
@@ -508,7 +507,5 @@ mod test {
                 .unwrap();
 
         assert_eq!(new_protocol_component.attributes, Some(expected_attributes));
-
-        assert_eq!(new_protocol_component.created_at, creation_ts);
     }
 }

@@ -301,7 +301,6 @@ pub struct NewProtocolComponent {
     pub protocol_type_id: i64,
     pub protocol_system_id: i64,
     pub attributes: Option<serde_json::Value>,
-    pub created_at: NaiveDateTime,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
