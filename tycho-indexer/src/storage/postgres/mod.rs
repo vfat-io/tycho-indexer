@@ -841,6 +841,7 @@ pub mod db_fixtures {
         component_id: i64,
         tx_id: i64,
         state: Value,
+        valid_to_tx: Option<i64>,
     ) {
         let ts: NaiveDateTime = schema::transaction::table
             .inner_join(schema::block::table)
@@ -849,12 +850,25 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
+        let valid_to_ts: Option<NaiveDateTime> = match &valid_to_tx {
+            Some(tx) => Some(
+                schema::transaction::table
+                    .inner_join(schema::block::table)
+                    .filter(schema::transaction::id.eq(tx))
+                    .select(schema::block::ts)
+                    .first::<NaiveDateTime>(conn)
+                    .await
+                    .expect("setup tx id not found"),
+            ),
+            None => None,
+        };
 
         let query = diesel::insert_into(schema::protocol_state::table).values((
             schema::protocol_state::protocol_component_id.eq(component_id),
             schema::protocol_state::modify_tx.eq(tx_id),
             schema::protocol_state::modified_ts.eq(ts),
             schema::protocol_state::valid_from.eq(ts),
+            schema::protocol_state::valid_to.eq(valid_to_ts),
             schema::protocol_state::state.eq(state),
         ));
         query

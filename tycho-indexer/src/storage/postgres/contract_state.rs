@@ -15,7 +15,6 @@ use crate::{
         AccountToContractStore, Address, Balance, BlockIdentifier, BlockOrTimestamp, ChangeType,
         Code, ContractDelta, ContractId, ContractStateGateway, ContractStore, StorableBlock,
         StorableContract, StorableToken, StorableTransaction, StoreKey, StoreVal, TxHash, Version,
-        VersionKind,
     },
 };
 

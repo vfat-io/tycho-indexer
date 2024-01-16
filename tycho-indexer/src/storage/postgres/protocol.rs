@@ -138,11 +138,15 @@ where
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::ProtocolState>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
+        let version_ts = match &at {
+            Some(version) => Some(version.to_ts(conn).await?),
+            None => None,
+        };
 
         match (ids, system) {
             (Some(ids), _) => {
                 decode_protocol_states(
-                    orm::ProtocolState::by_id(ids, chain_db_id, conn).await,
+                    orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
                     ids.join(",").as_str(),
                     conn,
                 )
@@ -150,7 +154,8 @@ where
             }
             (_, Some(system)) => {
                 decode_protocol_states(
-                    orm::ProtocolState::by_protocol_system(system, chain_db_id, conn).await,
+                    orm::ProtocolState::by_protocol_system(system, chain_db_id, version_ts, conn)
+                        .await,
                     system.to_string().as_str(),
                     conn,
                 )
@@ -159,7 +164,7 @@ where
             _ => {
                 dbg!(chain_db_id);
                 decode_protocol_states(
-                    orm::ProtocolState::by_chain(chain_db_id, conn).await,
+                    orm::ProtocolState::by_chain(chain_db_id, version_ts, conn).await,
                     chain.to_string().as_str(),
                     conn,
                 )
@@ -343,12 +348,19 @@ mod test {
 
         // protocol state for state1-reserve1
         let attributes1: HashMap<String, Bytes> =
-            vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
+            vec![("reserve1".to_owned(), Bytes::from(U256::from(1100)))]
                 .into_iter()
                 .collect();
         let state1: Value =
             serde_json::to_value(&attributes1).expect("Failed to convert attributes to json");
-        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[0], state1).await;
+        db_fixtures::insert_protocol_state(
+            conn,
+            protocol_component_id,
+            txn[0],
+            state1,
+            Some(txn[2]),
+        )
+        .await;
 
         // protocol state for state1-reserve2
         let attributes2: HashMap<String, Bytes> =
@@ -357,7 +369,17 @@ mod test {
                 .collect();
         let state2: Value =
             serde_json::to_value(&attributes2).expect("Failed to convert attributes to json");
-        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[0], state2).await;
+        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[0], state2, None).await;
+
+        // protocol state update for state1-reserve1
+        let attributes_new: HashMap<String, Bytes> =
+            vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
+                .into_iter()
+                .collect();
+        let state_new: Value =
+            serde_json::to_value(&attributes_new).expect("Failed to convert attributes to json");
+        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[2], state_new, None)
+            .await;
     }
 
     fn protocol_state() -> ProtocolState {
@@ -370,7 +392,7 @@ mod test {
         ProtocolState::new(
             "state1".to_owned(),
             attributes,
-            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+            "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
                 .parse()
                 .unwrap(),
         )
@@ -387,6 +409,41 @@ mod test {
 
         let result = gateway
             .get_states(&Chain::Ethereum, None, None, None, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(result, expected)
+    }
+
+    #[tokio::test]
+    async fn test_get_states_at() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        let mut protocol_state = protocol_state();
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1100))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+        ]
+        .into_iter()
+        .collect();
+        protocol_state.updated_attributes = attributes;
+        protocol_state.modify_tx =
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+                .parse()
+                .unwrap();
+        let expected = vec![protocol_state];
+
+        let result = gateway
+            .get_states(
+                &Chain::Ethereum,
+                Some(Version::from_block_number(Chain::Ethereum, 1)),
+                None,
+                None,
+                &mut conn,
+            )
             .await
             .unwrap();
 

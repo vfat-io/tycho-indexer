@@ -322,13 +322,25 @@ impl ProtocolState {
     pub async fn by_id(
         component_ids: &[&str],
         chain_id: i64,
+        version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<Self>> {
-        protocol_state::table
+        let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .filter(protocol_component::external_id.eq_any(component_ids))
             .filter(protocol_component::chain_id.eq(chain_id))
-            .filter(protocol_state::valid_to.is_null())
+            .filter(
+                protocol_state::valid_to
+                    .gt(version_ts)
+                    .or(protocol_state::valid_to.is_null()),
+            )
+            .into_boxed();
+
+        if let Some(ts) = version_ts {
+            query = query.filter(protocol_state::valid_from.le(ts));
+        }
+
+        query
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
@@ -337,9 +349,10 @@ impl ProtocolState {
     pub async fn by_protocol_system(
         system: models::ProtocolSystem,
         chain_id: i64,
+        version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<Self>> {
-        protocol_state::table
+        let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .inner_join(
                 protocol_system::table
@@ -347,17 +360,43 @@ impl ProtocolState {
             )
             .filter(protocol_system::name.eq(ProtocolSystemType::from(system)))
             .filter(protocol_component::chain_id.eq(chain_id))
-            .filter(protocol_state::valid_to.is_null())
+            .filter(
+                protocol_state::valid_to
+                    .gt(version_ts)
+                    .or(protocol_state::valid_to.is_null()),
+            )
+            .into_boxed();
+
+        if let Some(ts) = version_ts {
+            query = query.filter(protocol_state::valid_from.le(ts));
+        }
+
+        query
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
     }
 
-    pub async fn by_chain(chain_id: i64, conn: &mut AsyncPgConnection) -> QueryResult<Vec<Self>> {
-        protocol_state::table
+    pub async fn by_chain(
+        chain_id: i64,
+        version_ts: Option<NaiveDateTime>,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
+        let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .filter(protocol_component::chain_id.eq(chain_id))
-            .filter(protocol_state::valid_to.is_null())
+            .filter(
+                protocol_state::valid_to
+                    .gt(version_ts)
+                    .or(protocol_state::valid_to.is_null()),
+            )
+            .into_boxed();
+
+        if let Some(ts) = version_ts {
+            query = query.filter(protocol_state::valid_from.le(ts));
+        }
+
+        query
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
