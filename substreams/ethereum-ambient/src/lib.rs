@@ -11,9 +11,33 @@ mod pb;
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 const AMBIENT_HOTPROXY_CONTRACT: [u8; 20] = hex!("37e00522Ce66507239d59b541940F99eA19fF81F");
 const INIT_POOL_CODE: u8 = 71;
-const USER_CMD_FN_SIG: [u8; 4] = [0xA1, 0x51, 0x12, 0xF9];
-const USER_CMD_HOTPROXY_FN_SIG: [u8; 4] = [0xF9, 0x6d, 0xc7, 0x88];
-const SWAP_FN_SIG: [u8; 4] = [0x3d, 0x71, 0x9c, 0xd9];
+const USER_CMD_FN_SIG: [u8; 4] = hex!("a15112f9");
+const USER_CMD_HOTPROXY_FN_SIG: [u8; 4] = hex!("f96dc788");
+const SWAP_FN_SIG: [u8; 4] = hex!("3d719cd9");
+
+const SWAP_ABI_INPUT: &[ParamType] = &[
+    ParamType::Address,   // base
+    ParamType::Address,   // quote
+    ParamType::Uint(256), // pool index
+    // isBuy - if true the direction of the swap is for the user to send base
+    // tokens and receive back quote tokens.
+    ParamType::Bool,
+    ParamType::Bool,      // inBaseQty
+    ParamType::Uint(128), //qty
+    ParamType::Uint(16),  // poolTip
+    ParamType::Uint(128), // limitPrice
+    ParamType::Uint(128), // minOut
+    ParamType::Uint(8),   // reserveFlags
+];
+
+const SWAP_ABI_OUTPUT: &[ParamType] = &[
+    // The token base and quote token flows associated with this swap action.
+    // Negative indicates a credit paid to the user (token balance of pool
+    // decreases), positive a debit collected from the user (token balance of pool
+    // increases).
+    ParamType::Int(128), // baseFlow
+    ParamType::Int(128), // quoteFlow
+];
 
 struct SlotValue {
     new_value: Vec<u8>,
@@ -218,33 +242,7 @@ fn map_changes(
             } else if call.input[0..4] == SWAP_FN_SIG {
                 // Handle TVL changes caused by calling the swap function
 
-                let swap_external_abi_input_types = &[
-                    ParamType::Address,   // base
-                    ParamType::Address,   // quote
-                    ParamType::Uint(256), // pool index
-                    // isBuy - if true the direction of the swap is for the user to send base
-                    // tokens and receive back quote tokens.
-                    ParamType::Bool,
-                    ParamType::Bool,      // inBaseQty
-                    ParamType::Uint(128), //qty
-                    ParamType::Uint(16),  // poolTip
-                    ParamType::Uint(128), // limitPrice
-                    ParamType::Uint(128), // minOut
-                    ParamType::Uint(8),   // reserveFlags
-                ];
-
-                let swap_external_abi_output_types = &[
-                    // The token base and quote token flows associated with this swap action.
-                    // Negative indicates a credit paid to the user (token balance of pool
-                    // decreases), positive a debit collected from the user (token balance of pool
-                    // increases).
-                    ParamType::Int(128), // baseFlow
-                    ParamType::Int(128), // quoteFlow
-                ];
-
-                if let Ok(external_input_params) =
-                    decode(swap_external_abi_input_types, &call.input[4..])
-                {
+                if let Ok(external_input_params) = decode(SWAP_ABI_INPUT, &call.input[4..]) {
                     let _base_token = external_input_params[0]
                         .to_owned()
                         .into_address()
@@ -269,9 +267,7 @@ fn map_changes(
                         .ok_or_else(|| anyhow!("Failed to convert to u32".to_string()))?
                         .as_u32();
 
-                    if let Ok(external_outputs) =
-                        decode(swap_external_abi_output_types, &call.return_data)
-                    {
+                    if let Ok(external_outputs) = decode(SWAP_ABI_OUTPUT, &call.return_data) {
                         // TODO: aggregate these with the previous balances to get new balances:
                         let _base_flow = external_outputs[0]
                             .to_owned()
@@ -304,33 +300,8 @@ fn map_changes(
             }
             if call.input[0..4] == USER_CMD_HOTPROXY_FN_SIG {
                 // Handle TVL changes caused by calling the userCmd method on the HotProxy contract
-                let swap_external_abi_input_types = &[
-                    ParamType::Address,   // base
-                    ParamType::Address,   // quote
-                    ParamType::Uint(256), // pool index
-                    // isBuy - if true the direction of the swap is for the user to send base
-                    // tokens and receive back quote tokens.
-                    ParamType::Bool,
-                    ParamType::Bool,      // inBaseQty
-                    ParamType::Uint(128), //qty
-                    ParamType::Uint(16),  // poolTip
-                    ParamType::Uint(128), // limitPrice
-                    ParamType::Uint(128), // minOut
-                    ParamType::Uint(8),   // reserveFlags
-                ];
 
-                let swap_external_abi_output_types = &[
-                    // The token base and quote token flows associated with this swap action.
-                    // Negative indicates a credit paid to the user (token balance of pool
-                    // decreases), positive a debit collected from the user (token balance of pool
-                    // increases).
-                    ParamType::Int(128), // baseFlow
-                    ParamType::Int(128), // quoteFlow
-                ];
-
-                if let Ok(external_input_params) =
-                    decode(swap_external_abi_input_types, &call.input[4..])
-                {
+                if let Ok(external_input_params) = decode(SWAP_ABI_INPUT, &call.input[4..]) {
                     let _base_token = external_input_params[0]
                         .to_owned()
                         .into_address()
@@ -355,9 +326,7 @@ fn map_changes(
                         .ok_or_else(|| anyhow!("Failed to convert to u32".to_string()))?
                         .as_u32();
 
-                    if let Ok(external_outputs) =
-                        decode(swap_external_abi_output_types, &call.return_data)
-                    {
+                    if let Ok(external_outputs) = decode(SWAP_ABI_OUTPUT, &call.return_data) {
                         // TODO: aggregate these with the previous balances to get new balances:
                         let _base_flow = external_outputs[0]
                             .to_owned()
