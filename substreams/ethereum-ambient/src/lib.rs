@@ -269,34 +269,16 @@ fn map_changes(
                     if let Ok(external_outputs) =
                         decode(swap_external_abi_output_types, &call.return_data)
                     {
-                        let base_flow = external_outputs[0]
+                        // TODO: aggregate these with the previous balances to get new balances:
+                        let _base_flow = external_outputs[0]
                             .to_owned()
                             .into_int() // Needs conversion into bytes for next step
                             .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
 
-                        let quote_flow = external_outputs[1]
+                        let _quote_flow = external_outputs[1]
                             .to_owned()
                             .into_int() // Needs conversion into bytes for next step
                             .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
-
-                        let base_balance_change = tycho::BalanceChange {
-                            token: base_token,
-                            balance: vec![], /* this needs to be aggregated with the current TVL */
-                            component_id: format!("ambient_{}", pool_index).into_bytes(),
-                        };
-
-                        let quote_balance_change = tycho::BalanceChange {
-                            token: quote_token,
-                            balance: vec![], /* this needs to be aggregated with the current TVL */
-                            component_id: format!("ambient_{}", pool_index).into_bytes(),
-                        };
-
-                        tx_change
-                            .balance_changes
-                            .push(base_balance_change);
-                        tx_change
-                            .balance_changes
-                            .push(quote_balance_change);
                     } else {
                         bail!("Failed to decode call outputs.".to_string());
                     }
