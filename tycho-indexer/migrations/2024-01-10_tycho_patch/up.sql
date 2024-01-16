@@ -33,3 +33,6 @@ ALTER COLUMN "implementation" TYPE implementation_type
 USING protocol_type::text::implementation_type;
 
 DROP TYPE protocol_implementation_type;
+
+DROP TRIGGER invalidate_previous_protocol_state ON protocol_state;
+DROP FUNCTION invalidate_previous_entry_protocol_state();

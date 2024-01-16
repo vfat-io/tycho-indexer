@@ -31,4 +31,24 @@ ALTER COLUMN "name" TYPE varchar(255);
 
 DROP TYPE protocol_system_type;
 
+CREATE OR REPLACE FUNCTION invalidate_previous_entry_protocol_state()
+    RETURNS TRIGGER
+    AS $$
+BEGIN
+    -- Update the 'valid_to' field of the last valid entry when a new one is inserted.
+    UPDATE
+        protocol_state
+    SET
+        valid_to = NEW.valid_from
+    WHERE
+        valid_to IS NULL
+        AND protocol_component_id = NEW.protocol_component_id;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
 
+CREATE TRIGGER invalidate_previous_protocol_state
+    BEFORE INSERT ON protocol_state
+    FOR EACH ROW
+    EXECUTE PROCEDURE invalidate_previous_entry_protocol_state();
