@@ -335,7 +335,7 @@ impl ProtocolState {
     }
 
     pub async fn by_protocol_system(
-        system: &models::ProtocolSystem,
+        system: models::ProtocolSystem,
         chain_id: i64,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<Self>> {
@@ -345,7 +345,7 @@ impl ProtocolState {
                 protocol_system::table
                     .on(protocol_component::protocol_system_id.eq(protocol_system::id)),
             )
-            .filter(protocol_system::name.eq(&system.to_string().as_str()))
+            .filter(protocol_system::name.eq(ProtocolSystemType::from(system)))
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(protocol_state::valid_to.is_null())
             .select(Self::as_select())

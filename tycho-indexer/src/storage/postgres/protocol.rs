@@ -128,27 +128,6 @@ where
         Ok(())
     }
 
-    async fn upsert_protocol_type(
-        &self,
-        new: &Self::ProtocolType,
-        conn: &mut Self::DB,
-    ) -> Result<(), StorageError> {
-        use super::schema::protocol_type::dsl::*;
-
-        let values: orm::NewProtocolType = new.to_storage();
-
-        diesel::insert_into(protocol_type)
-            .values(&values)
-            .on_conflict(name)
-            .do_update()
-            .set(&values)
-            .execute(conn)
-            .await
-            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", &values.name, None))?;
-
-        Ok(())
-    }
-
     // Gets all protocol states from the db filtered by chain, component ids and/or protocol system.
     async fn get_states(
         &self,
@@ -171,7 +150,7 @@ where
             }
             (_, Some(system)) => {
                 decode_protocol_states(
-                    orm::ProtocolState::by_protocol_system(&system, chain_db_id, conn).await,
+                    orm::ProtocolState::by_protocol_system(system, chain_db_id, conn).await,
                     system.to_string().as_str(),
                     conn,
                 )
@@ -271,13 +250,18 @@ mod test {
     use super::*;
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use diesel_async::AsyncConnection;
-    use serde_json::json;
+    use ethers::types::U256;
+    use serde_json::{json, Value};
 
     use crate::{
         extractor::evm,
         models,
         models::{FinancialType, ImplementationType},
-        storage::postgres::{orm, schema, PostgresGateway},
+        storage::postgres::{
+            db_fixtures, orm,
+            schema::{self, sql_types::ProtocolSystemType},
+            PostgresGateway,
+        },
     };
 
     use super::*;
@@ -338,12 +322,13 @@ mod test {
             ],
         )
         .await;
-        let protocol_system_id = db_fixtures::insert_protocol_system(conn, "Ambient").await;
+        let protocol_system_id =
+            db_fixtures::insert_protocol_system(conn, orm::ProtocolSystemType::Ambient).await;
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
-            FinancialProtocolType::Swap,
-            ProtocolImplementationType::Custom,
+            orm::FinancialType::Swap,
+            orm::ImplementationType::Custom,
         )
         .await;
         let protocol_component_id = db_fixtures::insert_protocol_component(
@@ -391,7 +376,6 @@ mod test {
         )
     }
 
-    #[rstest]
     #[tokio::test]
     async fn test_get_states() {
         let mut conn = setup_db().await;
@@ -414,17 +398,16 @@ mod test {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
-        let protocol_system_id = gw
+        let first_id = gw
             ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
             .await
             .unwrap();
-        assert_eq!(protocol_system_id, 1);
 
-        let protocol_system_id = gw
+        let second_id = gw
             ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
             .await
             .unwrap();
-        assert_eq!(protocol_system_id, 1);
+        assert_eq!(first_id, second_id);
     }
 
     #[tokio::test]
