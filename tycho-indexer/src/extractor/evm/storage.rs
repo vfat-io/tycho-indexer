@@ -27,7 +27,7 @@ pub mod pg {
                 orm,
                 orm::{NewToken, Token},
             },
-            Address, Balance, BlockHash, ChangeType, Code, StorableComponent,
+            Address, Balance, BlockHash, ChangeType, Code, StorableProtocolComponent,
             StorableProtocolState, StorableToken, TxHash,
         },
     };
@@ -274,7 +274,7 @@ pub mod pg {
         }
     }
 
-    impl StorableComponent<orm::ProtocolComponent, orm::NewProtocolComponent, i64>
+    impl StorableProtocolComponent<orm::ProtocolComponent, orm::NewProtocolComponent, i64>
         for evm::ProtocolComponent
     {
         fn from_storage(
@@ -398,7 +398,7 @@ mod test {
     use super::*;
     use crate::{models::ProtocolSystem, storage::postgres::orm};
 
-    use crate::{hex_bytes::Bytes, storage::StorableComponent};
+    use crate::{hex_bytes::Bytes, storage::StorableProtocolComponent};
     use chrono::Utc;
     use ethers::prelude::H160;
     use std::str::FromStr;

@@ -684,7 +684,7 @@ pub trait StorableContract<S, N, I>: Sized + Send + Sync + 'static {
     fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
 }
 
-pub trait StorableComponent<S, N, I>: Sized + Send + Sync + 'static {
+pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(
         val: S,
         tokens: Vec<H160>,
