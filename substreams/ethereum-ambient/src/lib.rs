@@ -8,10 +8,10 @@ use substreams_ethereum::pb::eth::{self};
 use pb::tycho::evm::v1::{self as tycho};
 
 mod pb;
-
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 const INIT_POOL_CODE: u8 = 71;
 const USER_CMD_FN_SIG: [u8; 4] = [0xA1, 0x51, 0x12, 0xF9];
+const SWAP_FN_SIG: [u8; 4] = [0x3d, 0x71, 0x9c, 0xd9];
 
 struct SlotValue {
     new_value: Vec<u8>,
@@ -212,6 +212,96 @@ fn map_changes(
                     }
                 } else {
                     bail!("Failed to decode ABI external call.".to_string());
+                }
+            } else if call.input[0..4] == SWAP_FN_SIG {
+                // Handle TVL changes caused by calling the swap function
+
+                let swap_external_abi_input_types = &[
+                    ParamType::Address,   // base
+                    ParamType::Address,   // quote
+                    ParamType::Uint(256), // pool index
+                    // isBuy - if true the direction of the swap is for the user to send base
+                    // tokens and receive back quote tokens.
+                    ParamType::Bool,
+                    ParamType::Bool,      // inBaseQty
+                    ParamType::Uint(16),  // tip
+                    ParamType::Uint(128), // limitPrice
+                    ParamType::Uint(128), // minOut
+                    ParamType::Uint(8),   // reserveFlags
+                ];
+
+                let swap_external_abi_output_types = &[
+                    // The token base and quote token flows associated with this swap action.
+                    // Negative indicates a credit paid to the user (token balance of pool
+                    // decreases), positive a debit collected from the user (token balance of pool
+                    // increases).
+                    ParamType::Int(128), // baseFlow
+                    ParamType::Int(128), // quoteFlow
+                ];
+
+                if let Ok(external_input_params) =
+                    decode(swap_external_abi_input_types, &call.input[4..])
+                {
+                    let base_token = external_input_params[0]
+                        .to_owned()
+                        .into_address()
+                        .ok_or_else(|| {
+                            anyhow!("Failed to convert to address: {:?}", &external_input_params[1])
+                        })?
+                        .to_fixed_bytes()
+                        .to_vec();
+
+                    let quote_token = external_input_params[1]
+                        .to_owned()
+                        .into_address()
+                        .ok_or_else(|| {
+                            anyhow!("Failed to convert to address: {:?}", &external_input_params[1])
+                        })?
+                        .to_fixed_bytes()
+                        .to_vec();
+
+                    let pool_index = external_input_params[2]
+                        .to_owned()
+                        .into_uint()
+                        .ok_or_else(|| anyhow!("Failed to convert to u32".to_string()))?
+                        .as_u32();
+
+                    if let Ok(external_outputs) =
+                        decode(swap_external_abi_output_types, &call.return_data)
+                    {
+                        let base_flow = external_outputs[0]
+                            .to_owned()
+                            .into_int() // Needs conversion into bytes for next step
+                            .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+
+                        let quote_flow = external_outputs[1]
+                            .to_owned()
+                            .into_int() // Needs conversion into bytes for next step
+                            .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+
+                        let base_balance_change = tycho::BalanceChange {
+                            token: base_token,
+                            balance: vec![], /* this needs to be aggregated with the current TVL */
+                            component_id: format!("ambient_{}", pool_index).into_bytes(),
+                        };
+
+                        let quote_balance_change = tycho::BalanceChange {
+                            token: quote_token,
+                            balance: vec![], /* this needs to be aggregated with the current TVL */
+                            component_id: format!("ambient_{}", pool_index).into_bytes(),
+                        };
+
+                        tx_change
+                            .balance_changes
+                            .push(base_balance_change);
+                        tx_change
+                            .balance_changes
+                            .push(quote_balance_change);
+                    } else {
+                        bail!("Failed to decode call outputs.".to_string());
+                    }
+                } else {
+                    bail!("Failed to decode ABI internal call.".to_string());
                 }
             }
         }
