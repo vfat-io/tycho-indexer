@@ -297,6 +297,7 @@ impl ProtocolState {
             .inner_join(protocol_component::table)
             .filter(protocol_component::external_id.eq_any(component_ids))
             .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(protocol_state::valid_to.is_null())
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
@@ -315,6 +316,7 @@ impl ProtocolState {
             )
             .filter(protocol_system::name.eq(&system.to_string().as_str()))
             .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(protocol_state::valid_to.is_null())
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
@@ -324,6 +326,7 @@ impl ProtocolState {
         protocol_state::table
             .inner_join(protocol_component::table)
             .filter(protocol_component::chain_id.eq(chain_id))
+            // .filter(protocol_state::valid_to.is_null())
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await

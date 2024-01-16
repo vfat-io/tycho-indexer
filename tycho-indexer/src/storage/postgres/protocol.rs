@@ -1,5 +1,7 @@
 #![allow(unused_variables)]
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -24,24 +26,51 @@ async fn decode_protocol_states(
 ) -> Result<Vec<ProtocolState>, StorageError> {
     match result {
         Ok(states) => {
-            let mut protocol_states = Vec::new();
+            let mut protocol_states: HashMap<String, ProtocolState> = HashMap::new();
             for state in states {
                 let component_id = schema::protocol_component::table
                     .filter(schema::protocol_component::id.eq(state.protocol_component_id))
                     .select(schema::protocol_component::external_id)
                     .first::<String>(conn)
                     .await
-                    .expect("Failed to find matching protocol component in db");
+                    .map_err(|err| {
+                        StorageError::NoRelatedEntity(
+                            "ProtocolComponent".to_owned(),
+                            "ProtocolState".to_owned(),
+                            state.id.to_string(),
+                        )
+                    })?;
                 let tx_hash = schema::transaction::table
                     .filter(schema::transaction::id.eq(state.modify_tx))
                     .select(schema::transaction::hash)
                     .first::<Bytes>(conn)
                     .await
-                    .expect("Failed to find matching protocol component in db");
-                let protocol_state = ProtocolState::from_storage(state, component_id, &tx_hash)?;
-                protocol_states.push(protocol_state);
+                    .map_err(|err| {
+                        StorageError::NoRelatedEntity(
+                            "Transaction".to_owned(),
+                            "ProtocolState".to_owned(),
+                            state.id.to_string(),
+                        )
+                    })?;
+
+                let protocol_state =
+                    ProtocolState::from_storage(state, component_id.clone(), &tx_hash)?;
+
+                if let Some(existing_state) = protocol_states.get_mut(&component_id) {
+                    // found a protocol state with a matching component id - merge states
+                    dbg!(&existing_state);
+                    dbg!(&protocol_state);
+                    existing_state
+                        .merge(protocol_state)
+                        .map_err(|err| StorageError::DecodeError(err.to_string()))?;
+                } else {
+                    // no matching state found - add as a new state to the list
+                    protocol_states.insert(component_id, protocol_state);
+                }
             }
-            Ok(protocol_states)
+
+            let decoded_states: Vec<ProtocolState> = protocol_states.into_values().collect();
+            Ok(decoded_states)
         }
         Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
     }
@@ -76,7 +105,6 @@ where
     // }
 
     // Gets all protocol states from the db filtered by chain, component ids and/or protocol system.
-    // A separate protocol state is returned for each state update.
     async fn get_states(
         &self,
         chain: &Chain,
@@ -105,6 +133,7 @@ where
                 .await
             }
             _ => {
+                dbg!(chain_db_id);
                 decode_protocol_states(
                     orm::ProtocolState::by_chain(chain_db_id, conn).await,
                     chain.to_string().as_str(),
@@ -171,6 +200,11 @@ mod test {
 
     use std::collections::HashMap;
 
+    use diesel_async::AsyncConnection;
+    use ethers::types::U256;
+    use rstest::rstest;
+    use serde_json::Value;
+
     use crate::{
         extractor::evm,
         storage::postgres::{
@@ -179,10 +213,6 @@ mod test {
             PostgresGateway,
         },
     };
-    use diesel_async::AsyncConnection;
-    use ethers::types::U256;
-    use rstest::rstest;
-    use serde_json::Value;
 
     use super::*;
 
@@ -258,15 +288,24 @@ mod test {
             txn[0],
         )
         .await;
-        let attributes: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
-        ]
-        .into_iter()
-        .collect();
-        let state: Value =
-            serde_json::to_value(&attributes).expect("Failed to convert attributes to json");
-        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[0], state).await;
+
+        // protocol state for state1-reserve1
+        let attributes1: HashMap<String, Bytes> =
+            vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
+                .into_iter()
+                .collect();
+        let state1: Value =
+            serde_json::to_value(&attributes1).expect("Failed to convert attributes to json");
+        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[0], state1).await;
+
+        // protocol state for state1-reserve2
+        let attributes2: HashMap<String, Bytes> =
+            vec![("reserve2".to_owned(), Bytes::from(U256::from(500)))]
+                .into_iter()
+                .collect();
+        let state2: Value =
+            serde_json::to_value(&attributes2).expect("Failed to convert attributes to json");
+        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[0], state2).await;
     }
 
     fn protocol_state() -> ProtocolState {
