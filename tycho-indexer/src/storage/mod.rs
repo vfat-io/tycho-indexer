@@ -79,7 +79,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{ProtocolComponent, ProtocolState},
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolSystem},
     storage::postgres::orm,
@@ -481,8 +481,11 @@ pub trait ProtocolGateway {
     type DB;
     type Token;
     type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
-    // TODO: uncomment below when StorableProtocolComponent is implemented (ENG 1728)
-    // type ProtocolComponent;
+    type ProtocolComponent: StorableProtocolComponent<
+        orm::ProtocolComponent,
+        orm::NewProtocolComponent,
+        i64,
+    >;
 
     /// Retrieve ProtocolComponent from the db
     ///
@@ -493,13 +496,19 @@ pub trait ProtocolGateway {
     ///
     /// # Returns
     /// Ok, if found else Err
-    // TODO: uncomment to implement in ENG 2030
-    // async fn get_components(
-    //     &self,
-    //     chain: &Chain,
-    //     system: Option<ProtocolSystem>,
-    //     ids: Option<&[&str]>,
-    // ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
+    async fn get_components(
+        &self,
+        chain: &Chain,
+        system: Option<ProtocolSystem>,
+        ids: Option<&[&str]>,
+    ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
+
+    async fn upsert_components(
+        &self,
+        new: [&ProtocolComponent],
+        chain_id: i64,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 
     /// Stores new found ProtocolComponents.
     ///

@@ -6,12 +6,13 @@ use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{ProtocolComponent, ProtocolState},
     models::{Chain, ProtocolSystem},
     storage::{
         postgres::{orm, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+        StorableContract, StorableProtocolComponent, StorableToken, StorableTransaction,
+        StorageError, TxHash, Version,
     },
 };
 
@@ -28,20 +29,37 @@ where
     type Token = T;
     type ProtocolState = ProtocolState;
 
-    // TODO: uncomment to implement in ENG 2049
-    // async fn get_components(
-    //     &self,
-    //     chain: &Chain,
-    //     system: Option<ProtocolSystem>,
-    //     ids: Option<&[&str]>,
-    // ) -> Result<Vec<ProtocolComponent>, StorageError> {
-    //     todo!()
-    // }
+    async fn get_components(
+        &self,
+        chain: &Chain,
+        system: Option<ProtocolSystem>,
+        ids: Option<&[&str]>,
+    ) -> Result<Vec<ProtocolComponent>, StorageError> {
+        todo!()
+    }
 
-    // TODO: uncomment to implement in ENG 2049
-    // async fn upsert_components(&self, new: &[&ProtocolComponent]) -> Result<(), StorageError> {
-    //     todo!()
-    // }
+    async fn upsert_components(
+        &self,
+        new: &[ProtocolComponent],
+        chain_id: i64,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        use super::schema::protocol_component::dsl::*;
+
+        let values = new
+            .into_iter()
+            .map(|pc| pc.to_storage())
+            .collect();
+
+        diesel::insert_into(protocol_component)
+            .values(&values)
+            .on_conflict(external_id)
+            .do_update()
+            .set(&values)
+            .execute(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", &values.name, None))?;
+    }
 
     async fn get_states(
         &self,
