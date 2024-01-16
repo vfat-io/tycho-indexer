@@ -217,23 +217,44 @@ pub struct NewTransaction {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolSystem {
     pub id: i64,
-    pub name: String,
+    pub name: ProtocolSystemType,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Debug, DbEnum)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialProtocolType"]
-pub enum FinancialProtocolType {
+#[derive(Insertable, Debug)]
+#[diesel(table_name=protocol_system)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolSystem {
+    pub name: ProtocolSystemType,
+}
+
+#[derive(Debug, DbEnum, Clone)]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolSystemType"]
+pub enum ProtocolSystemType {
+    Ambient,
+}
+
+impl From<models::ProtocolSystem> for ProtocolSystemType {
+    fn from(value: models::ProtocolSystem) -> Self {
+        match value {
+            models::ProtocolSystem::Ambient => ProtocolSystemType::Ambient,
+        }
+    }
+}
+
+#[derive(Debug, DbEnum, Clone, PartialEq)]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialType"]
+pub enum FinancialType {
     Swap,
     Psm,
     Debt,
     Leverage,
 }
 
-#[derive(Debug, DbEnum)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolImplementationType"]
-pub enum ProtocolImplementationType {
+#[derive(Debug, DbEnum, Clone, PartialEq)]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ImplementationType"]
+pub enum ImplementationType {
     Custom,
     Vm,
 }
@@ -244,11 +265,21 @@ pub enum ProtocolImplementationType {
 pub struct ProtocolType {
     pub id: i64,
     pub name: String,
-    pub financial_type: FinancialProtocolType,
+    pub financial_type: FinancialType,
     pub attribute_schema: Option<serde_json::Value>,
-    pub implementation: ProtocolImplementationType,
+    pub implementation: ImplementationType,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+#[derive(AsChangeset, Insertable)]
+#[diesel(table_name = protocol_type)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolType {
+    pub name: String,
+    pub financial_type: FinancialType,
+    pub attribute_schema: Option<serde_json::Value>,
+    pub implementation: ImplementationType,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
