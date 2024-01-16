@@ -494,11 +494,7 @@ mod test {
         assert_eq!(new_protocol_component.external_id, protocol_component.id.0);
         assert_eq!(new_protocol_component.chain_id, chain_id);
 
-        let parsed_protocol_type_id = protocol_component
-            .protocol_type_id
-            .parse::<i64>()
-            .unwrap();
-        assert_eq!(new_protocol_component.protocol_type_id, parsed_protocol_type_id);
+        assert_eq!(new_protocol_component.protocol_type_id, 42);
 
         assert_eq!(new_protocol_component.protocol_system_id, protocol_system_id);
 
