@@ -402,9 +402,8 @@ mod test {
     use chrono::Utc;
     use ethers::prelude::H160;
     use std::str::FromStr;
-
-    #[tokio::test]
-    async fn test_from_storage() {
+    #[test]
+    fn test_from_storage_protocol_component() {
         let atts = serde_json::json!({
             "key1": "value1",
             "key2": "value2"
@@ -463,7 +462,7 @@ mod test {
     }
 
     #[test]
-    fn test_to_storage() {
+    fn test_to_storage_protocol_component() {
         let protocol_component = evm::ProtocolComponent {
             id: evm::ContractId("sample_contract_id".to_string()),
             protocol_system: ProtocolSystem::Ambient,
@@ -482,18 +481,6 @@ mod test {
             },
             change: Default::default(),
         };
-
-        println!(
-            "{:?}",
-            std::str::from_utf8(
-                &protocol_component
-                    .static_attributes
-                    .get("key1")
-                    .unwrap()
-                    .0
-            )
-            .unwrap()
-        );
 
         let chain_id = 1;
         let protocol_system_id = 2;
