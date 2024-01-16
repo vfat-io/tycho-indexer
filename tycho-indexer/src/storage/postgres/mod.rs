@@ -132,6 +132,7 @@
 //! database operations.
 use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, str::FromStr, sync::Arc};
 
+use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{
     pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
@@ -143,8 +144,8 @@ use tracing::{debug, info};
 use crate::models::Chain;
 
 use super::{
-    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableToken,
-    StorableTransaction, StorageError,
+    BlockIdentifier, BlockOrTimestamp, ContractDelta, StateGateway, StorableBlock,
+    StorableContract, StorableToken, StorableTransaction, StorageError, Version, VersionKind,
 };
 
 pub mod cache;
@@ -271,6 +272,38 @@ impl StorageError {
             }
             _ => StorageError::Unexpected(err_string),
         }
+    }
+}
+
+impl BlockOrTimestamp {
+    pub async fn to_ts(&self, conn: &mut AsyncPgConnection) -> Result<NaiveDateTime, StorageError> {
+        match self {
+            BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(h, conn)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "Block", &hex::encode(h), None))?
+                .ts),
+            BlockOrTimestamp::Block(BlockIdentifier::Number((chain, no))) => {
+                Ok(orm::Block::by_number(*chain, *no, conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(err, "Block", &format!("{}", no), None)
+                    })?
+                    .ts)
+            }
+            BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
+        }
+    }
+}
+
+impl Version {
+    pub async fn to_ts(&self, conn: &mut AsyncPgConnection) -> Result<NaiveDateTime, StorageError> {
+        if !matches!(self.1, VersionKind::Last) {
+            return Err(StorageError::Unsupported(format!(
+                "Unsupported version kind: {:?}",
+                self.1
+            )));
+        }
+        self.0.to_ts(conn).await
     }
 }
 

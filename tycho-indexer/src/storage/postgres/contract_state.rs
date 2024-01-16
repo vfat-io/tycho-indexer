@@ -581,7 +581,10 @@ where
         at: Option<&Version>,
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<Address, ContractStore>, StorageError> {
-        let version_ts = version_to_ts(at, conn).await?;
+        let version_ts = match &at {
+            Some(version) => version.to_ts(conn).await?,
+            None => Utc::now().naive_utc(),
+        };
 
         let slots = {
             use schema::{account, contract_storage::dsl::*};
@@ -671,7 +674,10 @@ where
             .map_err(|err| {
                 StorageError::from_diesel(err, "Account", &hex::encode(&id.address), None)
             })?;
-        let version_ts = version_to_ts(version, db).await?;
+        let version_ts = match &version {
+            Some(version) => version.to_ts(db).await?,
+            None => Utc::now().naive_utc(),
+        };
 
         let (balance_tx, balance_orm) = schema::account_balance::table
             .inner_join(schema::transaction::table)
@@ -763,7 +769,10 @@ where
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::ContractState>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
-        let version_ts = version_to_ts(version, conn).await?;
+        let version_ts = match &version {
+            Some(version) => version.to_ts(conn).await?,
+            None => Utc::now().naive_utc(),
+        };
         let accounts = {
             use schema::account::dsl::*;
             let mut q = account
@@ -1172,8 +1181,11 @@ where
         let chain_id = self.get_chain_id(chain);
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
-        let start_version_ts = coerce_block_or_ts(start_version, conn).await?;
-        let target_version_ts = coerce_block_or_ts(Some(target_version), conn).await?;
+        let start_version_ts = match start_version {
+            Some(version) => version.to_ts(conn).await?,
+            None => Utc::now().naive_utc(),
+        };
+        let target_version_ts = target_version.to_ts(conn).await?;
 
         let balance_deltas = self
             .get_balance_deltas(chain_id, &start_version_ts, &target_version_ts, conn)
@@ -1320,51 +1332,6 @@ where
         .await?;
 
         Ok(())
-    }
-}
-
-/// Given a version find the corresponding timestamp.
-///
-/// If the version is a block, it will query the database for that block and
-/// return its timestamp.
-///
-/// ## Note:
-/// This can fail if there is no block present in the db. With the current table
-/// schema this means, that there were no changes detected at that block, but
-/// there might have been on previous or in later blocks.
-async fn version_to_ts(
-    start_version: Option<&Version>,
-    conn: &mut AsyncPgConnection,
-) -> Result<NaiveDateTime, StorageError> {
-    if let Some(Version(version, kind)) = start_version {
-        if !matches!(kind, VersionKind::Last) {
-            return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", kind)));
-        }
-        coerce_block_or_ts(Some(version), conn).await
-    } else {
-        Ok(Utc::now().naive_utc())
-    }
-}
-
-async fn coerce_block_or_ts(
-    version: Option<&BlockOrTimestamp>,
-    conn: &mut AsyncPgConnection,
-) -> Result<NaiveDateTime, StorageError> {
-    if version.is_none() {
-        return Ok(Utc::now().naive_utc());
-    }
-    match version.unwrap() {
-        BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(h, conn)
-            .await
-            .map_err(|err| StorageError::from_diesel(err, "Block", &hex::encode(h), None))?
-            .ts),
-        BlockOrTimestamp::Block(BlockIdentifier::Number((chain, no))) => {
-            Ok(orm::Block::by_number(*chain, *no, conn)
-                .await
-                .map_err(|err| StorageError::from_diesel(err, "Block", &format!("{}", no), None))?
-                .ts)
-        }
-        BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
     }
 }
 
