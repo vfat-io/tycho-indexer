@@ -5,7 +5,6 @@ use crate::{
         evm,
         evm::utils::{parse_u256_slot_entry, TryDecode},
     },
-    models,
     models::Chain,
     storage,
     storage::{
@@ -453,7 +452,10 @@ mod test {
 
     use crate::{models::ProtocolSystem, storage::postgres::orm};
 
-    use crate::{hex_bytes::Bytes, storage::StorableProtocolComponent};
+    use crate::{
+        hex_bytes::Bytes,
+        storage::{ContractId, StorableProtocolComponent},
+    };
     use chrono::Utc;
     use ethers::prelude::H160;
     use std::str::FromStr;
