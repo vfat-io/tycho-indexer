@@ -508,7 +508,7 @@ impl Account {
     }
 }
 
-#[derive(Insertable)]
+#[derive(AsChangeset, Insertable)]
 #[diesel(table_name = account)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccount<'a> {
@@ -535,7 +535,7 @@ pub struct Token {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Insertable)]
+#[derive(AsChangeset, Insertable)]
 #[diesel(table_name = token)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewToken {

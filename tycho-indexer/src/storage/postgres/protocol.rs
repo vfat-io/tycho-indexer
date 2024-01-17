@@ -10,11 +10,17 @@ use ethers::types::{transaction, Transaction};
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    extractor::evm::{ERC20Token, ProtocolComponent, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ProtocolType},
     storage::{
-        postgres::{orm, schema, PostgresGateway},
+        postgres::{
+            orm,
+            orm::{Account, NewAccount},
+            schema,
+            schema::chain,
+            PostgresGateway,
+        },
         Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ProtocolGateway,
         StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolState,
         StorableProtocolType, StorableToken, StorableTransaction, StorageError, TxHash, Version,
@@ -90,7 +96,7 @@ where
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     type DB = AsyncPgConnection;
-    type Token = T;
+    type Token = ERC20Token;
     type ProtocolState = ProtocolState;
     type ProtocolStateDelta = ProtocolStateDelta;
     type ProtocolType = ProtocolType;
@@ -229,7 +235,7 @@ where
     async fn get_tokens(
         &self,
         chain: Chain,
-        address: Option<&[&Address]>,
+        addresses: Option<&[&Address]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError> {
         todo!()
@@ -237,11 +243,41 @@ where
 
     async fn add_tokens(
         &self,
-        chain: Chain,
-        token: &[&Self::Token],
+        tokens: &[&Self::Token],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        todo!()
+        for token in tokens {
+            let chain_id = self.get_chain_id(&token.chain);
+            let hex_addr = hex::encode(token.address);
+            let new_account = NewAccount {
+                title: &format!("{}_{}", token.chain, token.symbol),
+                address: token.address.as_ref(),
+                chain_id,
+                creation_tx: None,
+                created_at: None,
+                deleted_at: None,
+            };
+            let account_id = diesel::insert_into(schema::account::table)
+                .values(&new_account)
+                .on_conflict((schema::account::address, schema::account::chain_id))
+                .do_update()
+                .set(&new_account)
+                .returning(schema::account::id)
+                .get_result::<i64>(conn)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "Account", &hex_addr, None))?;
+
+            let new_token = token.to_storage(account_id);
+            diesel::insert_into(schema::token::table)
+                .values(&new_token)
+                .on_conflict(schema::token::account_id)
+                .do_update()
+                .set(&new_token)
+                .execute(conn)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "Token", &token.symbol, None))?;
+        }
+        Ok(())
     }
 
     async fn get_state_delta(
@@ -302,14 +338,16 @@ mod test {
     };
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use diesel_async::AsyncConnection;
-    use ethers::types::U256;
+    use ethers::{prelude::H160, types::U256};
+    use hex::FromHex;
     use rstest::rstest;
     use serde_json::{json, Value};
+    use std::str::FromStr;
 
     use crate::{
         models,
         models::{FinancialType, ImplementationType},
-        storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
+        storage::postgres::{db_fixtures, orm, schema, schema::token::dsl::token, PostgresGateway},
     };
 
     use super::*;
@@ -576,6 +614,79 @@ mod test {
             Some(json!({"attribute": "another_schema"}))
         );
         assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
+    }
+
+    async fn setup_data(conn: &mut AsyncPgConnection) {
+        let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+    }
+
+    #[tokio::test]
+    async fn test_add_tokens() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let token_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".into();
+        let erc_token = ERC20Token {
+            address: H160::from_str(token_address).unwrap(),
+            symbol: "WETH".to_string(),
+            decimals: 18,
+            tax: 0,
+            gas: vec![Some(64), None],
+            chain: Chain::Ethereum,
+        };
+        let erc_tokens: &[&ERC20Token] = &[&erc_token];
+        gw.add_tokens(erc_tokens, &mut conn)
+            .await
+            .unwrap();
+
+        let inserted_token = schema::token::table
+            .filter(schema::token::symbol.eq("WETH".to_string()))
+            .select(schema::token::all_columns)
+            .first::<orm::Token>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(inserted_token.symbol, "WETH".to_string());
+        assert_eq!(inserted_token.decimals, 18);
+
+        let token_address_bytes = Vec::<u8>::from_hex(token_address.trim_start_matches("0x"))
+            .expect("Invalid hex string");
+
+        let (inserted_account_id, inserted_account_title) = schema::account::table
+            .filter(schema::account::address.eq(token_address_bytes))
+            .select((schema::account::id, schema::account::title))
+            .first::<(i64, String)>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(inserted_account_id, inserted_token.account_id);
+        assert_eq!(inserted_account_title, "ethereum_WETH".to_string());
+
+        // Insert the same token with different decimals
+        let new_erc_token = ERC20Token {
+            address: H160::from_str(token_address).unwrap(),
+            symbol: "WETH".to_string(),
+            decimals: 6,
+            tax: 0,
+            gas: vec![Some(64), None],
+            chain: Chain::Ethereum,
+        };
+
+        let erc_tokens: &[&ERC20Token] = &[&new_erc_token];
+        gw.add_tokens(erc_tokens, &mut conn)
+            .await
+            .unwrap();
+
+        let inserted_tokens = schema::token::table
+            .filter(schema::token::symbol.eq("WETH".to_string()))
+            .select(schema::token::all_columns)
+            .get_results::<orm::Token>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(inserted_tokens.len(), 1);
+        assert_eq!(inserted_tokens[0].decimals, 6);
+        assert_eq!(inserted_tokens[0].account_id, inserted_account_id);
     }
 
     #[tokio::test]

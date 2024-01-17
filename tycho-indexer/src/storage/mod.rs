@@ -650,7 +650,6 @@ pub trait ProtocolGateway {
     /// be immutable.
     ///
     /// # Parameters
-    /// - `chain` The chain of the token.
     /// - `token` The tokens to insert.
     ///
     /// # Return
@@ -658,7 +657,7 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_tokens(
         &self,
-        chain: Chain,
+
         token: &[&Self::Token],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
