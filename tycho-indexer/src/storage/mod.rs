@@ -74,6 +74,7 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
+use ethers::prelude::H160;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -728,6 +729,23 @@ pub trait StorableContract<S, N, I>: Sized + Send + Sync + 'static {
     /// This method will return an error if the replacement is not successful.
     /// E.g. if the passed store value fails to convert into this structs types.
     fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
+}
+
+pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
+    fn from_storage(
+        val: S,
+        tokens: Vec<H160>,
+        contract_ids: Vec<H160>,
+        chain: Chain,
+        protocol_system: ProtocolSystem,
+    ) -> Result<Self, StorageError>;
+
+    fn to_storage(
+        &self,
+        chain_id: i64,
+        protocol_system_id: i64,
+        creation_ts: NaiveDateTime,
+    ) -> Result<N, StorageError>;
 }
 
 #[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize)]
