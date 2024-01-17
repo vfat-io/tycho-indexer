@@ -130,14 +130,7 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-use std::{
-    collections::HashMap,
-    hash::Hash,
-    i64,
-    marker::PhantomData,
-    str::FromStr,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, str::FromStr, sync::Arc};
 
 use diesel::prelude::*;
 use diesel_async::{
@@ -165,8 +158,8 @@ pub mod schema;
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
 pub struct EnumTableCache<E> {
-    map_id: Mutex<HashMap<E, i64>>,
-    map_enum: Mutex<HashMap<i64, E>>,
+    map_id: HashMap<E, i64>,
+    map_enum: HashMap<i64, E>,
 }
 
 /// Provides caching for enum and its database ID relationships.
@@ -201,19 +194,11 @@ where
     ///
     /// * `entries` - A slice of tuples ideally obtained from a database query.
     pub fn from_tuples(entries: Vec<(i64, String)>) -> Self {
-        let mut cache = Self { map_id: HashMap::new().into(), map_enum: HashMap::new().into() };
+        let mut cache = Self { map_id: HashMap::new(), map_enum: HashMap::new() };
         for (id_, name_) in entries {
             let val = E::from_str(&name_).expect("valid enum value");
-            cache
-                .map_id
-                .lock()
-                .expect("REASON") //TODO
-                .insert(val, id_);
-            cache
-                .map_enum
-                .lock()
-                .expect("REASON") //TODO
-                .insert(id_, val);
+            cache.map_id.insert(val, id_);
+            cache.map_enum.insert(id_, val);
         }
         cache
     }
@@ -225,14 +210,9 @@ where
     ///
     /// * `val` - The enum variant to lookup.
     fn get_id(&self, val: &E) -> i64 {
-        *self
-            .map_id
-            .lock()
-            .expect("REASON") //TODO
-            .get(val)
-            .unwrap_or_else(|| {
-                panic!("Unexpected cache miss for enum {:?}, entries: {:?}", val, self.map_id)
-            })
+        *self.map_id.get(val).unwrap_or_else(|| {
+            panic!("Unexpected cache miss for enum {:?}, entries: {:?}", val, self.map_id)
+        })
     }
 
     /// Retrieves the corresponding enum variant for a database ID. Panics on
@@ -244,8 +224,6 @@ where
     fn get_chain(&self, id: &i64) -> E {
         *self
             .map_enum
-            .lock()
-            .expect("REASON")
             .get(id)
             .unwrap_or_else(|| {
                 panic!("Unexpected cache miss for id {}, entries: {:?}", id, self.map_enum)
