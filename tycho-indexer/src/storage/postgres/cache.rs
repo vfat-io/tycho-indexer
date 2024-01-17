@@ -141,15 +141,11 @@ impl DBCacheWriteExecutor {
                     DBCacheMessage::Flush(sender) => {
                         // Flush the current state and send back the result
                         let flush_result = self.flush().await;
-                        sender
-                            .send(flush_result)
-                            .expect("Should successfully notify sender");
+                        let _ = sender.send(flush_result);
                     }
                     DBCacheMessage::Revert(to, sender) => {
                         let revert_result = self.revert(&to).await;
-                        sender
-                            .send(revert_result)
-                            .expect("Should successfully notify sender");
+                        let _ = sender.send(revert_result);
                     }
                 }
             }
@@ -177,10 +173,7 @@ impl DBCacheWriteExecutor {
                     // New database transaction for the same block are cached
                     self.pending_db_txs
                         .append(&mut new_db_tx.operations);
-                    new_db_tx
-                        .tx
-                        .send(Ok(()))
-                        .expect("Should successfully notify sender");
+                    let _ = new_db_tx.tx.send(Ok(()));
                 } else if new_db_tx.block.number < pending.number {
                     // New database transaction for an old block are directly sent to the database
                     let mut conn = self
@@ -221,10 +214,7 @@ impl DBCacheWriteExecutor {
                         .await;
 
                     // Forward the result to the sender
-                    new_db_tx
-                        .tx
-                        .send(res)
-                        .expect("Should successfully notify sender");
+                    let _ = new_db_tx.tx.send(res);
                 } else if new_db_tx.block.parent_hash == pending.hash {
                     debug!("New block received {} !", new_db_tx.block.parent_hash);
                     // New database transaction for the next block, we flush and cache it
@@ -235,16 +225,13 @@ impl DBCacheWriteExecutor {
 
                     self.pending_db_txs
                         .append(&mut new_db_tx.operations);
-                    new_db_tx
-                        .tx
-                        .send(Ok(()))
-                        .expect("Should successfully notify sender");
+                    let _ = new_db_tx.tx.send(Ok(()));
                 } else {
                     // Other cases send unexpected error
-                    self.error_transmitter
+                    let _ = self
+                        .error_transmitter
                         .send(StorageError::Unexpected("Invalid cache state!".into()))
-                        .await
-                        .expect("Should successfully notify error");
+                        .await;
                 }
             }
             None => {
@@ -254,10 +241,7 @@ impl DBCacheWriteExecutor {
 
                 self.pending_db_txs
                     .append(&mut new_db_tx.operations);
-                new_db_tx
-                    .tx
-                    .send(Ok(()))
-                    .expect("Should successfully notify sender");
+                let _ = new_db_tx.tx.send(Ok(()));
             }
         }
     }
