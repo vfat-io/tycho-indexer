@@ -359,7 +359,8 @@ pub mod pg {
             &self,
             chain_id: i64,
             protocol_system_id: i64,
-            creation_ts: NaiveDateTime,
+            creation_tx: i64,
+            created_at: NaiveDateTime,
         ) -> Result<orm::NewProtocolComponent, StorageError> {
             let protocol_type_id = self
                 .protocol_type_id
@@ -374,6 +375,8 @@ pub mod pg {
                 chain_id,
                 protocol_type_id,
                 protocol_system_id,
+                creation_tx,
+                created_at,
                 attributes: Some(serde_json::to_value(&self.static_attributes).map_err(|err| {
                     StorageError::DecodeError(
                         "Could not convert attributes in StorableComponent".to_string(),
@@ -586,7 +589,7 @@ mod test {
         let protocol_system_id = 2;
         let creation_ts = Utc::now().naive_utc();
 
-        let result = protocol_component.to_storage(chain_id, protocol_system_id, creation_ts);
+        let result = protocol_component.to_storage(chain_id, protocol_system_id, 0, creation_ts);
 
         assert!(result.is_ok());
 
