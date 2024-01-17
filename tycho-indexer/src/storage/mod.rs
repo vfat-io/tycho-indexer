@@ -505,8 +505,7 @@ pub trait ProtocolGateway {
 
     async fn upsert_components(
         &self,
-        new: [&ProtocolComponent],
-        chain_id: i64,
+        new: &[&Self::ProtocolComponent],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
