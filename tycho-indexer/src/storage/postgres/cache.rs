@@ -24,7 +24,7 @@ use crate::{
 
 /// Represents different types of database write operations.
 #[derive(PartialEq, Clone)]
-pub enum WriteOp {
+pub(crate) enum WriteOp {
     UpsertBlock(evm::Block),
     UpsertTx(evm::Transaction),
     SaveExtractionState(ExtractionState),
@@ -34,14 +34,14 @@ pub enum WriteOp {
 
 /// Represents a transaction in the database, including the block information,
 /// a list of operations to be performed, and a channel to send the result.
-pub struct DBTransaction {
+pub(crate) struct DBTransaction {
     block: evm::Block,
     operations: Vec<WriteOp>,
     tx: oneshot::Sender<Result<(), StorageError>>,
 }
 
 impl DBTransaction {
-    pub fn new(
+    pub(crate) fn new(
         block: evm::Block,
         operations: Vec<WriteOp>,
         tx: oneshot::Sender<Result<(), StorageError>>,
@@ -51,7 +51,7 @@ impl DBTransaction {
 }
 
 /// Represents different types of messages that can be sent to the DBCacheWriteExecutor.
-pub enum DBCacheMessage {
+pub(crate) enum DBCacheMessage {
     Write(DBTransaction),
     Flush(oneshot::Sender<Result<(), StorageError>>),
     Revert(BlockIdentifier, oneshot::Sender<Result<(), StorageError>>),
