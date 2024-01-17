@@ -5,7 +5,6 @@ use crate::{
         evm,
         evm::utils::{parse_u256_slot_entry, TryDecode},
     },
-    models,
     models::Chain,
     storage,
     storage::{
@@ -17,20 +16,22 @@ use chrono::NaiveDateTime;
 use std::collections::HashMap;
 
 pub mod pg {
-    use ethers::types::{H160, H256, U256};
-    use serde_json::Value;
-
     use crate::{
+        extractor::evm::utils::pad_and_parse_h160,
         hex_bytes::Bytes,
+        models,
+        models::{FinancialType, ImplementationType},
         storage::{
             postgres::{
                 orm,
                 orm::{NewToken, Token},
             },
             Address, Balance, BlockHash, ChangeType, Code, StorableProtocolComponent,
-            StorableProtocolState, StorableToken, TxHash,
+            StorableProtocolState, StorableProtocolType, StorableToken, TxHash,
         },
     };
+    use ethers::types::{H160, H256, U256};
+    use serde_json::Value;
 
     use super::*;
 
@@ -115,6 +116,43 @@ pub mod pg {
 
         fn hash(&self) -> BlockHash {
             self.hash.into()
+        }
+    }
+    impl StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64> for models::ProtocolType {
+        fn from_storage(val: orm::ProtocolType) -> Result<Self, StorageError> {
+            let financial_type: FinancialType = match val.financial_type {
+                orm::FinancialType::Swap => FinancialType::Swap,
+                orm::FinancialType::Psm => FinancialType::Psm,
+                orm::FinancialType::Debt => FinancialType::Debt,
+                orm::FinancialType::Leverage => FinancialType::Leverage,
+            };
+            let implementation_type: ImplementationType = match val.implementation {
+                orm::ImplementationType::Custom => ImplementationType::Custom,
+                orm::ImplementationType::Vm => ImplementationType::Vm,
+            };
+
+            Ok(Self::new(val.name, financial_type, val.attribute_schema, implementation_type))
+        }
+
+        fn to_storage(&self) -> orm::NewProtocolType {
+            let financial_protocol_type: orm::FinancialType = match self.financial_type {
+                FinancialType::Swap => orm::FinancialType::Swap,
+                FinancialType::Psm => orm::FinancialType::Psm,
+                FinancialType::Debt => orm::FinancialType::Debt,
+                FinancialType::Leverage => orm::FinancialType::Leverage,
+            };
+
+            let protocol_implementation_type: orm::ImplementationType = match self.implementation {
+                ImplementationType::Custom => orm::ImplementationType::Custom,
+                ImplementationType::Vm => orm::ImplementationType::Vm,
+            };
+
+            orm::NewProtocolType {
+                name: self.name.clone(),
+                implementation: protocol_implementation_type,
+                attribute_schema: self.attribute_schema.clone(),
+                financial_type: financial_protocol_type,
+            }
         }
     }
 
@@ -255,22 +293,34 @@ pub mod pg {
 
     impl StorableToken<orm::Token, orm::NewToken, i64> for evm::ERC20Token {
         fn from_storage(val: Token, contract: storage::ContractId) -> Result<Self, StorageError> {
-            // TODO: implementing this is planned for ENG 1717, uncomment below to start
-            // let address =
-            //     pad_and_parse_h160(contract.address()).map_err(StorageError::DecodeError)?;
-            // Ok(evm::ERC20Token::new(
-            //     address,
-            //     String::try_from(&val.symbol).map_err(StorageError::DecodeError)?,
-            // ))
-            todo!()
+            let address =
+                pad_and_parse_h160(contract.address()).map_err(StorageError::DecodeError)?;
+            Ok(evm::ERC20Token::new(
+                address,
+                val.symbol,
+                val.decimals as u32,
+                val.tax as u64,
+                val.gas
+                    .into_iter()
+                    .map(|item| item.map(|i| i as u64))
+                    .collect(),
+                contract.chain,
+            ))
         }
 
-        fn to_storage(&self, contract_id: i64) -> NewToken {
-            todo!()
-        }
-
-        fn contract_id(&self) -> storage::ContractId {
-            todo!()
+        fn to_storage(&self, contract_id: i64) -> orm::NewToken {
+            NewToken {
+                account_id: contract_id,
+                symbol: self.symbol.clone(),
+                decimals: self.decimals as i32,
+                tax: self.tax as i64,
+                gas: self
+                    .gas
+                    .clone()
+                    .into_iter()
+                    .map(|item| item.map(|i| i as i64))
+                    .collect(),
+            }
         }
     }
 
@@ -329,7 +379,6 @@ pub mod pg {
                         "Could not convert attributes in StorableComponent".to_string(),
                     )
                 })?),
-                created_at: creation_ts,
             })
         }
     }
@@ -396,12 +445,63 @@ pub mod pg {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{
+        extractor::evm::{utils::pad_and_parse_h160, ERC20Token},
+        storage::{postgres::orm::Token, Address, StorableToken},
+    };
+
     use crate::{models::ProtocolSystem, storage::postgres::orm};
 
-    use crate::{hex_bytes::Bytes, storage::StorableProtocolComponent};
+    use crate::{
+        hex_bytes::Bytes,
+        storage::{ContractId, StorableProtocolComponent},
+    };
     use chrono::Utc;
     use ethers::prelude::H160;
     use std::str::FromStr;
+
+    #[test]
+    fn test_storable_token_from_storage() {
+        let token_address: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".into();
+        let orm_token = Token {
+            id: 1,
+            account_id: 1,
+            symbol: String::from("WETH"),
+            decimals: 18,
+            tax: 0,
+            gas: vec![Some(64), None],
+            inserted_ts: Default::default(),
+            modified_ts: Default::default(),
+        };
+        let contract_id = ContractId::new(Chain::Ethereum, token_address.clone());
+        let result = ERC20Token::from_storage(orm_token, contract_id);
+        assert!(result.is_ok());
+
+        let token = result.unwrap();
+        assert_eq!(token.address, pad_and_parse_h160(&token_address).unwrap());
+        assert_eq!(token.symbol, String::from("WETH"));
+        assert_eq!(token.decimals, 18);
+        assert_eq!(token.gas, vec![Some(64), None]);
+    }
+    #[test]
+    fn test_storable_token_to_storage() {
+        let token_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".into();
+        let erc_token = ERC20Token {
+            address: pad_and_parse_h160(&token_address).unwrap(),
+            symbol: "WETH".into(),
+            decimals: 18,
+            tax: 0,
+            gas: vec![Some(64), None],
+            chain: Chain::Ethereum,
+        };
+
+        let new_token = erc_token.to_storage(22);
+        assert_eq!(new_token.account_id, 22);
+        assert_eq!(new_token.symbol, erc_token.symbol);
+        assert_eq!(new_token.decimals, erc_token.decimals as i32);
+        assert_eq!(new_token.gas, vec![Some(64), None]);
+    }
+
     #[test]
     fn test_from_storage_protocol_component() {
         let atts = serde_json::json!({
@@ -495,11 +595,7 @@ mod test {
         assert_eq!(new_protocol_component.external_id, protocol_component.id.0);
         assert_eq!(new_protocol_component.chain_id, chain_id);
 
-        let parsed_protocol_type_id = protocol_component
-            .protocol_type_id
-            .parse::<i64>()
-            .unwrap();
-        assert_eq!(new_protocol_component.protocol_type_id, parsed_protocol_type_id);
+        assert_eq!(new_protocol_component.protocol_type_id, 42);
 
         assert_eq!(new_protocol_component.protocol_system_id, protocol_system_id);
 
@@ -508,7 +604,5 @@ mod test {
                 .unwrap();
 
         assert_eq!(new_protocol_component.attributes, Some(expected_attributes));
-
-        assert_eq!(new_protocol_component.created_at, creation_ts);
     }
 }
