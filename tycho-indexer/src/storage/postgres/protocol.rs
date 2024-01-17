@@ -13,7 +13,8 @@ use crate::{
     storage::{
         postgres::{orm, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+        StorableContract, StorableProtocolComponent, StorableProtocolType, StorableToken,
+        StorableTransaction, StorageError, TxHash, Version,
     },
 };
 
@@ -63,7 +64,7 @@ where
         println!("a");
         for pc in new {
             let new_pc = pc
-                .to_storage(self.get_chain_id(&pc.chain), 0, Default::default())
+                .to_storage(self.get_chain_id(&pc.chain), 0, 0, Default::default())
                 .unwrap();
             values.push(new_pc);
         }
@@ -191,13 +192,13 @@ mod test {
     use serde_json::json;
 
     use crate::{
-        extractor::evm,
         models,
         models::{FinancialType, ImplementationType},
         storage::postgres::{orm, schema, PostgresGateway},
     };
 
     use super::*;
+    use crate::storage::postgres::db_fixtures;
     use std::collections::HashMap;
 
     type EVMGateway = PostgresGateway<
@@ -218,6 +219,10 @@ mod test {
             .unwrap();
 
         conn
+    }
+
+    async fn setup_data(conn: &mut AsyncPgConnection) {
+        let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
     }
 
     #[tokio::test]
@@ -301,22 +306,11 @@ mod test {
     #[tokio::test]
     async fn test_upsert_components() {
         let mut conn = setup_db().await;
-
+        setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-        gw.chain_id_cache
-            .map_enum
-            .lock()
-            .unwrap()
-            .insert(1, Chain::Ethereum);
 
-        gw.chain_id_cache
-            .map_id
-            .lock()
-            .unwrap()
-            .insert(Chain::Ethereum, 1);
-        // Define test data
-        let protocol_system = ProtocolSystem::default(); // Replace with actual test data
-        let chain = Chain::default(); // Replace with actual test data
+        let protocol_system = ProtocolSystem::Ambient;
+        let chain = Chain::Ethereum;
         let new_component = ProtocolComponent {
             id: ContractId("test_contract_id".to_string()),
             protocol_system: protocol_system.clone(),
