@@ -492,21 +492,21 @@ impl TvlChange {
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 pub struct ProtocolComponent {
     // an id for this component, could be hex repr of contract address
-    id: ContractId,
+    pub id: ContractId,
     // what system this component belongs to
-    protocol_system: ProtocolSystem,
+    pub protocol_system: ProtocolSystem,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
-    protocol_type_id: String,
+    pub protocol_type_id: String,
     // blockchain the component belongs to
-    chain: Chain,
+    pub chain: Chain,
     // ids of the tokens tradable
-    tokens: Vec<H160>,
+    pub tokens: Vec<H160>,
     // addresses of the related contracts
-    contract_ids: Vec<H160>,
+    pub contract_ids: Vec<H160>,
     // stores the static attributes
-    static_attributes: HashMap<String, Bytes>,
+    pub static_attributes: HashMap<String, Bytes>,
     // the type of change (creation, deletion etc)
-    change: ChangeType,
+    pub change: ChangeType,
 }
 
 /// A type representing the unique identifier for a contract. It can represent an on-chain address
