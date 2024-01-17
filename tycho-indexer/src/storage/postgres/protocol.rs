@@ -347,39 +347,37 @@ mod test {
         .await;
 
         // protocol state for state1-reserve1
-        let attributes1: HashMap<String, Bytes> =
-            vec![("reserve1".to_owned(), Bytes::from(U256::from(1100)))]
-                .into_iter()
-                .collect();
-        let state1: Value =
-            serde_json::to_value(&attributes1).expect("Failed to convert attributes to json");
         db_fixtures::insert_protocol_state(
             conn,
             protocol_component_id,
             txn[0],
-            state1,
+            "reserve1".to_owned(),
+            Bytes::from(U256::from(1100)),
             Some(txn[2]),
         )
         .await;
 
         // protocol state for state1-reserve2
-        let attributes2: HashMap<String, Bytes> =
-            vec![("reserve2".to_owned(), Bytes::from(U256::from(500)))]
-                .into_iter()
-                .collect();
-        let state2: Value =
-            serde_json::to_value(&attributes2).expect("Failed to convert attributes to json");
-        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[0], state2, None).await;
+        db_fixtures::insert_protocol_state(
+            conn,
+            protocol_component_id,
+            txn[0],
+            "reserve2".to_owned(),
+            Bytes::from(U256::from(500)),
+            None,
+        )
+        .await;
 
         // protocol state update for state1-reserve1
-        let attributes_new: HashMap<String, Bytes> =
-            vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
-                .into_iter()
-                .collect();
-        let state_new: Value =
-            serde_json::to_value(&attributes_new).expect("Failed to convert attributes to json");
-        db_fixtures::insert_protocol_state(conn, protocol_component_id, txn[2], state_new, None)
-            .await;
+        db_fixtures::insert_protocol_state(
+            conn,
+            protocol_component_id,
+            txn[2],
+            "reserve1".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+        )
+        .await;
     }
 
     fn protocol_state() -> ProtocolState {

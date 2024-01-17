@@ -17,7 +17,7 @@ CREATE TYPE financial_protocol_type AS ENUM(
 );
 
 ALTER TABLE protocol_type
-ALTER COLUMN protocol_type TYPE financial_protocol_type
+ALTER COLUMN financial_type TYPE financial_protocol_type
 USING protocol_type::text::financial_protocol_type;
 
 DROP TYPE financial_type;
@@ -47,6 +47,14 @@ BEGIN
 END;
 $$
 LANGUAGE plpgsql;
+
+ALTER TABLE protocol_state 
+DROP CONSTRAINT check_attribute_fields;
+
+ALTER TABLE protocol_state 
+DROP COLUMN attribute_name,
+DROP COLUMN attribute_value,
+ADD COLUMN state jsonb NULL; 
 
 CREATE TRIGGER invalidate_previous_protocol_state
     BEFORE INSERT ON protocol_state

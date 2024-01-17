@@ -382,21 +382,21 @@ pub mod pg {
             })
         }
     }
+
     impl StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64> for evm::ProtocolState {
         fn from_storage(
             val: orm::ProtocolState,
             component_id: String,
             tx_hash: &TxHash,
         ) -> Result<Self, StorageError> {
-            let attr = match val.state {
-                Some(val) => serde_json::from_value(val).map_err(|err| {
-                    StorageError::DecodeError(format!(
-                        "Failed to deserialize state attribute: {}",
-                        err
-                    ))
-                })?,
-                None => HashMap::new(),
-            };
+            let attr =
+                if let (Some(name), Some(value)) = (&val.attribute_name, &val.attribute_value) {
+                    vec![(name.clone(), value.clone())]
+                        .into_iter()
+                        .collect()
+                } else {
+                    std::collections::HashMap::new()
+                };
             Ok(evm::ProtocolState::new(
                 component_id,
                 attr,
@@ -409,16 +409,21 @@ pub mod pg {
             protocol_component_id: i64,
             tx_id: i64,
             block_ts: NaiveDateTime,
-        ) -> orm::NewProtocolState {
-            orm::NewProtocolState {
-                protocol_component_id,
-                state: self.convert_attributes_to_json(),
-                modify_tx: tx_id,
-                tvl: None,
-                inertias: None,
-                valid_from: block_ts,
-                valid_to: None,
+        ) -> Vec<orm::NewProtocolState> {
+            let mut protocol_states = Vec::new();
+            for (name, value) in &self.updated_attributes {
+                protocol_states.push(orm::NewProtocolState {
+                    protocol_component_id,
+                    attribute_name: Some(name.clone()),
+                    attribute_value: Some(value.clone()),
+                    modify_tx: tx_id,
+                    valid_from: block_ts,
+                    valid_to: None,
+                    tvl: None,
+                    inertias: None,
+                });
             }
+            protocol_states
         }
     }
 

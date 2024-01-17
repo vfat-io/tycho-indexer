@@ -320,7 +320,8 @@ pub struct NewProtocolComponent {
 pub struct ProtocolState {
     pub id: i64,
     pub protocol_component_id: i64,
-    pub state: Option<serde_json::Value>,
+    pub attribute_name: Option<String>,
+    pub attribute_value: Option<Bytes>,
     pub modify_tx: i64,
     pub tvl: Option<i64>,
     pub inertias: Option<Vec<Option<i64>>>,
@@ -420,7 +421,8 @@ impl ProtocolState {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolState {
     pub protocol_component_id: i64,
-    pub state: Option<serde_json::Value>,
+    pub attribute_name: Option<String>,
+    pub attribute_value: Option<Bytes>,
     pub modify_tx: i64,
     pub tvl: Option<i64>,
     pub inertias: Option<Vec<Option<i64>>>,

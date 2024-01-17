@@ -493,9 +493,8 @@ pub mod db_fixtures {
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
-    use serde_json::Value;
 
-    use crate::storage::Code;
+    use crate::{hex_bytes::Bytes, storage::Code};
 
     use super::{
         orm::{FinancialType, ImplementationType, ProtocolSystemType},
@@ -840,7 +839,8 @@ pub mod db_fixtures {
         conn: &mut AsyncPgConnection,
         component_id: i64,
         tx_id: i64,
-        state: Value,
+        attribute_name: String,
+        attribute_value: Bytes,
         valid_to_tx: Option<i64>,
     ) {
         let ts: NaiveDateTime = schema::transaction::table
@@ -869,7 +869,8 @@ pub mod db_fixtures {
             schema::protocol_state::modified_ts.eq(ts),
             schema::protocol_state::valid_from.eq(ts),
             schema::protocol_state::valid_to.eq(valid_to_ts),
-            schema::protocol_state::state.eq(state),
+            schema::protocol_state::attribute_name.eq(attribute_name),
+            schema::protocol_state::attribute_value.eq(attribute_value),
         ));
         query
             .execute(conn)

@@ -34,5 +34,18 @@ USING protocol_type::text::implementation_type;
 
 DROP TYPE protocol_implementation_type;
 
+ALTER TABLE protocol_state 
+DROP COLUMN state,
+ADD COLUMN attribute_name VARCHAR NULL,
+ADD COLUMN attribute_value BYTEA NULL;
+
+-- Make sure either both attribute_name and attribute_value are given or neither are given
+ALTER TABLE protocol_state 
+ADD CONSTRAINT check_attribute_fields
+CHECK (
+    (attribute_name IS NULL AND attribute_value IS NULL) OR 
+    (attribute_name IS NOT NULL AND attribute_value IS NOT NULL)
+);
+
 DROP TRIGGER invalidate_previous_protocol_state ON protocol_state;
 DROP FUNCTION invalidate_previous_entry_protocol_state();
