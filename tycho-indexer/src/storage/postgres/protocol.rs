@@ -260,6 +260,7 @@ mod test {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
+    use rstest::rstest;
     use serde_json::{json, Value};
 
     use crate::{
@@ -400,8 +401,15 @@ mod test {
         )
     }
 
+    #[rstest]
+    #[case::by_chain(None, None)]
+    #[case::by_system(Some(ProtocolSystem::Ambient), None)]
+    #[case::by_ids(None, Some(vec!["state1"]))]
     #[tokio::test]
-    async fn test_get_protocol_states() {
+    async fn test_get_protocol_states(
+        #[case] system: Option<ProtocolSystem>,
+        #[case] ids: Option<Vec<&str>>,
+    ) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
 
@@ -410,7 +418,7 @@ mod test {
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
         let result = gateway
-            .get_protocol_states(&Chain::Ethereum, None, None, None, &mut conn)
+            .get_protocol_states(&Chain::Ethereum, None, system, ids.as_deref(), &mut conn)
             .await
             .unwrap();
 
