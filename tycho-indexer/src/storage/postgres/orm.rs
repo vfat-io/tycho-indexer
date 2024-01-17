@@ -229,23 +229,44 @@ pub struct NewTransaction {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolSystem {
     pub id: i64,
-    pub name: String,
+    pub name: ProtocolSystemType,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Debug, DbEnum)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialProtocolType"]
-pub enum FinancialProtocolType {
+#[derive(Insertable, Debug)]
+#[diesel(table_name=protocol_system)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolSystem {
+    pub name: ProtocolSystemType,
+}
+
+#[derive(Debug, DbEnum, Clone)]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolSystemType"]
+pub enum ProtocolSystemType {
+    Ambient,
+}
+
+impl From<models::ProtocolSystem> for ProtocolSystemType {
+    fn from(value: models::ProtocolSystem) -> Self {
+        match value {
+            models::ProtocolSystem::Ambient => ProtocolSystemType::Ambient,
+        }
+    }
+}
+
+#[derive(Debug, DbEnum, Clone, PartialEq)]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialType"]
+pub enum FinancialType {
     Swap,
     Psm,
     Debt,
     Leverage,
 }
 
-#[derive(Debug, DbEnum)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolImplementationType"]
-pub enum ProtocolImplementationType {
+#[derive(Debug, DbEnum, Clone, PartialEq)]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ImplementationType"]
+pub enum ImplementationType {
     Custom,
     Vm,
 }
@@ -256,14 +277,24 @@ pub enum ProtocolImplementationType {
 pub struct ProtocolType {
     pub id: i64,
     pub name: String,
-    pub financial_type: FinancialProtocolType,
+    pub financial_type: FinancialType,
     pub attribute_schema: Option<serde_json::Value>,
-    pub implementation: ProtocolImplementationType,
+    pub implementation: ImplementationType,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(AsChangeset, Insertable)]
+#[diesel(table_name = protocol_type)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolType {
+    pub name: String,
+    pub financial_type: FinancialType,
+    pub attribute_schema: Option<serde_json::Value>,
+    pub implementation: ImplementationType,
+}
+
+#[derive(Identifiable, Queryable, Associations, Selectable, Clone)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
@@ -280,6 +311,18 @@ pub struct ProtocolComponent {
     pub deleted_at: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+#[derive(Insertable)]
+#[diesel(belongs_to(Chain))]
+#[diesel(belongs_to(ProtocolType))]
+#[diesel(belongs_to(ProtocolSystem))]
+#[diesel(table_name = protocol_component)]
+pub struct NewProtocolComponent {
+    pub external_id: String,
+    pub chain_id: i64,
+    pub protocol_type_id: i64,
+    pub protocol_system_id: i64,
+    pub attributes: Option<serde_json::Value>,
 }
 
 impl ProtocolComponent {
@@ -302,7 +345,8 @@ impl ProtocolComponent {
 pub struct ProtocolState {
     pub id: i64,
     pub protocol_component_id: i64,
-    pub state: Option<serde_json::Value>,
+    pub attribute_name: Option<String>,
+    pub attribute_value: Option<Bytes>,
     pub modify_tx: i64,
     pub tvl: Option<i64>,
     pub inertias: Option<Vec<Option<i64>>>,
@@ -316,39 +360,81 @@ impl ProtocolState {
     pub async fn by_id(
         component_ids: &[&str],
         chain_id: i64,
+        version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<Self>> {
-        protocol_state::table
+        let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .filter(protocol_component::external_id.eq_any(component_ids))
             .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(
+                protocol_state::valid_to
+                    .gt(version_ts)
+                    .or(protocol_state::valid_to.is_null()),
+            )
+            .into_boxed();
+
+        if let Some(ts) = version_ts {
+            query = query.filter(protocol_state::valid_from.le(ts));
+        }
+
+        query
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
     }
 
     pub async fn by_protocol_system(
-        system: &models::ProtocolSystem,
+        system: models::ProtocolSystem,
         chain_id: i64,
+        version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<Self>> {
-        protocol_state::table
+        let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .inner_join(
                 protocol_system::table
                     .on(protocol_component::protocol_system_id.eq(protocol_system::id)),
             )
-            .filter(protocol_system::name.eq(&system.to_string().as_str()))
+            .filter(protocol_system::name.eq(ProtocolSystemType::from(system)))
             .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(
+                protocol_state::valid_to
+                    .gt(version_ts)
+                    .or(protocol_state::valid_to.is_null()),
+            )
+            .into_boxed();
+
+        if let Some(ts) = version_ts {
+            query = query.filter(protocol_state::valid_from.le(ts));
+        }
+
+        query
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
     }
 
-    pub async fn by_chain(chain_id: i64, conn: &mut AsyncPgConnection) -> QueryResult<Vec<Self>> {
-        protocol_state::table
+    pub async fn by_chain(
+        chain_id: i64,
+        version_ts: Option<NaiveDateTime>,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<Self>> {
+        let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(
+                protocol_state::valid_to
+                    .gt(version_ts)
+                    .or(protocol_state::valid_to.is_null()),
+            )
+            .into_boxed();
+
+        if let Some(ts) = version_ts {
+            query = query.filter(protocol_state::valid_from.le(ts));
+        }
+
+        query
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
@@ -360,7 +446,8 @@ impl ProtocolState {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolState {
     pub protocol_component_id: i64,
-    pub state: Option<serde_json::Value>,
+    pub attribute_name: Option<String>,
+    pub attribute_value: Option<Bytes>,
     pub modify_tx: i64,
     pub tvl: Option<i64>,
     pub inertias: Option<Vec<Option<i64>>>,

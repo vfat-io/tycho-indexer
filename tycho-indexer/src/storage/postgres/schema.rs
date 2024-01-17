@@ -2,16 +2,20 @@
 
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "financial_protocol_type"))]
-    pub struct FinancialProtocolType;
+    #[diesel(postgres_type(name = "financial_type"))]
+    pub struct FinancialType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "hstore"))]
     pub struct Hstore;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "protocol_implementation_type"))]
-    pub struct ProtocolImplementationType;
+    #[diesel(postgres_type(name = "implementation_type"))]
+    pub struct ImplementationType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "protocol_system_type"))]
+    pub struct ProtocolSystemType;
 }
 
 diesel::table! {
@@ -171,21 +175,24 @@ diesel::table! {
         id -> Int8,
         tvl -> Nullable<Int8>,
         inertias -> Nullable<Array<Nullable<Int8>>>,
-        state -> Nullable<Jsonb>,
         modify_tx -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
         protocol_component_id -> Int8,
+        attribute_name -> Nullable<Varchar>,
+        attribute_value -> Nullable<Bytea>,
     }
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::ProtocolSystemType;
+
     protocol_system (id) {
         id -> Int8,
-        #[max_length = 255]
-        name -> Varchar,
+        name -> ProtocolSystemType,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
     }
@@ -193,16 +200,16 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    use super::sql_types::FinancialProtocolType;
-    use super::sql_types::ProtocolImplementationType;
+    use super::sql_types::FinancialType;
+    use super::sql_types::ImplementationType;
 
     protocol_type (id) {
         id -> Int8,
         #[max_length = 255]
         name -> Varchar,
-        financial_type -> FinancialProtocolType,
+        financial_type -> FinancialType,
         attribute_schema -> Nullable<Jsonb>,
-        implementation -> ProtocolImplementationType,
+        implementation -> ImplementationType,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
     }

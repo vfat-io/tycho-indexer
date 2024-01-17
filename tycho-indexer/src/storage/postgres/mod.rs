@@ -132,6 +132,7 @@
 //! database operations.
 use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, str::FromStr, sync::Arc};
 
+use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{
     pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
@@ -143,8 +144,8 @@ use tracing::{debug, info};
 use crate::models::Chain;
 
 use super::{
-    ContractDelta, StateGateway, StorableBlock, StorableContract, StorableToken,
-    StorableTransaction, StorageError,
+    BlockIdentifier, BlockOrTimestamp, ContractDelta, StateGateway, StorableBlock,
+    StorableContract, StorableToken, StorableTransaction, StorageError, Version, VersionKind,
 };
 
 pub mod cache;
@@ -271,6 +272,38 @@ impl StorageError {
             }
             _ => StorageError::Unexpected(err_string),
         }
+    }
+}
+
+impl BlockOrTimestamp {
+    pub async fn to_ts(&self, conn: &mut AsyncPgConnection) -> Result<NaiveDateTime, StorageError> {
+        match self {
+            BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(h, conn)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "Block", &hex::encode(h), None))?
+                .ts),
+            BlockOrTimestamp::Block(BlockIdentifier::Number((chain, no))) => {
+                Ok(orm::Block::by_number(*chain, *no, conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(err, "Block", &format!("{}", no), None)
+                    })?
+                    .ts)
+            }
+            BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
+        }
+    }
+}
+
+impl Version {
+    pub async fn to_ts(&self, conn: &mut AsyncPgConnection) -> Result<NaiveDateTime, StorageError> {
+        if !matches!(self.1, VersionKind::Last) {
+            return Err(StorageError::Unsupported(format!(
+                "Unsupported version kind: {:?}",
+                self.1
+            )));
+        }
+        self.0.to_ts(conn).await
     }
 }
 
@@ -460,12 +493,11 @@ pub mod db_fixtures {
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
-    use serde_json::Value;
 
-    use crate::storage::Code;
+    use crate::{hex_bytes::Bytes, storage::Code};
 
     use super::{
-        orm::{FinancialProtocolType, ProtocolImplementationType},
+        orm::{FinancialType, ImplementationType, ProtocolSystemType},
         schema,
     };
 
@@ -739,7 +771,10 @@ pub mod db_fixtures {
     }
 
     // Insert a new Protocol System
-    pub async fn insert_protocol_system(conn: &mut AsyncPgConnection, name: &str) -> i64 {
+    pub async fn insert_protocol_system(
+        conn: &mut AsyncPgConnection,
+        name: ProtocolSystemType,
+    ) -> i64 {
         diesel::insert_into(schema::protocol_system::table)
             .values(schema::protocol_system::name.eq(name))
             .returning(schema::protocol_system::id)
@@ -752,8 +787,8 @@ pub mod db_fixtures {
     pub async fn insert_protocol_type(
         conn: &mut AsyncPgConnection,
         name: &str,
-        finantial_type: FinancialProtocolType,
-        implementation_type: ProtocolImplementationType,
+        finantial_type: FinancialType,
+        implementation_type: ImplementationType,
     ) -> i64 {
         diesel::insert_into(schema::protocol_type::table)
             .values((
@@ -804,7 +839,9 @@ pub mod db_fixtures {
         conn: &mut AsyncPgConnection,
         component_id: i64,
         tx_id: i64,
-        state: Value,
+        attribute_name: String,
+        attribute_value: Bytes,
+        valid_to_tx: Option<i64>,
     ) {
         let ts: NaiveDateTime = schema::transaction::table
             .inner_join(schema::block::table)
@@ -813,13 +850,27 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
+        let valid_to_ts: Option<NaiveDateTime> = match &valid_to_tx {
+            Some(tx) => Some(
+                schema::transaction::table
+                    .inner_join(schema::block::table)
+                    .filter(schema::transaction::id.eq(tx))
+                    .select(schema::block::ts)
+                    .first::<NaiveDateTime>(conn)
+                    .await
+                    .expect("setup tx id not found"),
+            ),
+            None => None,
+        };
 
         let query = diesel::insert_into(schema::protocol_state::table).values((
             schema::protocol_state::protocol_component_id.eq(component_id),
             schema::protocol_state::modify_tx.eq(tx_id),
             schema::protocol_state::modified_ts.eq(ts),
             schema::protocol_state::valid_from.eq(ts),
-            schema::protocol_state::state.eq(state),
+            schema::protocol_state::valid_to.eq(valid_to_ts),
+            schema::protocol_state::attribute_name.eq(attribute_name),
+            schema::protocol_state::attribute_value.eq(attribute_value),
         ));
         query
             .execute(conn)
