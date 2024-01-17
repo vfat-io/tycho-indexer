@@ -74,13 +74,14 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
+use ethers::prelude::H160;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
     extractor::evm::ProtocolState,
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ProtocolSystem},
+    models::{Chain, ExtractionState, ProtocolSystem, ProtocolType},
     storage::postgres::orm,
 };
 
@@ -224,7 +225,28 @@ pub trait StorableTransaction<S, N, I>: Sized + Send + Sync + 'static {
     fn hash(&self) -> TxHash;
 }
 
-#[derive(Error, Debug, PartialEq, Clone)]
+/// Lays out the necessary interface needed to store and retrieve protocol types
+/// from storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   transaction.
+/// * `N`: This represents the storage-specific data type used when converting from the protocol
+///   type to storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the transaction.
+pub trait StorableProtocolType<S, N, I>: Sized + Send + Sync + 'static {
+    /// Converts a protocol type from storage representation (`S`) to protocol type
+    /// form.
+    fn from_storage(val: S) -> Result<Self, crate::storage::StorageError>;
+
+    /// Converts a protocol type object to its storable representation (`N`).
+    fn to_storage(&self) -> N;
+}
+
+#[derive(Error, Debug, PartialEq)]
 pub enum StorageError {
     #[error("Could not find {0} with id `{1}`!")]
     NotFound(String, String),
@@ -449,8 +471,6 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(val: S, contract: ContractId) -> Result<Self, StorageError>;
 
     fn to_storage(&self, contract_id: I) -> N;
-
-    fn contract_id(&self) -> ContractId;
 }
 
 /// Lays out the necessary interface needed to store and retrieve protocol states from
@@ -466,11 +486,9 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
 ///   `to_storage` method, thereby providing a flexible way for different databases to interact with
 ///   the token.
 pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
-    fn from_storage(val: S, contract: ContractId) -> Result<Self, StorageError>;
+    fn from_storage(val: S, component_id: String, tx_hash: &TxHash) -> Result<Self, StorageError>;
 
-    fn to_storage(&self, contract_id: I) -> N;
-
-    fn contract_id(&self) -> ContractId;
+    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> N;
 }
 
 /// Store and retrieve protocol related structs.
@@ -482,6 +500,9 @@ pub trait ProtocolGateway {
     type DB;
     type Token;
     type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
+
+    type ProtocolType: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>;
+
     // TODO: uncomment below when StorableProtocolComponent is implemented (ENG 1728)
     // type ProtocolComponent;
 
@@ -501,6 +522,19 @@ pub trait ProtocolGateway {
     //     system: Option<ProtocolSystem>,
     //     ids: Option<&[&str]>,
     // ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
+
+    /// Stores new found ProtocolTypes or updates if existing.
+    ///
+    /// # Parameters
+    /// - `new`  The new protocol types.
+    ///
+    /// # Returns
+    /// Ok if stored successfully.
+    async fn upsert_protocol_type(
+        &self,
+        new: &Self::ProtocolType,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 
     /// Stores new found ProtocolComponents.
     ///
@@ -610,6 +644,12 @@ pub trait ProtocolGateway {
         to: &BlockIdentifier,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
+
+    async fn _get_or_create_protocol_system_id(
+        &self,
+        protocol_system: ProtocolSystem,
+        conn: &mut Self::DB,
+    ) -> Result<i64, StorageError>;
 }
 
 /// Lays out the necessary interface needed to store and retrieve contracts from
@@ -677,6 +717,23 @@ pub trait StorableContract<S, N, I>: Sized + Send + Sync + 'static {
     /// This method will return an error if the replacement is not successful.
     /// E.g. if the passed store value fails to convert into this structs types.
     fn set_store(&mut self, store: &ContractStore) -> Result<(), StorageError>;
+}
+
+pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
+    fn from_storage(
+        val: S,
+        tokens: Vec<H160>,
+        contract_ids: Vec<H160>,
+        chain: Chain,
+        protocol_system: ProtocolSystem,
+    ) -> Result<Self, StorageError>;
+
+    fn to_storage(
+        &self,
+        chain_id: i64,
+        protocol_system_id: i64,
+        creation_ts: NaiveDateTime,
+    ) -> Result<N, StorageError>;
 }
 
 #[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize)]
@@ -947,5 +1004,6 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         Delta = D,
         Token = T,
         ProtocolState = ProtocolState,
+        ProtocolType = ProtocolType,
     >,
 >;

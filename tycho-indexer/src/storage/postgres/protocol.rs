@@ -1,15 +1,19 @@
 #![allow(unused_variables)]
+#![allow(unused_imports)]
 
 use async_trait::async_trait;
-use diesel_async::AsyncPgConnection;
+
+use diesel::prelude::*;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
     extractor::evm::ProtocolState,
-    models::{Chain, ProtocolSystem},
+    models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
         postgres::{orm, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+        StorableContract, StorableProtocolType, StorableToken, StorableTransaction, StorageError,
+        TxHash, Version,
     },
 };
 
@@ -25,6 +29,7 @@ where
     type DB = AsyncPgConnection;
     type Token = T;
     type ProtocolState = ProtocolState;
+    type ProtocolType = ProtocolType;
 
     // TODO: uncomment to implement in ENG 2049
     // async fn get_components(
@@ -40,6 +45,27 @@ where
     // async fn upsert_components(&self, new: &[&ProtocolComponent]) -> Result<(), StorageError> {
     //     todo!()
     // }
+
+    async fn upsert_protocol_type(
+        &self,
+        new: &Self::ProtocolType,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        use super::schema::protocol_type::dsl::*;
+
+        let values: orm::NewProtocolType = new.to_storage();
+
+        diesel::insert_into(protocol_type)
+            .values(&values)
+            .on_conflict(name)
+            .do_update()
+            .set(&values)
+            .execute(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", &values.name, None))?;
+
+        Ok(())
+    }
 
     async fn get_states(
         &self,
@@ -86,5 +112,149 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         todo!()
+    }
+
+    async fn _get_or_create_protocol_system_id(
+        &self,
+        new: ProtocolSystem,
+        conn: &mut Self::DB,
+    ) -> Result<i64, StorageError> {
+        use super::schema::protocol_system::dsl::*;
+        let new_system = orm::ProtocolSystemType::from(new);
+
+        let existing_entry = protocol_system
+            .filter(name.eq(new_system.clone()))
+            .first::<orm::ProtocolSystem>(conn)
+            .await;
+
+        if let Ok(entry) = existing_entry {
+            return Ok(entry.id);
+        } else {
+            let new_entry = orm::NewProtocolSystem { name: new_system };
+
+            let inserted_protocol_system = diesel::insert_into(protocol_system)
+                .values(&new_entry)
+                .get_result::<orm::ProtocolSystem>(conn)
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
+                })?;
+            Ok(inserted_protocol_system.id)
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use diesel_async::AsyncConnection;
+    use serde_json::json;
+
+    use crate::{
+        extractor::evm,
+        models,
+        models::{FinancialType, ImplementationType},
+        storage::postgres::{orm, schema, PostgresGateway},
+    };
+
+    use super::*;
+
+    type EVMGateway = PostgresGateway<
+        evm::Block,
+        evm::Transaction,
+        evm::Account,
+        evm::AccountUpdate,
+        evm::ERC20Token,
+    >;
+
+    async fn setup_db() -> AsyncPgConnection {
+        let db_url = std::env::var("DATABASE_URL").unwrap();
+        let mut conn = AsyncPgConnection::establish(&db_url)
+            .await
+            .unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
+
+        conn
+    }
+
+    #[tokio::test]
+    async fn test_get_or_create_protocol_system_id() {
+        let mut conn = setup_db().await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let protocol_system_id = gw
+            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(protocol_system_id, 1);
+
+        let protocol_system_id = gw
+            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(protocol_system_id, 1);
+    }
+
+    #[tokio::test]
+    async fn test_add_protocol_type() {
+        let mut conn = setup_db().await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let d = NaiveDate::from_ymd_opt(2015, 6, 3).unwrap();
+        let t = NaiveTime::from_hms_milli_opt(12, 34, 56, 789).unwrap();
+        let dt = NaiveDateTime::new(d, t);
+
+        let protocol_type = models::ProtocolType {
+            name: "Protocol".to_string(),
+            financial_type: FinancialType::Debt,
+            attribute_schema: Some(json!({"attribute": "schema"})),
+            implementation: ImplementationType::Custom,
+        };
+
+        gw.upsert_protocol_type(&protocol_type, &mut conn)
+            .await
+            .unwrap();
+
+        let inserted_data = schema::protocol_type::table
+            .filter(schema::protocol_type::name.eq("Protocol"))
+            .select(schema::protocol_type::all_columns)
+            .first::<orm::ProtocolType>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(inserted_data.name, "Protocol".to_string());
+        assert_eq!(inserted_data.financial_type, orm::FinancialType::Debt);
+        assert_eq!(inserted_data.attribute_schema, Some(json!({"attribute": "schema"})));
+        assert_eq!(inserted_data.implementation, orm::ImplementationType::Custom);
+
+        let updated_protocol_type = models::ProtocolType {
+            name: "Protocol".to_string(),
+            financial_type: FinancialType::Leverage,
+            attribute_schema: Some(json!({"attribute": "another_schema"})),
+            implementation: ImplementationType::Vm,
+        };
+
+        gw.upsert_protocol_type(&updated_protocol_type, &mut conn)
+            .await
+            .unwrap();
+
+        let newly_inserted_data = schema::protocol_type::table
+            .filter(schema::protocol_type::name.eq("Protocol"))
+            .select(schema::protocol_type::all_columns)
+            .load::<orm::ProtocolType>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(newly_inserted_data.len(), 1);
+        assert_eq!(newly_inserted_data[0].name, "Protocol".to_string());
+        assert_eq!(newly_inserted_data[0].financial_type, orm::FinancialType::Leverage);
+        assert_eq!(
+            newly_inserted_data[0].attribute_schema,
+            Some(json!({"attribute": "another_schema"}))
+        );
+        assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
     }
 }
