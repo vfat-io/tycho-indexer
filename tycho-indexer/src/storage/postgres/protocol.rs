@@ -129,7 +129,7 @@ where
     }
 
     // Gets all protocol states from the db filtered by chain, component ids and/or protocol system.
-    async fn get_states(
+    async fn get_protocol_states(
         &self,
         chain: &Chain,
         at: Option<Version>,
@@ -173,7 +173,7 @@ where
         }
     }
 
-    async fn update_state(
+    async fn update_protocol_state(
         &self,
         chain: Chain,
         new: &[(TxHash, ProtocolState)],
@@ -399,7 +399,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_get_states() {
+    async fn test_get_protocol_states() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
 
@@ -408,7 +408,7 @@ mod test {
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
         let result = gateway
-            .get_states(&Chain::Ethereum, None, None, None, &mut conn)
+            .get_protocol_states(&Chain::Ethereum, None, None, None, &mut conn)
             .await
             .unwrap();
 
@@ -416,7 +416,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_get_states_at() {
+    async fn test_get_protocol_states_at() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
 
@@ -437,7 +437,7 @@ mod test {
         let expected = vec![protocol_state];
 
         let result = gateway
-            .get_states(
+            .get_protocol_states(
                 &Chain::Ethereum,
                 Some(Version::from_block_number(Chain::Ethereum, 1)),
                 None,

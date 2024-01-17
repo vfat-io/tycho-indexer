@@ -569,7 +569,7 @@ pub trait ProtocolGateway {
     /// - `system` The protocol system this component belongs to
     /// - `id` The external id of the component e.g. address, or the pair
     /// - `at` The version at which the state is valid at.
-    async fn get_states(
+    async fn get_protocol_states(
         &self,
         chain: &Chain,
         at: Option<Version>,
@@ -578,7 +578,7 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolState>, StorageError>;
 
-    async fn update_state(
+    async fn update_protocol_state(
         &self,
         chain: Chain,
         new: &[(TxHash, ProtocolState)],
