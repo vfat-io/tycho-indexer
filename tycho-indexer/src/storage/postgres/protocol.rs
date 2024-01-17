@@ -217,24 +217,8 @@ where
             let component_db_id = *components
                 .get(&state.component_id)
                 .expect("Failed to find component");
-            let attributes: Option<Value> = if !state.updated_attributes.is_empty() {
-                Some(
-                    serde_json::to_value(&state.updated_attributes)
-                        .expect("Failed to convert attributes to json"),
-                )
-            } else {
-                None
-            };
-            let new = orm::NewProtocolState {
-                protocol_component_id: component_db_id,
-                state: attributes,
-                modify_tx: tx_db.0,
-                tvl: None,
-                inertias: None,
-                valid_from: tx_db.1,
-                valid_to: None,
-            };
-            state_data.push(new);
+            let mut db_states = ProtocolState::to_storage(state, component_db_id, tx_db.0, tx_db.1);
+            state_data.append(&mut db_states);
         }
 
         if !state_data.is_empty() {
@@ -332,9 +316,6 @@ mod test {
             PostgresGateway,
         },
     };
-    use diesel_async::AsyncConnection;
-    use ethers::types::U256;
-    use serde_json::Value;
 
     use super::*;
 
@@ -549,7 +530,7 @@ mod test {
             )
             .await
             .expect("Failed ");
-        assert_eq!(db_states.len(), 2)
+        assert_eq!(db_states.len(), 1)
     }
 
     #[tokio::test]
