@@ -404,8 +404,9 @@ pub mod pg {
             ))
         }
 
-        // When stored, protocol states are divided into multiple protocol state db entities - one per attribute
-        // This is to allow individualised control over attribute versioning and more efficient querying
+        // When stored, protocol states are divided into multiple protocol state db entities - one
+        // per attribute This is to allow individualised control over attribute versioning
+        // and more efficient querying
         fn to_storage(
             &self,
             protocol_component_id: i64,

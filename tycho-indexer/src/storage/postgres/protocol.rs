@@ -20,50 +20,63 @@ use crate::{
     },
 };
 
-// decode Protocol State query results
-async fn decode_protocol_states(
-    result: Result<Vec<orm::ProtocolState>, diesel::result::Error>,
-    context: &str,
-    conn: &mut AsyncPgConnection,
-) -> Result<Vec<ProtocolState>, StorageError> {
-    match result {
-        Ok(states) => {
-            let mut protocol_states: HashMap<String, ProtocolState> = HashMap::new();
-            for state in states {
-                let (component_id, tx_hash): (String, Bytes) = schema::protocol_state::table
-                    .inner_join(
-                        schema::protocol_component::table.on(schema::protocol_component::id
-                            .eq(schema::protocol_state::protocol_component_id)),
-                    )
-                    .inner_join(
-                        schema::transaction::table
-                            .on(schema::transaction::id.eq(schema::protocol_state::modify_tx)),
-                    )
-                    .filter(schema::protocol_state::id.eq(state.id))
-                    .select((schema::protocol_component::external_id, schema::transaction::hash))
-                    .first::<(String, Bytes)>(conn)
-                    .await?;
+impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
+where
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta + From<A>,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
+    T: StorableToken<orm::Token, orm::NewToken, i64>,
+{
+    // decode Protocol State query results
+    async fn _decode_protocol_states(
+        &self,
+        result: Result<Vec<orm::ProtocolState>, diesel::result::Error>,
+        context: &str,
+        conn: &mut <Self as ProtocolGateway>::DB,
+    ) -> Result<Vec<ProtocolState>, StorageError> {
+        match result {
+            Ok(states) => {
+                let mut protocol_states: HashMap<String, ProtocolState> = HashMap::new();
+                for state in states {
+                    let (component_id, tx_hash): (String, Bytes) = schema::protocol_state::table
+                        .inner_join(
+                            schema::protocol_component::table.on(schema::protocol_component::id
+                                .eq(schema::protocol_state::protocol_component_id)),
+                        )
+                        .inner_join(
+                            schema::transaction::table
+                                .on(schema::transaction::id.eq(schema::protocol_state::modify_tx)),
+                        )
+                        .filter(schema::protocol_state::id.eq(state.id))
+                        .select((
+                            schema::protocol_component::external_id,
+                            schema::transaction::hash,
+                        ))
+                        .first::<(String, Bytes)>(conn)
+                        .await?;
 
-                let protocol_state =
-                    ProtocolState::from_storage(state, component_id.clone(), &tx_hash)?;
+                    let protocol_state =
+                        ProtocolState::from_storage(state, component_id.clone(), &tx_hash)?;
 
-                if let Some(existing_state) = protocol_states.get_mut(&component_id) {
-                    // found a protocol state with a matching component id - merge states
-                    dbg!(&existing_state);
-                    dbg!(&protocol_state);
-                    existing_state
-                        .merge(protocol_state)
-                        .map_err(|err| StorageError::DecodeError(err.to_string()))?;
-                } else {
-                    // no matching state found - add as a new state to the list
-                    protocol_states.insert(component_id, protocol_state);
+                    if let Some(existing_state) = protocol_states.get_mut(&component_id) {
+                        // found a protocol state with a matching component id - merge states
+                        dbg!(&existing_state);
+                        dbg!(&protocol_state);
+                        existing_state
+                            .merge(protocol_state)
+                            .map_err(|err| StorageError::DecodeError(err.to_string()))?;
+                    } else {
+                        // no matching state found - add as a new state to the list
+                        protocol_states.insert(component_id, protocol_state);
+                    }
                 }
-            }
 
-            let decoded_states: Vec<ProtocolState> = protocol_states.into_values().collect();
-            Ok(decoded_states)
+                let decoded_states: Vec<ProtocolState> = protocol_states.into_values().collect();
+                Ok(decoded_states)
+            }
+            Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
         }
-        Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
     }
 }
 
@@ -117,9 +130,10 @@ where
         Ok(())
     }
 
-    // Gets all protocol states from the db filtered by chain, component ids and/or protocol system. The
-    // filters are applied in the following order: component ids, protocol system, chain. If component ids
-    // are provided, the protocol system filter is ignored. The chain filter is always applied.
+    // Gets all protocol states from the db filtered by chain, component ids and/or protocol system.
+    // The filters are applied in the following order: component ids, protocol system, chain. If
+    // component ids are provided, the protocol system filter is ignored. The chain filter is
+    // always applied.
     async fn get_protocol_states(
         &self,
         chain: &Chain,
@@ -136,7 +150,7 @@ where
 
         match (ids, system) {
             (Some(ids), _) => {
-                decode_protocol_states(
+                self._decode_protocol_states(
                     orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
                     ids.join(",").as_str(),
                     conn,
@@ -144,7 +158,7 @@ where
                 .await
             }
             (_, Some(system)) => {
-                decode_protocol_states(
+                self._decode_protocol_states(
                     orm::ProtocolState::by_protocol_system(system, chain_db_id, version_ts, conn)
                         .await,
                     system.to_string().as_str(),
@@ -153,7 +167,7 @@ where
                 .await
             }
             _ => {
-                decode_protocol_states(
+                self._decode_protocol_states(
                     orm::ProtocolState::by_chain(chain_db_id, version_ts, conn).await,
                     chain.to_string().as_str(),
                     conn,
