@@ -28,6 +28,7 @@ where
     type DB = AsyncPgConnection;
     type Token = T;
     type ProtocolState = ProtocolState;
+    type ProtocolComponent = ProtocolComponent;
 
     async fn get_components(
         &self,

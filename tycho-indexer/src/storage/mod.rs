@@ -978,5 +978,6 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         Delta = D,
         Token = T,
         ProtocolState = ProtocolState,
+        ProtocolComponent = ProtocolComponent,
     >,
 >;
