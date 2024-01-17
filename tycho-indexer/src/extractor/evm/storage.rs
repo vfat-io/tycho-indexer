@@ -18,6 +18,7 @@ use std::collections::HashMap;
 pub mod pg {
     use crate::{
         extractor::evm::utils::pad_and_parse_h160,
+        hex_bytes::Bytes,
         models,
         models::{FinancialType, ImplementationType},
         storage::{
@@ -30,6 +31,7 @@ pub mod pg {
         },
     };
     use ethers::types::{H160, H256, U256};
+    use serde_json::Value;
 
     use super::*;
 
