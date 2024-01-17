@@ -191,19 +191,19 @@ impl DBCacheWriteExecutor {
                                         continue;
                                     } else {
                                         match self.execute_write_op(&op, conn).await {
-                                        Err(StorageError::DuplicateEntry(entity, id)) => {
+                                            Err(StorageError::DuplicateEntry(entity, id)) => {
                                                 // As this db transaction is old. It can contain
                                                 // already stored txs, we log the duplicate entry
-                                            // error and continue
+                                                // error and continue
                                                 debug!(
                                                     "Duplicate entry for {} with id {}",
                                                     entity, id
                                                 );
-                                        }
-                                        Err(e) => {
-                                            return Err(e);
-                                        }
-                                        _ => {}
+                                            }
+                                            Err(e) => {
+                                                return Err(e);
+                                            }
+                                            _ => {}
                                         }
                                     }
                                 }
