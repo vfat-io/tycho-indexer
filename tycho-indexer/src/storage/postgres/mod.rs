@@ -460,10 +460,11 @@ pub mod db_fixtures {
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
+    use serde_json::Value;
 
-    use crate::storage::Code;
+    use crate::storage::{postgres::orm, Code};
 
-    use super::schema;
+    use super::schema::{self, protocol_type::attribute_schema};
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -553,6 +554,39 @@ pub mod db_fixtures {
             .values(&data)
             .returning(schema::transaction::id)
             .get_results(conn)
+            .await
+            .unwrap()
+    }
+
+    pub async fn insert_protocol_system(conn: &mut AsyncPgConnection, name: &str) {
+        // TODO: Implement when https://github.com/propeller-heads/tycho-indexer/pull/91 is merged
+        //diesel::insert_into(schema::protocol_system::table)
+        //    .values(schema::protocol_system::name.eq(name))
+        //    .returning(schema::protocol_system::id)
+        //    .get_result(conn)
+        //    .await
+        //    .unwrap()
+    }
+
+    pub async fn insert_protocol_type(
+        conn: &mut AsyncPgConnection,
+        name: &str,
+        financial_type: Option<orm::FinancialType>,
+        attribute: Option<Value>,
+        implementation_type: Option<orm::ImplementationType>,
+    ) -> i64 {
+        let financial_type = financial_type.unwrap_or_else(|| orm::FinancialType::Swap);
+        let implementation_type =
+            implementation_type.unwrap_or_else(|| orm::ImplementationType::Custom);
+        let query = diesel::insert_into(schema::protocol_type::table).values((
+            schema::protocol_type::name.eq(name),
+            schema::protocol_type::financial_type.eq(financial_type),
+            schema::protocol_type::attribute_schema.eq(attribute),
+            schema::protocol_type::implementation.eq(implementation_type),
+        ));
+        query
+            .returning(schema::protocol_type::id)
+            .get_result(conn)
             .await
             .unwrap()
     }
