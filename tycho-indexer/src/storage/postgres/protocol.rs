@@ -64,7 +64,7 @@ where
         println!("a");
         for pc in new {
             let new_pc = pc
-                .to_storage(self.get_chain_id(&pc.chain), 0, 0, Default::default())
+                .to_storage(self.get_chain_id(&pc.chain), 1, 1, Default::default())
                 .unwrap();
             values.push(new_pc);
         }
@@ -198,7 +198,7 @@ mod test {
     };
 
     use super::*;
-    use crate::storage::postgres::db_fixtures;
+    use crate::storage::postgres::{db_fixtures, orm::ProtocolSystemType};
     use std::collections::HashMap;
 
     type EVMGateway = PostgresGateway<
@@ -223,6 +223,47 @@ mod test {
 
     async fn setup_data(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let txn = db_fixtures::insert_txns(
+            conn,
+            &[
+                (
+                    // deploy c0
+                    blk[0],
+                    1i64,
+                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+                ),
+                (
+                    // change c0 state, deploy c2
+                    blk[0],
+                    2i64,
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                ),
+                // ----- Block 01 LAST
+                (
+                    // deploy c1, delete c2
+                    blk[1],
+                    1i64,
+                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
+                ),
+                (
+                    // change c0 and c1 state
+                    blk[1],
+                    2i64,
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                ),
+                // ----- Block 02 LAST
+            ],
+        )
+        .await;
+
+        db_fixtures::insert_protocol_type(conn, &"Test_Type", None, None, None).await;
+
+        let ps = diesel::insert_into(schema::protocol_system::table)
+            .values(schema::protocol_system::name.eq(&ProtocolSystemType::Ambient))
+            .get_result::<orm::ProtocolSystem>(conn)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
