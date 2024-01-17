@@ -167,9 +167,9 @@ impl DBCacheWriteExecutor {
     /// reducing the frequency of write operations, while also maintaining the integrity
     /// and order of blockchain data.
     ///
-    /// Errors are sent to the error channel if the incoming transaction's block does not logically
-    /// follow the sequence of the blockchain (e.g., if the block is too far ahead or does not
-    /// connect with the last persisted block) or if we fail to send a transaction to the database.
+    /// Errors are sent to the error channel if the incoming transaction's block is too far ahead or
+    /// does not connect with the last persisted block or if we fail to send a transaction to
+    /// the database.
     async fn write(&mut self, mut new_db_tx: DBTransaction) {
         match self.pending_block {
             Some(pending) => {
@@ -193,17 +193,25 @@ impl DBCacheWriteExecutor {
                         .transaction(|conn| {
                             async {
                                 for op in new_db_tx.operations {
-                                    match self.execute_write_op(op, conn).await {
+                                    if let WriteOp::UpsertBlock(_) = op {
+                                        // Ignore block upserts, we expect it to already be stored
+                                        continue;
+                                    } else {
+                                        match self.execute_write_op(&op, conn).await {
                                         Err(StorageError::DuplicateEntry(entity, id)) => {
-                                            // As this db transaction is old. It can contain already
-                                            // stored blocks or txs, we log the duplicate entry
+                                                // As this db transaction is old. It can contain
+                                                // already stored txs, we log the duplicate entry
                                             // error and continue
-                                            debug!("Duplicate entry for {} with id {}", entity, id);
+                                                debug!(
+                                                    "Duplicate entry for {} with id {}",
+                                                    entity, id
+                                                );
                                         }
                                         Err(e) => {
                                             return Err(e);
                                         }
                                         _ => {}
+                                        }
                                     }
                                 }
                                 Result::<(), StorageError>::Ok(())
@@ -272,12 +280,9 @@ impl DBCacheWriteExecutor {
                 for op in db_txs.into_iter() {
                     if !seen_operations.contains(&op) {
                         // Only executes if it is not already in seen_operations
-                        match self
-                            .execute_write_op(op.clone(), conn)
-                            .await
-                        {
+                        match self.execute_write_op(&op, conn).await {
                             Ok(_) => {
-                                seen_operations.push(op.clone());
+                                seen_operations.push(op);
                             }
                             Err(e) => {
                                 // If and error happens, revert the whole transaction
@@ -326,28 +331,28 @@ impl DBCacheWriteExecutor {
     /// upserts, updates, and reverts, ensuring data consistency in the database.
     async fn execute_write_op(
         &mut self,
-        operation: WriteOp,
+        operation: &WriteOp,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         match operation {
             WriteOp::UpsertBlock(block) => {
                 self.state_gateway
-                    .upsert_block(&block, conn)
+                    .upsert_block(block, conn)
                     .await
             }
             WriteOp::UpsertTx(transaction) => {
                 self.state_gateway
-                    .upsert_tx(&transaction, conn)
+                    .upsert_tx(transaction, conn)
                     .await
             }
             WriteOp::SaveExtractionState(state) => {
                 self.state_gateway
-                    .save_state(&state, conn)
+                    .save_state(state, conn)
                     .await
             }
             WriteOp::InsertContract(contract) => {
                 self.state_gateway
-                    .insert_contract(&contract, conn)
+                    .insert_contract(contract, conn)
                     .await
             }
             WriteOp::UpdateContracts(contracts) => {
