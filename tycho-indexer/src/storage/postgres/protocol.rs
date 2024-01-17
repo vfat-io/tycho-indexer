@@ -30,30 +30,19 @@ async fn decode_protocol_states(
         Ok(states) => {
             let mut protocol_states: HashMap<String, ProtocolState> = HashMap::new();
             for state in states {
-                let component_id = schema::protocol_component::table
-                    .filter(schema::protocol_component::id.eq(state.protocol_component_id))
-                    .select(schema::protocol_component::external_id)
-                    .first::<String>(conn)
-                    .await
-                    .map_err(|err| {
-                        StorageError::NoRelatedEntity(
-                            "ProtocolComponent".to_owned(),
-                            "ProtocolState".to_owned(),
-                            state.id.to_string(),
-                        )
-                    })?;
-                let tx_hash = schema::transaction::table
-                    .filter(schema::transaction::id.eq(state.modify_tx))
-                    .select(schema::transaction::hash)
-                    .first::<Bytes>(conn)
-                    .await
-                    .map_err(|err| {
-                        StorageError::NoRelatedEntity(
-                            "Transaction".to_owned(),
-                            "ProtocolState".to_owned(),
-                            state.id.to_string(),
-                        )
-                    })?;
+                let (component_id, tx_hash): (String, Bytes) = schema::protocol_state::table
+                    .inner_join(
+                        schema::protocol_component::table.on(schema::protocol_component::id
+                            .eq(schema::protocol_state::protocol_component_id)),
+                    )
+                    .inner_join(
+                        schema::transaction::table
+                            .on(schema::transaction::id.eq(schema::protocol_state::modify_tx)),
+                    )
+                    .filter(schema::protocol_state::id.eq(state.id))
+                    .select((schema::protocol_component::external_id, schema::transaction::hash))
+                    .first::<(String, Bytes)>(conn)
+                    .await?;
 
                 let protocol_state =
                     ProtocolState::from_storage(state, component_id.clone(), &tx_hash)?;
@@ -128,7 +117,9 @@ where
         Ok(())
     }
 
-    // Gets all protocol states from the db filtered by chain, component ids and/or protocol system.
+    // Gets all protocol states from the db filtered by chain, component ids and/or protocol system. The
+    // filters are applied in the following order: component ids, protocol system, chain. If component ids
+    // are provided, the protocol system filter is ignored. The chain filter is always applied.
     async fn get_protocol_states(
         &self,
         chain: &Chain,
@@ -162,7 +153,6 @@ where
                 .await
             }
             _ => {
-                dbg!(chain_db_id);
                 decode_protocol_states(
                     orm::ProtocolState::by_chain(chain_db_id, version_ts, conn).await,
                     chain.to_string().as_str(),
