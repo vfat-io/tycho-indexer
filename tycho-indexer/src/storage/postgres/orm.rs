@@ -217,7 +217,7 @@ pub struct NewTransaction {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolSystem {
     pub id: i64,
-    pub name: ProtocolSystemType,
+    pub name: String,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
@@ -226,21 +226,7 @@ pub struct ProtocolSystem {
 #[diesel(table_name=protocol_system)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolSystem {
-    pub name: ProtocolSystemType,
-}
-
-#[derive(Debug, DbEnum, Clone)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolSystemType"]
-pub enum ProtocolSystemType {
-    Ambient,
-}
-
-impl From<models::ProtocolSystem> for ProtocolSystemType {
-    fn from(value: models::ProtocolSystem) -> Self {
-        match value {
-            models::ProtocolSystem::Ambient => ProtocolSystemType::Ambient,
-        }
-    }
+    pub name: String,
 }
 
 #[derive(Debug, DbEnum, Clone, PartialEq)]
@@ -282,7 +268,7 @@ pub struct NewProtocolType {
     pub implementation: ImplementationType,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Clone)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
@@ -299,6 +285,18 @@ pub struct ProtocolComponent {
     pub deleted_at: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+#[derive(Insertable)]
+#[diesel(belongs_to(Chain))]
+#[diesel(belongs_to(ProtocolType))]
+#[diesel(belongs_to(ProtocolSystem))]
+#[diesel(table_name = protocol_component)]
+pub struct NewProtocolComponent {
+    pub external_id: String,
+    pub chain_id: i64,
+    pub protocol_type_id: i64,
+    pub protocol_system_id: i64,
+    pub attributes: Option<serde_json::Value>,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
