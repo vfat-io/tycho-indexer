@@ -290,7 +290,7 @@ pub struct ProtocolComponent {
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
-#[derive(Insertable)]
+#[derive(Insertable, AsChangeset, Debug)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
@@ -300,6 +300,7 @@ pub struct NewProtocolComponent {
     pub chain_id: i64,
     pub protocol_type_id: i64,
     pub protocol_system_id: i64,
+    pub creation_tx: i64,
     pub attributes: Option<serde_json::Value>,
     pub created_at: NaiveDateTime,
 }
