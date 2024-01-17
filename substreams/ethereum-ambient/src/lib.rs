@@ -10,9 +10,11 @@ use pb::tycho::evm::v1::{self as tycho};
 mod pb;
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 const AMBIENT_HOTPROXY_CONTRACT: [u8; 20] = hex!("37e00522Ce66507239d59b541940F99eA19fF81F");
+const AMBIENT_MICROPATHS_CONTRACT: [u8; 20] = hex!("f241bEf0Ea64020655C70963ef81Fea333752367");
 const INIT_POOL_CODE: u8 = 71;
 const USER_CMD_FN_SIG: [u8; 4] = hex!("a15112f9");
 const USER_CMD_HOTPROXY_FN_SIG: [u8; 4] = hex!("f96dc788");
+const SWEEP_SWAP_FN_SIG: [u8; 4] = hex!("7b370fc2");
 const SWAP_FN_SIG: [u8; 4] = hex!("3d719cd9");
 
 const SWAP_ABI_INPUT: &[ParamType] = &[
@@ -342,6 +344,98 @@ fn map_changes(
                     }
                 } else {
                     bail!("Failed to decode ABI internal call.".to_string());
+                }
+            }
+        }
+
+        let ambient_micropaths_calls = block_tx
+            .calls
+            .iter()
+            .filter(|call| !call.state_reverted)
+            .filter(|call| call.address == AMBIENT_MICROPATHS_CONTRACT)
+            .collect::<Vec<_>>();
+
+        for call in ambient_micropaths_calls {
+            if call.input.len() < 4 {
+                continue;
+            }
+            if call.input[0..4] == SWEEP_SWAP_FN_SIG {
+                // Handle TVL changes caused by calling the sweepSwap method on the MicroPaths
+                // contract
+
+                let sweep_swap_abi: &[ParamType] = &[
+                    ParamType::Tuple(vec![
+                        ParamType::Uint(128),
+                        ParamType::Uint(128),
+                        ParamType::Uint(128),
+                        ParamType::Uint(64),
+                        ParamType::Uint(64),
+                    ]), // CurveState
+                    ParamType::Int(24), // midTick
+                    ParamType::Tuple(vec![
+                        ParamType::Bool,
+                        ParamType::Bool,
+                        ParamType::Uint(8),
+                        ParamType::Uint(128),
+                        ParamType::Uint(128),
+                    ]), // SwapDirective
+                    ParamType::Tuple(vec![
+                        ParamType::Tuple(vec![
+                            ParamType::Uint(8),  // schema
+                            ParamType::Uint(16), // feeRate
+                            ParamType::Uint(8),  // protocolTake
+                            ParamType::Uint(16), // tickSize
+                            ParamType::Uint(8),  // jitThresh
+                            ParamType::Uint(8),  // knockoutBits
+                            ParamType::Uint(8),  // oracleFlags
+                        ]),
+                        ParamType::FixedBytes(32), // poolHash
+                        ParamType::Address,
+                    ]), // PoolCursor
+                ];
+                let sweep_swap_abi_output: &[ParamType] = &[
+                    ParamType::Tuple(vec![
+                        ParamType::Int(128), // baseFlow
+                        ParamType::Int(128), // quoteFlow
+                        ParamType::Uint(128),
+                        ParamType::Uint(128),
+                    ]), // Chaining.PairFlow memory accum
+                    ParamType::Uint(128), // priceOut
+                    ParamType::Uint(128), // seedOut
+                    ParamType::Uint(128), // concOut
+                    ParamType::Uint(64),  // ambientOut
+                    ParamType::Uint(64),  // concGrowthOut
+                ];
+                if let Ok(sweep_swap_input) = decode(sweep_swap_abi, &call.input[4..]) {
+                    let pool_cursor = sweep_swap_input[3]
+                        .to_owned()
+                        .into_tuple()
+                        .ok_or_else(|| anyhow!("Failed to convert to tuple".to_string()))?;
+                    let _pool_hash = pool_cursor[1]
+                        .to_owned()
+                        .into_fixed_bytes()
+                        .ok_or_else(|| anyhow!("Failed to convert to fixed bytes".to_string()))?;
+                    if let Ok(sweep_swap_output) = decode(sweep_swap_abi_output, &call.return_data)
+                    {
+                        let pair_flow = sweep_swap_output[0]
+                            .to_owned()
+                            .into_tuple()
+                            .ok_or_else(|| anyhow!("Failed to convert to tuple".to_string()))?;
+
+                        let _base_flow = pair_flow[0]
+                            .to_owned()
+                            .into_int() // Needs conversion into bytes for next step
+                            .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+
+                        let _quote_flow = pair_flow[1]
+                            .to_owned()
+                            .into_int() // Needs conversion into bytes for next step
+                            .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+                    } else {
+                        bail!("Failed to decode sweepSwap outputs.".to_string());
+                    }
+                } else {
+                    bail!("Failed to decode sweepSwap inputs.".to_string());
                 }
             }
         }
