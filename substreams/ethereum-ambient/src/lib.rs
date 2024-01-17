@@ -3,7 +3,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use anyhow::{anyhow, bail};
 use ethabi::{decode, ParamType};
 use hex_literal::hex;
-use substreams_ethereum::pb::eth::{self};
+use substreams_ethereum::pb::eth::{self, v2::Call};
 
 use pb::tycho::evm::v1::{self as tycho};
 
@@ -133,18 +133,18 @@ fn map_changes(
             .collect::<Vec<_>>();
         storage_changes.sort_unstable_by_key(|change| change.ordinal);
 
-        let ambient_calls = block_tx
+        let block_calls = block_tx
             .calls
             .iter()
             .filter(|call| !call.state_reverted)
-            .filter(|call| call.address == AMBIENT_CONTRACT)
             .collect::<Vec<_>>();
 
-        for call in ambient_calls {
+        for call in block_calls {
             if call.input.len() < 4 {
                 continue;
             }
-            if call.input[0..4] == USER_CMD_FN_SIG {
+            if call.address == AMBIENT_CONTRACT && call.input[0..4] == USER_CMD_FN_SIG {
+                // Extract pool creations
                 let user_cmd_external_abi_types = &[
                     // index of the proxy sidecar the command is being called on
                     ParamType::Uint(16),
@@ -241,202 +241,25 @@ fn map_changes(
                 } else {
                     bail!("Failed to decode ABI external call.".to_string());
                 }
-            } else if call.input[0..4] == SWAP_FN_SIG {
+            } else if call.address == AMBIENT_CONTRACT && call.input[0..4] == SWAP_FN_SIG {
                 // Handle TVL changes caused by calling the swap function
-
-                if let Ok(external_input_params) = decode(SWAP_ABI_INPUT, &call.input[4..]) {
-                    let _base_token = external_input_params[0]
-                        .to_owned()
-                        .into_address()
-                        .ok_or_else(|| {
-                            anyhow!("Failed to convert to address: {:?}", &external_input_params[1])
-                        })?
-                        .to_fixed_bytes()
-                        .to_vec();
-
-                    let _quote_token = external_input_params[1]
-                        .to_owned()
-                        .into_address()
-                        .ok_or_else(|| {
-                            anyhow!("Failed to convert to address: {:?}", &external_input_params[1])
-                        })?
-                        .to_fixed_bytes()
-                        .to_vec();
-
-                    let _pool_index = external_input_params[2]
-                        .to_owned()
-                        .into_uint()
-                        .ok_or_else(|| anyhow!("Failed to convert to u32".to_string()))?
-                        .as_u32();
-
-                    if let Ok(external_outputs) = decode(SWAP_ABI_OUTPUT, &call.return_data) {
-                        // TODO: aggregate these with the previous balances to get new balances:
-                        let _base_flow = external_outputs[0]
-                            .to_owned()
-                            .into_int() // Needs conversion into bytes for next step
-                            .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
-
-                        let _quote_flow = external_outputs[1]
-                            .to_owned()
-                            .into_int() // Needs conversion into bytes for next step
-                            .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
-                    } else {
-                        bail!("Failed to decode call outputs.".to_string());
-                    }
-                } else {
-                    bail!("Failed to decode ABI internal call.".to_string());
-                }
-            }
-        }
-
-        let ambient_hotproxy_calls = block_tx
-            .calls
-            .iter()
-            .filter(|call| !call.state_reverted)
-            .filter(|call| call.address == AMBIENT_HOTPROXY_CONTRACT)
-            .collect::<Vec<_>>();
-
-        for call in ambient_hotproxy_calls {
-            if call.input.len() < 4 {
-                continue;
-            }
-            if call.input[0..4] == USER_CMD_HOTPROXY_FN_SIG {
+                // TODO: aggregate these with the previous balances to get new balances:
+                let (_base_token, _quote_token, _pool_index, _base_flow, _quote_flow) =
+                    decode_direct_swap_call(call)?;
+            } else if call.address == AMBIENT_HOTPROXY_CONTRACT &&
+                call.input[0..4] == USER_CMD_HOTPROXY_FN_SIG
+            {
                 // Handle TVL changes caused by calling the userCmd method on the HotProxy contract
-
-                if let Ok(external_input_params) = decode(SWAP_ABI_INPUT, &call.input[4..]) {
-                    let _base_token = external_input_params[0]
-                        .to_owned()
-                        .into_address()
-                        .ok_or_else(|| {
-                            anyhow!("Failed to convert to address: {:?}", &external_input_params[1])
-                        })?
-                        .to_fixed_bytes()
-                        .to_vec();
-
-                    let _quote_token = external_input_params[1]
-                        .to_owned()
-                        .into_address()
-                        .ok_or_else(|| {
-                            anyhow!("Failed to convert to address: {:?}", &external_input_params[1])
-                        })?
-                        .to_fixed_bytes()
-                        .to_vec();
-
-                    let _pool_index = external_input_params[2]
-                        .to_owned()
-                        .into_uint()
-                        .ok_or_else(|| anyhow!("Failed to convert to u32".to_string()))?
-                        .as_u32();
-
-                    if let Ok(external_outputs) = decode(SWAP_ABI_OUTPUT, &call.return_data) {
-                        // TODO: aggregate these with the previous balances to get new balances:
-                        let _base_flow = external_outputs[0]
-                            .to_owned()
-                            .into_int() // Needs conversion into bytes for next step
-                            .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
-
-                        let _quote_flow = external_outputs[1]
-                            .to_owned()
-                            .into_int() // Needs conversion into bytes for next step
-                            .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
-                    } else {
-                        bail!("Failed to decode call outputs.".to_string());
-                    }
-                } else {
-                    bail!("Failed to decode ABI internal call.".to_string());
-                }
-            }
-        }
-
-        let ambient_micropaths_calls = block_tx
-            .calls
-            .iter()
-            .filter(|call| !call.state_reverted)
-            .filter(|call| call.address == AMBIENT_MICROPATHS_CONTRACT)
-            .collect::<Vec<_>>();
-
-        for call in ambient_micropaths_calls {
-            if call.input.len() < 4 {
-                continue;
-            }
-            if call.input[0..4] == SWEEP_SWAP_FN_SIG {
+                // TODO: aggregate these with the previous balances to get new balances:
+                let (_base_token, _quote_token, _pool_index, _base_flow, _quote_flow) =
+                    decode_direct_swap_call(call)?;
+            } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
+                call.input[0..4] == SWEEP_SWAP_FN_SIG
+            {
                 // Handle TVL changes caused by calling the sweepSwap method on the MicroPaths
                 // contract
-
-                let sweep_swap_abi: &[ParamType] = &[
-                    ParamType::Tuple(vec![
-                        ParamType::Uint(128),
-                        ParamType::Uint(128),
-                        ParamType::Uint(128),
-                        ParamType::Uint(64),
-                        ParamType::Uint(64),
-                    ]), // CurveState
-                    ParamType::Int(24), // midTick
-                    ParamType::Tuple(vec![
-                        ParamType::Bool,
-                        ParamType::Bool,
-                        ParamType::Uint(8),
-                        ParamType::Uint(128),
-                        ParamType::Uint(128),
-                    ]), // SwapDirective
-                    ParamType::Tuple(vec![
-                        ParamType::Tuple(vec![
-                            ParamType::Uint(8),  // schema
-                            ParamType::Uint(16), // feeRate
-                            ParamType::Uint(8),  // protocolTake
-                            ParamType::Uint(16), // tickSize
-                            ParamType::Uint(8),  // jitThresh
-                            ParamType::Uint(8),  // knockoutBits
-                            ParamType::Uint(8),  // oracleFlags
-                        ]),
-                        ParamType::FixedBytes(32), // poolHash
-                        ParamType::Address,
-                    ]), // PoolCursor
-                ];
-                let sweep_swap_abi_output: &[ParamType] = &[
-                    ParamType::Tuple(vec![
-                        ParamType::Int(128), // baseFlow
-                        ParamType::Int(128), // quoteFlow
-                        ParamType::Uint(128),
-                        ParamType::Uint(128),
-                    ]), // Chaining.PairFlow memory accum
-                    ParamType::Uint(128), // priceOut
-                    ParamType::Uint(128), // seedOut
-                    ParamType::Uint(128), // concOut
-                    ParamType::Uint(64),  // ambientOut
-                    ParamType::Uint(64),  // concGrowthOut
-                ];
-                if let Ok(sweep_swap_input) = decode(sweep_swap_abi, &call.input[4..]) {
-                    let pool_cursor = sweep_swap_input[3]
-                        .to_owned()
-                        .into_tuple()
-                        .ok_or_else(|| anyhow!("Failed to convert to tuple".to_string()))?;
-                    let _pool_hash = pool_cursor[1]
-                        .to_owned()
-                        .into_fixed_bytes()
-                        .ok_or_else(|| anyhow!("Failed to convert to fixed bytes".to_string()))?;
-                    if let Ok(sweep_swap_output) = decode(sweep_swap_abi_output, &call.return_data)
-                    {
-                        let pair_flow = sweep_swap_output[0]
-                            .to_owned()
-                            .into_tuple()
-                            .ok_or_else(|| anyhow!("Failed to convert to tuple".to_string()))?;
-
-                        let _base_flow = pair_flow[0]
-                            .to_owned()
-                            .into_int() // Needs conversion into bytes for next step
-                            .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
-
-                        let _quote_flow = pair_flow[1]
-                            .to_owned()
-                            .into_int() // Needs conversion into bytes for next step
-                            .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
-                    } else {
-                        bail!("Failed to decode sweepSwap outputs.".to_string());
-                    }
-                } else {
-                    bail!("Failed to decode sweepSwap inputs.".to_string());
-                }
+                // TODO: aggregate these flows with the previous balances to get new balances:
+                let (_base_flow, _quote_flow, _pool_hash) = decode_sweep_swap_call(call)?;
             }
         }
 
@@ -616,4 +439,132 @@ fn map_changes(
     });
 
     Ok(block_changes)
+}
+
+fn decode_direct_swap_call(
+    call: &Call,
+) -> Result<(Vec<u8>, Vec<u8>, u32, ethabi::Int, ethabi::Int), anyhow::Error> {
+    if let Ok(external_input_params) = decode(SWAP_ABI_INPUT, &call.input[4..]) {
+        let base_token = external_input_params[0]
+            .to_owned()
+            .into_address()
+            .ok_or_else(|| {
+                anyhow!("Failed to convert to address: {:?}", &external_input_params[1])
+            })?
+            .to_fixed_bytes()
+            .to_vec();
+
+        let quote_token = external_input_params[1]
+            .to_owned()
+            .into_address()
+            .ok_or_else(|| {
+                anyhow!("Failed to convert to address: {:?}", &external_input_params[1])
+            })?
+            .to_fixed_bytes()
+            .to_vec();
+
+        let pool_index = external_input_params[2]
+            .to_owned()
+            .into_uint()
+            .ok_or_else(|| anyhow!("Failed to convert to u32".to_string()))?
+            .as_u32();
+
+        if let Ok(external_outputs) = decode(SWAP_ABI_OUTPUT, &call.return_data) {
+            let base_flow = external_outputs[0]
+                .to_owned()
+                .into_int() // Needs conversion into bytes for next step
+                .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+
+            let quote_flow = external_outputs[1]
+                .to_owned()
+                .into_int() // Needs conversion into bytes for next step
+                .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+
+            Ok((base_token, quote_token, pool_index, base_flow, quote_flow))
+        } else {
+            bail!("Failed to decode call outputs.".to_string());
+        }
+    } else {
+        bail!("Failed to decode ABI internal call.".to_string());
+    }
+}
+
+fn decode_sweep_swap_call(
+    call: &Call,
+) -> Result<(ethabi::Int, ethabi::Int, Vec<u8>), anyhow::Error> {
+    let sweep_swap_abi: &[ParamType] = &[
+        ParamType::Tuple(vec![
+            ParamType::Uint(128),
+            ParamType::Uint(128),
+            ParamType::Uint(128),
+            ParamType::Uint(64),
+            ParamType::Uint(64),
+        ]), // CurveState
+        ParamType::Int(24), // midTick
+        ParamType::Tuple(vec![
+            ParamType::Bool,
+            ParamType::Bool,
+            ParamType::Uint(8),
+            ParamType::Uint(128),
+            ParamType::Uint(128),
+        ]), // SwapDirective
+        ParamType::Tuple(vec![
+            ParamType::Tuple(vec![
+                ParamType::Uint(8),  // schema
+                ParamType::Uint(16), // feeRate
+                ParamType::Uint(8),  // protocolTake
+                ParamType::Uint(16), // tickSize
+                ParamType::Uint(8),  // jitThresh
+                ParamType::Uint(8),  // knockoutBits
+                ParamType::Uint(8),  // oracleFlags
+            ]),
+            ParamType::FixedBytes(32), // poolHash
+            ParamType::Address,
+        ]), // PoolCursor
+    ];
+    let sweep_swap_abi_output: &[ParamType] = &[
+        ParamType::Tuple(vec![
+            ParamType::Int(128), // baseFlow
+            ParamType::Int(128), // quoteFlow
+            ParamType::Uint(128),
+            ParamType::Uint(128),
+        ]), // Chaining.PairFlow memory accum
+        ParamType::Uint(128), // priceOut
+        ParamType::Uint(128), // seedOut
+        ParamType::Uint(128), // concOut
+        ParamType::Uint(64),  // ambientOut
+        ParamType::Uint(64),  // concGrowthOut
+    ];
+    if let Ok(sweep_swap_input) = decode(sweep_swap_abi, &call.input[4..]) {
+        let pool_cursor = sweep_swap_input[3]
+            .to_owned()
+            .into_tuple()
+            .ok_or_else(|| anyhow!("Failed to convert to tuple".to_string()))?;
+        let pool_hash = pool_cursor[1]
+            .to_owned()
+            .into_fixed_bytes()
+            .ok_or_else(|| anyhow!("Failed to convert to fixed bytes".to_string()))?;
+        if let Ok(sweep_swap_output) = decode(sweep_swap_abi_output, &call.return_data) {
+            let pair_flow = sweep_swap_output[0]
+                .to_owned()
+                .into_tuple()
+                .ok_or_else(|| anyhow!("Failed to convert to tuple".to_string()))?;
+
+            let base_flow = pair_flow[0]
+                .to_owned()
+                .into_int() // Needs conversion into bytes for next step
+                .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+
+            let quote_flow = pair_flow[1]
+                .to_owned()
+                .into_int() // Needs conversion into bytes for next step
+                .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+
+            Ok((base_flow, quote_flow, pool_hash))
+        } else {
+            bail!("Failed to decode sweepSwap outputs.".to_string());
+        }
+    } else {
+        bail!("Failed to decode sweepSwap inputs.".to_string());
+    }
 }
