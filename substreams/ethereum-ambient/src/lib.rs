@@ -1,9 +1,11 @@
 use std::collections::{hash_map::Entry, HashMap};
 
 use anyhow::{anyhow, bail};
+
 use ethabi::{decode, ParamType};
 use hex_literal::hex;
 use substreams_ethereum::pb::eth::{self, v2::Call};
+use tiny_keccak::{Hasher, Keccak};
 
 use pb::tycho::evm::v1::{self as tycho};
 
@@ -241,18 +243,15 @@ fn map_changes(
                 } else {
                     bail!("Failed to decode ABI external call.".to_string());
                 }
-            } else if call.address == AMBIENT_CONTRACT && call.input[0..4] == SWAP_FN_SIG {
-                // Handle TVL changes caused by calling the swap function
-                // TODO: aggregate these with the previous balances to get new balances:
-                let (_base_token, _quote_token, _pool_index, _base_flow, _quote_flow) =
-                    decode_direct_swap_call(call)?;
-            } else if call.address == AMBIENT_HOTPROXY_CONTRACT &&
-                call.input[0..4] == USER_CMD_HOTPROXY_FN_SIG
-            {
+            } else if
+            // Handle TVL changes caused by calling the swap function
+            (call.address == AMBIENT_CONTRACT && call.input[0..4] == SWAP_FN_SIG) ||
                 // Handle TVL changes caused by calling the userCmd method on the HotProxy contract
+                (call.address == AMBIENT_HOTPROXY_CONTRACT &&
+                    call.input[0..4] == USER_CMD_HOTPROXY_FN_SIG)
+            {
                 // TODO: aggregate these with the previous balances to get new balances:
-                let (_base_token, _quote_token, _pool_index, _base_flow, _quote_flow) =
-                    decode_direct_swap_call(call)?;
+                let (_pool_hash, _base_flow, _quote_flow) = decode_direct_swap_call(call)?;
             } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
                 call.input[0..4] == SWEEP_SWAP_FN_SIG
             {
@@ -441,9 +440,23 @@ fn map_changes(
     Ok(block_changes)
 }
 
+fn encode_pool_hash(token_x: Vec<u8>, token_y: Vec<u8>, pool_idx: u32) -> [u8; 32] {
+    let mut keccak = Keccak::v256();
+
+    let mut data = Vec::new();
+    data.extend_from_slice(&token_x);
+    data.extend_from_slice(&token_y);
+    data.extend_from_slice(&pool_idx.to_be_bytes());
+
+    let mut output = [0u8; 32];
+    keccak.update(&data);
+    keccak.finalize(&mut output);
+    output
+}
+
 fn decode_direct_swap_call(
     call: &Call,
-) -> Result<(Vec<u8>, Vec<u8>, u32, ethabi::Int, ethabi::Int), anyhow::Error> {
+) -> Result<([u8; 32], ethabi::Int, ethabi::Int), anyhow::Error> {
     if let Ok(external_input_params) = decode(SWAP_ABI_INPUT, &call.input[4..]) {
         let base_token = external_input_params[0]
             .to_owned()
@@ -480,7 +493,8 @@ fn decode_direct_swap_call(
                 .into_int() // Needs conversion into bytes for next step
                 .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
 
-            Ok((base_token, quote_token, pool_index, base_flow, quote_flow))
+            let pool_hash = encode_pool_hash(base_token, quote_token, pool_index);
+            Ok((pool_hash, base_flow, quote_flow))
         } else {
             bail!("Failed to decode call outputs.".to_string());
         }
@@ -491,7 +505,7 @@ fn decode_direct_swap_call(
 
 fn decode_sweep_swap_call(
     call: &Call,
-) -> Result<(ethabi::Int, ethabi::Int, Vec<u8>), anyhow::Error> {
+) -> Result<(Vec<u8>, ethabi::Int, ethabi::Int), anyhow::Error> {
     let sweep_swap_abi: &[ParamType] = &[
         ParamType::Tuple(vec![
             ParamType::Uint(128),
@@ -560,7 +574,7 @@ fn decode_sweep_swap_call(
                 .into_int() // Needs conversion into bytes for next step
                 .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
 
-            Ok((base_flow, quote_flow, pool_hash))
+            Ok((pool_hash, base_flow, quote_flow))
         } else {
             bail!("Failed to decode sweepSwap outputs.".to_string());
         }
