@@ -323,7 +323,7 @@ where
                 let account_id = accounts
                     .iter()
                     .find(|account| {
-                        account.address == Bytes::from(token.address.as_ref().to_vec()) &&
+                        account.address == token.address.as_ref().to_vec() &&
                             account.chain_id == self.get_chain_id(&token.chain)
                     })
                     .map(|account| account.id)
@@ -429,7 +429,6 @@ mod test {
     const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
     const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
-    const WBTC: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
