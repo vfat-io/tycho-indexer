@@ -323,8 +323,6 @@ pub struct ProtocolState {
     pub attribute_name: Option<String>,
     pub attribute_value: Option<Bytes>,
     pub modify_tx: i64,
-    pub tvl: Option<i64>,
-    pub inertias: Option<Vec<Option<i64>>>,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
@@ -424,8 +422,6 @@ pub struct NewProtocolState {
     pub attribute_name: Option<String>,
     pub attribute_value: Option<Bytes>,
     pub modify_tx: i64,
-    pub tvl: Option<i64>,
-    pub inertias: Option<Vec<Option<i64>>>,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
 }

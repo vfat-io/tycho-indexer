@@ -54,7 +54,9 @@ DROP CONSTRAINT check_attribute_fields;
 ALTER TABLE protocol_state 
 DROP COLUMN attribute_name,
 DROP COLUMN attribute_value,
-ADD COLUMN state jsonb NULL; 
+ADD COLUMN state jsonb NULL,
+ADD COLUMN tvl bigint NULL,
+ADD COLUMN inertias bigint[] NULL;
 
 CREATE TRIGGER invalidate_previous_protocol_state
     BEFORE INSERT ON protocol_state

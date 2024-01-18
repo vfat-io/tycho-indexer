@@ -173,8 +173,6 @@ diesel::table! {
 diesel::table! {
     protocol_state (id) {
         id -> Int8,
-        tvl -> Nullable<Int8>,
-        inertias -> Nullable<Array<Nullable<Int8>>>,
         modify_tx -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,

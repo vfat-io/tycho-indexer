@@ -422,8 +422,6 @@ pub mod pg {
                     modify_tx: tx_id,
                     valid_from: block_ts,
                     valid_to: None,
-                    tvl: None,
-                    inertias: None,
                 });
             }
             protocol_states

@@ -36,6 +36,8 @@ DROP TYPE protocol_implementation_type;
 
 ALTER TABLE protocol_state 
 DROP COLUMN state,
+DROP COLUMN tvl,
+DROP COLUMN inertias,
 ADD COLUMN attribute_name VARCHAR NULL,
 ADD COLUMN attribute_value BYTEA NULL;
 
