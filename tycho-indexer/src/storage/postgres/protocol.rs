@@ -11,6 +11,7 @@ use ethers::{
     abi::Hash,
     types::{transaction, Transaction},
 };
+use tracing::warn;
 
 use crate::{
     extractor::evm::{ProtocolState, ProtocolStateUpdate},
@@ -55,9 +56,9 @@ where
                         let transaction = data.2;
                         let latest_tx = match latest_tx {
                             Some(latest)
-                                if latest.block_id < transaction.block_id ||
-                                    (latest.block_id == transaction.block_id &&
-                                        latest.index < transaction.index) =>
+                                if latest.block_id < transaction.block_id
+                                    || (latest.block_id == transaction.block_id
+                                        && latest.index < transaction.index) =>
                             {
                                 Some(transaction)
                             }
@@ -153,6 +154,13 @@ where
         };
 
         match (ids, system) {
+            (Some(ids), Some(system)) => {
+                warn!("Both protocol IDs and system were provided. System will be ignored.");
+                self._decode_protocol_states(
+                    orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
+                    ids.join(",").as_str(),
+                )
+            }
             (Some(ids), _) => self._decode_protocol_states(
                 orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
                 ids.join(",").as_str(),
