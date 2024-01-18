@@ -29,6 +29,7 @@ where
     type DB = AsyncPgConnection;
     type Token = T;
     type ProtocolState = ProtocolState;
+    type ProtocolStateUpdate = ProtocolStateUpdate;
     type ProtocolType = ProtocolType;
 
     // TODO: uncomment to implement in ENG 2049

@@ -16,6 +16,8 @@ use chrono::NaiveDateTime;
 use std::collections::HashMap;
 
 pub mod pg {
+    use std::collections::HashSet;
+
     use crate::{
         extractor::evm::utils::pad_and_parse_h160,
         hex_bytes::Bytes,
@@ -32,6 +34,8 @@ pub mod pg {
     };
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
+
+    use self::storage::ProtocolStateDelta;
 
     use super::*;
 
@@ -426,6 +430,80 @@ pub mod pg {
             // Convert Bytes to String and then to serde_json Value
             let serialized_map: HashMap<String, serde_json::Value> = self
                 .attributes
+                .iter()
+                .map(|(k, v)| {
+                    let s = hex::encode(v);
+                    (k.clone(), serde_json::Value::String(s))
+                })
+                .collect();
+
+            // Convert HashMap<String, serde_json::Value> to serde_json::Value struct
+            match serde_json::to_value(serialized_map) {
+                Ok(value) => Some(value),
+                Err(_) => None,
+            }
+        }
+    }
+
+    impl ProtocolStateDelta<orm::ProtocolState, orm::NewProtocolState, i64>
+        for evm::ProtocolStateUpdate
+    {
+        fn from_storage(
+            val: orm::ProtocolState,
+            component_id: String,
+            tx_hash: &TxHash,
+            change: ChangeType,
+        ) -> Result<Self, StorageError> {
+            let mut attr: HashMap<String, Bytes> = HashMap::new();
+            if let Some(Value::Object(state)) = &val.state {
+                for (k, v) in state.iter() {
+                    if let Value::String(s) = v {
+                        attr.insert(k.clone(), Bytes::from(s.as_str()));
+                    }
+                }
+            }
+
+            match change {
+                ChangeType::Deletion => Ok(evm::ProtocolStateUpdate {
+                    component_id,
+                    updated_attributes: HashMap::new(),
+                    deleted_attributes: attr.into_keys().collect(),
+                    modify_tx: H256::try_decode(tx_hash, "tx hash")
+                        .map_err(StorageError::DecodeError)?,
+                }),
+                _ => Ok(evm::ProtocolStateUpdate {
+                    component_id,
+                    updated_attributes: attr,
+                    deleted_attributes: HashSet::new(),
+                    modify_tx: H256::try_decode(tx_hash, "tx hash")
+                        .map_err(StorageError::DecodeError)?,
+                }),
+            }
+        }
+
+        fn to_storage(
+            &self,
+            protocol_component_id: i64,
+            tx_id: i64,
+            block_ts: NaiveDateTime,
+        ) -> orm::NewProtocolState {
+            orm::NewProtocolState {
+                protocol_component_id,
+                state: self.convert_attributes_to_json(),
+                modify_tx: tx_id,
+                tvl: None,
+                inertias: None,
+                valid_from: block_ts,
+                valid_to: None,
+            }
+        }
+    }
+
+    impl evm::ProtocolStateUpdate {
+        fn convert_attributes_to_json(&self) -> Option<serde_json::Value> {
+            // Convert Bytes to String and then to serde_json Value
+            let serialized_map: HashMap<String, serde_json::Value> = self
+                .updated_attributes
                 .iter()
                 .map(|(k, v)| {
                     let s = hex::encode(v);
