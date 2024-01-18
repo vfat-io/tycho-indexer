@@ -138,9 +138,10 @@ use diesel_async::{
     AsyncPgConnection, RunQueryDsl,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use strum::IntoEnumIterator;
 use tracing::{debug, info};
 
-use crate::models::Chain;
+use crate::models::{Chain, ProtocolSystem, ProtocolSystemIter};
 
 use super::{
     ContractDelta, StateGateway, StorableBlock, StorableContract, StorableToken,
@@ -221,7 +222,7 @@ where
     /// # Arguments
     ///
     /// * `id` - The database ID to lookup.
-    fn get_chain(&self, id: &i64) -> E {
+    fn get_enum(&self, id: &i64) -> E {
         *self
             .map_enum
             .get(id)
@@ -232,6 +233,7 @@ where
 }
 
 type ChainEnumCache = EnumTableCache<Chain>;
+type ProtocolSystemEnumCache = EnumTableCache<ProtocolSystem>;
 
 impl From<diesel::result::Error> for StorageError {
     fn from(value: diesel::result::Error) -> Self {
@@ -275,6 +277,7 @@ impl StorageError {
 }
 
 pub struct PostgresGateway<B, TX, A, D, T> {
+    protocol_system_id_cache: Arc<ProtocolSystemEnumCache>,
     chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
@@ -291,8 +294,12 @@ where
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
-    pub fn with_cache(cache: Arc<ChainEnumCache>) -> Self {
+    pub fn with_cache(
+        cache: Arc<ChainEnumCache>,
+        protocol_system_cache: Arc<ProtocolSystemEnumCache>,
+    ) -> Self {
         Self {
+            protocol_system_id_cache: protocol_system_cache,
             chain_id_cache: cache,
             _phantom_block: PhantomData,
             _phantom_tx: PhantomData,
@@ -305,7 +312,7 @@ where
     #[allow(clippy::needless_pass_by_ref_mut)]
     #[cfg(test)]
     pub async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
-        let results: Vec<(i64, String)> = async {
+        let chain_id_mapping: Vec<(i64, String)> = async {
             use schema::chain::dsl::*;
             chain
                 .select((id, name))
@@ -314,8 +321,21 @@ where
                 .expect("Failed to load chain ids!")
         }
         .await;
-        let cache = Arc::new(ChainEnumCache::from_tuples(results));
-        Self::with_cache(cache)
+
+        let protocol_system_id_mapping: Vec<(i64, String)> = async {
+            use schema::protocol_system::dsl::*;
+            protocol_system
+                .select((id, name))
+                .load(conn)
+                .await
+                .expect("Failed to load chain ids!")
+        }
+        .await;
+
+        let cache = Arc::new(ChainEnumCache::from_tuples(chain_id_mapping));
+        let protocol_system_cache =
+            Arc::new(ProtocolSystemEnumCache::from_tuples(protocol_system_id_mapping));
+        Self::with_cache(cache, protocol_system_cache)
     }
 
     fn get_chain_id(&self, chain: &Chain) -> i64 {
@@ -323,13 +343,27 @@ where
     }
 
     fn get_chain(&self, id: &i64) -> Chain {
-        self.chain_id_cache.get_chain(id)
+        self.chain_id_cache.get_enum(id)
+    }
+
+    fn get_protocol_system_id(&self, protocol_system: &ProtocolSystem) -> i64 {
+        self.protocol_system_id_cache
+            .get_id(protocol_system)
+    }
+
+    fn get_protocol_system(&self, id: &i64) -> ProtocolSystem {
+        self.protocol_system_id_cache
+            .get_enum(id)
     }
 
     pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
         let cache = EnumTableCache::<Chain>::from_pool(pool.clone()).await?;
-
-        let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(Arc::new(cache)));
+        let protocol_system_cache: EnumTableCache<ProtocolSystem> =
+            EnumTableCache::<ProtocolSystem>::from_pool(pool.clone()).await?;
+        let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(
+            Arc::new(cache),
+            Arc::new(protocol_system_cache),
+        ));
 
         Ok(gw)
     }
@@ -412,6 +446,27 @@ pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
         .await
         .expect("chains ensured");
     debug!("Ensured chain enum presence for: {:?}", chains);
+}
+
+pub async fn ensure_protocol_systems(pool: Pool<AsyncPgConnection>) {
+    let mut conn = pool.get().await.expect("connection ok");
+    let protocol_system_strings: Vec<String> = ProtocolSystem::iter()
+        .map(|ps| ps.to_string())
+        .collect();
+
+    diesel::insert_into(schema::protocol_system::table)
+        .values(
+            protocol_system_strings
+                .iter()
+                .map(|ps| schema::protocol_system::name.eq(ps))
+                .collect::<Vec<_>>(),
+        )
+        .on_conflict_do_nothing()
+        .execute(&mut conn)
+        .await
+        .expect("Could not ensure protocol system enum's in database");
+
+    debug!("Ensured protocol system enum presence for: {:?}", protocol_system_strings);
 }
 
 fn run_migrations(db_url: &str) {

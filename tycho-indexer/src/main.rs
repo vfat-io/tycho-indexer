@@ -109,6 +109,7 @@ async fn main() -> Result<(), ExtractionError> {
 
     let pool = postgres::connect(&args.database_url).await?;
     postgres::ensure_chains(&[Chain::Ethereum], pool.clone()).await;
+    postgres::ensure_protocol_systems(pool.clone()).await;
     let evm_gw = PostgresGateway::<
         evm::Block,
         evm::Transaction,
