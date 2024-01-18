@@ -84,8 +84,7 @@ impl AmbientPgGateway {
             ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
         self.state_gateway
             .save_state(block, &state)
-            .await
-            .expect("Received signal ok")?;
+            .await?;
         Ok(())
     }
 
@@ -98,21 +97,18 @@ impl AmbientPgGateway {
         debug!("Upserting block");
         self.state_gateway
             .upsert_block(&changes.block)
-            .await
-            .expect("Received signal ok")?;
+            .await?;
         for update in changes.tx_updates.iter() {
             debug!(tx_hash = ?update.tx.hash, "Processing transaction");
             self.state_gateway
                 .upsert_tx(&changes.block, &update.tx)
-                .await
-                .expect("Received signal ok")?;
+                .await?;
             if update.is_creation() {
                 let new: evm::Account = update.into();
                 info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
                 self.state_gateway
                     .insert_contract(&changes.block, &new)
-                    .await
-                    .expect("Received signal ok")?;
+                    .await?;
             }
         }
         let collected_changes: Vec<(Bytes, AccountUpdate)> = changes
@@ -125,8 +121,7 @@ impl AmbientPgGateway {
 
         self.state_gateway
             .update_contracts(&changes.block, changes_slice)
-            .await
-            .expect("Received signal ok")?;
+            .await?;
         self.save_cursor(&changes.block, new_cursor)
             .await?;
 
@@ -155,8 +150,7 @@ impl AmbientPgGateway {
             .collect();
         self.state_gateway
             .revert_state(to)
-            .await
-            .expect("Received signal ok")?;
+            .await?;
 
         self.save_cursor(&block, new_cursor)
             .await?;

@@ -196,7 +196,7 @@ impl DBCacheWriteExecutor {
                                                 // already stored txs, we log the duplicate entry
                                                 // error and continue
                                                 debug!(
-                                                    "Duplicate entry for {} with id {}",
+                                                    "Ignoring duplicate entry for {} with id {}",
                                                     entity, id
                                                 );
                                             }
@@ -368,85 +368,98 @@ impl CachedGateway {
     ) -> Self {
         CachedGateway { tx, pool, state_gateway }
     }
-    pub async fn upsert_block(
-        &self,
-        new: &evm::Block,
-    ) -> Result<Result<(), StorageError>, RecvError> {
+    pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*new, vec![WriteOp::UpsertBlock(*new)], tx);
         self.tx
             .send(DBCacheMessage::Write(db_tx))
             .await
             .expect("Send message to receiver ok");
-        rx.await
+
+        match rx.await {
+            Ok(result) => result, // Flatten the Result here
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
     }
 
     pub async fn upsert_tx(
         &self,
         block: &evm::Block,
         new: &evm::Transaction,
-    ) -> Result<Result<(), StorageError>, RecvError> {
+    ) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::UpsertTx(*new)], tx);
         self.tx
             .send(DBCacheMessage::Write(db_tx))
             .await
             .expect("Send message to receiver ok");
-        rx.await
+        match rx.await {
+            Ok(result) => result, // Flatten the Result here
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
     }
 
     pub async fn save_state(
         &self,
         block: &evm::Block,
         new: &ExtractionState,
-    ) -> Result<Result<(), StorageError>, RecvError> {
+    ) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::SaveExtractionState(new.clone())], tx);
         self.tx
             .send(DBCacheMessage::Write(db_tx))
             .await
             .expect("Send message to receiver ok");
-        rx.await
+        match rx.await {
+            Ok(result) => result, // Flatten the Result here
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
     }
 
     pub async fn insert_contract(
         &self,
         block: &evm::Block,
         new: &evm::Account,
-    ) -> Result<Result<(), StorageError>, RecvError> {
+    ) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::InsertContract(new.clone())], tx);
         self.tx
             .send(DBCacheMessage::Write(db_tx))
             .await
             .expect("Send message to receiver ok");
-        rx.await
+        match rx.await {
+            Ok(result) => result, // Flatten the Result here
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
     }
 
     pub async fn update_contracts(
         &self,
         block: &evm::Block,
         new: &[(TxHash, AccountUpdate)],
-    ) -> Result<Result<(), StorageError>, RecvError> {
+    ) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::UpdateContracts(new.to_owned())], tx);
         self.tx
             .send(DBCacheMessage::Write(db_tx))
             .await
             .expect("Send message to receiver ok");
-        rx.await
+        match rx.await {
+            Ok(result) => result, // Flatten the Result here
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
     }
 
-    pub async fn revert_state(
-        &self,
-        to: &BlockIdentifier,
-    ) -> Result<Result<(), StorageError>, RecvError> {
+    pub async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(DBCacheMessage::Revert(to.clone(), tx))
             .await
             .expect("Send message to receiver ok");
-        rx.await
+        match rx.await {
+            Ok(result) => result, // Flatten the Result here
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
     }
 
     pub async fn get_accounts_delta(
@@ -890,12 +903,10 @@ mod test {
         cached_gw
             .upsert_block(&block_1)
             .await
-            .expect("Received signal ok")
             .expect("Upsert block 1 ok");
         cached_gw
             .upsert_tx(&block_1, &tx_1)
             .await
-            .expect("Received signal ok")
             .expect("Upsert tx 1 ok");
 
         // Send second block messages
@@ -903,7 +914,6 @@ mod test {
         cached_gw
             .upsert_block(&block_2)
             .await
-            .expect("Received signal ok")
             .expect("Upsert block 2 ok");
 
         // Send third block messages
@@ -911,7 +921,6 @@ mod test {
         cached_gw
             .upsert_block(&block_3)
             .await
-            .expect("Received signal ok")
             .expect("Upsert block 3 ok");
 
         let maybe_err = err_rx

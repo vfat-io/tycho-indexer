@@ -260,6 +260,8 @@ pub enum StorageError {
     Unexpected(String),
     #[error("Currently unsupported operation: {0}")]
     Unsupported(String),
+    #[error("Write cache unexpectedly dropped notification channel!")]
+    WriteCacheGoneAway(),
 }
 
 /// Storage methods for chain specific objects.
