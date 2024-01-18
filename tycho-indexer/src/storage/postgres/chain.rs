@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use std::collections::HashMap;
 use tracing::instrument;
 
 use crate::storage::{
@@ -119,6 +120,22 @@ where
             .map_err(|err| {
                 StorageError::from_diesel(err, "Transaction", &hex::encode(hash), None)
             })?
+    }
+
+    async fn _get_tx_ids(
+        &self,
+        hashes: &[TxHash],
+        conn: &mut Self::DB,
+    ) -> Result<HashMap<TxHash, i64>, StorageError> {
+        use super::schema::transaction::dsl::*;
+
+        let results = transaction
+            .filter(hash.eq_any(hashes))
+            .select((hash, id))
+            .load::<(TxHash, i64)>(conn)
+            .await?;
+
+        Ok(results.into_iter().collect())
     }
 }
 

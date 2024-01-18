@@ -2,7 +2,7 @@
 #![allow(unused_imports)]
 
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::Hash};
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -12,9 +12,9 @@ use crate::{
     models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
         postgres::{orm, PostgresGateway},
-        Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableProtocolComponent, StorableProtocolType, StorableToken,
-        StorableTransaction, StorageError, TxHash, Version,
+        Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ProtocolGateway,
+        StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolType,
+        StorableToken, StorableTransaction, StorageError, TxHash, Version,
     },
 };
 
@@ -49,14 +49,27 @@ where
     ) -> Result<(), StorageError> {
         use super::schema::protocol_component::dsl::*;
         let mut values: Vec<orm::NewProtocolComponent> = vec![];
+        let tx_hashes: Vec<TxHash> = new
+            .iter()
+            .map(|pc| pc.creation_tx.into())
+            .collect();
+        let tx_hash_id_mapping: HashMap<TxHash, i64> = self
+            ._get_tx_ids(&tx_hashes, conn)
+            .await
+            .unwrap();
 
         for pc in new {
+            let tx_hash = match tx_hash_id_mapping.get::<TxHash>(&pc.creation_tx.into()) {
+                Some(hash) => hash.to_owned(),
+                None => return Err(StorageError::DecodeError("TxHash not found".to_string())),
+            };
+
             let new_pc = pc
                 .to_storage(
                     self.get_chain_id(&pc.chain),
                     self.get_protocol_system_id(&pc.protocol_system),
-                    1,                  //TODO
-                    Default::default(), //TODO
+                    tx_hash,
+                    pc.created_at,
                 )
                 .unwrap();
             values.push(new_pc);
@@ -351,7 +364,7 @@ mod test {
             static_attributes: HashMap::new(),
             change: ChangeType::Creation,
             creation_tx: H256::from_str(
-                "0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac",
+                "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
             )
             .unwrap(),
             created_at: Default::default(),
@@ -404,7 +417,7 @@ mod test {
             static_attributes: HashMap::new(),
             change: ChangeType::Creation,
             creation_tx: H256::from_str(
-                "0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac",
+                "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
             )
             .unwrap(),
             created_at: Default::default(),
