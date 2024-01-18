@@ -255,7 +255,7 @@ where
         let results = query
             .load::<(orm::Token, i64, Address)>(conn)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "Token", "la", None))?;
+            .map_err(|err| StorageError::from_diesel(err, "Token", &chain.to_string(), None))?;
 
         let tokens: Result<Vec<Self::Token>, StorageError> = results
             .into_iter()
