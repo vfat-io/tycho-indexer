@@ -229,9 +229,7 @@ mod test {
 
     async fn setup_data(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
-        let chain_id = db_fixtures::insert_chain(conn, "starknet").await;
-        db_fixtures::insert_protocol_type(conn, &"Test_Type_1", None, None, None).await;
-        db_fixtures::insert_protocol_type(conn, &"Test_Type_2", None, None, None).await;
+
         db_fixtures::insert_protocol_system(conn, "Ambient").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
         let txn = db_fixtures::insert_txns(
@@ -351,13 +349,16 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-
+        let protocol_type_id_1 =
+            db_fixtures::insert_protocol_type(&mut conn, &"Test_Type_1", None, None, None).await;
+        let protocol_type_id_2 =
+            db_fixtures::insert_protocol_type(&mut conn, &"Test_Type_2", None, None, None).await;
         let protocol_system = ProtocolSystem::Ambient;
         let chain = Chain::Ethereum;
         let new_component = ProtocolComponent {
             id: ContractId("test_contract_id".to_string()),
             protocol_system: protocol_system.clone(),
-            protocol_type_id: "1".to_string(),
+            protocol_type_id: protocol_type_id_1.to_string(),
             chain: chain.clone(),
             tokens: vec![],
             contract_ids: vec![],
@@ -410,7 +411,7 @@ mod test {
         let new_component = ProtocolComponent {
             id: ContractId("test_contract_id".to_string()),
             protocol_system: protocol_system.clone(),
-            protocol_type_id: "2".to_string(), // altered here
+            protocol_type_id: protocol_type_id_2.to_string(), // altered here
             chain: chain.clone(),
             tokens: vec![],
             contract_ids: vec![],
