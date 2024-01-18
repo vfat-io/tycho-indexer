@@ -13,8 +13,10 @@ mod pb;
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 const AMBIENT_HOTPROXY_CONTRACT: [u8; 20] = hex!("37e00522Ce66507239d59b541940F99eA19fF81F");
 const AMBIENT_MICROPATHS_CONTRACT: [u8; 20] = hex!("f241bEf0Ea64020655C70963ef81Fea333752367");
+const AMBIENT_WARMPATH_CONTRACT: [u8; 20] = hex!("d268767BE4597151Ce2BB4a70A9E368ff26cB195");
 const INIT_POOL_CODE: u8 = 71;
 const USER_CMD_FN_SIG: [u8; 4] = hex!("a15112f9");
+const USER_CMD_WARMPATH_FN_SIG: [u8; 4] = hex!("f96dc788");
 const USER_CMD_HOTPROXY_FN_SIG: [u8; 4] = hex!("f96dc788");
 const SWEEP_SWAP_FN_SIG: [u8; 4] = hex!("7b370fc2");
 const SWAP_FN_SIG: [u8; 4] = hex!("3d719cd9");
@@ -34,13 +36,27 @@ const SWAP_ABI_INPUT: &[ParamType] = &[
     ParamType::Uint(8),   // reserveFlags
 ];
 
-const SWAP_ABI_OUTPUT: &[ParamType] = &[
+const BASE_QUOTE_FLOW_OUTPUT: &[ParamType] = &[
     // The token base and quote token flows associated with this swap action.
     // Negative indicates a credit paid to the user (token balance of pool
     // decreases), positive a debit collected from the user (token balance of pool
     // increases).
     ParamType::Int(128), // baseFlow
     ParamType::Int(128), // quoteFlow
+];
+
+//"(uint8,address,address,uint256,int24,int24,uint128,uint128,uint128,uint8,address)"
+const LIQUIDITY_CHANGE_ABI: &[ParamType] = &[
+    ParamType::Uint(8),
+    ParamType::Address,   // base
+    ParamType::Address,   // quote
+    ParamType::Uint(256), // pool index
+    ParamType::Int(256),
+    ParamType::Uint(128),
+    ParamType::Uint(128),
+    ParamType::Uint(128),
+    ParamType::Uint(8),
+    ParamType::Address,
 ];
 
 struct SlotValue {
@@ -259,6 +275,22 @@ fn map_changes(
                 // contract
                 // TODO: aggregate these flows with the previous balances to get new balances:
                 let (_base_flow, _quote_flow, _pool_hash) = decode_sweep_swap_call(call)?;
+            } else if call.address == AMBIENT_WARMPATH_CONTRACT &&
+                call.input[0..4] == USER_CMD_WARMPATH_FN_SIG
+            {
+                // Handle TVL changes caused by mints, burns, or harvest when calling the userCmd
+                // method on the WarmPath contract.
+                let code = call.input[35];
+                let is_mint =
+                    code == 1 || code == 11 || code == 12 || code == 3 || code == 31 || code == 32;
+                let is_burn =
+                    code == 2 || code == 21 || code == 22 || code == 4 || code == 41 || code == 42;
+                let is_harvest = code == 5;
+                if is_mint || is_burn || is_harvest {
+                    // TODO: aggregate these flows with the previous balances to get new balances:
+                    let (_base_flow, _quote_flow, _pool_hash) =
+                        decode_warm_path_user_cmd_call(call)?;
+                }
             }
         }
 
@@ -462,7 +494,7 @@ fn decode_direct_swap_call(
             .to_owned()
             .into_address()
             .ok_or_else(|| {
-                anyhow!("Failed to convert base token to address: {:?}", &external_input_params[1])
+                anyhow!("Failed to convert base token to address: {:?}", &external_input_params[0])
             })?
             .to_fixed_bytes()
             .to_vec();
@@ -482,22 +514,9 @@ fn decode_direct_swap_call(
             .ok_or_else(|| anyhow!("Failed to convert pool index to u32".to_string()))?
             .as_u32();
 
-        if let Ok(external_outputs) = decode(SWAP_ABI_OUTPUT, &call.return_data) {
-            let base_flow = external_outputs[0]
-                .to_owned()
-                .into_int() // Needs conversion into bytes for next step
-                .ok_or_else(|| anyhow!("Failed to convert base flow to i128".to_string()))?;
-
-            let quote_flow = external_outputs[1]
-                .to_owned()
-                .into_int() // Needs conversion into bytes for next step
-                .ok_or_else(|| anyhow!("Failed to convert quote floww to i128".to_string()))?;
-
-            let pool_hash = encode_pool_hash(base_token, quote_token, pool_index);
-            Ok((pool_hash, base_flow, quote_flow))
-        } else {
-            bail!("Failed to decode swap call outputs.".to_string());
-        }
+        let (base_flow, quote_flow) = decode_flows_from_output(call)?;
+        let pool_hash = encode_pool_hash(base_token, quote_token, pool_index);
+        Ok((pool_hash, base_flow, quote_flow))
     } else {
         bail!("Failed to decode swap call inputs.".to_string());
     }
@@ -580,5 +599,62 @@ fn decode_sweep_swap_call(
         }
     } else {
         bail!("Failed to decode sweepSwap inputs.".to_string());
+    }
+}
+
+fn decode_warm_path_user_cmd_call(
+    call: &Call,
+) -> Result<([u8; 32], ethabi::Int, ethabi::Int), anyhow::Error> {
+    if let Ok(liquidity_change_calldata) = decode(LIQUIDITY_CHANGE_ABI, &call.input[4..]) {
+        let base_token = liquidity_change_calldata[1]
+            .to_owned()
+            .into_address()
+            .ok_or_else(|| {
+                anyhow!(
+                    "Failed to convert base token to address: {:?}",
+                    &liquidity_change_calldata[1]
+                )
+            })?
+            .to_fixed_bytes()
+            .to_vec();
+        let quote_token = liquidity_change_calldata[2]
+            .to_owned()
+            .into_address()
+            .ok_or_else(|| {
+                anyhow!(
+                    "Failed to convert quote token to address: {:?}",
+                    &liquidity_change_calldata[2]
+                )
+            })?
+            .to_fixed_bytes()
+            .to_vec();
+        let pool_index = liquidity_change_calldata[3]
+            .to_owned()
+            .into_uint()
+            .ok_or_else(|| anyhow!("Failed to convert pool index to u32".to_string()))?
+            .as_u32();
+
+        let (base_flow, quote_flow) = decode_flows_from_output(call)?;
+        let pool_hash = encode_pool_hash(base_token, quote_token, pool_index);
+        Ok((pool_hash, base_flow, quote_flow))
+    } else {
+        bail!("Failed to decode inputs for WarmPath userCmd call.".to_string());
+    }
+}
+
+fn decode_flows_from_output(call: &Call) -> Result<(ethabi::Int, ethabi::Int), anyhow::Error> {
+    if let Ok(external_outputs) = decode(BASE_QUOTE_FLOW_OUTPUT, &call.return_data) {
+        let base_flow = external_outputs[0]
+            .to_owned()
+            .into_int() // Needs conversion into bytes for next step
+            .ok_or_else(|| anyhow!("Failed to convert base flow to i128".to_string()))?;
+
+        let quote_flow = external_outputs[1]
+            .to_owned()
+            .into_int() // Needs conversion into bytes for next step
+            .ok_or_else(|| anyhow!("Failed to convert quote floww to i128".to_string()))?;
+        Ok((base_flow, quote_flow))
+    } else {
+        bail!("Failed to decode swap call outputs.".to_string());
     }
 }
