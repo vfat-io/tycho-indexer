@@ -217,7 +217,7 @@ pub struct NewTransaction {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolSystem {
     pub id: i64,
-    pub name: ProtocolSystemType,
+    pub name: String,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
@@ -226,21 +226,7 @@ pub struct ProtocolSystem {
 #[diesel(table_name=protocol_system)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolSystem {
-    pub name: ProtocolSystemType,
-}
-
-#[derive(Debug, DbEnum, Clone)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ProtocolSystemType"]
-pub enum ProtocolSystemType {
-    Ambient,
-}
-
-impl From<models::ProtocolSystem> for ProtocolSystemType {
-    fn from(value: models::ProtocolSystem) -> Self {
-        match value {
-            models::ProtocolSystem::Ambient => ProtocolSystemType::Ambient,
-        }
-    }
+    pub name: String,
 }
 
 #[derive(Debug, DbEnum, Clone, PartialEq)]

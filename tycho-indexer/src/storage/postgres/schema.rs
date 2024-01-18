@@ -12,10 +12,6 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "implementation_type"))]
     pub struct ImplementationType;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "protocol_system_type"))]
-    pub struct ProtocolSystemType;
 }
 
 diesel::table! {
@@ -186,11 +182,11 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    use super::sql_types::ProtocolSystemType;
 
     protocol_system (id) {
         id -> Int8,
-        name -> ProtocolSystemType,
+        #[max_length = 255]
+        name -> Varchar,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
     }

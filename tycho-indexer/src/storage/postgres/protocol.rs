@@ -9,7 +9,7 @@ use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{ProtocolState, ProtocolStateUpdate},
     hex_bytes::Bytes,
     models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
@@ -92,6 +92,7 @@ where
     type DB = AsyncPgConnection;
     type Token = T;
     type ProtocolState = ProtocolState;
+    type ProtocolStateUpdate = ProtocolStateUpdate;
     type ProtocolType = ProtocolType;
 
     // TODO: uncomment to implement in ENG 2049
@@ -180,7 +181,7 @@ where
     async fn update_protocol_state(
         &self,
         chain: Chain,
-        new: &[(TxHash, ProtocolState)],
+        new: &[(TxHash, ProtocolStateUpdate)],
         conn: &mut Self::DB,
     ) {
         todo!()
@@ -212,7 +213,7 @@ where
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolState, StorageError> {
+    ) -> Result<ProtocolStateUpdate, StorageError> {
         todo!()
     }
 
@@ -230,17 +231,16 @@ where
         conn: &mut Self::DB,
     ) -> Result<i64, StorageError> {
         use super::schema::protocol_system::dsl::*;
-        let new_system = orm::ProtocolSystemType::from(new);
 
         let existing_entry = protocol_system
-            .filter(name.eq(new_system.clone()))
+            .filter(name.eq(new.to_string().clone()))
             .first::<orm::ProtocolSystem>(conn)
             .await;
 
         if let Ok(entry) = existing_entry {
             return Ok(entry.id);
         } else {
-            let new_entry = orm::NewProtocolSystem { name: new_system };
+            let new_entry = orm::NewProtocolSystem { name: new.to_string() };
 
             let inserted_protocol_system = diesel::insert_into(protocol_system)
                 .values(&new_entry)
