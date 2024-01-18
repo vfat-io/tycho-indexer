@@ -462,7 +462,7 @@ fn decode_direct_swap_call(
             .to_owned()
             .into_address()
             .ok_or_else(|| {
-                anyhow!("Failed to convert to address: {:?}", &external_input_params[1])
+                anyhow!("Failed to convert base token to address: {:?}", &external_input_params[1])
             })?
             .to_fixed_bytes()
             .to_vec();
@@ -471,7 +471,7 @@ fn decode_direct_swap_call(
             .to_owned()
             .into_address()
             .ok_or_else(|| {
-                anyhow!("Failed to convert to address: {:?}", &external_input_params[1])
+                anyhow!("Failed to convert quote token to address: {:?}", &external_input_params[1])
             })?
             .to_fixed_bytes()
             .to_vec();
@@ -479,27 +479,27 @@ fn decode_direct_swap_call(
         let pool_index = external_input_params[2]
             .to_owned()
             .into_uint()
-            .ok_or_else(|| anyhow!("Failed to convert to u32".to_string()))?
+            .ok_or_else(|| anyhow!("Failed to convert pool index to u32".to_string()))?
             .as_u32();
 
         if let Ok(external_outputs) = decode(SWAP_ABI_OUTPUT, &call.return_data) {
             let base_flow = external_outputs[0]
                 .to_owned()
                 .into_int() // Needs conversion into bytes for next step
-                .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+                .ok_or_else(|| anyhow!("Failed to convert base flow to i128".to_string()))?;
 
             let quote_flow = external_outputs[1]
                 .to_owned()
                 .into_int() // Needs conversion into bytes for next step
-                .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+                .ok_or_else(|| anyhow!("Failed to convert quote floww to i128".to_string()))?;
 
             let pool_hash = encode_pool_hash(base_token, quote_token, pool_index);
             Ok((pool_hash, base_flow, quote_flow))
         } else {
-            bail!("Failed to decode call outputs.".to_string());
+            bail!("Failed to decode swap call outputs.".to_string());
         }
     } else {
-        bail!("Failed to decode ABI internal call.".to_string());
+        bail!("Failed to decode swap call inputs.".to_string());
     }
 }
 
@@ -553,26 +553,26 @@ fn decode_sweep_swap_call(
         let pool_cursor = sweep_swap_input[3]
             .to_owned()
             .into_tuple()
-            .ok_or_else(|| anyhow!("Failed to convert to tuple".to_string()))?;
+            .ok_or_else(|| anyhow!("Failed to convert pool cursor to tuple".to_string()))?;
         let pool_hash = pool_cursor[1]
             .to_owned()
             .into_fixed_bytes()
-            .ok_or_else(|| anyhow!("Failed to convert to fixed bytes".to_string()))?;
+            .ok_or_else(|| anyhow!("Failed to convert pool hash to fixed bytes".to_string()))?;
         if let Ok(sweep_swap_output) = decode(sweep_swap_abi_output, &call.return_data) {
             let pair_flow = sweep_swap_output[0]
                 .to_owned()
                 .into_tuple()
-                .ok_or_else(|| anyhow!("Failed to convert to tuple".to_string()))?;
+                .ok_or_else(|| anyhow!("Failed to convert pair flow to tuple".to_string()))?;
 
             let base_flow = pair_flow[0]
                 .to_owned()
                 .into_int() // Needs conversion into bytes for next step
-                .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+                .ok_or_else(|| anyhow!("Failed to convert base flow to i128".to_string()))?;
 
             let quote_flow = pair_flow[1]
                 .to_owned()
                 .into_int() // Needs conversion into bytes for next step
-                .ok_or_else(|| anyhow!("Failed to convert to i128".to_string()))?;
+                .ok_or_else(|| anyhow!("Failed to convert quote flow to i128".to_string()))?;
 
             Ok((pool_hash, base_flow, quote_flow))
         } else {
