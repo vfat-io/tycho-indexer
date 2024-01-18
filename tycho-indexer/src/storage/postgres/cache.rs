@@ -1,16 +1,21 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-use std::ops::{Deref, DerefMut};
+use std::{
+    num::NonZeroUsize,
+    ops::{Deref, DerefMut},
+};
 
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
     AsyncPgConnection,
 };
+use lru::LruCache;
 use tokio::{
     sync::{
         mpsc,
         oneshot::{self, error::RecvError},
+        Mutex,
     },
     task::JoinHandle,
 };
@@ -353,10 +358,17 @@ impl DBCacheWriteExecutor {
     }
 }
 
+#[derive(Hash, Eq, PartialEq)]
+struct RevertParameters {
+    start_version: Option<BlockOrTimestamp>,
+    end_version: BlockOrTimestamp,
+}
+
 pub struct CachedGateway {
     tx: mpsc::Sender<DBCacheMessage>,
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
+    lru_cache: Mutex<LruCache<RevertParameters, Vec<AccountUpdate>>>,
 }
 
 impl CachedGateway {
@@ -366,7 +378,12 @@ impl CachedGateway {
         pool: Pool<AsyncPgConnection>,
         state_gateway: EVMStateGateway<AsyncPgConnection>,
     ) -> Self {
-        CachedGateway { tx, pool, state_gateway }
+        CachedGateway {
+            tx,
+            pool,
+            state_gateway,
+            lru_cache: Mutex::new(LruCache::new(NonZeroUsize::new(5).unwrap())),
+        }
     }
     pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
@@ -467,16 +484,39 @@ impl CachedGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-        db: &mut AsyncPgConnection,
     ) -> Result<Vec<AccountUpdate>, StorageError> {
-        //TODO: handle multiple extractors reverts
-        self.flush()
-            .await
-            .expect("Received signal ok")
-            .expect("Flush should succeed");
-        self.state_gateway
-            .get_accounts_delta(chain, start_version, end_version, db)
-            .await
+        let mut lru_cache = self.lru_cache.lock().await;
+
+        // Construct a key for the LRU cache
+        let key = RevertParameters {
+            start_version: start_version.cloned(),
+            end_version: end_version.clone(),
+        };
+
+        // Check if the delta is already in the LRU cache
+        if let Some(delta) = lru_cache.get(&key) {
+            return Ok(delta.clone());
+        }
+
+        // Flush the current state and wait for the flush to complete
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tx
+            .send(DBCacheMessage::Flush(tx))
+            .await;
+        let _ = rx.await;
+
+        // Fetch the delta from the database
+        let mut db = self.pool.get().await.unwrap();
+        let delta = self
+            .state_gateway
+            .get_accounts_delta(chain, start_version, end_version, &mut db)
+            .await?;
+
+        // Insert the new delta into the LRU cache
+        lru_cache.put(key, delta.clone());
+
+        Ok(delta)
     }
 
     pub async fn flush(&self) -> Result<Result<(), StorageError>, RecvError> {
@@ -531,7 +571,7 @@ mod test {
                 },
                 db_fixtures, PostgresGateway,
             },
-            BlockIdentifier, StorageError,
+            BlockIdentifier, BlockOrTimestamp, StorageError,
             StorageError::NotFound,
         },
     };
@@ -971,6 +1011,90 @@ mod test {
         );
         // Assert no error happened
         assert_eq!(maybe_err, Empty);
+    }
+
+    #[tokio::test]
+    async fn test_cached_gateway_revert() {
+        // Setup
+        let connection_pool = setup_gateway().await;
+        let mut connection = connection_pool
+            .get()
+            .await
+            .expect("Failed to get a connection from the pool");
+        setup_data(&mut connection).await;
+        let gateway = Arc::new(
+            PostgresGateway::<
+                evm::Block,
+                evm::Transaction,
+                evm::Account,
+                evm::AccountUpdate,
+                evm::ERC20Token,
+            >::from_connection(&mut connection)
+            .await,
+        );
+        drop(connection);
+        let (tx, rx) = mpsc::channel(10);
+        let (err_tx, err_rx) = mpsc::channel(10);
+
+        let write_executor = DBCacheWriteExecutor::new(
+            "ethereum".to_owned(),
+            Chain::Ethereum,
+            connection_pool.clone(),
+            gateway.clone(),
+            rx,
+            err_tx,
+        );
+
+        let handle = write_executor.run();
+        let cached_gw = CachedGateway::new(tx, connection_pool.clone(), gateway);
+
+        // Get delta from current state (None) to block 1
+        let delta_0 = cached_gw
+            .get_accounts_delta(
+                &Chain::Ethereum,
+                None,
+                &BlockOrTimestamp::Block(BlockIdentifier::Hash(
+                    H256::from_str(
+                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                    )
+                    .unwrap()
+                    .into(),
+                )),
+            )
+            .await
+            .unwrap();
+
+        // Revert to block 1
+        let _ = cached_gw
+            .revert_state(&BlockIdentifier::Hash(
+                H256::from_str(
+                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                )
+                .unwrap()
+                .into(),
+            ))
+            .await;
+
+        // Get delta from current state (None) to block 1 again
+        let delta_1 = cached_gw
+            .get_accounts_delta(
+                &Chain::Ethereum,
+                None,
+                &BlockOrTimestamp::Block(BlockIdentifier::Hash(
+                    H256::from_str(
+                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                    )
+                    .unwrap()
+                    .into(),
+                )),
+            )
+            .await
+            .unwrap();
+
+        handle.abort();
+
+        // Assert that the two deltas are the same
+        assert_eq!(delta_0, delta_1);
     }
 
     fn get_sample_block(version: usize) -> evm::Block {

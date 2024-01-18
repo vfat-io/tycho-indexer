@@ -121,7 +121,7 @@ pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
 pub type AccountToContractStore = HashMap<Address, ContractStore>;
 
 /// Identifies a block in storage.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum BlockIdentifier {
     /// Identifies the block by its position on a specified chain.
     ///
@@ -388,7 +388,7 @@ pub trait ExtractionStateGateway {
 
 /// Point in time as either block or timestamp. If a block is chosen it
 /// timestamp attribute is used.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum BlockOrTimestamp {
     Block(BlockIdentifier),
     Timestamp(NaiveDateTime),

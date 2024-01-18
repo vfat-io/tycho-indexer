@@ -143,7 +143,7 @@ impl AmbientPgGateway {
         let address = H160(AMBIENT_CONTRACT);
         let account_updates = self
             .state_gateway
-            .get_accounts_delta(&self.chain, None, &target, conn)
+            .get_accounts_delta(&self.chain, None, &target)
             .await?
             .into_iter()
             .filter_map(|u| if u.address == address { Some((u.address, u)) } else { None })
