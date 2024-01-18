@@ -144,15 +144,15 @@ diesel::table! {
         chain_id -> Int8,
         #[max_length = 255]
         external_id -> Varchar,
-        attributes -> Nullable<Jsonb>,
-        created_at -> Timestamptz,
-        creation_tx -> Int8,
-        deleted_at -> Nullable<Timestamptz>,
-        deletion_tx -> Nullable<Int8>,
-        inserted_ts -> Timestamptz,
-        modified_ts -> Timestamptz,
         protocol_type_id -> Int8,
         protocol_system_id -> Int8,
+        attributes -> Nullable<Jsonb>,
+        created_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+        inserted_ts -> Timestamptz,
+        modified_ts -> Timestamptz,
+        creation_tx -> Int8,
+        deletion_tx -> Nullable<Int8>,
     }
 }
 

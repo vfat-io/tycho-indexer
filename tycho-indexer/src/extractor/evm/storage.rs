@@ -523,6 +523,8 @@ mod test {
             deleted_at: None,
             inserted_ts: Default::default(),
             modified_ts: Default::default(),
+            creation_tx: 1,
+            deletion_tx: None,
         };
 
         let tokens = vec![
