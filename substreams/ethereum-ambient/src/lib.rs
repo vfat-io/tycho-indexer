@@ -1,17 +1,47 @@
 use std::collections::{hash_map::Entry, HashMap};
 
 use anyhow::{anyhow, bail};
+
 use ethabi::{decode, ParamType};
 use hex_literal::hex;
-use substreams_ethereum::pb::eth::{self};
+use substreams_ethereum::pb::eth::{self, v2::Call};
+use tiny_keccak::{Hasher, Keccak};
 
 use pb::tycho::evm::v1::{self as tycho};
 
 mod pb;
-
 const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
+const AMBIENT_HOTPROXY_CONTRACT: [u8; 20] = hex!("37e00522Ce66507239d59b541940F99eA19fF81F");
+const AMBIENT_MICROPATHS_CONTRACT: [u8; 20] = hex!("f241bEf0Ea64020655C70963ef81Fea333752367");
 const INIT_POOL_CODE: u8 = 71;
-const USER_CMD_FN_SIG: [u8; 4] = [0xA1, 0x51, 0x12, 0xF9];
+const USER_CMD_FN_SIG: [u8; 4] = hex!("a15112f9");
+const USER_CMD_HOTPROXY_FN_SIG: [u8; 4] = hex!("f96dc788");
+const SWEEP_SWAP_FN_SIG: [u8; 4] = hex!("7b370fc2");
+const SWAP_FN_SIG: [u8; 4] = hex!("3d719cd9");
+
+const SWAP_ABI_INPUT: &[ParamType] = &[
+    ParamType::Address,   // base
+    ParamType::Address,   // quote
+    ParamType::Uint(256), // pool index
+    // isBuy - if true the direction of the swap is for the user to send base
+    // tokens and receive back quote tokens.
+    ParamType::Bool,
+    ParamType::Bool,      // inBaseQty
+    ParamType::Uint(128), //qty
+    ParamType::Uint(16),  // poolTip
+    ParamType::Uint(128), // limitPrice
+    ParamType::Uint(128), // minOut
+    ParamType::Uint(8),   // reserveFlags
+];
+
+const SWAP_ABI_OUTPUT: &[ParamType] = &[
+    // The token base and quote token flows associated with this swap action.
+    // Negative indicates a credit paid to the user (token balance of pool
+    // decreases), positive a debit collected from the user (token balance of pool
+    // increases).
+    ParamType::Int(128), // baseFlow
+    ParamType::Int(128), // quoteFlow
+];
 
 struct SlotValue {
     new_value: Vec<u8>,
@@ -105,18 +135,18 @@ fn map_changes(
             .collect::<Vec<_>>();
         storage_changes.sort_unstable_by_key(|change| change.ordinal);
 
-        let ambient_calls = block_tx
+        let block_calls = block_tx
             .calls
             .iter()
             .filter(|call| !call.state_reverted)
-            .filter(|call| call.address == AMBIENT_CONTRACT)
             .collect::<Vec<_>>();
 
-        for call in ambient_calls {
+        for call in block_calls {
             if call.input.len() < 4 {
                 continue;
             }
-            if call.input[0..4] == USER_CMD_FN_SIG {
+            if call.address == AMBIENT_CONTRACT && call.input[0..4] == USER_CMD_FN_SIG {
+                // Extract pool creations
                 let user_cmd_external_abi_types = &[
                     // index of the proxy sidecar the command is being called on
                     ParamType::Uint(16),
@@ -213,6 +243,22 @@ fn map_changes(
                 } else {
                     bail!("Failed to decode ABI external call.".to_string());
                 }
+            } else if
+            // Handle TVL changes caused by calling the swap function
+            (call.address == AMBIENT_CONTRACT && call.input[0..4] == SWAP_FN_SIG) ||
+                // Handle TVL changes caused by calling the userCmd method on the HotProxy contract
+                (call.address == AMBIENT_HOTPROXY_CONTRACT &&
+                    call.input[0..4] == USER_CMD_HOTPROXY_FN_SIG)
+            {
+                // TODO: aggregate these with the previous balances to get new balances:
+                let (_pool_hash, _base_flow, _quote_flow) = decode_direct_swap_call(call)?;
+            } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
+                call.input[0..4] == SWEEP_SWAP_FN_SIG
+            {
+                // Handle TVL changes caused by calling the sweepSwap method on the MicroPaths
+                // contract
+                // TODO: aggregate these flows with the previous balances to get new balances:
+                let (_base_flow, _quote_flow, _pool_hash) = decode_sweep_swap_call(call)?;
             }
         }
 
@@ -392,4 +438,147 @@ fn map_changes(
     });
 
     Ok(block_changes)
+}
+
+fn encode_pool_hash(token_x: Vec<u8>, token_y: Vec<u8>, pool_idx: u32) -> [u8; 32] {
+    let mut keccak = Keccak::v256();
+
+    let mut data = Vec::new();
+    data.extend_from_slice(&token_x);
+    data.extend_from_slice(&token_y);
+    data.extend_from_slice(&pool_idx.to_be_bytes());
+
+    let mut output = [0u8; 32];
+    keccak.update(&data);
+    keccak.finalize(&mut output);
+    output
+}
+
+fn decode_direct_swap_call(
+    call: &Call,
+) -> Result<([u8; 32], ethabi::Int, ethabi::Int), anyhow::Error> {
+    if let Ok(external_input_params) = decode(SWAP_ABI_INPUT, &call.input[4..]) {
+        let base_token = external_input_params[0]
+            .to_owned()
+            .into_address()
+            .ok_or_else(|| {
+                anyhow!("Failed to convert base token to address: {:?}", &external_input_params[1])
+            })?
+            .to_fixed_bytes()
+            .to_vec();
+
+        let quote_token = external_input_params[1]
+            .to_owned()
+            .into_address()
+            .ok_or_else(|| {
+                anyhow!("Failed to convert quote token to address: {:?}", &external_input_params[1])
+            })?
+            .to_fixed_bytes()
+            .to_vec();
+
+        let pool_index = external_input_params[2]
+            .to_owned()
+            .into_uint()
+            .ok_or_else(|| anyhow!("Failed to convert pool index to u32".to_string()))?
+            .as_u32();
+
+        if let Ok(external_outputs) = decode(SWAP_ABI_OUTPUT, &call.return_data) {
+            let base_flow = external_outputs[0]
+                .to_owned()
+                .into_int() // Needs conversion into bytes for next step
+                .ok_or_else(|| anyhow!("Failed to convert base flow to i128".to_string()))?;
+
+            let quote_flow = external_outputs[1]
+                .to_owned()
+                .into_int() // Needs conversion into bytes for next step
+                .ok_or_else(|| anyhow!("Failed to convert quote floww to i128".to_string()))?;
+
+            let pool_hash = encode_pool_hash(base_token, quote_token, pool_index);
+            Ok((pool_hash, base_flow, quote_flow))
+        } else {
+            bail!("Failed to decode swap call outputs.".to_string());
+        }
+    } else {
+        bail!("Failed to decode swap call inputs.".to_string());
+    }
+}
+
+fn decode_sweep_swap_call(
+    call: &Call,
+) -> Result<(Vec<u8>, ethabi::Int, ethabi::Int), anyhow::Error> {
+    let sweep_swap_abi: &[ParamType] = &[
+        ParamType::Tuple(vec![
+            ParamType::Uint(128),
+            ParamType::Uint(128),
+            ParamType::Uint(128),
+            ParamType::Uint(64),
+            ParamType::Uint(64),
+        ]), // CurveState
+        ParamType::Int(24), // midTick
+        ParamType::Tuple(vec![
+            ParamType::Bool,
+            ParamType::Bool,
+            ParamType::Uint(8),
+            ParamType::Uint(128),
+            ParamType::Uint(128),
+        ]), // SwapDirective
+        ParamType::Tuple(vec![
+            ParamType::Tuple(vec![
+                ParamType::Uint(8),  // schema
+                ParamType::Uint(16), // feeRate
+                ParamType::Uint(8),  // protocolTake
+                ParamType::Uint(16), // tickSize
+                ParamType::Uint(8),  // jitThresh
+                ParamType::Uint(8),  // knockoutBits
+                ParamType::Uint(8),  // oracleFlags
+            ]),
+            ParamType::FixedBytes(32), // poolHash
+            ParamType::Address,
+        ]), // PoolCursor
+    ];
+    let sweep_swap_abi_output: &[ParamType] = &[
+        ParamType::Tuple(vec![
+            ParamType::Int(128), // baseFlow
+            ParamType::Int(128), // quoteFlow
+            ParamType::Uint(128),
+            ParamType::Uint(128),
+        ]), // Chaining.PairFlow memory accum
+        ParamType::Uint(128), // priceOut
+        ParamType::Uint(128), // seedOut
+        ParamType::Uint(128), // concOut
+        ParamType::Uint(64),  // ambientOut
+        ParamType::Uint(64),  // concGrowthOut
+    ];
+    if let Ok(sweep_swap_input) = decode(sweep_swap_abi, &call.input[4..]) {
+        let pool_cursor = sweep_swap_input[3]
+            .to_owned()
+            .into_tuple()
+            .ok_or_else(|| anyhow!("Failed to convert pool cursor to tuple".to_string()))?;
+        let pool_hash = pool_cursor[1]
+            .to_owned()
+            .into_fixed_bytes()
+            .ok_or_else(|| anyhow!("Failed to convert pool hash to fixed bytes".to_string()))?;
+        if let Ok(sweep_swap_output) = decode(sweep_swap_abi_output, &call.return_data) {
+            let pair_flow = sweep_swap_output[0]
+                .to_owned()
+                .into_tuple()
+                .ok_or_else(|| anyhow!("Failed to convert pair flow to tuple".to_string()))?;
+
+            let base_flow = pair_flow[0]
+                .to_owned()
+                .into_int() // Needs conversion into bytes for next step
+                .ok_or_else(|| anyhow!("Failed to convert base flow to i128".to_string()))?;
+
+            let quote_flow = pair_flow[1]
+                .to_owned()
+                .into_int() // Needs conversion into bytes for next step
+                .ok_or_else(|| anyhow!("Failed to convert quote flow to i128".to_string()))?;
+
+            Ok((pool_hash, base_flow, quote_flow))
+        } else {
+            bail!("Failed to decode sweepSwap outputs.".to_string());
+        }
+    } else {
+        bail!("Failed to decode sweepSwap inputs.".to_string());
+    }
 }
