@@ -934,13 +934,12 @@ fn decode_knockout_call(
         let code = input_data[31];
         let is_mint = code == 91;
         let is_burn = code == 92;
-        let abi;
 
-        if is_mint || is_burn {
-            abi = KNOCKOUT_INTERNAL_MINT_BURN_ABI;
+        let abi = if is_mint || is_burn {
+            KNOCKOUT_INTERNAL_MINT_BURN_ABI
         } else {
-            abi = KNOCKOUT_INTERNAL_OTHER_CMD_ABI;
-        }
+            KNOCKOUT_INTERNAL_OTHER_CMD_ABI
+        };
 
         if let Ok(mint_burn_inputs) = decode(abi, &input_data) {
             let base_token = mint_burn_inputs[1]
