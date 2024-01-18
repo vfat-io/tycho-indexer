@@ -418,7 +418,7 @@ pub mod pg {
             block_ts: NaiveDateTime,
         ) -> Vec<orm::NewProtocolState> {
             let mut protocol_states = Vec::new();
-            for (name, value) in &self.updated_attributes {
+            for (name, value) in &self.attributes {
                 protocol_states.push(orm::NewProtocolState {
                     protocol_component_id,
                     attribute_name: Some(name.clone()),
@@ -432,26 +432,6 @@ pub mod pg {
         }
     }
 
-    impl evm::ProtocolState {
-        fn convert_attributes_to_json(&self) -> Option<serde_json::Value> {
-            // Convert Bytes to String and then to serde_json Value
-            let serialized_map: HashMap<String, serde_json::Value> = self
-                .attributes
-                .iter()
-                .map(|(k, v)| {
-                    let s = hex::encode(v);
-                    (k.clone(), serde_json::Value::String(s))
-                })
-                .collect();
-
-            // Convert HashMap<String, serde_json::Value> to serde_json::Value struct
-            match serde_json::to_value(serialized_map) {
-                Ok(value) => Some(value),
-                Err(_) => None,
-            }
-        }
-    }
-
     impl ProtocolStateDelta<orm::ProtocolState, orm::NewProtocolState, i64>
         for evm::ProtocolStateUpdate
     {
@@ -461,14 +441,14 @@ pub mod pg {
             tx_hash: &TxHash,
             change: ChangeType,
         ) -> Result<Self, StorageError> {
-            let mut attr: HashMap<String, Bytes> = HashMap::new();
-            if let Some(Value::Object(state)) = &val.state {
-                for (k, v) in state.iter() {
-                    if let Value::String(s) = v {
-                        attr.insert(k.clone(), Bytes::from(s.as_str()));
-                    }
-                }
-            }
+            let attr =
+                if let (Some(name), Some(value)) = (&val.attribute_name, &val.attribute_value) {
+                    vec![(name.clone(), value.clone())]
+                        .into_iter()
+                        .collect()
+                } else {
+                    std::collections::HashMap::new()
+                };
 
             match change {
                 ChangeType::Deletion => Ok(evm::ProtocolStateUpdate {
@@ -488,41 +468,27 @@ pub mod pg {
             }
         }
 
+        // When stored, protocol states are divided into multiple protocol state db entities - one
+        // per attribute This is to allow individualised control over attribute versioning
+        // and more efficient querying
         fn to_storage(
             &self,
             protocol_component_id: i64,
             tx_id: i64,
             block_ts: NaiveDateTime,
-        ) -> orm::NewProtocolState {
-            orm::NewProtocolState {
-                protocol_component_id,
-                state: self.convert_attributes_to_json(),
-                modify_tx: tx_id,
-                tvl: None,
-                inertias: None,
-                valid_from: block_ts,
-                valid_to: None,
+        ) -> Vec<orm::NewProtocolState> {
+            let mut protocol_states = Vec::new();
+            for (name, value) in &self.updated_attributes {
+                protocol_states.push(orm::NewProtocolState {
+                    protocol_component_id,
+                    attribute_name: Some(name.clone()),
+                    attribute_value: Some(value.clone()),
+                    modify_tx: tx_id,
+                    valid_from: block_ts,
+                    valid_to: None,
+                });
             }
-        }
-    }
-
-    impl evm::ProtocolStateUpdate {
-        fn convert_attributes_to_json(&self) -> Option<serde_json::Value> {
-            // Convert Bytes to String and then to serde_json Value
-            let serialized_map: HashMap<String, serde_json::Value> = self
-                .updated_attributes
-                .iter()
-                .map(|(k, v)| {
-                    let s = hex::encode(v);
-                    (k.clone(), serde_json::Value::String(s))
-                })
-                .collect();
-
-            // Convert HashMap<String, serde_json::Value> to serde_json::Value struct
-            match serde_json::to_value(serialized_map) {
-                Ok(value) => Some(value),
-                Err(_) => None,
-            }
+            protocol_states
         }
     }
 }

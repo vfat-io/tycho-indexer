@@ -497,7 +497,7 @@ pub mod db_fixtures {
     use crate::{hex_bytes::Bytes, storage::Code};
 
     use super::{
-        orm::{FinancialType, ImplementationType, ProtocolSystemType},
+        orm::{FinancialType, ImplementationType},
         schema,
     };
 
@@ -771,10 +771,7 @@ pub mod db_fixtures {
     }
 
     // Insert a new Protocol System
-    pub async fn insert_protocol_system(
-        conn: &mut AsyncPgConnection,
-        name: ProtocolSystemType,
-    ) -> i64 {
+    pub async fn insert_protocol_system(conn: &mut AsyncPgConnection, name: String) -> i64 {
         diesel::insert_into(schema::protocol_system::table)
             .values(schema::protocol_system::name.eq(name))
             .returning(schema::protocol_system::id)

@@ -514,7 +514,7 @@ pub trait ProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
         change: ChangeType,
     ) -> Result<Self, StorageError>;
 
-    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> N;
+    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> Vec<N>;
 }
 
 /// Store and retrieve protocol related structs.

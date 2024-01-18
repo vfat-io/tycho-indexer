@@ -355,7 +355,7 @@ impl ProtocolState {
                 protocol_system::table
                     .on(protocol_component::protocol_system_id.eq(protocol_system::id)),
             )
-            .filter(protocol_system::name.eq(ProtocolSystemType::from(system)))
+            .filter(protocol_system::name.eq(system.to_string()))
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
                 protocol_state::valid_to

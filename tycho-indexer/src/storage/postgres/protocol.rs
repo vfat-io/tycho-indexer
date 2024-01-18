@@ -267,11 +267,7 @@ mod test {
         extractor::evm,
         models,
         models::{FinancialType, ImplementationType},
-        storage::postgres::{
-            db_fixtures, orm,
-            schema::{self, sql_types::ProtocolSystemType},
-            PostgresGateway,
-        },
+        storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
     };
 
     use super::*;
@@ -333,7 +329,7 @@ mod test {
         )
         .await;
         let protocol_system_id =
-            db_fixtures::insert_protocol_system(conn, orm::ProtocolSystemType::Ambient).await;
+            db_fixtures::insert_protocol_system(conn, "Ambient".to_owned()).await;
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
@@ -439,7 +435,7 @@ mod test {
         ]
         .into_iter()
         .collect();
-        protocol_state.updated_attributes = attributes;
+        protocol_state.attributes = attributes;
         protocol_state.modify_tx =
             "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
                 .parse()
