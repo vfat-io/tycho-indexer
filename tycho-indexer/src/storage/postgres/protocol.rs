@@ -79,7 +79,7 @@ where
             .values(&values)
             .on_conflict((chain_id, protocol_system_id, external_id))
             .do_update()
-            .set(values.get(0).unwrap())
+            .set(values.first().unwrap())
             .execute(conn)
             .await
             .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))
@@ -350,16 +350,16 @@ mod test {
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
         let protocol_type_id_1 =
-            db_fixtures::insert_protocol_type(&mut conn, &"Test_Type_1", None, None, None).await;
+            db_fixtures::insert_protocol_type(&mut conn, "Test_Type_1", None, None, None).await;
         let protocol_type_id_2 =
-            db_fixtures::insert_protocol_type(&mut conn, &"Test_Type_2", None, None, None).await;
+            db_fixtures::insert_protocol_type(&mut conn, "Test_Type_2", None, None, None).await;
         let protocol_system = ProtocolSystem::Ambient;
         let chain = Chain::Ethereum;
-        let new_component = ProtocolComponent {
+        let original_component = ProtocolComponent {
             id: ContractId("test_contract_id".to_string()),
-            protocol_system: protocol_system.clone(),
+            protocol_system,
             protocol_type_id: protocol_type_id_1.to_string(),
-            chain: chain.clone(),
+            chain,
             tokens: vec![],
             contract_ids: vec![],
             static_attributes: HashMap::new(),
@@ -373,7 +373,7 @@ mod test {
 
         // Call the function under test
         let result = gw
-            .upsert_components(&[&new_component.clone()], &mut conn)
+            .upsert_components(&[&original_component.clone()], &mut conn)
             .await;
 
         // Assert the result
@@ -390,29 +390,29 @@ mod test {
         assert!(inserted_data.is_ok());
         let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
         assert_eq!(
-            new_component.protocol_type_id,
+            original_component.protocol_type_id,
             inserted_data
                 .protocol_type_id
                 .to_string()
         );
         assert_eq!(
-            new_component.protocol_type_id,
+            original_component.protocol_type_id,
             inserted_data
                 .protocol_type_id
                 .to_string()
         );
         assert_eq!(
-            gw.get_protocol_system_id(&new_component.protocol_system),
+            gw.get_protocol_system_id(&original_component.protocol_system),
             inserted_data.protocol_system_id
         );
-        assert_eq!(gw.get_chain_id(&new_component.chain), inserted_data.chain_id);
-        assert_eq!(new_component.id.0, inserted_data.external_id);
+        assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
+        assert_eq!(original_component.id.0, inserted_data.external_id);
 
         let new_component = ProtocolComponent {
             id: ContractId("test_contract_id".to_string()),
-            protocol_system: protocol_system.clone(),
+            protocol_system,
             protocol_type_id: protocol_type_id_2.to_string(), // altered here
-            chain: chain.clone(),
+            chain,
             tokens: vec![],
             contract_ids: vec![],
             static_attributes: HashMap::new(),

@@ -141,7 +141,7 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use strum::IntoEnumIterator;
 use tracing::{debug, info};
 
-use crate::models::{Chain, ProtocolSystem, ProtocolSystemIter};
+use crate::models::{Chain, ProtocolSystem};
 
 use super::{
     ContractDelta, StateGateway, StorableBlock, StorableContract, StorableToken,
@@ -350,7 +350,7 @@ where
         self.protocol_system_id_cache
             .get_id(protocol_system)
     }
-
+    #[warn(dead_code)]
     fn get_protocol_system(&self, id: &i64) -> ProtocolSystem {
         self.protocol_system_id_cache
             .get_enum(id)
@@ -519,7 +519,7 @@ pub mod db_fixtures {
 
     use crate::storage::{postgres::orm, Code};
 
-    use super::schema::{self, protocol_type::attribute_schema};
+    use super::schema::{self};
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -629,9 +629,8 @@ pub mod db_fixtures {
         attribute: Option<Value>,
         implementation_type: Option<orm::ImplementationType>,
     ) -> i64 {
-        let financial_type = financial_type.unwrap_or_else(|| orm::FinancialType::Swap);
-        let implementation_type =
-            implementation_type.unwrap_or_else(|| orm::ImplementationType::Custom);
+        let financial_type = financial_type.unwrap_or(orm::FinancialType::Swap);
+        let implementation_type = implementation_type.unwrap_or(orm::ImplementationType::Custom);
         let query = diesel::insert_into(schema::protocol_type::table).values((
             schema::protocol_type::name.eq(name),
             schema::protocol_type::financial_type.eq(financial_type),
