@@ -19,7 +19,10 @@ const USER_CMD_FN_SIG: [u8; 4] = hex!("a15112f9");
 const USER_CMD_WARMPATH_FN_SIG: [u8; 4] = hex!("f96dc788");
 const USER_CMD_HOTPROXY_FN_SIG: [u8; 4] = hex!("f96dc788");
 const SWEEP_SWAP_FN_SIG: [u8; 4] = hex!("7b370fc2");
+
+// MicroPaths fn sigs
 const SWAP_FN_SIG: [u8; 4] = hex!("3d719cd9");
+const MINT_RANGE_FN_SIG: [u8; 4] = hex!("2370632b");
 
 const SWAP_ABI_INPUT: &[ParamType] = &[
     ParamType::Address,   // base
@@ -45,7 +48,6 @@ const BASE_QUOTE_FLOW_OUTPUT: &[ParamType] = &[
     ParamType::Int(128), // quoteFlow
 ];
 
-//"(uint8,address,address,uint256,int24,int24,uint128,uint128,uint128,uint8,address)"
 const LIQUIDITY_CHANGE_ABI: &[ParamType] = &[
     ParamType::Uint(8),
     ParamType::Address,   // base
@@ -59,6 +61,27 @@ const LIQUIDITY_CHANGE_ABI: &[ParamType] = &[
     ParamType::Address,
 ];
 
+// ABI for the mintRange function parameters
+const MINT_RANGE_ABI: &[ParamType] = &[
+    ParamType::Uint(128),      //  price
+    ParamType::Int(24),        //  priceTick
+    ParamType::Uint(128),      //  seed
+    ParamType::Uint(128),      //  conc
+    ParamType::Uint(64),       //  seedGrowth
+    ParamType::Uint(64),       //  concGrowth
+    ParamType::Int(24),        //  lowTick
+    ParamType::Int(24),        //  highTick
+    ParamType::Uint(128),      //  liq
+    ParamType::FixedBytes(32), //  poolHash
+];
+
+// ABI for the mintRange function with return values
+const MINT_RANGE_RETURN_ABI: &[ParamType] = &[
+    ParamType::Int(128),  //  baseFlow
+    ParamType::Int(128),  //  quoteFlow
+    ParamType::Uint(128), //  seedOut
+    ParamType::Uint(128), //  concOut
+];
 struct SlotValue {
     new_value: Vec<u8>,
     start_value: Vec<u8>,
@@ -274,7 +297,7 @@ fn map_changes(
                 // Handle TVL changes caused by calling the sweepSwap method on the MicroPaths
                 // contract
                 // TODO: aggregate these flows with the previous balances to get new balances:
-                let (_base_flow, _quote_flow, _pool_hash) = decode_sweep_swap_call(call)?;
+                let (_pool_hash, _base_flow, _quote_flow) = decode_sweep_swap_call(call)?;
             } else if call.address == AMBIENT_WARMPATH_CONTRACT &&
                 call.input[0..4] == USER_CMD_WARMPATH_FN_SIG
             {
@@ -288,9 +311,14 @@ fn map_changes(
                 let is_harvest = code == 5;
                 if is_mint || is_burn || is_harvest {
                     // TODO: aggregate these flows with the previous balances to get new balances:
-                    let (_base_flow, _quote_flow, _pool_hash) =
+                    let (_pool_hash, _base_flow, _quote_flow) =
                         decode_warm_path_user_cmd_call(call)?;
                 }
+            } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
+                call.input[0..4] == MINT_RANGE_FN_SIG
+            {
+                // TODO: aggregate these flows with the previous balances to get new balances:
+                let (_pool_hash, _base_flow, _quote_flow) = decode_mint_range_call(call)?;
             }
         }
 
@@ -656,5 +684,33 @@ fn decode_flows_from_output(call: &Call) -> Result<(ethabi::Int, ethabi::Int), a
         Ok((base_flow, quote_flow))
     } else {
         bail!("Failed to decode swap call outputs.".to_string());
+    }
+}
+
+fn decode_mint_range_call(
+    call: &Call,
+) -> Result<(Vec<u8>, ethabi::Int, ethabi::Int), anyhow::Error> {
+    if let Ok(mint_range) = decode(MINT_RANGE_ABI, &call.input[4..]) {
+        let pool_hash = mint_range[9]
+            .to_owned()
+            .into_fixed_bytes()
+            .ok_or_else(|| anyhow!("Failed to convert pool hash to fixed bytes".to_string()))?;
+
+        if let Ok(external_outputs) = decode(MINT_RANGE_RETURN_ABI, &call.return_data) {
+            let base_flow = external_outputs[0]
+                .to_owned()
+                .into_int() // Needs conversion into bytes for next step
+                .ok_or_else(|| anyhow!("Failed to convert base flow to i128".to_string()))?;
+
+            let quote_flow = external_outputs[1]
+                .to_owned()
+                .into_int() // Needs conversion into bytes for next step
+                .ok_or_else(|| anyhow!("Failed to convert quote floww to i128".to_string()))?;
+            Ok((pool_hash, base_flow, quote_flow))
+        } else {
+            bail!("Failed to decode swap call outputs.".to_string());
+        }
+    } else {
+        bail!("Failed to decode inputs for WarmPath userCmd call.".to_string());
     }
 }
