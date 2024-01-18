@@ -23,6 +23,7 @@ const SWEEP_SWAP_FN_SIG: [u8; 4] = hex!("7b370fc2");
 // MicroPaths fn sigs
 const SWAP_FN_SIG: [u8; 4] = hex!("3d719cd9");
 const MINT_RANGE_FN_SIG: [u8; 4] = hex!("2370632b");
+const MINT_AMBIENT_FN_SIG: [u8; 4] = hex!("2ee11587");
 const BURN_AMBIENT_FN_SIG: [u8; 4] = hex!("2a6f0864");
 
 const SWAP_ABI_INPUT: &[ParamType] = &[
@@ -97,6 +98,24 @@ const BURN_AMBIENT_ABI: &[ParamType] = &[
 
 // ABI for the burnAmbient function with return values
 const BURN_AMBIENT_RETURN_ABI: &[ParamType] = &[
+    ParamType::Int(128),  // int128 baseFlow
+    ParamType::Int(128),  // int128 quoteFlow
+    ParamType::Uint(128), // uint128 seedOut
+];
+
+// ABI for the mintAmbient function parameters
+const MINT_AMBIENT_ABI: &[ParamType] = &[
+    ParamType::Uint(128),      // uint128 price
+    ParamType::Uint(128),      // uint128 seed
+    ParamType::Uint(128),      // uint128 conc
+    ParamType::Uint(64),       // uint64 seedGrowth
+    ParamType::Uint(64),       // uint64 concGrowth
+    ParamType::Uint(128),      // uint128 liq
+    ParamType::FixedBytes(32), // bytes32 poolHash
+];
+
+// ABI for the mintAmbient function with return values
+const MINT_AMBIENT_RETURN_ABI: &[ParamType] = &[
     ParamType::Int(128),  // int128 baseFlow
     ParamType::Int(128),  // int128 quoteFlow
     ParamType::Uint(128), // uint128 seedOut
@@ -340,6 +359,12 @@ fn map_changes(
                 // Handle TVL changes on mintRange() calls to the MicroPaths contract
                 // TODO: aggregate these flows with the previous balances to get new balances:
                 let (_pool_hash, _base_flow, _quote_flow) = decode_mint_range_call(call)?;
+            } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
+                call.input[0..4] == MINT_AMBIENT_FN_SIG
+            {
+                // Handle TVL changes on mintAmbient() calls to the MicroPaths contract
+                // TODO: aggregate these flows with the previous balances to get new balances:
+                let (_pool_hash, _base_flow, _quote_flow) = decode_mint_ambient_call(call)?;
             } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
                 call.input[0..4] == BURN_AMBIENT_FN_SIG
             {
@@ -768,5 +793,33 @@ fn decode_burn_ambient_call(
         }
     } else {
         bail!("Failed to decode inputs for burnAmbient call.".to_string());
+    }
+}
+fn decode_mint_ambient_call(
+    call: &Call,
+) -> Result<(Vec<u8>, ethabi::Int, ethabi::Int), anyhow::Error> {
+    if let Ok(mint_ambient) = decode(MINT_AMBIENT_ABI, &call.input[4..]) {
+        let pool_hash = mint_ambient[6]
+            .to_owned()
+            .into_fixed_bytes()
+            .ok_or_else(|| anyhow!("Failed to convert pool hash to bytes".to_string()))?;
+
+        if let Ok(external_outputs) = decode(MINT_AMBIENT_RETURN_ABI, &call.return_data) {
+            let base_flow = external_outputs[0]
+                .to_owned()
+                .into_int()
+                .ok_or_else(|| anyhow!("Failed to convert base flow to i128".to_string()))?;
+
+            let quote_flow = external_outputs[1]
+                .to_owned()
+                .into_int()
+                .ok_or_else(|| anyhow!("Failed to convert quote flow to i128".to_string()))?;
+
+            Ok((pool_hash, base_flow, quote_flow))
+        } else {
+            bail!("Failed to decode mintAmbient call outputs.".to_string());
+        }
+    } else {
+        bail!("Failed to decode inputs for mintAmbient call.".to_string());
     }
 }
