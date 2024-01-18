@@ -7,7 +7,7 @@ use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{ProtocolState, ProtocolStateUpdate},
     models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
         postgres::{orm, PostgresGateway},
@@ -78,7 +78,12 @@ where
         todo!()
     }
 
-    async fn update_state(&self, chain: Chain, new: &[(TxHash, ProtocolState)], db: &mut Self::DB) {
+    async fn update_state(
+        &self,
+        chain: Chain,
+        new: &[(TxHash, ProtocolStateUpdate)],
+        db: &mut Self::DB,
+    ) {
         todo!()
     }
 
@@ -102,7 +107,7 @@ where
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolState, StorageError> {
+    ) -> Result<ProtocolStateUpdate, StorageError> {
         todo!()
     }
 

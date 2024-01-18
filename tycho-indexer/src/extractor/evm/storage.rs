@@ -425,7 +425,7 @@ pub mod pg {
         fn convert_attributes_to_json(&self) -> Option<serde_json::Value> {
             // Convert Bytes to String and then to serde_json Value
             let serialized_map: HashMap<String, serde_json::Value> = self
-                .updated_attributes
+                .attributes
                 .iter()
                 .map(|(k, v)| {
                     let s = hex::encode(v);
