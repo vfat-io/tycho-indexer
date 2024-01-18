@@ -49,26 +49,19 @@ where
     ) -> Result<(), StorageError> {
         use super::schema::protocol_component::dsl::*;
         let mut values: Vec<orm::NewProtocolComponent> = vec![];
-        //let values: Vec<NewProtocolComponent> = new
-        //    .into_iter()
-        //    .map(|pc| async {
-        //        pc.to_storage(
-        //            self.get_chain_id(&pc.chain),
-        //            self._get_or_create_protocol_system_id(pc.protocol_system, conn)
-        //                .await?,
-        //           Default::default(),
-        //      )
-        //  })
-        //  .collect::<Vec<_>>();
 
-        println!("a");
         for pc in new {
             let new_pc = pc
-                .to_storage(self.get_chain_id(&pc.chain), 1, 1, Default::default())
+                .to_storage(
+                    self.get_chain_id(&pc.chain),
+                    self.get_protocol_system_id(&pc.protocol_system),
+                    1,                  //TODO
+                    Default::default(), //TODO
+                )
                 .unwrap();
             values.push(new_pc);
         }
-        println!("b");
+
         diesel::insert_into(protocol_component)
             .values(&values)
             .on_conflict((chain_id, protocol_system_id, external_id))
@@ -222,8 +215,10 @@ mod test {
 
     async fn setup_data(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
-        db_fixtures::insert_protocol_type(conn, &"Test_Type", None, None, None).await;
-        db_fixtures::insert_protocol_system(conn, "ambient").await;
+        let chain_id = db_fixtures::insert_chain(conn, "starknet").await;
+        db_fixtures::insert_protocol_type(conn, &"Test_Type_1", None, None, None).await;
+        db_fixtures::insert_protocol_type(conn, &"Test_Type_2", None, None, None).await;
+        db_fixtures::insert_protocol_system(conn, "Ambient").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
         let txn = db_fixtures::insert_txns(
             conn,
@@ -366,15 +361,60 @@ mod test {
 
         // Optionally, you can query the database to verify the inserted data
         use crate::storage::postgres::schema::protocol_component::dsl::*;
-        //let inserted_data = protocol_component
-        //    .filter(external_id.eq("test_contract_id"))
-        //    .first::<ProtocolComponent>(&mut conn)
-        //    .optional()
-        //    .await;
+        let inserted_data = protocol_component
+            .filter(external_id.eq("test_contract_id"))
+            .first::<orm::ProtocolComponent>(&mut conn)
+            .await;
 
         // Assert that the data was inserted as expected
-        //assert!(inserted_data.is_ok());
-        //let inserted_data = inserted_data.unwrap();
-        //assert_eq!(Some(new_component), inserted_data);
+        assert!(inserted_data.is_ok());
+        let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
+        assert_eq!(
+            new_component.protocol_type_id,
+            inserted_data
+                .protocol_type_id
+                .to_string()
+        );
+        assert_eq!(
+            new_component.protocol_type_id,
+            inserted_data
+                .protocol_type_id
+                .to_string()
+        );
+        assert_eq!(
+            gw.get_protocol_system_id(&new_component.protocol_system),
+            inserted_data.protocol_system_id
+        );
+        assert_eq!(gw.get_chain_id(&new_component.chain), inserted_data.chain_id);
+        assert_eq!(new_component.id.0, inserted_data.external_id);
+
+        let new_component = ProtocolComponent {
+            id: ContractId("test_contract_id".to_string()),
+            protocol_system: protocol_system.clone(),
+            protocol_type_id: "2".to_string(), // altered here
+            chain: chain.clone(),
+            tokens: vec![],
+            contract_ids: vec![],
+            static_attributes: HashMap::new(),
+            change: ChangeType::Creation,
+        };
+
+        let result = gw
+            .upsert_components(&[&new_component.clone()], &mut conn)
+            .await;
+
+        let altered_inserted_data = protocol_component
+            .filter(external_id.eq("test_contract_id"))
+            .first::<orm::ProtocolComponent>(&mut conn)
+            .await;
+        let altered_inserted_data = altered_inserted_data.unwrap();
+
+        assert_eq!(altered_inserted_data.id, inserted_data.id);
+        assert_eq!(
+            new_component.protocol_type_id,
+            altered_inserted_data
+                .protocol_type_id
+                .to_string()
+        );
     }
 }
