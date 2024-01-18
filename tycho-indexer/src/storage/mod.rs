@@ -260,6 +260,8 @@ pub enum StorageError {
     Unexpected(String),
     #[error("Currently unsupported operation: {0}")]
     Unsupported(String),
+    #[error("Write cache unexpectedly dropped notification channel!")]
+    WriteCacheGoneAway(),
 }
 
 /// Storage methods for chain specific objects.
@@ -1014,7 +1016,6 @@ pub trait StateGateway<DB>:
     ExtractionStateGateway<DB = DB>
     + ChainGateway<DB = DB>
     + ProtocolGateway<DB = DB>
-    + ExtractionStateGateway<DB = DB>
     + ContractStateGateway<DB = DB>
     + Send
     + Sync
