@@ -197,7 +197,7 @@ mod test {
     };
 
     use super::*;
-    use crate::storage::postgres::{db_fixtures, orm::ProtocolSystemType};
+    use crate::storage::postgres::db_fixtures;
     use std::collections::HashMap;
 
     type EVMGateway = PostgresGateway<
@@ -222,6 +222,8 @@ mod test {
 
     async fn setup_data(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        db_fixtures::insert_protocol_type(conn, &"Test_Type", None, None, None).await;
+        db_fixtures::insert_protocol_system(conn, "ambient").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
         let txn = db_fixtures::insert_txns(
             conn,
@@ -255,14 +257,6 @@ mod test {
             ],
         )
         .await;
-
-        db_fixtures::insert_protocol_type(conn, &"Test_Type", None, None, None).await;
-
-        let ps = diesel::insert_into(schema::protocol_system::table)
-            .values(schema::protocol_system::name.eq(&ProtocolSystemType::Ambient))
-            .get_result::<orm::ProtocolSystem>(conn)
-            .await
-            .unwrap();
     }
 
     #[tokio::test]

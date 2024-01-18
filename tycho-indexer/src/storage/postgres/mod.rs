@@ -613,14 +613,13 @@ pub mod db_fixtures {
             .unwrap()
     }
 
-    pub async fn insert_protocol_system(conn: &mut AsyncPgConnection, name: &str) {
-        // TODO: Implement when https://github.com/propeller-heads/tycho-indexer/pull/91 is merged
-        //diesel::insert_into(schema::protocol_system::table)
-        //    .values(schema::protocol_system::name.eq(name))
-        //    .returning(schema::protocol_system::id)
-        //    .get_result(conn)
-        //    .await
-        //    .unwrap()
+    pub async fn insert_protocol_system(conn: &mut AsyncPgConnection, name: &str) -> i64 {
+        diesel::insert_into(schema::protocol_system::table)
+            .values(schema::protocol_system::name.eq(name))
+            .returning(schema::protocol_system::id)
+            .get_result(conn)
+            .await
+            .unwrap()
     }
 
     pub async fn insert_protocol_type(
