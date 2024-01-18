@@ -377,7 +377,7 @@ impl CachedGateway {
             .expect("Send message to receiver ok");
 
         match rx.await {
-            Ok(result) => result, // Flatten the Result here
+            Ok(result) => result,
             Err(_) => Err(StorageError::WriteCacheGoneAway()),
         }
     }
@@ -394,7 +394,7 @@ impl CachedGateway {
             .await
             .expect("Send message to receiver ok");
         match rx.await {
-            Ok(result) => result, // Flatten the Result here
+            Ok(result) => result,
             Err(_) => Err(StorageError::WriteCacheGoneAway()),
         }
     }
@@ -411,7 +411,7 @@ impl CachedGateway {
             .await
             .expect("Send message to receiver ok");
         match rx.await {
-            Ok(result) => result, // Flatten the Result here
+            Ok(result) => result,
             Err(_) => Err(StorageError::WriteCacheGoneAway()),
         }
     }
@@ -428,7 +428,7 @@ impl CachedGateway {
             .await
             .expect("Send message to receiver ok");
         match rx.await {
-            Ok(result) => result, // Flatten the Result here
+            Ok(result) => result,
             Err(_) => Err(StorageError::WriteCacheGoneAway()),
         }
     }
@@ -445,7 +445,7 @@ impl CachedGateway {
             .await
             .expect("Send message to receiver ok");
         match rx.await {
-            Ok(result) => result, // Flatten the Result here
+            Ok(result) => result,
             Err(_) => Err(StorageError::WriteCacheGoneAway()),
         }
     }
@@ -457,7 +457,7 @@ impl CachedGateway {
             .await
             .expect("Send message to receiver ok");
         match rx.await {
-            Ok(result) => result, // Flatten the Result here
+            Ok(result) => result,
             Err(_) => Err(StorageError::WriteCacheGoneAway()),
         }
     }
