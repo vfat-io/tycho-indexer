@@ -14,10 +14,13 @@ const AMBIENT_CONTRACT: [u8; 20] = hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f68
 const AMBIENT_HOTPROXY_CONTRACT: [u8; 20] = hex!("37e00522Ce66507239d59b541940F99eA19fF81F");
 const AMBIENT_MICROPATHS_CONTRACT: [u8; 20] = hex!("f241bEf0Ea64020655C70963ef81Fea333752367");
 const AMBIENT_WARMPATH_CONTRACT: [u8; 20] = hex!("d268767BE4597151Ce2BB4a70A9E368ff26cB195");
+const AMBIENT_KNOCKOUT_CONTRACT: [u8; 20] = hex!("7F5D75AdE75646919c923C98D53E9Cc7Be7ea794");
+
 const INIT_POOL_CODE: u8 = 71;
 const USER_CMD_FN_SIG: [u8; 4] = hex!("a15112f9");
 const USER_CMD_WARMPATH_FN_SIG: [u8; 4] = hex!("f96dc788");
 const USER_CMD_HOTPROXY_FN_SIG: [u8; 4] = hex!("f96dc788");
+const USER_CMD_KNOCKOUT_FN_SIG: [u8; 4] = hex!("f96dc788");
 const SWEEP_SWAP_FN_SIG: [u8; 4] = hex!("7b370fc2");
 
 // MicroPaths fn sigs
@@ -124,23 +127,56 @@ const MINT_AMBIENT_RETURN_ABI: &[ParamType] = &[
 
 // ABI for the burnRange function
 const BURN_RANGE_ABI: &[ParamType] = &[
-    ParamType::Uint(128),      // uint128 price
-    ParamType::Int(24),        // int24 priceTick
-    ParamType::Uint(128),      // uint128 seed
-    ParamType::Uint(128),      // uint128 conc
-    ParamType::Uint(64),       // uint64 seedGrowth
-    ParamType::Uint(64),       // uint64 concGrowth
-    ParamType::Int(24),        // int24 lowTick
-    ParamType::Int(24),        // int24 highTick
-    ParamType::Uint(128),      // uint128 liq
-    ParamType::FixedBytes(32), // bytes32 poolHash
+    ParamType::Uint(128),      // price
+    ParamType::Int(24),        // priceTick
+    ParamType::Uint(128),      // seed
+    ParamType::Uint(128),      // conc
+    ParamType::Uint(64),       // seedGrowth
+    ParamType::Uint(64),       // concGrowth
+    ParamType::Int(24),        // lowTick
+    ParamType::Int(24),        // highTick
+    ParamType::Uint(128),      // liq
+    ParamType::FixedBytes(32), // poolHash
 ];
 
 const BURN_RANGE_RETURN_ABI: &[ParamType] = &[
-    ParamType::Int(128),  // int128 baseFlow
-    ParamType::Int(128),  // int128 quoteFlow
-    ParamType::Uint(128), // uint128 seedOut
-    ParamType::Uint(128), // uint128 concOut
+    ParamType::Int(128),  // baseFlow
+    ParamType::Int(128),  // quoteFlow
+    ParamType::Uint(128), // seedOut
+    ParamType::Uint(128), // concOut
+];
+
+const KNOCKOUT_EXTERNAL_ABI: &[ParamType] = &[
+    ParamType::Bytes, // userCmd
+];
+const KNOCKOUT_INTERNAL_MINT_BURN_ABI: &[ParamType] = &[
+    ParamType::Uint(8),
+    ParamType::Address,   // base
+    ParamType::Address,   // quote
+    ParamType::Uint(256), // poolIdx
+    ParamType::Int(24),
+    ParamType::Int(24),
+    ParamType::Bool,
+    ParamType::Uint(8),
+    ParamType::Uint(256),
+    ParamType::Uint(256),
+    ParamType::Uint(128),
+    ParamType::Bool,
+];
+
+// Represents the ABI of any cmd which is not mint or burn
+const KNOCKOUT_INTERNAL_OTHER_CMD_ABI: &[ParamType] = &[
+    ParamType::Uint(8),
+    ParamType::Address,   // base
+    ParamType::Address,   // quote
+    ParamType::Uint(256), // poolIdx
+    ParamType::Int(24),
+    ParamType::Int(24),
+    ParamType::Bool,
+    ParamType::Uint(8),
+    ParamType::Uint(256),
+    ParamType::Uint(256),
+    ParamType::Uint(32),
 ];
 
 struct SlotValue {
@@ -399,6 +435,12 @@ fn map_changes(
                 // Handle TVL changes on burnAmbient() calls to the MicroPaths contract
                 // TODO: aggregate these flows with the previous balances to get new balances:
                 let (_pool_hash, _base_flow, _quote_flow) = decode_burn_ambient_call(call)?;
+            } else if call.address == AMBIENT_KNOCKOUT_CONTRACT &&
+                call.input[0..4] == USER_CMD_KNOCKOUT_FN_SIG
+            {
+                // Handle TVL changes on userCmd() calls to the KnockoutLiqPath contract
+                // TODO: aggregate these flows with the previous balances to get new balances:
+                let (_pool_hash, _base_flow, _quote_flow) = decode_knockout_call(call)?;
             }
         }
 
@@ -872,6 +914,59 @@ fn decode_burn_range_call(
                 .into_int()
                 .ok_or_else(|| anyhow!("Failed to convert quote flow to i128".to_string()))?;
 
+            Ok((pool_hash, base_flow, quote_flow))
+        } else {
+            bail!("Failed to decode burnRange call outputs.".to_string());
+        }
+    } else {
+        bail!("Failed to decode inputs for burnRange call.".to_string());
+    }
+}
+fn decode_knockout_call(
+    call: &Call,
+) -> Result<([u8; 32], ethabi::Int, ethabi::Int), anyhow::Error> {
+    if let Ok(external_cmd) = decode(KNOCKOUT_EXTERNAL_ABI, &call.input[4..]) {
+        let input_data = external_cmd[9]
+            .to_owned()
+            .into_bytes() // Convert Bytes32 to Vec<u8>
+            .ok_or_else(|| anyhow!("Failed to convert pool hash to bytes".to_string()))?;
+
+        let code = input_data[31];
+        let is_mint = code == 91;
+        let is_burn = code == 92;
+        let abi;
+
+        if is_mint || is_burn {
+            abi = KNOCKOUT_INTERNAL_MINT_BURN_ABI;
+        } else {
+            abi = KNOCKOUT_INTERNAL_OTHER_CMD_ABI;
+        }
+
+        if let Ok(mint_burn_inputs) = decode(abi, &input_data) {
+            let base_token = mint_burn_inputs[1]
+                .to_owned()
+                .into_address()
+                .ok_or_else(|| {
+                    anyhow!("Failed to convert base token to address: {:?}", &mint_burn_inputs[1])
+                })?
+                .to_fixed_bytes()
+                .to_vec();
+            let quote_token = mint_burn_inputs[2]
+                .to_owned()
+                .into_address()
+                .ok_or_else(|| {
+                    anyhow!("Failed to convert quote token to address: {:?}", &mint_burn_inputs[2])
+                })?
+                .to_fixed_bytes()
+                .to_vec();
+            let pool_index = mint_burn_inputs[3]
+                .to_owned()
+                .into_uint()
+                .ok_or_else(|| anyhow!("Failed to convert pool index to u32".to_string()))?
+                .as_u32();
+
+            let (base_flow, quote_flow) = decode_flows_from_output(call)?;
+            let pool_hash = encode_pool_hash(base_token, quote_token, pool_index);
             Ok((pool_hash, base_flow, quote_flow))
         } else {
             bail!("Failed to decode burnRange call outputs.".to_string());
