@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-use std::str::FromStr;
-
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter, EnumString};
 

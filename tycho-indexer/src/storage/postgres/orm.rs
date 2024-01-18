@@ -268,7 +268,7 @@ pub struct NewProtocolType {
     pub implementation: ImplementationType,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable, Clone)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
@@ -276,8 +276,8 @@ pub struct NewProtocolType {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolComponent {
     pub id: i64,
-    pub external_id: String,
     pub chain_id: i64,
+    pub external_id: String,
     pub protocol_type_id: i64,
     pub protocol_system_id: i64,
     pub attributes: Option<serde_json::Value>,
@@ -285,6 +285,8 @@ pub struct ProtocolComponent {
     pub deleted_at: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+    pub creation_tx: i64,
+    pub deletion_tx: Option<i64>,
 }
 #[derive(Insertable, AsChangeset, Debug)]
 #[diesel(belongs_to(Chain))]
