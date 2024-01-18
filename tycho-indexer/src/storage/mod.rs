@@ -489,7 +489,11 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
 ///   the token.
 pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
     // TODO: update to handle receiving multiple db entities to produce a single ProtocolState
-    fn from_storage(val: S, component_id: String, tx_hash: &TxHash) -> Result<Self, StorageError>;
+    fn from_storage(
+        vals: Vec<S>,
+        component_id: String,
+        tx_hash: &TxHash,
+    ) -> Result<Self, StorageError>;
 
     fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> Vec<N>;
 }

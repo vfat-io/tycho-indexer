@@ -389,18 +389,16 @@ pub mod pg {
 
     impl StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64> for evm::ProtocolState {
         fn from_storage(
-            val: orm::ProtocolState,
+            vals: Vec<orm::ProtocolState>,
             component_id: String,
             tx_hash: &TxHash,
         ) -> Result<Self, StorageError> {
-            let attr =
+            let mut attr = HashMap::new();
+            for val in vals {
                 if let (Some(name), Some(value)) = (&val.attribute_name, &val.attribute_value) {
-                    vec![(name.clone(), value.clone())]
-                        .into_iter()
-                        .collect()
-                } else {
-                    std::collections::HashMap::new()
-                };
+                    attr.insert(name.clone(), value.clone());
+                }
+            }
             Ok(evm::ProtocolState::new(
                 component_id,
                 attr,
