@@ -275,37 +275,72 @@ where
         tokens: &[&Self::Token],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        for token in tokens {
-            let chain_id = self.get_chain_id(&token.chain);
-            let hex_addr = hex::encode(token.address);
-            let new_account = NewAccount {
-                title: &format!("{}_{}", token.chain, token.symbol),
-                address: token.address.as_ref(),
-                chain_id,
-                creation_tx: None,
-                created_at: None,
-                deleted_at: None,
-            };
-            let account_id = diesel::insert_into(schema::account::table)
-                .values(&new_account)
-                .on_conflict((schema::account::address, schema::account::chain_id))
-                .do_update()
-                .set(&new_account)
-                .returning(schema::account::id)
-                .get_result::<i64>(conn)
-                .await
-                .map_err(|err| StorageError::from_diesel(err, "Account", &hex_addr, None))?;
+        let titles: Vec<String> = tokens
+            .iter()
+            .map(|token| format!("{}_{}", token.chain, token.symbol))
+            .collect();
 
-            let new_token = token.to_storage(account_id);
-            diesel::insert_into(schema::token::table)
-                .values(&new_token)
-                .on_conflict(schema::token::account_id)
-                .do_update()
-                .set(&new_token)
-                .execute(conn)
-                .await
-                .map_err(|err| StorageError::from_diesel(err, "Token", &token.symbol, None))?;
-        }
+        let new_accounts: Vec<NewAccount> = tokens
+            .iter()
+            .zip(titles.iter())
+            .map(|(token, title)| {
+                let chain_id = self.get_chain_id(&token.chain);
+                NewAccount {
+                    title,
+                    address: token.address.as_ref(),
+                    chain_id,
+                    creation_tx: None,
+                    created_at: None,
+                    deleted_at: None,
+                }
+            })
+            .collect();
+
+        diesel::insert_into(schema::account::table)
+            .values(&new_accounts)
+            .on_conflict((schema::account::address, schema::account::chain_id))
+            .do_nothing()
+            .execute(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Account", "batch", None))?;
+
+        let accounts: Vec<Account> = schema::account::table
+            .filter(
+                schema::account::address.eq_any(
+                    tokens
+                        .iter()
+                        .map(|t| t.address.as_ref()),
+                ),
+            )
+            .select(Account::as_select())
+            .get_results::<Account>(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Account", "retrieve", None))?;
+
+        let new_tokens: Vec<orm::NewToken> = tokens
+            .iter()
+            .map(|token| {
+                let account_id = accounts
+                    .iter()
+                    .find(|account| {
+                        account.address == Bytes::from(token.address.as_ref().to_vec()) &&
+                            account.chain_id == self.get_chain_id(&token.chain)
+                    })
+                    .map(|account| account.id)
+                    .expect("Account ID not found");
+
+                token.to_storage(account_id)
+            })
+            .collect();
+
+        diesel::insert_into(schema::token::table)
+            .values(&new_tokens)
+            .on_conflict(schema::token::account_id)
+            .do_nothing()
+            .execute(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Token", "batch", None))?;
+
         Ok(())
     }
 
@@ -393,6 +428,8 @@ mod test {
 
     const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+    const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
+    const WBTC: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -692,68 +729,64 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
+
+        // Insert one new token (USDT) and an existing token (WETH)
         let weth_symbol = "WETH".to_string();
-        let erc_token = ERC20Token {
-            address: H160::from_str(WETH).unwrap(),
-            symbol: weth_symbol.clone(),
-            decimals: 18,
-            tax: 0,
-            gas: vec![Some(64), None],
-            chain: Chain::Ethereum,
-        };
-        let erc_tokens: &[&ERC20Token] = &[&erc_token];
-        gw.add_tokens(erc_tokens, &mut conn)
+        let old_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
+        let old_account = &orm::Account::by_address(
+            &Bytes::from_str(WETH.trim_start_matches("0x")).expect("address ok"),
+            &mut conn,
+        )
+        .await
+        .unwrap()[0];
+
+        let usdt_symbol = "USDT".to_string();
+        let tokens = [
+            &ERC20Token {
+                address: H160::from_str(USDT).unwrap(),
+                symbol: usdt_symbol.clone(),
+                decimals: 6,
+                tax: 0,
+                gas: vec![Some(64), None],
+                chain: Chain::Ethereum,
+            },
+            &ERC20Token {
+                address: H160::from_str(WETH).unwrap(),
+                symbol: weth_symbol.clone(),
+                decimals: 18,
+                tax: 0,
+                gas: vec![Some(100), None],
+                chain: Chain::Ethereum,
+            },
+        ];
+
+        gw.add_tokens(&tokens, &mut conn)
             .await
             .unwrap();
 
-        let inserted_token = schema::token::table
-            .filter(schema::token::symbol.eq(weth_symbol.clone()))
-            .select(schema::token::all_columns)
-            .first::<orm::Token>(&mut conn)
-            .await
-            .unwrap();
+        let inserted_token = db_fixtures::get_token_by_symbol(&mut conn, usdt_symbol.clone()).await;
+        assert_eq!(inserted_token.symbol, usdt_symbol);
+        assert_eq!(inserted_token.decimals, 6);
+        let inserted_account = &orm::Account::by_address(
+            &Bytes::from_str(USDT.trim_start_matches("0x")).expect("address ok"),
+            &mut conn,
+        )
+        .await
+        .unwrap()[0];
+        assert_eq!(inserted_account.id, inserted_token.account_id);
+        assert_eq!(inserted_account.title, "ethereum_USDT".to_string());
 
-        assert_eq!(inserted_token.symbol, weth_symbol);
-        assert_eq!(inserted_token.decimals, 18);
-
-        let token_address_bytes =
-            Vec::<u8>::from_hex(WETH.trim_start_matches("0x")).expect("Invalid hex string");
-
-        let (inserted_account_id, inserted_account_title) = schema::account::table
-            .filter(schema::account::address.eq(token_address_bytes))
-            .select((schema::account::id, schema::account::title))
-            .first::<(i64, String)>(&mut conn)
-            .await
-            .unwrap();
-
-        assert_eq!(inserted_account_id, inserted_token.account_id);
-        assert_eq!(inserted_account_title, "ethereum_WETH".to_string());
-
-        // Insert the same token with different decimals
-        let new_erc_token = ERC20Token {
-            address: H160::from_str(WETH).unwrap(),
-            symbol: weth_symbol.clone(),
-            decimals: 6,
-            tax: 0,
-            gas: vec![Some(64), None],
-            chain: Chain::Ethereum,
-        };
-
-        let erc_tokens: &[&ERC20Token] = &[&new_erc_token];
-        gw.add_tokens(erc_tokens, &mut conn)
-            .await
-            .unwrap();
-
-        let inserted_tokens = schema::token::table
-            .filter(schema::token::symbol.eq(weth_symbol))
-            .select(schema::token::all_columns)
-            .get_results::<orm::Token>(&mut conn)
-            .await
-            .unwrap();
-
-        assert_eq!(inserted_tokens.len(), 1);
-        assert_eq!(inserted_tokens[0].decimals, 6);
-        assert_eq!(inserted_tokens[0].account_id, inserted_account_id);
+        // make sure nothing changed on WETH (ids included)
+        let new_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
+        assert_eq!(new_token, old_token);
+        let new_account = &orm::Account::by_address(
+            &Bytes::from_str(WETH.trim_start_matches("0x")).expect("address ok"),
+            &mut conn,
+        )
+        .await
+        .unwrap()[0];
+        assert_eq!(new_account, old_account);
+        assert!(inserted_account.id > new_account.id);
     }
 
     #[tokio::test]

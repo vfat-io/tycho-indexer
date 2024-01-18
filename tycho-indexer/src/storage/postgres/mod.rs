@@ -554,6 +554,7 @@ pub mod db_fixtures {
         orm::{FinancialType, ImplementationType},
         schema,
     };
+    use crate::storage::{orm, Code};
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -952,6 +953,15 @@ pub mod db_fixtures {
         query
             .returning(schema::token::id)
             .get_result(conn)
+            .await
+            .unwrap()
+    }
+
+    pub async fn get_token_by_symbol(conn: &mut AsyncPgConnection, symbol: String) -> orm::Token {
+        schema::token::table
+            .filter(schema::token::symbol.eq(symbol.clone()))
+            .select(schema::token::all_columns)
+            .first::<orm::Token>(conn)
             .await
             .unwrap()
     }
