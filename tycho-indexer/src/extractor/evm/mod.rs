@@ -737,7 +737,8 @@ impl ProtocolStateUpdate {
     /// The method combines two `ProtocolState` instances if they are for the same
     /// protocol component.
     ///
-    /// The merged update keeps the transaction of `other`.
+    /// NB: It is assumed that `other` is a more recent update than `self` is and the two are
+    /// combined accordingly.
     ///
     /// # Errors
     /// This method will return `ExtractionError::MergeError` if any of the above
