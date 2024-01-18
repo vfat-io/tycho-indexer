@@ -16,14 +16,17 @@ use crate::{
     storage::{
         postgres::{
             orm,
-            orm::{Account, NewAccount},
+            orm::{Account, NewAccount, Token},
             schema,
             schema::chain,
             PostgresGateway,
         },
-        Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ProtocolGateway,
-        StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolState,
-        StorableProtocolType, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+        Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ContractId,
+        ProtocolGateway, StorableBlock, StorableContract, StorableProtocolComponent,
+        StorableProtocolState, StorableProtocolType, StorableToken, StorableTransaction,
+        StorageError,
+        StorageError::DecodeError,
+        TxHash, Version,
     },
 };
 
@@ -238,7 +241,33 @@ where
         addresses: Option<&[&Address]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError> {
-        todo!()
+        use super::schema::{account::dsl::*, token::dsl::*};
+
+        let mut query = token
+            .inner_join(account)
+            .select((token::all_columns(), schema::account::chain_id, schema::account::address))
+            .into_boxed();
+
+        if let Some(addrs) = addresses {
+            query = query.filter(schema::account::address.eq_any(addrs));
+        }
+
+        let results = query
+            .load::<(orm::Token, i64, Address)>(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Token", "la", None))?;
+
+        let tokens: Result<Vec<Self::Token>, StorageError> = results
+            .into_iter()
+            .map(|(orm_token, chain_id_, address_)| {
+                let chain = self.get_chain(&chain_id_);
+                let contract_id = ContractId::new(chain, address_);
+
+                ERC20Token::from_storage(orm_token, contract_id)
+                    .map_err(|err| StorageError::DecodeError(err.to_string()))
+            })
+            .collect();
+        tokens
     }
 
     async fn add_tokens(
@@ -361,6 +390,9 @@ mod test {
         evm::AccountUpdate,
         evm::ERC20Token,
     >;
+
+    const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+    const USDC: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -618,6 +650,41 @@ mod test {
 
     async fn setup_data(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        let weth_id =
+            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
+                .await;
+        let usdc_id =
+            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
+                .await;
+    }
+    #[tokio::test]
+    async fn test_get_tokens() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        // get all tokens (no address filter)
+        let tokens = gw
+            .get_tokens(Chain::Ethereum, None, &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(tokens.len(), 2);
+
+        // get weth and usdc
+        let tokens = gw
+            .get_tokens(Chain::Ethereum, Some(&[&WETH.into(), &USDC.into()]), &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(tokens.len(), 2);
+
+        // get weth
+        let tokens = gw
+            .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].symbol, "WETH".to_string());
+        assert_eq!(tokens[0].decimals, 18);
     }
 
     #[tokio::test]
@@ -625,10 +692,10 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-        let token_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".into();
+        let weth_symbol = "WETH".to_string();
         let erc_token = ERC20Token {
-            address: H160::from_str(token_address).unwrap(),
-            symbol: "WETH".to_string(),
+            address: H160::from_str(WETH).unwrap(),
+            symbol: weth_symbol.clone(),
             decimals: 18,
             tax: 0,
             gas: vec![Some(64), None],
@@ -640,17 +707,17 @@ mod test {
             .unwrap();
 
         let inserted_token = schema::token::table
-            .filter(schema::token::symbol.eq("WETH".to_string()))
+            .filter(schema::token::symbol.eq(weth_symbol.clone()))
             .select(schema::token::all_columns)
             .first::<orm::Token>(&mut conn)
             .await
             .unwrap();
 
-        assert_eq!(inserted_token.symbol, "WETH".to_string());
+        assert_eq!(inserted_token.symbol, weth_symbol);
         assert_eq!(inserted_token.decimals, 18);
 
-        let token_address_bytes = Vec::<u8>::from_hex(token_address.trim_start_matches("0x"))
-            .expect("Invalid hex string");
+        let token_address_bytes =
+            Vec::<u8>::from_hex(WETH.trim_start_matches("0x")).expect("Invalid hex string");
 
         let (inserted_account_id, inserted_account_title) = schema::account::table
             .filter(schema::account::address.eq(token_address_bytes))
@@ -664,8 +731,8 @@ mod test {
 
         // Insert the same token with different decimals
         let new_erc_token = ERC20Token {
-            address: H160::from_str(token_address).unwrap(),
-            symbol: "WETH".to_string(),
+            address: H160::from_str(WETH).unwrap(),
+            symbol: weth_symbol.clone(),
             decimals: 6,
             tax: 0,
             gas: vec![Some(64), None],
@@ -678,7 +745,7 @@ mod test {
             .unwrap();
 
         let inserted_tokens = schema::token::table
-            .filter(schema::token::symbol.eq("WETH".to_string()))
+            .filter(schema::token::symbol.eq(weth_symbol))
             .select(schema::token::all_columns)
             .get_results::<orm::Token>(&mut conn)
             .await

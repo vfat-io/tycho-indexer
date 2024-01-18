@@ -932,4 +932,27 @@ pub mod db_fixtures {
             .await
             .expect("protocol state insert ok");
     }
+
+    pub async fn insert_token(
+        conn: &mut AsyncPgConnection,
+        chain_id: i64,
+        address: &str,
+        symbol: &str,
+        decimals: i32,
+    ) -> i64 {
+        let account_id = insert_account(conn, address, "token", chain_id, None).await;
+
+        let query = diesel::insert_into(schema::token::table).values((
+            schema::token::account_id.eq(account_id),
+            schema::token::symbol.eq(symbol),
+            schema::token::decimals.eq(decimals),
+            schema::token::tax.eq(10),
+            schema::token::gas.eq(vec![10]),
+        ));
+        query
+            .returning(schema::token::id)
+            .get_result(conn)
+            .await
+            .unwrap()
+    }
 }

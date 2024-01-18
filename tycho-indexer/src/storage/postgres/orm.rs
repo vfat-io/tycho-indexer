@@ -520,7 +520,7 @@ pub struct NewAccount<'a> {
     pub deleted_at: Option<NaiveDateTime>,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name = token)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
