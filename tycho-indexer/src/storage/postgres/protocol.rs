@@ -32,8 +32,8 @@ where
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
-    /// Decodes a ProtocolStates database result. Combines all matching protocol state db entities and
-    /// returns a list containing one ProtocolState per component.
+    /// Decodes a ProtocolStates database result. Combines all matching protocol state db entities
+    /// and returns a list containing one ProtocolState per component.
     fn _decode_protocol_states(
         &self,
         result: Result<Vec<(orm::ProtocolState, String, orm::Transaction)>, diesel::result::Error>,
@@ -55,9 +55,9 @@ where
                         let transaction = data.2;
                         let latest_tx = match latest_tx {
                             Some(latest)
-                                if latest.block_id < transaction.block_id
-                                    || (latest.block_id == transaction.block_id
-                                        && latest.index < transaction.index) =>
+                                if latest.block_id < transaction.block_id ||
+                                    (latest.block_id == transaction.block_id &&
+                                        latest.index < transaction.index) =>
                             {
                                 Some(transaction)
                             }
