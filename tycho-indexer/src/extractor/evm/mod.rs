@@ -507,6 +507,10 @@ pub struct ProtocolComponent {
     pub static_attributes: HashMap<String, Bytes>,
     // the type of change (creation, deletion etc)
     pub change: ChangeType,
+    // Hash of the transaction in which the component got created
+    pub creation_tx: H256,
+    // Time at which the component got created
+    pub created_at: NaiveDateTime,
 }
 
 /// A type representing the unique identifier for a contract. It can represent an on-chain address
@@ -524,6 +528,8 @@ impl ProtocolComponent {
         chain: Chain,
         protocol_system: ProtocolSystem,
         protocol_type_id: String,
+        tx_hash: H256,
+        creation_ts: NaiveDateTime,
     ) -> Result<Self, ExtractionError> {
         let id = ContractId(msg.id.clone());
 
@@ -557,6 +563,8 @@ impl ProtocolComponent {
             static_attributes,
             chain,
             change: msg.change().into(),
+            creation_tx: tx_hash,
+            created_at: creation_ts,
         })
     }
 }
@@ -601,6 +609,8 @@ impl BlockContractChanges {
                             chain,
                             protocol_system,
                             protocol_type_id.clone(),
+                            tx.hash,
+                            block.ts,
                         )?;
                         protocol_components.push(component);
                     }
@@ -876,6 +886,8 @@ impl BlockEntityChanges {
                             chain,
                             protocol_system,
                             protocol_type_id.clone(),
+                            tx.hash,
+                            block.ts,
                         )?;
                         new_protocol_components.insert(pool.clone().id.0, pool);
                     }
@@ -1437,6 +1449,8 @@ mod test {
                 ("key2".to_string(), Bytes::from(b"value2".to_vec())),
             ]),
             change: ChangeType::Creation,
+            creation_tx: tx.hash,
+            created_at: Default::default(),
         };
         BlockContractChanges {
             extractor: "test".to_string(),
@@ -1525,6 +1539,11 @@ mod test {
             .cloned()
             .collect(),
             change: ChangeType::Creation,
+            creation_tx: H256::from_str(
+                "0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac",
+            )
+            .unwrap(),
+            created_at: Default::default(),
         };
         BlockAccountChanges::new(
             "test",
@@ -1839,6 +1858,8 @@ mod test {
                     H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
                 ],
                 change: ChangeType::Creation,
+                creation_tx: tx.hash,
+                created_at: Default::default(),
             },
         )]
         .into_iter()
@@ -1947,6 +1968,8 @@ mod test {
                     H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
                 ],
                 change: ChangeType::Creation,
+                creation_tx: tx.hash,
+                created_at: Default::default(),
             },
         )]
         .into_iter()
@@ -2018,6 +2041,9 @@ mod test {
             expected_chain,
             expected_protocol_system,
             protocol_type_id.clone(),
+            H256::from_str("0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac")
+                .unwrap(),
+            Default::default(),
         );
 
         // Assert the result

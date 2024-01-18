@@ -333,6 +333,7 @@ pub mod pg {
             contract_ids: Vec<H160>,
             chain: Chain,
             protocol_system: models::ProtocolSystem,
+            transaction_hash: H256,
         ) -> Result<Self, StorageError> {
             let mut static_attributes: HashMap<String, Bytes> = HashMap::default();
 
@@ -352,6 +353,8 @@ pub mod pg {
                 contract_ids,
                 static_attributes,
                 change: Default::default(),
+                creation_tx: transaction_hash,
+                created_at: val.created_at,
             })
         }
 
@@ -460,7 +463,7 @@ mod test {
         storage::{ContractId, StorableProtocolComponent},
     };
     use chrono::Utc;
-    use ethers::prelude::H160;
+    use ethers::prelude::{H160, H256};
     use std::str::FromStr;
 
     #[test]
@@ -541,6 +544,8 @@ mod test {
             contract_ids.clone(),
             chain,
             protocol_system,
+            H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
+                .unwrap(),
         );
 
         assert!(result.is_ok());
@@ -585,6 +590,11 @@ mod test {
                 map
             },
             change: Default::default(),
+            creation_tx: H256::from_str(
+                "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+            )
+            .unwrap(),
+            created_at: Default::default(),
         };
 
         let chain_id = 1;

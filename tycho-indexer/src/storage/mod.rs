@@ -74,7 +74,7 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use ethers::prelude::H160;
+use ethers::prelude::{H160, H256};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -736,6 +736,7 @@ pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
         contract_ids: Vec<H160>,
         chain: Chain,
         protocol_system: ProtocolSystem,
+        transaction_hash: H256,
     ) -> Result<Self, StorageError>;
 
     fn to_storage(

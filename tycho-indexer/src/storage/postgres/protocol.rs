@@ -191,7 +191,8 @@ mod test {
 
     use super::*;
     use crate::storage::postgres::db_fixtures;
-    use std::collections::HashMap;
+    use ethers::prelude::H256;
+    use std::{collections::HashMap, str::FromStr};
 
     type EVMGateway = PostgresGateway<
         evm::Block,
@@ -349,6 +350,11 @@ mod test {
             contract_ids: vec![],
             static_attributes: HashMap::new(),
             change: ChangeType::Creation,
+            creation_tx: H256::from_str(
+                "0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac",
+            )
+            .unwrap(),
+            created_at: Default::default(),
         };
 
         // Call the function under test
@@ -397,6 +403,11 @@ mod test {
             contract_ids: vec![],
             static_attributes: HashMap::new(),
             change: ChangeType::Creation,
+            creation_tx: H256::from_str(
+                "0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac",
+            )
+            .unwrap(),
+            created_at: Default::default(),
         };
 
         let result = gw
