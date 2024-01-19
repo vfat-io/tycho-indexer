@@ -539,8 +539,6 @@ pub trait ProtocolGateway {
 
     type ProtocolType: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>;
 
-    // TODO: uncomment below when StorableProtocolComponent is implemented (ENG 1728)
-    // type ProtocolComponent;
     type ProtocolComponent: StorableProtocolComponent<
         orm::ProtocolComponent,
         orm::NewProtocolComponent,
@@ -556,7 +554,7 @@ pub trait ProtocolGateway {
     ///
     /// # Returns
     /// Ok, if found else Err
-    async fn get_components(
+    async fn get_protocol_components(
         &self,
         chain: &Chain,
         system: Option<ProtocolSystem>,

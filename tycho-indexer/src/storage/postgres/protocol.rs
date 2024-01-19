@@ -96,7 +96,7 @@ where
     type ProtocolType = ProtocolType;
     type ProtocolComponent = ProtocolComponent;
 
-    async fn get_components(
+    async fn get_protocol_components(
         &self,
         chain: &Chain,
         system: Option<ProtocolSystem>,
@@ -117,7 +117,7 @@ where
             .map(|pc| pc.creation_tx.into())
             .collect();
         let tx_hash_id_mapping: HashMap<TxHash, i64> =
-            orm::Transaction::db_id_by_hash(&tx_hashes, conn)
+            orm::Transaction::id_by_hash(&tx_hashes, conn)
                 .await
                 .unwrap();
 
