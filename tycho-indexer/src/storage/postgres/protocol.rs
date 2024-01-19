@@ -22,8 +22,8 @@ use crate::{
     storage::{
         postgres::{orm, schema, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableProtocolState, StorableProtocolType, StorableToken,
-        StorableTransaction, StorageError, TxHash, Version,
+        StorableContract, StorableProtocolState, StorableProtocolStateDelta, StorableProtocolType,
+        StorableToken, StorableTransaction, StorageError, TxHash, Version,
     },
 };
 
@@ -185,7 +185,7 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let chain_db_id = self.get_chain_id(chain);
-        let txns: HashMap<H256, (i64, NaiveDateTime)> = orm::Transaction::by_hashes(
+        let txns: HashMap<H256, (orm::Transaction, NaiveDateTime)> = orm::Transaction::by_hashes(
             new.iter()
                 .map(|state| state.modify_tx.as_bytes())
                 .collect::<Vec<&[u8]>>()
@@ -195,7 +195,7 @@ where
         .await?
         .into_iter()
         .map(|(tx, ts)| {
-            (H256::try_decode(&tx.hash, "tx hash").expect("Failed to decode tx hash"), (tx.id, ts))
+            (H256::try_decode(&tx.hash, "tx hash").expect("Failed to decode tx hash"), (tx, ts))
         })
         .collect();
 
@@ -211,19 +211,61 @@ where
         .map(|component| (component.external_id.clone(), component.id))
         .collect();
 
-        let mut state_data = Vec::new();
+        let mut state_data: Vec<(orm::NewProtocolState, i64)> = Vec::new();
 
         for state in new {
-            let tx_db = *txns
+            let tx_db = txns
                 .get(&state.modify_tx)
                 .expect("Failed to find tx");
             let component_db_id = *components
                 .get(&state.component_id)
                 .expect("Failed to find component");
-            let mut db_states = ProtocolState::to_storage(state, component_db_id, tx_db.0, tx_db.1);
-            state_data.append(&mut db_states);
+            let mut new_states: Vec<(orm::NewProtocolState, i64)> =
+                ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0.id, tx_db.1)
+                    .into_iter()
+                    .map(|state| (state, tx_db.0.index))
+                    .collect();
+
+            // check if an update for the new protocol states already exist. If so, set the older
+            // one as invalid (set its valid_to timestamp)
+            new_states
+                .iter_mut()
+                .for_each(|(new_state, tx_index)| {
+                    // Find existing states with same protocol_component_id and attribute_name and
+                    // 'valid_to' is None
+                    if let Some((matching_state, matching_index)) =
+                        state_data
+                            .iter_mut()
+                            .find(|(existing_state, existing_index)| {
+                                existing_state.protocol_component_id
+                                    == new_state.protocol_component_id
+                                    && existing_state.attribute_name == new_state.attribute_name
+                                    && existing_state.valid_to.is_none()
+                            })
+                    {
+                        // Update 'valid_to' of the older of the matching states
+                        if matching_state.valid_from < new_state.valid_from {
+                            matching_state.valid_to = Some(new_state.valid_from);
+                        } else if matching_state.valid_from > new_state.valid_from {
+                            new_state.valid_to = Some(matching_state.valid_from);
+                        } else if matching_index < tx_index {
+                            matching_state.valid_to = Some(new_state.valid_from);
+                        } else {
+                            new_state.valid_to = Some(matching_state.valid_from);
+                        }
+                    }
+                });
+            state_data.append(&mut new_states);
         }
 
+        let state_data: Vec<orm::NewProtocolState> = state_data
+            .into_iter()
+            .map(|(state, _index)| state)
+            .collect();
+
+        // TODO: invalidate newly outdated protocol states already in the db (ENG-2682)
+
+        // insert the prepared protocol state deltas
         if !state_data.is_empty() {
             diesel::insert_into(schema::protocol_state::table)
                 .values(&state_data)
@@ -392,6 +434,15 @@ mod test {
             txn[0],
         )
         .await;
+        let protocol_component_id2 = db_fixtures::insert_protocol_component(
+            conn,
+            "state2",
+            chain_id,
+            protocol_system_id,
+            protocol_type_id,
+            txn[0],
+        )
+        .await;
 
         // protocol state for state1-reserve1
         db_fixtures::insert_protocol_state(
@@ -437,7 +488,7 @@ mod test {
         ProtocolState::new(
             "state1".to_owned(),
             attributes,
-            "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
+            "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
                 .parse()
                 .unwrap(),
         )
@@ -502,41 +553,99 @@ mod test {
         assert_eq!(result, expected)
     }
 
+    fn protocol_state_delta() -> ProtocolStateDelta {
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+        ]
+        .into_iter()
+        .collect();
+        ProtocolStateDelta::new(
+            "state2".to_owned(),
+            attributes,
+            "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
+                .parse()
+                .unwrap(),
+        )
+    }
+
     #[tokio::test]
-    async fn test_protocol_update_states() {
+    async fn test_update_protocol_states() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
 
         let gateway = EVMGateway::from_connection(&mut conn).await;
         let chain = Chain::Ethereum;
 
-        let mut new_state = protocol_state();
-        let attributes: HashMap<String, Bytes> = vec![
+        // update
+        let mut new_state1 = protocol_state_delta();
+        let attributes1: HashMap<String, Bytes> = vec![
             ("reserve1".to_owned(), Bytes::from(U256::from(700))),
             ("reserve2".to_owned(), Bytes::from(U256::from(700))),
         ]
         .into_iter()
         .collect();
-        new_state.updated_attributes = attributes;
+        new_state1.updated_attributes = attributes1.clone();
+        new_state1.modify_tx = "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
+            .parse()
+            .unwrap();
+
+        // newer update
+        let mut new_state2 = protocol_state_delta();
+        let attributes2: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(800))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(800))),
+        ]
+        .into_iter()
+        .collect();
+        new_state2.updated_attributes = attributes2.clone();
 
         // update the protocol state
         gateway
-            .update_protocol_states(&chain, &[new_state.clone()], &mut conn)
+            .update_protocol_states(&chain, &[new_state1.clone(), new_state2.clone()], &mut conn)
             .await
             .expect("Failed to update protocol states");
 
-        // check the orginal state and the updated one both exist in the db
+        // check the correct state is considered the valid one
         let db_states = gateway
             .get_protocol_states(
                 &chain,
                 None,
                 None,
-                Some(&[new_state.component_id.as_str()]),
+                Some(&[new_state1.component_id.as_str()]),
                 &mut conn,
             )
             .await
             .expect("Failed ");
-        assert_eq!(db_states.len(), 1)
+        let mut expected_state = protocol_state();
+        expected_state.attributes = attributes2;
+        expected_state.component_id = new_state1.component_id.clone();
+        assert_eq!(db_states[0], expected_state);
+
+        // fetch the older state from the db and check it's valid_to is set correctly
+        let tx_hash1: Bytes = new_state1.modify_tx.as_bytes().into();
+        let older_state = schema::protocol_state::table
+            .inner_join(schema::protocol_component::table)
+            .inner_join(schema::transaction::table)
+            .filter(schema::transaction::hash.eq(tx_hash1))
+            .filter(schema::protocol_component::external_id.eq(new_state1.component_id.as_str()))
+            .select(orm::ProtocolState::as_select())
+            .first::<orm::ProtocolState>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol state");
+        assert_eq!(older_state.attribute_value, Some(Bytes::from(U256::from(700))));
+        // fetch the newer state from the db to compare the valid_from
+        let tx_hash2: Bytes = new_state2.modify_tx.as_bytes().into();
+        let newer_state = schema::protocol_state::table
+            .inner_join(schema::protocol_component::table)
+            .inner_join(schema::transaction::table)
+            .filter(schema::transaction::hash.eq(tx_hash2))
+            .filter(schema::protocol_component::external_id.eq(new_state1.component_id.as_str()))
+            .select(orm::ProtocolState::as_select())
+            .first::<orm::ProtocolState>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol state");
+        assert_eq!(older_state.valid_to, Some(newer_state.valid_from));
     }
 
     #[tokio::test]
