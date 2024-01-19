@@ -252,6 +252,7 @@ where
         }
 
         let results = query
+            .order(schema::token::symbol.asc())
             .load::<(orm::Token, i64, Address)>(conn)
             .await
             .map_err(|err| StorageError::from_diesel(err, "Token", &chain.to_string(), None))?;
@@ -317,16 +318,16 @@ where
             .await
             .map_err(|err| StorageError::from_diesel(err, "Account", "retrieve", None))?;
 
-        let account_map: HashMap<(Bytes, i64), i64> = accounts
+        let account_map: HashMap<(Vec<u8>, i64), i64> = accounts
             .iter()
-            .map(|account| ((account.address.clone(), account.chain_id), account.id))
+            .map(|account| ((account.address.clone().to_vec(), account.chain_id), account.id))
             .collect();
 
         let new_tokens: Vec<orm::NewToken> = tokens
             .iter()
             .map(|token| {
                 let token_chain_id = self.get_chain_id(&token.chain);
-                let account_key = (Bytes::from(token.address.as_bytes()), token_chain_id);
+                let account_key = (token.address.as_ref().to_vec(), token_chain_id);
 
                 let account_id = *account_map
                     .get(&account_key)
