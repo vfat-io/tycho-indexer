@@ -1,5 +1,4 @@
 #![allow(unused_variables)]
-#![allow(unused_imports)]
 
 use std::collections::HashMap;
 
@@ -8,22 +7,16 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use ethers::types::H256;
-use ethers::{
-    abi::Hash,
-    types::{transaction, Transaction},
-};
-use serde_json::Value;
 use tracing::warn;
 
 use crate::{
     extractor::evm::{utils::TryDecode, ProtocolState, ProtocolStateDelta},
-    hex_bytes::Bytes,
     models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
         postgres::{orm, schema, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
         StorableContract, StorableProtocolState, StorableProtocolStateDelta, StorableProtocolType,
-        StorableToken, StorableTransaction, StorageError, TxHash, Version,
+        StorableToken, StorableTransaction, StorageError, Version,
     },
 };
 
@@ -58,9 +51,9 @@ where
                         let transaction = data.2;
                         let latest_tx = match latest_tx {
                             Some(latest)
-                                if latest.block_id < transaction.block_id
-                                    || (latest.block_id == transaction.block_id
-                                        && latest.index < transaction.index) =>
+                                if latest.block_id < transaction.block_id ||
+                                    (latest.block_id == transaction.block_id &&
+                                        latest.index < transaction.index) =>
                             {
                                 Some(transaction)
                             }
@@ -237,10 +230,10 @@ where
                         state_data
                             .iter_mut()
                             .find(|(existing_state, existing_index)| {
-                                existing_state.protocol_component_id
-                                    == new_state.protocol_component_id
-                                    && existing_state.attribute_name == new_state.attribute_name
-                                    && existing_state.valid_to.is_none()
+                                existing_state.protocol_component_id ==
+                                    new_state.protocol_component_id &&
+                                    existing_state.attribute_name == new_state.attribute_name &&
+                                    existing_state.valid_to.is_none()
                             })
                     {
                         // Update 'valid_to' of the older of the matching states
@@ -349,16 +342,15 @@ mod test {
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
     use rstest::rstest;
-    use serde_json::{json, Value};
+    use serde_json::json;
 
     use crate::{
         extractor::evm,
+        hex_bytes::Bytes,
         models,
         models::{FinancialType, ImplementationType},
         storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
     };
-
-    use super::*;
 
     type EVMGateway = PostgresGateway<
         evm::Block,
@@ -470,7 +462,7 @@ mod test {
         db_fixtures::insert_protocol_state(
             conn,
             protocol_component_id,
-            txn[2],
+            txn[3],
             "reserve1".to_owned(),
             Bytes::from(U256::from(1000)),
             None,
