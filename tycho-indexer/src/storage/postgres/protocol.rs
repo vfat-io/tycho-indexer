@@ -111,7 +111,7 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::protocol_component::dsl::*;
-        let mut values: Vec<orm::NewProtocolComponent> = vec![];
+        let mut values: Vec<orm::NewProtocolComponent> = Vec::with_capacity(new.len());
         let tx_hashes: Vec<TxHash> = new
             .iter()
             .map(|pc| pc.creation_tx.into())
