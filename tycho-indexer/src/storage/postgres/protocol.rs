@@ -10,9 +10,9 @@ use ethers::types::{transaction, Transaction};
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ERC20Token, ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    extractor::evm::{ERC20Token, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
-    models::{Chain, ProtocolType},
+    models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
         postgres::{
             orm,
@@ -21,10 +21,9 @@ use crate::{
             schema::chain,
             PostgresGateway,
         },
-        Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ContractId,
-        ProtocolGateway, StorableBlock, StorableContract, StorableProtocolComponent,
-        StorableProtocolState, StorableProtocolType, StorableToken, StorableTransaction,
-        StorageError,
+        Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ContractId, ProtocolGateway,
+        StorableBlock, StorableContract, StorableProtocolState, StorableProtocolType,
+        StorableToken, StorableTransaction, StorageError,
         StorageError::DecodeError,
         TxHash, Version,
     },
@@ -530,6 +529,14 @@ mod test {
             None,
         )
         .await;
+
+        // insert tokens
+        let weth_id =
+            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
+                .await;
+        let usdc_id =
+            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
+                .await;
     }
 
     fn protocol_state() -> ProtocolState {
@@ -684,15 +691,6 @@ mod test {
         assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
     }
 
-    async fn setup_data(conn: &mut AsyncPgConnection) {
-        let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
-        let weth_id =
-            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
-                .await;
-        let usdc_id =
-            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
-                .await;
-    }
     #[tokio::test]
     async fn test_get_tokens() {
         let mut conn = setup_db().await;
