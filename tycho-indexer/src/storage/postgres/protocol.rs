@@ -609,6 +609,7 @@ mod test {
         use crate::storage::postgres::schema::protocol_component::dsl::*;
         let inserted_data = protocol_component
             .filter(external_id.eq("test_contract_id"))
+            .select(schema::protocol_component::all_columns)
             .first::<orm::ProtocolComponent>(&mut conn)
             .await;
 
