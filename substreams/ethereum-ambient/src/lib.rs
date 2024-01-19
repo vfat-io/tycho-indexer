@@ -336,15 +336,19 @@ fn map_changes(
                                 .to_fixed_bytes()
                                 .to_vec();
 
-                            let pool_index = internal_params[3]
+                            let mut pool_index_buf = [0u8; 32];
+                            internal_params[3]
                                 .to_owned()
                                 .into_uint()
                                 .ok_or_else(|| anyhow!("Failed to convert to u32".to_string()))?
-                                .as_u32();
+                                .to_big_endian(&mut pool_index_buf);
+                            let pool_index = pool_index_buf.to_vec();
+                            let pool_hash =
+                                encode_pool_hash(base.clone(), quote.clone(), pool_index.clone());
 
                             let static_attribute = tycho::Attribute {
                                 name: String::from("pool_index"),
-                                value: pool_index.to_be_bytes().to_vec(),
+                                value: pool_index,
                                 change: tycho::ChangeType::Creation.into(),
                             };
 
@@ -352,12 +356,7 @@ fn map_changes(
                             tokens.sort();
 
                             let new_component = tycho::ProtocolComponent {
-                                id: format!(
-                                    "{}{}{}",
-                                    hex::encode(base.clone()),
-                                    hex::encode(quote.clone()),
-                                    pool_index
-                                ),
+                                id: hex::encode(pool_hash),
                                 tokens,
                                 contracts: vec![AMBIENT_CONTRACT.to_vec()],
                                 static_att: vec![static_attribute],
@@ -622,13 +621,13 @@ fn map_changes(
     Ok(block_changes)
 }
 
-fn encode_pool_hash(token_x: Vec<u8>, token_y: Vec<u8>, pool_idx: u32) -> [u8; 32] {
+fn encode_pool_hash(token_x: Vec<u8>, token_y: Vec<u8>, pool_idx: Vec<u8>) -> [u8; 32] {
     let mut keccak = Keccak::v256();
 
     let mut data = Vec::new();
     data.extend_from_slice(&token_x);
     data.extend_from_slice(&token_y);
-    data.extend_from_slice(&pool_idx.to_be_bytes());
+    data.extend_from_slice(&pool_idx);
 
     let mut output = [0u8; 32];
     keccak.update(&data);
@@ -664,13 +663,15 @@ fn decode_direct_swap_call(
             .to_fixed_bytes()
             .to_vec();
 
-        let pool_index = external_input_params[2]
+        let mut pool_index_buf = [0u8; 32];
+        external_input_params[2]
             .to_owned()
             .into_uint()
             .ok_or_else(|| {
                 anyhow!("Failed to convert pool index to u32 for direct swap call".to_string())
             })?
-            .as_u32();
+            .to_big_endian(&mut pool_index_buf);
+        let pool_index = pool_index_buf.to_vec();
 
         let (base_flow, quote_flow) = decode_flows_from_output(call)?;
         let pool_hash = encode_pool_hash(base_token, quote_token, pool_index);
@@ -796,13 +797,18 @@ fn decode_warm_path_user_cmd_call(
             })?
             .to_fixed_bytes()
             .to_vec();
-        let pool_index = liquidity_change_calldata[3]
+
+        let mut pool_index_buf = [0u8; 32];
+        liquidity_change_calldata[3]
             .to_owned()
             .into_uint()
             .ok_or_else(|| {
-                anyhow!("Failed to convert pool index to u32 for WarmPath userCmd call".to_string())
+                anyhow!(
+                    "Failed to convert pool index to bytes for WarmPath userCmd call".to_string()
+                )
             })?
-            .as_u32();
+            .to_big_endian(&mut pool_index_buf);
+        let pool_index = pool_index_buf.to_vec();
 
         let (base_flow, quote_flow) = decode_flows_from_output(call)?;
         let pool_hash = encode_pool_hash(base_token, quote_token, pool_index);
@@ -847,7 +853,7 @@ fn decode_mint_range_call(
             let quote_flow = external_outputs[1]
                 .to_owned()
                 .into_int() // Needs conversion into bytes for next step
-                .ok_or_else(|| anyhow!("Failed to convert quote floww to i128".to_string()))?;
+                .ok_or_else(|| anyhow!("Failed to convert quote flow to i128".to_string()))?;
             Ok((pool_hash, base_flow, quote_flow))
         } else {
             bail!("Failed to decode swap call outputs.".to_string());
@@ -966,7 +972,10 @@ fn decode_knockout_call(
                 .to_owned()
                 .into_address()
                 .ok_or_else(|| {
-                    anyhow!("Failed to convert base token to address: {:?}", &mint_burn_inputs[1])
+                    anyhow!(
+                        "Failed to convert base token to address for knockout call: {:?}",
+                        &mint_burn_inputs[1]
+                    )
                 })?
                 .to_fixed_bytes()
                 .to_vec();
@@ -974,23 +983,31 @@ fn decode_knockout_call(
                 .to_owned()
                 .into_address()
                 .ok_or_else(|| {
-                    anyhow!("Failed to convert quote token to address: {:?}", &mint_burn_inputs[2])
+                    anyhow!(
+                        "Failed to convert quote token to address for knockout call: {:?}",
+                        &mint_burn_inputs[2]
+                    )
                 })?
                 .to_fixed_bytes()
                 .to_vec();
-            let pool_index = mint_burn_inputs[3]
+
+            let mut pool_index_buf = [0u8; 32];
+            mint_burn_inputs[3]
                 .to_owned()
                 .into_uint()
-                .ok_or_else(|| anyhow!("Failed to convert pool index to u32".to_string()))?
-                .as_u32();
+                .ok_or_else(|| {
+                    anyhow!("Failed to convert pool index to bytes for knockout call".to_string())
+                })?
+                .to_big_endian(&mut pool_index_buf);
+            let pool_index = pool_index_buf.to_vec();
 
             let (base_flow, quote_flow) = decode_flows_from_output(call)?;
             let pool_hash = encode_pool_hash(base_token, quote_token, pool_index);
             Ok((pool_hash, base_flow, quote_flow))
         } else {
-            bail!("Failed to decode burnRange call outputs.".to_string());
+            bail!("Failed to decode knockout call outputs.".to_string());
         }
     } else {
-        bail!("Failed to decode inputs for burnRange call.".to_string());
+        bail!("Failed to decode inputs for knockout call.".to_string());
     }
 }
