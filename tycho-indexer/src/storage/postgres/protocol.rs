@@ -122,10 +122,9 @@ where
                 .unwrap();
 
         for pc in new {
-            let tx_hash = match tx_hash_id_mapping.get::<TxHash>(&pc.creation_tx.into()) {
-                Some(hash) => hash.to_owned(),
-                None => return Err(StorageError::DecodeError("TxHash not found".to_string())),
-            };
+            let txh = tx_hash_id_mapping
+                .get(&pc.creation_tx.into())
+                .ok_or(StorageError::DecodeError("TxHash not found".to_string()))?;
 
             let new_pc = pc
                 .to_storage(
