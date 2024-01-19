@@ -288,6 +288,7 @@ pub struct ProtocolComponent {
     pub creation_tx: i64,
     pub deletion_tx: Option<i64>,
 }
+
 #[derive(Insertable, AsChangeset, Debug)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]

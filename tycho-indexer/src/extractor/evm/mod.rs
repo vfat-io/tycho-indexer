@@ -893,6 +893,7 @@ impl BlockEntityChanges {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
                     let tx_update =
                         ProtocolStateDeltasWithTx::try_from_message(change.entity_changes, tx)?;
+                    println!("{:?}", tx.hash);
                     state_updates.push(tx_update);
                     for component in change.component_changes {
                         let pool = ProtocolComponent::try_from_message(
@@ -1187,6 +1188,31 @@ pub mod fixtures {
                             ],
                         },
                     ],
+                    component_changes: vec![],
+                    balance_changes: vec![],
+                },
+                TransactionEntityChanges {
+                    tx: Some(Transaction {
+                        hash: vec![0x11, 0x12, 0x13, 0x14],
+                        from: vec![0x41, 0x42, 0x43, 0x44],
+                        to: vec![0x51, 0x52, 0x53, 0x54],
+                        index: 11,
+                    }),
+                    entity_changes: vec![EntityChanges {
+                        component_id: "State1".to_owned(),
+                        attributes: vec![
+                            Attribute {
+                                name: "reserve".to_owned(),
+                                value: 600_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Update.into(),
+                            },
+                            Attribute {
+                                name: "new".to_owned(),
+                                value: 0_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Update.into(),
+                            },
+                        ],
+                    }],
                     component_changes: vec![ProtocolComponent {
                         id: "Pool".to_owned(),
                         tokens: vec![
@@ -1218,31 +1244,6 @@ pub mod fixtures {
                             implementation_type: 0,
                         }),
                     }],
-                    balance_changes: vec![],
-                },
-                TransactionEntityChanges {
-                    tx: Some(Transaction {
-                        hash: vec![0x11, 0x12, 0x13, 0x14],
-                        from: vec![0x41, 0x42, 0x43, 0x44],
-                        to: vec![0x51, 0x52, 0x53, 0x54],
-                        index: 11,
-                    }),
-                    entity_changes: vec![EntityChanges {
-                        component_id: "State1".to_owned(),
-                        attributes: vec![
-                            Attribute {
-                                name: "reserve".to_owned(),
-                                value: 600_u64.to_be_bytes().to_vec(),
-                                change: ChangeType::Update.into(),
-                            },
-                            Attribute {
-                                name: "new".to_owned(),
-                                value: 0_u64.to_be_bytes().to_vec(),
-                                change: ChangeType::Update.into(),
-                            },
-                        ],
-                    }],
-                    component_changes: vec![],
                     balance_changes: vec![],
                 },
             ],
@@ -1464,7 +1465,7 @@ mod test {
             ]),
             change: ChangeType::Creation,
             creation_tx: tx.hash,
-            created_at: Default::default(),
+            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         };
         BlockContractChanges {
             extractor: "test".to_string(),
@@ -1554,10 +1555,10 @@ mod test {
             .collect(),
             change: ChangeType::Creation,
             creation_tx: H256::from_str(
-                "0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac",
+                "0x0000000000000000000000000000000000000000000000000000000011121314",
             )
             .unwrap(),
-            created_at: Default::default(),
+            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         };
         BlockAccountChanges::new(
             "test",
@@ -1873,7 +1874,7 @@ mod test {
                 ],
                 change: ChangeType::Creation,
                 creation_tx: tx.hash,
-                created_at: Default::default(),
+                created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
         )]
         .into_iter()
@@ -1983,7 +1984,7 @@ mod test {
                 ],
                 change: ChangeType::Creation,
                 creation_tx: tx.hash,
-                created_at: Default::default(),
+                created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
         )]
         .into_iter()
