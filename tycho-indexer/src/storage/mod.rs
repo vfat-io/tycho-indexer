@@ -489,10 +489,13 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
 ///   the token.
 pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
     // TODO: update to handle receiving multiple db entities to produce a single ProtocolState
-    fn from_storage(val: S, component_id: String, tx_hash: &TxHash) -> Result<Self, StorageError>;
+    fn from_storage(
+        vals: Vec<S>,
+        component_id: String,
+        tx_hash: &TxHash,
+    ) -> Result<Self, StorageError>;
 
-    // TODO: update to return multiple db entities for a single ProtocolState s
-    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> N;
+    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> Vec<N>;
 }
 
 /// Lays out the necessary interface needed to store and retrieve protocol state changes from
@@ -515,7 +518,7 @@ pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
         change: ChangeType,
     ) -> Result<Self, StorageError>;
 
-    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> N;
+    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> Vec<N>;
 }
 
 /// Store and retrieve protocol related structs.
@@ -602,19 +605,20 @@ pub trait ProtocolGateway {
     /// - `system` The protocol system this component belongs to
     /// - `id` The external id of the component e.g. address, or the pair
     /// - `at` The version at which the state is valid at.
-    async fn get_states(
+    async fn get_protocol_states(
         &self,
         chain: &Chain,
         at: Option<Version>,
         system: Option<ProtocolSystem>,
         id: Option<&[&str]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolState>, StorageError>;
 
-    async fn update_state(
+    async fn update_protocol_state(
         &self,
         chain: Chain,
         new: &[(TxHash, ProtocolStateDelta)],
-        db: &mut Self::DB,
+        conn: &mut Self::DB,
     );
 
     /// Retrieves a tokens from storage
@@ -629,6 +633,7 @@ pub trait ProtocolGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError>;
 
     /// Saves multiple tokens to storage.
@@ -643,7 +648,12 @@ pub trait ProtocolGateway {
     /// # Return
     /// Ok if all tokens could be inserted, Err if at least one token failed to
     /// insert.
-    async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError>;
+    async fn add_tokens(
+        &self,
+        chain: Chain,
+        token: &[&Self::Token],
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 
     /// Retrieve protocol component state changes
     ///
