@@ -123,14 +123,14 @@ where
 
         for pc in new {
             let txh = tx_hash_id_mapping
-                .get(&pc.creation_tx.into())
+                .get::<TxHash>(&pc.creation_tx.into())
                 .ok_or(StorageError::DecodeError("TxHash not found".to_string()))?;
 
             let new_pc = pc
                 .to_storage(
                     self.get_chain_id(&pc.chain),
                     self.get_protocol_system_id(&pc.protocol_system),
-                    tx_hash,
+                    txh.to_owned(),
                     pc.created_at,
                 )
                 .unwrap();
@@ -611,26 +611,25 @@ mod test {
             .first::<orm::ProtocolComponent>(&mut conn)
             .await;
 
-        println!("{:?}", inserted_data.unwrap());
-        //assert!(inserted_data.is_ok());
-        //let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
-        //assert_eq!(
-        //    original_component.protocol_type_id,
-        //    inserted_data
-        //        .protocol_type_id
-        //        .to_string()
-        //);
-        //assert_eq!(
-        //    original_component.protocol_type_id,
-        //   inserted_data
-        //       .protocol_type_id
-        //      .to_string()
-        //);
-        //assert_eq!(
-        //    gw.get_protocol_system_id(&original_component.protocol_system),
-        //    inserted_data.protocol_system_id
-        //);
-        //assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
-        //assert_eq!(original_component.id.0, inserted_data.external_id);
+        assert!(inserted_data.is_ok());
+        let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
+        assert_eq!(
+            original_component.protocol_type_id,
+            inserted_data
+                .protocol_type_id
+                .to_string()
+        );
+        assert_eq!(
+            original_component.protocol_type_id,
+            inserted_data
+                .protocol_type_id
+                .to_string()
+        );
+        assert_eq!(
+            gw.get_protocol_system_id(&original_component.protocol_system),
+            inserted_data.protocol_system_id
+        );
+        assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
+        assert_eq!(original_component.id.0, inserted_data.external_id);
     }
 }

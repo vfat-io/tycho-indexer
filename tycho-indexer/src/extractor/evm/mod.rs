@@ -893,7 +893,7 @@ impl BlockEntityChanges {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
                     let tx_update =
                         ProtocolStateDeltasWithTx::try_from_message(change.entity_changes, tx)?;
-                    println!("{:?}", tx.hash);
+
                     state_updates.push(tx_update);
                     for component in change.component_changes {
                         let pool = ProtocolComponent::try_from_message(

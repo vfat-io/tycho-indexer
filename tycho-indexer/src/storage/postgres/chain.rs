@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use std::collections::HashMap;
 use tracing::instrument;
 
 use crate::storage::{
