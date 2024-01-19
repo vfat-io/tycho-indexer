@@ -550,13 +550,12 @@ pub mod db_fixtures {
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
 
-    use crate::{hex_bytes::Bytes, storage::{postgres::orm, Code};
+    use crate::{hex_bytes::Bytes, storage::Code};
 
     use super::{
         orm::{FinancialType, ImplementationType},
         schema,
     };
-    use super::schema::{self};
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -646,37 +645,6 @@ pub mod db_fixtures {
             .values(&data)
             .returning(schema::transaction::id)
             .get_results(conn)
-            .await
-            .unwrap()
-    }
-
-    pub async fn insert_protocol_system(conn: &mut AsyncPgConnection, name: &str) -> i64 {
-        diesel::insert_into(schema::protocol_system::table)
-            .values(schema::protocol_system::name.eq(name))
-            .returning(schema::protocol_system::id)
-            .get_result(conn)
-            .await
-            .unwrap()
-    }
-
-    pub async fn insert_protocol_type(
-        conn: &mut AsyncPgConnection,
-        name: &str,
-        financial_type: Option<orm::FinancialType>,
-        attribute: Option<Value>,
-        implementation_type: Option<orm::ImplementationType>,
-    ) -> i64 {
-        let financial_type = financial_type.unwrap_or(orm::FinancialType::Swap);
-        let implementation_type = implementation_type.unwrap_or(orm::ImplementationType::Custom);
-        let query = diesel::insert_into(schema::protocol_type::table).values((
-            schema::protocol_type::name.eq(name),
-            schema::protocol_type::financial_type.eq(financial_type),
-            schema::protocol_type::attribute_schema.eq(attribute),
-            schema::protocol_type::implementation.eq(implementation_type),
-        ));
-        query
-            .returning(schema::protocol_type::id)
-            .get_result(conn)
             .await
             .unwrap()
     }
@@ -872,15 +840,19 @@ pub mod db_fixtures {
     pub async fn insert_protocol_type(
         conn: &mut AsyncPgConnection,
         name: &str,
-        finantial_type: FinancialType,
-        implementation_type: ImplementationType,
+        financial_type: Option<FinancialType>,
+        attribute: Option<Value>,
+        implementation_type: Option<ImplementationType>,
     ) -> i64 {
-        diesel::insert_into(schema::protocol_type::table)
-            .values((
-                schema::protocol_type::name.eq(name),
-                schema::protocol_type::financial_type.eq(finantial_type),
-                schema::protocol_type::implementation.eq(implementation_type),
-            ))
+        let financial_type = financial_type.unwrap_or(FinancialType::Swap);
+        let implementation_type = implementation_type.unwrap_or(ImplementationType::Custom);
+        let query = diesel::insert_into(schema::protocol_type::table).values((
+            schema::protocol_type::name.eq(name),
+            schema::protocol_type::financial_type.eq(financial_type),
+            schema::protocol_type::attribute_schema.eq(attribute),
+            schema::protocol_type::implementation.eq(implementation_type),
+        ));
+        query
             .returning(schema::protocol_type::id)
             .get_result(conn)
             .await

@@ -1,29 +1,23 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 use std::{collections::HashMap, hash::Hash};
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use ethers::{
-    abi::Hash,
-    types::{transaction, Transaction},
-};
+use ethers::types::{transaction, Transaction};
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState},
-    extractor::evm::{ProtocolState, ProtocolStateDelta},
+    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
         postgres::{orm, schema, PostgresGateway},
-        Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableProtocolState, StorableProtocolType, StorableToken,
-        StorableTransaction, StorageError, TxHash, Version,
+        Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ProtocolGateway,
+        StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolState,
+        StorableProtocolType, StorableToken, StorableTransaction, StorageError, TxHash, Version,
     },
 };
 
@@ -111,7 +105,7 @@ where
         todo!()
     }
 
-    async fn add_components(
+    async fn add_protocol_components(
         &self,
         new: &[&Self::ProtocolComponent],
         conn: &mut Self::DB,
@@ -314,7 +308,6 @@ mod test {
     };
 
     use super::*;
-    use crate::storage::postgres::db_fixtures;
     use ethers::prelude::H256;
     use std::{collections::HashMap, str::FromStr};
 
@@ -379,8 +372,9 @@ mod test {
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
-            orm::FinancialType::Swap,
-            orm::ImplementationType::Custom,
+            Some(orm::FinancialType::Swap),
+            None,
+            Some(orm::ImplementationType::Custom),
         )
         .await;
         let protocol_component_id = db_fixtures::insert_protocol_component(
@@ -580,7 +574,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_upsert_components() {
+    async fn test_add_protocol_components() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -606,22 +600,18 @@ mod test {
             created_at: Default::default(),
         };
 
-        // Call the function under test
         let result = gw
-            .add_components(&[&original_component.clone()], &mut conn)
+            .add_protocol_components(&[&original_component.clone()], &mut conn)
             .await;
 
-        // Assert the result
         assert!(result.is_ok());
 
-        // Optionally, you can query the database to verify the inserted data
         use crate::storage::postgres::schema::protocol_component::dsl::*;
         let inserted_data = protocol_component
             .filter(external_id.eq("test_contract_id"))
             .first::<orm::ProtocolComponent>(&mut conn)
             .await;
 
-        // Assert that the data was inserted as expected
         assert!(inserted_data.is_ok());
         let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
         assert_eq!(
