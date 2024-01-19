@@ -25,11 +25,6 @@ DROP TYPE financial_type;
 ALTER TABLE protocol_type
 DROP CONSTRAINT unique_name_constraint;
 
--- dropping tables will drop any triggers or indices along with it
-ALTER TABLE protocol_system
-ALTER COLUMN "name" TYPE varchar(255);
-
-DROP TYPE protocol_system_type;
 
 CREATE OR REPLACE FUNCTION invalidate_previous_entry_protocol_state()
     RETURNS TRIGGER
@@ -54,7 +49,9 @@ DROP CONSTRAINT check_attribute_fields;
 ALTER TABLE protocol_state 
 DROP COLUMN attribute_name,
 DROP COLUMN attribute_value,
-ADD COLUMN state jsonb NULL; 
+ADD COLUMN state jsonb NULL,
+ADD COLUMN tvl bigint NULL,
+ADD COLUMN inertias bigint[] NULL;
 
 CREATE TRIGGER invalidate_previous_protocol_state
     BEFORE INSERT ON protocol_state
