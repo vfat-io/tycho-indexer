@@ -459,7 +459,7 @@ mod gateway_test {
     //! between this component and the actual db interactions
     use std::collections::HashMap;
 
-    use crate::storage::{postgres::PostgresGateway, ChangeType, ContractId};
+    use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
     use diesel_async::pooled_connection::AsyncDieselConnectionManager;
     use ethers::types::U256;
     use mpsc::channel;
