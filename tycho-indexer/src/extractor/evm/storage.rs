@@ -16,6 +16,8 @@ use chrono::NaiveDateTime;
 use std::collections::HashMap;
 
 pub mod pg {
+    use std::collections::HashSet;
+
     use crate::{
         extractor::evm::utils::pad_and_parse_h160,
         hex_bytes::Bytes,
@@ -32,6 +34,8 @@ pub mod pg {
     };
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
+
+    use self::storage::StorableProtocolStateDelta;
 
     use super::*;
 
@@ -388,18 +392,17 @@ pub mod pg {
             })
         }
     }
+
     impl StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64> for evm::ProtocolState {
         fn from_storage(
-            val: orm::ProtocolState,
+            vals: Vec<orm::ProtocolState>,
             component_id: String,
             tx_hash: &TxHash,
         ) -> Result<Self, StorageError> {
-            let mut attr: HashMap<String, Bytes> = HashMap::new();
-            if let Some(Value::Object(state)) = &val.state {
-                for (k, v) in state.iter() {
-                    if let Value::String(s) = v {
-                        attr.insert(k.clone(), Bytes::from(s.as_str()));
-                    }
+            let mut attr = HashMap::new();
+            for val in vals {
+                if let (Some(name), Some(value)) = (&val.attribute_name, &val.attribute_value) {
+                    attr.insert(name.clone(), value.clone());
                 }
             }
             Ok(evm::ProtocolState::new(
@@ -409,21 +412,27 @@ pub mod pg {
             ))
         }
 
+        // When stored, protocol states are divided into multiple protocol state db entities - one
+        // per attribute This is to allow individualised control over attribute versioning
+        // and more efficient querying
         fn to_storage(
             &self,
             protocol_component_id: i64,
             tx_id: i64,
             block_ts: NaiveDateTime,
-        ) -> orm::NewProtocolState {
-            orm::NewProtocolState {
-                protocol_component_id,
-                state: self.convert_attributes_to_json(),
-                modify_tx: tx_id,
-                tvl: None,
-                inertias: None,
-                valid_from: block_ts,
-                valid_to: None,
+        ) -> Vec<orm::NewProtocolState> {
+            let mut protocol_states = Vec::new();
+            for (name, value) in &self.attributes {
+                protocol_states.push(orm::NewProtocolState {
+                    protocol_component_id,
+                    attribute_name: Some(name.clone()),
+                    attribute_value: Some(value.clone()),
+                    modify_tx: tx_id,
+                    valid_from: block_ts,
+                    valid_to: None,
+                });
             }
+            protocol_states
         }
     }
 
@@ -431,7 +440,7 @@ pub mod pg {
         fn convert_attributes_to_json(&self) -> Option<serde_json::Value> {
             // Convert Bytes to String and then to serde_json Value
             let serialized_map: HashMap<String, serde_json::Value> = self
-                .updated_attributes
+                .attributes
                 .iter()
                 .map(|(k, v)| {
                     let s = hex::encode(v);
@@ -444,6 +453,66 @@ pub mod pg {
                 Ok(value) => Some(value),
                 Err(_) => None,
             }
+        }
+    }
+
+    impl StorableProtocolStateDelta<orm::ProtocolState, orm::NewProtocolState, i64>
+        for evm::ProtocolStateDelta
+    {
+        fn from_storage(
+            val: orm::ProtocolState,
+            component_id: String,
+            tx_hash: &TxHash,
+            change: ChangeType,
+        ) -> Result<Self, StorageError> {
+            let attr =
+                if let (Some(name), Some(value)) = (&val.attribute_name, &val.attribute_value) {
+                    vec![(name.clone(), value.clone())]
+                        .into_iter()
+                        .collect()
+                } else {
+                    std::collections::HashMap::new()
+                };
+
+            match change {
+                ChangeType::Deletion => Ok(evm::ProtocolStateDelta {
+                    component_id,
+                    updated_attributes: HashMap::new(),
+                    deleted_attributes: attr.into_keys().collect(),
+                    modify_tx: H256::try_decode(tx_hash, "tx hash")
+                        .map_err(StorageError::DecodeError)?,
+                }),
+                _ => Ok(evm::ProtocolStateDelta {
+                    component_id,
+                    updated_attributes: attr,
+                    deleted_attributes: HashSet::new(),
+                    modify_tx: H256::try_decode(tx_hash, "tx hash")
+                        .map_err(StorageError::DecodeError)?,
+                }),
+            }
+        }
+
+        // When stored, protocol states are divided into multiple protocol state db entities - one
+        // per attribute This is to allow individualised control over attribute versioning
+        // and more efficient querying
+        fn to_storage(
+            &self,
+            protocol_component_id: i64,
+            tx_id: i64,
+            block_ts: NaiveDateTime,
+        ) -> Vec<orm::NewProtocolState> {
+            let mut protocol_states = Vec::new();
+            for (name, value) in &self.updated_attributes {
+                protocol_states.push(orm::NewProtocolState {
+                    protocol_component_id,
+                    attribute_name: Some(name.clone()),
+                    attribute_value: Some(value.clone()),
+                    modify_tx: tx_id,
+                    valid_from: block_ts,
+                    valid_to: None,
+                });
+            }
+            protocol_states
         }
     }
 }

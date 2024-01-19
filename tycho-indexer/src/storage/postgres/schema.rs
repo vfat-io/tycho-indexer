@@ -1,4 +1,5 @@
 // @generated automatically by Diesel CLI.
+
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "financial_type"))]
@@ -168,15 +169,14 @@ diesel::table! {
 diesel::table! {
     protocol_state (id) {
         id -> Int8,
-        tvl -> Nullable<Int8>,
-        inertias -> Nullable<Array<Nullable<Int8>>>,
-        state -> Nullable<Jsonb>,
         modify_tx -> Int8,
         valid_from -> Timestamptz,
         valid_to -> Nullable<Timestamptz>,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
         protocol_component_id -> Int8,
+        attribute_name -> Nullable<Varchar>,
+        attribute_value -> Nullable<Bytea>,
     }
 }
 

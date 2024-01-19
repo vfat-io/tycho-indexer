@@ -1,23 +1,10 @@
 #![doc = include_str!("../../Readme.md")]
 
-#[cfg(test)]
-#[macro_use]
-extern crate pretty_assertions;
-
-use std::sync::Arc;
-
-use actix_web::dev::ServerHandle;
-use clap::Parser;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use futures03::future::select_all;
-use tokio::task::JoinHandle;
-use tracing::info;
 
 use extractor::{
-    evm::{
-        ambient::{AmbientContractExtractor, AmbientPgGateway},
-        EVMStateGateway,
-    },
+    evm::ambient::{AmbientContractExtractor, AmbientPgGateway},
     runner::{ExtractorHandle, ExtractorRunnerBuilder},
 };
 use models::Chain;
@@ -25,8 +12,13 @@ use models::Chain;
 use crate::{
     extractor::{evm, ExtractionError},
     services::ServicesBuilder,
-    storage::postgres::{self, PostgresGateway},
+    storage::postgres::{self, cache::CachedGateway, PostgresGateway},
 };
+use actix_web::dev::ServerHandle;
+use clap::Parser;
+use std::sync::Arc;
+use tokio::{sync::mpsc, task, task::JoinHandle};
+use tracing::{error, info};
 
 mod extractor;
 mod hex_bytes;
@@ -36,6 +28,10 @@ mod serde_helpers;
 mod services;
 mod storage;
 mod substreams;
+
+#[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions;
 
 /// Tycho Indexer using Substreams
 ///
@@ -121,8 +117,30 @@ async fn main() -> Result<(), ExtractionError> {
 
     info!("Starting Tycho");
     let mut extractor_handles = Vec::new();
+    let (tx, rx) = mpsc::channel(10);
+    let (err_tx, mut err_rx) = mpsc::channel(10);
+
+    // Spawn a new task that listens to err_rx
+    task::spawn(async move {
+        while let Some(msg) = err_rx.recv().await {
+            //TODO: panic?
+            error!("Database write error received: {}", msg);
+        }
+    });
+
+    let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
+        "ethereum".to_owned(),
+        Chain::Ethereum,
+        pool.clone(),
+        evm_gw.clone(),
+        rx,
+        err_tx,
+    );
+
+    let handle = write_executor.run();
+    let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
     let (ambient_task, ambient_handle) =
-        start_ambient_extractor(&args, pool.clone(), evm_gw.clone()).await?;
+        start_ambient_extractor(&args, pool.clone(), cached_gw).await?;
     extractor_handles.push(ambient_handle.clone());
     info!("Extractor {} started!", ambient_handle.get_id());
 
@@ -139,7 +157,7 @@ async fn main() -> Result<(), ExtractionError> {
         .run()?;
     info!(server_url, "Http and Ws server started");
 
-    let shutdown_task = tokio::spawn(shutdown_handler(server_handle, extractor_handles));
+    let shutdown_task = tokio::spawn(shutdown_handler(server_handle, extractor_handles, handle));
     let (res, _, _) = select_all([ambient_task, server_task, shutdown_task]).await;
     res.expect("Extractor- nor ServiceTasks should panic!")
 }
@@ -147,10 +165,10 @@ async fn main() -> Result<(), ExtractionError> {
 async fn start_ambient_extractor(
     args: &CliArgs,
     pool: Pool<AsyncPgConnection>,
-    evm_gw: EVMStateGateway<AsyncPgConnection>,
+    cached_gw: CachedGateway,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
     let ambient_name = "vm:ambient";
-    let ambient_gw = AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, evm_gw);
+    let ambient_gw = AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, cached_gw);
     let extractor =
         AmbientContractExtractor::new(ambient_name, Chain::Ethereum, ambient_gw).await?;
 
@@ -170,6 +188,7 @@ async fn start_ambient_extractor(
 async fn shutdown_handler(
     server_handle: ServerHandle,
     extractors: Vec<ExtractorHandle>,
+    db_write_executor_handle: JoinHandle<()>,
 ) -> Result<(), ExtractionError> {
     // listen for ctrl-c
     tokio::signal::ctrl_c().await.unwrap();
@@ -177,6 +196,7 @@ async fn shutdown_handler(
         e.stop().await.unwrap();
     }
     server_handle.stop(true).await;
+    db_write_executor_handle.abort();
     Ok(())
 }
 
@@ -189,7 +209,9 @@ mod cli_tests {
     use super::CliArgs;
 
     #[tokio::test]
-    async fn test_arg_parsing_long() {
+    #[ignore]
+    // This test needs to be run independently because it temporarily changes env variables.
+    async fn test_arg_parsing_long_from_env() {
         // Save previous values of the environment variables.
         let prev_api_token = env::var("SUBSTREAMS_API_TOKEN");
         let prev_db_url = env::var("DATABASE_URL");
@@ -217,6 +239,37 @@ mod cli_tests {
         } else {
             env::remove_var("DATABASE_URL");
         }
+
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        let expected_args = CliArgs {
+            endpoint_url: "http://example.com".to_string(),
+            substreams_api_token: "your_api_token".to_string(),
+            database_url: "my_db".to_string(),
+            spkg: "package.spkg".to_string(),
+            module: "module_name".to_string(),
+            start_block: 17361664,
+            stop_block: None,
+        };
+
+        assert_eq!(args, expected_args);
+    }
+
+    #[tokio::test]
+    async fn test_arg_parsing_long() {
+        let args = CliArgs::try_parse_from(vec![
+            "tycho-indexer",
+            "--endpoint",
+            "http://example.com",
+            "--api_token",
+            "your_api_token",
+            "--db_url",
+            "my_db",
+            "--spkg",
+            "package.spkg",
+            "--module",
+            "module_name",
+        ]);
 
         assert!(args.is_ok());
         let args = args.unwrap();
