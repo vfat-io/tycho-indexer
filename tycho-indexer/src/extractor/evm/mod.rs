@@ -684,7 +684,7 @@ impl ProtocolState {
 
 #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
 /// Represents a change in protocol state.
-pub struct ProtocolStateUpdate {
+pub struct ProtocolStateDelta {
     // associates back to a component, which has metadata like type, tokens, etc.
     pub component_id: String,
     // the update protocol specific attributes, validated by the components schema
@@ -696,7 +696,7 @@ pub struct ProtocolStateUpdate {
 }
 
 // TODO: remove dead code check skip once extractor is implemented
-impl ProtocolStateUpdate {
+impl ProtocolStateDelta {
     pub fn new(component_id: String, attributes: HashMap<String, Bytes>, modify_tx: H256) -> Self {
         Self {
             component_id,
@@ -737,12 +737,13 @@ impl ProtocolStateUpdate {
     /// The method combines two `ProtocolState` instances if they are for the same
     /// protocol component.
     ///
-    /// The merged update keeps the transaction of `other`.
+    /// NB: It is assumed that `other` is a more recent update than `self` is and the two are
+    /// combined accordingly.
     ///
     /// # Errors
     /// This method will return `ExtractionError::MergeError` if any of the above
     /// conditions is violated.
-    pub fn merge(&mut self, other: ProtocolStateUpdate) -> Result<(), ExtractionError> {
+    pub fn merge(&mut self, other: ProtocolStateDelta) -> Result<(), ExtractionError> {
         if self.component_id != other.component_id {
             return Err(ExtractionError::MergeError(format!(
                 "Can't merge ProtocolStates from differing identities; Expected {}, got {}",
@@ -766,12 +767,12 @@ impl ProtocolStateUpdate {
 
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct ProtocolStateUpdatesWithTx {
-    pub protocol_states: HashMap<String, ProtocolStateUpdate>,
+pub struct ProtocolStateDeltasWithTx {
+    pub protocol_states: HashMap<String, ProtocolStateDelta>,
     pub tx: Transaction,
 }
 
-impl ProtocolStateUpdatesWithTx {
+impl ProtocolStateDeltasWithTx {
     /// Parses protocol state from tychos protobuf EntityChanges message
     pub fn try_from_message(
         msg: Vec<substreams::EntityChanges>,
@@ -779,7 +780,7 @@ impl ProtocolStateUpdatesWithTx {
     ) -> Result<Self, ExtractionError> {
         let mut protocol_states = HashMap::new();
         for state_msg in msg {
-            let state = ProtocolStateUpdate::try_from_message(state_msg, &tx)?;
+            let state = ProtocolStateDelta::try_from_message(state_msg, &tx)?;
             protocol_states.insert(state.clone().component_id, state);
         }
         Ok(Self { protocol_states, tx })
@@ -802,7 +803,7 @@ impl ProtocolStateUpdatesWithTx {
     /// # Errors
     /// This method will return `ExtractionError::MergeError` if any of the above
     /// conditions is violated.
-    pub fn merge(&mut self, other: ProtocolStateUpdatesWithTx) -> Result<(), ExtractionError> {
+    pub fn merge(&mut self, other: ProtocolStateDeltasWithTx) -> Result<(), ExtractionError> {
         if self.tx.block_hash != other.tx.block_hash {
             return Err(ExtractionError::MergeError(format!(
                 "Can't merge ProtocolStates from different blocks: 0x{:x} != 0x{:x}",
@@ -845,7 +846,7 @@ pub struct BlockEntityChangesResult {
     extractor: String,
     chain: Chain,
     pub block: Block,
-    pub state_updates: HashMap<String, ProtocolStateUpdate>,
+    pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
@@ -858,7 +859,7 @@ pub struct BlockEntityChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
-    pub state_updates: Vec<ProtocolStateUpdatesWithTx>,
+    pub state_updates: Vec<ProtocolStateDeltasWithTx>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
@@ -881,7 +882,7 @@ impl BlockEntityChanges {
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
                     let tx_update =
-                        ProtocolStateUpdatesWithTx::try_from_message(change.entity_changes, tx)?;
+                        ProtocolStateDeltasWithTx::try_from_message(change.entity_changes, tx)?;
                     state_updates.push(tx_update);
                     for component in change.component_changes {
                         let pool = ProtocolComponent::try_from_message(
@@ -921,7 +922,7 @@ impl BlockEntityChanges {
     /// This returns an error if there was a problem during merge. The error
     /// type is `ExtractionError`.
     pub fn aggregate_updates(self) -> Result<BlockEntityChangesResult, ExtractionError> {
-        let base = ProtocolStateUpdatesWithTx::default();
+        let base = ProtocolStateDeltasWithTx::default();
 
         let aggregated_states = self
             .state_updates
@@ -1603,7 +1604,7 @@ mod test {
         let del_attributes1: HashSet<String> = vec!["to_add_back".to_owned()]
             .into_iter()
             .collect();
-        let mut state1 = ProtocolStateUpdate {
+        let mut state1 = ProtocolStateDelta {
             component_id: "State1".to_owned(),
             updated_attributes: up_attributes1,
             deleted_attributes: del_attributes1,
@@ -1621,7 +1622,7 @@ mod test {
         let del_attributes2: HashSet<String> = vec!["to_be_removed".to_owned()]
             .into_iter()
             .collect();
-        let state2 = ProtocolStateUpdate {
+        let state2 = ProtocolStateDelta {
             component_id: "State1".to_owned(),
             updated_attributes: up_attributes2.clone(),
             deleted_attributes: del_attributes2,
@@ -1647,17 +1648,17 @@ mod test {
         assert_eq!(state1.deleted_attributes, expected_del_attributes);
     }
 
-    fn protocol_state_with_tx() -> ProtocolStateUpdatesWithTx {
+    fn protocol_state_with_tx() -> ProtocolStateDeltasWithTx {
         let attributes: HashMap<String, Bytes> = vec![
             ("reserve".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
             ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
         ]
         .into_iter()
         .collect();
-        let states: HashMap<String, ProtocolStateUpdate> = vec![
+        let states: HashMap<String, ProtocolStateDelta> = vec![
             (
                 "State1".to_owned(),
-                ProtocolStateUpdate {
+                ProtocolStateDelta {
                     component_id: "State1".to_owned(),
                     updated_attributes: attributes.clone(),
                     deleted_attributes: HashSet::new(),
@@ -1666,7 +1667,7 @@ mod test {
             ),
             (
                 "State2".to_owned(),
-                ProtocolStateUpdate {
+                ProtocolStateDelta {
                     component_id: "State2".to_owned(),
                     updated_attributes: attributes,
                     deleted_attributes: HashSet::new(),
@@ -1676,7 +1677,7 @@ mod test {
         ]
         .into_iter()
         .collect();
-        ProtocolStateUpdatesWithTx { protocol_states: states, tx: transaction01() }
+        ProtocolStateDeltasWithTx { protocol_states: states, tx: transaction01() }
     }
 
     #[test]
@@ -1690,9 +1691,9 @@ mod test {
         .into_iter()
         .collect();
         let new_tx = fixtures::transaction02(HASH_256_1, HASH_256_0, 11);
-        let new_states: HashMap<String, ProtocolStateUpdate> = vec![(
+        let new_states: HashMap<String, ProtocolStateDelta> = vec![(
             "State1".to_owned(),
-            ProtocolStateUpdate {
+            ProtocolStateDelta {
                 component_id: "State1".to_owned(),
                 updated_attributes: new_attributes,
                 deleted_attributes: HashSet::new(),
@@ -1702,7 +1703,7 @@ mod test {
         .into_iter()
         .collect();
 
-        let tx_update = ProtocolStateUpdatesWithTx { protocol_states: new_states, tx: new_tx };
+        let tx_update = ProtocolStateDeltasWithTx { protocol_states: new_states, tx: new_tx };
 
         let res = base_state.merge(tx_update);
 
@@ -1752,10 +1753,10 @@ mod test {
         assert_eq!(res, exp);
     }
 
-    fn protocol_state() -> ProtocolStateUpdate {
+    fn protocol_state() -> ProtocolStateDelta {
         let res1_value = 1000_u64.to_be_bytes().to_vec();
         let res2_value = 500_u64.to_be_bytes().to_vec();
-        ProtocolStateUpdate {
+        ProtocolStateDelta {
             component_id: "State1".to_string(),
             updated_attributes: vec![
                 ("reserve1".to_owned(), Bytes::from(res1_value)),
@@ -1776,7 +1777,7 @@ mod test {
             vec![("reserve".to_owned(), Bytes::from(U256::from(900)))]
                 .into_iter()
                 .collect();
-        let state2 = ProtocolStateUpdate {
+        let state2 = ProtocolStateDelta {
             component_id: "State2".to_owned(),
             updated_attributes: attributes2.clone(),
             deleted_attributes: HashSet::new(),
@@ -1798,7 +1799,7 @@ mod test {
     fn test_protocol_state_update_parse_msg() {
         let msg = fixtures::pb_state_changes();
 
-        let res = ProtocolStateUpdate::try_from_message(msg, &fixtures::transaction01()).unwrap();
+        let res = ProtocolStateDelta::try_from_message(msg, &fixtures::transaction01()).unwrap();
 
         assert_eq!(res, protocol_state());
     }
@@ -1821,9 +1822,9 @@ mod test {
         ]
         .into_iter()
         .collect();
-        let state_updates: HashMap<String, ProtocolStateUpdate> = vec![(
+        let state_updates: HashMap<String, ProtocolStateDelta> = vec![(
             "State1".to_owned(),
-            ProtocolStateUpdate {
+            ProtocolStateDelta {
                 component_id: "State1".to_owned(),
                 updated_attributes: attr,
                 deleted_attributes: HashSet::new(),
@@ -1872,7 +1873,7 @@ mod test {
             },
             state_updates: vec![
                 protocol_state_with_tx(),
-                ProtocolStateUpdatesWithTx { protocol_states: state_updates, tx },
+                ProtocolStateDeltasWithTx { protocol_states: state_updates, tx },
             ],
             new_protocol_components,
         }
@@ -1918,10 +1919,10 @@ mod test {
         ]
         .into_iter()
         .collect();
-        let state_updates: HashMap<String, ProtocolStateUpdate> = vec![
+        let state_updates: HashMap<String, ProtocolStateDelta> = vec![
             (
                 "State1".to_owned(),
-                ProtocolStateUpdate {
+                ProtocolStateDelta {
                     component_id: "State1".to_owned(),
                     updated_attributes: attr1,
                     deleted_attributes: HashSet::new(),
@@ -1930,7 +1931,7 @@ mod test {
             ),
             (
                 "State2".to_owned(),
-                ProtocolStateUpdate {
+                ProtocolStateDelta {
                     component_id: "State2".to_owned(),
                     updated_attributes: attr2,
                     deleted_attributes: HashSet::new(),

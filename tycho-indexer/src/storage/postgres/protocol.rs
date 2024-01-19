@@ -14,7 +14,7 @@ use ethers::{
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ProtocolState, ProtocolStateUpdate},
+    extractor::evm::{ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
@@ -56,9 +56,9 @@ where
                         let transaction = data.2;
                         let latest_tx = match latest_tx {
                             Some(latest)
-                                if latest.block_id < transaction.block_id ||
-                                    (latest.block_id == transaction.block_id &&
-                                        latest.index < transaction.index) =>
+                                if latest.block_id < transaction.block_id
+                                    || (latest.block_id == transaction.block_id
+                                        && latest.index < transaction.index) =>
                             {
                                 Some(transaction)
                             }
@@ -96,7 +96,7 @@ where
     type DB = AsyncPgConnection;
     type Token = T;
     type ProtocolState = ProtocolState;
-    type ProtocolStateUpdate = ProtocolStateUpdate;
+    type ProtocolStateDelta = ProtocolStateDelta;
     type ProtocolType = ProtocolType;
 
     // TODO: uncomment to implement in ENG 2049
@@ -179,7 +179,7 @@ where
     async fn update_protocol_state(
         &self,
         chain: Chain,
-        new: &[(TxHash, ProtocolStateUpdate)],
+        new: &[(TxHash, ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) {
         todo!()
@@ -211,7 +211,7 @@ where
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolStateUpdate, StorageError> {
+    ) -> Result<ProtocolStateDelta, StorageError> {
         todo!()
     }
 

@@ -35,7 +35,7 @@ pub mod pg {
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
 
-    use self::storage::ProtocolStateDelta;
+    use self::storage::StorableProtocolStateDelta;
 
     use super::*;
 
@@ -430,8 +430,28 @@ pub mod pg {
         }
     }
 
-    impl ProtocolStateDelta<orm::ProtocolState, orm::NewProtocolState, i64>
-        for evm::ProtocolStateUpdate
+    impl evm::ProtocolState {
+        fn convert_attributes_to_json(&self) -> Option<serde_json::Value> {
+            // Convert Bytes to String and then to serde_json Value
+            let serialized_map: HashMap<String, serde_json::Value> = self
+                .attributes
+                .iter()
+                .map(|(k, v)| {
+                    let s = hex::encode(v);
+                    (k.clone(), serde_json::Value::String(s))
+                })
+                .collect();
+
+            // Convert HashMap<String, serde_json::Value> to serde_json::Value struct
+            match serde_json::to_value(serialized_map) {
+                Ok(value) => Some(value),
+                Err(_) => None,
+            }
+        }
+    }
+
+    impl StorableProtocolStateDelta<orm::ProtocolState, orm::NewProtocolState, i64>
+        for evm::ProtocolStateDelta
     {
         fn from_storage(
             val: orm::ProtocolState,
@@ -449,14 +469,14 @@ pub mod pg {
                 };
 
             match change {
-                ChangeType::Deletion => Ok(evm::ProtocolStateUpdate {
+                ChangeType::Deletion => Ok(evm::ProtocolStateDelta {
                     component_id,
                     updated_attributes: HashMap::new(),
                     deleted_attributes: attr.into_keys().collect(),
                     modify_tx: H256::try_decode(tx_hash, "tx hash")
                         .map_err(StorageError::DecodeError)?,
                 }),
-                _ => Ok(evm::ProtocolStateUpdate {
+                _ => Ok(evm::ProtocolStateDelta {
                     component_id,
                     updated_attributes: attr,
                     deleted_attributes: HashSet::new(),
