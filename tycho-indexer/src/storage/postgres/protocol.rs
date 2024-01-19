@@ -56,9 +56,9 @@ where
                         let transaction = data.2;
                         let latest_tx = match latest_tx {
                             Some(latest)
-                                if latest.block_id < transaction.block_id
-                                    || (latest.block_id == transaction.block_id
-                                        && latest.index < transaction.index) =>
+                                if latest.block_id < transaction.block_id ||
+                                    (latest.block_id == transaction.block_id &&
+                                        latest.index < transaction.index) =>
                             {
                                 Some(transaction)
                             }
