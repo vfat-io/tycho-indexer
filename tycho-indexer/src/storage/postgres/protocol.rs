@@ -262,7 +262,7 @@ where
                 let chain = self.get_chain(&chain_id_);
                 let contract_id = ContractId::new(chain, address_);
 
-                ERC20Token::from_storage(orm_token, contract_id)
+                Self::Token::from_storage(orm_token, contract_id)
                     .map_err(|err| StorageError::DecodeError(err.to_string()))
             })
             .collect();
@@ -297,6 +297,7 @@ where
 
         diesel::insert_into(schema::account::table)
             .values(&new_accounts)
+            // .on_conflict(..).do_nothing() is necessary to ignore updating duplicated entries
             .on_conflict((schema::account::address, schema::account::chain_id))
             .do_nothing()
             .execute(conn)
@@ -316,16 +317,19 @@ where
             .await
             .map_err(|err| StorageError::from_diesel(err, "Account", "retrieve", None))?;
 
+        let account_map: HashMap<(Bytes, i64), i64> = accounts
+            .iter()
+            .map(|account| ((account.address.clone(), account.chain_id), account.id))
+            .collect();
+
         let new_tokens: Vec<orm::NewToken> = tokens
             .iter()
             .map(|token| {
-                let account_id = accounts
-                    .iter()
-                    .find(|account| {
-                        account.address == token.address.as_ref().to_vec() &&
-                            account.chain_id == self.get_chain_id(&token.chain)
-                    })
-                    .map(|account| account.id)
+                let token_chain_id = self.get_chain_id(&token.chain);
+                let account_key = (Bytes::from(token.address.as_bytes()), token_chain_id);
+
+                let account_id = *account_map
+                    .get(&account_key)
                     .expect("Account ID not found");
 
                 token.to_storage(account_id)
@@ -334,6 +338,7 @@ where
 
         diesel::insert_into(schema::token::table)
             .values(&new_tokens)
+            // .on_conflict(..).do_nothing() is necessary to ignore updating duplicated entries
             .on_conflict(schema::token::account_id)
             .do_nothing()
             .execute(conn)
