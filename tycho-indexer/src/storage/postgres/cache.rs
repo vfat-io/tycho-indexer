@@ -1075,8 +1075,85 @@ mod test {
             ))
             .await;
 
-        // Get delta from current state (None) to block 1 again
+        // Assert block 2 has been reverted
+        let mut connection = connection_pool
+            .get()
+            .await
+            .expect("Failed to get a connection from the pool");
+
+        let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
+        let fetched_block_2 = cached_gw
+            .get_block(&block_id_2, &mut connection)
+            .await
+            .expect_err("Failed to fetch block");
+
+        assert_eq!(
+            fetched_block_2,
+            NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
+        );
+        drop(connection);
+
+        // Send a new block 2 after the revert
+        let block_2 = get_sample_block(2);
+        cached_gw
+            .upsert_block(&block_2)
+            .await
+            .expect("Upsert block 2 ok");
+
+        // Send a new block 3 after the revert
+        let block_3 = get_sample_block(3);
+        cached_gw
+            .upsert_block(&block_3)
+            .await
+            .expect("Upsert block 3 ok");
+
+        // Get delta from current state (None) to block 2, stores it in the lru cache
         let delta_1 = cached_gw
+            .get_accounts_delta(
+                &Chain::Ethereum,
+                None,
+                &BlockOrTimestamp::Block(BlockIdentifier::Hash(
+                    H256::from_str(
+                        "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
+                    )
+                    .unwrap()
+                    .into(),
+                )),
+            )
+            .await
+            .unwrap();
+
+        // Revert to block 1
+        let _ = cached_gw
+            .revert_state(&BlockIdentifier::Hash(
+                H256::from_str(
+                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                )
+                .unwrap()
+                .into(),
+            ))
+            .await;
+
+        // Assert block 2 has been reverted
+        let mut connection = connection_pool
+            .get()
+            .await
+            .expect("Failed to get a connection from the pool");
+
+        let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
+        let fetched_block_2 = cached_gw
+            .get_block(&block_id_2, &mut connection)
+            .await
+            .expect_err("Failed to fetch block");
+
+        assert_eq!(
+            fetched_block_2,
+            NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
+        );
+        drop(connection);
+
+        // Get delta from current state (None) to block 1 again, retrieve it from the lru cache
+        let delta_2 = cached_gw
             .get_accounts_delta(
                 &Chain::Ethereum,
                 None,
@@ -1091,10 +1168,27 @@ mod test {
             .await
             .unwrap();
 
+        // Get delta from current state (None) to block 2 again, retrieve it from the lru cache
+        let delta_3 = cached_gw
+            .get_accounts_delta(
+                &Chain::Ethereum,
+                None,
+                &BlockOrTimestamp::Block(BlockIdentifier::Hash(
+                    H256::from_str(
+                        "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
+                    )
+                    .unwrap()
+                    .into(),
+                )),
+            )
+            .await
+            .unwrap();
+
         handle.abort();
 
-        // Assert that the two deltas are the same
-        assert_eq!(delta_0, delta_1);
+        // Assert that the deltas match
+        assert_eq!(delta_0, delta_2);
+        assert_eq!(delta_1, delta_3);
     }
 
     fn get_sample_block(version: usize) -> evm::Block {
