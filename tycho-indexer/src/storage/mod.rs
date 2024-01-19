@@ -79,7 +79,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolSystem, ProtocolType},
     storage::postgres::orm,
@@ -488,7 +488,32 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
 ///   `to_storage` method, thereby providing a flexible way for different databases to interact with
 ///   the token.
 pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
+    // TODO: update to handle receiving multiple db entities to produce a single ProtocolState
     fn from_storage(val: S, component_id: String, tx_hash: &TxHash) -> Result<Self, StorageError>;
+
+    // TODO: update to return multiple db entities for a single ProtocolState s
+    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> N;
+}
+
+/// Lays out the necessary interface needed to store and retrieve protocol state changes from
+/// storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   protocol state update.
+/// * `N`: This represents the storage-specific data type used when converting from the protocol
+///   state update to storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the token.
+pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
+    fn from_storage(
+        val: S,
+        component_id: String,
+        tx_hash: &TxHash,
+        change: ChangeType,
+    ) -> Result<Self, StorageError>;
 
     fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> N;
 }
@@ -501,7 +526,13 @@ pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
 pub trait ProtocolGateway {
     type DB;
     type Token;
+
     type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
+    type ProtocolStateDelta: StorableProtocolStateDelta<
+        orm::ProtocolState,
+        orm::NewProtocolState,
+        i64,
+    >;
 
     type ProtocolType: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>;
 
@@ -579,7 +610,12 @@ pub trait ProtocolGateway {
         id: Option<&[&str]>,
     ) -> Result<Vec<ProtocolState>, StorageError>;
 
-    async fn update_state(&self, chain: Chain, new: &[(TxHash, ProtocolState)], db: &mut Self::DB);
+    async fn update_state(
+        &self,
+        chain: Chain,
+        new: &[(TxHash, ProtocolStateDelta)],
+        db: &mut Self::DB,
+    );
 
     /// Retrieves a tokens from storage
     ///
@@ -630,7 +666,7 @@ pub trait ProtocolGateway {
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolState, StorageError>;
+    ) -> Result<ProtocolStateDelta, StorageError>;
 
     /// Reverts the protocol states in storage.
     ///
@@ -1006,6 +1042,7 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         Delta = D,
         Token = T,
         ProtocolState = ProtocolState,
+        ProtocolStateDelta = ProtocolStateDelta,
         ProtocolType = ProtocolType,
     >,
 >;
