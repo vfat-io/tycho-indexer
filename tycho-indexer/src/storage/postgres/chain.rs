@@ -121,22 +121,6 @@ where
                 StorageError::from_diesel(err, "Transaction", &hex::encode(hash), None)
             })?
     }
-
-    async fn _get_tx_ids(
-        &self,
-        hashes: &[TxHash],
-        conn: &mut Self::DB,
-    ) -> Result<HashMap<TxHash, i64>, StorageError> {
-        use super::schema::transaction::dsl::*;
-
-        let results = transaction
-            .filter(hash.eq_any(hashes))
-            .select((hash, id))
-            .load::<(TxHash, i64)>(conn)
-            .await?;
-
-        Ok(results.into_iter().collect())
-    }
 }
 
 #[cfg(test)]

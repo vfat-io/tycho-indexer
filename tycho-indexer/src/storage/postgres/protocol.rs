@@ -116,10 +116,10 @@ where
             .iter()
             .map(|pc| pc.creation_tx.into())
             .collect();
-        let tx_hash_id_mapping: HashMap<TxHash, i64> = self
-            ._get_tx_ids(&tx_hashes, conn)
-            .await
-            .unwrap();
+        let tx_hash_id_mapping: HashMap<TxHash, i64> =
+            orm::Transaction::db_id_by_hash(&tx_hashes, conn)
+                .await
+                .unwrap();
 
         for pc in new {
             let tx_hash = match tx_hash_id_mapping.get::<TxHash>(&pc.creation_tx.into()) {

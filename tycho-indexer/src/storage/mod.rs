@@ -339,12 +339,6 @@ pub trait ChainGateway {
         hash: &TxHash,
         db: &mut Self::DB,
     ) -> Result<Self::Transaction, StorageError>;
-
-    async fn _get_tx_ids(
-        &self,
-        hashes: &[TxHash],
-        conn: &mut Self::DB,
-    ) -> Result<HashMap<TxHash, i64>, StorageError>;
 }
 
 /// Store and retrieve state of Extractors.

@@ -2,11 +2,15 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
+use std::collections::HashMap;
 
 use crate::{
     hex_bytes::Bytes,
     models,
-    storage::{Address, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ContractId, TxHash},
+    storage::{
+        Address, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ContractId, StorageError,
+        TxHash,
+    },
 };
 
 use super::schema::{
@@ -198,6 +202,21 @@ impl Transaction {
             .select(Self::as_select())
             .first::<Self>(conn)
             .await
+    }
+
+    pub async fn db_id_by_hash(
+        hashes: &[TxHash],
+        conn: &mut AsyncPgConnection,
+    ) -> Result<HashMap<TxHash, i64>, StorageError> {
+        use super::schema::transaction::dsl::*;
+
+        let results = transaction
+            .filter(hash.eq_any(hashes))
+            .select((hash, id))
+            .load::<(TxHash, i64)>(conn)
+            .await?;
+
+        Ok(results.into_iter().collect())
     }
 }
 
