@@ -79,7 +79,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    extractor::evm::{ProtocolState, ProtocolStateUpdate},
+    extractor::evm::{ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolSystem, ProtocolType},
     storage::postgres::orm,
@@ -507,7 +507,7 @@ pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
 ///   conversion function. This facilitates the passage of database-specific foreign keys to the
 ///   `to_storage` method, thereby providing a flexible way for different databases to interact with
 ///   the token.
-pub trait ProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
+pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(
         val: S,
         component_id: String,
@@ -528,7 +528,11 @@ pub trait ProtocolGateway {
     type Token;
 
     type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
-    type ProtocolStateUpdate: ProtocolStateDelta<orm::ProtocolState, orm::NewProtocolState, i64>;
+    type ProtocolStateDelta: StorableProtocolStateDelta<
+        orm::ProtocolState,
+        orm::NewProtocolState,
+        i64,
+    >;
 
     type ProtocolType: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>;
 
@@ -609,7 +613,7 @@ pub trait ProtocolGateway {
     async fn update_state(
         &self,
         chain: Chain,
-        new: &[(TxHash, ProtocolStateUpdate)],
+        new: &[(TxHash, ProtocolStateDelta)],
         db: &mut Self::DB,
     );
 
@@ -662,7 +666,7 @@ pub trait ProtocolGateway {
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolStateUpdate, StorageError>;
+    ) -> Result<ProtocolStateDelta, StorageError>;
 
     /// Reverts the protocol states in storage.
     ///
@@ -1038,7 +1042,7 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         Delta = D,
         Token = T,
         ProtocolState = ProtocolState,
-        ProtocolStateUpdate = ProtocolStateUpdate,
+        ProtocolStateDelta = ProtocolStateDelta,
         ProtocolType = ProtocolType,
     >,
 >;
