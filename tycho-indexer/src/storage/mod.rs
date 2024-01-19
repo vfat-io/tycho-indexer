@@ -79,7 +79,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolSystem, ProtocolType},
     storage::postgres::orm,
@@ -488,9 +488,37 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
 ///   `to_storage` method, thereby providing a flexible way for different databases to interact with
 ///   the token.
 pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
-    fn from_storage(val: S, component_id: String, tx_hash: &TxHash) -> Result<Self, StorageError>;
+    // TODO: update to handle receiving multiple db entities to produce a single ProtocolState
+    fn from_storage(
+        vals: Vec<S>,
+        component_id: String,
+        tx_hash: &TxHash,
+    ) -> Result<Self, StorageError>;
 
-    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> N;
+    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> Vec<N>;
+}
+
+/// Lays out the necessary interface needed to store and retrieve protocol state changes from
+/// storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   protocol state update.
+/// * `N`: This represents the storage-specific data type used when converting from the protocol
+///   state update to storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the token.
+pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
+    fn from_storage(
+        val: S,
+        component_id: String,
+        tx_hash: &TxHash,
+        change: ChangeType,
+    ) -> Result<Self, StorageError>;
+
+    fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> Vec<N>;
 }
 
 /// Store and retrieve protocol related structs.
@@ -501,7 +529,13 @@ pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
 pub trait ProtocolGateway {
     type DB;
     type Token;
+
     type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
+    type ProtocolStateDelta: StorableProtocolStateDelta<
+        orm::ProtocolState,
+        orm::NewProtocolState,
+        i64,
+    >;
 
     type ProtocolType: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>;
 
@@ -571,15 +605,21 @@ pub trait ProtocolGateway {
     /// - `system` The protocol system this component belongs to
     /// - `id` The external id of the component e.g. address, or the pair
     /// - `at` The version at which the state is valid at.
-    async fn get_states(
+    async fn get_protocol_states(
         &self,
         chain: &Chain,
         at: Option<Version>,
         system: Option<ProtocolSystem>,
         id: Option<&[&str]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolState>, StorageError>;
 
-    async fn update_state(&self, chain: Chain, new: &[(TxHash, ProtocolState)], db: &mut Self::DB);
+    async fn update_protocol_state(
+        &self,
+        chain: Chain,
+        new: &[(TxHash, ProtocolStateDelta)],
+        conn: &mut Self::DB,
+    );
 
     /// Retrieves a tokens from storage
     ///
@@ -593,6 +633,7 @@ pub trait ProtocolGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError>;
 
     /// Saves multiple tokens to storage.
@@ -607,7 +648,12 @@ pub trait ProtocolGateway {
     /// # Return
     /// Ok if all tokens could be inserted, Err if at least one token failed to
     /// insert.
-    async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError>;
+    async fn add_tokens(
+        &self,
+        chain: Chain,
+        token: &[&Self::Token],
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 
     /// Retrieve protocol component state changes
     ///
@@ -630,7 +676,7 @@ pub trait ProtocolGateway {
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolState, StorageError>;
+    ) -> Result<ProtocolStateDelta, StorageError>;
 
     /// Reverts the protocol states in storage.
     ///
@@ -1006,6 +1052,7 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         Delta = D,
         Token = T,
         ProtocolState = ProtocolState,
+        ProtocolStateDelta = ProtocolStateDelta,
         ProtocolType = ProtocolType,
     >,
 >;

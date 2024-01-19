@@ -4349,6 +4349,7 @@ dependencies = [
  "prost",
  "substreams",
  "substreams-ethereum",
+ "tiny-keccak",
 ]
 
 [[package]]

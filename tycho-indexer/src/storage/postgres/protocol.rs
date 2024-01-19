@@ -1,21 +1,88 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use ethers::{
+    abi::Hash,
+    types::{transaction, Transaction},
+};
+use tracing::warn;
 
 use crate::{
-    extractor::evm::ProtocolState,
+    extractor::evm::{ProtocolState, ProtocolStateDelta},
+    hex_bytes::Bytes,
     models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
-        postgres::{orm, PostgresGateway},
+        postgres::{orm, schema, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableProtocolType, StorableToken, StorableTransaction, StorageError,
-        TxHash, Version,
+        StorableContract, StorableProtocolState, StorableProtocolType, StorableToken,
+        StorableTransaction, StorageError, TxHash, Version,
     },
 };
+
+impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
+where
+    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+    D: ContractDelta + From<A>,
+    A: StorableContract<orm::Contract, orm::NewContract, i64>,
+    T: StorableToken<orm::Token, orm::NewToken, i64>,
+{
+    /// Decodes a ProtocolStates database result. Combines all matching protocol state db entities
+    /// and returns a list containing one ProtocolState per component.
+    fn _decode_protocol_states(
+        &self,
+        result: Result<Vec<(orm::ProtocolState, String, orm::Transaction)>, diesel::result::Error>,
+        context: &str,
+    ) -> Result<Vec<ProtocolState>, StorageError> {
+        match result {
+            Ok(data_vec) => {
+                let mut protocol_states = Vec::new();
+                let (states_data, latest_tx): (
+                    HashMap<String, Vec<orm::ProtocolState>>,
+                    Option<orm::Transaction>,
+                ) = data_vec.into_iter().fold(
+                    (HashMap::new(), None),
+                    |(mut states, latest_tx), data| {
+                        states
+                            .entry(data.1)
+                            .or_insert_with(Vec::new)
+                            .push(data.0);
+                        let transaction = data.2;
+                        let latest_tx = match latest_tx {
+                            Some(latest)
+                                if latest.block_id < transaction.block_id ||
+                                    (latest.block_id == transaction.block_id &&
+                                        latest.index < transaction.index) =>
+                            {
+                                Some(transaction)
+                            }
+                            None => Some(transaction),
+                            _ => latest_tx,
+                        };
+                        (states, latest_tx)
+                    },
+                );
+                for (component_id, states) in states_data {
+                    let tx_hash = latest_tx
+                        .as_ref()
+                        .map(|tx| &tx.hash)
+                        .ok_or(StorageError::DecodeError("Modify tx hash not found".to_owned()))?;
+                    let protocol_state =
+                        ProtocolState::from_storage(states, component_id, tx_hash)?;
+                    protocol_states.push(protocol_state);
+                }
+                Ok(protocol_states)
+            }
+            Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
+        }
+    }
+}
 
 #[async_trait]
 impl<B, TX, A, D, T> ProtocolGateway for PostgresGateway<B, TX, A, D, T>
@@ -29,6 +96,7 @@ where
     type DB = AsyncPgConnection;
     type Token = T;
     type ProtocolState = ProtocolState;
+    type ProtocolStateDelta = ProtocolStateDelta;
     type ProtocolType = ProtocolType;
 
     // TODO: uncomment to implement in ENG 2049
@@ -67,18 +135,53 @@ where
         Ok(())
     }
 
-    async fn get_states(
+    // Gets all protocol states from the db filtered by chain, component ids and/or protocol system.
+    // The filters are applied in the following order: component ids, protocol system, chain. If
+    // component ids are provided, the protocol system filter is ignored. The chain filter is
+    // always applied.
+    async fn get_protocol_states(
         &self,
         chain: &Chain,
         at: Option<Version>,
         system: Option<ProtocolSystem>,
-        id: Option<&[&str]>,
-    ) -> Result<Vec<ProtocolState>, StorageError> {
-        let block_chain_id = self.get_chain_id(chain);
-        todo!()
+        ids: Option<&[&str]>,
+        conn: &mut Self::DB,
+    ) -> Result<Vec<Self::ProtocolState>, StorageError> {
+        let chain_db_id = self.get_chain_id(chain);
+        let version_ts = match &at {
+            Some(version) => Some(version.to_ts(conn).await?),
+            None => None,
+        };
+
+        match (ids, system) {
+            (Some(ids), Some(system)) => {
+                warn!("Both protocol IDs and system were provided. System will be ignored.");
+                self._decode_protocol_states(
+                    orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
+                    ids.join(",").as_str(),
+                )
+            }
+            (Some(ids), _) => self._decode_protocol_states(
+                orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
+                ids.join(",").as_str(),
+            ),
+            (_, Some(system)) => self._decode_protocol_states(
+                orm::ProtocolState::by_protocol_system(system, chain_db_id, version_ts, conn).await,
+                system.to_string().as_str(),
+            ),
+            _ => self._decode_protocol_states(
+                orm::ProtocolState::by_chain(chain_db_id, version_ts, conn).await,
+                chain.to_string().as_str(),
+            ),
+        }
     }
 
-    async fn update_state(&self, chain: Chain, new: &[(TxHash, ProtocolState)], db: &mut Self::DB) {
+    async fn update_protocol_state(
+        &self,
+        chain: Chain,
+        new: &[(TxHash, ProtocolStateDelta)],
+        conn: &mut Self::DB,
+    ) {
         todo!()
     }
 
@@ -86,11 +189,17 @@ where
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError> {
         todo!()
     }
 
-    async fn add_tokens(&self, chain: Chain, token: &[&Self::Token]) -> Result<(), StorageError> {
+    async fn add_tokens(
+        &self,
+        chain: Chain,
+        token: &[&Self::Token],
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
         todo!()
     }
 
@@ -102,7 +211,7 @@ where
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolState, StorageError> {
+    ) -> Result<ProtocolStateDelta, StorageError> {
         todo!()
     }
 
@@ -148,13 +257,15 @@ mod test {
     use super::*;
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use diesel_async::AsyncConnection;
-    use serde_json::json;
+    use ethers::types::U256;
+    use rstest::rstest;
+    use serde_json::{json, Value};
 
     use crate::{
         extractor::evm,
         models,
         models::{FinancialType, ImplementationType},
-        storage::postgres::{orm, schema, PostgresGateway},
+        storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
     };
 
     use super::*;
@@ -179,22 +290,185 @@ mod test {
         conn
     }
 
+    /// This sets up the data needed to test the gateway. The setup is structured such that each
+    /// protocol state's historical changes are kept together this makes it easy to reason about
+    /// that change an account should have at each version Please not that if you change
+    /// something here, also update the state fixtures right below, which contain protocol states
+    /// at each version.     
+    async fn setup_data(conn: &mut AsyncPgConnection) {
+        let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let txn = db_fixtures::insert_txns(
+            conn,
+            &[
+                (
+                    blk[0],
+                    1i64,
+                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+                ),
+                (
+                    blk[0],
+                    2i64,
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                ),
+                // ----- Block 01 LAST
+                (
+                    blk[1],
+                    1i64,
+                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
+                ),
+                (
+                    blk[1],
+                    2i64,
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                ),
+                // ----- Block 02 LAST
+            ],
+        )
+        .await;
+        let protocol_system_id =
+            db_fixtures::insert_protocol_system(conn, "Ambient".to_owned()).await;
+        let protocol_type_id = db_fixtures::insert_protocol_type(
+            conn,
+            "Pool",
+            orm::FinancialType::Swap,
+            orm::ImplementationType::Custom,
+        )
+        .await;
+        let protocol_component_id = db_fixtures::insert_protocol_component(
+            conn,
+            "state1",
+            chain_id,
+            protocol_system_id,
+            protocol_type_id,
+            txn[0],
+        )
+        .await;
+
+        // protocol state for state1-reserve1
+        db_fixtures::insert_protocol_state(
+            conn,
+            protocol_component_id,
+            txn[0],
+            "reserve1".to_owned(),
+            Bytes::from(U256::from(1100)),
+            Some(txn[2]),
+        )
+        .await;
+
+        // protocol state for state1-reserve2
+        db_fixtures::insert_protocol_state(
+            conn,
+            protocol_component_id,
+            txn[0],
+            "reserve2".to_owned(),
+            Bytes::from(U256::from(500)),
+            None,
+        )
+        .await;
+
+        // protocol state update for state1-reserve1
+        db_fixtures::insert_protocol_state(
+            conn,
+            protocol_component_id,
+            txn[2],
+            "reserve1".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+        )
+        .await;
+    }
+
+    fn protocol_state() -> ProtocolState {
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+        ]
+        .into_iter()
+        .collect();
+        ProtocolState::new(
+            "state1".to_owned(),
+            attributes,
+            "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
+                .parse()
+                .unwrap(),
+        )
+    }
+
+    #[rstest]
+    #[case::by_chain(None, None)]
+    #[case::by_system(Some(ProtocolSystem::Ambient), None)]
+    #[case::by_ids(None, Some(vec!["state1"]))]
+    #[tokio::test]
+    async fn test_get_protocol_states(
+        #[case] system: Option<ProtocolSystem>,
+        #[case] ids: Option<Vec<&str>>,
+    ) {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        let expected = vec![protocol_state()];
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        let result = gateway
+            .get_protocol_states(&Chain::Ethereum, None, system, ids.as_deref(), &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(result, expected)
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_states_at() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        let mut protocol_state = protocol_state();
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1100))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+        ]
+        .into_iter()
+        .collect();
+        protocol_state.attributes = attributes;
+        protocol_state.modify_tx =
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+                .parse()
+                .unwrap();
+        let expected = vec![protocol_state];
+
+        let result = gateway
+            .get_protocol_states(
+                &Chain::Ethereum,
+                Some(Version::from_block_number(Chain::Ethereum, 1)),
+                None,
+                None,
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, expected)
+    }
+
     #[tokio::test]
     async fn test_get_or_create_protocol_system_id() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
-        let protocol_system_id = gw
+        let first_id = gw
             ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
             .await
             .unwrap();
-        assert_eq!(protocol_system_id, 1);
 
-        let protocol_system_id = gw
+        let second_id = gw
             ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
             .await
             .unwrap();
-        assert_eq!(protocol_system_id, 1);
+        assert_eq!(first_id, second_id);
     }
 
     #[tokio::test]
