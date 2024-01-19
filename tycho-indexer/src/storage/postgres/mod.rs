@@ -350,7 +350,7 @@ where
         self.protocol_system_id_cache
             .get_id(protocol_system)
     }
-    #[warn(dead_code)]
+    #[allow(dead_code)]
     fn get_protocol_system(&self, id: &i64) -> ProtocolSystem {
         self.protocol_system_id_cache
             .get_enum(id)

@@ -533,7 +533,7 @@ pub trait ProtocolGateway {
         ids: Option<&[&str]>,
     ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
-    async fn upsert_components(
+    async fn add_components(
         &self,
         new: &[&Self::ProtocolComponent],
         conn: &mut Self::DB,

@@ -42,7 +42,7 @@ where
         todo!()
     }
 
-    async fn upsert_components(
+    async fn add_components(
         &self,
         new: &[&Self::ProtocolComponent],
         conn: &mut Self::DB,
@@ -78,8 +78,7 @@ where
         diesel::insert_into(protocol_component)
             .values(&values)
             .on_conflict((chain_id, protocol_system_id, external_id))
-            .do_update()
-            .set(values.first().unwrap())
+            .do_nothing()
             .execute(conn)
             .await
             .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))
@@ -373,7 +372,7 @@ mod test {
 
         // Call the function under test
         let result = gw
-            .upsert_components(&[&original_component.clone()], &mut conn)
+            .add_components(&[&original_component.clone()], &mut conn)
             .await;
 
         // Assert the result
@@ -407,39 +406,5 @@ mod test {
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
         assert_eq!(original_component.id.0, inserted_data.external_id);
-
-        let new_component = ProtocolComponent {
-            id: ContractId("test_contract_id".to_string()),
-            protocol_system,
-            protocol_type_id: protocol_type_id_2.to_string(), // altered here
-            chain,
-            tokens: vec![],
-            contract_ids: vec![],
-            static_attributes: HashMap::new(),
-            change: ChangeType::Creation,
-            creation_tx: H256::from_str(
-                "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-            )
-            .unwrap(),
-            created_at: Default::default(),
-        };
-
-        let result = gw
-            .upsert_components(&[&new_component.clone()], &mut conn)
-            .await;
-
-        let altered_inserted_data = protocol_component
-            .filter(external_id.eq("test_contract_id"))
-            .first::<orm::ProtocolComponent>(&mut conn)
-            .await;
-        let altered_inserted_data = altered_inserted_data.unwrap();
-
-        assert_eq!(altered_inserted_data.id, inserted_data.id);
-        assert_eq!(
-            new_component.protocol_type_id,
-            altered_inserted_data
-                .protocol_type_id
-                .to_string()
-        );
     }
 }
