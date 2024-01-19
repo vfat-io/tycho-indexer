@@ -361,7 +361,7 @@ where
                 .select((id, name))
                 .load(conn)
                 .await
-                .expect("Failed to load chain ids!")
+                .expect("Failed to load protocol system!")
         }
         .await;
 
