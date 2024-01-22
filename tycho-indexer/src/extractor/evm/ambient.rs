@@ -17,7 +17,7 @@ use super::{AccountUpdate, Block};
 use crate::{
     extractor::{evm, ExtractionError, Extractor, ExtractorMsg},
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolSystem},
+    models::{Chain, ExtractionState, ExtractorIdentity},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
@@ -35,7 +35,7 @@ pub struct AmbientContractExtractor<G> {
     gateway: G,
     name: String,
     chain: Chain,
-    protocol_system: ProtocolSystem,
+    protocol_system: String,
     // TODO: There is not reason this needs to be shared
     // try removing the Mutex
     inner: Arc<Mutex<Inner>>,
@@ -230,14 +230,14 @@ where
                 name: name.to_owned(),
                 chain,
                 inner: Arc::new(Mutex::new(Inner { cursor: Vec::new() })),
-                protocol_system: ProtocolSystem::Ambient,
+                protocol_system: "ambient".to_string(),
             },
             Ok(cursor) => AmbientContractExtractor {
                 gateway,
                 name: name.to_owned(),
                 chain,
                 inner: Arc::new(Mutex::new(Inner { cursor })),
-                protocol_system: ProtocolSystem::Ambient,
+                protocol_system: "ambient".to_string(),
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
@@ -281,7 +281,7 @@ where
             raw_msg,
             &self.name,
             self.chain,
-            self.protocol_system,
+            self.protocol_system.clone(),
             protocol_type_id,
         ) {
             Ok(changes) => {
