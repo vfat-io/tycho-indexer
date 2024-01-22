@@ -57,3 +57,6 @@ CREATE TRIGGER invalidate_previous_protocol_state
     BEFORE INSERT ON protocol_state
     FOR EACH ROW
     EXECUTE PROCEDURE invalidate_previous_entry_protocol_state();
+
+ALTER TABLE protocol_system
+DROP CONSTRAINT name_unique;

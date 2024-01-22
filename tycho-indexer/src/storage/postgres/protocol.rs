@@ -13,7 +13,7 @@ use tracing::warn;
 use crate::{
     extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
-    models::{Chain, ProtocolSystem, ProtocolType},
+    models::{Chain, ProtocolType},
     storage::{
         postgres::{orm, schema, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ProtocolGateway,
@@ -97,10 +97,10 @@ where
     type ProtocolType = ProtocolType;
     type ProtocolComponent = ProtocolComponent;
 
-    async fn get_components(
+    async fn get_protocol_components(
         &self,
         chain: &Chain,
-        system: ProtocolSystem,
+        system: Option<String>,
         ids: Option<&[&str]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolComponent>, StorageError> {
@@ -175,7 +175,7 @@ where
             .map(|pc| pc.creation_tx.into())
             .collect();
         let tx_hash_id_mapping: HashMap<TxHash, i64> =
-            orm::Transaction::db_id_by_hash(&tx_hashes, conn)
+            orm::Transaction::id_by_hash(&tx_hashes, conn)
                 .await
                 .unwrap();
 
@@ -187,7 +187,7 @@ where
             let new_pc = pc
                 .to_storage(
                     self.get_chain_id(&pc.chain),
-                    self.get_protocol_system_id(&pc.protocol_system),
+                    self.get_protocol_system_id(&pc.protocol_system.to_string()),
                     txh.to_owned(),
                     pc.created_at,
                 )
@@ -236,7 +236,7 @@ where
         &self,
         chain: &Chain,
         at: Option<Version>,
-        system: Option<ProtocolSystem>,
+        system: Option<String>,
         ids: Option<&[&str]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::ProtocolState>, StorageError> {
@@ -259,7 +259,13 @@ where
                 ids.join(",").as_str(),
             ),
             (_, Some(system)) => self._decode_protocol_states(
-                orm::ProtocolState::by_protocol_system(system, chain_db_id, version_ts, conn).await,
+                orm::ProtocolState::by_protocol_system(
+                    system.clone(),
+                    chain_db_id,
+                    version_ts,
+                    conn,
+                )
+                .await,
                 system.to_string().as_str(),
             ),
             _ => self._decode_protocol_states(
@@ -299,7 +305,7 @@ where
     async fn get_state_delta(
         &self,
         chain: &Chain,
-        system: Option<ProtocolSystem>,
+        system: Option<String>,
         id: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
@@ -318,7 +324,7 @@ where
 
     async fn _get_or_create_protocol_system_id(
         &self,
-        new: ProtocolSystem,
+        new: String,
         conn: &mut Self::DB,
     ) -> Result<i64, StorageError> {
         use super::schema::protocol_system::dsl::*;
@@ -425,7 +431,7 @@ mod test {
         )
         .await;
         let protocol_system_id =
-            db_fixtures::insert_protocol_system(conn, "Ambient".to_owned()).await;
+            db_fixtures::insert_protocol_system(conn, "ambient".to_owned()).await;
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
@@ -496,11 +502,11 @@ mod test {
 
     #[rstest]
     #[case::by_chain(None, None)]
-    #[case::by_system(Some(ProtocolSystem::Ambient), None)]
+    #[case::by_system(Some("ambient".to_string()), None)]
     #[case::by_ids(None, Some(vec!["state1"]))]
     #[tokio::test]
     async fn test_get_protocol_states(
-        #[case] system: Option<ProtocolSystem>,
+        #[case] system: Option<String>,
         #[case] ids: Option<Vec<&str>>,
     ) {
         let mut conn = setup_db().await;
@@ -559,12 +565,12 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let first_id = gw
-            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            ._get_or_create_protocol_system_id("ambient".to_string(), &mut conn)
             .await
             .unwrap();
 
         let second_id = gw
-            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            ._get_or_create_protocol_system_id("ambient".to_string(), &mut conn)
             .await
             .unwrap();
         assert_eq!(first_id, second_id);
@@ -639,7 +645,7 @@ mod test {
             db_fixtures::insert_protocol_type(&mut conn, "Test_Type_1", None, None, None).await;
         let protocol_type_id_2 =
             db_fixtures::insert_protocol_type(&mut conn, "Test_Type_2", None, None, None).await;
-        let protocol_system = ProtocolSystem::Ambient;
+        let protocol_system = "ambient".to_string();
         let chain = Chain::Ethereum;
         let original_component = ProtocolComponent {
             id: ContractId("test_contract_id".to_string()),
@@ -684,7 +690,11 @@ mod test {
                 .to_string()
         );
         assert_eq!(
-            gw.get_protocol_system_id(&original_component.protocol_system),
+            gw.get_protocol_system_id(
+                &original_component
+                    .protocol_system
+                    .to_string()
+            ),
             inserted_data.protocol_system_id
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);

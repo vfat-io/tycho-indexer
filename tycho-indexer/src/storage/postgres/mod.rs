@@ -11,8 +11,7 @@
 //! This decision stems from an understanding that while extending the Rust
 //! codebase to include more enums is a straightforward task, modifying the type
 //! of a SQL column can be an intricate process. By representing enums as
-//! tables, we circumvent unnecessary migrations when modifying Chain or
-//! ProtocolSystem enums.
+//! tables, we circumvent unnecessary migrations when modifying, for example the Chain enum.
 //!
 //! With this representation, it's important to synchronize them whenever the
 //! enums members changed. This can be done automatically once at system
@@ -139,10 +138,9 @@ use diesel_async::{
     AsyncPgConnection, RunQueryDsl,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use strum::IntoEnumIterator;
 use tracing::{debug, info};
 
-use crate::models::{Chain, ProtocolSystem};
+use crate::models::Chain;
 
 use super::{
     BlockIdentifier, BlockOrTimestamp, ContractDelta, StateGateway, StorableBlock,
@@ -159,7 +157,7 @@ pub mod schema;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
-pub struct EnumTableCache<E> {
+pub struct ValueIdTableCache<E> {
     map_id: HashMap<E, i64>,
     map_enum: HashMap<i64, E>,
 }
@@ -167,9 +165,9 @@ pub struct EnumTableCache<E> {
 /// Provides caching for enum and its database ID relationships.
 ///
 /// Uses a double sided hash map to provide quick lookups in both directions.
-impl<'a, E> EnumTableCache<E>
+impl<'a, E> ValueIdTableCache<E>
 where
-    E: Eq + Hash + Copy + FromStr + std::fmt::Debug,
+    E: Eq + Hash + Clone + FromStr + std::fmt::Debug,
     <E as FromStr>::Err: std::fmt::Debug,
 {
     pub async fn from_pool(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
@@ -199,7 +197,7 @@ where
         let mut cache = Self { map_id: HashMap::new(), map_enum: HashMap::new() };
         for (id_, name_) in entries {
             let val = E::from_str(&name_).expect("valid enum value");
-            cache.map_id.insert(val, id_);
+            cache.map_id.insert(val.clone(), id_);
             cache.map_enum.insert(id_, val);
         }
         cache
@@ -223,18 +221,21 @@ where
     /// # Arguments
     ///
     /// * `id` - The database ID to lookup.
-    fn get_enum(&self, id: &i64) -> E {
-        *self
-            .map_enum
+    fn get_value(&self, id: &i64) -> E {
+        self.map_enum
             .get(id)
             .unwrap_or_else(|| {
                 panic!("Unexpected cache miss for id {}, entries: {:?}", id, self.map_enum)
             })
+            .to_owned()
     }
 }
 
-type ChainEnumCache = EnumTableCache<Chain>;
-type ProtocolSystemEnumCache = EnumTableCache<ProtocolSystem>;
+type ChainEnumCache = ValueIdTableCache<Chain>;
+/// ProtocolSystem is not handled as an Enum, because that would require us to restart the whole
+/// application every time we want to add another System. Hence, to diverge from the implementation
+/// of the Chain enum was a conscious decision.
+type ProtocolSystemEnumCache = ValueIdTableCache<String>;
 
 impl From<diesel::result::Error> for StorageError {
     fn from(value: diesel::result::Error) -> Self {
@@ -376,23 +377,23 @@ where
     }
 
     fn get_chain(&self, id: &i64) -> Chain {
-        self.chain_id_cache.get_enum(id)
+        self.chain_id_cache.get_value(id)
     }
 
-    fn get_protocol_system_id(&self, protocol_system: &ProtocolSystem) -> i64 {
+    fn get_protocol_system_id(&self, protocol_system: &String) -> i64 {
         self.protocol_system_id_cache
             .get_id(protocol_system)
     }
     #[allow(dead_code)]
-    fn get_protocol_system(&self, id: &i64) -> ProtocolSystem {
+    fn get_protocol_system(&self, id: &i64) -> String {
         self.protocol_system_id_cache
-            .get_enum(id)
+            .get_value(id)
     }
 
     pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
-        let cache = EnumTableCache::<Chain>::from_pool(pool.clone()).await?;
-        let protocol_system_cache: EnumTableCache<ProtocolSystem> =
-            EnumTableCache::<ProtocolSystem>::from_pool(pool.clone()).await?;
+        let cache = ValueIdTableCache::<Chain>::from_pool(pool.clone()).await?;
+        let protocol_system_cache: ValueIdTableCache<String> =
+            ValueIdTableCache::<String>::from_pool(pool.clone()).await?;
         let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(
             Arc::new(cache),
             Arc::new(protocol_system_cache),
@@ -481,15 +482,12 @@ pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
     debug!("Ensured chain enum presence for: {:?}", chains);
 }
 
-pub async fn ensure_protocol_systems(pool: Pool<AsyncPgConnection>) {
+pub async fn ensure_protocol_systems(protocol_systems: &[String], pool: Pool<AsyncPgConnection>) {
     let mut conn = pool.get().await.expect("connection ok");
-    let protocol_system_strings: Vec<String> = ProtocolSystem::iter()
-        .map(|ps| ps.to_string())
-        .collect();
 
     diesel::insert_into(schema::protocol_system::table)
         .values(
-            protocol_system_strings
+            protocol_systems
                 .iter()
                 .map(|ps| schema::protocol_system::name.eq(ps))
                 .collect::<Vec<_>>(),
@@ -499,7 +497,7 @@ pub async fn ensure_protocol_systems(pool: Pool<AsyncPgConnection>) {
         .await
         .expect("Could not ensure protocol system enum's in database");
 
-    debug!("Ensured protocol system enum presence for: {:?}", protocol_system_strings);
+    debug!("Ensured protocol system enum presence for: {:?}", protocol_systems);
 }
 
 fn run_migrations(db_url: &str) {

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
-use strum_macros::{Display, EnumIter, EnumString};
+use strum_macros::{Display, EnumString};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
@@ -13,27 +13,6 @@ pub enum Chain {
     Ethereum,
     Starknet,
     ZkSync,
-}
-
-/// Represents the ecosystem to which a `ProtocolComponent` belongs.
-/// If you add a new enum type. Please, also add it to the migration and the orms
-#[derive(
-    PartialEq,
-    Debug,
-    Clone,
-    Display,
-    Default,
-    Deserialize,
-    Serialize,
-    Copy,
-    Eq,
-    Hash,
-    EnumString,
-    EnumIter,
-)]
-pub enum ProtocolSystem {
-    #[default]
-    Ambient,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]

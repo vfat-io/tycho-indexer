@@ -204,7 +204,7 @@ impl Transaction {
             .await
     }
 
-    pub async fn db_id_by_hash(
+    pub async fn id_by_hash(
         hashes: &[TxHash],
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<TxHash, i64>, StorageError> {
@@ -389,7 +389,7 @@ impl ProtocolState {
     }
 
     pub async fn by_protocol_system(
-        system: models::ProtocolSystem,
+        system: String,
         chain_id: i64,
         version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
