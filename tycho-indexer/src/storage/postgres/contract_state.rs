@@ -565,7 +565,7 @@ where
             orm::ContractStorage::latest_version_by_ids(db_end_versions.keys(), conn).await?;
         dbg!(&db_rows);
         if !db_rows.is_empty() {
-            versioning::update_end_versions(&mut db_rows, db_end_versions);
+            versioning::update_end_versions(&mut db_rows, &db_end_versions);
             versioning::build_batch_update_query(db_rows.as_slice(), "contract_storage")
                 .execute(conn)
                 .await?;

@@ -37,18 +37,16 @@ pub trait DeltaVersionedRow {
     fn set_previous_value(&mut self, previous_value: Self::Value);
 }
 
-pub trait StoredVersionedRow {
-    type EntityId: Ord + Hash + Debug;
+pub trait StoredVersionedRow<'a> {
+    type EntityId: Ord + Hash + Debug + 'a;
     type PrimaryKey: Into<i64> + Debug;
     type Version: Into<NaiveDateTime> + Copy + Debug;
-
-    fn get_id(&self) -> Self::EntityId;
 
     fn get_pk(&self) -> Self::PrimaryKey;
 
     fn get_valid_to(&self) -> Self::Version;
 
-    fn set_valid_to(&mut self, end_version: Self::Version);
+    fn set_valid_to(&mut self, end_versions: &'a HashMap<Self::EntityId, Self::Version>);
 }
 
 pub fn set_versioning_attributes<O: VersionedRow>(
@@ -105,19 +103,16 @@ pub fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Deb
 }
 // retrieve rows that require updating with a select
 // send an update stmt to update these rows
-pub fn update_end_versions<O: StoredVersionedRow>(
+pub fn update_end_versions<'a, O: StoredVersionedRow<'a>>(
     objects: &mut Vec<O>,
-    end_versions: HashMap<O::EntityId, O::Version>,
+    end_versions: &'a HashMap<O::EntityId, O::Version>,
 ) {
     for o in objects.iter_mut() {
-        let v = end_versions
-            .get(&o.get_id())
-            .expect("end version present");
-        o.set_valid_to(*v);
+        o.set_valid_to(end_versions);
     }
 }
 
-pub fn build_batch_update_query<'a, O: StoredVersionedRow>(
+pub fn build_batch_update_query<'a, O: StoredVersionedRow<'a>>(
     objects: &[O],
     table_name: &str,
 ) -> BoxedSqlQuery<'a, Pg, SqlQuery> {

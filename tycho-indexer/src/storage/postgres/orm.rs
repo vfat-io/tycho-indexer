@@ -757,15 +757,15 @@ pub struct ContractStorage {
 }
 
 impl ContractStorage {
-    pub async fn latest_version_by_ids<'b, I: IntoIterator<Item = &'b (i64, Bytes)>>(
+    pub async fn latest_version_by_ids<'b, I: IntoIterator<Item = &'b (i64, &'b Bytes)>>(
         ids: I,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<ContractStorage>, StorageError> {
         let tuple_ids = ids
             .into_iter()
-            .cloned()
+            .copied()
             .collect::<HashSet<_>>();
-        let (accounts, slots): (Vec<_>, Vec<_>) = tuple_ids.iter().cloned().unzip();
+        let (accounts, slots): (Vec<_>, Vec<_>) = tuple_ids.iter().copied().unzip();
         dbg!(&accounts);
         dbg!(&slots);
         let tmp = contract_storage::table
@@ -782,19 +782,17 @@ impl ContractStorage {
         dbg!(&tmp);
         Ok(tmp
             .into_iter()
-            .filter(|cs| tuple_ids.contains(&(cs.account_id, cs.slot.clone())))
+            .filter(|cs| tuple_ids.contains(&(cs.account_id, &cs.slot)))
             .collect())
     }
 }
 
-impl StoredVersionedRow for ContractStorage {
-    type EntityId = (i64, Bytes);
+use std::collections::HashMap;
+
+impl<'a> StoredVersionedRow<'a> for ContractStorage {
+    type EntityId = (i64, &'a Bytes);
     type PrimaryKey = i64;
     type Version = NaiveDateTime;
-
-    fn get_id(&self) -> Self::EntityId {
-        return (self.account_id, self.slot.clone());
-    }
 
     fn get_pk(&self) -> Self::PrimaryKey {
         return self.id;
@@ -804,8 +802,10 @@ impl StoredVersionedRow for ContractStorage {
         return self.valid_to.expect("valid_to is set")
     }
 
-    fn set_valid_to(&mut self, end_version: Self::Version) {
-        self.valid_to = Some(end_version);
+    fn set_valid_to(&mut self, end_versions: &'a HashMap<Self::EntityId, Self::Version>) {
+        self.valid_to = end_versions
+            .get(&(self.account_id, &self.slot))
+            .copied();
     }
 }
 
@@ -840,12 +840,12 @@ impl<'a> From<&'a ContractStorage> for NewSlot<'a> {
 */
 
 impl<'a> VersionedRow for NewSlot<'a> {
-    type EntityId = (i64, Bytes);
-    type SortKey = ((i64, Bytes), NaiveDateTime, i64);
+    type EntityId = (i64, &'a Bytes);
+    type SortKey = ((i64, &'a Bytes), NaiveDateTime, i64);
     type Version = NaiveDateTime;
 
     fn get_id(&self) -> Self::EntityId {
-        (self.account_id, self.slot.clone())
+        (self.account_id, self.slot)
     }
 
     fn get_sort_key(&self) -> Self::SortKey {
