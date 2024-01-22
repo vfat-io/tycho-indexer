@@ -25,6 +25,7 @@ use crate::{
     },
 };
 
+// Private methods
 impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
@@ -33,52 +34,60 @@ where
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
-    /// Decodes a ProtocolStates database result. Combines all matching protocol state db entities
-    /// and returns a list containing one ProtocolState per component.
+    /// # Decoding ProtocolStates from database results.
+    ///
+    /// This function takes as input the database result for querying protocol states and their
+    /// linked component id and transaction hash.
+    ///
+    /// ## Assumptions:
+    /// - It is assumed that the rows in the result are ordered by:
+    ///     1. Component ID,
+    ///     2. Transaction block, and then
+    ///     3. Transaction index.
+    ///
+    /// The function processes these individual `ProtocolState` entities and combines all entities
+    /// with matching component IDs into a single `ProtocolState`. The final output is a list
+    /// where each element is a `ProtocolState` representing a unique component.
+    ///
+    /// ## Returns:
+    /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
     fn _decode_protocol_states(
         &self,
-        result: Result<Vec<(orm::ProtocolState, String, orm::Transaction)>, diesel::result::Error>,
+        result: Result<Vec<(orm::ProtocolState, String, Bytes)>, diesel::result::Error>,
         context: &str,
     ) -> Result<Vec<ProtocolState>, StorageError> {
         match result {
             Ok(data_vec) => {
                 let mut protocol_states = Vec::new();
-                let (states_data, latest_tx): (
-                    HashMap<String, Vec<orm::ProtocolState>>,
-                    Option<orm::Transaction>,
-                ) = data_vec.into_iter().fold(
-                    (HashMap::new(), None),
-                    |(mut states, latest_tx), data| {
-                        states
-                            .entry(data.1)
-                            .or_insert_with(Vec::new)
-                            .push(data.0);
-                        let transaction = data.2;
-                        let latest_tx = match latest_tx {
-                            Some(latest)
-                                if latest.block_id < transaction.block_id ||
-                                    (latest.block_id == transaction.block_id &&
-                                        latest.index < transaction.index) =>
-                            {
-                                Some(transaction)
-                            }
-                            None => Some(transaction),
-                            _ => latest_tx,
-                        };
-                        (states, latest_tx)
-                    },
-                );
-                for (component_id, states) in states_data {
-                    let tx_hash = latest_tx
-                        .as_ref()
-                        .map(|tx| &tx.hash)
-                        .ok_or(StorageError::DecodeError("Modify tx hash not found".to_owned()))?;
-                    let protocol_state =
-                        ProtocolState::from_storage(states, component_id, tx_hash)?;
+
+                let mut i = 0;
+                while i < data_vec.len() {
+                    let stakeholder_start = i;
+                    let current_component_id = &data_vec[i].1;
+
+                    // Iterate until the component_id changes
+                    while i < data_vec.len() && &data_vec[i].1 == current_component_id {
+                        i += 1;
+                    }
+
+                    let states_slice = &data_vec[stakeholder_start..i];
+                    let tx_hash = &states_slice.last().unwrap().2; // Last element has the latest transaction
+
+                    let protocol_state = ProtocolState::from_storage(
+                        states_slice
+                            .iter()
+                            .map(|x| x.0.clone())
+                            .collect(),
+                        current_component_id.clone(),
+                        tx_hash,
+                    )?;
+
                     protocol_states.push(protocol_state);
                 }
+
                 Ok(protocol_states)
             }
+
             Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
         }
     }

@@ -299,7 +299,7 @@ pub struct NewProtocolComponent {
     pub attributes: Option<serde_json::Value>,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Clone)]
 #[diesel(belongs_to(ProtocolComponent))]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -323,7 +323,7 @@ impl ProtocolState {
         chain_id: i64,
         version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Vec<(Self, String, Transaction)>> {
+    ) -> QueryResult<Vec<(Self, String, Bytes)>> {
         let mut query = protocol_state::table
             .inner_join(
                 protocol_component::table
@@ -344,8 +344,13 @@ impl ProtocolState {
         }
 
         query
-            .select((Self::as_select(), protocol_component::external_id, Transaction::as_select()))
-            .get_results::<(Self, String, Transaction)>(conn)
+            .order_by((
+                protocol_state::protocol_component_id,
+                transaction::block_id,
+                transaction::index,
+            ))
+            .select((Self::as_select(), protocol_component::external_id, transaction::hash))
+            .get_results::<(Self, String, Bytes)>(conn)
             .await
     }
 
@@ -354,7 +359,7 @@ impl ProtocolState {
         chain_id: i64,
         version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Vec<(Self, String, Transaction)>> {
+    ) -> QueryResult<Vec<(Self, String, Bytes)>> {
         let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .inner_join(
@@ -376,8 +381,13 @@ impl ProtocolState {
         }
 
         query
-            .select((Self::as_select(), protocol_component::external_id, Transaction::as_select()))
-            .get_results::<(Self, String, Transaction)>(conn)
+            .order_by((
+                protocol_state::protocol_component_id,
+                transaction::block_id,
+                transaction::index,
+            ))
+            .select((Self::as_select(), protocol_component::external_id, transaction::hash))
+            .get_results::<(Self, String, Bytes)>(conn)
             .await
     }
 
@@ -385,7 +395,7 @@ impl ProtocolState {
         chain_id: i64,
         version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Vec<(Self, String, Transaction)>> {
+    ) -> QueryResult<Vec<(Self, String, Bytes)>> {
         let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
@@ -402,8 +412,13 @@ impl ProtocolState {
         }
 
         query
-            .select((Self::as_select(), protocol_component::external_id, Transaction::as_select()))
-            .get_results::<(Self, String, Transaction)>(conn)
+            .order_by((
+                protocol_state::protocol_component_id,
+                transaction::block_id,
+                transaction::index,
+            ))
+            .select((Self::as_select(), protocol_component::external_id, transaction::hash))
+            .get_results::<(Self, String, Bytes)>(conn)
             .await
     }
 }
