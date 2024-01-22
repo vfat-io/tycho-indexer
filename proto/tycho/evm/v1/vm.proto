@@ -47,3 +47,23 @@ message BlockContractChanges {
   // The set of transaction changes observed in the specified block.
   repeated TransactionContractChanges changes = 2;
 }
+
+// todo()!
+message BalanceDelta {
+  // The address of the ERC20 token whose balance changed.
+  bytes pool_hash = 1;
+  // The new balance of the token.
+  bytes base_token_balance = 2;
+  // The id of the component whose TVL is tracked.
+  bytes quote_token_balance = 3;
+  // todo()!
+  uint64 ordinal = 4;
+}
+
+// todo()!
+message BlockPoolChanges {
+  // todo()!
+  repeated ProtocolComponent protocol_components = 1;
+  // todo()!
+  repeated BalanceDelta balance_deltas = 2;
+}

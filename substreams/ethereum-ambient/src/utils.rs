@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail};
 use ethabi::{decode, ParamType};
+use ethabi::ethereum_types::U256;
 use substreams_ethereum::pb::eth::v2::Call;
 use tiny_keccak::{Hasher, Keccak};
 
@@ -42,3 +43,9 @@ const BASE_QUOTE_FLOW_OUTPUT: &[ParamType] = &[
     ParamType::Int(128), // baseFlow
     ParamType::Int(128), // quoteFlow
 ];
+
+pub fn from_u256_to_vec(src: U256) -> Vec<u8> {
+    let mut buf = [0u8; 32];
+    src.to_big_endian(&mut buf);
+    buf.to_vec()
+}

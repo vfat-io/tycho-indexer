@@ -3,6 +3,10 @@ use std::collections::{hash_map::Entry, HashMap};
 use substreams_ethereum::pb::eth::{self};
 
 mod contracts;
+use crate::{
+    contracts::{hotproxy::decode_direct_swap_hotproxy_call, main::decode_pool_init},
+    pb::tycho::evm::v1::{BalanceChange, BlockPoolChanges},
+};
 use contracts::{
     hotproxy::{AMBIENT_HOTPROXY_CONTRACT, USER_CMD_HOTPROXY_FN_SIG},
     knockout::{decode_knockout_call, AMBIENT_KNOCKOUT_CONTRACT, USER_CMD_KNOCKOUT_FN_SIG},
@@ -17,9 +21,12 @@ use contracts::{
         decode_warm_path_user_cmd_call, AMBIENT_WARMPATH_CONTRACT, USER_CMD_WARMPATH_FN_SIG,
     },
 };
-
-use crate::contracts::{hotproxy::decode_direct_swap_hotproxy_call, main::decode_pool_init};
+use num_bigint::Sign;
 use pb::tycho::evm::v1 as tycho;
+use substreams::{
+    scalar::BigInt,
+    store::{StoreAdd, StoreAddBigInt, StoreGet, StoreGetBigInt, StoreNew},
+};
 
 mod pb;
 mod utils;
@@ -62,46 +69,11 @@ impl From<InterimContractChange> for tycho::ContractChange {
     }
 }
 
-/// Extracts all contract changes relevant to vm simulations
-///
-/// This implementation has currently two major limitations:
-/// 1. It is hardwired to only care about changes to the ambient main contract, this is ok for this
-///    particular use case but for a more general purpose implementation this is not ideal
-/// 2. Changes are processed separately, this means that if there are any side effects between each
-///    other (e.g. if account is deleted and then created again in ethereum all the storage is set
-///    to 0. So there is a side effect between account creation and contract storage.) these might
-///    not be properly accounted for. Most of the time this should not be a major issue but may lead
-///    to wrong results so consume this implementation with care. See example below for a concrete
-///    case where this is problematic.
-///
-/// ## A very contrived example:
-/// 1. Some existing contract receives a transaction that changes it state, the state is updated
-/// 2. Next, this contract has self destruct called on itself
-/// 3. The contract is created again using CREATE2 at the same address
-/// 4. The contract receives a transaction that changes it state
-/// 5. We would emit this as as contract creation with slots set from 1 and from 4, although we
-///    should only emit the slots changed from 4.
-#[substreams::handlers::map]
-fn map_changes(
+fn map_pool_changes(
     block: eth::v2::Block,
-) -> Result<tycho::BlockContractChanges, substreams::errors::Error> {
-    let mut block_changes = tycho::BlockContractChanges::default();
-
-    let mut tx_change = tycho::TransactionContractChanges::default();
-
-    let mut changed_contracts: HashMap<Vec<u8>, InterimContractChange> = HashMap::new();
-
-    let created_accounts: HashMap<_, _> = block
-        .transactions()
-        .flat_map(|tx| {
-            tx.calls.iter().flat_map(|call| {
-                call.account_creations
-                    .iter()
-                    .map(|ac| (&ac.account, ac.ordinal))
-            })
-        })
-        .collect();
-
+) -> Result<tycho::BlockPoolChanges, substreams::errors::Error> {
+    let mut protocol_components = Vec::new();
+    let mut balance_deltas = Vec::new();
     for block_tx in block.transactions() {
         // extract storage changes
         let mut storage_changes = block_tx
@@ -133,9 +105,7 @@ fn map_changes(
                 // Extract pool creations
                 if let Some(protocol_component) = decode_pool_init(call)? {
                     // Handle the case when Some is returned
-                    tx_change
-                        .component_changes
-                        .push(protocol_component);
+                    protocol_components.push(protocol_component);
                 }
             }
 
@@ -168,10 +138,101 @@ fn map_changes(
                 }
                 _ => None,
             };
-
-            // TODO: if not None, unwrap result into `(pool_hash, base_flow, quote_flow)` and
-            // aggregate these with the previous balances to get new balances
+            let (_pool_hash, _base_flow, _quote_flow) = match _result {
+                Some((pool_hash, base_flow, quote_flow)) => (pool_hash, base_flow, quote_flow),
+                None => continue,
+            };
+            let balance_delta = tycho::BalanceDelta {
+                pool_hash: Vec::from(_pool_hash),
+                base_token_balance: crate::utils::from_u256_to_vec(_base_flow),
+                quote_token_balance: crate::utils::from_u256_to_vec(_quote_flow),
+                ordinal: call.index as u64,
+            };
+            balance_deltas.push(balance_delta);
         }
+    }
+    let pool_changes = tycho::BlockPoolChanges { protocol_components, balance_deltas };
+    Ok(pool_changes)
+}
+
+#[substreams::handlers::store]
+pub fn store_pools_balances(changes: tycho::BlockPoolChanges, balance_store: StoreAddBigInt) {
+    for component in changes.protocol_components {
+        let pool_hash_hex = hex::encode(&component.id);
+        balance_store.add(0, format!("{}{}", pool_hash_hex, "base"), BigInt::from(0));
+        balance_store.add(0, format!("{}{}", pool_hash_hex, "quote"), BigInt::from(0));
+    }
+
+    for balance_delta in changes.balance_deltas {
+        let pool_hash_hex = hex::encode(&balance_delta.pool_hash);
+        balance_store.add(
+            balance_delta.ordinal,
+            format!("{}{}", pool_hash_hex, "base"),
+            BigInt::from_bytes_le(Sign::Plus, &balance_delta.base_token_balance),
+        );
+        balance_store.add(
+            balance_delta.ordinal,
+            format!("{}{}", pool_hash_hex, "quote"),
+            BigInt::from_bytes_le(Sign::Plus, &balance_delta.quote_token_balance),
+        );
+    }
+}
+
+/// Extracts all contract changes relevant to vm simulations
+///
+/// This implementation has currently two major limitations:
+/// 1. It is hardwired to only care about changes to the ambient main contract, this is ok for this
+///    particular use case but for a more general purpose implementation this is not ideal
+/// 2. Changes are processed separately, this means that if there are any side effects between each
+///    other (e.g. if account is deleted and then created again in ethereum all the storage is set
+///    to 0. So there is a side effect between account creation and contract storage.) these might
+///    not be properly accounted for. Most of the time this should not be a major issue but may lead
+///    to wrong results so consume this implementation with care. See example below for a concrete
+///    case where this is problematic.
+///
+/// ## A very contrived example:
+/// 1. Some existing contract receives a transaction that changes it state, the state is updated
+/// 2. Next, this contract has self destruct called on itself
+/// 3. The contract is created again using CREATE2 at the same address
+/// 4. The contract receives a transaction that changes it state
+/// 5. We would emit this as as contract creation with slots set from 1 and from 4, although we
+///    should only emit the slots changed from 4.
+#[substreams::handlers::map]
+fn map_changes(
+    block: eth::v2::Block,
+    block_pool_changes: BlockPoolChanges,
+    balance_store: StoreGetBigInt,
+) -> Result<tycho::BlockContractChanges, substreams::errors::Error> {
+    let mut block_changes = tycho::BlockContractChanges::default();
+
+    let mut tx_change = tycho::TransactionContractChanges::default();
+
+    let mut changed_contracts: HashMap<Vec<u8>, InterimContractChange> = HashMap::new();
+
+    let created_accounts: HashMap<_, _> = block
+        .transactions()
+        .flat_map(|tx| {
+            tx.calls.iter().flat_map(|call| {
+                call.account_creations
+                    .iter()
+                    .map(|ac| (&ac.account, ac.ordinal))
+            })
+        })
+        .collect();
+
+    for block_tx in block.transactions() {
+        // extract storage changes
+        let mut storage_changes = block_tx
+            .calls
+            .iter()
+            .filter(|call| !call.state_reverted)
+            .flat_map(|call| {
+                call.storage_changes
+                    .iter()
+                    .filter(|c| c.address == AMBIENT_CONTRACT)
+            })
+            .collect::<Vec<_>>();
+        storage_changes.sort_unstable_by_key(|change| change.ordinal);
 
         // Note: some contracts change slot values and change them back to their
         //  original value before the transactions ends we remember the initial
@@ -307,6 +368,46 @@ fn map_changes(
                     });
                 }
             }
+        }
+
+        // Add new components or TVL changes to the tx_change
+        for component in &block_pool_changes.protocol_components {
+            tx_change
+                .component_changes
+                .push(component.clone());
+        }
+        for balance_delta in &block_pool_changes.balance_deltas {
+            let base_balance = balance_store.get_at(
+                balance_delta.ordinal,
+                format!("{}{}", hex::encode(&balance_delta.pool_hash), "base"),
+            );
+            let quote_balance = balance_store.get_at(
+                balance_delta.ordinal,
+                format!("{}{}", hex::encode(&balance_delta.pool_hash), "quote"),
+            );
+            let base_balance_change = BalanceChange {
+                component_id: balance_delta.pool_hash.clone(),
+                token: vec![1, 2], // how to get the token??
+                balance: base_balance
+                    .expect("Couldn't get balance from store")
+                    .to_bytes_be()
+                    .1,
+            };
+            let quote_balance_change = BalanceChange {
+                component_id: balance_delta.pool_hash.clone(),
+                token: vec![1, 2], // how to get the token??
+                balance: quote_balance
+                    .expect("Couldn't get balance from store")
+                    .to_bytes_be()
+                    .1,
+            };
+
+            tx_change
+                .balance_changes
+                .push(base_balance_change);
+            tx_change
+                .balance_changes
+                .push(quote_balance_change);
         }
 
         // if there were any changes, add transaction and push the changes

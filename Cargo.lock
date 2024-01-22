@@ -4327,6 +4327,7 @@ dependencies = [
  "ethabi 18.0.0",
  "hex",
  "hex-literal 0.4.1",
+ "num-bigint",
  "prost",
  "substreams",
  "substreams-ethereum",
