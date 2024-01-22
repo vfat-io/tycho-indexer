@@ -17,7 +17,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
     hex_bytes::Bytes,
-    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolSystem},
+    models::{Chain, ExtractorIdentity, NormalisedMessage},
     pb::tycho::evm::v1 as substreams,
     storage::{ChangeType, StateGatewayType},
 };
@@ -493,7 +493,7 @@ pub struct ProtocolComponent {
     // an id for this component, could be hex repr of contract address
     pub id: ContractId,
     // what system this component belongs to
-    pub protocol_system: ProtocolSystem,
+    pub protocol_system: String,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
     pub protocol_type_id: String,
     // blockchain the component belongs to
@@ -525,8 +525,8 @@ impl ProtocolComponent {
     pub fn try_from_message(
         msg: substreams::ProtocolComponent,
         chain: Chain,
-        protocol_system: ProtocolSystem,
-        protocol_type_id: String,
+        protocol_system: &str,
+        protocol_type_id: &str,
         tx_hash: H256,
         creation_ts: NaiveDateTime,
     ) -> Result<Self, ExtractionError> {
@@ -555,8 +555,8 @@ impl ProtocolComponent {
 
         Ok(Self {
             id,
-            protocol_type_id,
-            protocol_system,
+            protocol_type_id: protocol_type_id.to_owned(),
+            protocol_system: protocol_system.to_owned(),
             tokens,
             contract_ids,
             static_attributes,
@@ -587,7 +587,7 @@ impl BlockContractChanges {
         msg: substreams::BlockContractChanges,
         extractor: &str,
         chain: Chain,
-        protocol_system: ProtocolSystem,
+        protocol_system: String,
         protocol_type_id: String,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
@@ -606,8 +606,8 @@ impl BlockContractChanges {
                         let component = ProtocolComponent::try_from_message(
                             component_msg,
                             chain,
-                            protocol_system,
-                            protocol_type_id.clone(),
+                            &protocol_system,
+                            &protocol_type_id,
                             tx.hash,
                             block.ts,
                         )?;
@@ -880,7 +880,7 @@ impl BlockEntityChanges {
         msg: substreams::BlockEntityChanges,
         extractor: &str,
         chain: Chain,
-        protocol_system: ProtocolSystem,
+        protocol_system: String,
         protocol_type_id: String,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
@@ -899,8 +899,8 @@ impl BlockEntityChanges {
                         let pool = ProtocolComponent::try_from_message(
                             component,
                             chain,
-                            protocol_system,
-                            protocol_type_id.clone(),
+                            &protocol_system,
+                            &protocol_type_id,
                             tx.hash,
                             block.ts,
                         )?;
@@ -1304,7 +1304,7 @@ mod test {
     use actix_web::body::MessageBody;
     use rstest::rstest;
 
-    use crate::{extractor::evm::fixtures::transaction01, models::ProtocolSystem};
+    use crate::extractor::evm::fixtures::transaction01;
 
     use super::*;
 
@@ -1448,7 +1448,7 @@ mod test {
         };
         let protocol_component = ProtocolComponent {
             id: ContractId("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned()),
-            protocol_system: ProtocolSystem::Ambient,
+            protocol_system: "ambient".to_string(),
             protocol_type_id: String::from("id-1"),
             chain: Chain::Ethereum,
             tokens: vec![
@@ -1524,7 +1524,7 @@ mod test {
             msg,
             "test",
             Chain::Ethereum,
-            ProtocolSystem::Ambient,
+            "ambient".to_string(),
             String::from("id-1"),
         )
         .unwrap();
@@ -1535,7 +1535,7 @@ mod test {
         let address = H160::from_low_u64_be(0x0000000000000000000000000000000061626364);
         let protocol_component = ProtocolComponent {
             id: ContractId("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned()),
-            protocol_system: ProtocolSystem::Ambient,
+            protocol_system: "ambient".to_string(),
             protocol_type_id: String::from("id-1"),
             chain: Chain::Ethereum,
             tokens: vec![
@@ -1861,7 +1861,7 @@ mod test {
             "Pool".to_owned(),
             ProtocolComponent {
                 id: ContractId("Pool".to_owned()),
-                protocol_system: ProtocolSystem::Ambient,
+                protocol_system: "ambient".to_string(),
                 protocol_type_id: "Pool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec![
@@ -1909,7 +1909,7 @@ mod test {
             msg,
             "test",
             Chain::Ethereum,
-            ProtocolSystem::Ambient,
+            "ambient".to_string(),
             "Pool".to_owned(),
         )
         .unwrap();
@@ -1971,7 +1971,7 @@ mod test {
             "Pool".to_owned(),
             ProtocolComponent {
                 id: ContractId("Pool".to_owned()),
-                protocol_system: ProtocolSystem::Ambient,
+                protocol_system: "ambient".to_string(),
                 protocol_type_id: "Pool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec![
@@ -2041,7 +2041,7 @@ mod test {
         let msg = fixtures::pb_protocol_component();
 
         let expected_chain = Chain::Ethereum;
-        let expected_protocol_system = ProtocolSystem::Ambient;
+        let expected_protocol_system = "ambient".to_string();
         let expected_attribute_map: HashMap<String, Bytes> = vec![
             ("balance".to_string(), Bytes::from(100_u64.to_be_bytes().to_vec())),
             ("factory_address".to_string(), Bytes::from(b"0x0fwe0g240g20".to_vec())),
@@ -2054,8 +2054,8 @@ mod test {
         let result = ProtocolComponent::try_from_message(
             msg,
             expected_chain,
-            expected_protocol_system,
-            protocol_type_id.clone(),
+            &expected_protocol_system,
+            &protocol_type_id,
             H256::from_str("0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac")
                 .unwrap(),
             Default::default(),
