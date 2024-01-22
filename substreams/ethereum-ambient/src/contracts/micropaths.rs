@@ -93,12 +93,14 @@ const MINT_RANGE_RETURN_ABI: &[ParamType] = &[
 ];
 pub fn decode_mint_range_call(
     call: &Call,
-) -> Result<(Vec<u8>, ethabi::Int, ethabi::Int), anyhow::Error> {
+) -> Result<([u8; 32], ethabi::Int, ethabi::Int), anyhow::Error> {
     if let Ok(mint_range) = decode(MINT_RANGE_ABI, &call.input[4..]) {
-        let pool_hash = mint_range[9]
+        let pool_hash: [u8; 32] = mint_range[9]
             .to_owned()
             .into_fixed_bytes()
-            .ok_or_else(|| anyhow!("Failed to convert pool hash to fixed bytes".to_string()))?;
+            .ok_or_else(|| anyhow!("Failed to convert pool hash to fixed bytes".to_string()))?
+            .try_into()
+            .unwrap();
 
         if let Ok(external_outputs) = decode(MINT_RANGE_RETURN_ABI, &call.return_data) {
             let base_flow = external_outputs[0]
@@ -121,12 +123,14 @@ pub fn decode_mint_range_call(
 
 pub fn decode_burn_ambient_call(
     call: &Call,
-) -> Result<(Vec<u8>, ethabi::Int, ethabi::Int), anyhow::Error> {
+) -> Result<([u8; 32], ethabi::Int, ethabi::Int), anyhow::Error> {
     if let Ok(burn_ambient) = decode(BURN_AMBIENT_ABI, &call.input[4..]) {
-        let pool_hash = burn_ambient[6]
+        let pool_hash: [u8; 32] = burn_ambient[6]
             .to_owned()
             .into_fixed_bytes()
-            .ok_or_else(|| anyhow!("Failed to convert pool hash to bytes".to_string()))?;
+            .ok_or_else(|| anyhow!("Failed to convert pool hash to bytes".to_string()))?
+            .try_into()
+            .unwrap();
 
         if let Ok(external_outputs) = decode(BURN_AMBIENT_RETURN_ABI, &call.return_data) {
             let base_flow = external_outputs[0]
@@ -150,12 +154,14 @@ pub fn decode_burn_ambient_call(
 
 pub fn decode_mint_ambient_call(
     call: &Call,
-) -> Result<(Vec<u8>, ethabi::Int, ethabi::Int), anyhow::Error> {
+) -> Result<([u8; 32], ethabi::Int, ethabi::Int), anyhow::Error> {
     if let Ok(mint_ambient) = decode(MINT_AMBIENT_ABI, &call.input[4..]) {
-        let pool_hash = mint_ambient[6]
+        let pool_hash: [u8; 32] = mint_ambient[6]
             .to_owned()
             .into_fixed_bytes()
-            .ok_or_else(|| anyhow!("Failed to convert pool hash to bytes".to_string()))?;
+            .ok_or_else(|| anyhow!("Failed to convert pool hash to bytes".to_string()))?
+            .try_into()
+            .unwrap();
 
         if let Ok(external_outputs) = decode(MINT_AMBIENT_RETURN_ABI, &call.return_data) {
             let base_flow = external_outputs[0]
@@ -179,12 +185,14 @@ pub fn decode_mint_ambient_call(
 
 pub fn decode_burn_range_call(
     call: &Call,
-) -> Result<(Vec<u8>, ethabi::Int, ethabi::Int), anyhow::Error> {
+) -> Result<([u8; 32], ethabi::Int, ethabi::Int), anyhow::Error> {
     if let Ok(burn_range) = decode(BURN_RANGE_ABI, &call.input[4..]) {
-        let pool_hash = burn_range[9]
+        let pool_hash: [u8; 32] = burn_range[9]
             .to_owned()
             .into_fixed_bytes() // Convert Bytes32 to Vec<u8>
-            .ok_or_else(|| anyhow!("Failed to convert pool hash to bytes".to_string()))?;
+            .ok_or_else(|| anyhow!("Failed to convert pool hash to bytes".to_string()))?
+            .try_into()
+            .unwrap();
 
         if let Ok(external_outputs) = decode(BURN_RANGE_RETURN_ABI, &call.return_data) {
             let base_flow = external_outputs[0]
@@ -208,7 +216,7 @@ pub fn decode_burn_range_call(
 
 pub fn decode_sweep_swap_call(
     call: &Call,
-) -> Result<(Vec<u8>, ethabi::Int, ethabi::Int), anyhow::Error> {
+) -> Result<([u8; 32], ethabi::Int, ethabi::Int), anyhow::Error> {
     let sweep_swap_abi: &[ParamType] = &[
         ParamType::Tuple(vec![
             ParamType::Uint(128),
@@ -259,12 +267,14 @@ pub fn decode_sweep_swap_call(
             .ok_or_else(|| {
                 anyhow!("Failed to convert pool cursor to tuple for sweepSwap call".to_string())
             })?;
-        let pool_hash = pool_cursor[1]
+        let pool_hash: [u8; 32] = pool_cursor[1]
             .to_owned()
             .into_fixed_bytes()
             .ok_or_else(|| {
                 anyhow!("Failed to convert pool hash to fixed bytes for sweepSwap call".to_string())
-            })?;
+            })?
+            .try_into()
+            .unwrap();
         if let Ok(sweep_swap_output) = decode(sweep_swap_abi_output, &call.return_data) {
             let pair_flow = sweep_swap_output[0]
                 .to_owned()

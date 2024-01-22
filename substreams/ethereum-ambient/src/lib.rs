@@ -126,7 +126,10 @@ fn map_changes(
             if call.input.len() < 4 {
                 continue;
             }
-            if call.address == AMBIENT_CONTRACT && call.input[0..4] == USER_CMD_FN_SIG {
+            let selector: [u8; 4] = call.input[0..4].try_into().unwrap();
+            let address: [u8; 20] = call.address.clone().try_into().unwrap();
+
+            if call.address == AMBIENT_CONTRACT && selector == USER_CMD_FN_SIG {
                 // Extract pool creations
                 if let Some(protocol_component) = decode_pool_init(call)? {
                     // Handle the case when Some is returned
@@ -134,73 +137,40 @@ fn map_changes(
                         .component_changes
                         .push(protocol_component);
                 }
-            } else if
-            // Handle TVL changes caused by calling the swap function
-            call.address == AMBIENT_CONTRACT && call.input[0..4] == SWAP_FN_SIG {
-                // TODO: aggregate these with the previous balances to get new balances:
-                let (_pool_hash, _base_flow, _quote_flow) = decode_direct_swap_call(call)?;
-            } else if
-            // Handle TVL changes caused by calling the userCmd method on the HotProxy contract
-            call.address == AMBIENT_HOTPROXY_CONTRACT &&
-                call.input[0..4] == USER_CMD_HOTPROXY_FN_SIG
-            {
-                // TODO: aggregate these with the previous balances to get new balances:
-                let (_pool_hash, _base_flow, _quote_flow) = decode_direct_swap_hotproxy_call(call)?;
-            } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
-                call.input[0..4] == SWEEP_SWAP_FN_SIG
-            {
-                // Handle TVL changes caused by calling the sweepSwap method on the MicroPaths
-                // contract
-                // TODO: aggregate these flows with the previous balances to get new balances:
-                let (_pool_hash, _base_flow, _quote_flow) = decode_sweep_swap_call(call)?;
-            } else if call.address == AMBIENT_WARMPATH_CONTRACT &&
-                call.input[0..4] == USER_CMD_WARMPATH_FN_SIG
-            {
-                // Handle TVL changes caused by mints, burns, or harvest when calling the userCmd
-                // method on the WarmPath contract.
-                let code = call.input[35];
-                let is_mint =
-                    code == 1 || code == 11 || code == 12 || code == 3 || code == 31 || code == 32;
-                let is_burn =
-                    code == 2 || code == 21 || code == 22 || code == 4 || code == 41 || code == 42;
-                let is_harvest = code == 5;
-                let extract_tvl = is_mint || is_burn || is_harvest;
-                if extract_tvl {
-                    // TODO: aggregate these flows with the previous balances to get new balances:
-                    let (_pool_hash, _base_flow, _quote_flow) =
-                        decode_warm_path_user_cmd_call(call)?;
-                }
-            } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
-                call.input[0..4] == MINT_RANGE_FN_SIG
-            {
-                // Handle TVL changes on mintRange() calls to the MicroPaths contract
-                // TODO: aggregate these flows with the previous balances to get new balances:
-                let (_pool_hash, _base_flow, _quote_flow) = decode_mint_range_call(call)?;
-            } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
-                call.input[0..4] == MINT_AMBIENT_FN_SIG
-            {
-                // Handle TVL changes on mintAmbient() calls to the MicroPaths contract
-                // TODO: aggregate these flows with the previous balances to get new balances:
-                let (_pool_hash, _base_flow, _quote_flow) = decode_mint_ambient_call(call)?;
-            } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
-                call.input[0..4] == BURN_RANGE_FN_SIG
-            {
-                // Handle TVL changes on burnRange() calls to the MicroPaths contract
-                // TODO: aggregate these flows with the previous balances to get new balances:
-                let (_pool_hash, _base_flow, _quote_flow) = decode_burn_range_call(call)?;
-            } else if call.address == AMBIENT_MICROPATHS_CONTRACT &&
-                call.input[0..4] == BURN_AMBIENT_FN_SIG
-            {
-                // Handle TVL changes on burnAmbient() calls to the MicroPaths contract
-                // TODO: aggregate these flows with the previous balances to get new balances:
-                let (_pool_hash, _base_flow, _quote_flow) = decode_burn_ambient_call(call)?;
-            } else if call.address == AMBIENT_KNOCKOUT_CONTRACT &&
-                call.input[0..4] == USER_CMD_KNOCKOUT_FN_SIG
-            {
-                // Handle TVL changes on userCmd() calls to the KnockoutLiqPath contract
-                // TODO: aggregate these flows with the previous balances to get new balances:
-                let (_pool_hash, _base_flow, _quote_flow) = decode_knockout_call(call)?;
             }
+
+            // Extract TVL changes
+            let _result = match (address, selector) {
+                (AMBIENT_CONTRACT, SWAP_FN_SIG) => Some(decode_direct_swap_call(call)?),
+                (AMBIENT_HOTPROXY_CONTRACT, USER_CMD_HOTPROXY_FN_SIG) => {
+                    Some(decode_direct_swap_hotproxy_call(call)?)
+                }
+                (AMBIENT_MICROPATHS_CONTRACT, SWEEP_SWAP_FN_SIG) => {
+                    Some(decode_sweep_swap_call(call)?)
+                }
+                (AMBIENT_WARMPATH_CONTRACT, USER_CMD_WARMPATH_FN_SIG) => {
+                    decode_warm_path_user_cmd_call(call)?
+                }
+                (AMBIENT_MICROPATHS_CONTRACT, MINT_RANGE_FN_SIG) => {
+                    Some(decode_mint_range_call(call)?)
+                }
+                (AMBIENT_MICROPATHS_CONTRACT, MINT_AMBIENT_FN_SIG) => {
+                    Some(decode_mint_ambient_call(call)?)
+                }
+                (AMBIENT_MICROPATHS_CONTRACT, BURN_RANGE_FN_SIG) => {
+                    Some(decode_burn_range_call(call)?)
+                }
+                (AMBIENT_MICROPATHS_CONTRACT, BURN_AMBIENT_FN_SIG) => {
+                    Some(decode_burn_ambient_call(call)?)
+                }
+                (AMBIENT_KNOCKOUT_CONTRACT, USER_CMD_KNOCKOUT_FN_SIG) => {
+                    Some(decode_knockout_call(call)?)
+                }
+                _ => None,
+            };
+
+            // TODO: if not None, unwrap result into `(pool_hash, base_flow, quote_flow)` and
+            // aggregate these with the previous balances to get new balances
         }
 
         // Note: some contracts change slot values and change them back to their
