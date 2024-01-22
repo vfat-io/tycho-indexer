@@ -232,6 +232,9 @@ where
 }
 
 type ChainEnumCache = ValueIdTableCache<Chain>;
+/// ProtocolSystem is not handled as an Enum, because that would require us to restart the whole
+/// application every time we want to add another System. Hence, to diverge from the implementation
+/// of the Chain enum was a conscious decision.
 type ProtocolSystemEnumCache = ValueIdTableCache<String>;
 
 impl From<diesel::result::Error> for StorageError {
