@@ -81,7 +81,7 @@ use thiserror::Error;
 use crate::{
     extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ProtocolSystem, ProtocolType},
+    models::{Chain, ExtractionState, ProtocolType},
     storage::postgres::orm,
 };
 
@@ -557,7 +557,7 @@ pub trait ProtocolGateway {
     async fn get_protocol_components(
         &self,
         chain: &Chain,
-        system: Option<ProtocolSystem>,
+        system: Option<String>,
         ids: Option<&[&str]>,
     ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
@@ -617,7 +617,7 @@ pub trait ProtocolGateway {
         &self,
         chain: &Chain,
         at: Option<Version>,
-        system: Option<ProtocolSystem>,
+        system: Option<String>,
         id: Option<&[&str]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolState>, StorageError>;
@@ -679,7 +679,7 @@ pub trait ProtocolGateway {
     async fn get_state_delta(
         &self,
         chain: &Chain,
-        system: Option<ProtocolSystem>,
+        system: Option<String>,
         id: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
@@ -703,7 +703,7 @@ pub trait ProtocolGateway {
 
     async fn _get_or_create_protocol_system_id(
         &self,
-        protocol_system: ProtocolSystem,
+        protocol_system: String,
         conn: &mut Self::DB,
     ) -> Result<i64, StorageError>;
 }
@@ -781,7 +781,7 @@ pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
         tokens: Vec<H160>,
         contract_ids: Vec<H160>,
         chain: Chain,
-        protocol_system: ProtocolSystem,
+        protocol_system: String,
         transaction_hash: H256,
     ) -> Result<Self, StorageError>;
 

@@ -374,7 +374,7 @@ impl ProtocolState {
     }
 
     pub async fn by_protocol_system(
-        system: models::ProtocolSystem,
+        system: String,
         chain_id: i64,
         version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,

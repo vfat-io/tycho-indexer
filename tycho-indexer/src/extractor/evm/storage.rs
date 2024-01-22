@@ -336,7 +336,7 @@ pub mod pg {
             tokens: Vec<H160>,
             contract_ids: Vec<H160>,
             chain: Chain,
-            protocol_system: models::ProtocolSystem,
+            protocol_system: String,
             transaction_hash: H256,
         ) -> Result<Self, StorageError> {
             let mut static_attributes: HashMap<String, Bytes> = HashMap::default();
@@ -525,7 +525,7 @@ mod test {
         storage::{postgres::orm::Token, Address, StorableToken},
     };
 
-    use crate::{models::ProtocolSystem, storage::postgres::orm};
+    use crate::storage::postgres::orm;
 
     use crate::{
         hex_bytes::Bytes,
@@ -605,7 +605,7 @@ mod test {
         ];
         let contract_ids = vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)];
         let chain = Chain::Ethereum;
-        let protocol_system = ProtocolSystem::Ambient;
+        let protocol_system = "ambient".to_string();
 
         let result = evm::ProtocolComponent::from_storage(
             val.clone(),
@@ -644,7 +644,7 @@ mod test {
     fn test_to_storage_protocol_component() {
         let protocol_component = evm::ProtocolComponent {
             id: evm::ContractId("sample_contract_id".to_string()),
-            protocol_system: ProtocolSystem::Ambient,
+            protocol_system: "ambient".to_string(),
             protocol_type_id: "42".to_string(),
             chain: Chain::Ethereum,
             tokens: vec![
