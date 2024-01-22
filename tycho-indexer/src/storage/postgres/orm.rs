@@ -218,6 +218,21 @@ impl Transaction {
 
         Ok(results.into_iter().collect())
     }
+
+    pub async fn hash_by_id(
+        ids: &[i64],
+        conn: &mut AsyncPgConnection,
+    ) -> Result<HashMap<i64, TxHash>, StorageError> {
+        use super::schema::transaction::dsl::*;
+
+        let results = transaction
+            .filter(id.eq_any(ids))
+            .select((id, hash))
+            .load::<(i64, TxHash)>(conn)
+            .await?;
+
+        Ok(results.into_iter().collect())
+    }
 }
 
 #[derive(Insertable)]
@@ -287,7 +302,7 @@ pub struct NewProtocolType {
     pub implementation: ImplementationType,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug, PartialEq)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
