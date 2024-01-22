@@ -7,6 +7,7 @@ use std::{collections::HashMap, hash::Hash};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use ethers::types::{transaction, Transaction};
+use mockall::Any;
 use tracing::warn;
 
 use crate::{
@@ -99,10 +100,67 @@ where
     async fn get_components(
         &self,
         chain: &Chain,
-        system: Option<ProtocolSystem>,
+        system: ProtocolSystem,
         ids: Option<&[&str]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolComponent>, StorageError> {
-        todo!()
+        use super::schema::protocol_component::dsl::*;
+        let chain_id_value = self.get_chain_id(chain);
+        let protocol_system = self.get_protocol_system_id(&system);
+
+        let orm_protocol_components = match ids {
+            Some(external_ids) => {
+                protocol_component
+                    .filter(
+                        external_id.eq_any(external_ids).and(
+                            protocol_system_id
+                                .eq(protocol_system)
+                                .and(chain_id.eq(chain_id_value)),
+                        ),
+                    )
+                    .select(orm::ProtocolComponent::as_select())
+                    .load::<orm::ProtocolComponent>(conn)
+                    .await?
+            }
+            None => {
+                protocol_component
+                    .filter(
+                        chain_id
+                            .eq(chain_id_value)
+                            .and(protocol_system_id.eq(protocol_system)),
+                    )
+                    .select(orm::ProtocolComponent::as_select())
+                    .load::<orm::ProtocolComponent>(conn)
+                    .await?
+            }
+        };
+        let tx_ids: Vec<i64> = orm_protocol_components
+            .iter()
+            .map(|pc| pc.creation_tx)
+            .collect();
+        let tx_hashes = orm::Transaction::hash_by_id(tx_ids.as_slice(), conn).await?;
+
+        orm_protocol_components
+            .into_iter()
+            .map(|pc| {
+                let tx_hash = tx_hashes
+                    .get::<i64>(&pc.clone().creation_tx)
+                    .ok_or(StorageError::NotFound(
+                        "TransactionHash".to_string(),
+                        pc.clone().creation_tx.to_string(),
+                    ))?
+                    .to_owned()
+                    .into();
+                ProtocolComponent::from_storage(
+                    pc,
+                    vec![],
+                    vec![],
+                    chain.to_owned(), // Chain
+                    system,           // Protocol System
+                    tx_hash,          // Tx hash
+                )
+            })
+            .collect::<Result<Vec<ProtocolComponent>, StorageError>>()
     }
 
     async fn add_protocol_components(

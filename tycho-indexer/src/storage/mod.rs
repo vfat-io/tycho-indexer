@@ -559,8 +559,9 @@ pub trait ProtocolGateway {
     async fn get_components(
         &self,
         chain: &Chain,
-        system: Option<ProtocolSystem>,
+        system: ProtocolSystem,
         ids: Option<&[&str]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
     async fn add_protocol_components(
