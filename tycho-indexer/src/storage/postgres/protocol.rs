@@ -129,7 +129,7 @@ where
             let new_pc = pc
                 .to_storage(
                     self.get_chain_id(&pc.chain),
-                    self.get_protocol_system_id(&pc.protocol_system),
+                    self.get_protocol_system_id(&pc.protocol_system.to_string()),
                     txh.to_owned(),
                     pc.created_at,
                 )
@@ -373,7 +373,7 @@ mod test {
         )
         .await;
         let protocol_system_id =
-            db_fixtures::insert_protocol_system(conn, "Ambient".to_owned()).await;
+            db_fixtures::insert_protocol_system(conn, "ambient".to_owned()).await;
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
@@ -632,7 +632,11 @@ mod test {
                 .to_string()
         );
         assert_eq!(
-            gw.get_protocol_system_id(&original_component.protocol_system),
+            gw.get_protocol_system_id(
+                &original_component
+                    .protocol_system
+                    .to_string()
+            ),
             inserted_data.protocol_system_id
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);

@@ -379,7 +379,7 @@ where
 
     fn get_protocol_system_id(&self, protocol_system: &String) -> i64 {
         self.protocol_system_id_cache
-            .get_id(&protocol_system.clone())
+            .get_id(protocol_system)
     }
     #[allow(dead_code)]
     fn get_protocol_system(&self, id: &i64) -> String {
