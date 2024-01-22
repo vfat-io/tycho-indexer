@@ -19,9 +19,9 @@ use crate::{
     models::{Chain, ProtocolSystem, ProtocolType},
     storage::{
         postgres::{orm, schema, PostgresGateway},
-        Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableProtocolState, StorableProtocolType, StorableToken,
-        StorableTransaction, StorageError, TxHash, Version,
+        Address, BlockIdentifier, BlockOrTimestamp, ChangeType, ContractDelta, ProtocolGateway,
+        StorableBlock, StorableContract, StorableProtocolState, StorableProtocolStateDelta,
+        StorableProtocolType, StorableToken, StorableTransaction, StorageError, TxHash, Version,
     },
 };
 
@@ -51,11 +51,15 @@ where
     ///
     /// ## Returns:
     /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
-    fn _decode_protocol_states(
+    fn _decode_protocol_states<F, P>(
         &self,
         result: Result<Vec<(orm::ProtocolState, String, Bytes)>, diesel::result::Error>,
         context: &str,
-    ) -> Result<Vec<ProtocolState>, StorageError> {
+        mut from_storage_fn: F,
+    ) -> Result<Vec<P>, StorageError>
+    where
+        F: FnMut(Vec<orm::ProtocolState>, String, &Bytes) -> Result<P, StorageError>,
+    {
         match result {
             Ok(data_vec) => {
                 let mut protocol_states = Vec::new();
@@ -73,7 +77,7 @@ where
                     let states_slice = &data_vec[stakeholder_start..i];
                     let tx_hash = &states_slice.last().unwrap().2; // Last element has the latest transaction
 
-                    let protocol_state = ProtocolState::from_storage(
+                    let protocol_state = from_storage_fn(
                         states_slice
                             .iter()
                             .map(|x| x.0.clone())
@@ -166,21 +170,26 @@ where
             (Some(ids), Some(system)) => {
                 warn!("Both protocol IDs and system were provided. System will be ignored.");
                 self._decode_protocol_states(
-                    orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
+                    orm::ProtocolState::by_id(ids, chain_db_id, None, version_ts, conn).await,
                     ids.join(",").as_str(),
+                    ProtocolState::from_storage,
                 )
             }
             (Some(ids), _) => self._decode_protocol_states(
-                orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
+                orm::ProtocolState::by_id(ids, chain_db_id, None, version_ts, conn).await,
                 ids.join(",").as_str(),
+                ProtocolState::from_storage,
             ),
             (_, Some(system)) => self._decode_protocol_states(
-                orm::ProtocolState::by_protocol_system(system, chain_db_id, version_ts, conn).await,
+                orm::ProtocolState::by_protocol_system(system, chain_db_id, None, version_ts, conn)
+                    .await,
                 system.to_string().as_str(),
+                ProtocolState::from_storage,
             ),
             _ => self._decode_protocol_states(
-                orm::ProtocolState::by_chain(chain_db_id, version_ts, conn).await,
+                orm::ProtocolState::by_chain(chain_db_id, None, version_ts, conn).await,
                 chain.to_string().as_str(),
+                ProtocolState::from_storage,
             ),
         }
     }
@@ -212,16 +221,56 @@ where
         todo!()
     }
 
-    async fn get_state_delta(
+    async fn get_protocol_state_deltas(
         &self,
         chain: &Chain,
         system: Option<ProtocolSystem>,
-        id: Option<&[&str]>,
+        ids: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolStateDelta, StorageError> {
-        todo!()
+    ) -> Result<Vec<ProtocolStateDelta>, StorageError> {
+        let chain_db_id = self.get_chain_id(chain);
+        let start_ts = match start_version {
+            Some(version) => Some(version.to_ts(conn).await?),
+            None => None,
+        };
+        let end_ts = Some(end_version.to_ts(conn).await?);
+
+        match (ids, system) {
+            (Some(ids), Some(system)) => {
+                warn!("Both protocol IDs and system were provided. System will be ignored.");
+                self._decode_protocol_states(
+                    orm::ProtocolState::by_id(ids, chain_db_id, start_ts, end_ts, conn).await,
+                    ids.join(",").as_str(),
+                    |states, id, hash| {
+                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
+                    },
+                )
+            }
+            (Some(ids), _) => self._decode_protocol_states(
+                orm::ProtocolState::by_id(ids, chain_db_id, start_ts, end_ts, conn).await,
+                ids.join(",").as_str(),
+                |states, id, hash| {
+                    ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
+                },
+            ),
+            (_, Some(system)) => self._decode_protocol_states(
+                orm::ProtocolState::by_protocol_system(system, chain_db_id, start_ts, end_ts, conn)
+                    .await,
+                system.to_string().as_str(),
+                |states, id, hash| {
+                    ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
+                },
+            ),
+            _ => self._decode_protocol_states(
+                orm::ProtocolState::by_chain(chain_db_id, start_ts, end_ts, conn).await,
+                chain.to_string().as_str(),
+                |states, id, hash| {
+                    ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
+                },
+            ),
+        }
     }
 
     async fn revert_protocol_state(

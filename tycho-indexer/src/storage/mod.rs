@@ -512,7 +512,7 @@ pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
 ///   the token.
 pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(
-        val: S,
+        val: Vec<S>,
         component_id: String,
         tx_hash: &TxHash,
         change: ChangeType,
@@ -655,28 +655,28 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
-    /// Retrieve protocol component state changes
+    /// Retrieve protocol state changes
     ///
-    /// Fetches all state changes that occurred for the given protocol system
+    /// Fetches all state changes that occurred for the given protocol ids/system
     ///
     /// # Parameters
     /// - `chain` The chain of the component
     /// - `system` The protocol system this component belongs to
-    /// - `id` The external id of the component e.g. address, or the pair
+    /// - `ids` The external ids of the components e.g. addresses, or the pairs
     /// - `start_version` The version at which to start looking for changes at.
     /// - `end_version` The version at which to stop looking for changes.
     ///
     /// # Return
-    /// A ProtocolState containing all state changes, Err if no changes were found.
-    async fn get_state_delta(
+    /// A list of ProtocolStateDeltas containing all state changes, Err if no changes were found.
+    async fn get_protocol_state_deltas(
         &self,
         chain: &Chain,
         system: Option<ProtocolSystem>,
-        id: Option<&[&str]>,
+        ids: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolStateDelta, StorageError>;
+    ) -> Result<Vec<ProtocolStateDelta>, StorageError>;
 
     /// Reverts the protocol states in storage.
     ///

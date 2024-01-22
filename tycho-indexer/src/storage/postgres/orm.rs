@@ -317,11 +317,13 @@ pub struct ProtocolState {
 
 impl ProtocolState {
     /// retrieves all matching protocol states along with their linked component ids and transaction
-    /// hashes
+    /// hashes. To get state deltas, provide a start and end timestamp. To get full states, provide
+    /// either only an end timestamp or no timestamp (latest state).
     pub async fn by_id(
         component_ids: &[&str],
         chain_id: i64,
-        version_ts: Option<NaiveDateTime>,
+        start_ts: Option<NaiveDateTime>,
+        end_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(Self, String, Bytes)>> {
         let mut query = protocol_state::table
@@ -334,13 +336,19 @@ impl ProtocolState {
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
                 protocol_state::valid_to
-                    .gt(version_ts)
+                    .gt(end_ts)
                     .or(protocol_state::valid_to.is_null()),
             )
             .into_boxed();
 
-        if let Some(ts) = version_ts {
+        // if end timestamp is provided, we want to filter by valid_from <= end_ts
+        if let Some(ts) = end_ts {
             query = query.filter(protocol_state::valid_from.le(ts));
+        }
+
+        // if start timestamp is provided, we want to filter by valid_from >= start_ts
+        if let Some(ts) = start_ts {
+            query = query.filter(protocol_state::valid_from.ge(ts));
         }
 
         query
@@ -357,7 +365,8 @@ impl ProtocolState {
     pub async fn by_protocol_system(
         system: models::ProtocolSystem,
         chain_id: i64,
-        version_ts: Option<NaiveDateTime>,
+        start_ts: Option<NaiveDateTime>,
+        end_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(Self, String, Bytes)>> {
         let mut query = protocol_state::table
@@ -371,13 +380,19 @@ impl ProtocolState {
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
                 protocol_state::valid_to
-                    .gt(version_ts)
+                    .gt(end_ts)
                     .or(protocol_state::valid_to.is_null()),
             )
             .into_boxed();
 
-        if let Some(ts) = version_ts {
+        // if end timestamp is provided, we want to filter by valid_from <= end_ts
+        if let Some(ts) = end_ts {
             query = query.filter(protocol_state::valid_from.le(ts));
+        }
+
+        // if start timestamp is provided, we want to filter by valid_from >= start_ts
+        if let Some(ts) = start_ts {
+            query = query.filter(protocol_state::valid_from.ge(ts));
         }
 
         query
@@ -393,7 +408,8 @@ impl ProtocolState {
 
     pub async fn by_chain(
         chain_id: i64,
-        version_ts: Option<NaiveDateTime>,
+        start_ts: Option<NaiveDateTime>,
+        end_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(Self, String, Bytes)>> {
         let mut query = protocol_state::table
@@ -402,13 +418,19 @@ impl ProtocolState {
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
                 protocol_state::valid_to
-                    .gt(version_ts)
+                    .gt(end_ts)
                     .or(protocol_state::valid_to.is_null()),
             )
             .into_boxed();
 
-        if let Some(ts) = version_ts {
+        // if end timestamp is provided, we want to filter by valid_from <= end_ts
+        if let Some(ts) = end_ts {
             query = query.filter(protocol_state::valid_from.le(ts));
+        }
+
+        // if start timestamp is provided, we want to filter by valid_from >= start_ts
+        if let Some(ts) = start_ts {
+            query = query.filter(protocol_state::valid_from.ge(ts));
         }
 
         query

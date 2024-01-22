@@ -430,43 +430,21 @@ pub mod pg {
         }
     }
 
-    impl evm::ProtocolState {
-        fn convert_attributes_to_json(&self) -> Option<serde_json::Value> {
-            // Convert Bytes to String and then to serde_json Value
-            let serialized_map: HashMap<String, serde_json::Value> = self
-                .attributes
-                .iter()
-                .map(|(k, v)| {
-                    let s = hex::encode(v);
-                    (k.clone(), serde_json::Value::String(s))
-                })
-                .collect();
-
-            // Convert HashMap<String, serde_json::Value> to serde_json::Value struct
-            match serde_json::to_value(serialized_map) {
-                Ok(value) => Some(value),
-                Err(_) => None,
-            }
-        }
-    }
-
     impl StorableProtocolStateDelta<orm::ProtocolState, orm::NewProtocolState, i64>
         for evm::ProtocolStateDelta
     {
         fn from_storage(
-            val: orm::ProtocolState,
+            vals: Vec<orm::ProtocolState>,
             component_id: String,
             tx_hash: &TxHash,
             change: ChangeType,
         ) -> Result<Self, StorageError> {
-            let attr =
+            let mut attr = HashMap::new();
+            for val in vals {
                 if let (Some(name), Some(value)) = (&val.attribute_name, &val.attribute_value) {
-                    vec![(name.clone(), value.clone())]
-                        .into_iter()
-                        .collect()
-                } else {
-                    std::collections::HashMap::new()
-                };
+                    attr.insert(name.clone(), value.clone());
+                }
+            }
 
             match change {
                 ChangeType::Deletion => Ok(evm::ProtocolStateDelta {
