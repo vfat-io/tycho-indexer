@@ -624,6 +624,35 @@ impl AccountBalance {
             .get_results::<Self>(conn)
             .await
     }
+
+    pub async fn latest_versions_by_ids<'a, I: IntoIterator<Item = &'a i64>>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<AccountBalance>, StorageError> {
+        Ok(account_balance::table
+            .filter(account_balance::account_id.eq_any(ids))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await?)
+    }
+}
+
+impl<'a> StoredVersionedRow<'a> for AccountBalance {
+    type EntityId = i64;
+    type PrimaryKey = i64;
+    type Version = NaiveDateTime;
+
+    fn get_pk(&self) -> Self::PrimaryKey {
+        self.id
+    }
+
+    fn get_valid_to(&self) -> Self::Version {
+        self.valid_to.expect("valid to set")
+    }
+
+    fn get_entity_id(&'a self) -> Self::EntityId {
+        self.account_id
+    }
 }
 
 #[derive(Insertable, Debug)]
@@ -635,6 +664,28 @@ pub struct NewAccountBalance {
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
+}
+
+impl VersionedRow for NewAccountBalance {
+    type SortKey = (i64, NaiveDateTime, i64);
+    type EntityId = i64;
+    type Version = NaiveDateTime;
+
+    fn get_id(&self) -> Self::EntityId {
+        self.account_id
+    }
+
+    fn get_sort_key(&self) -> Self::SortKey {
+        (self.account_id, self.valid_from, self.modify_tx)
+    }
+
+    fn set_valid_to(&mut self, end_version: Self::Version) {
+        self.valid_to = Some(end_version);
+    }
+
+    fn get_valid_from(&self) -> Self::Version {
+        self.valid_from
+    }
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
@@ -665,6 +716,17 @@ impl ContractCode {
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await
+    }
+
+    pub async fn latest_versions_by_ids<'a, I: IntoIterator<Item = &'a i64>>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<ContractCode>, StorageError> {
+        Ok(contract_code::table
+            .filter(contract_code::account_id.eq_any(ids))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await?)
     }
 }
 

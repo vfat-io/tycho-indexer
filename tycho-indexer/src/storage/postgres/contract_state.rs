@@ -1105,6 +1105,14 @@ where
         }
 
         if !balance_data.is_empty() {
+            let end_versions = versioning::set_versioning_attributes(&mut balance_data);
+            let db_rows =
+                orm::AccountBalance::latest_versions_by_ids(end_versions.keys(), conn).await?;
+            if !db_rows.is_empty() {
+                versioning::build_batch_update_query(&db_rows, "account_balance", &end_versions)
+                    .execute(conn)
+                    .await?;
+            }
             diesel::insert_into(schema::account_balance::table)
                 .values(&balance_data)
                 .execute(conn)
