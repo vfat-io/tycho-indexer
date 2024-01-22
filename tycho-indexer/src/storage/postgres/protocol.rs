@@ -450,7 +450,7 @@ mod test {
         )
         .await;
 
-        let protocol_component_id = db_fixtures::insert_protocol_component(
+        db_fixtures::insert_protocol_component(
             conn,
             "state2",
             chain_id,
