@@ -18,6 +18,8 @@ use crate::{
     },
 };
 
+use self::{orm::NewSlot, versioning};
+
 use super::*;
 
 // Helper type to retrieve entities with their associated tx hashes.
@@ -543,15 +545,31 @@ where
                     new_entries.push(orm::NewSlot {
                         slot,
                         value: value.as_ref(),
+                        previous_value: None,
                         account_id: *account_id,
                         modify_tx: *modify_tx,
                         ordinal: *tx_index,
                         valid_from: *block_ts,
+                        valid_to: None,
                     })
                 }
             }
         }
-        new_entries.sort_by_key(|k| k.ordinal);
+        let db_end_versions = versioning::set_delta_versioning_attributes(&mut new_entries);
+        dbg!(&db_end_versions);
+        dbg!(&new_entries);
+        // would be better to use a tuple based where condition
+        // locks only actually affeted rows, but application side filter should work too.
+        // Could skip but wouldn't guarantee repeatable reads.
+        let mut db_rows: Vec<_> =
+            orm::ContractStorage::latest_version_by_ids(db_end_versions.keys(), conn).await?;
+        dbg!(&db_rows);
+        if !db_rows.is_empty() {
+            versioning::update_end_versions(&mut db_rows, db_end_versions);
+            versioning::build_batch_update_query(db_rows.as_slice(), "contract_storage")
+                .execute(conn)
+                .await?;
+        }
         diesel::insert_into(schema::contract_storage::table)
             .values(&new_entries)
             .execute(conn)
@@ -1954,109 +1972,165 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_upsert_slots() {
-        // Since HashMaps do not guarantee a consistent iteration order, this test
-        // aims to expose any logic in upsert_slots() that incorrectly relies on a certain
-        // iteration order.
-        //
-        // It runs multiple times in a loop to increase the likelihood of encountering
-        // different iteration orders. This approach helps in identifying cases where
-        // varying iteration orders might cause the code to behave unexpectedly or
-        // incorrectly.
-        //
-        // The test will be marked as failed if any of the iterations fail, indicating a reliance
-        // on iteration order in the upsert_slots function.
-        let mut test_failed = false;
-
-        for _ in 0..10 {
-            let mut conn = setup_db().await;
-            let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
-            let blk = db_fixtures::insert_blocks(&mut conn, chain_id).await;
-            let txn = db_fixtures::insert_txns(
-                &mut conn,
-                &[
-                    (
-                        blk[0],
-                        1i64,
-                        "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-                    ),
-                    (
-                        blk[0],
-                        2i64,
-                        "0xcb8e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130946",
-                    ),
-                ],
-            )
-            .await;
-            db_fixtures::insert_account(
-                &mut conn,
-                "6B175474E89094C44Da98b954EedeAC495271d0F",
-                "Account1",
-                chain_id,
-                Some(txn[0]),
-            )
-            .await;
-            let slot_data_tx_0: ContractStore = vec![
-                (vec![1u8].into(), Some(vec![10u8].into())),
-                (vec![2u8].into(), Some(vec![20u8].into())),
-                (vec![3u8].into(), Some(vec![30u8].into())),
-            ]
-            .into_iter()
-            .collect();
-            let slot_data_tx_1: ContractStore = vec![
-                (vec![1u8].into(), Some(vec![11u8].into())),
-                (vec![2u8].into(), Some(vec![21u8].into())),
-                (vec![3u8].into(), Some(vec![31u8].into())),
-            ]
-            .into_iter()
-            .collect();
-            let input_slots = [
+    async fn test_upsert_slots_against_empty_db() {
+        let mut conn = setup_db().await;
+        let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        let blk = db_fixtures::insert_blocks(&mut conn, chain_id).await;
+        let txn = db_fixtures::insert_txns(
+            &mut conn,
+            &[
                 (
-                    txn[0],
-                    vec![(
-                        Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F")
-                            .expect("account address ok"),
-                        slot_data_tx_0.clone(),
-                    )]
-                    .into_iter()
-                    .collect(),
+                    blk[0],
+                    1i64,
+                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
                 ),
                 (
-                    txn[1],
-                    vec![(
-                        Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F")
-                            .expect("account address ok"),
-                        slot_data_tx_1.clone(),
-                    )]
-                    .into_iter()
-                    .collect(),
+                    blk[0],
+                    2i64,
+                    "0xcb8e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130946",
                 ),
-            ]
-            .into_iter()
-            .collect();
-            let gw = EvmGateway::from_connection(&mut conn).await;
-
-            gw.upsert_slots(input_slots, &mut conn)
-                .await
-                .unwrap();
-
-            // Query the stored slots from the database
-            let fetched_slot_data: ContractStore = schema::contract_storage::table
-                .select((schema::contract_storage::slot, schema::contract_storage::value))
-                .get_results(&mut conn)
-                .await
-                .unwrap()
+            ],
+        )
+        .await;
+        db_fixtures::insert_account(
+            &mut conn,
+            "6B175474E89094C44Da98b954EedeAC495271d0F",
+            "Account1",
+            chain_id,
+            Some(txn[0]),
+        )
+        .await;
+        let slot_data_tx_0: ContractStore = vec![
+            (vec![1u8].into(), Some(vec![10u8].into())),
+            (vec![2u8].into(), Some(vec![20u8].into())),
+            (vec![3u8].into(), Some(vec![30u8].into())),
+        ]
+        .into_iter()
+        .collect();
+        let slot_data_tx_1: ContractStore = vec![
+            (vec![1u8].into(), Some(vec![11u8].into())),
+            (vec![2u8].into(), Some(vec![21u8].into())),
+            (vec![3u8].into(), Some(vec![31u8].into())),
+        ]
+        .into_iter()
+        .collect();
+        let input_slots = [
+            (
+                txn[0],
+                vec![(
+                    Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F")
+                        .expect("account address ok"),
+                    slot_data_tx_0.clone(),
+                )]
                 .into_iter()
-                .collect();
-            if slot_data_tx_1 != fetched_slot_data {
-                test_failed = true;
-                break; // Stop on first failure
-            }
-        }
-        assert!(
-            !test_failed,
-            "Test failed in one of the iterations due to HashMap iteration order"
-        );
+                .collect(),
+            ),
+            (
+                txn[1],
+                vec![(
+                    Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F")
+                        .expect("account address ok"),
+                    slot_data_tx_1.clone(),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let gw = EvmGateway::from_connection(&mut conn).await;
+
+        gw.upsert_slots(input_slots, &mut conn)
+            .await
+            .unwrap();
+
+        // Query the stored slots from the database
+        let fetched_slot_data: ContractStore = schema::contract_storage::table
+            .select((schema::contract_storage::slot, schema::contract_storage::value))
+            .filter(schema::contract_storage::valid_to.is_null())
+            .get_results(&mut conn)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect();
+        assert!(slot_data_tx_1 == fetched_slot_data);
+    }
+
+    #[tokio::test]
+    async fn test_upsert_slots_invalidate_db_side_records() {
+        let mut conn = setup_db().await;
+        let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        let blk = db_fixtures::insert_blocks(&mut conn, chain_id).await;
+        let txn = db_fixtures::insert_txns(
+            &mut conn,
+            &[
+                (
+                    blk[0],
+                    1i64,
+                    "0x93132c0221f4c45de9c667297dbb982753405978c94367ff074c3edd3c93e22f",
+                ),
+                (
+                    blk[1],
+                    1i64,
+                    "0xcb8e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130946",
+                ),
+            ],
+        )
+        .await;
+        let c0 = db_fixtures::insert_account(
+            &mut conn,
+            "6B175474E89094C44Da98b954EedeAC495271d0F",
+            "Account1",
+            chain_id,
+            Some(txn[0]),
+        )
+        .await;
+        db_fixtures::insert_slots(
+            &mut conn,
+            c0,
+            txn[0],
+            "2020-01-01T00:00:00",
+            &[(1, 10), (2, 20), (3, 30)],
+        )
+        .await;
+
+        let slot_data_tx_1: ContractStore = vec![(1, 11), (2, 12), (3, 13)]
+            .into_iter()
+            .map(|(s, v)| (int_to_b256(s), Some(int_to_b256(v))))
+            .collect();
+        let input_slots = [(
+            txn[1],
+            vec![(
+                Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F")
+                    .expect("account address ok"),
+                slot_data_tx_1.clone(),
+            )]
+            .into_iter()
+            .collect(),
+        )]
+        .into_iter()
+        .collect();
+        let gw = EvmGateway::from_connection(&mut conn).await;
+
+        gw.upsert_slots(input_slots, &mut conn)
+            .await
+            .unwrap();
+
+        // Query the stored slots from the database
+        let fetched_slot_data: ContractStore = schema::contract_storage::table
+            .select((schema::contract_storage::slot, schema::contract_storage::value))
+            .filter(schema::contract_storage::valid_to.is_null())
+            .get_results(&mut conn)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect();
+        dbg!(&fetched_slot_data);
+        assert!(slot_data_tx_1 == fetched_slot_data);
+    }
+
+    fn int_to_b256(s: u64) -> Bytes {
+        Bytes::from_str(&format!("{:064x}", U256::from(s))).unwrap()
     }
 
     async fn setup_slots_delta(conn: &mut AsyncPgConnection) {

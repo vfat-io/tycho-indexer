@@ -1,5 +1,11 @@
+use std::collections::{hash_map::DefaultHasher, HashSet};
+
 use chrono::NaiveDateTime;
-use diesel::prelude::*;
+use diesel::{
+    helper_types::{AsSelect, SqlTypeOf},
+    pg::Pg,
+    prelude::*,
+};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
 use std::collections::HashMap;
@@ -13,10 +19,13 @@ use crate::{
     },
 };
 
-use super::schema::{
-    account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
-    protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
-    token, transaction,
+use super::{
+    schema::{
+        account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
+        protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
+        token, transaction,
+    },
+    versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
 };
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -747,16 +756,121 @@ pub struct ContractStorage {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Insertable)]
+impl ContractStorage {
+    pub async fn latest_version_by_ids<'b, I: IntoIterator<Item = &'b (i64, Bytes)>>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<ContractStorage>, StorageError> {
+        let tuple_ids = ids
+            .into_iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        let (accounts, slots): (Vec<_>, Vec<_>) = tuple_ids.iter().cloned().unzip();
+        dbg!(&accounts);
+        dbg!(&slots);
+        let tmp = contract_storage::table
+            .select(ContractStorage::as_select())
+            .into_boxed()
+            .filter(
+                contract_storage::account_id
+                    .eq_any(&accounts)
+                    .and(contract_storage::slot.eq_any(&slots))
+                    .and(contract_storage::valid_to.is_null()),
+            )
+            .get_results(conn)
+            .await?;
+        dbg!(&tmp);
+        Ok(tmp
+            .into_iter()
+            .filter(|cs| tuple_ids.contains(&(cs.account_id, cs.slot.clone())))
+            .collect())
+    }
+}
+
+impl StoredVersionedRow for ContractStorage {
+    type EntityId = (i64, Bytes);
+    type PrimaryKey = i64;
+    type Version = NaiveDateTime;
+
+    fn get_id(&self) -> Self::EntityId {
+        return (self.account_id, self.slot.clone());
+    }
+
+    fn get_pk(&self) -> Self::PrimaryKey {
+        return self.id;
+    }
+
+    fn get_valid_to(&self) -> Self::Version {
+        return self.valid_to.expect("valid_to is set")
+    }
+
+    fn set_valid_to(&mut self, end_version: Self::Version) {
+        self.valid_to = Some(end_version);
+    }
+}
+
+#[derive(Insertable, Debug)]
 #[diesel(table_name = contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewSlot<'a> {
     pub slot: &'a Bytes,
     pub value: Option<&'a Bytes>,
+    pub previous_value: Option<&'a Bytes>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub ordinal: i64,
     pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
+}
+/*
+impl<'a> From<&'a ContractStorage> for NewSlot<'a> {
+    fn from(v: &'a ContractStorage) -> Self {
+        NewSlot {
+            slot: &v.slot,
+            value: v.value.as_ref(),
+            previous_value: v.previous_value.as_ref(),
+            account_id: v.account_id,
+            modify_tx: v.modify_tx,
+            ordinal: v.ordinal,
+            valid_from: v.valid_from,
+            valid_to: v.valid_to,
+        }
+    }
+}
+*/
+
+impl<'a> VersionedRow for NewSlot<'a> {
+    type EntityId = (i64, Bytes);
+    type SortKey = ((i64, Bytes), NaiveDateTime, i64);
+    type Version = NaiveDateTime;
+
+    fn get_id(&self) -> Self::EntityId {
+        (self.account_id, self.slot.clone())
+    }
+
+    fn get_sort_key(&self) -> Self::SortKey {
+        (self.get_id(), self.valid_from, self.ordinal)
+    }
+
+    fn set_valid_to(&mut self, end_version: Self::Version) {
+        self.valid_to = Some(end_version);
+    }
+
+    fn get_valid_from(&self) -> Self::Version {
+        self.valid_from
+    }
+}
+
+impl<'a> DeltaVersionedRow for NewSlot<'a> {
+    type Value = Option<&'a Bytes>;
+
+    fn get_value(&self) -> Self::Value {
+        self.value
+    }
+
+    fn set_previous_value(&mut self, previous_value: Self::Value) {
+        self.previous_value = previous_value
+    }
 }
 
 pub struct Contract {

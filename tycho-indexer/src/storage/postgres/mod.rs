@@ -154,6 +154,7 @@ pub mod extraction_state;
 pub mod orm;
 pub mod protocol;
 pub mod schema;
+mod versioning;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 

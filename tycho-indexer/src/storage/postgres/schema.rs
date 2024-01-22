@@ -181,8 +181,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
-
     protocol_system (id) {
         id -> Int8,
         #[max_length = 255]
