@@ -157,7 +157,7 @@ pub mod schema;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
-pub struct EnumTableCache<E> {
+pub struct ValueIdTableCache<E> {
     map_id: HashMap<E, i64>,
     map_enum: HashMap<i64, E>,
 }
@@ -165,7 +165,7 @@ pub struct EnumTableCache<E> {
 /// Provides caching for enum and its database ID relationships.
 ///
 /// Uses a double sided hash map to provide quick lookups in both directions.
-impl<'a, E> EnumTableCache<E>
+impl<'a, E> ValueIdTableCache<E>
 where
     E: Eq + Hash + Clone + FromStr + std::fmt::Debug,
     <E as FromStr>::Err: std::fmt::Debug,
@@ -221,7 +221,7 @@ where
     /// # Arguments
     ///
     /// * `id` - The database ID to lookup.
-    fn get_enum(&self, id: &i64) -> E {
+    fn get_value(&self, id: &i64) -> E {
         self.map_enum
             .get(id)
             .unwrap_or_else(|| {
@@ -231,8 +231,8 @@ where
     }
 }
 
-type ChainEnumCache = EnumTableCache<Chain>;
-type ProtocolSystemEnumCache = EnumTableCache<String>;
+type ChainEnumCache = ValueIdTableCache<Chain>;
+type ProtocolSystemEnumCache = ValueIdTableCache<String>;
 
 impl From<diesel::result::Error> for StorageError {
     fn from(value: diesel::result::Error) -> Self {
@@ -374,7 +374,7 @@ where
     }
 
     fn get_chain(&self, id: &i64) -> Chain {
-        self.chain_id_cache.get_enum(id)
+        self.chain_id_cache.get_value(id)
     }
 
     fn get_protocol_system_id(&self, protocol_system: &String) -> i64 {
@@ -384,13 +384,13 @@ where
     #[allow(dead_code)]
     fn get_protocol_system(&self, id: &i64) -> String {
         self.protocol_system_id_cache
-            .get_enum(id)
+            .get_value(id)
     }
 
     pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
-        let cache = EnumTableCache::<Chain>::from_pool(pool.clone()).await?;
-        let protocol_system_cache: EnumTableCache<String> =
-            EnumTableCache::<String>::from_pool(pool.clone()).await?;
+        let cache = ValueIdTableCache::<Chain>::from_pool(pool.clone()).await?;
+        let protocol_system_cache: ValueIdTableCache<String> =
+            ValueIdTableCache::<String>::from_pool(pool.clone()).await?;
         let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(
             Arc::new(cache),
             Arc::new(protocol_system_cache),
