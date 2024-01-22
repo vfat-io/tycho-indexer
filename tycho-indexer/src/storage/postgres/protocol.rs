@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
@@ -219,36 +219,45 @@ where
                     .map(|state| (state, tx_db.1))
                     .collect();
 
-            // check if an update for the new protocol states already exist. If so, set the older
-            // one as invalid (set its valid_to timestamp)
-            new_states
-                .iter_mut()
-                .for_each(|(new_state, tx_index)| {
-                    // Find existing states with same protocol_component_id and attribute_name and
-                    // 'valid_to' is None
-                    if let Some((matching_state, matching_index)) =
-                        state_data
-                            .iter_mut()
-                            .find(|(existing_state, existing_index)| {
-                                existing_state.protocol_component_id ==
-                                    new_state.protocol_component_id &&
-                                    existing_state.attribute_name == new_state.attribute_name &&
-                                    existing_state.valid_to.is_none()
-                            })
-                    {
-                        // Update 'valid_to' of the older of the matching states
-                        if matching_state.valid_from < new_state.valid_from {
-                            matching_state.valid_to = Some(new_state.valid_from);
-                        } else if matching_state.valid_from > new_state.valid_from {
-                            new_state.valid_to = Some(matching_state.valid_from);
-                        } else if matching_index < tx_index {
-                            matching_state.valid_to = Some(new_state.valid_from);
-                        } else {
-                            new_state.valid_to = Some(matching_state.valid_from);
-                        }
-                    }
-                });
             state_data.append(&mut new_states);
+        }
+
+        // Sort state_data by protocol_component_id, attribute_name, and transaction index
+        state_data.sort_by(|a, b| {
+            let order =
+                a.0.protocol_component_id
+                    .cmp(&b.0.protocol_component_id);
+            if order == Ordering::Equal {
+                let sub_order =
+                    a.0.attribute_name
+                        .cmp(&b.0.attribute_name);
+
+                if sub_order == Ordering::Equal {
+                    // Sort by block ts and tx_index as well
+                    a.1.cmp(&b.1)
+                } else {
+                    sub_order
+                }
+            } else {
+                order
+            }
+        });
+
+        // Invalidate older states
+        let mut i = 0;
+        while i + 1 < state_data.len() {
+            let next_state = &state_data[i + 1].0.clone();
+            let (current_state, _) = &mut state_data[i];
+
+            // Check if next_state has same protocol_component_id and attribute_name
+            if current_state.protocol_component_id == next_state.protocol_component_id &&
+                current_state.attribute_name == next_state.attribute_name
+            {
+                // Invalidate the current state
+                current_state.valid_to = Some(next_state.valid_from);
+            }
+
+            i += 1;
         }
 
         let state_data: Vec<orm::NewProtocolState> = state_data
