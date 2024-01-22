@@ -100,7 +100,7 @@ where
     async fn get_protocol_components(
         &self,
         chain: &Chain,
-        system: Option<String>,
+        system: String,
         ids: Option<&[&str]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolComponent>, StorageError> {
@@ -155,9 +155,9 @@ where
                     pc,
                     vec![],
                     vec![],
-                    chain.to_owned(), // Chain
-                    system,           // Protocol System
-                    tx_hash,          // Tx hash
+                    chain.to_owned(),
+                    &system,
+                    tx_hash,
                 )
             })
             .collect::<Result<Vec<ProtocolComponent>, StorageError>>()
@@ -450,6 +450,16 @@ mod test {
         )
         .await;
 
+        let protocol_component_id = db_fixtures::insert_protocol_component(
+            conn,
+            "state2",
+            chain_id,
+            protocol_system_id,
+            protocol_type_id,
+            txn[0],
+        )
+        .await;
+
         // protocol state for state1-reserve1
         db_fixtures::insert_protocol_state(
             conn,
@@ -699,5 +709,24 @@ mod test {
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
         assert_eq!(original_component.id.0, inserted_data.external_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_components() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let chain = Chain::Ethereum;
+        let system = "ambient".to_string();
+        let ids = Some(["state1", "state2"].as_slice());
+
+        let result = gw
+            .get_protocol_components(&chain, system, ids, &mut conn)
+            .await;
+
+        assert!(result.is_ok());
+        let components = result.unwrap();
+        assert_eq!(components.len(), 2);
     }
 }
