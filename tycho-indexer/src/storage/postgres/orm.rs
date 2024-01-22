@@ -787,8 +787,6 @@ impl ContractStorage {
     }
 }
 
-use std::collections::HashMap;
-
 impl<'a> StoredVersionedRow<'a> for ContractStorage {
     type EntityId = (i64, &'a Bytes);
     type PrimaryKey = i64;
@@ -802,10 +800,8 @@ impl<'a> StoredVersionedRow<'a> for ContractStorage {
         return self.valid_to.expect("valid_to is set")
     }
 
-    fn set_valid_to(&mut self, end_versions: &'a HashMap<Self::EntityId, Self::Version>) {
-        self.valid_to = end_versions
-            .get(&(self.account_id, &self.slot))
-            .copied();
+    fn get_entity_id(&'a self) -> Self::EntityId {
+        (self.account_id, &self.slot)
     }
 }
 

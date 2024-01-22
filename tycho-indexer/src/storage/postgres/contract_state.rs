@@ -558,17 +558,17 @@ where
         let db_end_versions = versioning::set_delta_versioning_attributes(&mut new_entries);
         dbg!(&db_end_versions);
         dbg!(&new_entries);
-        // would be better to use a tuple based where condition
-        // locks only actually affeted rows, but application side filter should work too.
-        // Could skip but wouldn't guarantee repeatable reads.
-        let mut db_rows: Vec<_> =
+        let db_rows: Vec<_> =
             orm::ContractStorage::latest_version_by_ids(db_end_versions.keys(), conn).await?;
         dbg!(&db_rows);
         if !db_rows.is_empty() {
-            versioning::update_end_versions(&mut db_rows, &db_end_versions);
-            versioning::build_batch_update_query(db_rows.as_slice(), "contract_storage")
-                .execute(conn)
-                .await?;
+            versioning::build_batch_update_query(
+                db_rows.as_slice(),
+                "contract_storage",
+                &db_end_versions,
+            )
+            .execute(conn)
+            .await?;
         }
         diesel::insert_into(schema::contract_storage::table)
             .values(&new_entries)

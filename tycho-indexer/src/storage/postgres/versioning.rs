@@ -46,7 +46,7 @@ pub trait StoredVersionedRow<'a> {
 
     fn get_valid_to(&self) -> Self::Version;
 
-    fn set_valid_to(&mut self, end_versions: &'a HashMap<Self::EntityId, Self::Version>);
+    fn get_entity_id(&'a self) -> Self::EntityId;
 }
 
 pub fn set_versioning_attributes<O: VersionedRow>(
@@ -101,20 +101,11 @@ pub fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Deb
     }
     db_updates
 }
-// retrieve rows that require updating with a select
-// send an update stmt to update these rows
-pub fn update_end_versions<'a, O: StoredVersionedRow<'a>>(
-    objects: &mut Vec<O>,
-    end_versions: &'a HashMap<O::EntityId, O::Version>,
-) {
-    for o in objects.iter_mut() {
-        o.set_valid_to(end_versions);
-    }
-}
 
 pub fn build_batch_update_query<'a, O: StoredVersionedRow<'a>>(
-    objects: &[O],
+    objects: &'a [O],
     table_name: &str,
+    end_versions: &'a HashMap<O::EntityId, O::Version>,
 ) -> BoxedSqlQuery<'a, Pg, SqlQuery> {
     dbg!(objects.len());
     let bind_params = (1..=objects.len() * 2)
@@ -139,9 +130,12 @@ pub fn build_batch_update_query<'a, O: StoredVersionedRow<'a>>(
     dbg!(&query_str);
     let mut query = sql_query(query_str).into_boxed();
     for o in objects.iter() {
+        let valid_to = *end_versions
+            .get(&o.get_entity_id())
+            .expect("versions present for all rows");
         query = query
             .bind::<BigInt, _>(o.get_pk().into())
-            .bind::<Timestamp, _>(o.get_valid_to().into());
+            .bind::<Timestamp, _>(valid_to.into());
     }
     dbg!(debug_query(&query).to_string());
     query
