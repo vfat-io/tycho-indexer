@@ -525,8 +525,8 @@ impl ProtocolComponent {
     pub fn try_from_message(
         msg: substreams::ProtocolComponent,
         chain: Chain,
-        protocol_system: String,
-        protocol_type_id: String,
+        protocol_system: &str,
+        protocol_type_id: &str,
         tx_hash: H256,
         creation_ts: NaiveDateTime,
     ) -> Result<Self, ExtractionError> {
@@ -555,8 +555,8 @@ impl ProtocolComponent {
 
         Ok(Self {
             id,
-            protocol_type_id,
-            protocol_system,
+            protocol_type_id: protocol_type_id.to_owned(),
+            protocol_system: protocol_system.to_owned(),
             tokens,
             contract_ids,
             static_attributes,
@@ -606,8 +606,8 @@ impl BlockContractChanges {
                         let component = ProtocolComponent::try_from_message(
                             component_msg,
                             chain,
-                            protocol_system.clone(),
-                            protocol_type_id.clone(),
+                            &protocol_system,
+                            &protocol_type_id,
                             tx.hash,
                             block.ts,
                         )?;
@@ -899,8 +899,8 @@ impl BlockEntityChanges {
                         let pool = ProtocolComponent::try_from_message(
                             component,
                             chain,
-                            protocol_system.clone(),
-                            protocol_type_id.clone(),
+                            &protocol_system,
+                            &protocol_type_id,
                             tx.hash,
                             block.ts,
                         )?;
@@ -2054,8 +2054,8 @@ mod test {
         let result = ProtocolComponent::try_from_message(
             msg,
             expected_chain,
-            expected_protocol_system.clone(),
-            protocol_type_id.clone(),
+            &expected_protocol_system,
+            &protocol_type_id,
             H256::from_str("0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac")
                 .unwrap(),
             Default::default(),
