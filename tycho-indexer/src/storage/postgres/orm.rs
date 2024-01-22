@@ -200,15 +200,16 @@ impl Transaction {
             .await
     }
 
-    pub async fn by_hashes(
+    // fetches the transaction id, hash, index and block timestamp for a given set of hashes
+    pub async fn id_by_hashes(
         hashes: &[&[u8]],
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Vec<(Self, NaiveDateTime)>> {
+    ) -> QueryResult<Vec<(i64, Bytes, i64, NaiveDateTime)>> {
         transaction::table
             .inner_join(block::table)
             .filter(transaction::hash.eq_any(hashes))
-            .select((Self::as_select(), block::ts))
-            .get_results::<(Self, NaiveDateTime)>(conn)
+            .select((transaction::id, transaction::hash, transaction::index, block::ts))
+            .get_results::<(i64, Bytes, i64, NaiveDateTime)>(conn)
             .await
     }
 }
@@ -312,14 +313,14 @@ pub struct NewProtocolComponent {
 }
 
 impl ProtocolComponent {
-    pub async fn by_external_ids(
+    pub async fn ids_by_external_ids(
         external_ids: &[&str],
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Vec<Self>> {
+    ) -> QueryResult<Vec<(i64, String)>> {
         protocol_component::table
             .filter(protocol_component::external_id.eq_any(external_ids))
-            .select(Self::as_select())
-            .get_results::<Self>(conn)
+            .select((protocol_component::id, protocol_component::external_id))
+            .get_results::<(i64, String)>(conn)
             .await
     }
 }

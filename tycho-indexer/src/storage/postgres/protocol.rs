@@ -178,7 +178,7 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let chain_db_id = self.get_chain_id(chain);
-        let txns: HashMap<H256, (orm::Transaction, NaiveDateTime)> = orm::Transaction::by_hashes(
+        let txns: HashMap<H256, (i64, i64, NaiveDateTime)> = orm::Transaction::id_by_hashes(
             new.iter()
                 .map(|state| state.modify_tx.as_bytes())
                 .collect::<Vec<&[u8]>>()
@@ -187,12 +187,12 @@ where
         )
         .await?
         .into_iter()
-        .map(|(tx, ts)| {
-            (H256::try_decode(&tx.hash, "tx hash").expect("Failed to decode tx hash"), (tx, ts))
+        .map(|(id, hash, index, ts)| {
+            (H256::try_decode(&hash, "tx hash").expect("Failed to decode tx hash"), (id, index, ts))
         })
         .collect();
 
-        let components: HashMap<String, i64> = orm::ProtocolComponent::by_external_ids(
+        let components: HashMap<String, i64> = orm::ProtocolComponent::ids_by_external_ids(
             new.iter()
                 .map(|state| state.component_id.as_str())
                 .collect::<Vec<&str>>()
@@ -201,7 +201,7 @@ where
         )
         .await?
         .into_iter()
-        .map(|component| (component.external_id.clone(), component.id))
+        .map(|(id, external_id)| (external_id, id))
         .collect();
 
         let mut state_data: Vec<(orm::NewProtocolState, i64)> = Vec::new();
@@ -214,9 +214,9 @@ where
                 .get(&state.component_id)
                 .expect("Failed to find component");
             let mut new_states: Vec<(orm::NewProtocolState, i64)> =
-                ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0.id, tx_db.1)
+                ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0, tx_db.2)
                     .into_iter()
-                    .map(|state| (state, tx_db.0.index))
+                    .map(|state| (state, tx_db.1))
                     .collect();
 
             // check if an update for the new protocol states already exist. If so, set the older
