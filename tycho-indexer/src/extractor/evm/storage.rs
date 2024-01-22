@@ -336,7 +336,8 @@ pub mod pg {
             tokens: Vec<H160>,
             contract_ids: Vec<H160>,
             chain: Chain,
-            protocol_system: models::ProtocolSystem,
+            protocol_system: String,
+            transaction_hash: H256,
         ) -> Result<Self, StorageError> {
             let mut static_attributes: HashMap<String, Bytes> = HashMap::default();
 
@@ -356,6 +357,8 @@ pub mod pg {
                 contract_ids,
                 static_attributes,
                 change: Default::default(),
+                creation_tx: transaction_hash,
+                created_at: val.created_at,
             })
         }
 
@@ -363,7 +366,8 @@ pub mod pg {
             &self,
             chain_id: i64,
             protocol_system_id: i64,
-            creation_ts: NaiveDateTime,
+            creation_tx: i64,
+            created_at: NaiveDateTime,
         ) -> Result<orm::NewProtocolComponent, StorageError> {
             let protocol_type_id = self
                 .protocol_type_id
@@ -378,6 +382,8 @@ pub mod pg {
                 chain_id,
                 protocol_type_id,
                 protocol_system_id,
+                creation_tx,
+                created_at,
                 attributes: Some(serde_json::to_value(&self.static_attributes).map_err(|err| {
                     StorageError::DecodeError(
                         "Could not convert attributes in StorableComponent".to_string(),
@@ -497,14 +503,14 @@ mod test {
         storage::{postgres::orm::Token, Address, StorableToken},
     };
 
-    use crate::{models::ProtocolSystem, storage::postgres::orm};
+    use crate::storage::postgres::orm;
 
     use crate::{
         hex_bytes::Bytes,
         storage::{ContractId, StorableProtocolComponent},
     };
     use chrono::Utc;
-    use ethers::prelude::H160;
+    use ethers::prelude::{H160, H256};
     use std::str::FromStr;
 
     #[test]
@@ -567,6 +573,8 @@ mod test {
             deleted_at: None,
             inserted_ts: Default::default(),
             modified_ts: Default::default(),
+            creation_tx: 1,
+            deletion_tx: None,
         };
 
         let tokens = vec![
@@ -575,7 +583,7 @@ mod test {
         ];
         let contract_ids = vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)];
         let chain = Chain::Ethereum;
-        let protocol_system = ProtocolSystem::Ambient;
+        let protocol_system = "ambient".to_string();
 
         let result = evm::ProtocolComponent::from_storage(
             val.clone(),
@@ -583,6 +591,8 @@ mod test {
             contract_ids.clone(),
             chain,
             protocol_system,
+            H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
+                .unwrap(),
         );
 
         assert!(result.is_ok());
@@ -612,7 +622,7 @@ mod test {
     fn test_to_storage_protocol_component() {
         let protocol_component = evm::ProtocolComponent {
             id: evm::ContractId("sample_contract_id".to_string()),
-            protocol_system: ProtocolSystem::Ambient,
+            protocol_system: "ambient".to_string(),
             protocol_type_id: "42".to_string(),
             chain: Chain::Ethereum,
             tokens: vec![
@@ -627,13 +637,18 @@ mod test {
                 map
             },
             change: Default::default(),
+            creation_tx: H256::from_str(
+                "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+            )
+            .unwrap(),
+            created_at: Default::default(),
         };
 
         let chain_id = 1;
         let protocol_system_id = 2;
         let creation_ts = Utc::now().naive_utc();
 
-        let result = protocol_component.to_storage(chain_id, protocol_system_id, creation_ts);
+        let result = protocol_component.to_storage(chain_id, protocol_system_id, 0, creation_ts);
 
         assert!(result.is_ok());
 
