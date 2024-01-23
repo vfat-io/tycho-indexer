@@ -1,5 +1,4 @@
-use std::collections::{hash_map::DefaultHasher, HashSet};
-
+use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
     helper_types::{AsSelect, SqlTypeOf},
@@ -8,7 +7,7 @@ use diesel::{
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
-use std::collections::HashMap;
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 
 use crate::{
     hex_bytes::Bytes,
@@ -624,19 +623,9 @@ impl AccountBalance {
             .get_results::<Self>(conn)
             .await
     }
-
-    pub async fn latest_versions_by_ids<'a, I: IntoIterator<Item = &'a i64>>(
-        ids: I,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<AccountBalance>, StorageError> {
-        Ok(account_balance::table
-            .filter(account_balance::account_id.eq_any(ids))
-            .select(Self::as_select())
-            .get_results::<Self>(conn)
-            .await?)
-    }
 }
 
+#[async_trait]
 impl<'a> StoredVersionedRow<'a> for AccountBalance {
     type EntityId = i64;
     type PrimaryKey = i64;
@@ -652,6 +641,24 @@ impl<'a> StoredVersionedRow<'a> for AccountBalance {
 
     fn get_entity_id(&'a self) -> Self::EntityId {
         self.account_id
+    }
+
+    async fn latest_versions_by_ids<I: IntoIterator<Item = &'a Self::EntityId> + Send + Sync>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Box<Self>>, StorageError> {
+        Ok(account_balance::table
+            .filter(account_balance::account_id.eq_any(ids))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await?
+            .into_iter()
+            .map(|e| Box::new(e))
+            .collect())
+    }
+
+    fn table_name() -> &'static str {
+        "account_balance"
     }
 }
 
@@ -717,16 +724,42 @@ impl ContractCode {
             .get_results::<Self>(conn)
             .await
     }
+}
 
-    pub async fn latest_versions_by_ids<'a, I: IntoIterator<Item = &'a i64>>(
+#[async_trait]
+impl<'a> StoredVersionedRow<'a> for ContractCode {
+    type EntityId = i64;
+    type PrimaryKey = i64;
+    type Version = NaiveDateTime;
+
+    fn get_pk(&self) -> Self::PrimaryKey {
+        self.id
+    }
+
+    fn get_valid_to(&self) -> Self::Version {
+        self.valid_to.expect("valid to set")
+    }
+
+    fn get_entity_id(&'a self) -> Self::EntityId {
+        self.account_id
+    }
+
+    async fn latest_versions_by_ids<I: IntoIterator<Item = &'a Self::EntityId> + Send + Sync>(
         ids: I,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<ContractCode>, StorageError> {
+    ) -> Result<Vec<Box<Self>>, StorageError> {
         Ok(contract_code::table
             .filter(contract_code::account_id.eq_any(ids))
             .select(Self::as_select())
             .get_results::<Self>(conn)
-            .await?)
+            .await?
+            .into_iter()
+            .map(|e| Box::new(e))
+            .collect())
+    }
+
+    fn table_name() -> &'static str {
+        "contract_code"
     }
 }
 
@@ -740,6 +773,28 @@ pub struct NewContractCode<'a> {
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
+}
+
+impl<'a> VersionedRow for NewContractCode<'a> {
+    type SortKey = (i64, NaiveDateTime, i64);
+    type EntityId = i64;
+    type Version = NaiveDateTime;
+
+    fn get_id(&self) -> Self::EntityId {
+        self.account_id
+    }
+
+    fn get_sort_key(&self) -> Self::SortKey {
+        (self.account_id, self.valid_from, self.modify_tx)
+    }
+
+    fn set_valid_to(&mut self, end_version: Self::Version) {
+        self.valid_to = Some(end_version);
+    }
+
+    fn get_valid_from(&self) -> Self::Version {
+        self.valid_from
+    }
 }
 
 // theoretically this struct could also simply reference the original struct.
@@ -818,11 +873,28 @@ pub struct ContractStorage {
     pub modified_ts: NaiveDateTime,
 }
 
-impl ContractStorage {
-    pub async fn latest_version_by_ids<'b, I: IntoIterator<Item = &'b (i64, &'b Bytes)>>(
+#[async_trait]
+impl<'a> StoredVersionedRow<'a> for ContractStorage {
+    type EntityId = (i64, &'a Bytes);
+    type PrimaryKey = i64;
+    type Version = NaiveDateTime;
+
+    fn get_pk(&self) -> Self::PrimaryKey {
+        return self.id;
+    }
+
+    fn get_valid_to(&self) -> Self::Version {
+        return self.valid_to.expect("valid_to is set")
+    }
+
+    fn get_entity_id(&'a self) -> Self::EntityId {
+        (self.account_id, &self.slot)
+    }
+
+    async fn latest_versions_by_ids<I: IntoIterator<Item = &'a Self::EntityId> + Send + Sync>(
         ids: I,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<ContractStorage>, StorageError> {
+    ) -> Result<Vec<Box<Self>>, StorageError> {
         let tuple_ids = ids
             .into_iter()
             .copied()
@@ -845,25 +917,12 @@ impl ContractStorage {
         Ok(tmp
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(cs.account_id, &cs.slot)))
+            .map(|cs| Box::new(cs))
             .collect())
     }
-}
 
-impl<'a> StoredVersionedRow<'a> for ContractStorage {
-    type EntityId = (i64, &'a Bytes);
-    type PrimaryKey = i64;
-    type Version = NaiveDateTime;
-
-    fn get_pk(&self) -> Self::PrimaryKey {
-        return self.id;
-    }
-
-    fn get_valid_to(&self) -> Self::Version {
-        return self.valid_to.expect("valid_to is set")
-    }
-
-    fn get_entity_id(&'a self) -> Self::EntityId {
-        (self.account_id, &self.slot)
+    fn table_name() -> &'static str {
+        "contract_storage"
     }
 }
 

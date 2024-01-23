@@ -3,6 +3,7 @@ use std::{
     ops::Deref,
 };
 
+use crate::storage::postgres::versioning::StoredVersionedRow;
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::RunQueryDsl;
@@ -559,7 +560,7 @@ where
         dbg!(&db_end_versions);
         dbg!(&new_entries);
         let db_rows: Vec<_> =
-            orm::ContractStorage::latest_version_by_ids(db_end_versions.keys(), conn).await?;
+            orm::ContractStorage::latest_versions_by_ids(db_end_versions.keys(), conn).await?;
         dbg!(&db_rows);
         if !db_rows.is_empty() {
             versioning::build_batch_update_query(
@@ -1105,20 +1106,14 @@ where
         }
 
         if !balance_data.is_empty() {
-            let end_versions = versioning::set_versioning_attributes(&mut balance_data);
-            let db_rows =
-                orm::AccountBalance::latest_versions_by_ids(end_versions.keys(), conn).await?;
-            if !db_rows.is_empty() {
-                versioning::build_batch_update_query(&db_rows, "account_balance", &end_versions)
-                    .execute(conn)
-                    .await?;
-            }
+            versioning::apply_versioning::<_, orm::AccountBalance>(&mut balance_data, conn).await?;
             diesel::insert_into(schema::account_balance::table)
                 .values(&balance_data)
                 .execute(conn)
                 .await?;
         }
         if !code_data.is_empty() {
+            versioning::apply_versioning::<_, orm::ContractCode>(&mut code_data, conn).await?;
             diesel::insert_into(schema::contract_code::table)
                 .values(&code_data)
                 .execute(conn)

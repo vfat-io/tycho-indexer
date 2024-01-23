@@ -2,8 +2,7 @@
 //!
 //! This module provides access to versioning tools.
 
-use std::{collections::HashMap, hash::Hash};
-
+use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
     debug_query,
@@ -12,14 +11,18 @@ use diesel::{
     sql_query,
     sql_types::{BigInt, Bytea, Timestamp},
 };
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use std::{collections::HashMap, hash::Hash};
+
+use crate::storage::StorageError;
 
 use super::orm::{ContractStorage, NewSlot};
 use std::fmt::Debug;
 
 pub trait VersionedRow {
-    type SortKey: Ord + Clone + Debug;
-    type EntityId: Ord + Hash + Debug;
-    type Version: Ord + Copy + Debug;
+    type SortKey: Ord + Clone + Debug + Send + Sync;
+    type EntityId: Ord + Hash + Debug + Send + Sync;
+    type Version: Ord + Copy + Debug + Send + Sync;
 
     fn get_id(&self) -> Self::EntityId;
 
@@ -37,16 +40,24 @@ pub trait DeltaVersionedRow {
     fn set_previous_value(&mut self, previous_value: Self::Value);
 }
 
+#[async_trait]
 pub trait StoredVersionedRow<'a> {
-    type EntityId: Ord + Hash + Debug + 'a;
-    type PrimaryKey: Into<i64> + Debug;
-    type Version: Into<NaiveDateTime> + Copy + Debug;
+    type EntityId: Ord + Hash + Debug + Send + Sync + 'a;
+    type PrimaryKey: Into<i64> + Debug + Send + Sync;
+    type Version: Into<NaiveDateTime> + Copy + Debug + Send + Sync;
 
     fn get_pk(&self) -> Self::PrimaryKey;
 
     fn get_valid_to(&self) -> Self::Version;
 
     fn get_entity_id(&'a self) -> Self::EntityId;
+
+    async fn latest_versions_by_ids<I: IntoIterator<Item = &'a Self::EntityId> + Send + Sync>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Box<Self>>, StorageError>;
+
+    fn table_name() -> &'static str;
 }
 
 pub fn set_versioning_attributes<O: VersionedRow>(
@@ -103,7 +114,7 @@ pub fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Deb
 }
 
 pub fn build_batch_update_query<'a, O: StoredVersionedRow<'a>>(
-    objects: &'a [O],
+    objects: &'a [Box<O>],
     table_name: &str,
     end_versions: &'a HashMap<O::EntityId, O::Version>,
 ) -> BoxedSqlQuery<'a, Pg, SqlQuery> {
@@ -139,4 +150,24 @@ pub fn build_batch_update_query<'a, O: StoredVersionedRow<'a>>(
     }
     dbg!(debug_query(&query).to_string());
     query
+}
+
+pub async fn apply_versioning<'a, N, S>(
+    new_data: &mut Vec<N>,
+    conn: &mut AsyncPgConnection,
+) -> Result<(), StorageError>
+where
+    N: VersionedRow,
+    S: for<'b> StoredVersionedRow<'b, EntityId = N::EntityId, Version = N::Version>,
+    <N as VersionedRow>::EntityId: 'a,
+    <N as VersionedRow>::Version: 'a,
+{
+    let end_versions = set_versioning_attributes(new_data);
+    let db_rows = S::latest_versions_by_ids(end_versions.keys(), conn).await?;
+    if !db_rows.is_empty() {
+        build_batch_update_query(&db_rows, S::table_name(), &end_versions)
+            .execute(conn)
+            .await?;
+    }
+    Ok(())
 }
