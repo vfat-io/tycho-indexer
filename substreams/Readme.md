@@ -81,6 +81,28 @@ You can also look into already existing substreams packages to see how it
 is done. E.g. [ethereum-ambient](./ethereum-ambient/) provides a pretty good
 example of how to get access to raw contract storage.
 
+# Run substreams locally
+
+To run using Tycho, please follow the instructions in the [main Readme](../Readme.md#substreams).
+To run using the substreams CLI, do
+```
+substreams run \
+  substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg \
+  map_changes \
+  -e mainnet.eth.streamingfast.io:443 \
+  --start-block 17361664 \
+  --stop-block +10
+```
+If you prefer you can also use the substreams gui with
+```
+substreams gui \
+  substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg \
+  map_changes \
+  -e mainnet.eth.streamingfast.io:443 \
+  --start-block 17361664 \
+  --stop-block +10
+```
+
 # Tests
 
 To create a block test asset for ethereum do the following:

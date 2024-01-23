@@ -253,31 +253,31 @@ pub struct BlockContractChanges {
     #[prost(message, repeated, tag="2")]
     pub changes: ::prost::alloc::vec::Vec<TransactionContractChanges>,
 }
-/// todo()!
+/// A change to a pool's balance. Ambient specific.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BalanceDelta {
     /// The address of the ERC20 token whose balance changed.
     #[prost(bytes="vec", tag="1")]
     pub pool_hash: ::prost::alloc::vec::Vec<u8>,
-    /// The new balance of the token.
+    /// The delta of the base token.
     #[prost(bytes="vec", tag="2")]
-    pub base_token_balance: ::prost::alloc::vec::Vec<u8>,
-    /// The id of the component whose TVL is tracked.
+    pub base_token_delta: ::prost::alloc::vec::Vec<u8>,
+    /// The delta of the quote token.
     #[prost(bytes="vec", tag="3")]
-    pub quote_token_balance: ::prost::alloc::vec::Vec<u8>,
-    /// todo()!
+    pub quote_token_delta: ::prost::alloc::vec::Vec<u8>,
+    /// Used to determine the order of the balance changes. Necessary for the balance store.
     #[prost(uint64, tag="4")]
     pub ordinal: u64,
 }
-/// todo()!
+///
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockPoolChanges {
-    /// todo()!
+    /// New protocol components added in this block
     #[prost(message, repeated, tag="1")]
     pub protocol_components: ::prost::alloc::vec::Vec<ProtocolComponent>,
-    /// todo()!
+    /// Balance changes to pools in this block
     #[prost(message, repeated, tag="2")]
     pub balance_deltas: ::prost::alloc::vec::Vec<BalanceDelta>,
 }

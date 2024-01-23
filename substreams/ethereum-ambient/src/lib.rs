@@ -5,7 +5,7 @@ use substreams_ethereum::pb::eth::{self};
 mod contracts;
 use crate::{
     contracts::{hotproxy::decode_direct_swap_hotproxy_call, main::decode_pool_init},
-    pb::tycho::evm::v1::{BalanceChange, BlockPoolChanges},
+    pb::tycho::evm::v1::{BalanceChange, BlockPoolChanges, ProtocolComponent},
 };
 use contracts::{
     hotproxy::{AMBIENT_HOTPROXY_CONTRACT, USER_CMD_HOTPROXY_FN_SIG},
@@ -25,7 +25,10 @@ use num_bigint::Sign;
 use pb::tycho::evm::v1 as tycho;
 use substreams::{
     scalar::BigInt,
-    store::{StoreAdd, StoreAddBigInt, StoreGet, StoreGetBigInt, StoreNew},
+    store::{
+        StoreAdd, StoreAddBigInt, StoreGet, StoreGetBigInt, StoreGetProto, StoreNew, StoreSet,
+        StoreSetProto,
+    },
 };
 
 mod pb;
@@ -144,8 +147,8 @@ fn map_pool_changes(
             };
             let balance_delta = tycho::BalanceDelta {
                 pool_hash: Vec::from(pool_hash),
-                base_token_balance: crate::utils::from_u256_to_vec(base_flow),
-                quote_token_balance: crate::utils::from_u256_to_vec(quote_flow),
+                base_token_delta: crate::utils::from_u256_to_vec(base_flow),
+                quote_token_delta: crate::utils::from_u256_to_vec(quote_flow),
                 ordinal: call.index as u64,
             };
             balance_deltas.push(balance_delta.clone());
@@ -168,16 +171,30 @@ pub fn store_pools_balances(changes: tycho::BlockPoolChanges, balance_store: Sto
         balance_store.add(
             balance_delta.ordinal,
             format!("{}{}", pool_hash_hex, "base"),
-            BigInt::from_bytes_le(Sign::Plus, &balance_delta.base_token_balance),
+            BigInt::from_bytes_le(Sign::Plus, &balance_delta.base_token_delta),
         );
         balance_store.add(
             balance_delta.ordinal,
             format!("{}{}", pool_hash_hex, "quote"),
-            BigInt::from_bytes_le(Sign::Plus, &balance_delta.quote_token_balance),
+            BigInt::from_bytes_le(Sign::Plus, &balance_delta.quote_token_delta),
         );
     }
 }
 
+#[substreams::handlers::store]
+pub fn store_pools(
+    changes: tycho::BlockPoolChanges,
+    component_store: StoreSetProto<ProtocolComponent>,
+) {
+    for (ordinal, component) in changes
+        .protocol_components
+        .into_iter()
+        .enumerate()
+    {
+        let pool_hash_hex = hex::encode(&component.id.clone());
+        component_store.set(ordinal as u64, pool_hash_hex, &component);
+    }
+}
 /// Extracts all contract changes relevant to vm simulations
 ///
 /// This implementation has currently two major limitations:
@@ -202,6 +219,7 @@ fn map_changes(
     block: eth::v2::Block,
     block_pool_changes: BlockPoolChanges,
     balance_store: StoreGetBigInt,
+    pool_store: StoreGetProto<ProtocolComponent>,
 ) -> Result<tycho::BlockContractChanges, substreams::errors::Error> {
     let mut block_changes = tycho::BlockContractChanges::default();
 
@@ -376,26 +394,28 @@ fn map_changes(
                 .component_changes
                 .push(component.clone());
         }
+
         for balance_delta in &block_pool_changes.balance_deltas {
-            let base_balance = balance_store.get_at(
-                balance_delta.ordinal,
-                format!("{}{}", hex::encode(&balance_delta.pool_hash), "base"),
-            );
-            let quote_balance = balance_store.get_at(
-                balance_delta.ordinal,
-                format!("{}{}", hex::encode(&balance_delta.pool_hash), "quote"),
-            );
+            let pool_hash_hex = hex::encode(&balance_delta.pool_hash);
+            let pool = match pool_store.get_last(pool_hash_hex.clone()) {
+                Some(pool) => pool,
+                None => panic!("Pool not found in store for given hash: {}", pool_hash_hex),
+            };
+            let base_balance = balance_store.get_last(format!("{}{}", pool_hash_hex, "base"));
+            let quote_balance = balance_store.get_last(format!("{}{}", pool_hash_hex, "quote"));
+
             let base_balance_change = BalanceChange {
                 component_id: balance_delta.pool_hash.clone(),
-                token: vec![1, 2], // how to get the token??
+                token: pool.tokens[0].clone(),
                 balance: base_balance
+                    .clone()
                     .expect("Couldn't get balance from store")
                     .to_bytes_be()
                     .1,
             };
             let quote_balance_change = BalanceChange {
                 component_id: balance_delta.pool_hash.clone(),
-                token: vec![1, 2], // how to get the token??
+                token: pool.tokens[1].clone(),
                 balance: quote_balance
                     .expect("Couldn't get balance from store")
                     .to_bytes_be()
@@ -404,10 +424,7 @@ fn map_changes(
 
             tx_change
                 .balance_changes
-                .push(base_balance_change);
-            tx_change
-                .balance_changes
-                .push(quote_balance_change);
+                .extend([base_balance_change, quote_balance_change]);
         }
 
         // if there were any changes, add transaction and push the changes

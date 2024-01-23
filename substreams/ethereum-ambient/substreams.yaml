@@ -30,6 +30,13 @@ modules:
     valueType: bigint
     inputs:
       - map: map_pool_changes
+  - name: store_pools
+    kind: store
+    initialBlock: 17361664
+    updatePolicy: set
+    valueType: proto:tycho.evm.state.v1.ProtocolComponent
+    inputs:
+      - map: map_pool_changes
   - name: map_changes
     kind: map
     initialBlock: 17361664
@@ -37,5 +44,6 @@ modules:
       - source: sf.ethereum.type.v2.Block
       - map: map_pool_changes
       - store: store_pools_balances
+      - store: store_pools
     output:
       type: proto:tycho.evm.state.v1.BlockContractChanges
