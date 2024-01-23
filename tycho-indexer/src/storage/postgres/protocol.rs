@@ -98,7 +98,7 @@ where
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     type DB = AsyncPgConnection;
-    type Token = ERC20Token;
+    type Token = T;
     type ProtocolState = ProtocolState;
     type ProtocolStateDelta = ProtocolStateDelta;
     type ProtocolType = ProtocolType;
@@ -277,17 +277,23 @@ where
     ) -> Result<(), StorageError> {
         let titles: Vec<String> = tokens
             .iter()
-            .map(|token| format!("{}_{}", token.chain, token.symbol))
+            .map(|token| format!("{}_{}", token.chain(), token.symbol()))
+            .collect();
+
+        let addresses: Vec<_> = tokens
+            .iter()
+            .map(|token| token.address().as_bytes().to_vec())
             .collect();
 
         let new_accounts: Vec<NewAccount> = tokens
             .iter()
             .zip(titles.iter())
-            .map(|(token, title)| {
-                let chain_id = self.get_chain_id(&token.chain);
+            .zip(addresses.iter())
+            .map(|((token, title), address)| {
+                let chain_id = self.get_chain_id(&token.chain());
                 NewAccount {
                     title,
-                    address: token.address.as_ref(),
+                    address,
                     chain_id,
                     creation_tx: None,
                     created_at: None,
@@ -306,13 +312,7 @@ where
             .map_err(|err| StorageError::from_diesel(err, "Account", "batch", None))?;
 
         let accounts: Vec<Account> = schema::account::table
-            .filter(
-                schema::account::address.eq_any(
-                    tokens
-                        .iter()
-                        .map(|t| t.address.as_ref()),
-                ),
-            )
+            .filter(schema::account::address.eq_any(addresses))
             .select(Account::as_select())
             .get_results::<Account>(conn)
             .await
@@ -326,8 +326,8 @@ where
         let new_tokens: Vec<orm::NewToken> = tokens
             .iter()
             .map(|token| {
-                let token_chain_id = self.get_chain_id(&token.chain);
-                let account_key = (token.address.as_ref().to_vec(), token_chain_id);
+                let token_chain_id = self.get_chain_id(&token.chain());
+                let account_key = (token.address().as_ref().to_vec(), token_chain_id);
 
                 let account_id = *account_map
                     .get(&account_key)
