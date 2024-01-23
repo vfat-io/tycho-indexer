@@ -476,7 +476,7 @@ mod test {
     #[rstest]
     #[case::by_chain(None, None)]
     #[case::by_system(Some("ambient".to_string()), None)]
-    #[case::by_ids(None, Some(vec!["state1"]))]
+    #[case::by_ids(None, Some(vec ! ["state1"]))]
     #[tokio::test]
     async fn test_get_protocol_states(
         #[case] system: Option<String>,
@@ -690,6 +690,7 @@ mod test {
             created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         }
     }
+
     #[tokio::test]
     async fn test_delete_protocol_components() {
         let mut conn = setup_db().await;
@@ -709,15 +710,21 @@ mod test {
             .await;
 
         assert!(res.is_ok());
-        for (index, component) in test_components.iter().enumerate() {
-            let updated_ts = schema::protocol_component::table
-                .filter(schema::protocol_component::external_id.eq(component.id.0.to_string()))
-                .select(schema::protocol_component::deleted_at)
-                .first::<Option<NaiveDateTime>>(&mut conn)
-                .await
-                .unwrap();
+        let pc_ids: Vec<String> = test_components
+            .iter()
+            .map(|test_pc| test_pc.id.0.to_string())
+            .collect();
 
-            assert!(updated_ts.is_some());
-        }
+        let updated_timestamps = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq_any(pc_ids))
+            .select(schema::protocol_component::deleted_at)
+            .load::<Option<NaiveDateTime>>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(updated_timestamps.len(), 2);
+        updated_timestamps
+            .into_iter()
+            .for_each(|ts| assert!(ts.is_some(), "Found None in updated_ts"));
     }
 }
