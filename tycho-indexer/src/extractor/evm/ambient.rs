@@ -463,7 +463,7 @@ mod test {
 
         gw.expect_revert()
             .withf(|c, v, cursor| {
-                c == &None &&
+                c.is_none() &&
                     v == &BlockIdentifier::Hash(evm::fixtures::HASH_256_0.into()) &&
                     cursor == "cursor@400"
             })
