@@ -10,9 +10,9 @@ use ethers::types::{transaction, Transaction};
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ERC20Token, ProtocolState, ProtocolStateDelta},
+    extractor::evm::{ERC20Token, ProtocolComponent, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
-    models::{Chain, ProtocolSystem, ProtocolType},
+    models::{Chain, ProtocolType},
     storage::{
         postgres::{
             orm,
@@ -22,8 +22,8 @@ use crate::{
             PostgresGateway,
         },
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ContractId, ProtocolGateway,
-        StorableBlock, StorableContract, StorableProtocolState, StorableProtocolType,
-        StorableToken, StorableTransaction, StorageError,
+        StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolState,
+        StorableProtocolType, StorableToken, StorableTransaction, StorageError,
         StorageError::DecodeError,
         TxHash, Version,
     },
@@ -411,7 +411,6 @@ mod test {
     use hex::FromHex;
     use rstest::rstest;
     use serde_json::{json, Value};
-    use std::str::FromStr;
 
     use crate::{
         models,
