@@ -218,6 +218,19 @@ impl Transaction {
 
         Ok(results.into_iter().collect())
     }
+
+    // fetches the transaction id, hash, index and block timestamp for a given set of hashes
+    pub async fn id_by_hashes(
+        hashes: &[&[u8]],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(i64, Bytes, i64, NaiveDateTime)>> {
+        transaction::table
+            .inner_join(block::table)
+            .filter(transaction::hash.eq_any(hashes))
+            .select((transaction::id, transaction::hash, transaction::index, block::ts))
+            .get_results::<(i64, Bytes, i64, NaiveDateTime)>(conn)
+            .await
+    }
 }
 
 #[derive(Insertable)]
@@ -321,6 +334,19 @@ pub struct NewProtocolComponent {
     pub creation_tx: i64,
     pub created_at: NaiveDateTime,
     pub attributes: Option<serde_json::Value>,
+}
+
+impl ProtocolComponent {
+    pub async fn ids_by_external_ids(
+        external_ids: &[&str],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(i64, String)>> {
+        protocol_component::table
+            .filter(protocol_component::external_id.eq_any(external_ids))
+            .select((protocol_component::id, protocol_component::external_id))
+            .get_results::<(i64, String)>(conn)
+            .await
+    }
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Clone)]
@@ -469,7 +495,7 @@ impl ProtocolState {
     }
 }
 
-#[derive(Insertable)]
+#[derive(Insertable, Clone)]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolState {
