@@ -140,7 +140,7 @@ pub enum BlockIdentifier {
     /// Latest stored block for the target chain
     ///
     /// Returns the block with the highest block number on the target chain.
-    Latest,
+    Latest(Chain),
 }
 
 impl Display for BlockIdentifier {
