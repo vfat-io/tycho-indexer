@@ -164,7 +164,7 @@ where
         let current_time: NaiveDateTime = Utc::now().naive_utc();
 
         diesel::update(protocol_component.filter(external_id.eq_any(ids_to_delete)))
-            .set((deleted_at.eq(current_time), modified_ts.eq(diesel::dsl::now)))
+            .set(deleted_at.eq(current_time))
             .execute(conn)
             .await?;
         Ok(())
@@ -700,26 +700,14 @@ mod test {
             create_test_protocol_component("state1"),
             create_test_protocol_component("state2"),
         ];
-
-        let mut id_by_modified_ts: HashMap<evm::ContractId, NaiveDateTime> = HashMap::new();
-        for component in test_components.iter() {
-            let original_component = schema::protocol_component::table
-                .filter(schema::protocol_component::external_id.eq(component.id.0.to_string()))
-                .first::<orm::ProtocolComponent>(&mut conn)
-                .await
-                .unwrap();
-            println!("{:?}", original_component.modified_ts);
-            id_by_modified_ts.insert(component.id.clone(), original_component.modified_ts.clone());
-        }
-        sleep(Duration::from_millis(5000)).await;
         let to_delete = test_components
             .iter()
             .collect::<Vec<_>>();
-        println!("herer");
+
         let res = gw
             .delete_protocol_components(&to_delete, &mut conn)
             .await;
-        println!("{:?}", res.is_ok());
+
         assert!(res.is_ok());
         for (index, component) in test_components.iter().enumerate() {
             let updated_component = schema::protocol_component::table
@@ -729,12 +717,6 @@ mod test {
                 .unwrap();
 
             assert!(updated_component.deleted_at.is_some());
-            assert_ne!(
-                &updated_component.modified_ts,
-                id_by_modified_ts
-                    .get(&component.id)
-                    .unwrap()
-            );
         }
     }
 }
