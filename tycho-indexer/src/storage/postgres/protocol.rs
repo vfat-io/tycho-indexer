@@ -2,11 +2,11 @@
 #![allow(unused_imports)]
 
 use async_trait::async_trait;
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap, hash::Hash, str::FromStr};
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use ethers::types::{transaction, Transaction};
+use ethers::types::{transaction, Transaction, H256};
 use mockall::Any;
 use tracing::warn;
 
@@ -104,60 +104,53 @@ where
         ids: Option<&[&str]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolComponent>, StorageError> {
-        use super::schema::protocol_component::dsl::*;
+        use super::schema::{protocol_component::dsl::*, transaction::dsl::*};
         let chain_id_value = self.get_chain_id(chain);
         let protocol_system = self.get_protocol_system_id(&system);
 
-        let orm_protocol_components = match ids {
-            Some(external_ids) => {
-                protocol_component
-                    .filter(
-                        external_id.eq_any(external_ids).and(
-                            protocol_system_id
-                                .eq(protocol_system)
-                                .and(chain_id.eq(chain_id_value)),
-                        ),
-                    )
-                    .select(orm::ProtocolComponent::as_select())
-                    .load::<orm::ProtocolComponent>(conn)
-                    .await?
-            }
-            None => {
-                protocol_component
-                    .filter(
-                        chain_id
-                            .eq(chain_id_value)
-                            .and(protocol_system_id.eq(protocol_system)),
-                    )
-                    .select(orm::ProtocolComponent::as_select())
-                    .load::<orm::ProtocolComponent>(conn)
-                    .await?
-            }
-        };
-        let tx_ids: Vec<i64> = orm_protocol_components
-            .iter()
-            .map(|pc| pc.creation_tx)
-            .collect();
-        let tx_hashes = orm::Transaction::hash_by_id(tx_ids.as_slice(), conn).await?;
+        let mut query = protocol_component
+            .inner_join(transaction.on(creation_tx.eq(schema::transaction::id)))
+            .select((protocol_component::all_columns(), hash))
+            .filter(
+                chain_id
+                    .eq(chain_id_value)
+                    .and(protocol_system_id.eq(protocol_system)),
+            )
+            .into_boxed();
+
+        let pc_test = protocol_component
+            .select(protocol_component::all_columns())
+            .filter(
+                chain_id
+                    .eq(chain_id_value)
+                    .and(protocol_system_id.eq(protocol_system)),
+            )
+            .load::<orm::ProtocolComponent>(conn)
+            .await?;
+
+        let tx_test = transaction
+            .select(schema::transaction::id)
+            .load::<i64>(conn)
+            .await?;
+
+        if let Some(external_ids) = ids {
+            query = query.filter(external_id.eq_any(external_ids));
+        }
+
+        let orm_protocol_components = query
+            .load::<(orm::ProtocolComponent, TxHash)>(conn)
+            .await?;
 
         orm_protocol_components
             .into_iter()
-            .map(|pc| {
-                let tx_hash = tx_hashes
-                    .get::<i64>(&pc.clone().creation_tx)
-                    .ok_or(StorageError::NotFound(
-                        "TransactionHash".to_string(),
-                        pc.clone().creation_tx.to_string(),
-                    ))?
-                    .to_owned()
-                    .into();
+            .map(|(pc, tx_hash)| {
                 ProtocolComponent::from_storage(
                     pc,
                     vec![],
                     vec![],
                     chain.to_owned(),
                     &system,
-                    tx_hash,
+                    tx_hash.into(),
                 )
             })
             .collect::<Result<Vec<ProtocolComponent>, StorageError>>()
@@ -399,33 +392,23 @@ mod test {
     /// that change an account should have at each version Please not that if you change
     /// something here, also update the state fixtures right below, which contain protocol states
     /// at each version.
-    async fn setup_data(conn: &mut AsyncPgConnection) {
+    async fn setup_data(conn: &mut AsyncPgConnection) -> Vec<String> {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let tx_hashes = [
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945".to_string(),
+            "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54".to_string(),
+            "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7".to_string(),
+            "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388".to_string(),
+        ];
         let txn = db_fixtures::insert_txns(
             conn,
             &[
-                (
-                    blk[0],
-                    1i64,
-                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-                ),
-                (
-                    blk[0],
-                    2i64,
-                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
-                ),
+                (blk[0], 1i64, &tx_hashes[0]),
+                (blk[0], 2i64, &tx_hashes[1]),
                 // ----- Block 01 LAST
-                (
-                    blk[1],
-                    1i64,
-                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
-                ),
-                (
-                    blk[1],
-                    2i64,
-                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
-                ),
+                (blk[1], 1i64, &tx_hashes[2]),
+                (blk[1], 2i64, &tx_hashes[3]),
                 // ----- Block 02 LAST
             ],
         )
@@ -456,7 +439,7 @@ mod test {
             chain_id,
             protocol_system_id,
             protocol_type_id,
-            txn[0],
+            txn[1],
         )
         .await;
 
@@ -492,6 +475,7 @@ mod test {
             None,
         )
         .await;
+        tx_hashes.to_vec()
     }
 
     fn protocol_state() -> ProtocolState {
@@ -714,7 +698,7 @@ mod test {
     #[tokio::test]
     async fn test_get_protocol_components() {
         let mut conn = setup_db().await;
-        setup_data(&mut conn).await;
+        let tx_hashes = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let chain = Chain::Ethereum;
@@ -722,11 +706,18 @@ mod test {
         let ids = Some(["state1", "state2"].as_slice());
 
         let result = gw
-            .get_protocol_components(&chain, system, ids, &mut conn)
+            .get_protocol_components(&chain, system, None, &mut conn)
             .await;
 
         assert!(result.is_ok());
         let components = result.unwrap();
         assert_eq!(components.len(), 2);
+
+        for (index, pc) in components.iter().enumerate() {
+            assert_eq!(pc.id, ContractId(format!("state{}", index + 1).to_string()));
+            assert_eq!(pc.protocol_system, "ambient");
+            assert_eq!(pc.chain, Chain::Ethereum);
+            assert_eq!(pc.creation_tx, H256::from_str(tx_hashes.get(index).unwrap()).unwrap());
+        }
     }
 }
