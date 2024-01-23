@@ -60,6 +60,7 @@ where
             }
 
             BlockIdentifier::Hash(block_hash) => orm::Block::by_hash(block_hash, conn).await,
+            BlockIdentifier::Latest => orm::Block::most_recent(conn).await,
         }
         .map_err(|err| StorageError::from_diesel(err, "Block", &block_id.to_string(), None))?;
         let chain = self.get_chain(&orm_block.chain_id);
@@ -175,6 +176,21 @@ mod test {
             chain: Chain::Ethereum,
             ts: "2020-01-01T01:00:00".parse().unwrap(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_get_block_latest() {
+        let mut conn = setup_db().await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp = block("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9");
+        let block_id = BlockIdentifier::Latest;
+
+        let block = gw
+            .get_block(&block_id, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(block, exp);
     }
 
     #[tokio::test]

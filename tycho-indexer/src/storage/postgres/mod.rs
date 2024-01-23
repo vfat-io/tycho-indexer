@@ -293,6 +293,10 @@ impl BlockOrTimestamp {
                     })?
                     .ts)
             }
+            BlockOrTimestamp::Block(BlockIdentifier::Latest) => Ok(orm::Block::most_recent(conn)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "Block", "latest", None))?
+                .ts),
             BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
         }
     }
