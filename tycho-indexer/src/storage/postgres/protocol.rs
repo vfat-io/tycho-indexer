@@ -265,6 +265,17 @@ where
                     .map(|state| (state, tx_db.1))
                     .collect();
 
+            // invalidated db entities for deleted attributes
+            for attr in &state.deleted_attributes {
+                diesel::update(schema::protocol_state::table)
+                    .filter(schema::protocol_state::protocol_component_id.eq(component_db_id))
+                    .filter(schema::protocol_state::attribute_name.eq(attr))
+                    .filter(schema::protocol_state::valid_to.is_null())
+                    .set(schema::protocol_state::valid_to.eq(tx_db.2))
+                    .execute(conn)
+                    .await?;
+            }
+
             state_data.append(&mut new_states);
         }
 
@@ -289,7 +300,7 @@ where
             }
         });
 
-        // Invalidate older states
+        // Invalidate older states within the new state data
         let mut i = 0;
         while i + 1 < state_data.len() {
             let next_state = &state_data[i + 1].0.clone();
@@ -630,6 +641,39 @@ mod test {
         let gateway = EVMGateway::from_connection(&mut conn).await;
         let chain = Chain::Ethereum;
 
+        // set up deletable attribute state
+        let protocol_component_id = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state2"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        let tx_hash: Bytes = "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+            .as_bytes()
+            .into();
+        let txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id,
+            txn_id,
+            "deletable".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+        )
+        .await;
+
         // update
         let mut new_state1 = protocol_state_delta();
         let attributes1: HashMap<String, Bytes> = vec![
@@ -639,6 +683,9 @@ mod test {
         .into_iter()
         .collect();
         new_state1.updated_attributes = attributes1.clone();
+        new_state1.deleted_attributes = vec!["deletable".to_owned()]
+            .into_iter()
+            .collect();
         new_state1.modify_tx = "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
             .parse()
             .unwrap();
