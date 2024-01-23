@@ -69,6 +69,7 @@ impl From<InterimContractChange> for tycho::ContractChange {
     }
 }
 
+#[substreams::handlers::map]
 fn map_pool_changes(
     block: eth::v2::Block,
 ) -> Result<tycho::BlockPoolChanges, substreams::errors::Error> {
@@ -104,13 +105,12 @@ fn map_pool_changes(
             if call.address == AMBIENT_CONTRACT && selector == USER_CMD_FN_SIG {
                 // Extract pool creations
                 if let Some(protocol_component) = decode_pool_init(call)? {
-                    // Handle the case when Some is returned
                     protocol_components.push(protocol_component);
                 }
             }
 
             // Extract TVL changes
-            let _result = match (address, selector) {
+            let result = match (address, selector) {
                 (AMBIENT_CONTRACT, SWAP_FN_SIG) => Some(decode_direct_swap_call(call)?),
                 (AMBIENT_HOTPROXY_CONTRACT, USER_CMD_HOTPROXY_FN_SIG) => {
                     Some(decode_direct_swap_hotproxy_call(call)?)
@@ -138,17 +138,17 @@ fn map_pool_changes(
                 }
                 _ => None,
             };
-            let (_pool_hash, _base_flow, _quote_flow) = match _result {
+            let (pool_hash, base_flow, quote_flow) = match result {
                 Some((pool_hash, base_flow, quote_flow)) => (pool_hash, base_flow, quote_flow),
                 None => continue,
             };
             let balance_delta = tycho::BalanceDelta {
-                pool_hash: Vec::from(_pool_hash),
-                base_token_balance: crate::utils::from_u256_to_vec(_base_flow),
-                quote_token_balance: crate::utils::from_u256_to_vec(_quote_flow),
+                pool_hash: Vec::from(pool_hash),
+                base_token_balance: crate::utils::from_u256_to_vec(base_flow),
+                quote_token_balance: crate::utils::from_u256_to_vec(quote_flow),
                 ordinal: call.index as u64,
             };
-            balance_deltas.push(balance_delta);
+            balance_deltas.push(balance_delta.clone());
         }
     }
     let pool_changes = tycho::BlockPoolChanges { protocol_components, balance_deltas };
