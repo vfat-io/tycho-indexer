@@ -110,7 +110,7 @@ where
 
         let mut query = protocol_component
             .inner_join(transaction.on(creation_tx.eq(schema::transaction::id)))
-            .select((protocol_component::all_columns(), hash))
+            .select((orm::ProtocolComponent::as_select(), hash))
             .filter(
                 chain_id
                     .eq(chain_id_value)
@@ -119,7 +119,6 @@ where
             .into_boxed();
 
         let pc_test = protocol_component
-            .select(protocol_component::all_columns())
             .filter(
                 chain_id
                     .eq(chain_id_value)
