@@ -44,3 +44,7 @@ CHECK (
 
 DROP TRIGGER invalidate_previous_protocol_state ON protocol_state;
 DROP FUNCTION invalidate_previous_entry_protocol_state();
+
+
+ALTER TABLE protocol_system
+ADD CONSTRAINT name_unique UNIQUE (name);
