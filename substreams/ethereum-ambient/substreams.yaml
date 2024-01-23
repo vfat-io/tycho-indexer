@@ -16,7 +16,7 @@ binaries:
     file: ../../target/wasm32-unknown-unknown/substreams/substreams_ethereum_ambient.wasm
 
 modules:
-  - name: map_pool_flows
+  - name: map_pool_changes
     kind: map
     inputs:
       - source: sf.ethereum.type.v2.Block
@@ -24,15 +24,15 @@ modules:
       type: proto:tycho.evm.state.v1.BlockPoolChanges
   - name: store_pools_balances
     kind: store
-    updatePolicy: set
-    valueType: proto:tycho.evm.state.v1.BlockPoolChanges
+    updatePolicy: add
+    valueType: bigint
     inputs:
-      - map: map_pool_flows
+      - map: map_pool_changes
   - name: map_changes
     kind: map
     inputs:
       - source: sf.ethereum.type.v2.Block
-      - source: proto:tycho.evm.state.v1.BlockPoolChanges
-      - source: store_pools_balances
+      - map: map_pool_changes
+      - store: store_pools_balances
     output:
       type: proto:tycho.evm.state.v1.BlockContractChanges
