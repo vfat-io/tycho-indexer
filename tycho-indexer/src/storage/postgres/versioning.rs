@@ -1,22 +1,37 @@
 //! # Versioning helpers and utilities
 //!
 //! This module provides access to versioning tools.
+//!
+//! # Limitations
+//!
+//! For orm structs that do use a complex entity id such as ContractStorage which uses
+//! account id and slot: `(i64, &Bytes)` to identify an entity. As dealing with
+//! lifetimes becomes increasingly complex. The alternative would be to clone bytes
+//! repeadedly which would not be very performant.
+//! The main problem with returning entites that themselves contain references is that we
+//! can't properly express the lifetime bounds of these with Rust when writing generic
+//! functions.
+//! One could duplicate the id on the struct and return sth like &(i64, Bytes) but that
+//! is currently not supported by Diesel.
+//! This means to avoid unnecessary clones, we need to add a lifetime to our
+//! StoredVersionRow trait.
+//! It may be worth exploring smart pointers further such as Arc, in this case they would need to
+//! be implemented for both NewSlot and ContractStorage. Additionally diesel's `eq_any`
+//! would need to support using smart pointers.
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
     debug_query,
-    pg::{sql_types, Pg},
+    pg::Pg,
     query_builder::{BoxedSqlQuery, SqlQuery},
     sql_query,
-    sql_types::{BigInt, Bytea, Timestamp},
+    sql_types::{BigInt, Timestamp},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use std::{collections::HashMap, hash::Hash};
 
 use crate::storage::StorageError;
-
-use super::orm::{ContractStorage, NewSlot};
 use std::fmt::Debug;
 
 pub trait VersionedRow {
