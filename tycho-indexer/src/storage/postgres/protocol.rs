@@ -414,13 +414,13 @@ mod test {
         )
         .await;
 
-        let protocol_component_id = db_fixtures::insert_protocol_component(
+        db_fixtures::insert_protocol_component(
             conn,
             "state2",
             chain_id,
             protocol_system_id,
             protocol_type_id,
-            txn[0],
+            txn[1],
         )
         .await;
         // protocol state for state1-reserve1
@@ -710,13 +710,14 @@ mod test {
 
         assert!(res.is_ok());
         for (index, component) in test_components.iter().enumerate() {
-            let updated_component = schema::protocol_component::table
+            let updated_ts = schema::protocol_component::table
                 .filter(schema::protocol_component::external_id.eq(component.id.0.to_string()))
-                .first::<orm::ProtocolComponent>(&mut conn)
+                .select(schema::protocol_component::deleted_at)
+                .first::<Option<NaiveDateTime>>(&mut conn)
                 .await
                 .unwrap();
 
-            assert!(updated_component.deleted_at.is_some());
+            assert!(updated_ts.is_some());
         }
     }
 }
