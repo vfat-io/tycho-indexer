@@ -204,7 +204,7 @@ impl Transaction {
             .await
     }
 
-    pub async fn id_by_hash(
+    pub async fn ids_by_hash(
         hashes: &[TxHash],
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<TxHash, i64>, StorageError> {
@@ -220,7 +220,7 @@ impl Transaction {
     }
 
     // fetches the transaction id, hash, index and block timestamp for a given set of hashes
-    pub async fn id_by_hashes(
+    pub async fn ids_and_ts_by_hash(
         hashes: &[&[u8]],
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(i64, Bytes, i64, NaiveDateTime)>> {

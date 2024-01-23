@@ -10,7 +10,7 @@ use ethers::types::H256;
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{utils::TryDecode, ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta, Transaction},
     models::{Chain, ProtocolType},
     storage::{
         postgres::{orm, schema, PostgresGateway},
@@ -117,7 +117,7 @@ where
             .map(|pc| pc.creation_tx.into())
             .collect();
         let tx_hash_id_mapping: HashMap<TxHash, i64> =
-            orm::Transaction::id_by_hash(&tx_hashes, conn)
+            orm::Transaction::ids_by_hash(&tx_hashes, conn)
                 .await
                 .unwrap();
 
@@ -224,7 +224,7 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let chain_db_id = self.get_chain_id(chain);
-        let txns: HashMap<H256, (i64, i64, NaiveDateTime)> = orm::Transaction::id_by_hashes(
+        let txns: HashMap<H256, (i64, i64, NaiveDateTime)> = orm::Transaction::ids_and_ts_by_hash(
             new.iter()
                 .map(|state| state.modify_tx.as_bytes())
                 .collect::<Vec<&[u8]>>()
@@ -233,9 +233,7 @@ where
         )
         .await?
         .into_iter()
-        .map(|(id, hash, index, ts)| {
-            (H256::try_decode(&hash, "tx hash").expect("Failed to decode tx hash"), (id, index, ts))
-        })
+        .map(|(id, hash, index, ts)| (Transaction::hash_from_bytes(hash), (id, index, ts)))
         .collect();
 
         let components: HashMap<String, i64> = orm::ProtocolComponent::ids_by_external_ids(
@@ -267,6 +265,7 @@ where
 
             // invalidated db entities for deleted attributes
             for attr in &state.deleted_attributes {
+                // PERF: slow but required due to diesel restrictions
                 diesel::update(schema::protocol_state::table)
                     .filter(schema::protocol_state::protocol_component_id.eq(component_db_id))
                     .filter(schema::protocol_state::attribute_name.eq(attr))
