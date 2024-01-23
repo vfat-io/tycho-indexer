@@ -296,10 +296,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        extractor::{evm, evm::ContractId},
-        storage::ChangeType,
-    };
+    use crate::{extractor::evm, storage::ChangeType};
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
@@ -590,7 +587,7 @@ mod test {
         let protocol_system = "ambient".to_string();
         let chain = Chain::Ethereum;
         let original_component = ProtocolComponent {
-            id: ContractId("test_contract_id".to_string()),
+            id: "test_contract_id".to_string(),
             protocol_system,
             protocol_type_id: protocol_type_id_1.to_string(),
             chain,
@@ -640,6 +637,6 @@ mod test {
             inserted_data.protocol_system_id
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
-        assert_eq!(original_component.id.0, inserted_data.external_id);
+        assert_eq!(original_component.id, inserted_data.external_id);
     }
 }
