@@ -2,7 +2,8 @@
 #![allow(unused_imports)]
 
 use async_trait::async_trait;
-use std::{collections::HashMap, hash::Hash};
+use chrono::{NaiveDateTime, Utc};
+use std::{collections::HashMap, hash::Hash, time::SystemTime};
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -149,6 +150,25 @@ where
         Ok(())
     }
 
+    async fn delete_protocol_components(
+        &self,
+        to_delete: &[&Self::ProtocolComponent],
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        use super::schema::protocol_component::dsl::*;
+
+        let ids_to_delete: Vec<String> = to_delete
+            .iter()
+            .map(|c| c.id.0.to_string())
+            .collect();
+        let current_time: NaiveDateTime = Utc::now().naive_utc();
+
+        diesel::update(protocol_component.filter(external_id.eq_any(ids_to_delete)))
+            .set((deleted_at.eq(current_time), modified_ts.eq(diesel::dsl::now)))
+            .execute(conn)
+            .await?;
+        Ok(())
+    }
     async fn upsert_protocol_type(
         &self,
         new: &Self::ProtocolType,
@@ -313,8 +333,10 @@ mod test {
     };
 
     use super::*;
+    use crate::storage::postgres::orm::ProtocolSystem;
     use ethers::prelude::H256;
-    use std::{collections::HashMap, str::FromStr};
+    use std::{collections::HashMap, str::FromStr, thread, time::Duration};
+    use tokio::time::sleep;
 
     type EVMGateway = PostgresGateway<
         evm::Block,
@@ -392,6 +414,15 @@ mod test {
         )
         .await;
 
+        let protocol_component_id = db_fixtures::insert_protocol_component(
+            conn,
+            "state2",
+            chain_id,
+            protocol_system_id,
+            protocol_type_id,
+            txn[0],
+        )
+        .await;
         // protocol state for state1-reserve1
         db_fixtures::insert_protocol_state(
             conn,
@@ -641,5 +672,69 @@ mod test {
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
         assert_eq!(original_component.id.0, inserted_data.external_id);
+    }
+
+    fn create_test_protocol_component(id: &str) -> ProtocolComponent {
+        ProtocolComponent {
+            id: ContractId(id.to_string()),
+            protocol_system: "ambient".to_string(),
+            protocol_type_id: "type_id_1".to_string(),
+            chain: Chain::Ethereum,
+            tokens: vec![],
+            contract_ids: vec![],
+            static_attributes: HashMap::new(),
+            change: ChangeType::Creation,
+            creation_tx: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000011121314,
+            ),
+            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+        }
+    }
+    #[tokio::test]
+    async fn test_delete_protocol_components() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let test_components = vec![
+            create_test_protocol_component("state1"),
+            create_test_protocol_component("state2"),
+        ];
+
+        let mut id_by_modified_ts: HashMap<evm::ContractId, NaiveDateTime> = HashMap::new();
+        for component in test_components.iter() {
+            let original_component = schema::protocol_component::table
+                .filter(schema::protocol_component::external_id.eq(component.id.0.to_string()))
+                .first::<orm::ProtocolComponent>(&mut conn)
+                .await
+                .unwrap();
+            println!("{:?}", original_component.modified_ts);
+            id_by_modified_ts.insert(component.id.clone(), original_component.modified_ts.clone());
+        }
+        sleep(Duration::from_millis(5000)).await;
+        let to_delete = test_components
+            .iter()
+            .collect::<Vec<_>>();
+        println!("herer");
+        let res = gw
+            .delete_protocol_components(&to_delete, &mut conn)
+            .await;
+        println!("{:?}", res.is_ok());
+        assert!(res.is_ok());
+        for (index, component) in test_components.iter().enumerate() {
+            let updated_component = schema::protocol_component::table
+                .filter(schema::protocol_component::external_id.eq(component.id.0.to_string()))
+                .first::<orm::ProtocolComponent>(&mut conn)
+                .await
+                .unwrap();
+
+            assert!(updated_component.deleted_at.is_some());
+            assert_ne!(
+                &updated_component.modified_ts,
+                id_by_modified_ts
+                    .get(&component.id)
+                    .unwrap()
+            );
+        }
     }
 }

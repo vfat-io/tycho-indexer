@@ -518,7 +518,7 @@ pub struct ProtocolComponent {
 ///
 /// `ContractId` is a simple wrapper around a `String` to ensure type safety
 /// and clarity when working with contract identifiers.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default, Eq, Hash)]
 pub struct ContractId(pub String);
 
 impl ProtocolComponent {
