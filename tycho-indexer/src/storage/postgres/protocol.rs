@@ -118,20 +118,6 @@ where
             )
             .into_boxed();
 
-        let pc_test = protocol_component
-            .filter(
-                chain_id
-                    .eq(chain_id_value)
-                    .and(protocol_system_id.eq(protocol_system)),
-            )
-            .load::<orm::ProtocolComponent>(conn)
-            .await?;
-
-        let tx_test = transaction
-            .select(schema::transaction::id)
-            .load::<i64>(conn)
-            .await?;
-
         if let Some(external_ids) = ids {
             query = query.filter(external_id.eq_any(external_ids));
         }
