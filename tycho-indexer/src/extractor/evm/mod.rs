@@ -17,7 +17,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
     hex_bytes::Bytes,
-    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolSystem},
+    models::{Chain, ExtractorIdentity, NormalisedMessage},
     pb::tycho::evm::v1 as substreams,
     storage::{ChangeType, StateGatewayType},
 };
@@ -491,21 +491,25 @@ impl TvlChange {
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 pub struct ProtocolComponent {
     // an id for this component, could be hex repr of contract address
-    id: ContractId,
+    pub id: ContractId,
     // what system this component belongs to
-    protocol_system: ProtocolSystem,
+    pub protocol_system: String,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
-    protocol_type_id: String,
+    pub protocol_type_id: String,
     // blockchain the component belongs to
-    chain: Chain,
+    pub chain: Chain,
     // ids of the tokens tradable
-    tokens: Vec<H160>,
+    pub tokens: Vec<H160>,
     // addresses of the related contracts
-    contract_ids: Vec<H160>,
+    pub contract_ids: Vec<H160>,
     // stores the static attributes
-    static_attributes: HashMap<String, Bytes>,
+    pub static_attributes: HashMap<String, Bytes>,
     // the type of change (creation, deletion etc)
-    change: ChangeType,
+    pub change: ChangeType,
+    // Hash of the transaction in which the component got created
+    pub creation_tx: H256,
+    // Time at which the component got created
+    pub created_at: NaiveDateTime,
 }
 
 /// A type representing the unique identifier for a contract. It can represent an on-chain address
@@ -521,8 +525,10 @@ impl ProtocolComponent {
     pub fn try_from_message(
         msg: substreams::ProtocolComponent,
         chain: Chain,
-        protocol_system: ProtocolSystem,
-        protocol_type_id: String,
+        protocol_system: &str,
+        protocol_type_id: &str,
+        tx_hash: H256,
+        creation_ts: NaiveDateTime,
     ) -> Result<Self, ExtractionError> {
         let id = ContractId(msg.id.clone());
 
@@ -549,13 +555,15 @@ impl ProtocolComponent {
 
         Ok(Self {
             id,
-            protocol_type_id,
-            protocol_system,
+            protocol_type_id: protocol_type_id.to_owned(),
+            protocol_system: protocol_system.to_owned(),
             tokens,
             contract_ids,
             static_attributes,
             chain,
             change: msg.change().into(),
+            creation_tx: tx_hash,
+            created_at: creation_ts,
         })
     }
 }
@@ -579,7 +587,7 @@ impl BlockContractChanges {
         msg: substreams::BlockContractChanges,
         extractor: &str,
         chain: Chain,
-        protocol_system: ProtocolSystem,
+        protocol_system: String,
         protocol_type_id: String,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
@@ -598,8 +606,10 @@ impl BlockContractChanges {
                         let component = ProtocolComponent::try_from_message(
                             component_msg,
                             chain,
-                            protocol_system,
-                            protocol_type_id.clone(),
+                            &protocol_system,
+                            &protocol_type_id,
+                            tx.hash,
+                            block.ts,
                         )?;
                         protocol_components.push(component);
                     }
@@ -870,7 +880,7 @@ impl BlockEntityChanges {
         msg: substreams::BlockEntityChanges,
         extractor: &str,
         chain: Chain,
-        protocol_system: ProtocolSystem,
+        protocol_system: String,
         protocol_type_id: String,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
@@ -883,13 +893,16 @@ impl BlockEntityChanges {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
                     let tx_update =
                         ProtocolStateDeltasWithTx::try_from_message(change.entity_changes, tx)?;
+
                     state_updates.push(tx_update);
                     for component in change.component_changes {
                         let pool = ProtocolComponent::try_from_message(
                             component,
                             chain,
-                            protocol_system,
-                            protocol_type_id.clone(),
+                            &protocol_system,
+                            &protocol_type_id,
+                            tx.hash,
+                            block.ts,
                         )?;
                         new_protocol_components.insert(pool.clone().id.0, pool);
                     }
@@ -1175,6 +1188,31 @@ pub mod fixtures {
                             ],
                         },
                     ],
+                    component_changes: vec![],
+                    balance_changes: vec![],
+                },
+                TransactionEntityChanges {
+                    tx: Some(Transaction {
+                        hash: vec![0x11, 0x12, 0x13, 0x14],
+                        from: vec![0x41, 0x42, 0x43, 0x44],
+                        to: vec![0x51, 0x52, 0x53, 0x54],
+                        index: 11,
+                    }),
+                    entity_changes: vec![EntityChanges {
+                        component_id: "State1".to_owned(),
+                        attributes: vec![
+                            Attribute {
+                                name: "reserve".to_owned(),
+                                value: 600_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Update.into(),
+                            },
+                            Attribute {
+                                name: "new".to_owned(),
+                                value: 0_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Update.into(),
+                            },
+                        ],
+                    }],
                     component_changes: vec![ProtocolComponent {
                         id: "Pool".to_owned(),
                         tokens: vec![
@@ -1206,31 +1244,6 @@ pub mod fixtures {
                             implementation_type: 0,
                         }),
                     }],
-                    balance_changes: vec![],
-                },
-                TransactionEntityChanges {
-                    tx: Some(Transaction {
-                        hash: vec![0x11, 0x12, 0x13, 0x14],
-                        from: vec![0x41, 0x42, 0x43, 0x44],
-                        to: vec![0x51, 0x52, 0x53, 0x54],
-                        index: 11,
-                    }),
-                    entity_changes: vec![EntityChanges {
-                        component_id: "State1".to_owned(),
-                        attributes: vec![
-                            Attribute {
-                                name: "reserve".to_owned(),
-                                value: 600_u64.to_be_bytes().to_vec(),
-                                change: ChangeType::Update.into(),
-                            },
-                            Attribute {
-                                name: "new".to_owned(),
-                                value: 0_u64.to_be_bytes().to_vec(),
-                                change: ChangeType::Update.into(),
-                            },
-                        ],
-                    }],
-                    component_changes: vec![],
                     balance_changes: vec![],
                 },
             ],
@@ -1291,7 +1304,7 @@ mod test {
     use actix_web::body::MessageBody;
     use rstest::rstest;
 
-    use crate::{extractor::evm::fixtures::transaction01, models::ProtocolSystem};
+    use crate::extractor::evm::fixtures::transaction01;
 
     use super::*;
 
@@ -1435,7 +1448,7 @@ mod test {
         };
         let protocol_component = ProtocolComponent {
             id: ContractId("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned()),
-            protocol_system: ProtocolSystem::Ambient,
+            protocol_system: "ambient".to_string(),
             protocol_type_id: String::from("id-1"),
             chain: Chain::Ethereum,
             tokens: vec![
@@ -1451,6 +1464,8 @@ mod test {
                 ("key2".to_string(), Bytes::from(b"value2".to_vec())),
             ]),
             change: ChangeType::Creation,
+            creation_tx: tx.hash,
+            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         };
         BlockContractChanges {
             extractor: "test".to_string(),
@@ -1509,7 +1524,7 @@ mod test {
             msg,
             "test",
             Chain::Ethereum,
-            ProtocolSystem::Ambient,
+            "ambient".to_string(),
             String::from("id-1"),
         )
         .unwrap();
@@ -1520,7 +1535,7 @@ mod test {
         let address = H160::from_low_u64_be(0x0000000000000000000000000000000061626364);
         let protocol_component = ProtocolComponent {
             id: ContractId("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned()),
-            protocol_system: ProtocolSystem::Ambient,
+            protocol_system: "ambient".to_string(),
             protocol_type_id: String::from("id-1"),
             chain: Chain::Ethereum,
             tokens: vec![
@@ -1539,6 +1554,11 @@ mod test {
             .cloned()
             .collect(),
             change: ChangeType::Creation,
+            creation_tx: H256::from_str(
+                "0x0000000000000000000000000000000000000000000000000000000011121314",
+            )
+            .unwrap(),
+            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         };
         BlockAccountChanges::new(
             "test",
@@ -1841,7 +1861,7 @@ mod test {
             "Pool".to_owned(),
             ProtocolComponent {
                 id: ContractId("Pool".to_owned()),
-                protocol_system: ProtocolSystem::Ambient,
+                protocol_system: "ambient".to_string(),
                 protocol_type_id: "Pool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec![
@@ -1853,6 +1873,8 @@ mod test {
                     H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
                 ],
                 change: ChangeType::Creation,
+                creation_tx: tx.hash,
+                created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
         )]
         .into_iter()
@@ -1887,7 +1909,7 @@ mod test {
             msg,
             "test",
             Chain::Ethereum,
-            ProtocolSystem::Ambient,
+            "ambient".to_string(),
             "Pool".to_owned(),
         )
         .unwrap();
@@ -1949,7 +1971,7 @@ mod test {
             "Pool".to_owned(),
             ProtocolComponent {
                 id: ContractId("Pool".to_owned()),
-                protocol_system: ProtocolSystem::Ambient,
+                protocol_system: "ambient".to_string(),
                 protocol_type_id: "Pool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec![
@@ -1961,6 +1983,8 @@ mod test {
                     H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
                 ],
                 change: ChangeType::Creation,
+                creation_tx: tx.hash,
+                created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
         )]
         .into_iter()
@@ -2017,7 +2041,7 @@ mod test {
         let msg = fixtures::pb_protocol_component();
 
         let expected_chain = Chain::Ethereum;
-        let expected_protocol_system = ProtocolSystem::Ambient;
+        let expected_protocol_system = "ambient".to_string();
         let expected_attribute_map: HashMap<String, Bytes> = vec![
             ("balance".to_string(), Bytes::from(100_u64.to_be_bytes().to_vec())),
             ("factory_address".to_string(), Bytes::from(b"0x0fwe0g240g20".to_vec())),
@@ -2030,8 +2054,11 @@ mod test {
         let result = ProtocolComponent::try_from_message(
             msg,
             expected_chain,
-            expected_protocol_system,
-            protocol_type_id.clone(),
+            &expected_protocol_system,
+            &protocol_type_id,
+            H256::from_str("0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac")
+                .unwrap(),
+            Default::default(),
         );
 
         // Assert the result

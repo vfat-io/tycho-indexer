@@ -11,8 +11,7 @@
 //! This decision stems from an understanding that while extending the Rust
 //! codebase to include more enums is a straightforward task, modifying the type
 //! of a SQL column can be an intricate process. By representing enums as
-//! tables, we circumvent unnecessary migrations when modifying Chain or
-//! ProtocolSystem enums.
+//! tables, we circumvent unnecessary migrations when modifying, for example the Chain enum.
 //!
 //! With this representation, it's important to synchronize them whenever the
 //! enums members changed. This can be done automatically once at system
@@ -158,7 +157,7 @@ pub mod schema;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
-pub struct EnumTableCache<E> {
+pub struct ValueIdTableCache<E> {
     map_id: HashMap<E, i64>,
     map_enum: HashMap<i64, E>,
 }
@@ -166,9 +165,9 @@ pub struct EnumTableCache<E> {
 /// Provides caching for enum and its database ID relationships.
 ///
 /// Uses a double sided hash map to provide quick lookups in both directions.
-impl<'a, E> EnumTableCache<E>
+impl<'a, E> ValueIdTableCache<E>
 where
-    E: Eq + Hash + Copy + FromStr + std::fmt::Debug,
+    E: Eq + Hash + Clone + FromStr + std::fmt::Debug,
     <E as FromStr>::Err: std::fmt::Debug,
 {
     pub async fn from_pool(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
@@ -198,7 +197,7 @@ where
         let mut cache = Self { map_id: HashMap::new(), map_enum: HashMap::new() };
         for (id_, name_) in entries {
             let val = E::from_str(&name_).expect("valid enum value");
-            cache.map_id.insert(val, id_);
+            cache.map_id.insert(val.clone(), id_);
             cache.map_enum.insert(id_, val);
         }
         cache
@@ -222,17 +221,21 @@ where
     /// # Arguments
     ///
     /// * `id` - The database ID to lookup.
-    fn get_chain(&self, id: &i64) -> E {
-        *self
-            .map_enum
+    fn get_value(&self, id: &i64) -> E {
+        self.map_enum
             .get(id)
             .unwrap_or_else(|| {
                 panic!("Unexpected cache miss for id {}, entries: {:?}", id, self.map_enum)
             })
+            .to_owned()
     }
 }
 
-type ChainEnumCache = EnumTableCache<Chain>;
+type ChainEnumCache = ValueIdTableCache<Chain>;
+/// ProtocolSystem is not handled as an Enum, because that would require us to restart the whole
+/// application every time we want to add another System. Hence, to diverge from the implementation
+/// of the Chain enum was a conscious decision.
+type ProtocolSystemEnumCache = ValueIdTableCache<String>;
 
 impl From<diesel::result::Error> for StorageError {
     fn from(value: diesel::result::Error) -> Self {
@@ -308,6 +311,7 @@ impl Version {
 }
 
 pub struct PostgresGateway<B, TX, A, D, T> {
+    protocol_system_id_cache: Arc<ProtocolSystemEnumCache>,
     chain_id_cache: Arc<ChainEnumCache>,
     _phantom_block: PhantomData<B>,
     _phantom_tx: PhantomData<TX>,
@@ -324,8 +328,12 @@ where
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
-    pub fn with_cache(cache: Arc<ChainEnumCache>) -> Self {
+    pub fn with_cache(
+        cache: Arc<ChainEnumCache>,
+        protocol_system_cache: Arc<ProtocolSystemEnumCache>,
+    ) -> Self {
         Self {
+            protocol_system_id_cache: protocol_system_cache,
             chain_id_cache: cache,
             _phantom_block: PhantomData,
             _phantom_tx: PhantomData,
@@ -338,7 +346,7 @@ where
     #[allow(clippy::needless_pass_by_ref_mut)]
     #[cfg(test)]
     pub async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
-        let results: Vec<(i64, String)> = async {
+        let chain_id_mapping: Vec<(i64, String)> = async {
             use schema::chain::dsl::*;
             chain
                 .select((id, name))
@@ -347,8 +355,21 @@ where
                 .expect("Failed to load chain ids!")
         }
         .await;
-        let cache = Arc::new(ChainEnumCache::from_tuples(results));
-        Self::with_cache(cache)
+
+        let protocol_system_id_mapping: Vec<(i64, String)> = async {
+            use schema::protocol_system::dsl::*;
+            protocol_system
+                .select((id, name))
+                .load(conn)
+                .await
+                .expect("Failed to load protocol system!")
+        }
+        .await;
+
+        let cache = Arc::new(ChainEnumCache::from_tuples(chain_id_mapping));
+        let protocol_system_cache =
+            Arc::new(ProtocolSystemEnumCache::from_tuples(protocol_system_id_mapping));
+        Self::with_cache(cache, protocol_system_cache)
     }
 
     fn get_chain_id(&self, chain: &Chain) -> i64 {
@@ -356,13 +377,27 @@ where
     }
 
     fn get_chain(&self, id: &i64) -> Chain {
-        self.chain_id_cache.get_chain(id)
+        self.chain_id_cache.get_value(id)
+    }
+
+    fn get_protocol_system_id(&self, protocol_system: &String) -> i64 {
+        self.protocol_system_id_cache
+            .get_id(protocol_system)
+    }
+    #[allow(dead_code)]
+    fn get_protocol_system(&self, id: &i64) -> String {
+        self.protocol_system_id_cache
+            .get_value(id)
     }
 
     pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
-        let cache = EnumTableCache::<Chain>::from_pool(pool.clone()).await?;
-
-        let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(Arc::new(cache)));
+        let cache = ValueIdTableCache::<Chain>::from_pool(pool.clone()).await?;
+        let protocol_system_cache: ValueIdTableCache<String> =
+            ValueIdTableCache::<String>::from_pool(pool.clone()).await?;
+        let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(
+            Arc::new(cache),
+            Arc::new(protocol_system_cache),
+        ));
 
         Ok(gw)
     }
@@ -447,6 +482,24 @@ pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
     debug!("Ensured chain enum presence for: {:?}", chains);
 }
 
+pub async fn ensure_protocol_systems(protocol_systems: &[String], pool: Pool<AsyncPgConnection>) {
+    let mut conn = pool.get().await.expect("connection ok");
+
+    diesel::insert_into(schema::protocol_system::table)
+        .values(
+            protocol_systems
+                .iter()
+                .map(|ps| schema::protocol_system::name.eq(ps))
+                .collect::<Vec<_>>(),
+        )
+        .on_conflict_do_nothing()
+        .execute(&mut conn)
+        .await
+        .expect("Could not ensure protocol system enum's in database");
+
+    debug!("Ensured protocol system enum presence for: {:?}", protocol_systems);
+}
+
 fn run_migrations(db_url: &str) {
     info!("Upgrading database...");
     let mut conn = PgConnection::establish(db_url).expect("Connection to database should succeed");
@@ -493,6 +546,7 @@ pub mod db_fixtures {
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
+    use serde_json::Value;
 
     use crate::{hex_bytes::Bytes, storage::Code};
 
@@ -784,15 +838,19 @@ pub mod db_fixtures {
     pub async fn insert_protocol_type(
         conn: &mut AsyncPgConnection,
         name: &str,
-        finantial_type: FinancialType,
-        implementation_type: ImplementationType,
+        financial_type: Option<FinancialType>,
+        attribute: Option<Value>,
+        implementation_type: Option<ImplementationType>,
     ) -> i64 {
-        diesel::insert_into(schema::protocol_type::table)
-            .values((
-                schema::protocol_type::name.eq(name),
-                schema::protocol_type::financial_type.eq(finantial_type),
-                schema::protocol_type::implementation.eq(implementation_type),
-            ))
+        let financial_type = financial_type.unwrap_or(FinancialType::Swap);
+        let implementation_type = implementation_type.unwrap_or(ImplementationType::Custom);
+        let query = diesel::insert_into(schema::protocol_type::table).values((
+            schema::protocol_type::name.eq(name),
+            schema::protocol_type::financial_type.eq(financial_type),
+            schema::protocol_type::attribute_schema.eq(attribute),
+            schema::protocol_type::implementation.eq(implementation_type),
+        ));
+        query
             .returning(schema::protocol_type::id)
             .get_result(conn)
             .await

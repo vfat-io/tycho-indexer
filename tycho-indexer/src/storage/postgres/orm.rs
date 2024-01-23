@@ -2,11 +2,15 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
+use std::collections::HashMap;
 
 use crate::{
     hex_bytes::Bytes,
     models,
-    storage::{Address, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ContractId, TxHash},
+    storage::{
+        Address, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ContractId, StorageError,
+        TxHash,
+    },
 };
 
 use super::schema::{
@@ -200,6 +204,21 @@ impl Transaction {
             .await
     }
 
+    pub async fn id_by_hash(
+        hashes: &[TxHash],
+        conn: &mut AsyncPgConnection,
+    ) -> Result<HashMap<TxHash, i64>, StorageError> {
+        use super::schema::transaction::dsl::*;
+
+        let results = transaction
+            .filter(hash.eq_any(hashes))
+            .select((hash, id))
+            .load::<(TxHash, i64)>(conn)
+            .await?;
+
+        Ok(results.into_iter().collect())
+    }
+
     // fetches the transaction id, hash, index and block timestamp for a given set of hashes
     pub async fn id_by_hashes(
         hashes: &[&[u8]],
@@ -281,7 +300,7 @@ pub struct NewProtocolType {
     pub implementation: ImplementationType,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable, Clone)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
@@ -289,8 +308,8 @@ pub struct NewProtocolType {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolComponent {
     pub id: i64,
-    pub external_id: String,
     pub chain_id: i64,
+    pub external_id: String,
     pub protocol_type_id: i64,
     pub protocol_system_id: i64,
     pub attributes: Option<serde_json::Value>,
@@ -298,8 +317,11 @@ pub struct ProtocolComponent {
     pub deleted_at: Option<NaiveDateTime>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+    pub creation_tx: i64,
+    pub deletion_tx: Option<i64>,
 }
-#[derive(Insertable)]
+
+#[derive(Insertable, AsChangeset, Debug)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
@@ -309,6 +331,8 @@ pub struct NewProtocolComponent {
     pub chain_id: i64,
     pub protocol_type_id: i64,
     pub protocol_system_id: i64,
+    pub creation_tx: i64,
+    pub created_at: NaiveDateTime,
     pub attributes: Option<serde_json::Value>,
 }
 
@@ -376,7 +400,7 @@ impl ProtocolState {
     }
 
     pub async fn by_protocol_system(
-        system: models::ProtocolSystem,
+        system: String,
         chain_id: i64,
         version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,

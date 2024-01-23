@@ -10,13 +10,14 @@ use ethers::types::H256;
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{utils::TryDecode, ProtocolState, ProtocolStateDelta},
-    models::{Chain, ProtocolSystem, ProtocolType},
+    extractor::evm::{utils::TryDecode, ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    models::{Chain, ProtocolType},
     storage::{
         postgres::{orm, schema, PostgresGateway},
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ProtocolGateway, StorableBlock,
-        StorableContract, StorableProtocolState, StorableProtocolStateDelta, StorableProtocolType,
-        StorableToken, StorableTransaction, StorageError, Version,
+        StorableContract, StorableProtocolComponent, StorableProtocolState,
+        StorableProtocolStateDelta, StorableProtocolType, StorableToken, StorableTransaction,
+        StorageError, TxHash, Version,
     },
 };
 
@@ -93,21 +94,60 @@ where
     type ProtocolState = ProtocolState;
     type ProtocolStateDelta = ProtocolStateDelta;
     type ProtocolType = ProtocolType;
+    type ProtocolComponent = ProtocolComponent;
 
-    // TODO: uncomment to implement in ENG 2049
-    // async fn get_components(
-    //     &self,
-    //     chain: &Chain,
-    //     system: Option<ProtocolSystem>,
-    //     ids: Option<&[&str]>,
-    // ) -> Result<Vec<ProtocolComponent>, StorageError> {
-    //     todo!()
-    // }
+    async fn get_protocol_components(
+        &self,
+        chain: &Chain,
+        system: Option<String>,
+        ids: Option<&[&str]>,
+    ) -> Result<Vec<ProtocolComponent>, StorageError> {
+        todo!()
+    }
 
-    // TODO: uncomment to implement in ENG 2049
-    // async fn upsert_components(&self, new: &[&ProtocolComponent]) -> Result<(), StorageError> {
-    //     todo!()
-    // }
+    async fn add_protocol_components(
+        &self,
+        new: &[&Self::ProtocolComponent],
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        use super::schema::protocol_component::dsl::*;
+        let mut values: Vec<orm::NewProtocolComponent> = Vec::with_capacity(new.len());
+        let tx_hashes: Vec<TxHash> = new
+            .iter()
+            .map(|pc| pc.creation_tx.into())
+            .collect();
+        let tx_hash_id_mapping: HashMap<TxHash, i64> =
+            orm::Transaction::id_by_hash(&tx_hashes, conn)
+                .await
+                .unwrap();
+
+        for pc in new {
+            let txh = tx_hash_id_mapping
+                .get::<TxHash>(&pc.creation_tx.into())
+                .ok_or(StorageError::DecodeError("TxHash not found".to_string()))?;
+
+            let new_pc = pc
+                .to_storage(
+                    self.get_chain_id(&pc.chain),
+                    self.get_protocol_system_id(&pc.protocol_system.to_string()),
+                    txh.to_owned(),
+                    pc.created_at,
+                )
+                .unwrap();
+            values.push(new_pc);
+        }
+
+        diesel::insert_into(protocol_component)
+            .values(&values)
+            .on_conflict((chain_id, protocol_system_id, external_id))
+            .do_nothing()
+            .execute(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))
+            .unwrap();
+
+        Ok(())
+    }
 
     async fn upsert_protocol_type(
         &self,
@@ -138,7 +178,7 @@ where
         &self,
         chain: &Chain,
         at: Option<Version>,
-        system: Option<ProtocolSystem>,
+        system: Option<String>,
         ids: Option<&[&str]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::ProtocolState>, StorageError> {
@@ -161,7 +201,13 @@ where
                 ids.join(",").as_str(),
             ),
             (_, Some(system)) => self._decode_protocol_states(
-                orm::ProtocolState::by_protocol_system(system, chain_db_id, version_ts, conn).await,
+                orm::ProtocolState::by_protocol_system(
+                    system.clone(),
+                    chain_db_id,
+                    version_ts,
+                    conn,
+                )
+                .await,
                 system.to_string().as_str(),
             ),
             _ => self._decode_protocol_states(
@@ -298,7 +344,7 @@ where
     async fn get_state_delta(
         &self,
         chain: &Chain,
-        system: Option<ProtocolSystem>,
+        system: Option<String>,
         id: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
@@ -317,7 +363,7 @@ where
 
     async fn _get_or_create_protocol_system_id(
         &self,
-        new: ProtocolSystem,
+        new: String,
         conn: &mut Self::DB,
     ) -> Result<i64, StorageError> {
         use super::schema::protocol_system::dsl::*;
@@ -347,6 +393,10 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{
+        extractor::{evm, evm::ContractId},
+        storage::ChangeType,
+    };
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
@@ -354,12 +404,13 @@ mod test {
     use serde_json::json;
 
     use crate::{
-        extractor::evm,
         hex_bytes::Bytes,
         models,
         models::{FinancialType, ImplementationType},
         storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
     };
+    use ethers::prelude::H256;
+    use std::{collections::HashMap, str::FromStr};
 
     type EVMGateway = PostgresGateway<
         evm::Block,
@@ -385,7 +436,7 @@ mod test {
     /// protocol state's historical changes are kept together this makes it easy to reason about
     /// that change an account should have at each version Please not that if you change
     /// something here, also update the state fixtures right below, which contain protocol states
-    /// at each version.     
+    /// at each version.
     async fn setup_data(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
@@ -418,12 +469,13 @@ mod test {
         )
         .await;
         let protocol_system_id =
-            db_fixtures::insert_protocol_system(conn, "Ambient".to_owned()).await;
+            db_fixtures::insert_protocol_system(conn, "ambient".to_owned()).await;
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
-            orm::FinancialType::Swap,
-            orm::ImplementationType::Custom,
+            Some(orm::FinancialType::Swap),
+            None,
+            Some(orm::ImplementationType::Custom),
         )
         .await;
         let protocol_component_id = db_fixtures::insert_protocol_component(
@@ -497,11 +549,11 @@ mod test {
 
     #[rstest]
     #[case::by_chain(None, None)]
-    #[case::by_system(Some(ProtocolSystem::Ambient), None)]
+    #[case::by_system(Some("ambient".to_string()), None)]
     #[case::by_ids(None, Some(vec!["state1"]))]
     #[tokio::test]
     async fn test_get_protocol_states(
-        #[case] system: Option<ProtocolSystem>,
+        #[case] system: Option<String>,
         #[case] ids: Option<Vec<&str>>,
     ) {
         let mut conn = setup_db().await;
@@ -655,12 +707,12 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let first_id = gw
-            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            ._get_or_create_protocol_system_id("ambient".to_string(), &mut conn)
             .await
             .unwrap();
 
         let second_id = gw
-            ._get_or_create_protocol_system_id(ProtocolSystem::Ambient, &mut conn)
+            ._get_or_create_protocol_system_id("ambient".to_string(), &mut conn)
             .await
             .unwrap();
         assert_eq!(first_id, second_id);
@@ -724,5 +776,70 @@ mod test {
             Some(json!({"attribute": "another_schema"}))
         );
         assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
+    }
+
+    #[tokio::test]
+    async fn test_add_protocol_components() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let protocol_type_id_1 =
+            db_fixtures::insert_protocol_type(&mut conn, "Test_Type_1", None, None, None).await;
+        let protocol_type_id_2 =
+            db_fixtures::insert_protocol_type(&mut conn, "Test_Type_2", None, None, None).await;
+        let protocol_system = "ambient".to_string();
+        let chain = Chain::Ethereum;
+        let original_component = ProtocolComponent {
+            id: ContractId("test_contract_id".to_string()),
+            protocol_system,
+            protocol_type_id: protocol_type_id_1.to_string(),
+            chain,
+            tokens: vec![],
+            contract_ids: vec![],
+            static_attributes: HashMap::new(),
+            change: ChangeType::Creation,
+            creation_tx: H256::from_str(
+                "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+            )
+            .unwrap(),
+            created_at: Default::default(),
+        };
+
+        let result = gw
+            .add_protocol_components(&[&original_component.clone()], &mut conn)
+            .await;
+
+        assert!(result.is_ok());
+
+        let inserted_data = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("test_contract_id".to_string()))
+            .select(orm::ProtocolComponent::as_select())
+            .first::<orm::ProtocolComponent>(&mut conn)
+            .await;
+
+        assert!(inserted_data.is_ok());
+        let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
+        assert_eq!(
+            original_component.protocol_type_id,
+            inserted_data
+                .protocol_type_id
+                .to_string()
+        );
+        assert_eq!(
+            original_component.protocol_type_id,
+            inserted_data
+                .protocol_type_id
+                .to_string()
+        );
+        assert_eq!(
+            gw.get_protocol_system_id(
+                &original_component
+                    .protocol_system
+                    .to_string()
+            ),
+            inserted_data.protocol_system_id
+        );
+        assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
+        assert_eq!(original_component.id.0, inserted_data.external_id);
     }
 }
