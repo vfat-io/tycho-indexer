@@ -19,7 +19,10 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::log::{debug, info};
+use tracing::{
+    log::{debug, info},
+    warn,
+};
 
 use crate::{
     extractor::evm::{self, AccountUpdate, EVMStateGateway},
@@ -486,6 +489,10 @@ impl CachedGateway {
         end_version: &BlockOrTimestamp,
     ) -> Result<Vec<AccountUpdate>, StorageError> {
         let mut lru_cache = self.lru_cache.lock().await;
+
+        if start_version.is_none() {
+            warn!("Get accounts delta called with start_version = None, this might be a bug in one of the extractors")
+        }
 
         // Construct a key for the LRU cache
         let key = RevertParameters {
