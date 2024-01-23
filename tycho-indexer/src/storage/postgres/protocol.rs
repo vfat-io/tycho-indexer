@@ -298,9 +298,15 @@ where
                 },
             ),
             (_, Some(system)) => self._decode_protocol_states(
-                orm::ProtocolState::by_protocol_system(system, chain_db_id, start_ts, end_ts, conn)
-                    .await,
-                system.to_string().as_str(),
+                orm::ProtocolState::by_protocol_system(
+                    system.clone(),
+                    chain_db_id,
+                    start_ts,
+                    end_ts,
+                    conn,
+                )
+                .await,
+                system.as_str(),
                 |states, id, hash| {
                     ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
                 },
