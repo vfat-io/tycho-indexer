@@ -10,7 +10,7 @@ use ethers::types::{transaction, Transaction};
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta, TvlChange},
     hex_bytes::Bytes,
     models::{Chain, ProtocolType},
     storage::{
@@ -95,6 +95,7 @@ where
     type ProtocolStateDelta = ProtocolStateDelta;
     type ProtocolType = ProtocolType;
     type ProtocolComponent = ProtocolComponent;
+    type TvlChange = TvlChange;
 
     async fn get_protocol_components(
         &self,
@@ -233,6 +234,15 @@ where
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError> {
         todo!()
+    }
+
+    async fn add_tvl_changes(
+        &self,
+        chain: Chain,
+        tvl_changes: &[&Self::TvlChange],
+        conn: &mut Self::DB,
+    ) {
+        // get account_id from token
     }
 
     async fn add_tokens(

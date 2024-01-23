@@ -246,6 +246,31 @@ pub trait StorableProtocolType<S, N, I>: Sized + Send + Sync + 'static {
     fn to_storage(&self) -> N;
 }
 
+/// Lays out the necessary interface needed to store and retrieve TVL changes
+/// from storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   transaction.
+/// * `N`: This represents the storage-specific data type used when converting from the protocol
+///   type to storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the transaction.
+pub trait StorableTvlChange<S, N, I>: Sized + Send + Sync + 'static {
+    /// Converts a protocol type from storage representation (`S`) to protocol type
+    /// form.
+    fn from_storage(
+        val: S,
+        token_address: H160,
+        modify_tx: &TxHash,
+    ) -> Result<Self, crate::storage::StorageError>;
+
+    /// Converts a protocol type object to its storable representation (`N`).
+    fn to_storage(&self, token_address: H160, modify_tx: &TxHash) -> N;
+}
+
 #[derive(Error, Debug, PartialEq)]
 pub enum StorageError {
     #[error("Could not find {0} with id `{1}`!")]
@@ -545,6 +570,8 @@ pub trait ProtocolGateway {
         i64,
     >;
 
+    type TvlChange: StorableTvlChange<orm::TvlChange, orm::NewTvlChange, i64>;
+
     /// Retrieve ProtocolComponent from the db
     ///
     /// # Parameters
@@ -643,6 +670,25 @@ pub trait ProtocolGateway {
         address: Option<&[&Address]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError>;
+
+    /// Saves multiple TVL changes to storage.
+    ///
+    /// Inserts token into storage. Tokens and their properties are assumed to
+    /// be immutable.
+    ///
+    /// # Parameters
+    /// - `chain` The chain of the token.
+    /// - `tvl_changes` The TVL changes to insert.
+    ///
+    /// # Return
+    /// Ok if all TVL changes could be inserted, Err if at least one token failed to
+    /// insert.
+    async fn add_tvl_changes(
+        &self,
+        chain: Chain,
+        tvl_changes: &[&Self::TvlChange],
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 
     /// Saves multiple tokens to storage.
     ///

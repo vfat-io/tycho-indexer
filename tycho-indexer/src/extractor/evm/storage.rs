@@ -16,7 +16,7 @@ use chrono::NaiveDateTime;
 use std::collections::HashMap;
 
 pub mod pg {
-    use std::collections::HashSet;
+    use std::{collections::HashSet, hash::Hash};
 
     use crate::{
         extractor::evm::utils::pad_and_parse_h160,
@@ -27,9 +27,10 @@ pub mod pg {
             postgres::{
                 orm,
                 orm::{NewToken, Token},
+                schema::token::dsl::token,
             },
             Address, Balance, BlockHash, ChangeType, Code, StorableProtocolComponent,
-            StorableProtocolState, StorableProtocolType, StorableToken, TxHash,
+            StorableProtocolState, StorableProtocolType, StorableToken, StorableTvlChange, TxHash,
         },
     };
     use ethers::types::{H160, H256, U256};
@@ -156,6 +157,29 @@ pub mod pg {
                 implementation: protocol_implementation_type,
                 attribute_schema: self.attribute_schema.clone(),
                 financial_type: financial_protocol_type,
+            }
+        }
+    }
+    impl StorableTvlChange<orm::TvlChange, orm::NewTvlChange, i64> for evm::TvlChange {
+        fn from_storage(
+            val: orm::TvlChange,
+            token_address: H160,
+            modify_tx: &TxHash,
+        ) -> Result<Self, StorageError> {
+            Ok(Self::new(
+                token_address,
+                val.new_balance,
+                H256::try_decode(modify_tx, "tx hash").map_err(StorageError::DecodeError)?,
+                val.protocol_component_id,
+            ))
+        }
+
+        fn to_storage(&self, token_id: i64, modify_tx: TxHash) -> orm::NewTvlChange {
+            orm::NewTvlChange {
+                token_id,
+                new_balance: self.new_balance.clone(),
+                modify_tx,
+                component_id: self.component_id.clone(),
             }
         }
     }

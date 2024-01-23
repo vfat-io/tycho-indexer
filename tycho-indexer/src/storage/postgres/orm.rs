@@ -277,6 +277,29 @@ pub struct ProtocolType {
     pub modified_ts: NaiveDateTime,
 }
 
+#[derive(Identifiable, Queryable, Selectable)]
+#[diesel(table_name = tvl_change)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct TvlChange {
+    pub id: i64,
+    pub token_id: i64,
+    pub new_balance: f64,
+    pub modify_tx: TxHash,
+    pub protocol_component_id: String,
+    pub inserted_ts: NaiveDateTime,
+    pub modified_ts: NaiveDateTime,
+}
+
+#[derive(Identifiable, Queryable, Selectable)]
+#[diesel(table_name = tvl_change)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewTvlChange {
+    pub token_id: i64,
+    pub new_balance: f64,
+    pub modify_tx: TxHash,
+    pub component_id: String,
+}
+
 #[derive(AsChangeset, Insertable)]
 #[diesel(table_name = protocol_type)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
