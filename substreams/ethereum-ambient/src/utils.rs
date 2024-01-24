@@ -1,20 +1,24 @@
 use anyhow::{anyhow, bail};
-use ethabi::{decode, ParamType};
-use ethabi::ethereum_types::U256;
+use ethabi::{decode, ethereum_types::U256, ParamType, Token, Uint};
 use substreams_ethereum::pb::eth::v2::Call;
 use tiny_keccak::{Hasher, Keccak};
 
 pub fn encode_pool_hash(token_x: Vec<u8>, token_y: Vec<u8>, pool_idx: Vec<u8>) -> [u8; 32] {
-    let mut keccak = Keccak::v256();
+    let base_address = ethabi::Address::from_slice(&token_x);
+    let quote_address = ethabi::Address::from_slice(&token_y);
+    let pool_idx_uint = Uint::from_big_endian(&pool_idx);
 
-    let mut data = Vec::new();
-    data.extend_from_slice(&token_x);
-    data.extend_from_slice(&token_y);
-    data.extend_from_slice(&pool_idx);
+    let encoded = ethabi::encode(&[
+        Token::Address(base_address),
+        Token::Address(quote_address),
+        Token::Uint(pool_idx_uint),
+    ]);
 
+    let mut hasher = Keccak::v256();
+    hasher.update(&encoded);
     let mut output = [0u8; 32];
-    keccak.update(&data);
-    keccak.finalize(&mut output);
+    hasher.finalize(&mut output);
+
     output
 }
 
