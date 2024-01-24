@@ -4329,6 +4329,7 @@ dependencies = [
  "hex-literal 0.4.1",
  "num-bigint",
  "prost",
+ "quote",
  "substreams",
  "substreams-ethereum",
  "tiny-keccak",

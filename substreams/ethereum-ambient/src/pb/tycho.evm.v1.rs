@@ -270,7 +270,7 @@ pub struct BalanceDelta {
     #[prost(uint64, tag="4")]
     pub ordinal: u64,
 }
-///
+/// Ambient pool changes within a single block
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockPoolChanges {
