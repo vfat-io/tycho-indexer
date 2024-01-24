@@ -498,8 +498,11 @@ impl TvlChange {
 /// smart contract.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 pub struct ProtocolComponent {
-    // an id for this component, could be hex repr of contract address
-    pub id: ContractId,
+    /// Is the unique identifier of a contract. It can represent an on-chain
+    /// address or in the case of a one-to-many relationship it could be something like
+    /// 'USDC-ETH'. This is for example the case with ambient, where one contract is
+    /// responsible for multiple components.
+    pub id: String,
     // what system this component belongs to
     pub protocol_system: String,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
@@ -520,15 +523,6 @@ pub struct ProtocolComponent {
     pub created_at: NaiveDateTime,
 }
 
-/// A type representing the unique identifier for a contract. It can represent an on-chain address
-/// or in the case of a one-to-many relationship it could be something like 'USDC-ETH'. This is for
-/// example the case with ambient, where one component is responsible for multiple contracts.
-///
-/// `ContractId` is a simple wrapper around a `String` to ensure type safety
-/// and clarity when working with contract identifiers.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
-pub struct ContractId(pub String);
-
 impl ProtocolComponent {
     pub fn try_from_message(
         msg: substreams::ProtocolComponent,
@@ -538,8 +532,6 @@ impl ProtocolComponent {
         tx_hash: H256,
         creation_ts: NaiveDateTime,
     ) -> Result<Self, ExtractionError> {
-        let id = ContractId(msg.id.clone());
-
         let tokens = msg
             .tokens
             .clone()
@@ -562,7 +554,7 @@ impl ProtocolComponent {
             .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
 
         Ok(Self {
-            id,
+            id: msg.id.clone(),
             protocol_type_id: protocol_type_id.to_owned(),
             protocol_system: protocol_system.to_owned(),
             tokens,
@@ -912,7 +904,7 @@ impl BlockEntityChanges {
                             tx.hash,
                             block.ts,
                         )?;
-                        new_protocol_components.insert(pool.clone().id.0, pool);
+                        new_protocol_components.insert(pool.id.clone(), pool);
                     }
                 }
             }
@@ -1455,7 +1447,7 @@ mod test {
             index: 2,
         };
         let protocol_component = ProtocolComponent {
-            id: ContractId("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned()),
+            id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
             protocol_system: "ambient".to_string(),
             protocol_type_id: String::from("id-1"),
             chain: Chain::Ethereum,
@@ -1542,7 +1534,7 @@ mod test {
     fn block_account_changes() -> BlockAccountChanges {
         let address = H160::from_low_u64_be(0x0000000000000000000000000000000061626364);
         let protocol_component = ProtocolComponent {
-            id: ContractId("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned()),
+            id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
             protocol_system: "ambient".to_string(),
             protocol_type_id: String::from("id-1"),
             chain: Chain::Ethereum,
@@ -1868,7 +1860,7 @@ mod test {
         let new_protocol_components: HashMap<String, ProtocolComponent> = vec![(
             "Pool".to_owned(),
             ProtocolComponent {
-                id: ContractId("Pool".to_owned()),
+                id: "Pool".to_owned(),
                 protocol_system: "ambient".to_string(),
                 protocol_type_id: "Pool".to_owned(),
                 chain: Chain::Ethereum,
@@ -1978,7 +1970,7 @@ mod test {
         let new_protocol_components: HashMap<String, ProtocolComponent> = vec![(
             "Pool".to_owned(),
             ProtocolComponent {
-                id: ContractId("Pool".to_owned()),
+                id: "Pool".to_owned(),
                 protocol_system: "ambient".to_string(),
                 protocol_type_id: "Pool".to_owned(),
                 chain: Chain::Ethereum,
@@ -2076,7 +2068,7 @@ mod test {
         let protocol_component = result.unwrap();
 
         // Assert specific properties of the protocol component
-        assert_eq!(protocol_component.id, ContractId("component_id".to_string()));
+        assert_eq!(protocol_component.id, "component_id".to_string());
         assert_eq!(protocol_component.protocol_system, expected_protocol_system);
         assert_eq!(protocol_component.protocol_type_id, protocol_type_id);
         assert_eq!(protocol_component.chain, expected_chain);
