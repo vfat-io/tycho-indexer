@@ -490,10 +490,10 @@ impl TvlChange {
 /// smart contract.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 pub struct ProtocolComponent {
-    /// Represents the unique identifier of a contract. It can represent an on-chain
+    /// Is the unique identifier of a contract. It can represent an on-chain
     /// address or in the case of a one-to-many relationship it could be something like
-    /// 'USDC-ETH'. This is for example the case with ambient, where one component is
-    /// responsible for multiple contracts.
+    /// 'USDC-ETH'. This is for example the case with ambient, where one contract is
+    /// responsible for multiple components.
     pub id: String,
     // what system this component belongs to
     pub protocol_system: String,
