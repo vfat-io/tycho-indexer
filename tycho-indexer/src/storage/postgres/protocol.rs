@@ -957,6 +957,7 @@ mod test {
             ._get_or_create_protocol_system_id("ambient".to_string(), &mut conn)
             .await
             .unwrap();
+        assert!(first_id > 0);
         assert_eq!(first_id, second_id);
     }
 

@@ -121,12 +121,12 @@ pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
 pub type AccountToContractStore = HashMap<Address, ContractStore>;
 
 /// Identifies a block in storage.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum BlockIdentifier {
     /// Identifies the block by its position on a specified chain.
     ///
     /// This form of identification has potential risks as it may become
-    /// ambiguous in certain situations.For example, if the block has not been
+    /// ambiguous in certain situations. For example, if the block has not been
     /// finalised, there exists a possibility of forks occurring. As a result,
     /// the same number could refer to different blocks on different forks.
     Number((Chain, i64)),
@@ -136,6 +136,11 @@ pub enum BlockIdentifier {
     /// The hash should be unique across multiple chains. Preferred method if
     /// the block is very recent.
     Hash(BlockHash),
+
+    /// Latest stored block for the target chain
+    ///
+    /// Returns the block with the highest block number on the target chain.
+    Latest(Chain),
 }
 
 impl Display for BlockIdentifier {
@@ -388,7 +393,7 @@ pub trait ExtractionStateGateway {
 
 /// Point in time as either block or timestamp. If a block is chosen it
 /// timestamp attribute is used.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum BlockOrTimestamp {
     Block(BlockIdentifier),
     Timestamp(NaiveDateTime),

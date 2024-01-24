@@ -45,6 +45,8 @@ pub trait Extractor: Send + Sync {
 
     async fn get_cursor(&self) -> String;
 
+    async fn get_last_processed_block(&self) -> Option<evm::Block>;
+
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,

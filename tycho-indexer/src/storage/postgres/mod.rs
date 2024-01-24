@@ -293,6 +293,12 @@ impl BlockOrTimestamp {
                     })?
                     .ts)
             }
+            BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)) => {
+                Ok(orm::Block::most_recent(*chain, conn)
+                    .await
+                    .map_err(|err| StorageError::from_diesel(err, "Block", "latest", None))?
+                    .ts)
+            }
             BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
         }
     }

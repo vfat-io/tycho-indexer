@@ -158,12 +158,26 @@ impl Block {
             .await
     }
 
+    pub async fn most_recent(
+        chain: models::Chain,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Block> {
+        block::table
+            .inner_join(chain::table)
+            .filter(chain::name.eq(chain.to_string()))
+            .order(block::number.desc())
+            .select(Block::as_select())
+            .first::<Block>(conn)
+            .await
+    }
+
     pub async fn by_id(id: &BlockIdentifier, conn: &mut AsyncPgConnection) -> QueryResult<Block> {
         match id {
             BlockIdentifier::Hash(hash) => Self::by_hash(hash, conn).await,
             BlockIdentifier::Number((chain, number)) => {
                 Self::by_number(*chain, *number, conn).await
             }
+            BlockIdentifier::Latest(chain) => Self::most_recent(*chain, conn).await,
         }
     }
 }
