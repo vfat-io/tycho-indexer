@@ -1,8 +1,8 @@
 #![allow(unused_variables)]
 
 use async_trait::async_trait;
-use chrono::{NaiveDateTime, Utc};
-use std::{cmp::Ordering, collections::HashMap, hash::Hash, time::SystemTime};
+use chrono::NaiveDateTime;
+use std::{cmp::Ordering, collections::HashMap};
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -527,7 +527,7 @@ mod test {
         extractor::evm::{self, ERC20Token},
         storage::ChangeType,
     };
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Utc};
     use diesel_async::AsyncConnection;
     use ethers::{prelude::H160, types::U256};
     use rstest::rstest;
@@ -540,11 +540,8 @@ mod test {
         storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
     };
 
-    use super::*;
-    use crate::storage::postgres::orm::ProtocolSystem;
     use ethers::prelude::H256;
-    use std::{collections::HashMap, str::FromStr, thread, time::Duration};
-    use tokio::time::sleep;
+    use std::{collections::HashMap, str::FromStr};
 
     type EVMGateway = PostgresGateway<
         evm::Block,
@@ -635,15 +632,6 @@ mod test {
         )
         .await;
 
-        db_fixtures::insert_protocol_component(
-            conn,
-            "state2",
-            chain_id,
-            protocol_system_id,
-            protocol_type_id,
-            txn[1],
-        )
-        .await;
         // protocol state for state1-reserve1
         db_fixtures::insert_protocol_state(
             conn,
