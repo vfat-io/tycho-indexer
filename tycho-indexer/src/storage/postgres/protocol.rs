@@ -10,14 +10,22 @@ use ethers::types::{transaction, Transaction};
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    extractor::evm::{ERC20Token, ProtocolComponent, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ProtocolType},
     storage::{
-        postgres::{orm, schema, PostgresGateway},
-        Address, BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractDelta, ProtocolGateway,
+        postgres::{
+            orm,
+            orm::{Account, NewAccount, Token},
+            schema,
+            schema::chain,
+            PostgresGateway,
+        },
+        Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ContractId, ProtocolGateway,
         StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolState,
-        StorableProtocolType, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+        StorableProtocolType, StorableToken, StorableTransaction, StorageError,
+        StorageError::DecodeError,
+        TxHash, Version,
     },
 };
 
@@ -229,19 +237,116 @@ where
     async fn get_tokens(
         &self,
         chain: Chain,
-        address: Option<&[&Address]>,
+        addresses: Option<&[&Address]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError> {
-        todo!()
+        use super::schema::{account::dsl::*, token::dsl::*};
+
+        let mut query = token
+            .inner_join(account)
+            .select((token::all_columns(), schema::account::chain_id, schema::account::address))
+            .into_boxed();
+
+        if let Some(addrs) = addresses {
+            query = query.filter(schema::account::address.eq_any(addrs));
+        }
+
+        let results = query
+            .order(schema::token::symbol.asc())
+            .load::<(orm::Token, i64, Address)>(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Token", &chain.to_string(), None))?;
+
+        let tokens: Result<Vec<Self::Token>, StorageError> = results
+            .into_iter()
+            .map(|(orm_token, chain_id_, address_)| {
+                let chain = self.get_chain(&chain_id_);
+                let contract_id = ContractId::new(chain, address_);
+
+                Self::Token::from_storage(orm_token, contract_id)
+                    .map_err(|err| StorageError::DecodeError(err.to_string()))
+            })
+            .collect();
+        tokens
     }
 
     async fn add_tokens(
         &self,
-        chain: Chain,
-        token: &[&Self::Token],
+        tokens: &[&Self::Token],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        todo!()
+        let titles: Vec<String> = tokens
+            .iter()
+            .map(|token| format!("{}_{}", token.chain(), token.symbol()))
+            .collect();
+
+        let addresses: Vec<_> = tokens
+            .iter()
+            .map(|token| token.address().as_bytes().to_vec())
+            .collect();
+
+        let new_accounts: Vec<NewAccount> = tokens
+            .iter()
+            .zip(titles.iter())
+            .zip(addresses.iter())
+            .map(|((token, title), address)| {
+                let chain_id = self.get_chain_id(&token.chain());
+                NewAccount {
+                    title,
+                    address,
+                    chain_id,
+                    creation_tx: None,
+                    created_at: None,
+                    deleted_at: None,
+                }
+            })
+            .collect();
+
+        diesel::insert_into(schema::account::table)
+            .values(&new_accounts)
+            // .on_conflict(..).do_nothing() is necessary to ignore updating duplicated entries
+            .on_conflict((schema::account::address, schema::account::chain_id))
+            .do_nothing()
+            .execute(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Account", "batch", None))?;
+
+        let accounts: Vec<Account> = schema::account::table
+            .filter(schema::account::address.eq_any(addresses))
+            .select(Account::as_select())
+            .get_results::<Account>(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Account", "retrieve", None))?;
+
+        let account_map: HashMap<(Vec<u8>, i64), i64> = accounts
+            .iter()
+            .map(|account| ((account.address.clone().to_vec(), account.chain_id), account.id))
+            .collect();
+
+        let new_tokens: Vec<orm::NewToken> = tokens
+            .iter()
+            .map(|token| {
+                let token_chain_id = self.get_chain_id(&token.chain());
+                let account_key = (token.address().as_ref().to_vec(), token_chain_id);
+
+                let account_id = *account_map
+                    .get(&account_key)
+                    .expect("Account ID not found");
+
+                token.to_storage(account_id)
+            })
+            .collect();
+
+        diesel::insert_into(schema::token::table)
+            .values(&new_tokens)
+            // .on_conflict(..).do_nothing() is necessary to ignore updating duplicated entries
+            .on_conflict(schema::token::account_id)
+            .do_nothing()
+            .execute(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Token", "batch", None))?;
+
+        Ok(())
     }
 
     async fn get_state_delta(
@@ -299,14 +404,15 @@ mod test {
     use crate::{extractor::evm, storage::ChangeType};
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use diesel_async::AsyncConnection;
-    use ethers::types::U256;
+    use ethers::{prelude::H160, types::U256};
+    use hex::FromHex;
     use rstest::rstest;
     use serde_json::{json, Value};
 
     use crate::{
         models,
         models::{FinancialType, ImplementationType},
-        storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
+        storage::postgres::{db_fixtures, orm, schema, schema::token::dsl::token, PostgresGateway},
     };
 
     use super::*;
@@ -320,6 +426,10 @@ mod test {
         evm::AccountUpdate,
         evm::ERC20Token,
     >;
+
+    const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+    const USDC: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+    const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -421,6 +531,14 @@ mod test {
             None,
         )
         .await;
+
+        // insert tokens
+        let weth_id =
+            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
+                .await;
+        let usdc_id =
+            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
+                .await;
     }
 
     fn protocol_state() -> ProtocolState {
@@ -573,6 +691,101 @@ mod test {
             Some(json!({"attribute": "another_schema"}))
         );
         assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
+    }
+
+    #[tokio::test]
+    async fn test_get_tokens() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        // get all tokens (no address filter)
+        let tokens = gw
+            .get_tokens(Chain::Ethereum, None, &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(tokens.len(), 2);
+
+        // get weth and usdc
+        let tokens = gw
+            .get_tokens(Chain::Ethereum, Some(&[&WETH.into(), &USDC.into()]), &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(tokens.len(), 2);
+
+        // get weth
+        let tokens = gw
+            .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), &mut conn)
+            .await
+            .unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].symbol, "WETH".to_string());
+        assert_eq!(tokens[0].decimals, 18);
+    }
+
+    #[tokio::test]
+    async fn test_add_tokens() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        // Insert one new token (USDT) and an existing token (WETH)
+        let weth_symbol = "WETH".to_string();
+        let old_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
+        let old_account = &orm::Account::by_address(
+            &Bytes::from_str(WETH.trim_start_matches("0x")).expect("address ok"),
+            &mut conn,
+        )
+        .await
+        .unwrap()[0];
+
+        let usdt_symbol = "USDT".to_string();
+        let tokens = [
+            &ERC20Token {
+                address: H160::from_str(USDT).unwrap(),
+                symbol: usdt_symbol.clone(),
+                decimals: 6,
+                tax: 0,
+                gas: vec![Some(64), None],
+                chain: Chain::Ethereum,
+            },
+            &ERC20Token {
+                address: H160::from_str(WETH).unwrap(),
+                symbol: weth_symbol.clone(),
+                decimals: 18,
+                tax: 0,
+                gas: vec![Some(100), None],
+                chain: Chain::Ethereum,
+            },
+        ];
+
+        gw.add_tokens(&tokens, &mut conn)
+            .await
+            .unwrap();
+
+        let inserted_token = db_fixtures::get_token_by_symbol(&mut conn, usdt_symbol.clone()).await;
+        assert_eq!(inserted_token.symbol, usdt_symbol);
+        assert_eq!(inserted_token.decimals, 6);
+        let inserted_account = &orm::Account::by_address(
+            &Bytes::from_str(USDT.trim_start_matches("0x")).expect("address ok"),
+            &mut conn,
+        )
+        .await
+        .unwrap()[0];
+        assert_eq!(inserted_account.id, inserted_token.account_id);
+        assert_eq!(inserted_account.title, "ethereum_USDT".to_string());
+
+        // make sure nothing changed on WETH (ids included)
+        let new_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
+        assert_eq!(new_token, old_token);
+        let new_account = &orm::Account::by_address(
+            &Bytes::from_str(WETH.trim_start_matches("0x")).expect("address ok"),
+            &mut conn,
+        )
+        .await
+        .unwrap()[0];
+        assert_eq!(new_account, old_account);
+        assert!(inserted_account.id > new_account.id);
     }
 
     #[tokio::test]
