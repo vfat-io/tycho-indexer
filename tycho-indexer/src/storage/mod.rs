@@ -565,6 +565,7 @@ pub trait ProtocolGateway {
         chain: &Chain,
         system: Option<String>,
         ids: Option<&[&str]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
     async fn add_protocol_components(
@@ -792,7 +793,7 @@ pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
         tokens: Vec<H160>,
         contract_ids: Vec<H160>,
         chain: Chain,
-        protocol_system: String,
+        protocol_system: &str,
         transaction_hash: H256,
     ) -> Result<Self, StorageError>;
 

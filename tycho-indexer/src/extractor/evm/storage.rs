@@ -348,7 +348,7 @@ pub mod pg {
             tokens: Vec<H160>,
             contract_ids: Vec<H160>,
             chain: Chain,
-            protocol_system: String,
+            protocol_system: &str,
             transaction_hash: H256,
         ) -> Result<Self, StorageError> {
             let mut static_attributes: HashMap<String, Bytes> = HashMap::default();
@@ -362,7 +362,7 @@ pub mod pg {
 
             Ok(evm::ProtocolComponent {
                 id: val.external_id,
-                protocol_system,
+                protocol_system: protocol_system.to_owned(),
                 protocol_type_id: val.protocol_type_id.to_string(),
                 chain,
                 tokens,
@@ -624,7 +624,7 @@ mod test {
             tokens.clone(),
             contract_ids.clone(),
             chain,
-            protocol_system,
+            &protocol_system,
             H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
                 .unwrap(),
         );

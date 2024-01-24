@@ -300,10 +300,11 @@ pub struct NewProtocolType {
     pub implementation: ImplementationType,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug, PartialEq)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
+#[diesel(belongs_to(Transaction, foreign_key = creation_tx))]
 #[diesel(table_name = protocol_component)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolComponent {
