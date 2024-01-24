@@ -61,3 +61,7 @@ DROP TRIGGER invalidate_previous_account_balance ON account_balance;
 
 DROP FUNCTION invalidate_previous_entry_account_balance();
 
+DROP TRIGGER invalidate_previous_contract_code ON contract_code;
+
+DROP FUNCTION invalidate_previous_entry_contract_code();
+

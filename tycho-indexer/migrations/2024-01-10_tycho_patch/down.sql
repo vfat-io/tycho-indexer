@@ -109,7 +109,7 @@ BEGIN
     WHERE
         valid_to IS NULL
         AND account_id = NEW.account_id
-        -- running this after inserts allows us to use upserts, 
+        -- running this after inserts allows us to use upserts,
         -- currently the application does not use that though
         AND id != NEW.id;
     RETURN NEW;
@@ -121,3 +121,29 @@ CREATE TRIGGER invalidate_previous_account_balance
     AFTER INSERT ON account_balance
     FOR EACH ROW
     EXECUTE PROCEDURE invalidate_previous_entry_account_balance();
+
+CREATE OR REPLACE FUNCTION invalidate_previous_entry_contract_code()
+    RETURNS TRIGGER
+    AS $$
+BEGIN
+    -- Update the 'valid_to' field of the last valid entry when a new one is inserted.
+    UPDATE
+        contract_code
+    SET
+        valid_to = NEW.valid_from
+    WHERE
+        valid_to IS NULL
+        AND account_id = NEW.account_id
+        -- running this after inserts allows us to use upserts,
+        -- currently the application does not use that though
+        AND id != NEW.id;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE TRIGGER invalidate_previous_contract_code
+    AFTER INSERT ON contract_code
+    FOR EACH ROW
+    EXECUTE PROCEDURE invalidate_previous_entry_contract_code();
+
