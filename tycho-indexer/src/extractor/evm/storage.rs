@@ -326,6 +326,18 @@ pub mod pg {
                     .collect(),
             }
         }
+
+        fn chain(&self) -> Chain {
+            self.chain
+        }
+
+        fn address(&self) -> H160 {
+            self.address
+        }
+
+        fn symbol(&self) -> String {
+            self.symbol.clone()
+        }
     }
 
     impl StorableProtocolComponent<orm::ProtocolComponent, orm::NewProtocolComponent, i64>

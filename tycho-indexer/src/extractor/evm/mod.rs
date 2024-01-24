@@ -33,6 +33,7 @@ mod utils;
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SwapPool {}
 
+#[derive(Debug)]
 pub struct ERC20Token {
     pub address: H160,
     pub symbol: String,

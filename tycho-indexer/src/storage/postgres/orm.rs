@@ -470,7 +470,7 @@ pub struct NewProtocolState {
     pub valid_to: Option<NaiveDateTime>,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug, PartialEq)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(Transaction, foreign_key = creation_tx))]
 #[diesel(table_name = account)]
@@ -534,7 +534,7 @@ impl Account {
     }
 }
 
-#[derive(Insertable)]
+#[derive(AsChangeset, Insertable, Debug)]
 #[diesel(table_name = account)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccount<'a> {
@@ -546,7 +546,7 @@ pub struct NewAccount<'a> {
     pub deleted_at: Option<NaiveDateTime>,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug, PartialEq)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name = token)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -561,7 +561,7 @@ pub struct Token {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Insertable)]
+#[derive(AsChangeset, Insertable, Debug)]
 #[diesel(table_name = token)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewToken {
