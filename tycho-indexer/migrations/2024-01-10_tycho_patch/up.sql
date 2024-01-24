@@ -38,10 +38,6 @@ ALTER TABLE protocol_state
 ALTER TABLE protocol_state
     ADD CONSTRAINT check_attribute_fields CHECK ((attribute_name IS NULL AND attribute_value IS NULL) OR (attribute_name IS NOT NULL AND attribute_value IS NOT NULL));
 
-DROP TRIGGER invalidate_previous_protocol_state ON protocol_state;
-
-DROP FUNCTION invalidate_previous_entry_protocol_state();
-
 ALTER TABLE protocol_system
     ADD CONSTRAINT name_unique UNIQUE (name);
 
