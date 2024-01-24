@@ -11,7 +11,6 @@ use std::{
     ops::Deref,
 };
 use tracing::warn;
-use utoipa::ToSchema;
 
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
@@ -85,25 +84,17 @@ impl Transaction {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Account {
     pub chain: Chain,
-    #[schema(value_type=String)]
     pub address: H160,
     pub title: String,
-    #[schema(value_type=HashMap<String, String>)]
     pub slots: HashMap<U256, U256>,
-    #[schema(value_type=String)]
     pub balance: U256,
-    #[schema(value_type=String)]
     pub code: Bytes,
-    #[schema(value_type=String)]
     pub code_hash: H256,
-    #[schema(value_type=String)]
     pub balance_modify_tx: H256,
-    #[schema(value_type=String)]
     pub code_modify_tx: H256,
-    #[schema(value_type=Option<String>)]
     pub creation_tx: Option<H256>,
 }
 

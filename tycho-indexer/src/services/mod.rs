@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     extractor::{evm, runner::ExtractorHandle, ExtractionError},
     models::Chain,
-    services::rpc::{Block, StateRequestBody, StateRequestResponse, Version},
+    services::rpc::{Block, EVMAccount, StateRequestBody, StateRequestResponse, Version},
     storage::{postgres::PostgresGateway, ContractId},
 };
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
@@ -85,7 +85,7 @@ impl ServicesBuilder {
                 schemas(StateRequestResponse),
                 schemas(StateRequestBody),
                 schemas(Chain),
-                schemas(evm::Account),
+                schemas(EVMAccount),
             )
         )]
         struct ApiDoc;

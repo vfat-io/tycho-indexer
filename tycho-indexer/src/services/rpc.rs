@@ -1,13 +1,17 @@
 //! This module contains Tycho RPC implementation
 
 use crate::{
-    extractor::evm::Account,
+    extractor::evm,
+    hex_bytes::Bytes,
     models::Chain,
     storage::{
         self, Address, BlockHash, BlockIdentifier, BlockOrTimestamp, ContractId,
         ContractStateGateway, StorageError,
     },
 };
+
+use ethers::types::{H160, H256, U256};
+
 use actix_web::{web, HttpResponse};
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::{
@@ -15,20 +19,61 @@ use diesel_async::{
     AsyncPgConnection,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 use utoipa::{IntoParams, ToSchema};
 
 use super::EvmPostgresGateway;
+
+// Equivalent to evm::Account. This struct was created to avoid modifying the evm::Account
+// struct for RPC purpose.
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct EVMAccount {
+    pub chain: Chain,
+    #[schema(value_type=String)]
+    pub address: H160,
+    pub title: String,
+    #[schema(value_type=HashMap<String, String>)]
+    pub slots: HashMap<U256, U256>,
+    #[schema(value_type=String)]
+    pub balance: U256,
+    pub code: Bytes,
+    #[schema(value_type=String)]
+    pub code_hash: H256,
+    #[schema(value_type=String)]
+    pub balance_modify_tx: H256,
+    #[schema(value_type=String)]
+    pub code_modify_tx: H256,
+    #[schema(value_type=Option<String>)]
+    pub creation_tx: Option<H256>,
+}
+
+impl From<evm::Account> for EVMAccount {
+    fn from(account: evm::Account) -> Self {
+        Self {
+            chain: account.chain,
+            address: account.address,
+            title: account.title,
+            slots: account.slots,
+            balance: account.balance,
+            code: account.code,
+            code_hash: account.code_hash,
+            balance_modify_tx: account.balance_modify_tx,
+            code_modify_tx: account.code_modify_tx,
+            creation_tx: account.creation_tx,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub(crate) struct StateRequestResponse {
     #[schema(value_type=Option<String>)]
-    accounts: Vec<Account>,
+    accounts: Vec<EVMAccount>,
 }
 
 impl StateRequestResponse {
-    fn new(accounts: Vec<Account>) -> Self {
+    fn new(accounts: Vec<EVMAccount>) -> Self {
         Self { accounts }
     }
 }
@@ -158,7 +203,12 @@ impl RpcHandler {
             .get_contracts(&params.chain, addresses, Some(&version), true, db_connection)
             .await
         {
-            Ok(accounts) => Ok(StateRequestResponse::new(accounts)),
+            Ok(accounts) => Ok(StateRequestResponse::new(
+                accounts
+                    .into_iter()
+                    .map(EVMAccount::from)
+                    .collect(),
+            )),
             Err(err) => {
                 error!(error = %err, "Error while getting contract states.");
                 Err(err.into())
@@ -438,7 +488,7 @@ mod tests {
 
         let code = Code::from("1234");
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
-        let expected = Account::new(
+        let expected = evm::Account::new(
             Chain::Ethereum,
             H160::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
             "account0".to_owned(),
@@ -473,7 +523,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(state.accounts.len(), 1);
-        assert_eq!(state.accounts[0], expected);
+        assert_eq!(state.accounts[0], expected.into());
     }
 
     #[test]
