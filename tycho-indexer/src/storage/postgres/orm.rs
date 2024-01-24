@@ -939,22 +939,6 @@ pub struct NewSlot<'a> {
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
 }
-/*
-impl<'a> From<&'a ContractStorage> for NewSlot<'a> {
-    fn from(v: &'a ContractStorage) -> Self {
-        NewSlot {
-            slot: &v.slot,
-            value: v.value.as_ref(),
-            previous_value: v.previous_value.as_ref(),
-            account_id: v.account_id,
-            modify_tx: v.modify_tx,
-            ordinal: v.ordinal,
-            valid_from: v.valid_from,
-            valid_to: v.valid_to,
-        }
-    }
-}
-*/
 
 impl<'a> VersionedRow for NewSlot<'a> {
     type EntityId = (i64, &'a Bytes);
