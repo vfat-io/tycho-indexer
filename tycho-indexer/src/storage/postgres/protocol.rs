@@ -100,26 +100,47 @@ where
     async fn get_protocol_components(
         &self,
         chain: &Chain,
-        system: String,
+        system: Option<String>,
         ids: Option<&[&str]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolComponent>, StorageError> {
         use super::schema::{protocol_component::dsl::*, transaction::dsl::*};
         let chain_id_value = self.get_chain_id(chain);
-        let protocol_system = self.get_protocol_system_id(&system);
 
         let mut query = protocol_component
             .inner_join(transaction.on(creation_tx.eq(schema::transaction::id)))
             .select((orm::ProtocolComponent::as_select(), hash))
-            .filter(
-                chain_id
-                    .eq(chain_id_value)
-                    .and(protocol_system_id.eq(protocol_system)),
-            )
             .into_boxed();
 
-        if let Some(external_ids) = ids {
-            query = query.filter(external_id.eq_any(external_ids));
+        match (system, ids) {
+            (Some(ps), None) => {
+                let protocol_system = self.get_protocol_system_id(&ps);
+                query = query.filter(
+                    chain_id
+                        .eq(chain_id_value)
+                        .and(protocol_system_id.eq(protocol_system)),
+                );
+            }
+            (None, Some(external_ids)) => {
+                query = query.filter(
+                    chain_id
+                        .eq(chain_id_value)
+                        .and(external_id.eq_any(external_ids)),
+                );
+            }
+            (Some(ps), Some(external_ids)) => {
+                let protocol_system = self.get_protocol_system_id(&ps);
+                query = query.filter(
+                    chain_id.eq(chain_id_value).and(
+                        external_id
+                            .eq_any(external_ids)
+                            .and(protocol_system_id.eq(protocol_system)),
+                    ),
+                );
+            }
+            (_, _) => {
+                query = query.filter(chain_id.eq(chain_id_value));
+            }
         }
 
         let orm_protocol_components = query
@@ -129,12 +150,13 @@ where
         orm_protocol_components
             .into_iter()
             .map(|(pc, tx_hash)| {
+                let ps = self.get_protocol_system(&pc.protocol_system_id);
                 ProtocolComponent::from_storage(
                     pc,
                     vec![],
                     vec![],
                     chain.to_owned(),
-                    &system,
+                    &ps,
                     tx_hash.into(),
                 )
             })
@@ -379,6 +401,7 @@ mod test {
     /// at each version.
     async fn setup_data(conn: &mut AsyncPgConnection) -> Vec<String> {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        let chain_id_sn = db_fixtures::insert_chain(conn, "starknet").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
         let tx_hashes = [
             "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945".to_string(),
@@ -398,8 +421,10 @@ mod test {
             ],
         )
         .await;
-        let protocol_system_id =
+        let protocol_system_id_ambient =
             db_fixtures::insert_protocol_system(conn, "ambient".to_owned()).await;
+        let protocol_system_id_zz =
+            db_fixtures::insert_protocol_system(conn, "zigzag".to_owned()).await;
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
@@ -412,7 +437,7 @@ mod test {
             conn,
             "state1",
             chain_id,
-            protocol_system_id,
+            protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
         )
@@ -421,8 +446,8 @@ mod test {
         db_fixtures::insert_protocol_component(
             conn,
             "state2",
-            chain_id,
-            protocol_system_id,
+            chain_id_sn,
+            protocol_system_id_zz,
             protocol_type_id,
             txn[1],
         )
@@ -679,30 +704,121 @@ mod test {
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
         assert_eq!(original_component.id.0, inserted_data.external_id);
     }
-
+    #[rstest]
+    #[case::get_one(Some("zigzag".to_string()))]
+    #[case::get_none(Some("ambient".to_string()))]
     #[tokio::test]
-    async fn test_get_protocol_components() {
+    async fn test_get_protocol_components_with_system_only(#[case] system: Option<String>) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
-        let chain = Chain::Ethereum;
-        let system = "ambient".to_string();
-        let ids = Some(["state1", "state2"].as_slice());
+        let chain = Chain::Starknet;
 
         let result = gw
-            .get_protocol_components(&chain, system, None, &mut conn)
+            .get_protocol_components(&chain, system.clone(), None, &mut conn)
             .await;
 
         assert!(result.is_ok());
-        let components = result.unwrap();
-        assert_eq!(components.len(), 2);
 
-        for (index, pc) in components.iter().enumerate() {
-            assert_eq!(pc.id, ContractId(format!("state{}", index + 1).to_string()));
-            assert_eq!(pc.protocol_system, "ambient");
-            assert_eq!(pc.chain, Chain::Ethereum);
-            assert_eq!(pc.creation_tx, H256::from_str(tx_hashes.get(index).unwrap()).unwrap());
+        match system.unwrap().as_str() {
+            "zigzag" => {
+                let components = result.unwrap();
+                assert_eq!(components.len(), 1);
+
+                let pc = &components[0];
+                assert_eq!(pc.id, ContractId("state2".to_string()));
+                assert_eq!(pc.protocol_system, "zigzag");
+                assert_eq!(pc.chain, Chain::Starknet);
+                assert_eq!(pc.creation_tx, H256::from_str(tx_hashes.get(1).unwrap()).unwrap());
+            }
+            "ambient" => {
+                let components = result.unwrap();
+                assert_eq!(components.len(), 0)
+            }
+            _ => {}
         }
+    }
+
+    #[rstest]
+    #[case::get_one("state1".to_string())]
+    #[case::get_none("state2".to_string())]
+    #[tokio::test]
+    async fn test_get_protocol_components_with_external_id_only(#[case] external_id: String) {
+        let mut conn = setup_db().await;
+        let tx_hashes = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let temp_ids_array = [external_id.as_str()];
+        let ids = Some(temp_ids_array.as_slice());
+        let chain = Chain::Ethereum;
+
+        let result = gw
+            .get_protocol_components(&chain, None, ids, &mut conn)
+            .await;
+
+        match external_id.as_str() {
+            "state1" => {
+                let components = result.unwrap();
+                assert_eq!(components.len(), 1);
+
+                let pc = &components[0];
+                assert_eq!(pc.id, ContractId(external_id.to_string()));
+                assert_eq!(pc.protocol_system, "ambient");
+                assert_eq!(pc.chain, Chain::Ethereum);
+                assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[0].to_string()).unwrap());
+            }
+            "state2" => {
+                let components = result.unwrap();
+                assert_eq!(components.len(), 0)
+            }
+            _ => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_components_with_system_and_ids() {
+        let mut conn = setup_db().await;
+        let tx_hashes = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let system = "ambient".to_string();
+        let ids = Some(["state1", "state2"].as_slice());
+        let chain = Chain::Ethereum;
+        let result = gw
+            .get_protocol_components(&chain, Some(system), ids, &mut conn)
+            .await;
+
+        let components = result.unwrap();
+        assert_eq!(components.len(), 1);
+
+        let pc = &components[0];
+        assert_eq!(pc.id, ContractId("state1".to_string()));
+        assert_eq!(pc.protocol_system, "ambient");
+        assert_eq!(pc.chain, Chain::Ethereum);
+        assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[0].to_string()).unwrap());
+    }
+
+    #[rstest]
+    #[case::get_one(Chain::Ethereum, 0)]
+    #[case::get_none(Chain::Starknet, 1)]
+    #[tokio::test]
+    async fn test_get_protocol_components_with_chain_filter(#[case] chain: Chain, #[case] i: i64) {
+        let mut conn = setup_db().await;
+        let tx_hashes = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let result = gw
+            .get_protocol_components(&chain, None, None, &mut conn)
+            .await;
+
+        let components = result.unwrap();
+        assert_eq!(components.len(), 1);
+
+        let pc = &components[0];
+        assert_eq!(pc.id, ContractId(format!("state{}", i + 1).to_string()));
+        assert_eq!(pc.chain, chain);
+        let i_usize: usize = i as usize;
+        assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
     }
 }
