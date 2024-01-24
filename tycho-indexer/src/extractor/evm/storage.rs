@@ -161,25 +161,17 @@ pub mod pg {
         }
     }
     impl StorableTvlChange<orm::TvlChange, orm::NewTvlChange, i64> for evm::TvlChange {
-        fn from_storage(
-            val: orm::TvlChange,
-            token_address: H160,
-            modify_tx: &TxHash,
-        ) -> Result<Self, StorageError> {
-            Ok(Self::new(
-                token_address,
-                val.new_balance,
-                H256::try_decode(modify_tx, "tx hash").map_err(StorageError::DecodeError)?,
-                val.protocol_component_id,
-            ))
-        }
-
-        fn to_storage(&self, token_id: i64, modify_tx: TxHash) -> orm::NewTvlChange {
+        fn to_storage(
+            &self,
+            token_id: i64,
+            modify_tx: i64,
+            protocol_component_id: i64,
+        ) -> orm::NewTvlChange {
             orm::NewTvlChange {
                 token_id,
                 new_balance: self.new_balance.clone(),
                 modify_tx,
-                component_id: self.component_id.clone(),
+                protocol_component_id,
             }
         }
     }

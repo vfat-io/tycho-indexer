@@ -238,8 +238,7 @@ diesel::table! {
     tvl_change (id) {
         id -> Int8,
         token_id -> Int8,
-        #[max_length = 255]
-        new_balance -> Varchar,
+        new_balance -> Bytea,
         modify_tx -> Int8,
         protocol_component_id -> Int8,
         inserted_ts -> Timestamptz,

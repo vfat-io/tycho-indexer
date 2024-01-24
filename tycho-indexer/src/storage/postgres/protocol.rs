@@ -23,7 +23,7 @@ use crate::{
         },
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ContractId, ProtocolGateway,
         StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolState,
-        StorableProtocolType, StorableToken, StorableTransaction, StorageError,
+        StorableProtocolType, StorableToken, StorableTransaction, StorableTvlChange, StorageError,
         StorageError::DecodeError,
         TxHash, Version,
     },
@@ -356,7 +356,46 @@ where
         tvl_changes: &[&Self::TvlChange],
         conn: &mut Self::DB,
     ) {
-        // get account_id from token
+        use super::schema::{account::dsl::*, token::dsl::*};
+
+        let token_addresses = tvl_changes
+            .iter()
+            .map(|tvl_change| tvl_change.token.as_bytes())
+            .collect();
+
+        let mut account_ids = token
+            .inner_join(account)
+            .select(token::id)
+            .filter(schema::account::address.eq_any(token_addresses))
+            .get_results::<i64>(conn)
+            .await?;
+
+        let transaction_ids = tvl_changes
+            .iter()
+            .map(|tvl_change| Transaction::id_by_hash(tvl_change.modify_tx.as_bytes(), conn))
+            .collect();
+
+        let protocol_component_ids = tvl_changes
+            .iter()
+            .map(|tvl_change| ProtocolComponent::id_by_hash(tvl_change.modify_tx.as_bytes(), conn))
+            .collect();
+
+        let mut new_tvl_changes = Vec::new();
+        for (index, tvl_change) in tvl_changes.iter().enumerate() {
+            let account_id = account_ids[index];
+            let transaction_id = transaction_ids[index];
+            let protocol_component_id = protocol_component_ids[index];
+
+            let new_tvl_change =
+                tvl_change.to_storage(account_id, transaction_id, protocol_component_id);
+            new_tvl_changes.push(new_tvl_change);
+        }
+
+        diesel::insert_into(schema::tvl_change::table)
+            .values(&new_tvl_changes)
+            .execute(conn)
+            .await
+            .unwrap();
     }
 
     async fn get_state_delta(
@@ -429,6 +468,7 @@ mod test {
     };
 
     use super::*;
+    use crate::storage::postgres::{orm::NewProtocolComponent, schema::protocol_component};
     use ethers::prelude::H256;
     use std::{collections::HashMap, str::FromStr};
 
@@ -799,6 +839,29 @@ mod test {
         .unwrap()[0];
         assert_eq!(new_account, old_account);
         assert!(inserted_account.id > new_account.id);
+    }
+    #[tokio::test]
+    async fn test_add_tvl_changes() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        const AMBIENT_POOL_HASH: String =
+            String::from("d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902");
+
+        let new_protocol_component = NewProtocolComponent {
+            chain_id: 1,
+            external_id: AMBIENT_POOL_HASH,
+            protocol_type_id: 1,
+            protocol_system_id: 1,
+            attributes: Some(json!({"attribute": "attribute_1"})),
+            creation_tx: 123456789,
+            created_at: Default::default(),
+        };
+
+        // Insert the new ProtocolComponent into the database
+        diesel::insert_into(protocol_component::table)
+            .values(&new_protocol_component)
+            .execute(conn)?;
     }
 
     #[tokio::test]

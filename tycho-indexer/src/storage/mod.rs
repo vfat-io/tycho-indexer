@@ -79,7 +79,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta, TvlChange},
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolType},
     storage::postgres::orm,
@@ -259,16 +259,8 @@ pub trait StorableProtocolType<S, N, I>: Sized + Send + Sync + 'static {
 ///   `to_storage` method, thereby providing a flexible way for different databases to interact with
 ///   the transaction.
 pub trait StorableTvlChange<S, N, I>: Sized + Send + Sync + 'static {
-    /// Converts a protocol type from storage representation (`S`) to protocol type
-    /// form.
-    fn from_storage(
-        val: S,
-        token_address: H160,
-        modify_tx: &TxHash,
-    ) -> Result<Self, crate::storage::StorageError>;
-
     /// Converts a protocol type object to its storable representation (`N`).
-    fn to_storage(&self, token_address: H160, modify_tx: &TxHash) -> N;
+    fn to_storage(&self, account_id: i64, modify_tx: i64, protocol_component_id: i64) -> N;
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -1116,5 +1108,6 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         ProtocolStateDelta = ProtocolStateDelta,
         ProtocolType = ProtocolType,
         ProtocolComponent = ProtocolComponent,
+        TvlChange = TvlChange,
     >,
 >;

@@ -449,10 +449,10 @@ impl AccountUpdateWithTx {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct TvlChange {
-    token: H160,
-    new_balance: f64,
+    pub token: H160,
+    new_balance: Bytes,
     // tx where the this balance was observed
-    modify_tx: H256,
+    pub modify_tx: H256,
     component_id: String,
 }
 
@@ -463,7 +463,7 @@ impl TvlChange {
     ) -> Result<Self, ExtractionError> {
         Ok(Self {
             token: pad_and_parse_h160(&msg.token.into()).map_err(ExtractionError::DecodeError)?,
-            new_balance: f64::from_bits(u64::from_le_bytes(msg.balance.try_into().unwrap())),
+            new_balance: Bytes::from(msg.balance.to_bytes_be().to_vec()),
             modify_tx: tx.hash,
             component_id: String::from_utf8(msg.component_id)
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,

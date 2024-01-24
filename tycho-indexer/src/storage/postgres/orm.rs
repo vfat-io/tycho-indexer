@@ -278,12 +278,12 @@ pub struct ProtocolType {
 }
 
 #[derive(Identifiable, Queryable, Selectable)]
-#[diesel(table_name = tvl_change)]
+#[diesel(table_name = tvl_change)] // reference to tokens and transactions
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct TvlChange {
     pub id: i64,
     pub token_id: i64,
-    pub new_balance: f64,
+    pub new_balance: Balance,
     pub modify_tx: i64,
     pub protocol_component_id: i64,
     pub inserted_ts: NaiveDateTime,
@@ -294,7 +294,7 @@ pub struct TvlChange {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewTvlChange {
     pub token_id: i64,
-    pub new_balance: f64,
+    pub new_balance: Balance,
     pub modify_tx: i64,
     pub protocol_component_id: i64,
 }
@@ -328,6 +328,22 @@ pub struct ProtocolComponent {
     pub modified_ts: NaiveDateTime,
     pub creation_tx: i64,
     pub deletion_tx: Option<i64>,
+}
+
+impl ProtocolComponent {
+    pub async fn id_by_external_id(
+        external_ids: &[String],
+        conn: &mut AsyncPgConnection,
+    ) -> Result<HashMap<TxHash, i64>, StorageError> {
+        use super::schema::protocol_component::dsl::*;
+
+        let results = protocol_component
+            .filter(external_id.eq_any(external_ids))
+            .select((external_id, id))
+            .load::<(TxHash, i64)>(conn)
+            .await?;
+        Ok(results.into_iter().collect())
+    }
 }
 
 #[derive(Insertable, AsChangeset, Debug)]
