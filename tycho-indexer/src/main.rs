@@ -18,7 +18,7 @@ use actix_web::dev::ServerHandle;
 use clap::Parser;
 use std::sync::Arc;
 use tokio::{sync::mpsc, task, task::JoinHandle};
-use tracing::{error, info};
+use tracing::info;
 
 mod extractor;
 mod hex_bytes;

@@ -29,6 +29,7 @@ const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224
 
 struct Inner {
     cursor: Vec<u8>,
+    last_processed_block: Option<Block>,
 }
 
 pub struct AmbientContractExtractor<G> {
@@ -46,6 +47,11 @@ impl<DB> AmbientContractExtractor<DB> {
         let cursor_bytes: Vec<u8> = cursor.into();
         let mut state = self.inner.lock().await;
         state.cursor = cursor_bytes;
+    }
+
+    async fn update_last_processed_block(&self, block: Block) {
+        let mut state = self.inner.lock().await;
+        state.last_processed_block = Some(block);
     }
 }
 
@@ -68,6 +74,7 @@ pub trait AmbientGateway: Send + Sync {
 
     async fn revert(
         &self,
+        current: Option<BlockIdentifier>,
         to: &BlockIdentifier,
         new_cursor: &str,
     ) -> Result<evm::BlockAccountChanges, StorageError>;
@@ -131,6 +138,7 @@ impl AmbientPgGateway {
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? to))]
     async fn backward(
         &self,
+        current: Option<BlockIdentifier>,
         to: &BlockIdentifier,
         new_cursor: &str,
         conn: &mut AsyncPgConnection,
@@ -139,11 +147,13 @@ impl AmbientPgGateway {
             .state_gateway
             .get_block(to, conn)
             .await?;
+        let start = current.map(BlockOrTimestamp::Block);
+
         let target = BlockOrTimestamp::Block(to.clone());
         let address = H160(AMBIENT_CONTRACT);
         let account_updates = self
             .state_gateway
-            .get_accounts_delta(&self.chain, None, &target, conn)
+            .get_accounts_delta(&self.chain, start.as_ref(), &target)
             .await?
             .into_iter()
             .filter_map(|u| if u.address == address { Some((u.address, u)) } else { None })
@@ -201,6 +211,7 @@ impl AmbientGateway for AmbientPgGateway {
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % to))]
     async fn revert(
         &self,
+        current: Option<BlockIdentifier>,
         to: &BlockIdentifier,
         new_cursor: &str,
     ) -> Result<evm::BlockAccountChanges, StorageError> {
@@ -208,7 +219,7 @@ impl AmbientGateway for AmbientPgGateway {
         let res = conn
             .transaction(|conn| {
                 async move {
-                    self.backward(to, new_cursor, conn)
+                    self.backward(current, to, new_cursor, conn)
                         .await
                 }
                 .scope_boxed()
@@ -229,14 +240,17 @@ where
                 gateway,
                 name: name.to_owned(),
                 chain,
-                inner: Arc::new(Mutex::new(Inner { cursor: Vec::new() })),
+                inner: Arc::new(Mutex::new(Inner {
+                    cursor: Vec::new(),
+                    last_processed_block: None,
+                })),
                 protocol_system: "ambient".to_string(),
             },
             Ok(cursor) => AmbientContractExtractor {
                 gateway,
                 name: name.to_owned(),
                 chain,
-                inner: Arc::new(Mutex::new(Inner { cursor })),
+                inner: Arc::new(Mutex::new(Inner { cursor, last_processed_block: None })),
                 protocol_system: "ambient".to_string(),
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
@@ -256,6 +270,13 @@ where
 
     async fn get_cursor(&self) -> String {
         String::from_utf8(self.inner.lock().await.cursor.clone()).expect("Cursor is utf8")
+    }
+
+    async fn get_last_processed_block(&self) -> Option<Block> {
+        self.inner
+            .lock()
+            .await
+            .last_processed_block
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name))]
@@ -286,6 +307,10 @@ where
         ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
+
+                self.update_last_processed_block(changes.block)
+                    .await;
+
                 changes
             }
             Err(ExtractionError::Empty) => {
@@ -317,9 +342,23 @@ where
                 block_ref.id, err
             ))
         })?;
+
+        let current = self
+            .get_last_processed_block()
+            .await
+            .map(|block| BlockIdentifier::Hash(block.hash.into()));
+
+        // Make sure we have a current block, otherwise it's not safe to revert.
+        // TODO: add last block to extraction state and get it when creating a new extractor.
+        assert!(current.is_some(), "Revert without current block");
+
         let changes = self
             .gateway
-            .revert(&BlockIdentifier::Hash(block_hash.into()), inp.last_valid_cursor.as_ref())
+            .revert(
+                current,
+                &BlockIdentifier::Hash(block_hash.into()),
+                inp.last_valid_cursor.as_ref(),
+            )
             .await?;
         self.update_cursor(inp.last_valid_cursor)
             .await;
@@ -421,20 +460,41 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_revert() {
-        let mut gw = MockAmbientGateway::new();
+        let mut gw: MockAmbientGateway = MockAmbientGateway::new();
         gw.expect_get_cursor()
             .times(1)
             .returning(|| Ok("cursor".into()));
+
+        gw.expect_upsert_contract()
+            .times(1)
+            .returning(|_, _| Ok(()));
+
         gw.expect_revert()
-            .withf(|v, cursor| {
-                v == &BlockIdentifier::Hash(evm::fixtures::HASH_256_0.into()) &&
+            .withf(|c, v, cursor| {
+                c.clone().unwrap() ==
+                    BlockIdentifier::Hash(
+                        Bytes::from_str(
+                            "0x0000000000000000000000000000000000000000000000000000000031323334",
+                        )
+                        .unwrap(),
+                    ) &&
+                    v == &BlockIdentifier::Hash(evm::fixtures::HASH_256_0.into()) &&
                     cursor == "cursor@400"
             })
             .times(1)
-            .returning(|_, _| Ok(evm::BlockAccountChanges::default()));
+            .returning(|_, _, _| Ok(evm::BlockAccountChanges::default()));
         let extractor = AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, gw)
             .await
             .expect("extractor init ok");
+
+        // Call handle_tick_scoped_data to initialize the last processed block.
+        let inp = evm::fixtures::pb_block_scoped_data(block_contract_changes_ok());
+
+        let res = extractor
+            .handle_tick_scoped_data(inp)
+            .await
+            .unwrap();
+
         let inp = undo_signal();
 
         let res = extractor.handle_revert(inp).await;

@@ -1,29 +1,16 @@
 /// Script to run only the RPC server
 /// Usage: cargo run --example rpc
-use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use futures03::future::select_all;
-
-use extractor::{
-    evm::ambient::{AmbientContractExtractor, AmbientPgGateway},
-    runner::{ExtractorHandle, ExtractorRunnerBuilder},
-};
-use models::Chain;
 
 use crate::{
     extractor::{evm, ExtractionError},
     services::ServicesBuilder,
-    storage::postgres::{self, cache::CachedGateway, PostgresGateway},
+    storage::postgres::{self, PostgresGateway},
 };
 use actix_web::dev::ServerHandle;
-use clap::Parser;
-use core::panic;
-use std::sync::Arc;
-use tokio::{sync::mpsc, task, task::JoinHandle};
 use tracing::info;
 
-use tycho_indexer::{
-    extractor, hex_bytes, models, pb, serde_helpers, services, storage, substreams,
-};
+use tycho_indexer::{extractor, services, storage};
 
 #[tokio::main]
 async fn main() -> Result<(), ExtractionError> {
@@ -31,7 +18,7 @@ async fn main() -> Result<(), ExtractionError> {
     tracing_subscriber::fmt::init();
 
     let pool =
-        postgres::connect(&"postgres://postgres:mypassword@localhost:5432/tycho_indexer_0").await?;
+        postgres::connect("postgres://postgres:mypassword@localhost:5432/tycho_indexer_0").await?;
     let evm_gw = PostgresGateway::<
         evm::Block,
         evm::Transaction,

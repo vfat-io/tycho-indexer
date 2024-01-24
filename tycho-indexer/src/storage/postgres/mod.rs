@@ -293,6 +293,12 @@ impl BlockOrTimestamp {
                     })?
                     .ts)
             }
+            BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)) => {
+                Ok(orm::Block::most_recent(*chain, conn)
+                    .await
+                    .map_err(|err| StorageError::from_diesel(err, "Block", "latest", None))?
+                    .ts)
+            }
             BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
         }
     }
@@ -554,6 +560,7 @@ pub mod db_fixtures {
         orm::{FinancialType, ImplementationType},
         schema,
     };
+    use crate::storage::orm;
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -931,5 +938,37 @@ pub mod db_fixtures {
             .execute(conn)
             .await
             .expect("protocol state insert ok");
+    }
+
+    pub async fn insert_token(
+        conn: &mut AsyncPgConnection,
+        chain_id: i64,
+        address: &str,
+        symbol: &str,
+        decimals: i32,
+    ) -> i64 {
+        let account_id = insert_account(conn, address, "token", chain_id, None).await;
+
+        let query = diesel::insert_into(schema::token::table).values((
+            schema::token::account_id.eq(account_id),
+            schema::token::symbol.eq(symbol),
+            schema::token::decimals.eq(decimals),
+            schema::token::tax.eq(10),
+            schema::token::gas.eq(vec![10]),
+        ));
+        query
+            .returning(schema::token::id)
+            .get_result(conn)
+            .await
+            .unwrap()
+    }
+
+    pub async fn get_token_by_symbol(conn: &mut AsyncPgConnection, symbol: String) -> orm::Token {
+        schema::token::table
+            .filter(schema::token::symbol.eq(symbol.clone()))
+            .select(schema::token::all_columns)
+            .first::<orm::Token>(conn)
+            .await
+            .unwrap()
     }
 }

@@ -468,7 +468,7 @@ mod tests {
         };
 
         let state = req_handler
-            .get_state_inner(&request, &StateRequestParameters::default(), &mut conn)
+            .get_contract_state_inner(&request, &StateRequestParameters::default(), &mut conn)
             .await
             .unwrap();
 
