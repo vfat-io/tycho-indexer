@@ -168,7 +168,7 @@ where
 
         let ids_to_delete: Vec<String> = to_delete
             .iter()
-            .map(|c| c.id.0.to_string())
+            .map(|c| c.id.to_string())
             .collect();
 
         diesel::update(protocol_component.filter(external_id.eq_any(ids_to_delete)))
@@ -886,7 +886,7 @@ mod test {
 
     fn create_test_protocol_component(id: &str) -> ProtocolComponent {
         ProtocolComponent {
-            id: ContractId(id.to_string()),
+            id: id.to_string(),
             protocol_system: "ambient".to_string(),
             protocol_type_id: "type_id_1".to_string(),
             chain: Chain::Ethereum,
@@ -911,18 +911,21 @@ mod test {
             create_test_protocol_component("state1"),
             create_test_protocol_component("state2"),
         ];
-        let to_delete = test_components
-            .iter()
-            .collect::<Vec<_>>();
 
         let res = gw
-            .delete_protocol_components(&to_delete, Utc::now().naive_utc(), &mut conn)
+            .delete_protocol_components(
+                &test_components
+                    .iter()
+                    .collect::<Vec<_>>(),
+                Utc::now().naive_utc(),
+                &mut conn,
+            )
             .await;
 
         assert!(res.is_ok());
         let pc_ids: Vec<String> = test_components
             .iter()
-            .map(|test_pc| test_pc.id.0.to_string())
+            .map(|test_pc| test_pc.id.to_string())
             .collect();
 
         let updated_timestamps = schema::protocol_component::table
