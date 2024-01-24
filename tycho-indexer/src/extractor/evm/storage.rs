@@ -361,7 +361,7 @@ pub mod pg {
             }
 
             Ok(evm::ProtocolComponent {
-                id: evm::ContractId(val.external_id),
+                id: val.external_id,
                 protocol_system,
                 protocol_type_id: val.protocol_type_id.to_string(),
                 chain,
@@ -390,7 +390,7 @@ pub mod pg {
                     )
                 })?;
             Ok(orm::NewProtocolComponent {
-                external_id: self.id.0.clone(),
+                external_id: self.id.clone(),
                 chain_id,
                 protocol_type_id,
                 protocol_system_id,
@@ -633,7 +633,7 @@ mod test {
 
         let protocol_component = result.unwrap();
 
-        assert_eq!(protocol_component.id, evm::ContractId(val.external_id.to_string()));
+        assert_eq!(protocol_component.id, val.external_id.to_string());
         assert_eq!(protocol_component.protocol_type_id, val.protocol_type_id.to_string());
         assert_eq!(protocol_component.chain, chain);
         assert_eq!(protocol_component.tokens, tokens);
@@ -655,7 +655,7 @@ mod test {
     #[test]
     fn test_to_storage_protocol_component() {
         let protocol_component = evm::ProtocolComponent {
-            id: evm::ContractId("sample_contract_id".to_string()),
+            id: "sample_contract_id".to_string(),
             protocol_system: "ambient".to_string(),
             protocol_type_id: "42".to_string(),
             chain: Chain::Ethereum,
@@ -688,7 +688,7 @@ mod test {
 
         let new_protocol_component = result.unwrap();
 
-        assert_eq!(new_protocol_component.external_id, protocol_component.id.0);
+        assert_eq!(new_protocol_component.external_id, protocol_component.id);
         assert_eq!(new_protocol_component.chain_id, chain_id);
 
         assert_eq!(new_protocol_component.protocol_type_id, 42);
