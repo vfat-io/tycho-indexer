@@ -6,11 +6,11 @@ use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use ethers::types::H256;
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta, Transaction},
+    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    hex_bytes::Bytes,
     models::{Chain, ProtocolType},
     storage::{
         postgres::{orm, schema, PostgresGateway},
@@ -224,7 +224,7 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let chain_db_id = self.get_chain_id(chain);
-        let txns: HashMap<H256, (i64, i64, NaiveDateTime)> = orm::Transaction::ids_and_ts_by_hash(
+        let txns: HashMap<Bytes, (i64, i64, NaiveDateTime)> = orm::Transaction::ids_and_ts_by_hash(
             new.iter()
                 .map(|state| state.modify_tx.as_bytes())
                 .collect::<Vec<&[u8]>>()
@@ -233,7 +233,7 @@ where
         )
         .await?
         .into_iter()
-        .map(|(id, hash, index, ts)| (Transaction::hash_from_bytes(hash), (id, index, ts)))
+        .map(|(id, hash, index, ts)| (hash, (id, index, ts)))
         .collect();
 
         let components: HashMap<String, i64> = orm::ProtocolComponent::ids_by_external_ids(
@@ -252,7 +252,7 @@ where
 
         for state in new {
             let tx_db = txns
-                .get(&state.modify_tx)
+                .get(state.modify_tx.as_bytes())
                 .expect("Failed to find tx");
             let component_db_id = *components
                 .get(&state.component_id)
