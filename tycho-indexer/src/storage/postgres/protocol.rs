@@ -153,6 +153,7 @@ where
     async fn delete_protocol_components(
         &self,
         to_delete: &[&Self::ProtocolComponent],
+        block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::protocol_component::dsl::*;
@@ -161,10 +162,9 @@ where
             .iter()
             .map(|c| c.id.0.to_string())
             .collect();
-        let current_time: NaiveDateTime = Utc::now().naive_utc();
 
         diesel::update(protocol_component.filter(external_id.eq_any(ids_to_delete)))
-            .set(deleted_at.eq(current_time))
+            .set(deleted_at.eq(block_ts))
             .execute(conn)
             .await?;
         Ok(())
@@ -706,7 +706,7 @@ mod test {
             .collect::<Vec<_>>();
 
         let res = gw
-            .delete_protocol_components(&to_delete, &mut conn)
+            .delete_protocol_components(&to_delete, Utc::now().naive_utc(), &mut conn)
             .await;
 
         assert!(res.is_ok());
