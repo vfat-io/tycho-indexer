@@ -1,11 +1,11 @@
 #![allow(unused_variables)]
 
 use async_trait::async_trait;
-use std::{collections::HashMap, hash::Hash};
+use chrono::NaiveDateTime;
+use std::{cmp::Ordering, collections::HashMap};
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use ethers::types::{transaction, Transaction};
 use tracing::warn;
 
 use crate::{
@@ -639,6 +639,7 @@ mod test {
             "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7".to_string(),
             "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388".to_string(),
         ];
+
         let txn = db_fixtures::insert_txns(
             conn,
             &[
@@ -651,10 +652,12 @@ mod test {
             ],
         )
         .await;
+
         let protocol_system_id_ambient =
             db_fixtures::insert_protocol_system(conn, "ambient".to_owned()).await;
         let protocol_system_id_zz =
             db_fixtures::insert_protocol_system(conn, "zigzag".to_owned()).await;
+
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
@@ -674,14 +677,13 @@ mod test {
         .await;
         let protocol_component_id2 = db_fixtures::insert_protocol_component(
             conn,
-            "state2",
+            "state3",
             chain_id,
-            protocol_system_id,
+            protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
         )
         .await;
-
         db_fixtures::insert_protocol_component(
             conn,
             "state2",
@@ -818,7 +820,7 @@ mod test {
         .into_iter()
         .collect();
         ProtocolStateDelta::new(
-            "state2".to_owned(),
+            "state3".to_owned(),
             attributes,
             "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
                 .parse()
@@ -1257,7 +1259,7 @@ mod test {
                 assert_eq!(components.len(), 1);
 
                 let pc = &components[0];
-                assert_eq!(pc.id, ContractId("state2".to_string()));
+                assert_eq!(pc.id, "state2".to_string());
                 assert_eq!(pc.protocol_system, "zigzag");
                 assert_eq!(pc.chain, Chain::Starknet);
                 assert_eq!(pc.creation_tx, H256::from_str(tx_hashes.get(1).unwrap()).unwrap());
@@ -1293,7 +1295,7 @@ mod test {
                 assert_eq!(components.len(), 1);
 
                 let pc = &components[0];
-                assert_eq!(pc.id, ContractId(external_id.to_string()));
+                assert_eq!(pc.id, external_id.to_string());
                 assert_eq!(pc.protocol_system, "ambient");
                 assert_eq!(pc.chain, Chain::Ethereum);
                 assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[0].to_string()).unwrap());
@@ -1323,7 +1325,7 @@ mod test {
         assert_eq!(components.len(), 1);
 
         let pc = &components[0];
-        assert_eq!(pc.id, ContractId("state1".to_string()));
+        assert_eq!(pc.id, "state1".to_string());
         assert_eq!(pc.protocol_system, "ambient");
         assert_eq!(pc.chain, Chain::Ethereum);
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[0].to_string()).unwrap());
@@ -1342,11 +1344,18 @@ mod test {
             .get_protocol_components(&chain, None, None, &mut conn)
             .await;
 
-        let components = result.unwrap();
-        assert_eq!(components.len(), 1);
+        let mut components = result.unwrap();
+        components.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let assert_message = format!(
+            "Found {} ProtocolComponents for chain {}, expecting >= 1, because there are two eth and one stark component. Two eth components are needed for the ProtocolStates",
+            components.len(),
+            chain
+        );
+        assert!(!components.is_empty(), "{}", assert_message.to_string());
 
         let pc = &components[0];
-        assert_eq!(pc.id, ContractId(format!("state{}", i + 1).to_string()));
+        assert_eq!(pc.id, format!("state{}", i + 1).to_string());
         assert_eq!(pc.chain, chain);
         let i_usize: usize = i as usize;
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
