@@ -53,7 +53,7 @@ DROP TRIGGER invalidate_previous_protocol_state ON protocol_state;
 
 DROP FUNCTION invalidate_previous_entry_protocol_state();
 
-DROP TRIGGER invalidate_previous_contract_storage ON protocol_state;
+DROP TRIGGER invalidate_previous_contract_storage ON contract_storage;
 
 DROP FUNCTION invalidate_previous_entry_contract_storage();
 

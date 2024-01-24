@@ -3,7 +3,6 @@ use std::{
     ops::Deref,
 };
 
-use crate::storage::postgres::versioning::StoredVersionedRow;
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::RunQueryDsl;
@@ -19,7 +18,7 @@ use crate::{
     },
 };
 
-use self::{orm::NewSlot, versioning};
+use self::versioning::{apply_versioning, apply_delta_versioning};
 
 use super::*;
 
@@ -556,7 +555,7 @@ where
                 }
             }
         }
-        versioning::apply_versioning::<_, orm::ContractStorage>(&mut new_entries, conn).await?;
+        apply_delta_versioning::<_, orm::ContractStorage>(&mut new_entries, conn).await?;
         diesel::insert_into(schema::contract_storage::table)
             .values(&new_entries)
             .execute(conn)
@@ -1092,14 +1091,14 @@ where
         }
 
         if !balance_data.is_empty() {
-            versioning::apply_versioning::<_, orm::AccountBalance>(&mut balance_data, conn).await?;
+            apply_versioning::<_, orm::AccountBalance>(&mut balance_data, conn).await?;
             diesel::insert_into(schema::account_balance::table)
                 .values(&balance_data)
                 .execute(conn)
                 .await?;
         }
         if !code_data.is_empty() {
-            versioning::apply_versioning::<_, orm::ContractCode>(&mut code_data, conn).await?;
+            apply_versioning::<_, orm::ContractCode>(&mut code_data, conn).await?;
             diesel::insert_into(schema::contract_code::table)
                 .values(&code_data)
                 .execute(conn)

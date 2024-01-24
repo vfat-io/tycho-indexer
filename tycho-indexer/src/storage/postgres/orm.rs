@@ -1,13 +1,9 @@
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use diesel::{
-    helper_types::{AsSelect, SqlTypeOf},
-    pg::Pg,
-    prelude::*,
-};
+use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
-use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     hex_bytes::Bytes,
@@ -678,7 +674,7 @@ impl VersionedRow for NewAccountBalance {
     type EntityId = i64;
     type Version = NaiveDateTime;
 
-    fn get_id(&self) -> Self::EntityId {
+    fn get_entity_id(&self) -> Self::EntityId {
         self.account_id
     }
 
@@ -780,7 +776,7 @@ impl<'a> VersionedRow for NewContractCode<'a> {
     type EntityId = i64;
     type Version = NaiveDateTime;
 
-    fn get_id(&self) -> Self::EntityId {
+    fn get_entity_id(&self) -> Self::EntityId {
         self.account_id
     }
 
@@ -945,12 +941,12 @@ impl<'a> VersionedRow for NewSlot<'a> {
     type SortKey = ((i64, Bytes), NaiveDateTime, i64);
     type Version = NaiveDateTime;
 
-    fn get_id(&self) -> Self::EntityId {
+    fn get_entity_id(&self) -> Self::EntityId {
         (self.account_id, self.slot.clone())
     }
 
     fn get_sort_key(&self) -> Self::SortKey {
-        (self.get_id(), self.valid_from, self.ordinal)
+        (self.get_entity_id(), self.valid_from, self.ordinal)
     }
 
     fn set_valid_to(&mut self, end_version: Self::Version) {

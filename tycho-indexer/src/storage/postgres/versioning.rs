@@ -64,7 +64,7 @@ pub trait VersionedRow {
     type Version: Ord + Copy + Debug + Send + Sync;
 
     /// Exposes the entity identifier.
-    fn get_id(&self) -> Self::EntityId;
+    fn get_entity_id(&self) -> Self::EntityId;
 
     /// Exposes the sorting key.
     fn get_sort_key(&self) -> Self::SortKey;
@@ -131,23 +131,23 @@ pub trait StoredVersionedRow {
 /// This function will mutate the entries in the passed vector. It will assign a end
 /// version to each row if there is a duplicated entity in the collection. Entities are invalidated
 /// according to their sort key in ascending order.
-pub fn set_versioning_attributes<O: VersionedRow>(
+fn set_versioning_attributes<O: VersionedRow>(
     objects: &mut Vec<O>,
 ) -> HashMap<O::EntityId, O::Version> {
     let mut db_updates = HashMap::new();
     objects.sort_by_cached_key(|e| e.get_sort_key());
 
-    db_updates.insert(objects[0].get_id(), objects[0].get_valid_from());
+    db_updates.insert(objects[0].get_entity_id(), objects[0].get_valid_from());
 
     for i in 0..objects.len() - 1 {
         let (head, tail) = objects.split_at_mut(i + 1);
         let current = &mut head[head.len() - 1];
         let next = &tail[0];
 
-        if current.get_id() == next.get_id() {
+        if current.get_entity_id() == next.get_entity_id() {
             current.set_valid_to(next.get_valid_from());
         } else {
-            db_updates.insert(next.get_id(), next.get_valid_from());
+            db_updates.insert(next.get_entity_id(), next.get_valid_from());
         }
     }
     db_updates
@@ -157,7 +157,7 @@ pub fn set_versioning_attributes<O: VersionedRow>(
 ///
 /// Same as `set_versioning_attributes` but will also set previous value for delta versioned table
 /// entries.
-pub fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Debug>(
+fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Debug>(
     objects: &mut Vec<O>,
 ) -> HashMap<O::EntityId, O::Version> {
     let mut db_updates = HashMap::new();
@@ -166,7 +166,7 @@ pub fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Deb
 
     dbg!(&objects);
 
-    db_updates.insert(objects[0].get_id(), objects[0].get_valid_from());
+    db_updates.insert(objects[0].get_entity_id(), objects[0].get_valid_from());
 
     for i in 0..objects.len() - 1 {
         let (head, tail) = objects.split_at_mut(i + 1);
@@ -177,11 +177,11 @@ pub fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Deb
         dbg!(&current);
         dbg!(&next);
 
-        if current.get_id() == next.get_id() {
+        if current.get_entity_id() == next.get_entity_id() {
             current.set_valid_to(next.get_valid_from());
             next.set_previous_value(current.get_value())
         } else {
-            db_updates.insert(next.get_id(), next.get_valid_from());
+            db_updates.insert(next.get_entity_id(), next.get_valid_from());
         }
     }
     db_updates
@@ -194,7 +194,7 @@ pub fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Deb
 ///
 /// Building such a query with pure diesel is currently not supported as this query updates each
 /// primary key with a unique value. See: https://github.com/diesel-rs/diesel/discussions/2879
-pub fn build_batch_update_query<'a, O: StoredVersionedRow>(
+fn build_batch_update_query<'a, O: StoredVersionedRow>(
     objects: &'a [Box<O>],
     table_name: &str,
     end_versions: &'a HashMap<O::EntityId, O::Version>,
@@ -248,7 +248,36 @@ where
     S: StoredVersionedRow<EntityId = N::EntityId, Version = N::Version>,
     <N as VersionedRow>::EntityId: Clone,
 {
+    if new_data.is_empty() {
+        return Ok(())
+    }
+
     let end_versions = set_versioning_attributes(new_data);
+    let db_rows = S::latest_versions_by_ids(end_versions.keys().into_iter().cloned(), conn).await?;
+    if !db_rows.is_empty() {
+        build_batch_update_query(&db_rows, S::table_name(), &end_versions)
+            .execute(conn)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Applies and executes delta versioning logic for a set of new entries.
+///
+/// Same as `apply_versioning` but also takes care of previous value columns.
+pub async fn apply_delta_versioning<'a, N, S>(
+    new_data: &mut Vec<N>,
+    conn: &mut AsyncPgConnection,
+) -> Result<(), StorageError>
+where
+    N: VersionedRow + DeltaVersionedRow + Debug,
+    S: StoredVersionedRow<EntityId = N::EntityId, Version = N::Version>,
+    <N as VersionedRow>::EntityId: Clone,
+{
+    if new_data.is_empty() {
+        return Ok(())
+    }
+    let end_versions = set_delta_versioning_attributes(new_data);
     let db_rows = S::latest_versions_by_ids(end_versions.keys().into_iter().cloned(), conn).await?;
     if !db_rows.is_empty() {
         build_batch_update_query(&db_rows, S::table_name(), &end_versions)
