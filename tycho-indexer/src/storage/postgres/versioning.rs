@@ -2,17 +2,29 @@
 //!
 //! This module provides access to versioning tools.
 //!
+//! # Traits
+//!
+//! The module exposes three main traits that can be implemented to provide versioning logic:
+//!
+//! * `VersionedRow`: Gives this module access to versioning attributes such as valid_to. Implement
+//!   this trait to enable setting these attributes automatically to use batch insertion.
+//!
+//! * `DeltaVersionedRow`: Same as above but will also set `previous_value`` attributes.
+//!
+//! * `StoredVersionedRow`: This trait provides to set the end version on currently active version
+//!   in the db based on the currently incoming data.
+//!
 //! # Limitations
 //!
-//! For orm structs that do use a complex entity id such as ContractStorage which uses
-//! account id and slot: `(i64, &Bytes)` to identify an entity. As dealing with
-//! lifetimes becomes increasingly complex. The alternative would be to clone bytes
-//! repeadedly which would not be very performant.
-//! The main problem with returning entites that themselves contain references is that we
-//! can't properly express the lifetime bounds of these with Rust when writing generic
-//! functions.
-//! One could duplicate the id on the struct and return sth like &(i64, Bytes) but that
-//! is currently not supported by Diesel.
+//! For orm structs that do use a complex EntityId type such as ContractStorage which uses
+//! account id and slot: `(i64, &Bytes)` the main limitation is that these can't use
+//! `apply_versioning` . As dealing with lifetimes becomes increasingly complex. The alternative
+//! would be to clone bytes repeadedly which would not be very performant and therefore not
+//! implemented here. The main problem with returning EntityId values that themselves contain
+//! references is that we can't properly express the lifetime bounds of these with Rust when writing
+//! generic functions.
+//! One could duplicate the id as an attributes on the struct and return sth like
+//! `&(i64, Bytes)`` but that is currently not supported by Diesel.
 //! This means to avoid unnecessary clones, we need to add a lifetime to our
 //! StoredVersionRow trait.
 //! It may be worth exploring smart pointers further such as Arc, in this case they would need to
@@ -34,52 +46,91 @@ use std::{collections::HashMap, hash::Hash};
 use crate::storage::StorageError;
 use std::fmt::Debug;
 
+/// Trait indicating that a struct can be inserted into a versioned table.
+///
+/// This trait enables querying the struct for its current state and allows to set the `valid_to``
+/// column in case we are inserting a historical row (row that is outdated at the time of insertion,
+/// but contributes to the historiy of the entity).
 pub trait VersionedRow {
+    /// Rust type to use as key to sort a collection of structs by entity and time.
     type SortKey: Ord + Clone + Debug + Send + Sync;
+    /// The entity identifier type.
     type EntityId: Ord + Hash + Debug + Send + Sync;
+    /// The version type.
     type Version: Ord + Copy + Debug + Send + Sync;
 
+    /// Retrieves the entity identifier.
     fn get_id(&self) -> Self::EntityId;
 
+    /// Retrieves the sorting key.
     fn get_sort_key(&self) -> Self::SortKey;
 
+    /// Allows setting `valid_to`` column, thereby invalidating this version.
     fn set_valid_to(&mut self, end_version: Self::Version);
 
+    /// Retrieves the starting version.
     fn get_valid_from(&self) -> Self::Version;
 }
 
+/// Trait indicating that a struct can be insered in a delta versioned table.
+///
+/// Delta versioned records require the previous value present in one of their columns. This serves
+/// to build both forward and backward delta changes while avoiding self joins.
 pub trait DeltaVersionedRow {
     type Value: Clone + Debug;
 
+    /// Retrieves the current value.
     fn get_value(&self) -> Self::Value;
+
+    /// Sets the previous value.
     fn set_previous_value(&mut self, previous_value: Self::Value);
 }
 
+/// Indicates the struct relates to a stored entry in a versioned table
+///
+/// This struct is used to invalidate rows that are currently valid on the db side before inserting
+/// new versions for those entities.
+///
+/// ## Note
+/// The associated types of this trait need to match with the types defined for the corresponding
+/// `VersionedRow` trait.
 #[async_trait]
 pub trait StoredVersionedRow<'a> {
+    /// The entity identifier type.
     type EntityId: Ord + Hash + Debug + Send + Sync + 'a;
+    /// The primary key on the table for this row.
     type PrimaryKey: Into<i64> + Debug + Send + Sync;
+    /// The version type.
     type Version: Into<NaiveDateTime> + Copy + Debug + Send + Sync;
 
+    /// Exposes the primary key.
     fn get_pk(&self) -> Self::PrimaryKey;
 
+    /// Exposes the end version.
     fn get_valid_to(&self) -> Self::Version;
 
+    /// Exposes the entity id.
     fn get_entity_id(&'a self) -> Self::EntityId;
 
+    /// Retrieves the latest versions for the passed entity ids from the database.
     async fn latest_versions_by_ids<I: IntoIterator<Item = &'a Self::EntityId> + Send + Sync>(
         ids: I,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<Box<Self>>, StorageError>;
 
+    /// Exposes the associated table name.
     fn table_name() -> &'static str;
 }
 
+/// Sets end versions on a collection of new rows.
+///
+/// This function will mutate the entries in the passed vector. It will assign a end
+/// version to each row if there is a duplicated entity in the collection. Entities are invalidated
+/// according to their sort key in ascending order.
 pub fn set_versioning_attributes<O: VersionedRow>(
     objects: &mut Vec<O>,
 ) -> HashMap<O::EntityId, O::Version> {
     let mut db_updates = HashMap::new();
-    // TODO: potentially assume this
     objects.sort_by_cached_key(|e| e.get_sort_key());
 
     db_updates.insert(objects[0].get_id(), objects[0].get_valid_from());
@@ -98,6 +149,10 @@ pub fn set_versioning_attributes<O: VersionedRow>(
     db_updates
 }
 
+/// Sets end versions and previous values on a collection of new rows.
+///
+/// Same as `set_versioning_attributes` but will also set previous value for delta versioned table
+/// entries.
 pub fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Debug>(
     objects: &mut Vec<O>,
 ) -> HashMap<O::EntityId, O::Version> {
@@ -128,6 +183,13 @@ pub fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Deb
     db_updates
 }
 
+/// Builds a update query that updates multiple rows at once.
+///
+/// Builds a query that will take update multiple rows end versions. The rows are identified by
+/// their primary key and the version is retrieved from the `end_versions` parameter.
+///
+/// Building such a query with pure diesel is currently not supported as this query updates each
+/// primary key with a unique value. See: https://github.com/diesel-rs/diesel/discussions/2879
 pub fn build_batch_update_query<'a, O: StoredVersionedRow<'a>>(
     objects: &'a [Box<O>],
     table_name: &str,
@@ -167,6 +229,18 @@ pub fn build_batch_update_query<'a, O: StoredVersionedRow<'a>>(
     query
 }
 
+/// Applies and execute versioning logic for a set of new entries.
+///
+/// This function will execute the following steps:
+/// - Set end versions on a collection of new entries
+/// - Given the new entries query the table currently valid versions
+/// - Execute and update query to invalidate the previously retrieved entries
+///
+/// ## Note
+/// The types constraints of this function are currently likely not 100% correct. Thus it only works
+/// for simple EntityId types (those that do not contain any references). For types that use
+/// references please use concrete types by reusing the individual functions provided by this module
+/// to execute these steps manually.
 pub async fn apply_versioning<'a, N, S>(
     new_data: &mut Vec<N>,
     conn: &mut AsyncPgConnection,
