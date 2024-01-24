@@ -1,5 +1,5 @@
 use chrono::NaiveDateTime;
-use diesel::prelude::*;
+use diesel::{dsl::sql, prelude::*, sql_types::Bool};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
 use std::collections::HashMap;
@@ -349,7 +349,7 @@ impl ProtocolComponent {
     }
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable, Clone)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug)]
 #[diesel(belongs_to(ProtocolComponent))]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -482,6 +482,132 @@ impl ProtocolState {
         if let Some(ts) = start_ts {
             query = query.filter(protocol_state::valid_from.ge(ts));
         }
+
+        query
+            .order_by((
+                protocol_state::protocol_component_id,
+                transaction::block_id,
+                transaction::index,
+            ))
+            .select((Self::as_select(), protocol_component::external_id, transaction::hash))
+            .get_results::<(Self, String, Bytes)>(conn)
+            .await
+    }
+
+    /// retrieves all matching protocol states where their attributes have been deleted
+    pub async fn deleted_by_id(
+        component_ids: &[&str],
+        chain_id: i64,
+        start_ts: Option<NaiveDateTime>,
+        end_ts: NaiveDateTime,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(Self, String, Bytes)>> {
+        let mut query = protocol_state::table
+            .inner_join(
+                protocol_component::table
+                    .on(protocol_component::id.eq(protocol_state::protocol_component_id)),
+            )
+            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
+            .filter(protocol_component::external_id.eq_any(component_ids))
+            .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(
+                protocol_state::valid_to
+                    .le(end_ts)
+                    .and(protocol_state::valid_to.ge(start_ts)),
+            )
+            .into_boxed();
+
+        // Subquery to exclude entities that have a valid at version at end_ts
+        let sub_query = format!("NOT EXISTS (
+                                SELECT 1 FROM protocol_state ps2
+                                WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
+                                AND ps2.attribute_name = protocol_state.attribute_name
+                                AND ps2.valid_from <= '{}'
+                                AND (ps2.valid_to > '{}' OR ps2.valid_to IS NULL)
+                            )", end_ts, end_ts);
+        query = query.filter(sql::<Bool>(&sub_query));
+
+        query
+            .order_by((
+                protocol_state::protocol_component_id,
+                transaction::block_id,
+                transaction::index,
+            ))
+            .select((Self::as_select(), protocol_component::external_id, transaction::hash))
+            .get_results::<(Self, String, Bytes)>(conn)
+            .await
+    }
+
+    pub async fn deleted_by_protocol_system(
+        system: String,
+        chain_id: i64,
+        start_ts: Option<NaiveDateTime>,
+        end_ts: NaiveDateTime,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(Self, String, Bytes)>> {
+        let mut query = protocol_state::table
+            .inner_join(protocol_component::table)
+            .inner_join(
+                protocol_system::table
+                    .on(protocol_component::protocol_system_id.eq(protocol_system::id)),
+            )
+            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
+            .filter(protocol_system::name.eq(system.to_string()))
+            .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(
+                protocol_state::valid_to
+                    .le(end_ts)
+                    .and(protocol_state::valid_to.ge(start_ts)),
+            )
+            .into_boxed();
+
+        // Subquery to exclude entities that have a valid at version at end_ts
+        let sub_query = format!("NOT EXISTS (
+                                SELECT 1 FROM protocol_state ps2
+                                WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
+                                AND ps2.attribute_name = protocol_state.attribute_name
+                                AND ps2.valid_from <= '{}'
+                                AND (ps2.valid_to > '{}' OR ps2.valid_to IS NULL)
+                            )", end_ts, end_ts);
+        query = query.filter(sql::<Bool>(&sub_query));
+
+        query
+            .order_by((
+                protocol_state::protocol_component_id,
+                transaction::block_id,
+                transaction::index,
+            ))
+            .select((Self::as_select(), protocol_component::external_id, transaction::hash))
+            .get_results::<(Self, String, Bytes)>(conn)
+            .await
+    }
+
+    pub async fn deleted_by_chain(
+        chain_id: i64,
+        start_ts: Option<NaiveDateTime>,
+        end_ts: NaiveDateTime,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(Self, String, Bytes)>> {
+        let mut query = protocol_state::table
+            .inner_join(protocol_component::table)
+            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
+            .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(
+                protocol_state::valid_to
+                    .le(end_ts)
+                    .and(protocol_state::valid_to.ge(start_ts)),
+            )
+            .into_boxed();
+
+        // Subquery to exclude entities that have a valid at version at end_ts
+        let sub_query = format!("NOT EXISTS (
+                                SELECT 1 FROM protocol_state ps2
+                                WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
+                                AND ps2.attribute_name = protocol_state.attribute_name
+                                AND ps2.valid_from <= '{}'
+                                AND (ps2.valid_to > '{}' OR ps2.valid_to IS NULL)
+                            )", end_ts, end_ts);
+        query = query.filter(sql::<Bool>(&sub_query));
 
         query
             .order_by((

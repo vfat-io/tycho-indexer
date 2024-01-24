@@ -85,7 +85,6 @@ where
 
                     protocol_states.push(protocol_state);
                 }
-
                 Ok(protocol_states)
             }
 
@@ -374,48 +373,120 @@ where
             Some(version) => Some(version.to_ts(conn).await?),
             None => None,
         };
-        let end_ts = Some(end_version.to_ts(conn).await?);
+        let end_ts = end_version.to_ts(conn).await?;
+
+        let mut deltas;
 
         match (ids, system) {
             (Some(ids), Some(system)) => {
+                // Filter by ids (ignore system)
                 warn!("Both protocol IDs and system were provided. System will be ignored.");
-                self._decode_protocol_states(
-                    orm::ProtocolState::by_id(ids, chain_db_id, start_ts, end_ts, conn).await,
+                deltas = self._decode_protocol_states(
+                    orm::ProtocolState::by_id(ids, chain_db_id, start_ts, Some(end_ts), conn).await,
                     ids.join(",").as_str(),
                     |states, id, hash| {
                         ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
                     },
-                )
+                )?;
+                let deleted_deltas = self._decode_protocol_states(
+                    orm::ProtocolState::deleted_by_id(ids, chain_db_id, start_ts, end_ts, conn)
+                        .await,
+                    ids.join(",").as_str(),
+                    |states, id, hash| {
+                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Deletion)
+                    },
+                )?;
+                deltas.extend(deleted_deltas);
             }
-            (Some(ids), _) => self._decode_protocol_states(
-                orm::ProtocolState::by_id(ids, chain_db_id, start_ts, end_ts, conn).await,
-                ids.join(",").as_str(),
-                |states, id, hash| {
-                    ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
-                },
-            ),
-            (_, Some(system)) => self._decode_protocol_states(
-                orm::ProtocolState::by_protocol_system(
-                    system.clone(),
-                    chain_db_id,
-                    start_ts,
-                    end_ts,
-                    conn,
-                )
-                .await,
-                system.as_str(),
-                |states, id, hash| {
-                    ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
-                },
-            ),
-            _ => self._decode_protocol_states(
-                orm::ProtocolState::by_chain(chain_db_id, start_ts, end_ts, conn).await,
-                chain.to_string().as_str(),
-                |states, id, hash| {
-                    ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
-                },
-            ),
+            (Some(ids), _) => {
+                // Filter by ids
+                deltas = self._decode_protocol_states(
+                    orm::ProtocolState::by_id(ids, chain_db_id, start_ts, Some(end_ts), conn).await,
+                    ids.join(",").as_str(),
+                    |states, id, hash| {
+                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
+                    },
+                )?;
+                let deleted_deltas = self._decode_protocol_states(
+                    orm::ProtocolState::deleted_by_id(ids, chain_db_id, start_ts, end_ts, conn)
+                        .await,
+                    ids.join(",").as_str(),
+                    |states, id, hash| {
+                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Deletion)
+                    },
+                )?;
+                deltas.extend(deleted_deltas);
+            }
+            (_, Some(system)) => {
+                // Filter by protoocol system
+                deltas = self._decode_protocol_states(
+                    orm::ProtocolState::by_protocol_system(
+                        system.clone(),
+                        chain_db_id,
+                        start_ts,
+                        Some(end_ts),
+                        conn,
+                    )
+                    .await,
+                    system.to_string().as_str(),
+                    |states, id, hash| {
+                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
+                    },
+                )?;
+                let deleted_deltas = self._decode_protocol_states(
+                    orm::ProtocolState::deleted_by_protocol_system(
+                        system.clone(),
+                        chain_db_id,
+                        start_ts,
+                        end_ts,
+                        conn,
+                    )
+                    .await,
+                    system.to_string().as_str(),
+                    |states, id, hash| {
+                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Deletion)
+                    },
+                )?;
+                deltas.extend(deleted_deltas);
+            }
+            _ => {
+                // Filter by chain
+                deltas = self._decode_protocol_states(
+                    orm::ProtocolState::by_chain(chain_db_id, start_ts, Some(end_ts), conn).await,
+                    chain.to_string().as_str(),
+                    |states, id, hash| {
+                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
+                    },
+                )?;
+                let deleted_deltas = self._decode_protocol_states(
+                    orm::ProtocolState::deleted_by_chain(chain_db_id, start_ts, end_ts, conn).await,
+                    chain.to_string().as_str(),
+                    |states, id, hash| {
+                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Deletion)
+                    },
+                )?;
+                deltas.extend(deleted_deltas);
+            }
         }
+
+        // Group by component_id and merge states.
+        let mut grouped: HashMap<String, ProtocolStateDelta> = HashMap::new();
+        for delta in deltas {
+            let key = delta.component_id.clone();
+            if let Some(existing_state) = grouped.get_mut(&key) {
+                existing_state
+                    .merge(delta)
+                    .map_err(|err| {
+                        StorageError::DecodeError(format!(
+                            "Failed to merge protocol states: {}",
+                            err
+                        ))
+                    })?;
+            } else {
+                grouped.insert(key, delta);
+            }
+        }
+        Ok(grouped.into_values().collect())
     }
 
     async fn revert_protocol_state(
@@ -764,6 +835,92 @@ mod test {
             .await
             .expect("Failed to fetch protocol state");
         assert_eq!(older_state.valid_to, Some(newer_state.valid_from));
+    }
+
+    #[rstest]
+    #[case::by_chain(None, None)]
+    #[case::by_system(Some("ambient".to_string()), None)]
+    #[case::by_ids(None, Some(vec!["state1"]))]
+    #[tokio::test]
+    async fn test_get_protocol_state_deltas_forward(
+        #[case] system: Option<String>,
+        #[case] ids: Option<Vec<&str>>,
+    ) {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        // set up deleted attribute state
+        let protocol_component_id = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state1"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        let from_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        let to_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id,
+            from_txn_id,
+            "deleted".to_owned(),
+            Bytes::from(U256::from(1000)),
+            Some(to_txn_id),
+        )
+        .await;
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        // expected result
+        let mut state_delta = protocol_state_delta();
+        state_delta.component_id = "state1".to_owned();
+        state_delta.deleted_attributes = vec!["deleted".to_owned()]
+            .into_iter()
+            .collect();
+        state_delta.modify_tx =
+            "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54"
+                .parse()
+                .unwrap();
+        let expected = vec![state_delta];
+
+        // test
+        let result = gateway
+            .get_protocol_state_deltas(
+                &Chain::Ethereum,
+                system,
+                ids.as_deref(),
+                Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1)))),
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        // asserts
+        assert_eq!(result, expected)
     }
 
     #[tokio::test]
