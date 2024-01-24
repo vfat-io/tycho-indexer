@@ -121,12 +121,12 @@ pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
 pub type AccountToContractStore = HashMap<Address, ContractStore>;
 
 /// Identifies a block in storage.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum BlockIdentifier {
     /// Identifies the block by its position on a specified chain.
     ///
     /// This form of identification has potential risks as it may become
-    /// ambiguous in certain situations.For example, if the block has not been
+    /// ambiguous in certain situations. For example, if the block has not been
     /// finalised, there exists a possibility of forks occurring. As a result,
     /// the same number could refer to different blocks on different forks.
     Number((Chain, i64)),
@@ -136,6 +136,11 @@ pub enum BlockIdentifier {
     /// The hash should be unique across multiple chains. Preferred method if
     /// the block is very recent.
     Hash(BlockHash),
+
+    /// Latest stored block for the target chain
+    ///
+    /// Returns the block with the highest block number on the target chain.
+    Latest(Chain),
 }
 
 impl Display for BlockIdentifier {
@@ -388,7 +393,7 @@ pub trait ExtractionStateGateway {
 
 /// Point in time as either block or timestamp. If a block is chosen it
 /// timestamp attribute is used.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum BlockOrTimestamp {
     Block(BlockIdentifier),
     Timestamp(NaiveDateTime),
@@ -473,6 +478,12 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(val: S, contract: ContractId) -> Result<Self, StorageError>;
 
     fn to_storage(&self, contract_id: I) -> N;
+
+    fn chain(&self) -> Chain;
+
+    fn address(&self) -> H160;
+
+    fn symbol(&self) -> String;
 }
 
 /// Lays out the necessary interface needed to store and retrieve protocol states from
@@ -559,6 +570,7 @@ pub trait ProtocolGateway {
         chain: &Chain,
         system: Option<String>,
         ids: Option<&[&str]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
     async fn add_protocol_components(
@@ -567,6 +579,12 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
+    async fn delete_protocol_components(
+        &self,
+        to_delete: &[&Self::ProtocolComponent],
+        block_ts: NaiveDateTime,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
     /// Stores new found ProtocolTypes or updates if existing.
     ///
     /// # Parameters
@@ -650,7 +668,6 @@ pub trait ProtocolGateway {
     /// be immutable.
     ///
     /// # Parameters
-    /// - `chain` The chain of the token.
     /// - `token` The tokens to insert.
     ///
     /// # Return
@@ -658,8 +675,8 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_tokens(
         &self,
-        chain: Chain,
-        token: &[&Self::Token],
+
+        tokens: &[&Self::Token],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -781,7 +798,7 @@ pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
         tokens: Vec<H160>,
         contract_ids: Vec<H160>,
         chain: Chain,
-        protocol_system: String,
+        protocol_system: &str,
         transaction_hash: H256,
     ) -> Result<Self, StorageError>;
 
