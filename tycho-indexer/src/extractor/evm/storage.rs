@@ -470,15 +470,11 @@ pub mod pg {
                     component_id,
                     updated_attributes: HashMap::new(),
                     deleted_attributes: attr.into_keys().collect(),
-                    modify_tx: H256::try_decode(tx_hash, "tx hash")
-                        .map_err(StorageError::DecodeError)?,
                 }),
                 _ => Ok(evm::ProtocolStateDelta {
                     component_id,
                     updated_attributes: attr,
                     deleted_attributes: HashSet::new(),
-                    modify_tx: H256::try_decode(tx_hash, "tx hash")
-                        .map_err(StorageError::DecodeError)?,
                 }),
             }
         }

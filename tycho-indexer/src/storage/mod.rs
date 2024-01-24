@@ -643,7 +643,7 @@ pub trait ProtocolGateway {
     async fn update_protocol_states(
         &self,
         chain: &Chain,
-        new: &[ProtocolStateDelta],
+        new: &[(TxHash, ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 

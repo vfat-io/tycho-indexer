@@ -1,7 +1,7 @@
 #![allow(unused_variables)]
 
 use async_trait::async_trait;
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use std::{cmp::Ordering, collections::HashMap};
 
 use diesel::prelude::*;
@@ -24,6 +24,8 @@ use crate::{
         StorableTransaction, StorageError, TxHash, Version,
     },
 };
+
+use super::WithTxHash;
 
 // Private methods
 impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
@@ -317,14 +319,20 @@ where
     async fn update_protocol_states(
         &self,
         chain: &Chain,
-        new: &[ProtocolStateDelta],
+        new: &[(TxHash, ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let chain_db_id = self.get_chain_id(chain);
+
+        let new = new
+            .iter()
+            .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_owned()) })
+            .collect::<Vec<_>>();
+
         let txns: HashMap<Bytes, (i64, i64, NaiveDateTime)> = orm::Transaction::ids_and_ts_by_hash(
             new.iter()
-                .map(|state| state.modify_tx.as_bytes())
-                .collect::<Vec<&[u8]>>()
+                .filter_map(|u| u.tx.as_ref())
+                .collect::<Vec<&TxHash>>()
                 .as_slice(),
             conn,
         )
@@ -349,13 +357,13 @@ where
 
         for state in new {
             let tx_db = txns
-                .get(state.modify_tx.as_bytes())
+                .get(state.tx.as_ref().unwrap())
                 .expect("Failed to find tx");
             let component_db_id = *components
                 .get(&state.component_id)
                 .expect("Failed to find component");
             let mut new_states: Vec<(orm::NewProtocolState, i64)> =
-                ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0, tx_db.2)
+                ProtocolStateDelta::to_storage(state.entity, component_db_id, tx_db.0, tx_db.2)
                     .into_iter()
                     .map(|state| (state, tx_db.1))
                     .collect();
@@ -957,13 +965,7 @@ mod test {
         ]
         .into_iter()
         .collect();
-        ProtocolStateDelta::new(
-            "state3".to_owned(),
-            attributes,
-            "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
-                .parse()
-                .unwrap(),
-        )
+        ProtocolStateDelta::new("state3".to_owned(), attributes)
     }
 
     #[tokio::test]
@@ -1020,7 +1022,7 @@ mod test {
         new_state1.deleted_attributes = vec!["deletable".to_owned()]
             .into_iter()
             .collect();
-        new_state1.modify_tx = "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
+        let tx_1: H256 = "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
             .parse()
             .unwrap();
 
@@ -1033,10 +1035,17 @@ mod test {
         .into_iter()
         .collect();
         new_state2.updated_attributes = attributes2.clone();
+        let tx_2: H256 = "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
+            .parse()
+            .unwrap();
 
         // update the protocol state
         gateway
-            .update_protocol_states(&chain, &[new_state1.clone(), new_state2.clone()], &mut conn)
+            .update_protocol_states(
+                &chain,
+                &[(tx_1.into(), new_state1.clone()), (tx_2.into(), new_state2.clone())],
+                &mut conn,
+            )
             .await
             .expect("Failed to update protocol states");
 
@@ -1057,7 +1066,7 @@ mod test {
         assert_eq!(db_states[0], expected_state);
 
         // fetch the older state from the db and check it's valid_to is set correctly
-        let tx_hash1: Bytes = new_state1.modify_tx.as_bytes().into();
+        let tx_hash1: Bytes = tx_1.as_bytes().into();
         let older_state = schema::protocol_state::table
             .inner_join(schema::protocol_component::table)
             .inner_join(schema::transaction::table)
@@ -1069,7 +1078,7 @@ mod test {
             .expect("Failed to fetch protocol state");
         assert_eq!(older_state.attribute_value, Some(Bytes::from(U256::from(700))));
         // fetch the newer state from the db to compare the valid_from
-        let tx_hash2: Bytes = new_state2.modify_tx.as_bytes().into();
+        let tx_hash2: Bytes = tx_2.as_bytes().into();
         let newer_state = schema::protocol_state::table
             .inner_join(schema::protocol_component::table)
             .inner_join(schema::transaction::table)
@@ -1146,10 +1155,6 @@ mod test {
         state_delta.deleted_attributes = vec!["deleted".to_owned()]
             .into_iter()
             .collect();
-        state_delta.modify_tx =
-            "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54"
-                .parse()
-                .unwrap();
         let expected = vec![state_delta];
 
         // test
