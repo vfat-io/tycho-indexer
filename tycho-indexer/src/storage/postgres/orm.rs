@@ -16,7 +16,7 @@ use crate::{
 use super::schema::{
     account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
     protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
-    token, transaction,
+    token, transaction, tvl_change,
 };
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -284,20 +284,19 @@ pub struct TvlChange {
     pub id: i64,
     pub token_id: i64,
     pub new_balance: f64,
-    pub modify_tx: TxHash,
-    pub protocol_component_id: String,
+    pub modify_tx: i64,
+    pub protocol_component_id: i64,
     pub inserted_ts: NaiveDateTime,
-    pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Selectable)]
+#[derive(AsChangeset, Insertable)]
 #[diesel(table_name = tvl_change)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewTvlChange {
     pub token_id: i64,
     pub new_balance: f64,
-    pub modify_tx: TxHash,
-    pub component_id: String,
+    pub modify_tx: i64,
+    pub protocol_component_id: i64,
 }
 
 #[derive(AsChangeset, Insertable)]

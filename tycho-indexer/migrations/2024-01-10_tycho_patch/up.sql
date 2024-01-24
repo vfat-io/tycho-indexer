@@ -48,3 +48,18 @@ DROP FUNCTION invalidate_previous_entry_protocol_state();
 
 ALTER TABLE protocol_system
 ADD CONSTRAINT name_unique UNIQUE (name);
+
+--  Saves the TVL change of a protocol component.
+CREATE TABLE IF NOT EXISTS tvl_change(
+    "id" bigserial PRIMARY KEY,
+    -- id of the token whose tvl changed
+    "token_id" bigint REFERENCES "token"(id) NOT NULL,
+    -- new balance of the token for this component
+    "new_balance" varchar(255) NOT NULL,
+    -- the transaction that modified the tvl of this component
+    "modify_tx" bigint REFERENCES "transaction"(id) ON DELETE CASCADE NOT NULL,
+    -- Reference to static attributes of the protocol.
+    "protocol_component_id" bigint REFERENCES protocol_component(id) NOT NULL,
+    -- Timestamp this entry was inserted into this table.
+    "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );

@@ -1,15 +1,15 @@
 // @generated automatically by Diesel CLI.
 
 pub mod sql_types {
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[derive(diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "financial_type"))]
     pub struct FinancialType;
 
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[derive(diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "hstore"))]
     pub struct Hstore;
 
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[derive(diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "implementation_type"))]
     pub struct ImplementationType;
 }
@@ -145,15 +145,15 @@ diesel::table! {
         chain_id -> Int8,
         #[max_length = 255]
         external_id -> Varchar,
-        protocol_type_id -> Int8,
-        protocol_system_id -> Int8,
         attributes -> Nullable<Jsonb>,
         created_at -> Timestamptz,
+        creation_tx -> Int8,
         deleted_at -> Nullable<Timestamptz>,
+        deletion_tx -> Nullable<Int8>,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
-        creation_tx -> Int8,
-        deletion_tx -> Nullable<Int8>,
+        protocol_type_id -> Int8,
+        protocol_system_id -> Int8,
     }
 }
 
@@ -181,8 +181,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
-
     protocol_system (id) {
         id -> Int8,
         #[max_length = 255]
@@ -236,6 +234,18 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    tvl_change (id) {
+        id -> Int8,
+        token_id -> Int8,
+        #[max_length = 255]
+        new_balance -> Varchar,
+        modify_tx -> Int8,
+        protocol_component_id -> Int8,
+        inserted_ts -> Timestamptz,
+    }
+}
+
 diesel::joinable!(account -> chain (chain_id));
 diesel::joinable!(account_balance -> account (account_id));
 diesel::joinable!(account_balance -> transaction (modify_tx));
@@ -256,6 +266,9 @@ diesel::joinable!(protocol_state -> protocol_component (protocol_component_id));
 diesel::joinable!(protocol_state -> transaction (modify_tx));
 diesel::joinable!(token -> account (account_id));
 diesel::joinable!(transaction -> block (block_id));
+diesel::joinable!(tvl_change -> protocol_component (protocol_component_id));
+diesel::joinable!(tvl_change -> token (token_id));
+diesel::joinable!(tvl_change -> transaction (modify_tx));
 
 diesel::allow_tables_to_appear_in_same_query!(
     account,
@@ -274,4 +287,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     protocol_type,
     token,
     transaction,
+    tvl_change,
 );

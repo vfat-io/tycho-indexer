@@ -1,3 +1,4 @@
+
 CREATE TYPE protocol_implementation_type AS ENUM(
     'custom',
     'vm'
@@ -60,3 +61,5 @@ CREATE TRIGGER invalidate_previous_protocol_state
 
 ALTER TABLE protocol_system
 DROP CONSTRAINT name_unique;
+
+DROP TABLE tvl_change;
