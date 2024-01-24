@@ -573,6 +573,12 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
+    async fn delete_protocol_components(
+        &self,
+        to_delete: &[&Self::ProtocolComponent],
+        block_ts: NaiveDateTime,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
     /// Stores new found ProtocolTypes or updates if existing.
     ///
     /// # Parameters

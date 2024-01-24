@@ -1,9 +1,9 @@
 #![allow(unused_variables)]
 
-use std::{cmp::Ordering, collections::HashMap};
-
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
+use std::{cmp::Ordering, collections::HashMap};
+
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use tracing::warn;
@@ -153,6 +153,25 @@ where
         Ok(())
     }
 
+    async fn delete_protocol_components(
+        &self,
+        to_delete: &[&Self::ProtocolComponent],
+        block_ts: NaiveDateTime,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        use super::schema::protocol_component::dsl::*;
+
+        let ids_to_delete: Vec<String> = to_delete
+            .iter()
+            .map(|c| c.id.to_string())
+            .collect();
+
+        diesel::update(protocol_component.filter(external_id.eq_any(ids_to_delete)))
+            .set(deleted_at.eq(block_ts))
+            .execute(conn)
+            .await?;
+        Ok(())
+    }
     async fn upsert_protocol_type(
         &self,
         new: &Self::ProtocolType,
@@ -508,7 +527,7 @@ mod test {
         extractor::evm::{self, ERC20Token},
         storage::ChangeType,
     };
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Utc};
     use diesel_async::AsyncConnection;
     use ethers::{prelude::H160, types::U256};
     use rstest::rstest;
@@ -520,6 +539,7 @@ mod test {
         models::{FinancialType, ImplementationType},
         storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
     };
+
     use ethers::prelude::H256;
     use std::{collections::HashMap, str::FromStr};
 
@@ -673,7 +693,7 @@ mod test {
     #[rstest]
     #[case::by_chain(None, None)]
     #[case::by_system(Some("ambient".to_string()), None)]
-    #[case::by_ids(None, Some(vec!["state1"]))]
+    #[case::by_ids(None, Some(vec ! ["state1"]))]
     #[tokio::test]
     async fn test_get_protocol_states(
         #[case] system: Option<String>,
@@ -1095,5 +1115,62 @@ mod test {
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
         assert_eq!(original_component.id, inserted_data.external_id);
+    }
+
+    fn create_test_protocol_component(id: &str) -> ProtocolComponent {
+        ProtocolComponent {
+            id: id.to_string(),
+            protocol_system: "ambient".to_string(),
+            protocol_type_id: "type_id_1".to_string(),
+            chain: Chain::Ethereum,
+            tokens: vec![],
+            contract_ids: vec![],
+            static_attributes: HashMap::new(),
+            change: ChangeType::Creation,
+            creation_tx: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000011121314,
+            ),
+            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_protocol_components() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let test_components = vec![
+            create_test_protocol_component("state1"),
+            create_test_protocol_component("state2"),
+        ];
+
+        let res = gw
+            .delete_protocol_components(
+                &test_components
+                    .iter()
+                    .collect::<Vec<_>>(),
+                Utc::now().naive_utc(),
+                &mut conn,
+            )
+            .await;
+
+        assert!(res.is_ok());
+        let pc_ids: Vec<String> = test_components
+            .iter()
+            .map(|test_pc| test_pc.id.to_string())
+            .collect();
+
+        let updated_timestamps = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq_any(pc_ids))
+            .select(schema::protocol_component::deleted_at)
+            .load::<Option<NaiveDateTime>>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(updated_timestamps.len(), 2);
+        updated_timestamps
+            .into_iter()
+            .for_each(|ts| assert!(ts.is_some(), "Found None in updated_ts"));
     }
 }
