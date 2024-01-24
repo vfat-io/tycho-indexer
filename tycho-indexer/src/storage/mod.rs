@@ -570,6 +570,7 @@ pub trait ProtocolGateway {
         chain: &Chain,
         system: Option<String>,
         ids: Option<&[&str]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
     async fn add_protocol_components(
@@ -578,6 +579,12 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
+    async fn delete_protocol_components(
+        &self,
+        to_delete: &[&Self::ProtocolComponent],
+        block_ts: NaiveDateTime,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
     /// Stores new found ProtocolTypes or updates if existing.
     ///
     /// # Parameters
@@ -633,12 +640,12 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolState>, StorageError>;
 
-    async fn update_protocol_state(
+    async fn update_protocol_states(
         &self,
-        chain: Chain,
-        new: &[(TxHash, ProtocolStateDelta)],
+        chain: &Chain,
+        new: &[ProtocolStateDelta],
         conn: &mut Self::DB,
-    );
+    ) -> Result<(), StorageError>;
 
     /// Retrieves a tokens from storage
     ///
@@ -791,7 +798,7 @@ pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
         tokens: Vec<H160>,
         contract_ids: Vec<H160>,
         chain: Chain,
-        protocol_system: String,
+        protocol_system: &str,
         transaction_hash: H256,
     ) -> Result<Self, StorageError>;
 

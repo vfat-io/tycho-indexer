@@ -218,7 +218,7 @@ impl Transaction {
             .await
     }
 
-    pub async fn id_by_hash(
+    pub async fn ids_by_hash(
         hashes: &[TxHash],
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<TxHash, i64>, StorageError> {
@@ -231,6 +231,19 @@ impl Transaction {
             .await?;
 
         Ok(results.into_iter().collect())
+    }
+
+    // fetches the transaction id, hash, index and block timestamp for a given set of hashes
+    pub async fn ids_and_ts_by_hash(
+        hashes: &[&[u8]],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(i64, Bytes, i64, NaiveDateTime)>> {
+        transaction::table
+            .inner_join(block::table)
+            .filter(transaction::hash.eq_any(hashes))
+            .select((transaction::id, transaction::hash, transaction::index, block::ts))
+            .get_results::<(i64, Bytes, i64, NaiveDateTime)>(conn)
+            .await
     }
 }
 
@@ -301,10 +314,11 @@ pub struct NewProtocolType {
     pub implementation: ImplementationType,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug, PartialEq)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
 #[diesel(belongs_to(ProtocolSystem))]
+#[diesel(belongs_to(Transaction, foreign_key = creation_tx))]
 #[diesel(table_name = protocol_component)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolComponent {
@@ -335,6 +349,19 @@ pub struct NewProtocolComponent {
     pub creation_tx: i64,
     pub created_at: NaiveDateTime,
     pub attributes: Option<serde_json::Value>,
+}
+
+impl ProtocolComponent {
+    pub async fn ids_by_external_ids(
+        external_ids: &[&str],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(i64, String)>> {
+        protocol_component::table
+            .filter(protocol_component::external_id.eq_any(external_ids))
+            .select((protocol_component::id, protocol_component::external_id))
+            .get_results::<(i64, String)>(conn)
+            .await
+    }
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
@@ -446,7 +473,7 @@ impl ProtocolState {
     }
 }
 
-#[derive(Insertable)]
+#[derive(Insertable, Clone)]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolState {

@@ -22,6 +22,8 @@ use crate::{
     storage::{ChangeType, StateGatewayType},
 };
 
+use self::utils::TryDecode;
+
 use super::ExtractionError;
 
 pub mod ambient;
@@ -75,6 +77,11 @@ pub struct Transaction {
 impl Transaction {
     pub fn new(hash: H256, block_hash: H256, from: H160, to: Option<H160>, index: u64) -> Self {
         Transaction { hash, block_hash, from, to, index }
+    }
+
+    // This serves to expose the 'try_decode' method from utils externally
+    pub fn hash_from_bytes(hash: Bytes) -> H256 {
+        H256::try_decode(&hash, "tx hash").expect("Failed to decode tx hash")
     }
 }
 
