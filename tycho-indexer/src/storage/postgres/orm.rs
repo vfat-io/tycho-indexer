@@ -204,7 +204,7 @@ impl Transaction {
             .await
     }
 
-    pub async fn id_by_hash(
+    pub async fn ids_by_hash(
         hashes: &[TxHash],
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<TxHash, i64>, StorageError> {
@@ -217,6 +217,19 @@ impl Transaction {
             .await?;
 
         Ok(results.into_iter().collect())
+    }
+
+    // fetches the transaction id, hash, index and block timestamp for a given set of hashes
+    pub async fn ids_and_ts_by_hash(
+        hashes: &[&[u8]],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(i64, Bytes, i64, NaiveDateTime)>> {
+        transaction::table
+            .inner_join(block::table)
+            .filter(transaction::hash.eq_any(hashes))
+            .select((transaction::id, transaction::hash, transaction::index, block::ts))
+            .get_results::<(i64, Bytes, i64, NaiveDateTime)>(conn)
+            .await
     }
 }
 
@@ -322,6 +335,19 @@ pub struct NewProtocolComponent {
     pub creation_tx: i64,
     pub created_at: NaiveDateTime,
     pub attributes: Option<serde_json::Value>,
+}
+
+impl ProtocolComponent {
+    pub async fn ids_by_external_ids(
+        external_ids: &[&str],
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(i64, String)>> {
+        protocol_component::table
+            .filter(protocol_component::external_id.eq_any(external_ids))
+            .select((protocol_component::id, protocol_component::external_id))
+            .get_results::<(i64, String)>(conn)
+            .await
+    }
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
@@ -433,7 +459,7 @@ impl ProtocolState {
     }
 }
 
-#[derive(Insertable)]
+#[derive(Insertable, Clone)]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolState {
@@ -445,7 +471,7 @@ pub struct NewProtocolState {
     pub valid_to: Option<NaiveDateTime>,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug, PartialEq)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(Transaction, foreign_key = creation_tx))]
 #[diesel(table_name = account)]
@@ -509,7 +535,7 @@ impl Account {
     }
 }
 
-#[derive(Insertable)]
+#[derive(AsChangeset, Insertable, Debug)]
 #[diesel(table_name = account)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAccount<'a> {
@@ -521,7 +547,7 @@ pub struct NewAccount<'a> {
     pub deleted_at: Option<NaiveDateTime>,
 }
 
-#[derive(Identifiable, Queryable, Associations, Selectable)]
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug, PartialEq)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name = token)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -536,7 +562,7 @@ pub struct Token {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Insertable)]
+#[derive(AsChangeset, Insertable, Debug)]
 #[diesel(table_name = token)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewToken {

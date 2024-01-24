@@ -473,6 +473,12 @@ pub trait StorableToken<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(val: S, contract: ContractId) -> Result<Self, StorageError>;
 
     fn to_storage(&self, contract_id: I) -> N;
+
+    fn chain(&self) -> Chain;
+
+    fn address(&self) -> H160;
+
+    fn symbol(&self) -> String;
 }
 
 /// Lays out the necessary interface needed to store and retrieve protocol states from
@@ -568,6 +574,12 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
+    async fn delete_protocol_components(
+        &self,
+        to_delete: &[&Self::ProtocolComponent],
+        block_ts: NaiveDateTime,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
     /// Stores new found ProtocolTypes or updates if existing.
     ///
     /// # Parameters
@@ -623,12 +635,12 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolState>, StorageError>;
 
-    async fn update_protocol_state(
+    async fn update_protocol_states(
         &self,
-        chain: Chain,
-        new: &[(TxHash, ProtocolStateDelta)],
+        chain: &Chain,
+        new: &[ProtocolStateDelta],
         conn: &mut Self::DB,
-    );
+    ) -> Result<(), StorageError>;
 
     /// Retrieves a tokens from storage
     ///
@@ -651,7 +663,6 @@ pub trait ProtocolGateway {
     /// be immutable.
     ///
     /// # Parameters
-    /// - `chain` The chain of the token.
     /// - `token` The tokens to insert.
     ///
     /// # Return
@@ -659,8 +670,8 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_tokens(
         &self,
-        chain: Chain,
-        token: &[&Self::Token],
+
+        tokens: &[&Self::Token],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
