@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use self::versioning::{apply_versioning, apply_delta_versioning};
+use self::versioning::{apply_delta_versioning, apply_versioning};
 
 use super::*;
 
@@ -1418,6 +1418,8 @@ mod test {
             ],
         )
         .await;
+
+        // Account C0
         let c0 = db_fixtures::insert_account(
             conn,
             "6B175474E89094C44Da98b954EedeAC495271d0F",
@@ -1426,28 +1428,37 @@ mod test {
             Some(txn[0]),
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 0, txn[0], c0).await;
+        db_fixtures::insert_account_balance(conn, 0, txn[0], Some("2020-01-01T00:00:00"), c0).await;
         db_fixtures::insert_contract_code(conn, c0, txn[0], Bytes::from_str("C0C0C0").unwrap())
             .await;
-        db_fixtures::insert_account_balance(conn, 100, txn[1], c0).await;
+        db_fixtures::insert_account_balance(conn, 100, txn[1], Some("2020-01-01T01:00:00"), c0)
+            .await;
+        // Slot 2 is never modified again
+        db_fixtures::insert_slots(conn, c0, txn[1], "2020-01-01T00:00:00", None, &[(2, 1, None)])
+            .await;
+        // First version for slots 0 and 1.
         db_fixtures::insert_slots(
             conn,
             c0,
             txn[1],
             "2020-01-01T00:00:00",
-            &[(0, 1), (1, 5), (2, 1)],
+            Some("2020-01-01T01:00:00"),
+            &[(0, 1, None), (1, 5, None)],
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 101, txn[3], c0).await;
+        db_fixtures::insert_account_balance(conn, 101, txn[3], None, c0).await;
+        // Second and final version for 0 and 1, new slots 5 and 6
         db_fixtures::insert_slots(
             conn,
             c0,
             txn[3],
             "2020-01-01T01:00:00",
-            &[(0, 2), (1, 3), (5, 25), (6, 30)],
+            None,
+            &[(0, 2, Some(1)), (1, 3, Some(5)), (5, 25, None), (6, 30, None)],
         )
         .await;
 
+        // Account C1
         let c1 = db_fixtures::insert_account(
             conn,
             "73BcE791c239c8010Cd3C857d96580037CCdd0EE",
@@ -1456,12 +1467,20 @@ mod test {
             Some(txn[2]),
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 50, txn[2], c1).await;
+        db_fixtures::insert_account_balance(conn, 50, txn[2], None, c1).await;
         db_fixtures::insert_contract_code(conn, c1, txn[2], Bytes::from_str("C1C1C1").unwrap())
             .await;
-        db_fixtures::insert_slots(conn, c1, txn[3], "2020-01-01T01:00:00", &[(0, 128), (1, 255)])
-            .await;
+        db_fixtures::insert_slots(
+            conn,
+            c1,
+            txn[3],
+            "2020-01-01T01:00:00",
+            None,
+            &[(0, 128, None), (1, 255, None)],
+        )
+        .await;
 
+        // Account C2
         let c2 = db_fixtures::insert_account(
             conn,
             "94a3F312366b8D0a32A00986194053C0ed0CdDb1",
@@ -1470,10 +1489,18 @@ mod test {
             Some(txn[1]),
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 25, txn[1], c2).await;
+        db_fixtures::insert_account_balance(conn, 25, txn[1], None, c2).await;
         db_fixtures::insert_contract_code(conn, c2, txn[1], Bytes::from_str("C2C2C2").unwrap())
             .await;
-        db_fixtures::insert_slots(conn, c2, txn[1], "2020-01-01T00:00:00", &[(1, 2), (2, 4)]).await;
+        db_fixtures::insert_slots(
+            conn,
+            c2,
+            txn[1],
+            "2020-01-01T00:00:00",
+            None,
+            &[(1, 2, None), (2, 4, None)],
+        )
+        .await;
         db_fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
     }
 
@@ -2078,7 +2105,8 @@ mod test {
             c0,
             txn[0],
             "2020-01-01T00:00:00",
-            &[(1, 10), (2, 20), (3, 30)],
+            None,
+            &[(1, 10, None), (2, 20, None), (3, 30, None)],
         )
         .await;
 
@@ -2148,12 +2176,15 @@ mod test {
             Some(txn[0]),
         )
         .await;
+        db_fixtures::insert_slots(conn, c0, txn[0], "2020-01-01T00:00:00", None, &[(2, 1, None)])
+            .await;
         db_fixtures::insert_slots(
             conn,
             c0,
             txn[0],
             "2020-01-01T00:00:00",
-            &[(0, 1), (1, 5), (2, 1)],
+            Some("2020-01-01T01:00:00"),
+            &[(0, 1, None), (1, 5, None)],
         )
         .await;
         db_fixtures::insert_slots(
@@ -2161,7 +2192,8 @@ mod test {
             c0,
             txn[1],
             "2020-01-01T01:00:00",
-            &[(0, 2), (1, 3), (5, 25), (6, 30)],
+            None,
+            &[(0, 2, Some(1)), (1, 3, Some(5)), (5, 25, None), (6, 30, None)],
         )
         .await;
     }
