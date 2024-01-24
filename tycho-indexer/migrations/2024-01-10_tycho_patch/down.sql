@@ -1,4 +1,3 @@
-
 CREATE TYPE protocol_implementation_type AS ENUM(
     'custom',
     'vm'
@@ -44,10 +43,10 @@ END;
 $$
 LANGUAGE plpgsql;
 
-ALTER TABLE protocol_state 
+ALTER TABLE protocol_state
 DROP CONSTRAINT check_attribute_fields;
 
-ALTER TABLE protocol_state 
+ALTER TABLE protocol_state
 DROP COLUMN attribute_name,
 DROP COLUMN attribute_value,
 ADD COLUMN state jsonb NULL,
@@ -62,4 +61,6 @@ CREATE TRIGGER invalidate_previous_protocol_state
 ALTER TABLE protocol_system
 DROP CONSTRAINT name_unique;
 
+ALTER TABLE token
+DROP CONSTRAINT unique_account_id_constraint;
 DROP TABLE tvl_change;
