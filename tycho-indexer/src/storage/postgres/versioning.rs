@@ -14,23 +14,27 @@
 //! * `StoredVersionedRow`: This trait provides to set the end version on currently active version
 //!   in the db based on the currently incoming data.
 //!
-//! # Limitations
+//! ## Notes
+//! To use the apply_versioning function defined here VersionRow::EntityId and
+//! StoredVersionedRow::EntityId must be of the same type. Keep that in mind while implementing
+//! these traits on your structs.
 //!
-//! For orm structs that do use a complex EntityId type such as ContractStorage which uses
-//! account id and slot: `(i64, &Bytes)` the main limitation is that these can't use
-//! `apply_versioning` . As dealing with lifetimes becomes increasingly complex. The alternative
-//! would be to clone bytes repeadedly which would not be very performant and therefore not
-//! implemented here. The main problem with returning EntityId values that themselves contain
-//! references is that we can't properly express the lifetime bounds of these with Rust when writing
-//! generic functions.
-//! One could duplicate the id as an attributes on the struct and return sth like
-//! `&(i64, Bytes)`` but that is currently not supported by Diesel.
-//! This means to avoid unnecessary clones, we need to add a lifetime to our
-//! StoredVersionRow trait.
-//! It may be worth exploring smart pointers further such as Arc, in this case they would need to
-//! be implemented for both NewSlot and ContractStorage. Additionally diesel's `eq_any`
-//! would need to support using smart pointers.
-
+//! # Design Decisions
+//!
+//! Initially we would support references in EntityId, to reduce the number of clones necessary for
+//! compley entity id types. This would lead to a strange situation, where these the trait bounds
+//! for the `apply_versioning` method would not be expressable. Reasons fot this are not 100% clear
+//! but `latest_versions_by_ids` referring to the `StoredVersionedRow::EntityId`` but actually being
+//! used with `VersionedRow::EntityId` is most likely related. Previous iterations had lifetimes on
+//! `StoredVersionedRow<'a>` but as said the mangement of lifetimes become increasingly complex to a
+//! point where apply_versioning was not always usable.
+//!
+//! Instead we removed support for references in the EntityId type for now and just accept the high
+//! number of clones necessary. This may be revisited later again in case the clones become a
+//! performance issue.
+//! There are basically two versions to resolve this, modify the ORM structs to use smart pointers
+//! thus making the clones cheap. Or modify the traits and the function defined here to work around
+//! the lifetime issues.
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
@@ -59,16 +63,16 @@ pub trait VersionedRow {
     /// The version type.
     type Version: Ord + Copy + Debug + Send + Sync;
 
-    /// Retrieves the entity identifier.
+    /// Exposes the entity identifier.
     fn get_id(&self) -> Self::EntityId;
 
-    /// Retrieves the sorting key.
+    /// Exposes the sorting key.
     fn get_sort_key(&self) -> Self::SortKey;
 
     /// Allows setting `valid_to`` column, thereby invalidating this version.
     fn set_valid_to(&mut self, end_version: Self::Version);
 
-    /// Retrieves the starting version.
+    /// Exposes the starting version.
     fn get_valid_from(&self) -> Self::Version;
 }
 
@@ -79,7 +83,7 @@ pub trait VersionedRow {
 pub trait DeltaVersionedRow {
     type Value: Clone + Debug;
 
-    /// Retrieves the current value.
+    /// Exposes the current value.
     fn get_value(&self) -> Self::Value;
 
     /// Sets the previous value.
@@ -95,9 +99,9 @@ pub trait DeltaVersionedRow {
 /// The associated types of this trait need to match with the types defined for the corresponding
 /// `VersionedRow` trait.
 #[async_trait]
-pub trait StoredVersionedRow<'a> {
+pub trait StoredVersionedRow {
     /// The entity identifier type.
-    type EntityId: Ord + Hash + Debug + Send + Sync + 'a;
+    type EntityId: Ord + Hash + Debug + Send + Sync;
     /// The primary key on the table for this row.
     type PrimaryKey: Into<i64> + Debug + Send + Sync;
     /// The version type.
@@ -110,10 +114,10 @@ pub trait StoredVersionedRow<'a> {
     fn get_valid_to(&self) -> Self::Version;
 
     /// Exposes the entity id.
-    fn get_entity_id(&'a self) -> Self::EntityId;
+    fn get_entity_id(&self) -> Self::EntityId;
 
     /// Retrieves the latest versions for the passed entity ids from the database.
-    async fn latest_versions_by_ids<I: IntoIterator<Item = &'a Self::EntityId> + Send + Sync>(
+    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
         ids: I,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<Box<Self>>, StorageError>;
@@ -190,7 +194,7 @@ pub fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Deb
 ///
 /// Building such a query with pure diesel is currently not supported as this query updates each
 /// primary key with a unique value. See: https://github.com/diesel-rs/diesel/discussions/2879
-pub fn build_batch_update_query<'a, O: StoredVersionedRow<'a>>(
+pub fn build_batch_update_query<'a, O: StoredVersionedRow>(
     objects: &'a [Box<O>],
     table_name: &str,
     end_versions: &'a HashMap<O::EntityId, O::Version>,
@@ -235,24 +239,17 @@ pub fn build_batch_update_query<'a, O: StoredVersionedRow<'a>>(
 /// - Set end versions on a collection of new entries
 /// - Given the new entries query the table currently valid versions
 /// - Execute and update query to invalidate the previously retrieved entries
-///
-/// ## Note
-/// The types constraints of this function are currently likely not 100% correct. Thus it only works
-/// for simple EntityId types (those that do not contain any references). For types that use
-/// references please use concrete types by reusing the individual functions provided by this module
-/// to execute these steps manually.
 pub async fn apply_versioning<'a, N, S>(
     new_data: &mut Vec<N>,
     conn: &mut AsyncPgConnection,
 ) -> Result<(), StorageError>
 where
     N: VersionedRow,
-    S: for<'b> StoredVersionedRow<'b, EntityId = N::EntityId, Version = N::Version>,
-    <N as VersionedRow>::EntityId: 'a,
-    <N as VersionedRow>::Version: 'a,
+    S: StoredVersionedRow<EntityId = N::EntityId, Version = N::Version>,
+    <N as VersionedRow>::EntityId: Clone,
 {
     let end_versions = set_versioning_attributes(new_data);
-    let db_rows = S::latest_versions_by_ids(end_versions.keys(), conn).await?;
+    let db_rows = S::latest_versions_by_ids(end_versions.keys().into_iter().cloned(), conn).await?;
     if !db_rows.is_empty() {
         build_batch_update_query(&db_rows, S::table_name(), &end_versions)
             .execute(conn)

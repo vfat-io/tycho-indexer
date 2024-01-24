@@ -556,21 +556,7 @@ where
                 }
             }
         }
-        let db_end_versions = versioning::set_delta_versioning_attributes(&mut new_entries);
-        dbg!(&db_end_versions);
-        dbg!(&new_entries);
-        let db_rows: Vec<_> =
-            orm::ContractStorage::latest_versions_by_ids(db_end_versions.keys(), conn).await?;
-        dbg!(&db_rows);
-        if !db_rows.is_empty() {
-            versioning::build_batch_update_query(
-                db_rows.as_slice(),
-                "contract_storage",
-                &db_end_versions,
-            )
-            .execute(conn)
-            .await?;
-        }
+        versioning::apply_versioning::<_, orm::ContractStorage>(&mut new_entries, conn).await?;
         diesel::insert_into(schema::contract_storage::table)
             .values(&new_entries)
             .execute(conn)
