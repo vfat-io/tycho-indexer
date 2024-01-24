@@ -1,7 +1,5 @@
 //! This module contains Tycho RPC implementation
 
-use std::sync::Arc;
-
 use crate::{
     extractor::evm::Account,
     models::Chain,
@@ -17,12 +15,15 @@ use diesel_async::{
     AsyncPgConnection,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
+use utoipa::{IntoParams, ToSchema};
 
 use super::EvmPostgresGateway;
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct StateRequestResponse {
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub(crate) struct StateRequestResponse {
+    #[schema(value_type=Option<String>)]
     accounts: Vec<Account>,
 }
 
@@ -44,15 +45,17 @@ pub enum RpcError {
     Connection(#[from] deadpool::PoolError),
 }
 
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct StateRequestParameters {
     #[serde(default = "Chain::default")]
     chain: Chain,
+    #[param(default = 0)]
     tvl_gt: Option<u64>,
+    #[param(default = 0)]
     intertia_min_gt: Option<u64>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct StateRequestBody {
     #[serde(rename = "contractIds")]
     contract_ids: Option<Vec<ContractId>>,
@@ -60,8 +63,8 @@ pub struct StateRequestBody {
     version: Version,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Version {
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub(crate) struct Version {
     timestamp: Option<NaiveDateTime>,
     block: Option<Block>,
 }
@@ -94,8 +97,9 @@ impl TryFrom<&Version> for BlockOrTimestamp {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Block {
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub(crate) struct Block {
+    #[schema(value_type=Option<String>)]
     hash: Option<BlockHash>,
     chain: Option<Chain>,
     number: Option<i64>,
@@ -114,7 +118,7 @@ impl RpcHandler {
     }
 
     #[instrument(skip(self, request, params))]
-    async fn get_state(
+    async fn get_contract_state(
         &self,
         request: &StateRequestBody,
         params: &StateRequestParameters,
@@ -122,11 +126,11 @@ impl RpcHandler {
         let mut conn = self.db_connection_pool.get().await?;
 
         info!(?request, ?params, "Getting contract state.");
-        self.get_state_inner(request, params, &mut conn)
+        self.get_contract_state_inner(request, params, &mut conn)
             .await
     }
 
-    async fn get_state_inner(
+    async fn get_contract_state_inner(
         &self,
         request: &StateRequestBody,
         params: &StateRequestParameters,
@@ -163,6 +167,17 @@ impl RpcHandler {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/contract_state",
+    responses(
+        (status = 200, description = "OK", body = StateRequestResponse),
+    ),
+    request_body = StateRequestBody,
+    params(
+        StateRequestParameters
+    ),
+)]
 pub async fn contract_state(
     query: web::Query<StateRequestParameters>,
     body: web::Json<StateRequestBody>,
@@ -171,7 +186,7 @@ pub async fn contract_state(
     // Call the handler to get the state
     let response = handler
         .into_inner()
-        .get_state(&body, &query)
+        .get_contract_state(&body, &query)
         .await;
 
     match response {

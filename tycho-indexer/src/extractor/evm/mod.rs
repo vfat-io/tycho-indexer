@@ -1,17 +1,17 @@
 #![allow(dead_code)]
 
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    ops::Deref,
-};
-
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
     utils::keccak256,
 };
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    ops::Deref,
+};
 use tracing::warn;
+use utoipa::ToSchema;
 
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
@@ -77,17 +77,25 @@ impl Transaction {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Account {
     pub chain: Chain,
+    #[schema(value_type=String)]
     pub address: H160,
     pub title: String,
+    #[schema(value_type=HashMap<String, String>)]
     pub slots: HashMap<U256, U256>,
+    #[schema(value_type=String)]
     pub balance: U256,
+    #[schema(value_type=String)]
     pub code: Bytes,
+    #[schema(value_type=String)]
     pub code_hash: H256,
+    #[schema(value_type=String)]
     pub balance_modify_tx: H256,
+    #[schema(value_type=String)]
     pub code_modify_tx: H256,
+    #[schema(value_type=Option<String>)]
     pub creation_tx: Option<H256>,
 }
 

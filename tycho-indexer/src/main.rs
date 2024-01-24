@@ -123,9 +123,8 @@ async fn main() -> Result<(), ExtractionError> {
 
     // Spawn a new task that listens to err_rx
     task::spawn(async move {
-        while let Some(msg) = err_rx.recv().await {
-            //TODO: panic?
-            error!("Database write error received: {}", msg);
+        if let Some(msg) = err_rx.recv().await {
+            panic!("Database write error received: {}", msg);
         }
     });
 
