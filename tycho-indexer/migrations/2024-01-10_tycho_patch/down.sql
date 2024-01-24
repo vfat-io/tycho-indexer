@@ -49,6 +49,7 @@ DROP CONSTRAINT check_attribute_fields;
 ALTER TABLE protocol_state 
 DROP COLUMN attribute_name,
 DROP COLUMN attribute_value,
+DROP COLUMN previous_value,
 ADD COLUMN state jsonb NULL,
 ADD COLUMN tvl bigint NULL,
 ADD COLUMN inertias bigint[] NULL;

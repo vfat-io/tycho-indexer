@@ -896,6 +896,7 @@ pub mod db_fixtures {
         tx_id: i64,
         attribute_name: String,
         attribute_value: Bytes,
+        previous_value: Option<Bytes>,
         valid_to_tx: Option<i64>,
     ) {
         let ts: NaiveDateTime = schema::transaction::table
@@ -926,6 +927,7 @@ pub mod db_fixtures {
             schema::protocol_state::valid_to.eq(valid_to_ts),
             schema::protocol_state::attribute_name.eq(attribute_name),
             schema::protocol_state::attribute_value.eq(attribute_value),
+            schema::protocol_state::previous_value.eq(previous_value),
         ));
         query
             .execute(conn)

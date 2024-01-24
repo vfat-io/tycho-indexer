@@ -145,15 +145,15 @@ diesel::table! {
         chain_id -> Int8,
         #[max_length = 255]
         external_id -> Varchar,
-        protocol_type_id -> Int8,
-        protocol_system_id -> Int8,
         attributes -> Nullable<Jsonb>,
         created_at -> Timestamptz,
+        creation_tx -> Int8,
         deleted_at -> Nullable<Timestamptz>,
+        deletion_tx -> Nullable<Int8>,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
-        creation_tx -> Int8,
-        deletion_tx -> Nullable<Int8>,
+        protocol_type_id -> Int8,
+        protocol_system_id -> Int8,
     }
 }
 
@@ -177,12 +177,11 @@ diesel::table! {
         protocol_component_id -> Int8,
         attribute_name -> Nullable<Varchar>,
         attribute_value -> Nullable<Bytea>,
+        previous_value -> Nullable<Bytea>,
     }
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
-
     protocol_system (id) {
         id -> Int8,
         #[max_length = 255]

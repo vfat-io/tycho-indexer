@@ -32,7 +32,8 @@ DROP COLUMN state,
 DROP COLUMN tvl,
 DROP COLUMN inertias,
 ADD COLUMN attribute_name VARCHAR NULL,
-ADD COLUMN attribute_value BYTEA NULL;
+ADD COLUMN attribute_value BYTEA NULL,
+ADD COLUMN previous_value BYTEA NULL;
 
 -- Make sure either both attribute_name and attribute_value are given or neither are given
 ALTER TABLE protocol_state 

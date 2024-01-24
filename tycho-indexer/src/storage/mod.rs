@@ -676,7 +676,7 @@ pub trait ProtocolGateway {
     ///
     /// # Return
     /// A list of ProtocolStateDeltas containing all state changes, Err if no changes were found.
-    async fn get_protocol_state_deltas(
+    async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
         system: Option<String>,

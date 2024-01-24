@@ -359,7 +359,7 @@ where
         todo!()
     }
 
-    async fn get_protocol_state_deltas(
+    async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
         system: Option<String>,
@@ -469,7 +469,7 @@ where
             }
         }
 
-        // Group by component_id and merge states.
+        // Aggregate - group by component_id and merge states.
         let mut grouped: HashMap<String, ProtocolStateDelta> = HashMap::new();
         for delta in deltas {
             let key = delta.component_id.clone();
@@ -640,6 +640,7 @@ mod test {
             txn[0],
             "reserve1".to_owned(),
             Bytes::from(U256::from(1100)),
+            None,
             Some(txn[2]),
         )
         .await;
@@ -652,6 +653,7 @@ mod test {
             "reserve2".to_owned(),
             Bytes::from(U256::from(500)),
             None,
+            None,
         )
         .await;
 
@@ -662,6 +664,7 @@ mod test {
             txn[3],
             "reserve1".to_owned(),
             Bytes::from(U256::from(1000)),
+            None,
             None,
         )
         .await;
@@ -888,6 +891,7 @@ mod test {
             from_txn_id,
             "deleted".to_owned(),
             Bytes::from(U256::from(1000)),
+            None,
             Some(to_txn_id),
         )
         .await;
@@ -908,7 +912,7 @@ mod test {
 
         // test
         let result = gateway
-            .get_protocol_state_deltas(
+            .get_protocol_states_delta(
                 &Chain::Ethereum,
                 system,
                 ids.as_deref(),
