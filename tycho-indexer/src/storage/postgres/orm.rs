@@ -649,7 +649,7 @@ impl StoredVersionedRow for AccountBalance {
             .get_results::<Self>(conn)
             .await?
             .into_iter()
-            .map(|e| Box::new(e))
+            .map(Box::new)
             .collect())
     }
 
@@ -750,7 +750,7 @@ impl StoredVersionedRow for ContractCode {
             .get_results::<Self>(conn)
             .await?
             .into_iter()
-            .map(|e| Box::new(e))
+            .map(Box::new)
             .collect())
     }
 
@@ -876,17 +876,19 @@ impl StoredVersionedRow for ContractStorage {
     type Version = NaiveDateTime;
 
     fn get_pk(&self) -> Self::PrimaryKey {
-        return self.id;
+        self.id
     }
 
     fn get_valid_to(&self) -> Self::Version {
-        return self.valid_to.expect("valid_to is set")
+        self.valid_to.expect("valid_to is set")
     }
 
     fn get_entity_id(&self) -> Self::EntityId {
         (self.account_id, self.slot.clone())
     }
 
+    // Clippy false positive
+    #[allow(clippy::mutable_key_type)]
     async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
         ids: I,
         conn: &mut AsyncPgConnection,
@@ -909,7 +911,7 @@ impl StoredVersionedRow for ContractStorage {
             .await?
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(&cs.account_id, &cs.slot)))
-            .map(|cs| Box::new(cs))
+            .map(Box::new)
             .collect())
     }
 

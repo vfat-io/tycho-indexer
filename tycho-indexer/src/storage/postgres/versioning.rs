@@ -38,7 +38,6 @@
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
-    debug_query,
     pg::Pg,
     query_builder::{BoxedSqlQuery, SqlQuery},
     sql_query,
@@ -132,7 +131,7 @@ pub trait StoredVersionedRow {
 /// version to each row if there is a duplicated entity in the collection. Entities are invalidated
 /// according to their sort key in ascending order.
 fn set_versioning_attributes<O: VersionedRow>(
-    objects: &mut Vec<O>,
+    objects: &mut [O],
 ) -> HashMap<O::EntityId, O::Version> {
     let mut db_updates = HashMap::new();
     objects.sort_by_cached_key(|e| e.get_sort_key());
@@ -158,7 +157,7 @@ fn set_versioning_attributes<O: VersionedRow>(
 /// Same as `set_versioning_attributes` but will also set previous value for delta versioned table
 /// entries.
 fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Debug>(
-    objects: &mut Vec<O>,
+    objects: &mut [O],
 ) -> HashMap<O::EntityId, O::Version> {
     let mut db_updates = HashMap::new();
 
@@ -230,7 +229,7 @@ fn build_batch_update_query<'a, O: StoredVersionedRow>(
 /// - Given the new entries query the table currently valid versions
 /// - Execute and update query to invalidate the previously retrieved entries
 pub async fn apply_versioning<'a, N, S>(
-    new_data: &mut Vec<N>,
+    new_data: &mut [N],
     conn: &mut AsyncPgConnection,
 ) -> Result<(), StorageError>
 where
@@ -243,7 +242,7 @@ where
     }
 
     let end_versions = set_versioning_attributes(new_data);
-    let db_rows = S::latest_versions_by_ids(end_versions.keys().into_iter().cloned(), conn).await?;
+    let db_rows = S::latest_versions_by_ids(end_versions.keys().cloned(), conn).await?;
     if !db_rows.is_empty() {
         build_batch_update_query(&db_rows, S::table_name(), &end_versions)
             .execute(conn)
@@ -256,7 +255,7 @@ where
 ///
 /// Same as `apply_versioning` but also takes care of previous value columns.
 pub async fn apply_delta_versioning<'a, N, S>(
-    new_data: &mut Vec<N>,
+    new_data: &mut [N],
     conn: &mut AsyncPgConnection,
 ) -> Result<(), StorageError>
 where
@@ -268,7 +267,7 @@ where
         return Ok(())
     }
     let end_versions = set_delta_versioning_attributes(new_data);
-    let db_rows = S::latest_versions_by_ids(end_versions.keys().into_iter().cloned(), conn).await?;
+    let db_rows = S::latest_versions_by_ids(end_versions.keys().cloned(), conn).await?;
     if !db_rows.is_empty() {
         build_batch_update_query(&db_rows, S::table_name(), &end_versions)
             .execute(conn)
