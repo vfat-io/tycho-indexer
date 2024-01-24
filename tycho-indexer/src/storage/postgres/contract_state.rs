@@ -2141,7 +2141,6 @@ mod test {
             .unwrap()
             .into_iter()
             .collect();
-        dbg!(&fetched_slot_data);
         assert!(slot_data_tx_1 == fetched_slot_data);
     }
 

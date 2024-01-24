@@ -164,18 +164,12 @@ fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Debug>(
 
     objects.sort_by_cached_key(|e| e.get_sort_key());
 
-    dbg!(&objects);
-
     db_updates.insert(objects[0].get_entity_id(), objects[0].get_valid_from());
 
     for i in 0..objects.len() - 1 {
         let (head, tail) = objects.split_at_mut(i + 1);
         let current = &mut head[head.len() - 1];
         let next = &mut tail[0];
-
-        dbg!(i);
-        dbg!(&current);
-        dbg!(&next);
 
         if current.get_entity_id() == next.get_entity_id() {
             current.set_valid_to(next.get_valid_from());
@@ -199,7 +193,6 @@ fn build_batch_update_query<'a, O: StoredVersionedRow>(
     table_name: &str,
     end_versions: &'a HashMap<O::EntityId, O::Version>,
 ) -> BoxedSqlQuery<'a, Pg, SqlQuery> {
-    dbg!(objects.len());
     let bind_params = (1..=objects.len() * 2)
         .map(|i| if i % 2 == 0 { format!("${}", i) } else { format!("(${}", i) })
         .collect::<Vec<String>>()
@@ -207,7 +200,6 @@ fn build_batch_update_query<'a, O: StoredVersionedRow>(
         .map(|chunk| chunk.join(", ") + ")")
         .collect::<Vec<String>>()
         .join(", ");
-    dbg!(&bind_params);
     let query_str = format!(
         r#"
         UPDATE {} as t set
@@ -219,7 +211,6 @@ fn build_batch_update_query<'a, O: StoredVersionedRow>(
         "#,
         table_name, bind_params
     );
-    dbg!(&query_str);
     let mut query = sql_query(query_str).into_boxed();
     for o in objects.iter() {
         let valid_to = *end_versions
@@ -229,7 +220,6 @@ fn build_batch_update_query<'a, O: StoredVersionedRow>(
             .bind::<BigInt, _>(o.get_pk().into())
             .bind::<Timestamp, _>(valid_to.into());
     }
-    dbg!(debug_query(&query).to_string());
     query
 }
 

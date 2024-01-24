@@ -896,9 +896,7 @@ impl StoredVersionedRow for ContractStorage {
             .iter()
             .zip(slots.iter())
             .collect::<HashSet<_>>();
-        dbg!(&accounts);
-        dbg!(&slots);
-        let tmp = contract_storage::table
+        Ok(contract_storage::table
             .select(ContractStorage::as_select())
             .into_boxed()
             .filter(
@@ -908,9 +906,7 @@ impl StoredVersionedRow for ContractStorage {
                     .and(contract_storage::valid_to.is_null()),
             )
             .get_results(conn)
-            .await?;
-        dbg!(&tmp);
-        Ok(tmp
+            .await?
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(&cs.account_id, &cs.slot)))
             .map(|cs| Box::new(cs))
