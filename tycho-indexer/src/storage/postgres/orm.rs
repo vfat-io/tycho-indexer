@@ -425,6 +425,9 @@ impl ProtocolState {
             .await
     }
 
+    /// retrieves all matching protocol states along with their linked component ids and transaction
+    /// hashes. To get state deltas, provide a start and end timestamp. To get full states, provide
+    /// either only an end timestamp or no timestamp (latest state).
     pub async fn by_protocol_system(
         system: String,
         chain_id: i64,
@@ -469,6 +472,9 @@ impl ProtocolState {
             .await
     }
 
+    /// retrieves all matching protocol states along with their linked component ids and transaction
+    /// hashes. To get state deltas, provide a start and end timestamp. To get full states, provide
+    /// either only an end timestamp or no timestamp (latest state).
     pub async fn by_chain(
         chain_id: i64,
         start_ts: Option<NaiveDateTime>,
@@ -511,7 +517,7 @@ impl ProtocolState {
     pub async fn deleted_by_id(
         component_ids: &[&str],
         chain_id: i64,
-        start_ts: Option<NaiveDateTime>,
+        start_ts: NaiveDateTime,
         end_ts: NaiveDateTime,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(Self, String, Bytes)>> {
@@ -548,10 +554,11 @@ impl ProtocolState {
             .await
     }
 
+    /// retrieves all matching protocol states where their attributes have been deleted
     pub async fn deleted_by_protocol_system(
         system: String,
         chain_id: i64,
-        start_ts: Option<NaiveDateTime>,
+        start_ts: NaiveDateTime,
         end_ts: NaiveDateTime,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(Self, String, Bytes)>> {
@@ -592,9 +599,10 @@ impl ProtocolState {
             .await
     }
 
+    /// retrieves all matching protocol states where their attributes have been deleted
     pub async fn deleted_by_chain(
         chain_id: i64,
-        start_ts: Option<NaiveDateTime>,
+        start_ts: NaiveDateTime,
         end_ts: NaiveDateTime,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(Self, String, Bytes)>> {
@@ -627,6 +635,119 @@ impl ProtocolState {
             ))
             .select((Self::as_select(), protocol_component::external_id, transaction::hash))
             .get_results::<(Self, String, Bytes)>(conn)
+            .await
+    }
+
+    // retrieves old values for matching protocol states
+    pub async fn reverted_by_id(
+        component_ids: &[&str],
+        chain_id: i64,
+        start_ts: NaiveDateTime,
+        end_ts: NaiveDateTime,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(String, String, Option<Bytes>)>> {
+        // We query all states that were added between the start and end timestamps, filtered by
+        // component id. We then group it by component and attribute and order it by tx,
+        // then we deduplicate by taking the first row per group. This gives us the first
+        // state update for each component-attribute pair. Finally, we return the component id,
+        // attribute name and previous value for each component-attribute pair.
+        protocol_state::table
+            .inner_join(
+                protocol_component::table
+                    .on(protocol_component::id.eq(protocol_state::protocol_component_id)),
+            )
+            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
+            .filter(protocol_component::external_id.eq_any(component_ids))
+            .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(protocol_state::valid_from.gt(end_ts))
+            .filter(protocol_state::valid_from.le(start_ts))
+            .order_by((
+                protocol_state::protocol_component_id,
+                protocol_state::attribute_name,
+                transaction::block_id,
+                transaction::index,
+            ))
+            .select((
+                protocol_component::external_id,
+                protocol_state::attribute_name,
+                protocol_state::previous_value,
+            ))
+            .distinct_on((protocol_state::protocol_component_id, protocol_state::attribute_name))
+            .get_results::<(String, String, Option<Bytes>)>(conn)
+            .await
+    }
+
+    // retrieves old values for matching protocol states
+    pub async fn reverted_by_system(
+        system: String,
+        chain_id: i64,
+        start_ts: NaiveDateTime,
+        end_ts: NaiveDateTime,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(String, String, Option<Bytes>)>> {
+        // We query all states that were added between the start and end timestamps, filtered by
+        // system. We then group it by component and attribute and order it by tx,
+        // then we deduplicate by taking the first row per group. This gives us the first
+        // state update for each component-attribute pair. Finally, we return the component id,
+        // attribute name and previous value for each component-attribute pair.
+        protocol_state::table
+            .inner_join(protocol_component::table)
+            .inner_join(
+                protocol_system::table
+                    .on(protocol_component::protocol_system_id.eq(protocol_system::id)),
+            )
+            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
+            .filter(protocol_system::name.eq(system.to_string()))
+            .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(protocol_state::valid_from.gt(end_ts))
+            .filter(protocol_state::valid_from.le(start_ts))
+            .order_by((
+                protocol_state::protocol_component_id,
+                protocol_state::attribute_name,
+                transaction::block_id,
+                transaction::index,
+            ))
+            .select((
+                protocol_component::external_id,
+                protocol_state::attribute_name,
+                protocol_state::previous_value,
+            ))
+            .distinct_on((protocol_state::protocol_component_id, protocol_state::attribute_name))
+            .get_results::<(String, String, Option<Bytes>)>(conn)
+            .await
+    }
+
+    // retrieves old values for matching protocol states
+    pub async fn reverted_by_chain(
+        chain_id: i64,
+        start_ts: NaiveDateTime,
+        end_ts: NaiveDateTime,
+        conn: &mut AsyncPgConnection,
+    ) -> QueryResult<Vec<(String, String, Option<Bytes>)>> {
+        // We query all states that were added between the start and end timestamps, filtered by
+        // chain. We then group it by component and attribute and order it by tx,
+        // then we deduplicate by taking the first row per group. This gives us the first
+        // state update for each component-attribute pair. Finally, we return the component id,
+        // attribute name and previous value for each component-attribute pair.
+        protocol_state::table
+            .inner_join(protocol_component::table)
+            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
+            .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(protocol_state::valid_from.gt(end_ts))
+            .filter(protocol_state::valid_from.le(start_ts))
+            .order_by((
+                protocol_state::protocol_component_id,
+                protocol_state::attribute_name,
+                transaction::block_id,
+                transaction::index,
+            ))
+            .select((
+                protocol_component::external_id,
+                protocol_state::attribute_name,
+                protocol_state::previous_value,
+            ))
+            .distinct_on((protocol_state::protocol_component_id, protocol_state::attribute_name))
+            .get_results::<(String, String, Option<Bytes>)>(conn)
             .await
     }
 }
