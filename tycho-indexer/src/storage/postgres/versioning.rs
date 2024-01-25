@@ -11,8 +11,8 @@
 //!
 //! * `DeltaVersionedRow`: Same as above but will also set `previous_value`` attributes.
 //!
-//! * `StoredVersionedRow`: This trait provides to set the end version on currently active version
-//!   in the db based on the currently incoming data.
+//! * `StoredVersionedRow`: Enables setting the end version on currently active version in the db
+//!   based on new incoming entries.
 //!
 //! ## Notes
 //! To use the apply_versioning function defined here VersionRow::EntityId and
@@ -22,12 +22,12 @@
 //! # Design Decisions
 //!
 //! Initially we would support references in EntityId, to reduce the number of clones necessary for
-//! compley entity id types. This would lead to a strange situation, where these the trait bounds
-//! for the `apply_versioning` method would not be expressable. Reasons fot this are not 100% clear
-//! but `latest_versions_by_ids` referring to the `StoredVersionedRow::EntityId`` but actually being
-//! used with `VersionedRow::EntityId` is most likely related. Previous iterations had lifetimes on
-//! `StoredVersionedRow<'a>` but as said the mangement of lifetimes become increasingly complex to a
-//! point where apply_versioning was not always usable.
+//! complex entity id types. This would lead to a strange situation, where these trait bounds
+//! for the `apply_versioning` method would not be expressible. Reasons for this are not 100% clear,
+//! however, `latest_versions_by_ids` referring to the `StoredVersionedRow::EntityId`` but actually
+//! being used with `VersionedRow::EntityId` is most likely related. Previous iterations had
+//! lifetimes on `StoredVersionedRow<'a>` but as said, the management of lifetimes became
+//! increasingly complex to a point where apply_versioning was not always usable.
 //!
 //! Instead we removed support for references in the EntityId type for now and just accept the high
 //! number of clones necessary. This may be revisited later again in case the clones become a
@@ -53,7 +53,7 @@ use std::fmt::Debug;
 ///
 /// This trait enables querying the struct for its current state and allows to set the `valid_to``
 /// column in case we are inserting a historical row (row that is outdated at the time of insertion,
-/// but contributes to the historiy of the entity).
+/// but contributes to the history of the entity).
 pub trait VersionedRow {
     /// Rust type to use as key to sort a collection of structs by entity and time.
     type SortKey: Ord + Clone + Debug + Send + Sync;
@@ -75,7 +75,7 @@ pub trait VersionedRow {
     fn get_valid_from(&self) -> Self::Version;
 }
 
-/// Trait indicating that a struct can be insered in a delta versioned table.
+/// Trait indicating that a struct can be inserted in a delta versioned table.
 ///
 /// Delta versioned records require the previous value present in one of their columns. This serves
 /// to build both forward and backward delta changes while avoiding self joins.
@@ -89,7 +89,7 @@ pub trait DeltaVersionedRow {
     fn set_previous_value(&mut self, previous_value: Self::Value);
 }
 
-/// Indicates the struct relates to a stored entry in a versioned table
+/// Trait indicating that a struct relates to a stored entry in a versioned table.
 ///
 /// This struct is used to invalidate rows that are currently valid on the db side before inserting
 /// new versions for those entities.
@@ -192,6 +192,8 @@ fn build_batch_update_query<'a, O: StoredVersionedRow>(
     table_name: &str,
     end_versions: &'a HashMap<O::EntityId, O::Version>,
 ) -> BoxedSqlQuery<'a, Pg, SqlQuery> {
+    // Generate bind parameter 2-tuples the result will look like '($1, $2), ($3, $4), ...'
+    // These are later subsituted with the primary key and valid to values.
     let bind_params = (1..=objects.len() * 2)
         .map(|i| if i % 2 == 0 { format!("${}", i) } else { format!("(${}", i) })
         .collect::<Vec<String>>()
