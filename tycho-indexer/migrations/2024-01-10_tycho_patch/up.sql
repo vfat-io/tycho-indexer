@@ -49,7 +49,13 @@ DROP FUNCTION invalidate_previous_entry_protocol_state();
 ALTER TABLE protocol_system
 ADD CONSTRAINT name_unique UNIQUE (name);
 
+-- Adding a junction Table to establish a many-to-many relationship between protocol_components and tokens
+CREATE TABLE IF NOT EXISTS protocol_component_token_junction (
+    protocol_component_id bigint REFERENCES protocol_component(id) ON DELETE CASCADE,
+    token_id bigint REFERENCES token(id) ON DELETE CASCADE,
+    PRIMARY KEY (protocol_component_id, token_id)
+);
 
--- Make the "account_id" column of the token unique
-ALTER TABLE token
-    ADD CONSTRAINT unique_account_id_constraint UNIQUE (account_id);
+CREATE INDEX IF NOT EXISTS idx_protocol_component_token_protocol_component_id ON protocol_component_token_junction(protocol_component_id);
+CREATE INDEX IF NOT EXISTS idx_protocol_component_token_token_id ON protocol_component_token_junction(token_id);
+
