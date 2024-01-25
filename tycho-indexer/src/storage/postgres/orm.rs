@@ -309,7 +309,8 @@ pub struct ProtocolType {
 }
 
 #[derive(Identifiable, Queryable, Selectable)]
-#[diesel(table_name = component_balance)] // reference to tokens and transactions
+#[diesel(table_name = component_balance)]
+#[diesel(belongs_to(ProtocolComponent))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ComponentBalance {
     pub id: i64,
