@@ -1,8 +1,9 @@
+use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{dsl::sql, prelude::*, sql_types::Bool};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     hex_bytes::Bytes,
@@ -13,10 +14,13 @@ use crate::{
     },
 };
 
-use super::schema::{
-    account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
-    protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
-    token, transaction,
+use super::{
+    schema::{
+        account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
+        protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
+        token, transaction,
+    },
+    versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
 };
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -897,6 +901,43 @@ impl AccountBalance {
     }
 }
 
+#[async_trait]
+impl StoredVersionedRow for AccountBalance {
+    type EntityId = i64;
+    type PrimaryKey = i64;
+    type Version = NaiveDateTime;
+
+    fn get_pk(&self) -> Self::PrimaryKey {
+        self.id
+    }
+
+    fn get_valid_to(&self) -> Self::Version {
+        self.valid_to.expect("valid to set")
+    }
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        self.account_id
+    }
+
+    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Box<Self>>, StorageError> {
+        Ok(account_balance::table
+            .filter(account_balance::account_id.eq_any(ids))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await?
+            .into_iter()
+            .map(Box::new)
+            .collect())
+    }
+
+    fn table_name() -> &'static str {
+        "account_balance"
+    }
+}
+
 #[derive(Insertable, Debug)]
 #[diesel(table_name = account_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -906,6 +947,28 @@ pub struct NewAccountBalance {
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
+}
+
+impl VersionedRow for NewAccountBalance {
+    type SortKey = (i64, NaiveDateTime, i64);
+    type EntityId = i64;
+    type Version = NaiveDateTime;
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        self.account_id
+    }
+
+    fn get_sort_key(&self) -> Self::SortKey {
+        (self.account_id, self.valid_from, self.modify_tx)
+    }
+
+    fn set_valid_to(&mut self, end_version: Self::Version) {
+        self.valid_to = Some(end_version);
+    }
+
+    fn get_valid_from(&self) -> Self::Version {
+        self.valid_from
+    }
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
@@ -939,6 +1002,43 @@ impl ContractCode {
     }
 }
 
+#[async_trait]
+impl StoredVersionedRow for ContractCode {
+    type EntityId = i64;
+    type PrimaryKey = i64;
+    type Version = NaiveDateTime;
+
+    fn get_pk(&self) -> Self::PrimaryKey {
+        self.id
+    }
+
+    fn get_valid_to(&self) -> Self::Version {
+        self.valid_to.expect("valid to set")
+    }
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        self.account_id
+    }
+
+    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Box<Self>>, StorageError> {
+        Ok(contract_code::table
+            .filter(contract_code::account_id.eq_any(ids))
+            .select(Self::as_select())
+            .get_results::<Self>(conn)
+            .await?
+            .into_iter()
+            .map(Box::new)
+            .collect())
+    }
+
+    fn table_name() -> &'static str {
+        "contract_code"
+    }
+}
+
 #[derive(Insertable, Debug)]
 #[diesel(table_name = contract_code)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -949,6 +1049,28 @@ pub struct NewContractCode<'a> {
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
+}
+
+impl<'a> VersionedRow for NewContractCode<'a> {
+    type SortKey = (i64, NaiveDateTime, i64);
+    type EntityId = i64;
+    type Version = NaiveDateTime;
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        self.account_id
+    }
+
+    fn get_sort_key(&self) -> Self::SortKey {
+        (self.account_id, self.valid_from, self.modify_tx)
+    }
+
+    fn set_valid_to(&mut self, end_version: Self::Version) {
+        self.valid_to = Some(end_version);
+    }
+
+    fn get_valid_from(&self) -> Self::Version {
+        self.valid_from
+    }
 }
 
 // theoretically this struct could also simply reference the original struct.
@@ -1027,16 +1149,103 @@ pub struct ContractStorage {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Insertable)]
+#[async_trait]
+impl StoredVersionedRow for ContractStorage {
+    type EntityId = (i64, Bytes);
+    type PrimaryKey = i64;
+    type Version = NaiveDateTime;
+
+    fn get_pk(&self) -> Self::PrimaryKey {
+        self.id
+    }
+
+    fn get_valid_to(&self) -> Self::Version {
+        self.valid_to.expect("valid_to is set")
+    }
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        (self.account_id, self.slot.clone())
+    }
+
+    // Clippy false positive
+    #[allow(clippy::mutable_key_type)]
+    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Box<Self>>, StorageError> {
+        let (accounts, slots): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
+        let tuple_ids = accounts
+            .iter()
+            .zip(slots.iter())
+            .collect::<HashSet<_>>();
+        Ok(contract_storage::table
+            .select(ContractStorage::as_select())
+            .into_boxed()
+            .filter(
+                contract_storage::account_id
+                    .eq_any(&accounts)
+                    .and(contract_storage::slot.eq_any(&slots))
+                    .and(contract_storage::valid_to.is_null()),
+            )
+            .get_results(conn)
+            .await?
+            .into_iter()
+            .filter(|cs| tuple_ids.contains(&(&cs.account_id, &cs.slot)))
+            .map(Box::new)
+            .collect())
+    }
+
+    fn table_name() -> &'static str {
+        "contract_storage"
+    }
+}
+
+#[derive(Insertable, Debug)]
 #[diesel(table_name = contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewSlot<'a> {
     pub slot: &'a Bytes,
     pub value: Option<&'a Bytes>,
+    pub previous_value: Option<&'a Bytes>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub ordinal: i64,
     pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
+}
+
+impl<'a> VersionedRow for NewSlot<'a> {
+    type EntityId = (i64, Bytes);
+    type SortKey = ((i64, Bytes), NaiveDateTime, i64);
+    type Version = NaiveDateTime;
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        (self.account_id, self.slot.clone())
+    }
+
+    fn get_sort_key(&self) -> Self::SortKey {
+        (self.get_entity_id(), self.valid_from, self.ordinal)
+    }
+
+    fn set_valid_to(&mut self, end_version: Self::Version) {
+        self.valid_to = Some(end_version);
+    }
+
+    fn get_valid_from(&self) -> Self::Version {
+        self.valid_from
+    }
+}
+
+impl<'a> DeltaVersionedRow for NewSlot<'a> {
+    type Value = Option<&'a Bytes>;
+
+    fn get_value(&self) -> Self::Value {
+        self.value
+    }
+
+    fn set_previous_value(&mut self, previous_value: Self::Value) {
+        self.previous_value = previous_value
+    }
 }
 
 pub struct Contract {
