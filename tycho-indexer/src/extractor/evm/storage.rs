@@ -165,12 +165,15 @@ pub mod pg {
             token_id: i64,
             modify_tx: i64,
             protocol_component_id: i64,
+            block_ts: NaiveDateTime,
         ) -> orm::NewTvlChange {
             orm::NewTvlChange {
                 token_id,
                 new_balance: self.new_balance.clone(),
                 modify_tx,
                 protocol_component_id,
+                valid_from: block_ts,
+                valid_to: None,
             }
         }
     }

@@ -74,5 +74,10 @@ CREATE TABLE IF NOT EXISTS tvl_change(
     -- Reference to static attributes of the protocol.
     "protocol_component_id" bigint REFERENCES protocol_component(id) NOT NULL,
     -- Timestamp this entry was inserted into this table.
-    "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- The ts at which this state became valid at.
+    "valid_from" timestamptz NOT NULL,
+    -- The ts at which this state stopped being valid at. Null if this
+    --	state is the currently valid entry.
+    "valid_to" timestamptz
     );

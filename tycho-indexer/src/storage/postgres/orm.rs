@@ -318,6 +318,8 @@ pub struct TvlChange {
     pub modify_tx: i64,
     pub protocol_component_id: i64,
     pub inserted_ts: NaiveDateTime,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
 }
 
 #[derive(AsChangeset, Insertable)]
@@ -328,6 +330,30 @@ pub struct NewTvlChange {
     pub new_balance: Balance,
     pub modify_tx: i64,
     pub protocol_component_id: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
+}
+
+impl VersionedRow for NewTvlChange {
+    type SortKey = (i64, NaiveDateTime, i64);
+    type EntityId = i64;
+    type Version = NaiveDateTime;
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        self.protocol_component_id
+    }
+
+    fn get_sort_key(&self) -> Self::SortKey {
+        (self.protocol_component_id, self.valid_from, self.modify_tx)
+    }
+
+    fn set_valid_to(&mut self, end_version: Self::Version) {
+        self.valid_to = Some(end_version);
+    }
+
+    fn get_valid_from(&self) -> Self::Version {
+        self.valid_from
+    }
 }
 
 #[derive(AsChangeset, Insertable)]

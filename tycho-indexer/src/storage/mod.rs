@@ -266,7 +266,13 @@ pub trait StorableProtocolType<S, N, I>: Sized + Send + Sync + 'static {
 ///   the transaction.
 pub trait StorableTvlChange<S, N, I>: Sized + Send + Sync + 'static {
     /// Converts a protocol type object to its storable representation (`N`).
-    fn to_storage(&self, account_id: i64, modify_tx: i64, protocol_component_id: i64) -> N;
+    fn to_storage(
+        &self,
+        account_id: i64,
+        modify_tx: i64,
+        protocol_component_id: i64,
+        block_ts: NaiveDateTime,
+    ) -> N;
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -699,6 +705,7 @@ pub trait ProtocolGateway {
         &self,
         chain: Chain,
         tvl_changes: &[&Self::TvlChange],
+        block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 

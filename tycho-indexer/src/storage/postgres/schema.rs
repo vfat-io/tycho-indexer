@@ -242,6 +242,8 @@ diesel::table! {
         modify_tx -> Int8,
         protocol_component_id -> Int8,
         inserted_ts -> Timestamptz,
+        valid_from -> Timestamptz,
+        valid_to -> Nullable<Timestamptz>,
     }
 }
 

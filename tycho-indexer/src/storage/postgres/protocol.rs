@@ -9,7 +9,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ERC20Token, ProtocolComponent, ProtocolState, ProtocolStateDelta, TvlChange},
+    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta, TvlChange},
     hex_bytes::Bytes,
     models::{Chain, ProtocolType},
     storage::{
@@ -21,9 +21,7 @@ use crate::{
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ContractId, ProtocolGateway,
         StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolState,
         StorableProtocolStateDelta, StorableProtocolType, StorableToken, StorableTransaction,
-        StorableTvlChange, StorageError,
-        StorageError::DecodeError,
-        TxHash, Version,
+        StorableTvlChange, StorageError, TxHash, Version,
     },
 };
 
@@ -535,6 +533,7 @@ where
         &self,
         chain: Chain,
         tvl_changes: &[&Self::TvlChange],
+        block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
@@ -569,8 +568,12 @@ where
             let transaction_id = transaction_ids[&transaction_hashes[index]];
             let protocol_component_id = protocol_component_ids[&external_ids[index]];
 
-            let new_tvl_change =
-                tvl_change.to_storage(current_account_id, transaction_id, protocol_component_id);
+            let new_tvl_change = tvl_change.to_storage(
+                current_account_id,
+                transaction_id,
+                protocol_component_id,
+                block_ts,
+            );
             new_tvl_changes.push(new_tvl_change);
         }
 
@@ -1190,8 +1193,9 @@ mod test {
         };
 
         let tvl_changes = vec![&tvl_change];
-        // Insert the new ProtocolComponent into the database
-        gw.add_tvl_changes(Chain::Ethereum, &tvl_changes, &mut conn)
+        let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
+
+        gw.add_tvl_changes(Chain::Ethereum, &tvl_changes, block_ts, &mut conn)
             .await
             .unwrap();
 
