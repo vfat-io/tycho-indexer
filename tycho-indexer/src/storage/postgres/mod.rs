@@ -564,30 +564,27 @@ pub mod testing {
     /// Run tests that require committing data to the db.
     ///
     /// This function will run tests that are expected to commit data into the database, e.g.
-    /// because the test setups are to complex for using `begin_test_transaction`. Please only use
+    /// because the test setups are too complex for using `begin_test_transaction`. Please only use
     /// this as a last resort as these tests are slow and have to be run serially. Using a test
-    /// transaction is preferred were possible.
+    /// transaction is preferred where possible.  
     ///
     /// The method will pass a connection pool to the actual test function, catch any panics and
     /// then purge all data in the tables so that the next test can run from a clean slate.
     ///
     /// ## Interference with other tests
-    /// While this function runs, the db will actually contain data. This means two things:
+    /// While this function runs, the db will actually contain data.
     ///
-    ///     1. It is likely to interfere with other tests using this same function. To mitigate
-    ///        this, you can use the `#[serial]` macro which will execute these tests sequentially.
-    ///     2. Other tests that rely on a empty db (most tests unsing test transactions) will likely
-    ///        be affected if run in parrallel with this function. To keep running these tests in
-    ///        parallel but avoid running them during the sequential tests use the macro
-    ///        #[parallel].
+    /// This is likely to interfere with other tests using this same function. To mitigate this, the
+    /// test name or the package should contain the string `serial_db`, this way nextest will
+    /// automatically put these test into a separate group.
+    /// Other tests that rely on a empty db (most tests unsing test_transactions) will likely
+    /// be affected if run in parrallel with tests using this function. CI will automatically
+    /// partition the serial and parallel tests into two separate groups.
     ///
     /// ## Example
     /// ```
-    /// use serial_test::serial;
-    ///
     /// #[tokio::test]
-    /// #[serial]
-    /// fn test_commit() {
+    /// fn test_serial_db_mytest_name() {
     ///     run_against_db(|connection_pool| async move {
     ///         println!("here goes actual test code")
     ///     }).await;
