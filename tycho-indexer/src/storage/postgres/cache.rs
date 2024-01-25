@@ -577,7 +577,6 @@ mod test_serial_db {
     };
     use diesel_async::AsyncPgConnection;
     use ethers::{prelude::H256, types::H160};
-    use serial_test::serial;
     use std::{str::FromStr, sync::Arc};
     use tokio::sync::{
         mpsc,
@@ -587,7 +586,6 @@ mod test_serial_db {
     use tokio::sync::mpsc::error::TryRecvError::Empty;
 
     #[tokio::test]
-    #[serial]
     async fn test_write_and_flush() {
         run_against_db(|connection_pool| async move {
             let mut connection = connection_pool
@@ -659,7 +657,6 @@ mod test_serial_db {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_writes_and_new_blocks() {
         run_against_db(|connection_pool| async move {
             let mut connection = connection_pool
@@ -784,7 +781,6 @@ mod test_serial_db {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_revert() {
         // Setup
         run_against_db(|connection_pool| async move {
@@ -885,7 +881,6 @@ mod test_serial_db {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_cached_gateway() {
         // Setup
         run_against_db(|connection_pool| async move {
@@ -993,7 +988,6 @@ mod test_serial_db {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_cached_gateway_revert() {
         run_against_db(|connection_pool| async move {
             let mut connection = connection_pool

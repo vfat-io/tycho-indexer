@@ -67,10 +67,8 @@ utoipa-swagger-ui = { version = "6.0.0", features = ["actix-web"] }
 lru = "0.12.1"
 
 [dev-dependencies]
-serial_test = "3.0.0"
 actix-rt = "2.9.0"
 actix-test = "0.1.2"
 rstest = "0.18.2"
 tokio-tungstenite = "0.20.0"
 pretty_assertions = "1.4.0"
-

@@ -524,7 +524,6 @@ mod test_serial_db {
     };
     use ethers::types::U256;
     use mpsc::channel;
-    use serial_test::serial;
     use std::collections::HashMap;
     use tokio::sync::{
         mpsc,
@@ -576,7 +575,6 @@ mod test_serial_db {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_get_cursor() {
         run_against_db(|pool| async move {
             let (gw, mut err_rx, pool) = setup_gw(pool).await;
@@ -693,7 +691,6 @@ mod test_serial_db {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_upsert_contract() {
         run_against_db(|pool| async move {
             let (gw, mut err_rx, pool) = setup_gw(pool).await;
@@ -736,7 +733,6 @@ mod test_serial_db {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_revert() {
         run_against_db(|pool| async move {
             let mut conn = pool

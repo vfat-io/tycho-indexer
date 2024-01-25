@@ -260,7 +260,6 @@ mod tests {
     use actix_web::test;
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
-    use serial_test::parallel;
 
     use std::{collections::HashMap, str::FromStr, sync::Arc};
 
@@ -472,7 +471,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[parallel]
     async fn test_get_state() {
         let db_url = std::env::var("DATABASE_URL").unwrap();
         let pool = postgres::connect(&db_url)

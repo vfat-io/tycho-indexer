@@ -589,7 +589,6 @@ mod test {
     use ethers::{prelude::H160, types::U256};
     use rstest::rstest;
     use serde_json::json;
-    use serial_test::parallel;
 
     use crate::{
         hex_bytes::Bytes,
@@ -759,7 +758,7 @@ mod test {
     #[case::by_system(Some("ambient".to_string()), None)]
     #[case::by_ids(None, Some(vec ! ["state1"]))]
     #[tokio::test]
-    #[parallel]
+
     async fn test_get_protocol_states(
         #[case] system: Option<String>,
         #[case] ids: Option<Vec<&str>>,
@@ -780,7 +779,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[parallel]
+
     async fn test_get_protocol_states_at() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -832,7 +831,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[parallel]
+
     async fn test_update_protocol_states() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -948,7 +947,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[parallel]
+
     async fn test_get_or_create_protocol_system_id() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -1027,7 +1026,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[parallel]
+
     async fn test_get_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1058,7 +1057,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[parallel]
+
     async fn test_add_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1124,7 +1123,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[parallel]
+
     async fn test_add_protocol_components() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1207,7 +1206,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[parallel]
+
     async fn test_delete_protocol_components() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1250,7 +1249,7 @@ mod test {
     #[case::get_one(Some("zigzag".to_string()))]
     #[case::get_none(Some("ambient".to_string()))]
     #[tokio::test]
-    #[parallel]
+
     async fn test_get_protocol_components_with_system_only(#[case] system: Option<String>) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1287,7 +1286,7 @@ mod test {
     #[case::get_one("state1".to_string())]
     #[case::get_none("state2".to_string())]
     #[tokio::test]
-    #[parallel]
+
     async fn test_get_protocol_components_with_external_id_only(#[case] external_id: String) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1321,7 +1320,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[parallel]
+
     async fn test_get_protocol_components_with_system_and_ids() {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1348,7 +1347,7 @@ mod test {
     #[case::get_one(Chain::Ethereum, 0)]
     #[case::get_none(Chain::Starknet, 1)]
     #[tokio::test]
-    #[parallel]
+
     async fn test_get_protocol_components_with_chain_filter(#[case] chain: Chain, #[case] i: i64) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
