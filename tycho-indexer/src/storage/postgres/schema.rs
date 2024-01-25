@@ -175,8 +175,8 @@ diesel::table! {
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
         protocol_component_id -> Int8,
-        attribute_name -> Nullable<Varchar>,
-        attribute_value -> Nullable<Bytea>,
+        attribute_name -> Varchar,
+        attribute_value -> Bytea,
         previous_value -> Nullable<Bytea>,
     }
 }
@@ -249,7 +249,6 @@ diesel::joinable!(protocol_calls_contract -> protocol_component (protocol_compon
 diesel::joinable!(protocol_component -> chain (chain_id));
 diesel::joinable!(protocol_component -> protocol_system (protocol_system_id));
 diesel::joinable!(protocol_component -> protocol_type (protocol_type_id));
-diesel::joinable!(protocol_component -> transaction (id));
 diesel::joinable!(protocol_holds_token -> protocol_component (protocol_component_id));
 diesel::joinable!(protocol_holds_token -> token (token_id));
 diesel::joinable!(protocol_state -> protocol_component (protocol_component_id));

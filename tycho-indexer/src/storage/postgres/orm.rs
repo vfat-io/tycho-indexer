@@ -371,8 +371,8 @@ impl ProtocolComponent {
 pub struct ProtocolState {
     pub id: i64,
     pub protocol_component_id: i64,
-    pub attribute_name: Option<String>,
-    pub attribute_value: Option<Bytes>,
+    pub attribute_name: String,
+    pub attribute_value: Bytes,
     pub previous_value: Option<Bytes>,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
@@ -393,10 +393,7 @@ impl ProtocolState {
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(Self, String, Bytes)>> {
         let mut query = protocol_state::table
-            .inner_join(
-                protocol_component::table
-                    .on(protocol_component::id.eq(protocol_state::protocol_component_id)),
-            )
+            .inner_join(protocol_component::table)
             .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
             .filter(protocol_component::external_id.eq_any(component_ids))
             .filter(protocol_component::chain_id.eq(chain_id))
@@ -519,10 +516,7 @@ impl ProtocolState {
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(Self, String, Bytes)>> {
         let mut query = protocol_state::table
-            .inner_join(
-                protocol_component::table
-                    .on(protocol_component::id.eq(protocol_state::protocol_component_id)),
-            )
+            .inner_join(protocol_component::table)
             .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
             .filter(protocol_component::external_id.eq_any(component_ids))
             .filter(protocol_component::chain_id.eq(chain_id))

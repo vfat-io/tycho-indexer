@@ -1076,7 +1076,7 @@ mod test {
             .first::<orm::ProtocolState>(&mut conn)
             .await
             .expect("Failed to fetch protocol state");
-        assert_eq!(older_state.attribute_value, Some(Bytes::from(U256::from(700))));
+        assert_eq!(older_state.attribute_value, Bytes::from(U256::from(700)));
         // fetch the newer state from the db to compare the valid_from
         let tx_hash2: Bytes = tx_2.as_bytes().into();
         let newer_state = schema::protocol_state::table

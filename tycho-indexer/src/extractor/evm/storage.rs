@@ -413,9 +413,7 @@ pub mod pg {
         ) -> Result<Self, StorageError> {
             let mut attr = HashMap::new();
             for val in vals {
-                if let (Some(name), Some(value)) = (&val.attribute_name, &val.attribute_value) {
-                    attr.insert(name.clone(), value.clone());
-                }
+                attr.insert(val.attribute_name, val.attribute_value);
             }
             Ok(evm::ProtocolState::new(
                 component_id,
@@ -460,9 +458,7 @@ pub mod pg {
         ) -> Result<Self, StorageError> {
             let mut attr = HashMap::new();
             for val in vals {
-                if let (Some(name), Some(value)) = (&val.attribute_name, &val.attribute_value) {
-                    attr.insert(name.clone(), value.clone());
-                }
+                attr.insert(val.attribute_name, val.attribute_value);
             }
 
             match change {

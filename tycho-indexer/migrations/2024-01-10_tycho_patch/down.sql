@@ -44,9 +44,6 @@ $$
 LANGUAGE plpgsql;
 
 ALTER TABLE protocol_state
-DROP CONSTRAINT check_attribute_fields;
-
-ALTER TABLE protocol_state
 DROP COLUMN attribute_name,
 DROP COLUMN attribute_value,
 DROP COLUMN previous_value,
