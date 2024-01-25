@@ -557,7 +557,7 @@ impl DerefMut for CachedGateway {
 }
 
 #[cfg(test)]
-mod test {
+mod test_serial_db {
     use crate::{
         extractor::{evm, evm::EVMStateGateway},
         hex_bytes::Bytes,

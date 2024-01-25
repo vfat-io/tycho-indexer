@@ -528,8 +528,7 @@ pub mod testing {
         let database_url =
             std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
         let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
-        let pool = Pool::builder(config).build().unwrap();
-        pool
+        Pool::builder(config).build().unwrap()
     }
 
     async fn teardown(conn: &mut AsyncPgConnection) {
@@ -557,7 +556,7 @@ pub mod testing {
             sql_query(format!("DELETE FROM {};", t))
                 .execute(conn)
                 .await
-                .expect(&format!("Error truncating {} table", t));
+                .unwrap_or_else(|_| panic!("Error truncating {} table", t));
         }
         dbg!("Teardown completed");
     }

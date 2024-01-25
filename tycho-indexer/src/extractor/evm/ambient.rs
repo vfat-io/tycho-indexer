@@ -505,7 +505,7 @@ mod test {
 }
 
 #[cfg(test)]
-mod gateway_test {
+mod test_serial_db {
     //! It is notoriously hard to mock postgres here, we would need to have traits and abstractions
     //! for the connection pooling as well as for transaction handling so the easiest way
     //! forward is to just run these tests against a real postgres instance.

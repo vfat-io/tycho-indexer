@@ -1,0 +1,6 @@
+[test-groups]
+serial-db = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(~serial_db)'
+test-group = 'serial-db'
