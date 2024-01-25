@@ -808,6 +808,7 @@ pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
         &self,
         chain_id: i64,
         protocol_system_id: i64,
+        protocol_type_id: i64,
         creation_tx: i64,
         created_at: NaiveDateTime,
     ) -> Result<N, StorageError>;

@@ -181,7 +181,11 @@ where
             orm::Transaction::ids_by_hash(&tx_hashes, conn)
                 .await
                 .unwrap();
-
+        let pt_id = orm::ProtocolType::id_by_name(&new[0].protocol_type_id, conn)
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(err, "ProtocolType", &new[0].protocol_type_id, None)
+            })?;
         for pc in new {
             let txh = tx_hash_id_mapping
                 .get::<TxHash>(&pc.creation_tx.into())
@@ -191,6 +195,7 @@ where
                 .to_storage(
                     self.get_chain_id(&pc.chain),
                     self.get_protocol_system_id(&pc.protocol_system.to_string()),
+                    pt_id,
                     txh.to_owned(),
                     pc.created_at,
                 )
@@ -1128,8 +1133,10 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
+        let protocol_type_name_1 = String::from("Test_Type_1");
         let protocol_type_id_1 =
-            db_fixtures::insert_protocol_type(&mut conn, "Test_Type_1", None, None, None).await;
+            db_fixtures::insert_protocol_type(&mut conn, &protocol_type_name_1, None, None, None)
+                .await;
         let protocol_type_id_2 =
             db_fixtures::insert_protocol_type(&mut conn, "Test_Type_2", None, None, None).await;
         let protocol_system = "ambient".to_string();
@@ -1137,7 +1144,7 @@ mod test {
         let original_component = ProtocolComponent {
             id: "test_contract_id".to_string(),
             protocol_system,
-            protocol_type_id: protocol_type_id_1.to_string(),
+            protocol_type_id: protocol_type_name_1,
             chain,
             tokens: vec![],
             contract_ids: vec![],
@@ -1164,18 +1171,7 @@ mod test {
 
         assert!(inserted_data.is_ok());
         let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
-        assert_eq!(
-            original_component.protocol_type_id,
-            inserted_data
-                .protocol_type_id
-                .to_string()
-        );
-        assert_eq!(
-            original_component.protocol_type_id,
-            inserted_data
-                .protocol_type_id
-                .to_string()
-        );
+        assert_eq!(inserted_data.protocol_type_id, protocol_type_id_1);
         assert_eq!(
             gw.get_protocol_system_id(
                 &original_component
