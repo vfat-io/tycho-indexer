@@ -16,9 +16,9 @@ use crate::{
 
 use super::{
     schema::{
-        account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
-        protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
-        token, transaction, tvl_change,
+        account, account_balance, block, chain, component_balance, contract_code, contract_storage,
+        extraction_state, protocol_component, protocol_holds_token, protocol_state,
+        protocol_system, protocol_type, token, transaction,
     },
     versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
 };
@@ -309,9 +309,9 @@ pub struct ProtocolType {
 }
 
 #[derive(Identifiable, Queryable, Selectable)]
-#[diesel(table_name = tvl_change)] // reference to tokens and transactions
+#[diesel(table_name = component_balance)] // reference to tokens and transactions
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct TvlChange {
+pub struct ComponentBalance {
     pub id: i64,
     pub token_id: i64,
     pub new_balance: Balance,
@@ -323,9 +323,9 @@ pub struct TvlChange {
 }
 
 #[derive(AsChangeset, Insertable)]
-#[diesel(table_name = tvl_change)]
+#[diesel(table_name = component_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewTvlChange {
+pub struct NewComponentBalance {
     pub token_id: i64,
     pub new_balance: Balance,
     pub modify_tx: i64,
@@ -334,7 +334,7 @@ pub struct NewTvlChange {
     pub valid_to: Option<NaiveDateTime>,
 }
 
-impl VersionedRow for NewTvlChange {
+impl VersionedRow for NewComponentBalance {
     type SortKey = (i64, NaiveDateTime, i64);
     type EntityId = i64;
     type Version = NaiveDateTime;

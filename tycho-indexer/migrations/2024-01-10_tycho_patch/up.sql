@@ -62,8 +62,8 @@ DROP TRIGGER invalidate_previous_contract_code ON contract_code;
 DROP FUNCTION invalidate_previous_entry_contract_code();
 
 
---  Saves the TVL change of a protocol component.
-CREATE TABLE IF NOT EXISTS tvl_change(
+--  Saves the component balance of a protocol component.
+CREATE TABLE IF NOT EXISTS component_balance(
     "id" bigserial PRIMARY KEY,
     -- id of the token whose tvl changed
     "token_id" bigint REFERENCES "token"(id) NOT NULL,

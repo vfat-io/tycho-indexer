@@ -80,7 +80,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta, TvlChange},
+    extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolType},
     storage::postgres::orm,
@@ -252,7 +252,7 @@ pub trait StorableProtocolType<S, N, I>: Sized + Send + Sync + 'static {
     fn to_storage(&self) -> N;
 }
 
-/// Lays out the necessary interface needed to store and retrieve TVL changes
+/// Lays out the necessary interface needed to store and retrieve component balances
 /// from storage.
 ///
 /// Generics:
@@ -264,7 +264,7 @@ pub trait StorableProtocolType<S, N, I>: Sized + Send + Sync + 'static {
 ///   conversion function. This facilitates the passage of database-specific foreign keys to the
 ///   `to_storage` method, thereby providing a flexible way for different databases to interact with
 ///   the transaction.
-pub trait StorableTvlChange<S, N, I>: Sized + Send + Sync + 'static {
+pub trait StorableComponentBalance<S, N, I>: Sized + Send + Sync + 'static {
     /// Converts a protocol type object to its storable representation (`N`).
     fn to_storage(
         &self,
@@ -581,7 +581,11 @@ pub trait ProtocolGateway {
         i64,
     >;
 
-    type TvlChange: StorableTvlChange<orm::TvlChange, orm::NewTvlChange, i64>;
+    type ComponentBalance: StorableComponentBalance<
+        orm::ComponentBalance,
+        orm::NewComponentBalance,
+        i64,
+    >;
 
     /// Retrieve ProtocolComponent from the db
     ///
@@ -689,22 +693,22 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError>;
 
-    /// Saves multiple TVL changes to storage.
+    /// Saves multiple component balances to storage.
     ///
     /// Inserts token into storage. Tokens and their properties are assumed to
     /// be immutable.
     ///
     /// # Parameters
     /// - `chain` The chain of the token.
-    /// - `tvl_changes` The TVL changes to insert.
+    /// - `component_balances` The component balances to insert.
     ///
     /// # Return
-    /// Ok if all TVL changes could be inserted, Err if at least one token failed to
+    /// Ok if all component balances could be inserted, Err if at least one token failed to
     /// insert.
-    async fn add_tvl_changes(
+    async fn add_component_balances(
         &self,
         chain: Chain,
-        tvl_changes: &[&Self::TvlChange],
+        component_balances: &[&Self::ComponentBalance],
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
@@ -1129,6 +1133,6 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         ProtocolStateDelta = ProtocolStateDelta,
         ProtocolType = ProtocolType,
         ProtocolComponent = ProtocolComponent,
-        TvlChange = TvlChange,
+        ComponentBalance = ComponentBalance,
     >,
 >;

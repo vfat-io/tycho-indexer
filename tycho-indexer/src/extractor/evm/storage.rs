@@ -28,8 +28,9 @@ pub mod pg {
                 orm,
                 orm::{NewToken, Token},
             },
-            Address, Balance, BlockHash, ChangeType, Code, StorableProtocolComponent,
-            StorableProtocolState, StorableProtocolType, StorableToken, StorableTvlChange, TxHash,
+            Address, Balance, BlockHash, ChangeType, Code, StorableComponentBalance,
+            StorableProtocolComponent, StorableProtocolState, StorableProtocolType, StorableToken,
+            TxHash,
         },
     };
     use ethers::types::{H160, H256, U256};
@@ -159,15 +160,17 @@ pub mod pg {
             }
         }
     }
-    impl StorableTvlChange<orm::TvlChange, orm::NewTvlChange, i64> for evm::TvlChange {
+    impl StorableComponentBalance<orm::ComponentBalance, orm::NewComponentBalance, i64>
+        for evm::ComponentBalance
+    {
         fn to_storage(
             &self,
             token_id: i64,
             modify_tx: i64,
             protocol_component_id: i64,
             block_ts: NaiveDateTime,
-        ) -> orm::NewTvlChange {
-            orm::NewTvlChange {
+        ) -> orm::NewComponentBalance {
+            orm::NewComponentBalance {
                 token_id,
                 new_balance: self.new_balance.clone(),
                 modify_tx,

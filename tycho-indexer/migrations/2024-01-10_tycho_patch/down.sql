@@ -149,4 +149,4 @@ CREATE TRIGGER invalidate_previous_contract_code
 
 
 DROP CONSTRAINT unique_account_id_constraint;
-    DROP TABLE tvl_change;
+    DROP TABLE component_balance;

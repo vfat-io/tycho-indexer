@@ -250,7 +250,7 @@ pub struct BlockAccountChanges {
     pub account_updates: HashMap<H160, AccountUpdate>,
     pub new_protocol_components: Vec<ProtocolComponent>,
     pub deleted_protocol_components: Vec<ProtocolComponent>,
-    pub tvl_changes: Vec<TvlChange>,
+    pub component_balances: Vec<ComponentBalance>,
 }
 
 impl BlockAccountChanges {
@@ -261,7 +261,7 @@ impl BlockAccountChanges {
         account_updates: HashMap<H160, AccountUpdate>,
         new_protocol_components: Vec<ProtocolComponent>,
         deleted_protocol_components: Vec<ProtocolComponent>,
-        tvl_change: Vec<TvlChange>,
+        component_balances: Vec<ComponentBalance>,
     ) -> Self {
         BlockAccountChanges {
             extractor: extractor.to_owned(),
@@ -270,7 +270,7 @@ impl BlockAccountChanges {
             account_updates,
             new_protocol_components,
             deleted_protocol_components,
-            tvl_changes: tvl_change,
+            component_balances,
         }
     }
 }
@@ -372,7 +372,7 @@ pub struct BlockContractChanges {
     pub block: Block,
     pub tx_updates: Vec<AccountUpdateWithTx>,
     pub protocol_components: Vec<ProtocolComponent>,
-    pub tvl_changes: Vec<TvlChange>,
+    pub component_balances: Vec<ComponentBalance>,
 }
 
 pub type EVMStateGateway<DB> =
@@ -454,7 +454,7 @@ impl AccountUpdateWithTx {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct TvlChange {
+pub struct ComponentBalance {
     pub token: H160,
     pub new_balance: Bytes,
     // tx where the this balance was observed
@@ -462,7 +462,7 @@ pub struct TvlChange {
     pub component_id: String,
 }
 
-impl TvlChange {
+impl ComponentBalance {
     pub fn try_from_message(
         msg: substreams::BalanceChange,
         tx: &Transaction,
@@ -621,7 +621,7 @@ impl BlockContractChanges {
                 block,
                 tx_updates,
                 protocol_components,
-                tvl_changes: Vec::new(),
+                component_balances: Vec::new(),
             });
         }
         Err(ExtractionError::Empty)
@@ -1511,7 +1511,7 @@ mod test {
                 },
             ],
             protocol_components: vec![protocol_component],
-            tvl_changes: Vec::new(),
+            component_balances: Vec::new(),
         }
     }
 
@@ -2089,7 +2089,7 @@ mod test {
     }
 
     #[rstest]
-    fn test_try_from_message_tvl_change() {
+    fn test_try_from_message_component_balance() {
         let tx = create_transaction();
         let expected_balance: f64 = 3000.0;
         let msg_balance = expected_balance.to_le_bytes().to_vec();
@@ -2106,7 +2106,7 @@ mod test {
             token: msg_token,
             component_id: msg_component_id,
         };
-        let from_message = TvlChange::try_from_message(msg, &tx).unwrap();
+        let from_message = ComponentBalance::try_from_message(msg, &tx).unwrap();
 
         assert_eq!(from_message.new_balance, msg_balance);
         assert_eq!(from_message.modify_tx, tx.hash);

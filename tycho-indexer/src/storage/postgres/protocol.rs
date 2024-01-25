@@ -9,7 +9,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta, TvlChange},
+    extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ProtocolType},
     storage::{
@@ -19,9 +19,9 @@ use crate::{
             schema, PostgresGateway,
         },
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ContractId, ProtocolGateway,
-        StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolState,
-        StorableProtocolStateDelta, StorableProtocolType, StorableToken, StorableTransaction,
-        StorableTvlChange, StorageError, TxHash, Version,
+        StorableBlock, StorableComponentBalance, StorableContract, StorableProtocolComponent,
+        StorableProtocolState, StorableProtocolStateDelta, StorableProtocolType, StorableToken,
+        StorableTransaction, StorageError, TxHash, Version,
     },
 };
 
@@ -99,7 +99,7 @@ where
     type ProtocolStateDelta = ProtocolStateDelta;
     type ProtocolType = ProtocolType;
     type ProtocolComponent = ProtocolComponent;
-    type TvlChange = TvlChange;
+    type ComponentBalance = ComponentBalance;
 
     async fn get_protocol_components(
         &self,
@@ -529,17 +529,17 @@ where
         Ok(())
     }
 
-    async fn add_tvl_changes(
+    async fn add_component_balances(
         &self,
         chain: Chain,
-        tvl_changes: &[&Self::TvlChange],
+        component_balances: &[&Self::ComponentBalance],
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
-        let token_addresses: Vec<Bytes> = tvl_changes
+        let token_addresses: Vec<Bytes> = component_balances
             .iter()
-            .map(|tvl_change| Bytes::from(tvl_change.token.as_bytes()))
+            .map(|component_balance| Bytes::from(component_balance.token.as_bytes()))
             .collect();
 
         let account_ids = token
@@ -549,39 +549,43 @@ where
             .get_results::<i64>(conn)
             .await?;
 
-        let transaction_hashes: Vec<TxHash> = tvl_changes
+        let transaction_hashes: Vec<TxHash> = component_balances
             .iter()
-            .map(|tvl_change| Bytes::from(tvl_change.modify_tx.as_bytes()))
+            .map(|component_balance| Bytes::from(component_balance.modify_tx.as_bytes()))
             .collect();
         let transaction_ids = orm::Transaction::ids_by_hash(&transaction_hashes, conn).await?;
 
-        let external_ids: Vec<String> = tvl_changes
+        let external_ids: Vec<String> = component_balances
             .iter()
-            .map(|tvl_change| tvl_change.component_id.to_string())
+            .map(|component_balance| {
+                component_balance
+                    .component_id
+                    .to_string()
+            })
             .collect();
         let protocol_component_ids =
             orm::ProtocolComponent::id_by_external_id(&external_ids, conn).await?;
 
-        let mut new_tvl_changes = Vec::new();
-        for (index, tvl_change) in tvl_changes.iter().enumerate() {
+        let mut new_component_balances = Vec::new();
+        for (index, component_balance) in component_balances.iter().enumerate() {
             let current_account_id = account_ids[index];
             let transaction_id = transaction_ids[&transaction_hashes[index]];
             let protocol_component_id = protocol_component_ids[&external_ids[index]];
 
-            let new_tvl_change = tvl_change.to_storage(
+            let new_component_balance = component_balance.to_storage(
                 current_account_id,
                 transaction_id,
                 protocol_component_id,
                 block_ts,
             );
-            new_tvl_changes.push(new_tvl_change);
+            new_component_balances.push(new_component_balance);
         }
 
-        diesel::insert_into(schema::tvl_change::table)
-            .values(&new_tvl_changes)
+        diesel::insert_into(schema::component_balance::table)
+            .values(&new_component_balances)
             .execute(conn)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "TvlChange", "batch", None))?;
+            .map_err(|err| StorageError::from_diesel(err, "ComponentBalance", "batch", None))?;
 
         Ok(())
     }
@@ -1174,7 +1178,7 @@ mod test {
         assert!(inserted_account.id > new_account.id);
     }
     #[tokio::test]
-    async fn test_add_tvl_changes() {
+    async fn test_add_component_balances() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -1185,27 +1189,27 @@ mod test {
         let protocol_component_id: String = String::from("state1");
 
         let base_token = H160::from_str(WETH.trim_start_matches("0x")).unwrap();
-        let tvl_change = TvlChange {
+        let component_balance = ComponentBalance {
             token: base_token,
             new_balance: Bytes::from(&[0u8]),
             modify_tx: tx_hash,
             component_id: protocol_component_id,
         };
 
-        let tvl_changes = vec![&tvl_change];
+        let component_balances = vec![&component_balance];
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
-        gw.add_tvl_changes(Chain::Ethereum, &tvl_changes, block_ts, &mut conn)
+        gw.add_component_balances(Chain::Ethereum, &component_balances, block_ts, &mut conn)
             .await
             .unwrap();
 
-        let inserted_data = schema::tvl_change::table
-            .select(orm::TvlChange::as_select())
-            .first::<orm::TvlChange>(&mut conn)
+        let inserted_data = schema::component_balance::table
+            .select(orm::ComponentBalance::as_select())
+            .first::<orm::ComponentBalance>(&mut conn)
             .await;
 
         assert!(inserted_data.is_ok());
-        let inserted_data: orm::TvlChange = inserted_data.unwrap();
+        let inserted_data: orm::ComponentBalance = inserted_data.unwrap();
 
         assert_eq!(inserted_data.new_balance, Bytes::from(&[0u8]));
 

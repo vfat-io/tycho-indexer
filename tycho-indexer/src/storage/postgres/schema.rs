@@ -83,6 +83,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    component_balance (id) {
+        id -> Int8,
+        token_id -> Int8,
+        new_balance -> Bytea,
+        modify_tx -> Int8,
+        protocol_component_id -> Int8,
+        inserted_ts -> Timestamptz,
+        valid_from -> Timestamptz,
+        valid_to -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
     contract_code (id) {
         id -> Int8,
         code -> Bytea,
@@ -234,23 +247,13 @@ diesel::table! {
     }
 }
 
-diesel::table! {
-    tvl_change (id) {
-        id -> Int8,
-        token_id -> Int8,
-        new_balance -> Bytea,
-        modify_tx -> Int8,
-        protocol_component_id -> Int8,
-        inserted_ts -> Timestamptz,
-        valid_from -> Timestamptz,
-        valid_to -> Nullable<Timestamptz>,
-    }
-}
-
 diesel::joinable!(account -> chain (chain_id));
 diesel::joinable!(account_balance -> account (account_id));
 diesel::joinable!(account_balance -> transaction (modify_tx));
 diesel::joinable!(block -> chain (chain_id));
+diesel::joinable!(component_balance -> protocol_component (protocol_component_id));
+diesel::joinable!(component_balance -> token (token_id));
+diesel::joinable!(component_balance -> transaction (modify_tx));
 diesel::joinable!(contract_code -> account (account_id));
 diesel::joinable!(contract_code -> transaction (modify_tx));
 diesel::joinable!(contract_storage -> account (account_id));
@@ -267,9 +270,6 @@ diesel::joinable!(protocol_state -> protocol_component (protocol_component_id));
 diesel::joinable!(protocol_state -> transaction (modify_tx));
 diesel::joinable!(token -> account (account_id));
 diesel::joinable!(transaction -> block (block_id));
-diesel::joinable!(tvl_change -> protocol_component (protocol_component_id));
-diesel::joinable!(tvl_change -> token (token_id));
-diesel::joinable!(tvl_change -> transaction (modify_tx));
 
 diesel::allow_tables_to_appear_in_same_query!(
     account,
@@ -277,6 +277,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     audit_log,
     block,
     chain,
+    component_balance,
     contract_code,
     contract_storage,
     extraction_state,
@@ -288,5 +289,4 @@ diesel::allow_tables_to_appear_in_same_query!(
     protocol_type,
     token,
     transaction,
-    tvl_change,
 );
