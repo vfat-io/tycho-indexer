@@ -644,7 +644,11 @@ impl StoredVersionedRow for AccountBalance {
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<Box<Self>>, StorageError> {
         Ok(account_balance::table
-            .filter(account_balance::account_id.eq_any(ids))
+            .filter(
+                account_balance::account_id
+                    .eq_any(ids)
+                    .and(account_balance::valid_to.is_null()),
+            )
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await?
@@ -745,7 +749,11 @@ impl StoredVersionedRow for ContractCode {
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<Box<Self>>, StorageError> {
         Ok(contract_code::table
-            .filter(contract_code::account_id.eq_any(ids))
+            .filter(
+                contract_code::account_id
+                    .eq_any(ids)
+                    .and(contract_code::valid_to.is_null()),
+            )
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await?
