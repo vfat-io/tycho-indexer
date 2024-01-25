@@ -357,7 +357,6 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
-
         let token_addresses = tvl_changes
             .iter()
             .map(|tvl_change| tvl_change.token.as_bytes())
@@ -365,31 +364,32 @@ where
 
         let mut account_ids = token
             .inner_join(account)
-            .select(token::id)
+            .select(schema::token::id)
             .filter(schema::account::address.eq_any(token_addresses))
             .get_results::<i64>(conn)
             .await?;
 
-        let transaction_ids = tvl_changes
+        let transaction_hashes: Vec<TxHash> = tvl_changes
             .iter()
-            .map(|tvl_change| orm::Transaction::id_by_hash(tvl_change.modify_tx.as_bytes(), conn))
+            .map(|tvl_change| Bytes::from(tvl_change.modify_tx.as_bytes()))
             .collect();
+        let transaction_ids = orm::Transaction::id_by_hash(&transaction_hashes, conn).await?;
 
-        let protocol_component_ids = tvl_changes
+        let external_ids: Vec<String> = tvl_changes
             .iter()
-            .map(|tvl_change| {
-                orm::ProtocolComponent::id_by_external_id(tvl_change.modify_tx.as_bytes(), conn)
-            })
+            .map(|tvl_change| tvl_change.component_id)
             .collect();
+        let protocol_component_ids =
+            orm::ProtocolComponent::id_by_external_id(&external_ids, conn).await?;
 
         let mut new_tvl_changes = Vec::new();
         for (index, tvl_change) in tvl_changes.iter().enumerate() {
-            let account_id = account_ids[index];
-            let transaction_id = transaction_ids[index];
-            let protocol_component_id = protocol_component_ids[index];
+            let current_account_id = account_ids[index];
+            let transaction_id = transaction_ids[&transaction_hashes[index]];
+            let protocol_component_id = protocol_component_ids[&external_ids[index]];
 
             let new_tvl_change =
-                tvl_change.to_storage(account_id, transaction_id, protocol_component_id);
+                tvl_change.to_storage(current_account_id, transaction_id, protocol_component_id);
             new_tvl_changes.push(new_tvl_change);
         }
 
@@ -397,9 +397,9 @@ where
             .values(&new_tvl_changes)
             .execute(conn)
             .await
-            .unwrap();
+            .map_err(|err| StorageError::from_diesel(err, "TvlChange", "batch", None))?;
 
-        Ok()
+        Ok(())
     }
 
     async fn get_state_delta(

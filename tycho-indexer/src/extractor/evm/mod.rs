@@ -453,7 +453,7 @@ pub struct TvlChange {
     new_balance: Bytes,
     // tx where the this balance was observed
     pub modify_tx: H256,
-    component_id: String,
+    pub component_id: String,
 }
 
 impl TvlChange {
