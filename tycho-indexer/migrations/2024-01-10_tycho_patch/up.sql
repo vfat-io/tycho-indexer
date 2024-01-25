@@ -11,8 +11,8 @@ CREATE TYPE financial_type AS ENUM(
 );
 
 ALTER TABLE protocol_type
-ALTER COLUMN financial_type TYPE financial_type
-USING protocol_type::text::financial_type;
+    ALTER COLUMN financial_type TYPE financial_type
+    USING protocol_type::text::financial_type;
 
 DROP TYPE financial_protocol_type;
 
@@ -22,39 +22,47 @@ CREATE TYPE implementation_type AS ENUM(
 );
 
 ALTER TABLE protocol_type
-ALTER COLUMN "implementation" TYPE implementation_type
-USING protocol_type::text::implementation_type;
+    ALTER COLUMN "implementation" TYPE implementation_type
+    USING protocol_type::text::implementation_type;
 
 DROP TYPE protocol_implementation_type;
 
 ALTER TABLE protocol_state
-DROP COLUMN state,
-DROP COLUMN tvl,
-DROP COLUMN inertias,
-ADD COLUMN attribute_name VARCHAR NULL,
-ADD COLUMN attribute_value BYTEA NULL;
+    DROP COLUMN state,
+    DROP COLUMN tvl,
+    DROP COLUMN inertias,
+    ADD COLUMN attribute_name VARCHAR NULL,
+    ADD COLUMN attribute_value BYTEA NULL;
 
 -- Make sure either both attribute_name and attribute_value are given or neither are given
 ALTER TABLE protocol_state
-ADD CONSTRAINT check_attribute_fields
-CHECK (
-    (attribute_name IS NULL AND attribute_value IS NULL) OR
-    (attribute_name IS NOT NULL AND attribute_value IS NOT NULL)
-);
-
-DROP TRIGGER invalidate_previous_protocol_state ON protocol_state;
-DROP FUNCTION invalidate_previous_entry_protocol_state();
-
+    ADD CONSTRAINT check_attribute_fields CHECK ((attribute_name IS NULL AND attribute_value IS NULL) OR (attribute_name IS NOT NULL AND attribute_value IS NOT NULL));
 
 ALTER TABLE protocol_system
-ADD CONSTRAINT name_unique UNIQUE (name);
-
+    ADD CONSTRAINT name_unique UNIQUE (name);
 
 -- Make the "account_id" column of the token unique
 ALTER TABLE token
     ADD CONSTRAINT unique_account_id_constraint UNIQUE (account_id);
---  Saves the TVL change of a protocol component.
 
+DROP TRIGGER invalidate_previous_protocol_state ON protocol_state;
+
+DROP FUNCTION invalidate_previous_entry_protocol_state();
+
+DROP TRIGGER invalidate_previous_contract_storage ON contract_storage;
+
+DROP FUNCTION invalidate_previous_entry_contract_storage();
+
+DROP TRIGGER invalidate_previous_account_balance ON account_balance;
+
+DROP FUNCTION invalidate_previous_entry_account_balance();
+
+DROP TRIGGER invalidate_previous_contract_code ON contract_code;
+
+DROP FUNCTION invalidate_previous_entry_contract_code();
+
+
+--  Saves the TVL change of a protocol component.
 CREATE TABLE IF NOT EXISTS tvl_change(
     "id" bigserial PRIMARY KEY,
     -- id of the token whose tvl changed

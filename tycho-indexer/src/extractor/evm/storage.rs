@@ -363,7 +363,7 @@ pub mod pg {
             tokens: Vec<H160>,
             contract_ids: Vec<H160>,
             chain: Chain,
-            protocol_system: String,
+            protocol_system: &str,
             transaction_hash: H256,
         ) -> Result<Self, StorageError> {
             let mut static_attributes: HashMap<String, Bytes> = HashMap::default();
@@ -376,8 +376,8 @@ pub mod pg {
             }
 
             Ok(evm::ProtocolComponent {
-                id: evm::ContractId(val.external_id),
-                protocol_system,
+                id: val.external_id,
+                protocol_system: protocol_system.to_owned(),
                 protocol_type_id: val.protocol_type_id.to_string(),
                 chain,
                 tokens,
@@ -405,7 +405,7 @@ pub mod pg {
                     )
                 })?;
             Ok(orm::NewProtocolComponent {
-                external_id: self.id.0.clone(),
+                external_id: self.id.clone(),
                 chain_id,
                 protocol_type_id,
                 protocol_system_id,
@@ -520,8 +520,8 @@ pub mod pg {
         }
 
         // When stored, protocol states are divided into multiple protocol state db entities - one
-        // per attribute This is to allow individualised control over attribute versioning
-        // and more efficient querying
+        // per attribute. This is to allow individualised control over attribute versioning
+        // and more efficient querying. This function ignores deleted_attributes.
         fn to_storage(
             &self,
             protocol_component_id: i64,
@@ -639,7 +639,7 @@ mod test {
             tokens.clone(),
             contract_ids.clone(),
             chain,
-            protocol_system,
+            &protocol_system,
             H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
                 .unwrap(),
         );
@@ -648,7 +648,7 @@ mod test {
 
         let protocol_component = result.unwrap();
 
-        assert_eq!(protocol_component.id, evm::ContractId(val.external_id.to_string()));
+        assert_eq!(protocol_component.id, val.external_id.to_string());
         assert_eq!(protocol_component.protocol_type_id, val.protocol_type_id.to_string());
         assert_eq!(protocol_component.chain, chain);
         assert_eq!(protocol_component.tokens, tokens);
@@ -670,7 +670,7 @@ mod test {
     #[test]
     fn test_to_storage_protocol_component() {
         let protocol_component = evm::ProtocolComponent {
-            id: evm::ContractId("sample_contract_id".to_string()),
+            id: "sample_contract_id".to_string(),
             protocol_system: "ambient".to_string(),
             protocol_type_id: "42".to_string(),
             chain: Chain::Ethereum,
@@ -703,7 +703,7 @@ mod test {
 
         let new_protocol_component = result.unwrap();
 
-        assert_eq!(new_protocol_component.external_id, protocol_component.id.0);
+        assert_eq!(new_protocol_component.external_id, protocol_component.id);
         assert_eq!(new_protocol_component.chain_id, chain_id);
 
         assert_eq!(new_protocol_component.protocol_type_id, 42);

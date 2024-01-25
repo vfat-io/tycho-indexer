@@ -18,7 +18,7 @@ use actix_web::dev::ServerHandle;
 use clap::Parser;
 use std::sync::Arc;
 use tokio::{sync::mpsc, task, task::JoinHandle};
-use tracing::{error, info};
+use tracing::info;
 
 mod extractor;
 mod hex_bytes;
@@ -123,9 +123,8 @@ async fn main() -> Result<(), ExtractionError> {
 
     // Spawn a new task that listens to err_rx
     task::spawn(async move {
-        while let Some(msg) = err_rx.recv().await {
-            //TODO: panic?
-            error!("Database write error received: {}", msg);
+        if let Some(msg) = err_rx.recv().await {
+            panic!("Database write error received: {}", msg);
         }
     });
 

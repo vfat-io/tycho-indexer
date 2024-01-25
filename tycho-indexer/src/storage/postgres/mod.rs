@@ -154,6 +154,7 @@ pub mod extraction_state;
 pub mod orm;
 pub mod protocol;
 pub mod schema;
+mod versioning;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
@@ -291,6 +292,12 @@ impl BlockOrTimestamp {
                     .map_err(|err| {
                         StorageError::from_diesel(err, "Block", &format!("{}", no), None)
                     })?
+                    .ts)
+            }
+            BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)) => {
+                Ok(orm::Block::most_recent(*chain, conn)
+                    .await
+                    .map_err(|err| StorageError::from_diesel(err, "Block", "latest", None))?
                     .ts)
             }
             BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
@@ -688,15 +695,22 @@ pub mod db_fixtures {
         contract_id: i64,
         modify_tx: i64,
         valid_from: &str,
-        slots: &[(u64, u64)],
+        valid_to: Option<&str>,
+        slots: &[(u64, u64, Option<u64>)],
     ) -> Vec<i64> {
         let ts = valid_from
             .parse::<chrono::NaiveDateTime>()
             .unwrap();
+        let end_ts = valid_to.map(|s| {
+            s.parse::<chrono::NaiveDateTime>()
+                .unwrap()
+        });
         let data = slots
             .iter()
             .enumerate()
-            .map(|(idx, (k, v))| {
+            .map(|(idx, (k, v, pv))| {
+                let previous_value =
+                    pv.map(|pv| hex::decode(format!("{:064x}", U256::from(pv))).unwrap());
                 (
                     schema::contract_storage::slot.eq(hex::decode(format!(
                         "{:064x}",
@@ -708,9 +722,11 @@ pub mod db_fixtures {
                         U256::from(*v)
                     ))
                     .unwrap()),
+                    schema::contract_storage::previous_value.eq(previous_value),
                     schema::contract_storage::account_id.eq(contract_id),
                     schema::contract_storage::modify_tx.eq(modify_tx),
                     schema::contract_storage::valid_from.eq(ts),
+                    schema::contract_storage::valid_to.eq(end_ts),
                     schema::contract_storage::ordinal.eq(idx as i64),
                 )
             })
@@ -728,6 +744,7 @@ pub mod db_fixtures {
         conn: &mut AsyncPgConnection,
         new_balance: u64,
         tx_id: i64,
+        valid_to: Option<&str>,
         account: i64,
     ) {
         let ts = schema::transaction::table
@@ -737,7 +754,10 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
-
+        let end_ts = valid_to.map(|s| {
+            s.parse::<chrono::NaiveDateTime>()
+                .unwrap()
+        });
         let mut b0 = [0; 32];
         U256::from(new_balance).to_big_endian(&mut b0);
         {
@@ -748,7 +768,7 @@ pub mod db_fixtures {
                     balance.eq(b0.as_slice()),
                     modify_tx.eq(tx_id),
                     valid_from.eq(ts),
-                    valid_to.eq(Option::<NaiveDateTime>::None),
+                    valid_to.eq(end_ts),
                 ))
                 .execute(conn)
                 .await

@@ -1,12 +1,11 @@
 #![allow(unused_variables)]
-#![allow(unused_imports)]
 
 use async_trait::async_trait;
-use std::{collections::HashMap, hash::Hash};
+use chrono::NaiveDateTime;
+use std::{cmp::Ordering, collections::HashMap};
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use ethers::types::{transaction, Transaction};
 use tracing::warn;
 
 use crate::{
@@ -16,14 +15,13 @@ use crate::{
     storage::{
         postgres::{
             orm,
-            orm::{Account, NewAccount, Token},
-            schema,
-            schema::chain,
-            PostgresGateway,
+            orm::{Account, NewAccount},
+            schema, PostgresGateway,
         },
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ContractId, ProtocolGateway,
         StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolState,
-        StorableProtocolType, StorableToken, StorableTransaction, StorableTvlChange, StorageError,
+        StorableProtocolStateDelta, StorableProtocolType, StorableToken, StorableTransaction,
+        StorableTvlChange, StorageError,
         StorageError::DecodeError,
         TxHash, Version,
     },
@@ -110,8 +108,65 @@ where
         chain: &Chain,
         system: Option<String>,
         ids: Option<&[&str]>,
+        conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolComponent>, StorageError> {
-        todo!()
+        use super::schema::{protocol_component::dsl::*, transaction::dsl::*};
+        let chain_id_value = self.get_chain_id(chain);
+
+        let mut query = protocol_component
+            .inner_join(transaction.on(creation_tx.eq(schema::transaction::id)))
+            .select((orm::ProtocolComponent::as_select(), hash))
+            .into_boxed();
+
+        match (system, ids) {
+            (Some(ps), None) => {
+                let protocol_system = self.get_protocol_system_id(&ps);
+                query = query.filter(
+                    chain_id
+                        .eq(chain_id_value)
+                        .and(protocol_system_id.eq(protocol_system)),
+                );
+            }
+            (None, Some(external_ids)) => {
+                query = query.filter(
+                    chain_id
+                        .eq(chain_id_value)
+                        .and(external_id.eq_any(external_ids)),
+                );
+            }
+            (Some(ps), Some(external_ids)) => {
+                let protocol_system = self.get_protocol_system_id(&ps);
+                query = query.filter(
+                    chain_id.eq(chain_id_value).and(
+                        external_id
+                            .eq_any(external_ids)
+                            .and(protocol_system_id.eq(protocol_system)),
+                    ),
+                );
+            }
+            (_, _) => {
+                query = query.filter(chain_id.eq(chain_id_value));
+            }
+        }
+
+        let orm_protocol_components = query
+            .load::<(orm::ProtocolComponent, TxHash)>(conn)
+            .await?;
+
+        orm_protocol_components
+            .into_iter()
+            .map(|(pc, tx_hash)| {
+                let ps = self.get_protocol_system(&pc.protocol_system_id);
+                ProtocolComponent::from_storage(
+                    pc,
+                    vec![],
+                    vec![],
+                    chain.to_owned(),
+                    &ps,
+                    tx_hash.into(),
+                )
+            })
+            .collect::<Result<Vec<ProtocolComponent>, StorageError>>()
     }
 
     async fn add_protocol_components(
@@ -126,7 +181,7 @@ where
             .map(|pc| pc.creation_tx.into())
             .collect();
         let tx_hash_id_mapping: HashMap<TxHash, i64> =
-            orm::Transaction::id_by_hash(&tx_hashes, conn)
+            orm::Transaction::ids_by_hash(&tx_hashes, conn)
                 .await
                 .unwrap();
 
@@ -158,6 +213,25 @@ where
         Ok(())
     }
 
+    async fn delete_protocol_components(
+        &self,
+        to_delete: &[&Self::ProtocolComponent],
+        block_ts: NaiveDateTime,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        use super::schema::protocol_component::dsl::*;
+
+        let ids_to_delete: Vec<String> = to_delete
+            .iter()
+            .map(|c| c.id.to_string())
+            .collect();
+
+        diesel::update(protocol_component.filter(external_id.eq_any(ids_to_delete)))
+            .set(deleted_at.eq(block_ts))
+            .execute(conn)
+            .await?;
+        Ok(())
+    }
     async fn upsert_protocol_type(
         &self,
         new: &Self::ProtocolType,
@@ -226,13 +300,120 @@ where
         }
     }
 
-    async fn update_protocol_state(
+    async fn update_protocol_states(
         &self,
-        chain: Chain,
-        new: &[(TxHash, ProtocolStateDelta)],
+        chain: &Chain,
+        new: &[ProtocolStateDelta],
         conn: &mut Self::DB,
-    ) {
-        todo!()
+    ) -> Result<(), StorageError> {
+        let chain_db_id = self.get_chain_id(chain);
+        let txns: HashMap<Bytes, (i64, i64, NaiveDateTime)> = orm::Transaction::ids_and_ts_by_hash(
+            new.iter()
+                .map(|state| state.modify_tx.as_bytes())
+                .collect::<Vec<&[u8]>>()
+                .as_slice(),
+            conn,
+        )
+        .await?
+        .into_iter()
+        .map(|(id, hash, index, ts)| (hash, (id, index, ts)))
+        .collect();
+
+        let components: HashMap<String, i64> = orm::ProtocolComponent::ids_by_external_ids(
+            new.iter()
+                .map(|state| state.component_id.as_str())
+                .collect::<Vec<&str>>()
+                .as_slice(),
+            conn,
+        )
+        .await?
+        .into_iter()
+        .map(|(id, external_id)| (external_id, id))
+        .collect();
+
+        let mut state_data: Vec<(orm::NewProtocolState, i64)> = Vec::new();
+
+        for state in new {
+            let tx_db = txns
+                .get(state.modify_tx.as_bytes())
+                .expect("Failed to find tx");
+            let component_db_id = *components
+                .get(&state.component_id)
+                .expect("Failed to find component");
+            let mut new_states: Vec<(orm::NewProtocolState, i64)> =
+                ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0, tx_db.2)
+                    .into_iter()
+                    .map(|state| (state, tx_db.1))
+                    .collect();
+
+            // invalidated db entities for deleted attributes
+            for attr in &state.deleted_attributes {
+                // PERF: slow but required due to diesel restrictions
+                diesel::update(schema::protocol_state::table)
+                    .filter(schema::protocol_state::protocol_component_id.eq(component_db_id))
+                    .filter(schema::protocol_state::attribute_name.eq(attr))
+                    .filter(schema::protocol_state::valid_to.is_null())
+                    .set(schema::protocol_state::valid_to.eq(tx_db.2))
+                    .execute(conn)
+                    .await?;
+            }
+
+            state_data.append(&mut new_states);
+        }
+
+        // Sort state_data by protocol_component_id, attribute_name, and transaction index
+        state_data.sort_by(|a, b| {
+            let order =
+                a.0.protocol_component_id
+                    .cmp(&b.0.protocol_component_id);
+            if order == Ordering::Equal {
+                let sub_order =
+                    a.0.attribute_name
+                        .cmp(&b.0.attribute_name);
+
+                if sub_order == Ordering::Equal {
+                    // Sort by block ts and tx_index as well
+                    a.1.cmp(&b.1)
+                } else {
+                    sub_order
+                }
+            } else {
+                order
+            }
+        });
+
+        // Invalidate older states within the new state data
+        let mut i = 0;
+        while i + 1 < state_data.len() {
+            let next_state = &state_data[i + 1].0.clone();
+            let (current_state, _) = &mut state_data[i];
+
+            // Check if next_state has same protocol_component_id and attribute_name
+            if current_state.protocol_component_id == next_state.protocol_component_id &&
+                current_state.attribute_name == next_state.attribute_name
+            {
+                // Invalidate the current state
+                current_state.valid_to = Some(next_state.valid_from);
+            }
+
+            i += 1;
+        }
+
+        let state_data: Vec<orm::NewProtocolState> = state_data
+            .into_iter()
+            .map(|(state, _index)| state)
+            .collect();
+
+        // TODO: invalidate newly outdated protocol states already in the db (ENG-2682)
+
+        // insert the prepared protocol state deltas
+        if !state_data.is_empty() {
+            diesel::insert_into(schema::protocol_state::table)
+                .values(&state_data)
+                .execute(conn)
+                .await?;
+        }
+        Ok(())
     }
 
     async fn get_tokens(
@@ -373,7 +554,7 @@ where
             .iter()
             .map(|tvl_change| Bytes::from(tvl_change.modify_tx.as_bytes()))
             .collect();
-        let transaction_ids = orm::Transaction::id_by_hash(&transaction_hashes, conn).await?;
+        let transaction_ids = orm::Transaction::ids_by_hash(&transaction_hashes, conn).await?;
 
         let external_ids: Vec<String> = tvl_changes
             .iter()
@@ -455,24 +636,22 @@ where
 mod test {
     use super::*;
     use crate::{
-        extractor::{evm, evm::ContractId},
+        extractor::evm::{self, ERC20Token},
         storage::ChangeType,
     };
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Utc};
     use diesel_async::AsyncConnection;
     use ethers::{prelude::H160, types::U256};
-    use hex::FromHex;
     use rstest::rstest;
-    use serde_json::{json, Value};
+    use serde_json::json;
 
     use crate::{
+        hex_bytes::Bytes,
         models,
         models::{FinancialType, ImplementationType},
-        storage::postgres::{db_fixtures, orm, schema, schema::token::dsl::token, PostgresGateway},
+        storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
     };
 
-    use super::*;
-    use crate::storage::postgres::{orm::NewProtocolComponent, schema::protocol_component};
     use ethers::prelude::H256;
     use std::{collections::HashMap, str::FromStr};
 
@@ -505,39 +684,35 @@ mod test {
     /// that change an account should have at each version Please not that if you change
     /// something here, also update the state fixtures right below, which contain protocol states
     /// at each version.
-    async fn setup_data(conn: &mut AsyncPgConnection) {
+    async fn setup_data(conn: &mut AsyncPgConnection) -> Vec<String> {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        let chain_id_sn = db_fixtures::insert_chain(conn, "starknet").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let tx_hashes = [
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945".to_string(),
+            "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54".to_string(),
+            "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7".to_string(),
+            "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388".to_string(),
+        ];
+
         let txn = db_fixtures::insert_txns(
             conn,
             &[
-                (
-                    blk[0],
-                    1i64,
-                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-                ),
-                (
-                    blk[0],
-                    2i64,
-                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
-                ),
+                (blk[0], 1i64, &tx_hashes[0]),
+                (blk[0], 2i64, &tx_hashes[1]),
                 // ----- Block 01 LAST
-                (
-                    blk[1],
-                    1i64,
-                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
-                ),
-                (
-                    blk[1],
-                    2i64,
-                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
-                ),
+                (blk[1], 1i64, &tx_hashes[2]),
+                (blk[1], 2i64, &tx_hashes[3]),
                 // ----- Block 02 LAST
             ],
         )
         .await;
-        let protocol_system_id =
+
+        let protocol_system_id_ambient =
             db_fixtures::insert_protocol_system(conn, "ambient".to_owned()).await;
+        let protocol_system_id_zz =
+            db_fixtures::insert_protocol_system(conn, "zigzag".to_owned()).await;
+
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
@@ -550,9 +725,27 @@ mod test {
             conn,
             "state1",
             chain_id,
-            protocol_system_id,
+            protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
+        )
+        .await;
+        let protocol_component_id2 = db_fixtures::insert_protocol_component(
+            conn,
+            "state3",
+            chain_id,
+            protocol_system_id_ambient,
+            protocol_type_id,
+            txn[0],
+        )
+        .await;
+        db_fixtures::insert_protocol_component(
+            conn,
+            "state2",
+            chain_id_sn,
+            protocol_system_id_zz,
+            protocol_type_id,
+            txn[1],
         )
         .await;
 
@@ -582,7 +775,7 @@ mod test {
         db_fixtures::insert_protocol_state(
             conn,
             protocol_component_id,
-            txn[2],
+            txn[3],
             "reserve1".to_owned(),
             Bytes::from(U256::from(1000)),
             None,
@@ -596,6 +789,7 @@ mod test {
         let usdc_id =
             db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
                 .await;
+        tx_hashes.to_vec()
     }
 
     fn protocol_state() -> ProtocolState {
@@ -608,7 +802,7 @@ mod test {
         ProtocolState::new(
             "state1".to_owned(),
             attributes,
-            "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
+            "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
                 .parse()
                 .unwrap(),
         )
@@ -617,7 +811,7 @@ mod test {
     #[rstest]
     #[case::by_chain(None, None)]
     #[case::by_system(Some("ambient".to_string()), None)]
-    #[case::by_ids(None, Some(vec!["state1"]))]
+    #[case::by_ids(None, Some(vec ! ["state1"]))]
     #[tokio::test]
     async fn test_get_protocol_states(
         #[case] system: Option<String>,
@@ -673,6 +867,137 @@ mod test {
         assert_eq!(result, expected)
     }
 
+    fn protocol_state_delta() -> ProtocolStateDelta {
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+        ]
+        .into_iter()
+        .collect();
+        ProtocolStateDelta::new(
+            "state3".to_owned(),
+            attributes,
+            "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
+                .parse()
+                .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_update_protocol_states() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+        let chain = Chain::Ethereum;
+
+        // set up deletable attribute state
+        let protocol_component_id = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state2"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        let tx_hash: Bytes = "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+            .as_bytes()
+            .into();
+        let txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id,
+            txn_id,
+            "deletable".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+        )
+        .await;
+
+        // update
+        let mut new_state1 = protocol_state_delta();
+        let attributes1: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(700))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(700))),
+        ]
+        .into_iter()
+        .collect();
+        new_state1.updated_attributes = attributes1.clone();
+        new_state1.deleted_attributes = vec!["deletable".to_owned()]
+            .into_iter()
+            .collect();
+        new_state1.modify_tx = "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
+            .parse()
+            .unwrap();
+
+        // newer update
+        let mut new_state2 = protocol_state_delta();
+        let attributes2: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(800))),
+            ("reserve2".to_owned(), Bytes::from(U256::from(800))),
+        ]
+        .into_iter()
+        .collect();
+        new_state2.updated_attributes = attributes2.clone();
+
+        // update the protocol state
+        gateway
+            .update_protocol_states(&chain, &[new_state1.clone(), new_state2.clone()], &mut conn)
+            .await
+            .expect("Failed to update protocol states");
+
+        // check the correct state is considered the valid one
+        let db_states = gateway
+            .get_protocol_states(
+                &chain,
+                None,
+                None,
+                Some(&[new_state1.component_id.as_str()]),
+                &mut conn,
+            )
+            .await
+            .expect("Failed ");
+        let mut expected_state = protocol_state();
+        expected_state.attributes = attributes2;
+        expected_state.component_id = new_state1.component_id.clone();
+        assert_eq!(db_states[0], expected_state);
+
+        // fetch the older state from the db and check it's valid_to is set correctly
+        let tx_hash1: Bytes = new_state1.modify_tx.as_bytes().into();
+        let older_state = schema::protocol_state::table
+            .inner_join(schema::protocol_component::table)
+            .inner_join(schema::transaction::table)
+            .filter(schema::transaction::hash.eq(tx_hash1))
+            .filter(schema::protocol_component::external_id.eq(new_state1.component_id.as_str()))
+            .select(orm::ProtocolState::as_select())
+            .first::<orm::ProtocolState>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol state");
+        assert_eq!(older_state.attribute_value, Some(Bytes::from(U256::from(700))));
+        // fetch the newer state from the db to compare the valid_from
+        let tx_hash2: Bytes = new_state2.modify_tx.as_bytes().into();
+        let newer_state = schema::protocol_state::table
+            .inner_join(schema::protocol_component::table)
+            .inner_join(schema::transaction::table)
+            .filter(schema::transaction::hash.eq(tx_hash2))
+            .filter(schema::protocol_component::external_id.eq(new_state1.component_id.as_str()))
+            .select(orm::ProtocolState::as_select())
+            .first::<orm::ProtocolState>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol state");
+        assert_eq!(older_state.valid_to, Some(newer_state.valid_from));
+    }
+
     #[tokio::test]
     async fn test_get_or_create_protocol_system_id() {
         let mut conn = setup_db().await;
@@ -687,6 +1012,7 @@ mod test {
             ._get_or_create_protocol_system_id("ambient".to_string(), &mut conn)
             .await
             .unwrap();
+        assert!(first_id > 0);
         assert_eq!(first_id, second_id);
     }
 
@@ -908,7 +1234,7 @@ mod test {
         let protocol_system = "ambient".to_string();
         let chain = Chain::Ethereum;
         let original_component = ProtocolComponent {
-            id: ContractId("test_contract_id".to_string()),
+            id: "test_contract_id".to_string(),
             protocol_system,
             protocol_type_id: protocol_type_id_1.to_string(),
             chain,
@@ -958,6 +1284,187 @@ mod test {
             inserted_data.protocol_system_id
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
-        assert_eq!(original_component.id.0, inserted_data.external_id);
+        assert_eq!(original_component.id, inserted_data.external_id);
+    }
+
+    fn create_test_protocol_component(id: &str) -> ProtocolComponent {
+        ProtocolComponent {
+            id: id.to_string(),
+            protocol_system: "ambient".to_string(),
+            protocol_type_id: "type_id_1".to_string(),
+            chain: Chain::Ethereum,
+            tokens: vec![],
+            contract_ids: vec![],
+            static_attributes: HashMap::new(),
+            change: ChangeType::Creation,
+            creation_tx: H256::from_low_u64_be(
+                0x0000000000000000000000000000000000000000000000000000000011121314,
+            ),
+            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_protocol_components() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let test_components = vec![
+            create_test_protocol_component("state1"),
+            create_test_protocol_component("state2"),
+        ];
+
+        let res = gw
+            .delete_protocol_components(
+                &test_components
+                    .iter()
+                    .collect::<Vec<_>>(),
+                Utc::now().naive_utc(),
+                &mut conn,
+            )
+            .await;
+
+        assert!(res.is_ok());
+        let pc_ids: Vec<String> = test_components
+            .iter()
+            .map(|test_pc| test_pc.id.to_string())
+            .collect();
+
+        let updated_timestamps = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq_any(pc_ids))
+            .select(schema::protocol_component::deleted_at)
+            .load::<Option<NaiveDateTime>>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(updated_timestamps.len(), 2);
+        updated_timestamps
+            .into_iter()
+            .for_each(|ts| assert!(ts.is_some(), "Found None in updated_ts"));
+    }
+    #[rstest]
+    #[case::get_one(Some("zigzag".to_string()))]
+    #[case::get_none(Some("ambient".to_string()))]
+    #[tokio::test]
+    async fn test_get_protocol_components_with_system_only(#[case] system: Option<String>) {
+        let mut conn = setup_db().await;
+        let tx_hashes = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let chain = Chain::Starknet;
+
+        let result = gw
+            .get_protocol_components(&chain, system.clone(), None, &mut conn)
+            .await;
+
+        assert!(result.is_ok());
+
+        match system.unwrap().as_str() {
+            "zigzag" => {
+                let components = result.unwrap();
+                assert_eq!(components.len(), 1);
+
+                let pc = &components[0];
+                assert_eq!(pc.id, "state2".to_string());
+                assert_eq!(pc.protocol_system, "zigzag");
+                assert_eq!(pc.chain, Chain::Starknet);
+                assert_eq!(pc.creation_tx, H256::from_str(tx_hashes.get(1).unwrap()).unwrap());
+            }
+            "ambient" => {
+                let components = result.unwrap();
+                assert_eq!(components.len(), 0)
+            }
+            _ => {}
+        }
+    }
+
+    #[rstest]
+    #[case::get_one("state1".to_string())]
+    #[case::get_none("state2".to_string())]
+    #[tokio::test]
+    async fn test_get_protocol_components_with_external_id_only(#[case] external_id: String) {
+        let mut conn = setup_db().await;
+        let tx_hashes = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let temp_ids_array = [external_id.as_str()];
+        let ids = Some(temp_ids_array.as_slice());
+        let chain = Chain::Ethereum;
+
+        let result = gw
+            .get_protocol_components(&chain, None, ids, &mut conn)
+            .await;
+
+        match external_id.as_str() {
+            "state1" => {
+                let components = result.unwrap();
+                assert_eq!(components.len(), 1);
+
+                let pc = &components[0];
+                assert_eq!(pc.id, external_id.to_string());
+                assert_eq!(pc.protocol_system, "ambient");
+                assert_eq!(pc.chain, Chain::Ethereum);
+                assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[0].to_string()).unwrap());
+            }
+            "state2" => {
+                let components = result.unwrap();
+                assert_eq!(components.len(), 0)
+            }
+            _ => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_components_with_system_and_ids() {
+        let mut conn = setup_db().await;
+        let tx_hashes = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let system = "ambient".to_string();
+        let ids = Some(["state1", "state2"].as_slice());
+        let chain = Chain::Ethereum;
+        let result = gw
+            .get_protocol_components(&chain, Some(system), ids, &mut conn)
+            .await;
+
+        let components = result.unwrap();
+        assert_eq!(components.len(), 1);
+
+        let pc = &components[0];
+        assert_eq!(pc.id, "state1".to_string());
+        assert_eq!(pc.protocol_system, "ambient");
+        assert_eq!(pc.chain, Chain::Ethereum);
+        assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[0].to_string()).unwrap());
+    }
+
+    #[rstest]
+    #[case::get_one(Chain::Ethereum, 0)]
+    #[case::get_none(Chain::Starknet, 1)]
+    #[tokio::test]
+    async fn test_get_protocol_components_with_chain_filter(#[case] chain: Chain, #[case] i: i64) {
+        let mut conn = setup_db().await;
+        let tx_hashes = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let result = gw
+            .get_protocol_components(&chain, None, None, &mut conn)
+            .await;
+
+        let mut components = result.unwrap();
+        components.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let assert_message = format!(
+            "Found {} ProtocolComponents for chain {}, expecting >= 1, because there are two eth and one stark component. Two eth components are needed for the ProtocolStates",
+            components.len(),
+            chain
+        );
+        assert!(!components.is_empty(), "{}", assert_message.to_string());
+
+        let pc = &components[0];
+        assert_eq!(pc.id, format!("state{}", i + 1).to_string());
+        assert_eq!(pc.chain, chain);
+        let i_usize: usize = i as usize;
+        assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
     }
 }
