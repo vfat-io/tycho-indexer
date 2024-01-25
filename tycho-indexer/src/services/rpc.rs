@@ -464,7 +464,7 @@ mod tests {
             db_fixtures::insert_account(conn, acc_address, "account0", chain_id, Some(tid[0]))
                 .await;
 
-        db_fixtures::insert_account_balance(conn, 100, tid[0], acc_id).await;
+        db_fixtures::insert_account_balance(conn, 100, tid[0], None, acc_id).await;
         let contract_code = Code::from("1234");
         db_fixtures::insert_contract_code(conn, acc_id, tid[0], contract_code).await;
         acc_address.to_string()
