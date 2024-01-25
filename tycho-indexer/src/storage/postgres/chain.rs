@@ -179,7 +179,6 @@ mod test {
     }
 
     #[tokio::test]
-    
     async fn test_get_block_latest() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -195,7 +194,6 @@ mod test {
     }
 
     #[tokio::test]
-    
     async fn test_get_block() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -211,7 +209,6 @@ mod test {
     }
 
     #[tokio::test]
-    
     async fn test_add_block() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -229,7 +226,6 @@ mod test {
     }
 
     #[tokio::test]
-    
     async fn test_upsert_block() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -272,7 +268,6 @@ mod test {
     }
 
     #[tokio::test]
-    
     async fn test_get_tx() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -287,7 +282,6 @@ mod test {
     }
 
     #[tokio::test]
-    
     async fn test_add_tx() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -309,7 +303,6 @@ mod test {
     }
 
     #[tokio::test]
-    
     async fn test_upsert_tx() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;

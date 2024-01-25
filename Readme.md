@@ -248,6 +248,7 @@ diesel migration run --migration-dir ./tycho-indexer/migrations
 1. Please also make sure that the following commands pass if you have changed the code:
 
 ```sh
+# alternatively use ./check.sh
 cargo check --all
 cargo nextest run --workspace --all-targets --all-features -E 'not test(serial_db)'
 cargo nextest run --workspace --all-targets --all-features -E 'test(serial_db)'
