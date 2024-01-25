@@ -4,12 +4,16 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     extractor::{evm, runner::ExtractorHandle, ExtractionError},
-    storage::postgres::PostgresGateway,
+    models::Chain,
+    services::rpc::{Block, EVMAccount, StateRequestBody, StateRequestResponse, Version},
+    storage::{postgres::PostgresGateway, ContractId},
 };
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use tokio::task::JoinHandle;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 mod rpc;
 mod ws;
@@ -71,6 +75,22 @@ impl ServicesBuilder {
     pub fn run(
         self,
     ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
+        #[derive(OpenApi)]
+        #[openapi(
+            paths(rpc::contract_state),
+            components(
+                schemas(Version),
+                schemas(Block),
+                schemas(ContractId),
+                schemas(StateRequestResponse),
+                schemas(StateRequestBody),
+                schemas(Chain),
+                schemas(EVMAccount),
+            )
+        )]
+        struct ApiDoc;
+
+        let openapi = ApiDoc::openapi();
         let ws_data = web::Data::new(ws::WsData::new(self.extractor_handles));
         let rpc_data =
             web::Data::new(rpc::RpcHandler::new(self.db_gateway, self.db_connection_pool));
@@ -87,6 +107,10 @@ impl ServicesBuilder {
                         .route(web::get().to(ws::WsActor::ws_index)),
                 )
                 .wrap(RequestTracing::new())
+                // Create a swagger-ui endpoint to http://0.0.0.0:4242/docs/
+                .service(
+                    SwaggerUi::new("/docs/{_:.*}").url("/api-docs/openapi.json", openapi.clone()),
+                )
         })
         .bind((self.bind, self.port))
         .map_err(|err| ExtractionError::ServiceError(err.to_string()))?

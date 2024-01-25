@@ -77,6 +77,7 @@ use chrono::NaiveDateTime;
 use ethers::prelude::{H160, H256};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::{
     extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
@@ -424,8 +425,9 @@ pub enum VersionKind {
     Index(i64),
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 pub struct ContractId {
+    #[schema(value_type=String)]
     pub address: Address,
     pub chain: Chain,
 }
