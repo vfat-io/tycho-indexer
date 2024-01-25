@@ -41,7 +41,7 @@ pub(crate) enum WriteOp {
 
 /// Represents a transaction in the database, including the block information,
 /// a list of operations to be performed, and a channel to send the result.
-pub(crate) struct DBTransaction {
+pub struct DBTransaction {
     block: evm::Block,
     operations: Vec<WriteOp>,
     tx: oneshot::Sender<Result<(), StorageError>>,
@@ -58,7 +58,7 @@ impl DBTransaction {
 }
 
 /// Represents different types of messages that can be sent to the DBCacheWriteExecutor.
-pub(crate) enum DBCacheMessage {
+pub enum DBCacheMessage {
     Write(DBTransaction),
     Flush(oneshot::Sender<Result<(), StorageError>>),
     Revert(BlockIdentifier, oneshot::Sender<Result<(), StorageError>>),
@@ -97,7 +97,7 @@ pub(crate) enum DBCacheMessage {
 /// Read Operations
 /// The class does provide read operations for completeness, but it will not consider any
 /// cached changes while reading. Any reads are direct pass through to the database.
-pub(crate) struct DBCacheWriteExecutor {
+pub struct DBCacheWriteExecutor {
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
@@ -114,7 +114,7 @@ pub(crate) struct DBCacheWriteExecutor {
 }
 
 impl DBCacheWriteExecutor {
-    pub(crate) fn new(
+    pub fn new(
         name: String,
         chain: Chain,
         pool: Pool<AsyncPgConnection>,

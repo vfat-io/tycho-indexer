@@ -9,29 +9,20 @@ use extractor::{
 };
 use models::Chain;
 
-use crate::{
-    extractor::{evm, ExtractionError},
-    services::ServicesBuilder,
-    storage::postgres::{self, cache::CachedGateway, PostgresGateway},
-};
 use actix_web::dev::ServerHandle;
 use clap::Parser;
 use std::sync::Arc;
 use tokio::{sync::mpsc, task, task::JoinHandle};
 use tracing::info;
 
-mod extractor;
-mod hex_bytes;
-mod models;
-mod pb;
-mod serde_helpers;
-mod services;
-mod storage;
-mod substreams;
-
-#[cfg(test)]
-#[macro_use]
-extern crate pretty_assertions;
+use tycho_indexer::{
+    extractor,
+    extractor::{evm, ExtractionError},
+    models,
+    services::ServicesBuilder,
+    storage,
+    storage::postgres::{self, cache::CachedGateway, PostgresGateway},
+};
 
 /// Tycho Indexer using Substreams
 ///
