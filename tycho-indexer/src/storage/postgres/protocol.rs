@@ -545,7 +545,76 @@ where
         to: &BlockIdentifier,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        todo!()
+        // To revert all changes of a chain, we need to delete & modify entries
+        // from a big number of tables. Reverting state, signifies deleting
+        // history. We will not keep any branches in the db only the main branch
+        // will be kept.
+        let block = orm::Block::by_id(to, conn).await?;
+
+        // All entities and version updates are connected to the block via a
+        // cascade delete, this ensures that the state is reverted by simply
+        // deleting the correct blocks, which then triggers cascading deletes on
+        // child entries.
+        diesel::delete(
+            schema::block::table
+                .filter(schema::block::number.gt(block.number))
+                .filter(schema::block::chain_id.eq(block.chain_id)),
+        )
+        .execute(conn)
+        .await?;
+
+        // Any versioned table's rows, which have `valid_to` set to "> block.ts"
+        // need, to be updated to be valid again (thus, valid_to = NULL).
+        diesel::update(
+            schema::contract_storage::table.filter(schema::contract_storage::valid_to.gt(block.ts)),
+        )
+        .set(schema::contract_storage::valid_to.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
+        diesel::update(
+            schema::account_balance::table.filter(schema::account_balance::valid_to.gt(block.ts)),
+        )
+        .set(schema::account_balance::valid_to.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
+        diesel::update(
+            schema::contract_code::table.filter(schema::contract_code::valid_to.gt(block.ts)),
+        )
+        .set(schema::contract_code::valid_to.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
+        diesel::update(
+            schema::protocol_state::table.filter(schema::protocol_state::valid_to.gt(block.ts)),
+        )
+        .set(schema::protocol_state::valid_to.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
+        diesel::update(
+            schema::protocol_calls_contract::table
+                .filter(schema::protocol_calls_contract::valid_to.gt(block.ts)),
+        )
+        .set(schema::protocol_calls_contract::valid_to.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
+        diesel::update(schema::account::table.filter(schema::account::deleted_at.gt(block.ts)))
+            .set(schema::account::deleted_at.eq(Option::<NaiveDateTime>::None))
+            .execute(conn)
+            .await?;
+
+        diesel::update(
+            schema::protocol_component::table
+                .filter(schema::protocol_component::deleted_at.gt(block.ts)),
+        )
+        .set(schema::protocol_component::deleted_at.eq(Option::<NaiveDateTime>::None))
+        .execute(conn)
+        .await?;
+
+        Ok(())
     }
 
     async fn _get_or_create_protocol_system_id(
@@ -1360,5 +1429,37 @@ mod test {
         assert_eq!(pc.chain, chain);
         let i_usize: usize = i as usize;
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_revert() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        let block1_hash =
+            H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
+                .unwrap()
+                .0
+                .into();
+        let block1_ts = "2020-01-01T00:00:00"
+            .parse::<chrono::NaiveDateTime>()
+            .expect("timestamp");
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        gateway
+            .revert_protocol_state(&BlockIdentifier::Hash(block1_hash), &mut conn)
+            .await
+            .unwrap();
+
+        let states = schema::protocol_state::table
+            .select(orm::ProtocolState::as_select())
+            .get_results::<orm::ProtocolState>(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(states.len(), 2);
+        for state in states {
+            assert_eq!(state.valid_from, block1_ts);
+        }
     }
 }

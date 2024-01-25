@@ -705,15 +705,14 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<ProtocolStateDelta, StorageError>;
 
-    /// Reverts the protocol states in storage.
+    /// Reverts the storage to a previous version.
     ///
-    /// Deletes all protocol states that were set after the given block.
+    /// This modification will delete version in storage. The state will be
+    /// reset to the passed version.
     ///
     /// # Parameters
-    /// - `to` The block at which the we must revert to.
-    ///
-    /// # Return
-    /// Ok if the revert was successful, Err if it was not.
+    /// - `to` The version to revert to. Given a block uses VersionKind::Last behaviour.
+    /// - `conn` The database gateway.
     async fn revert_protocol_state(
         &self,
         to: &BlockIdentifier,
