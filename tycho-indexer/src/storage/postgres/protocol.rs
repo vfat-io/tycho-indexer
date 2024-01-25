@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
+use ethers::types::H160;
 use std::{cmp::Ordering, collections::HashMap};
 
 use diesel::prelude::*;
@@ -171,41 +172,100 @@ where
         new: &[&Self::ProtocolComponent],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        use super::schema::protocol_component::dsl::*;
+        use super::schema::{
+            account::dsl::*, protocol_component::dsl::*, protocol_component_token_junction::dsl::*,
+            token::dsl::*,
+        };
         let mut values: Vec<orm::NewProtocolComponent> = Vec::with_capacity(new.len());
         let tx_hashes: Vec<TxHash> = new
             .iter()
             .map(|pc| pc.creation_tx.into())
             .collect();
         let tx_hash_id_mapping: HashMap<TxHash, i64> =
-            orm::Transaction::ids_by_hash(&tx_hashes, conn)
-                .await
-                .unwrap();
+            orm::Transaction::ids_by_hash(&tx_hashes, conn).await?;
 
         for pc in new {
             let txh = tx_hash_id_mapping
                 .get::<TxHash>(&pc.creation_tx.into())
                 .ok_or(StorageError::DecodeError("TxHash not found".to_string()))?;
 
-            let new_pc = pc
-                .to_storage(
-                    self.get_chain_id(&pc.chain),
-                    self.get_protocol_system_id(&pc.protocol_system.to_string()),
-                    txh.to_owned(),
-                    pc.created_at,
-                )
-                .unwrap();
+            let new_pc = pc.to_storage(
+                self.get_chain_id(&pc.chain),
+                self.get_protocol_system_id(&pc.protocol_system.to_string()),
+                txh.to_owned(),
+                pc.created_at,
+            )?;
             values.push(new_pc);
         }
 
-        diesel::insert_into(protocol_component)
-            .values(&values)
-            .on_conflict((chain_id, protocol_system_id, external_id))
-            .do_nothing()
-            .execute(conn)
+        let inserted_protocol_components: Vec<orm::ProtocolComponent> =
+            diesel::insert_into(protocol_component)
+                .values(&values)
+                .on_conflict((
+                    schema::protocol_component::chain_id,
+                    protocol_system_id,
+                    external_id,
+                ))
+                .do_nothing()
+                .get_results(conn)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))?;
+
+        let component_id_by_token_addresses: HashMap<i64, Vec<H160>> = inserted_protocol_components
+            .iter()
+            .zip(new.iter()) // TODO: assuming correct order here at the moment
+            .map(|(pc_orm, pc_struct)| (pc_orm.id, pc_struct.tokens.to_owned()))
+            .collect::<HashMap<_, _>>();
+
+        let token_addresses: Vec<Address> = new
+            .iter()
+            .flat_map(|pc| {
+                pc.tokens
+                    .clone()
+                    .into_iter()
+                    .map(|token_address| Address::from(token_address.0))
+                    .collect::<Vec<Address>>()
+            })
+            .collect();
+
+        let query = token
+            .inner_join(account)
+            .select((schema::account::address, schema::token::id))
+            .filter(schema::account::address.eq_any(token_addresses))
+            .into_boxed();
+
+        let token_add_by_id: HashMap<Address, i64> = query
+            .load::<(Address, i64)>(conn)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))
-            .unwrap();
+            .map_err(|err| {
+                StorageError::from_diesel(err, "Token", &new[0].chain.to_string(), None)
+            })?
+            .into_iter()
+            .collect();
+
+        let component_to_token_relations: Vec<orm::NewProtocolComponentToken> =
+            component_id_by_token_addresses
+                .into_iter()
+                .flat_map(|(pc_id, token_adds)| {
+                    token_adds
+                        .into_iter()
+                        .map(|token_add| {
+                            orm::NewProtocolComponentToken {
+                                protocol_component_id: pc_id,
+                                token_id: token_add_by_id
+                                    .get(&Address::from(token_add.0))
+                                    .unwrap_or(&0) // TODO: figure out what to do
+                                    .to_owned(),
+                            }
+                        })
+                        .collect::<Vec<orm::NewProtocolComponentToken>>()
+                })
+                .collect();
+
+        diesel::insert_into(protocol_component_token_junction)
+            .values(&component_to_token_relations)
+            .execute(conn)
+            .await?;
 
         Ok(())
     }
@@ -483,7 +543,6 @@ where
 
         diesel::insert_into(schema::account::table)
             .values(&new_accounts)
-            // .on_conflict(..).do_nothing() is necessary to ignore updating duplicated entries
             .on_conflict((schema::account::address, schema::account::chain_id))
             .do_nothing()
             .execute(conn)
