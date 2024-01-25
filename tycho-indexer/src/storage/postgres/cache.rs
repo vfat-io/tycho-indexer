@@ -195,7 +195,6 @@ impl DBCacheWriteExecutor {
                         .run(|conn| {
                             async {
                                 for op in new_db_tx.operations {
-                                    dbg!("WRITE", &op);
                                     if let WriteOp::UpsertBlock(_) = op {
                                         // Ignore block upserts, we expect it to already be stored
                                         continue;
@@ -276,7 +275,6 @@ impl DBCacheWriteExecutor {
                     for op in db_txs.into_iter() {
                         if !seen_operations.contains(&op) {
                             // Only executes if it is not already in seen_operations
-                            dbg!("FLUSH", &op);
                             match self.execute_write_op(&op, conn).await {
                                 Ok(_) => {
                                     seen_operations.push(op);
@@ -560,20 +558,18 @@ impl DerefMut for CachedGateway {
 
 #[cfg(test)]
 mod test {
-    use serial_test::serial;
-    use std::{str::FromStr, sync::Arc};
-
     use crate::{
         extractor::{evm, evm::EVMStateGateway},
         hex_bytes::Bytes,
         models::{Chain, ExtractionState},
-        postgres::testing::run_against_db,
         storage::{
             postgres::{
                 cache::{
                     CachedGateway, DBCacheMessage, DBCacheWriteExecutor, DBTransaction, WriteOp,
                 },
-                db_fixtures, PostgresGateway,
+                db_fixtures,
+                testing::run_against_db,
+                PostgresGateway,
             },
             BlockIdentifier, BlockOrTimestamp, StorageError,
             StorageError::NotFound,
@@ -581,6 +577,8 @@ mod test {
     };
     use diesel_async::AsyncPgConnection;
     use ethers::{prelude::H256, types::H160};
+    use serial_test::serial;
+    use std::{str::FromStr, sync::Arc};
     use tokio::sync::{
         mpsc,
         oneshot::{self},
