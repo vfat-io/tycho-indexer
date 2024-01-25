@@ -357,12 +357,12 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
-        let token_addresses = tvl_changes
+        let token_addresses: Vec<Bytes> = tvl_changes
             .iter()
-            .map(|tvl_change| tvl_change.token.as_bytes())
+            .map(|tvl_change| Bytes::from(tvl_change.token.as_bytes()))
             .collect();
 
-        let mut account_ids = token
+        let account_ids = token
             .inner_join(account)
             .select(schema::token::id)
             .filter(schema::account::address.eq_any(token_addresses))
@@ -377,7 +377,7 @@ where
 
         let external_ids: Vec<String> = tvl_changes
             .iter()
-            .map(|tvl_change| tvl_change.component_id)
+            .map(|tvl_change| tvl_change.component_id.to_string())
             .collect();
         let protocol_component_ids =
             orm::ProtocolComponent::id_by_external_id(&external_ids, conn).await?;
@@ -850,23 +850,50 @@ mod test {
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
-        const AMBIENT_POOL_HASH: String =
-            String::from("d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902");
+        let tx_hash =
+            H256::from_str("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")
+                .unwrap();
+        let protocol_component_id: String = String::from("state1");
 
-        let new_protocol_component = NewProtocolComponent {
-            chain_id: 1,
-            external_id: AMBIENT_POOL_HASH,
-            protocol_type_id: 1,
-            protocol_system_id: 1,
-            attributes: Some(json!({"attribute": "attribute_1"})),
-            creation_tx: 123456789,
-            created_at: Default::default(),
+        let base_token = H160::from_str(WETH.trim_start_matches("0x")).unwrap();
+        let tvl_change = TvlChange {
+            token: base_token,
+            new_balance: Bytes::from(&[0u8]),
+            modify_tx: tx_hash,
+            component_id: protocol_component_id,
         };
 
+        let tvl_changes = vec![&tvl_change];
         // Insert the new ProtocolComponent into the database
-        diesel::insert_into(protocol_component::table)
-            .values(&new_protocol_component)
-            .execute(conn)?;
+        gw.add_tvl_changes(Chain::Ethereum, &tvl_changes, &mut conn)
+            .await
+            .unwrap();
+
+        let inserted_data = schema::tvl_change::table
+            .select(orm::TvlChange::as_select())
+            .first::<orm::TvlChange>(&mut conn)
+            .await;
+
+        assert!(inserted_data.is_ok());
+        let inserted_data: orm::TvlChange = inserted_data.unwrap();
+
+        assert_eq!(inserted_data.new_balance, Bytes::from(&[0u8]));
+
+        let referenced_token = schema::token::table
+            .filter(schema::token::id.eq(inserted_data.token_id))
+            .select(orm::Token::as_select())
+            .first::<orm::Token>(&mut conn)
+            .await;
+        let referenced_token: orm::Token = referenced_token.unwrap();
+        assert_eq!(referenced_token.symbol, String::from("WETH"));
+
+        let referenced_component = schema::protocol_component::table
+            .filter(schema::protocol_component::id.eq(inserted_data.protocol_component_id))
+            .select(orm::ProtocolComponent::as_select())
+            .first::<orm::ProtocolComponent>(&mut conn)
+            .await;
+        let referenced_component: orm::ProtocolComponent = referenced_component.unwrap();
+        assert_eq!(referenced_component.external_id, String::from("state1"));
     }
 
     #[tokio::test]

@@ -16,7 +16,7 @@ use chrono::NaiveDateTime;
 use std::collections::HashMap;
 
 pub mod pg {
-    use std::{collections::HashSet, hash::Hash};
+    use std::collections::HashSet;
 
     use crate::{
         extractor::evm::utils::pad_and_parse_h160,

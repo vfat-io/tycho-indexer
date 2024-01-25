@@ -450,7 +450,7 @@ impl AccountUpdateWithTx {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct TvlChange {
     pub token: H160,
-    new_balance: Bytes,
+    pub new_balance: Bytes,
     // tx where the this balance was observed
     pub modify_tx: H256,
     pub component_id: String,
