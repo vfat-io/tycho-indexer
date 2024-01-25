@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS tvl_change(
     -- id of the token whose tvl changed
     "token_id" bigint REFERENCES "token"(id) NOT NULL,
     -- new balance of the token for this component
-    "new_balance" varchar(255) NOT NULL,
+    "new_balance" bytea NOT NULL,
     -- the transaction that modified the tvl of this component
     "modify_tx" bigint REFERENCES "transaction"(id) ON DELETE CASCADE NOT NULL,
     -- Reference to static attributes of the protocol.

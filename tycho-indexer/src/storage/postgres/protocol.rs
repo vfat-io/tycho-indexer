@@ -355,7 +355,7 @@ where
         chain: Chain,
         tvl_changes: &[&Self::TvlChange],
         conn: &mut Self::DB,
-    ) {
+    ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
 
         let token_addresses = tvl_changes
@@ -372,12 +372,14 @@ where
 
         let transaction_ids = tvl_changes
             .iter()
-            .map(|tvl_change| Transaction::id_by_hash(tvl_change.modify_tx.as_bytes(), conn))
+            .map(|tvl_change| orm::Transaction::id_by_hash(tvl_change.modify_tx.as_bytes(), conn))
             .collect();
 
         let protocol_component_ids = tvl_changes
             .iter()
-            .map(|tvl_change| ProtocolComponent::id_by_hash(tvl_change.modify_tx.as_bytes(), conn))
+            .map(|tvl_change| {
+                orm::ProtocolComponent::id_by_external_id(tvl_change.modify_tx.as_bytes(), conn)
+            })
             .collect();
 
         let mut new_tvl_changes = Vec::new();
@@ -396,6 +398,8 @@ where
             .execute(conn)
             .await
             .unwrap();
+
+        Ok()
     }
 
     async fn get_state_delta(
@@ -845,6 +849,7 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
+
         const AMBIENT_POOL_HASH: String =
             String::from("d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902");
 

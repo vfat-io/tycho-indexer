@@ -27,7 +27,6 @@ pub mod pg {
             postgres::{
                 orm,
                 orm::{NewToken, Token},
-                schema::token::dsl::token,
             },
             Address, Balance, BlockHash, ChangeType, Code, StorableProtocolComponent,
             StorableProtocolState, StorableProtocolType, StorableToken, StorableTvlChange, TxHash,
