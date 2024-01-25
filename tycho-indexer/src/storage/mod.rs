@@ -587,16 +587,16 @@ pub trait ProtocolGateway {
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
-    /// Stores new found ProtocolTypes or updates if existing.
+    /// Stores new found ProtocolTypes.
     ///
     /// # Parameters
     /// - `new`  The new protocol types.
     ///
     /// # Returns
     /// Ok if stored successfully.
-    async fn upsert_protocol_type(
+    async fn add_protocol_types(
         &self,
-        new: &Self::ProtocolType,
+        new_protocol_types: &[Self::ProtocolType],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 

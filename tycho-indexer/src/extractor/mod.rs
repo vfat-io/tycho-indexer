@@ -43,6 +43,7 @@ pub type ExtractorMsg = Arc<dyn NormalisedMessage>;
 pub trait Extractor: Send + Sync {
     fn get_id(&self) -> ExtractorIdentity;
 
+    async fn ensure_protocol_types(&mut self);
     async fn get_cursor(&self) -> String;
 
     async fn get_last_processed_block(&self) -> Option<evm::Block>;

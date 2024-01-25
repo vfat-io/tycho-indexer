@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use std::{str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use diesel_async::{
@@ -17,7 +17,9 @@ use super::{AccountUpdate, Block};
 use crate::{
     extractor::{evm, ExtractionError, Extractor, ExtractorMsg},
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ExtractorIdentity},
+    models::{
+        Chain, ExtractionState, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType,
+    },
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
@@ -40,6 +42,7 @@ pub struct AmbientContractExtractor<G> {
     // TODO: There is not reason this needs to be shared
     // try removing the Mutex
     inner: Arc<Mutex<Inner>>,
+    protocol_type_names: HashMap<String, String>,
 }
 
 impl<DB> AmbientContractExtractor<DB> {
@@ -66,6 +69,7 @@ pub struct AmbientPgGateway {
 #[async_trait]
 pub trait AmbientGateway: Send + Sync {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]);
     async fn upsert_contract(
         &self,
         changes: &evm::BlockContractChanges,
@@ -83,6 +87,14 @@ pub trait AmbientGateway: Send + Sync {
 impl AmbientPgGateway {
     pub fn new(name: &str, chain: Chain, pool: Pool<AsyncPgConnection>, gw: CachedGateway) -> Self {
         AmbientPgGateway { name: name.to_owned(), chain, pool, state_gateway: gw }
+    }
+
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
+        let mut conn = self.pool.get().await.unwrap();
+        self.state_gateway
+            .add_protocol_types(new_protocol_types, &mut *conn)
+            .await
+            .expect("Couldn't insert protocol types");
     }
 
     #[instrument(skip_all)]
@@ -194,6 +206,10 @@ impl AmbientGateway for AmbientPgGateway {
         self.get_last_cursor(&mut conn).await
     }
 
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
+        todo!()
+    }
+
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn upsert_contract(
         &self,
@@ -235,7 +251,7 @@ where
 {
     pub async fn new(name: &str, chain: Chain, gateway: G) -> Result<Self, ExtractionError> {
         // check if this extractor has state
-        let res = match gateway.get_cursor().await {
+        let mut res = match gateway.get_cursor().await {
             Err(StorageError::NotFound(_, _)) => AmbientContractExtractor {
                 gateway,
                 name: name.to_owned(),
@@ -245,6 +261,7 @@ where
                     last_processed_block: None,
                 })),
                 protocol_system: "ambient".to_string(),
+                protocol_type_names: HashMap::new(),
             },
             Ok(cursor) => AmbientContractExtractor {
                 gateway,
@@ -252,9 +269,12 @@ where
                 chain,
                 inner: Arc::new(Mutex::new(Inner { cursor, last_processed_block: None })),
                 protocol_system: "ambient".to_string(),
+                protocol_type_names: HashMap::new(),
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
+
+        res.ensure_protocol_types().await;
         Ok(res)
     }
 }
@@ -266,6 +286,22 @@ where
 {
     fn get_id(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.name)
+    }
+
+    async fn ensure_protocol_types(&mut self) {
+        let pt = ProtocolType::new(
+            "ambient_pool".to_string(),
+            FinancialType::Swap,
+            None,
+            ImplementationType::Vm,
+        );
+
+        self.gateway
+            .ensure_protocol_types(&[pt])
+            .await;
+
+        self.protocol_type_names
+            .insert("pool".to_string(), "ambient_pool".to_string());
     }
 
     async fn get_cursor(&self) -> String {
@@ -296,14 +332,16 @@ where
 
         debug!(?raw_msg, "Received message");
 
-        // TODO: figure out how/where to get this ID from (in ENG-2049)
-        let protocol_type_id = String::from("id-1");
+        let protocol_type_id = self
+            .protocol_type_names
+            .get("pool")
+            .expect("Couldn't fing Protocol Type");
         let msg = match evm::BlockContractChanges::try_from_message(
             raw_msg,
             &self.name,
             self.chain,
             self.protocol_system.clone(),
-            protocol_type_id,
+            protocol_type_id.clone(),
         ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);

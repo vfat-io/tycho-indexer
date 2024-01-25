@@ -234,23 +234,24 @@ where
             .await?;
         Ok(())
     }
-    async fn upsert_protocol_type(
+    async fn add_protocol_types(
         &self,
-        new: &Self::ProtocolType,
+        new_protocol_types: &[Self::ProtocolType],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::protocol_type::dsl::*;
-
-        let values: orm::NewProtocolType = new.to_storage();
+        let values: Vec<orm::NewProtocolType> = new_protocol_types
+            .iter()
+            .map(|new_protocol_type| new_protocol_type.to_storage())
+            .collect();
 
         diesel::insert_into(protocol_type)
             .values(&values)
             .on_conflict(name)
-            .do_update()
-            .set(&values)
+            .do_nothing()
             .execute(conn)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", &values.name, None))?;
+            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", "Batch insert", None))?;
 
         Ok(())
     }
@@ -986,7 +987,7 @@ mod test {
             implementation: ImplementationType::Custom,
         };
 
-        gw.upsert_protocol_type(&protocol_type, &mut conn)
+        gw.add_protocol_types(&[protocol_type], &mut conn)
             .await
             .unwrap();
 
@@ -1009,25 +1010,25 @@ mod test {
             implementation: ImplementationType::Vm,
         };
 
-        gw.upsert_protocol_type(&updated_protocol_type, &mut conn)
-            .await
-            .unwrap();
-
-        let newly_inserted_data = schema::protocol_type::table
-            .filter(schema::protocol_type::name.eq("Protocol"))
-            .select(schema::protocol_type::all_columns)
-            .load::<orm::ProtocolType>(&mut conn)
-            .await
-            .unwrap();
-
-        assert_eq!(newly_inserted_data.len(), 1);
-        assert_eq!(newly_inserted_data[0].name, "Protocol".to_string());
-        assert_eq!(newly_inserted_data[0].financial_type, orm::FinancialType::Leverage);
-        assert_eq!(
-            newly_inserted_data[0].attribute_schema,
-            Some(json!({"attribute": "another_schema"}))
-        );
-        assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
+        // gw.add_protocol_types(&updated_protocol_type, &mut conn)
+        //     .await
+        //     .unwrap();
+        //
+        // let newly_inserted_data = schema::protocol_type::table
+        //     .filter(schema::protocol_type::name.eq("Protocol"))
+        //     .select(schema::protocol_type::all_columns)
+        //     .load::<orm::ProtocolType>(&mut conn)
+        //     .await
+        //     .unwrap();
+        //
+        // assert_eq!(newly_inserted_data.len(), 1);
+        // assert_eq!(newly_inserted_data[0].name, "Protocol".to_string());
+        // assert_eq!(newly_inserted_data[0].financial_type, orm::FinancialType::Leverage);
+        // assert_eq!(
+        //     newly_inserted_data[0].attribute_schema,
+        //     Some(json!({"attribute": "another_schema"}))
+        // );
+        // assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
     }
 
     #[tokio::test]
@@ -1357,7 +1358,7 @@ mod test {
         components.sort_by(|a, b| a.id.cmp(&b.id));
 
         let assert_message = format!(
-            "Found {} ProtocolComponents for chain {}, expecting >= 1, because there are two eth and one stark component. Two eth components are needed for the ProtocolStates",
+            "Found {} ProtocolComponents for chain {:?}, expecting >= 1, because there are two eth and one stark component. Two eth components are needed for the ProtocolStates",
             components.len(),
             chain
         );
