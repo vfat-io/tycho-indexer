@@ -33,10 +33,8 @@ pub fn decode_warm_path_user_cmd_call(
             .ok_or_else(|| anyhow!("Failed to hotproxy userCmd input data.".to_string()))?;
 
         let code = input_bytes[31];
-        let is_mint =
-            code == 1 || code == 11 || code == 12 || code == 3 || code == 31 || code == 32;
-        let is_burn =
-            code == 2 || code == 21 || code == 22 || code == 4 || code == 41 || code == 42;
+        let is_mint = [1, 11, 12, 3, 31, 32].contains(&code);
+        let is_burn = [2, 21, 22, 4, 41, 42].contains(&code);
         let is_harvest = code == 5;
         if is_mint || is_burn || is_harvest {
             if let Ok(liquidity_change_calldata) = decode(LIQUIDITY_CHANGE_ABI, &input_bytes) {

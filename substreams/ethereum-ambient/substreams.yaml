@@ -31,7 +31,7 @@ modules:
     valueType: proto:tycho.evm.state.v1.ProtocolComponent
     inputs:
       - map: map_pool_changes
-  - name: store_pools_balances
+  - name: store_pool_balances
     kind: store
     initialBlock: 17361664
     updatePolicy: add
