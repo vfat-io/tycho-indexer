@@ -515,6 +515,112 @@ fn run_migrations(db_url: &str) {
 }
 
 #[cfg(test)]
+pub mod testing {
+    //! # Reusable components to write tests against the DB.
+    use diesel::sql_query;
+    use diesel_async::{
+        pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
+        AsyncPgConnection, RunQueryDsl,
+    };
+    use std::future::Future;
+
+    async fn setup_pool() -> Pool<AsyncPgConnection> {
+        let database_url =
+            std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+        let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
+        let pool = Pool::builder(config).build().unwrap();
+        pool
+    }
+
+    async fn teardown(conn: &mut AsyncPgConnection) {
+        let tables = vec![
+            // put block early so most FKs cascade, it would
+            // be better to find the correct order tough.
+            "block",
+            "protocol_calls_contract",
+            "contract_storage",
+            "contract_code",
+            "account_balance",
+            "protocol_holds_token",
+            "token",
+            "account",
+            "protocol_state",
+            "protocol_component",
+            "extraction_state",
+            "protocol_type",
+            "protocol_system",
+            "transaction",
+            "chain",
+            "audit_log",
+        ];
+        for t in tables.iter() {
+            sql_query(format!("DELETE FROM {};", t))
+                .execute(conn)
+                .await
+                .expect(&format!("Error truncating {} table", t));
+        }
+        dbg!("Teardown completed");
+    }
+
+    /// Run tests that require committing data to the db.
+    ///
+    /// This function will run tests that are expected to commit data into the database, e.g.
+    /// because the test setups are to complex for using `begin_test_transaction`. Please only use
+    /// this as a last resort as these tests are slow and have to be run serially. Using a test
+    /// transaction is preferred were possible.
+    ///
+    /// The method will pass a connection pool to the actual test function, catch any panics and
+    /// then purge all data in the tables so that the next test can run from a clean slate.
+    ///
+    /// ## Interference with other tests
+    /// While this function runs, the db will actually contain data. This means two things:
+    ///
+    ///     1. It is likely to interfere with other tests using this same function. To mitigate
+    ///        this, you can use the `#[serial]` macro which will execute these tests sequentially.
+    ///     2. Other tests that rely on a empty db (most tests unsing test transactions) will likely
+    ///        be affected if run in parrallel with this function. To keep running these tests in
+    ///        parallel but avoid running them during the sequential tests use the macro
+    ///        #[parallel].
+    ///
+    /// ## Example
+    /// ```
+    /// use serial_test::serial;
+    ///
+    /// #[tokio::test]
+    /// #[serial]
+    /// fn test_commit() {
+    ///     run_against_db(|connection_pool| async move {
+    ///         println!("here goes actual test code")
+    ///     }).await;
+    /// }
+    /// ```
+    ///
+    /// ## Future
+    /// We should consider moving these test to their own database. That would require running
+    /// migrations on these databases though. For now tests run fast enough though.
+    pub async fn run_against_db<F, Fut>(test_f: F)
+    where
+        F: FnOnce(Pool<AsyncPgConnection>) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send,
+    {
+        let connection_pool = setup_pool().await;
+        let inner_pool = connection_pool.clone();
+        let res = tokio::spawn(async move {
+            test_f(inner_pool).await;
+        })
+        .await;
+
+        let mut connection = connection_pool
+            .get()
+            .await
+            .expect("Failed to get a connection from the pool");
+
+        teardown(&mut connection).await;
+        res.unwrap();
+    }
+}
+
+#[cfg(test)]
 pub mod db_fixtures {
     //! # General Purpose Fixtures for Database State Modification
     //!
