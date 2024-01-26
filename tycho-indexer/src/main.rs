@@ -2,6 +2,7 @@
 
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use futures03::future::select_all;
+use std::collections::HashMap;
 
 use extractor::{
     evm::ambient::{AmbientContractExtractor, AmbientPgGateway},
@@ -9,6 +10,12 @@ use extractor::{
 };
 use models::Chain;
 
+use crate::{
+    extractor::{evm, ExtractionError},
+    models::{FinancialType, ImplementationType, ProtocolType},
+    services::ServicesBuilder,
+    storage::postgres::{self, cache::CachedGateway, PostgresGateway},
+};
 use actix_web::dev::ServerHandle;
 use clap::Parser;
 use std::sync::Arc;
@@ -160,8 +167,23 @@ async fn start_ambient_extractor(
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
     let ambient_name = "vm:ambient";
     let ambient_gw = AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, cached_gw);
-    let extractor =
-        AmbientContractExtractor::new(ambient_name, Chain::Ethereum, ambient_gw).await?;
+    let mut ambient_protocol_types = HashMap::new();
+    ambient_protocol_types.insert(
+        "vm:pool".to_string(),
+        ProtocolType::new(
+            "ambient_pool".to_string(),
+            FinancialType::Swap,
+            None,
+            ImplementationType::Vm,
+        ),
+    );
+    let extractor = AmbientContractExtractor::new(
+        ambient_name,
+        Chain::Ethereum,
+        ambient_gw,
+        ambient_protocol_types,
+    )
+    .await?;
 
     let start_block = args.start_block;
     let stop_block = args.stop_block();

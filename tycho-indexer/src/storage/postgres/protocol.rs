@@ -181,10 +181,10 @@ where
             orm::Transaction::ids_by_hash(&tx_hashes, conn)
                 .await
                 .unwrap();
-        let pt_id = orm::ProtocolType::id_by_name(&new[0].protocol_type_id, conn)
+        let pt_id = orm::ProtocolType::id_by_name(&new[0].protocol_type_name, conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(err, "ProtocolType", &new[0].protocol_type_id, None)
+                StorageError::from_diesel(err, "ProtocolType", &new[0].protocol_type_name, None)
             })?;
         for pc in new {
             let txh = tx_hash_id_mapping
@@ -462,7 +462,7 @@ where
     ) -> Result<(), StorageError> {
         let titles: Vec<String> = tokens
             .iter()
-            .map(|token| format!("{}_{}", token.chain(), token.symbol()))
+            .map(|token| format!("{:?}_{}", token.chain(), token.symbol()))
             .collect();
 
         let addresses: Vec<_> = tokens
@@ -1002,33 +1002,6 @@ mod test {
         assert_eq!(inserted_data.financial_type, orm::FinancialType::Debt);
         assert_eq!(inserted_data.attribute_schema, Some(json!({"attribute": "schema"})));
         assert_eq!(inserted_data.implementation, orm::ImplementationType::Custom);
-
-        let updated_protocol_type = models::ProtocolType {
-            name: "Protocol".to_string(),
-            financial_type: FinancialType::Leverage,
-            attribute_schema: Some(json!({"attribute": "another_schema"})),
-            implementation: ImplementationType::Vm,
-        };
-
-        // gw.add_protocol_types(&updated_protocol_type, &mut conn)
-        //     .await
-        //     .unwrap();
-        //
-        // let newly_inserted_data = schema::protocol_type::table
-        //     .filter(schema::protocol_type::name.eq("Protocol"))
-        //     .select(schema::protocol_type::all_columns)
-        //     .load::<orm::ProtocolType>(&mut conn)
-        //     .await
-        //     .unwrap();
-        //
-        // assert_eq!(newly_inserted_data.len(), 1);
-        // assert_eq!(newly_inserted_data[0].name, "Protocol".to_string());
-        // assert_eq!(newly_inserted_data[0].financial_type, orm::FinancialType::Leverage);
-        // assert_eq!(
-        //     newly_inserted_data[0].attribute_schema,
-        //     Some(json!({"attribute": "another_schema"}))
-        // );
-        // assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
     }
 
     #[tokio::test]
@@ -1113,7 +1086,7 @@ mod test {
         .await
         .unwrap()[0];
         assert_eq!(inserted_account.id, inserted_token.account_id);
-        assert_eq!(inserted_account.title, "ethereum_USDT".to_string());
+        assert_eq!(inserted_account.title, "Ethereum_USDT".to_string());
 
         // make sure nothing changed on WETH (ids included)
         let new_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
@@ -1145,7 +1118,7 @@ mod test {
         let original_component = ProtocolComponent {
             id: "test_contract_id".to_string(),
             protocol_system,
-            protocol_type_id: protocol_type_name_1,
+            protocol_type_name: protocol_type_name_1,
             chain,
             tokens: vec![],
             contract_ids: vec![],
@@ -1189,7 +1162,7 @@ mod test {
         ProtocolComponent {
             id: id.to_string(),
             protocol_system: "ambient".to_string(),
-            protocol_type_id: "type_id_1".to_string(),
+            protocol_type_name: "type_id_1".to_string(),
             chain: Chain::Ethereum,
             tokens: vec![],
             contract_ids: vec![],

@@ -363,7 +363,7 @@ pub mod pg {
             Ok(evm::ProtocolComponent {
                 id: val.external_id,
                 protocol_system: protocol_system.to_owned(),
-                protocol_type_id: val.protocol_type_id.to_string(),
+                protocol_type_name: val.protocol_type_id.to_string(),
                 chain,
                 tokens,
                 contract_ids,
@@ -627,7 +627,7 @@ mod test {
         let protocol_component = result.unwrap();
 
         assert_eq!(protocol_component.id, val.external_id.to_string());
-        assert_eq!(protocol_component.protocol_type_id, val.protocol_type_id.to_string());
+        assert_eq!(protocol_component.protocol_type_name, val.protocol_type_id.to_string());
         assert_eq!(protocol_component.chain, chain);
         assert_eq!(protocol_component.tokens, tokens);
         assert_eq!(protocol_component.contract_ids, contract_ids);
@@ -650,7 +650,7 @@ mod test {
         let protocol_component = evm::ProtocolComponent {
             id: "sample_contract_id".to_string(),
             protocol_system: "ambient".to_string(),
-            protocol_type_id: "ambient_pool".to_string(),
+            protocol_type_name: "ambient_pool".to_string(),
             chain: Chain::Ethereum,
             tokens: vec![
                 H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
