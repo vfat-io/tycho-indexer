@@ -688,8 +688,6 @@ pub trait ProtocolGateway {
     ///
     /// # Parameters
     /// - `chain` The chain of the component
-    /// - `system` The protocol system this component belongs to
-    /// - `ids` The external ids of the components e.g. addresses, or the pairs
     /// - `start_version` The version at which to start looking for changes at.
     /// - `end_version` The version at which to stop looking for changes.
     ///
@@ -698,8 +696,6 @@ pub trait ProtocolGateway {
     async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
-        system: Option<String>,
-        ids: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,

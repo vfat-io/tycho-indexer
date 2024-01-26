@@ -103,8 +103,6 @@ where
     async fn _get_protocol_states_delta_forward(
         &self,
         chain: &Chain,
-        system: Option<String>,
-        ids: Option<&[&str]>,
         start_ts: NaiveDateTime,
         end_ts: NaiveDateTime,
         conn: &mut AsyncPgConnection,
@@ -118,111 +116,45 @@ where
         // sets of results.
 
         let chain_db_id = self.get_chain_id(chain);
-        let mut deltas;
 
-        match (ids, system) {
-            (Some(ids), Some(system)) => {
-                // Filter by ids (ignore system)
-                warn!("Both protocol IDs and system were provided. System will be ignored.");
-                deltas = self._decode_protocol_states(
-                    orm::ProtocolState::by_id(ids, chain_db_id, Some(start_ts), Some(end_ts), conn)
-                        .await,
-                    ids.join(",").as_str(),
-                    |states, id, hash| {
-                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
-                    },
-                )?;
-                let deleted_deltas = self._decode_protocol_states(
-                    orm::ProtocolState::deleted_by_id(ids, chain_db_id, start_ts, end_ts, conn)
-                        .await,
-                    ids.join(",").as_str(),
-                    |states, id, hash| {
-                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Deletion)
-                    },
-                )?;
-                deltas.extend(deleted_deltas);
-            }
-            (Some(ids), _) => {
-                // Filter by ids
-                deltas = self._decode_protocol_states(
-                    orm::ProtocolState::by_id(ids, chain_db_id, Some(start_ts), Some(end_ts), conn)
-                        .await,
-                    ids.join(",").as_str(),
-                    |states, id, hash| {
-                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
-                    },
-                )?;
-                let deleted_deltas = self._decode_protocol_states(
-                    orm::ProtocolState::deleted_by_id(ids, chain_db_id, start_ts, end_ts, conn)
-                        .await,
-                    ids.join(",").as_str(),
-                    |states, id, hash| {
-                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Deletion)
-                    },
-                )?;
-                deltas.extend(deleted_deltas);
-            }
-            (_, Some(system)) => {
-                // Filter by protoocol system
-                deltas = self._decode_protocol_states(
-                    orm::ProtocolState::by_protocol_system(
-                        system.clone(),
-                        chain_db_id,
-                        Some(start_ts),
-                        Some(end_ts),
-                        conn,
-                    )
-                    .await,
-                    system.as_str(),
-                    |states, id, hash| {
-                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
-                    },
-                )?;
-                let deleted_deltas = self._decode_protocol_states(
-                    orm::ProtocolState::deleted_by_protocol_system(
-                        system.clone(),
-                        chain_db_id,
-                        start_ts,
-                        end_ts,
-                        conn,
-                    )
-                    .await,
-                    system.as_str(),
-                    |states, id, hash| {
-                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Deletion)
-                    },
-                )?;
-                deltas.extend(deleted_deltas);
-            }
-            _ => {
-                // Filter by chain
-                deltas = self._decode_protocol_states(
-                    orm::ProtocolState::by_chain(chain_db_id, Some(start_ts), Some(end_ts), conn)
-                        .await,
-                    chain.to_string().as_str(),
-                    |states, id, hash| {
-                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
-                    },
-                )?;
-                let deleted_deltas = self._decode_protocol_states(
-                    orm::ProtocolState::deleted_by_chain(chain_db_id, start_ts, end_ts, conn).await,
-                    chain.to_string().as_str(),
-                    |states, id, hash| {
-                        ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Deletion)
-                    },
-                )?;
-                deltas.extend(deleted_deltas);
-            }
-        }
+        // Filter by chain
+        let mut deltas = self._decode_protocol_states(
+            orm::ProtocolState::by_chain(chain_db_id, Some(start_ts), Some(end_ts), conn).await,
+            chain.to_string().as_str(),
+            |states, id, hash| {
+                ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
+            },
+        )?;
+        let deleted_deltas = self._decode_protocol_states(
+            orm::ProtocolState::deleted_by_chain(chain_db_id, start_ts, end_ts, conn).await,
+            chain.to_string().as_str(),
+            |states, id, hash| {
+                ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Deletion)
+            },
+        )?;
+        deltas.extend(deleted_deltas);
 
         Ok(deltas)
     }
 
-    fn _decode_protocol_states_revert_delta(
+    async fn _get_protocol_states_delta_backward(
         &self,
-        result: Result<Vec<(String, String, Option<Bytes>)>, diesel::result::Error>,
-        context: &str,
+        chain: &Chain,
+        start_ts: NaiveDateTime,
+        end_ts: NaiveDateTime,
+        conn: &mut AsyncPgConnection,
     ) -> Result<Vec<ProtocolStateDelta>, StorageError> {
+        // Going backwards
+        //                  ]     changes to revert    ]
+        // -----------------|--------------------------|
+        //                target                     start
+        // We query for the previous values of all component attributes updated between
+        // start and target version.
+
+        let chain_db_id = self.get_chain_id(chain);
+
+        let result =
+            orm::ProtocolState::reverted_by_chain(chain_db_id, start_ts, end_ts, conn).await;
         match result {
             Ok(data_vec) => {
                 let mut deltas = Vec::new();
@@ -260,68 +192,12 @@ where
                 Ok(deltas)
             }
 
-            Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
-        }
-    }
-
-    async fn _get_protocol_states_delta_backward(
-        &self,
-        chain: &Chain,
-        system: Option<String>,
-        ids: Option<&[&str]>,
-        start_ts: NaiveDateTime,
-        end_ts: NaiveDateTime,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<ProtocolStateDelta>, StorageError> {
-        // Going backwards
-        //                  ]     changes to revert    ]
-        // -----------------|--------------------------|
-        //                target                     start
-        // We query for the previous values of all component attributes updated between
-        // start and target version.
-
-        let chain_db_id = self.get_chain_id(chain);
-
-        match (ids, system) {
-            (Some(ids), Some(system)) => {
-                // Filter by ids (ignore system)
-                warn!("Both protocol IDs and system were provided. System will be ignored.");
-                Ok(self._decode_protocol_states_revert_delta(
-                    orm::ProtocolState::reverted_by_id(ids, chain_db_id, start_ts, end_ts, conn)
-                        .await,
-                    ids.join(",").as_str(),
-                )?)
-            }
-            (Some(ids), _) => {
-                // Filter by ids
-                Ok(self._decode_protocol_states_revert_delta(
-                    orm::ProtocolState::reverted_by_id(ids, chain_db_id, start_ts, end_ts, conn)
-                        .await,
-                    ids.join(",").as_str(),
-                )?)
-            }
-            (_, Some(system)) => {
-                // Filter by protoocol system
-                Ok(self._decode_protocol_states_revert_delta(
-                    orm::ProtocolState::reverted_by_system(
-                        system.clone(),
-                        chain_db_id,
-                        start_ts,
-                        end_ts,
-                        conn,
-                    )
-                    .await,
-                    system.as_str(),
-                )?)
-            }
-            _ => {
-                // Filter by chain
-                Ok(self._decode_protocol_states_revert_delta(
-                    orm::ProtocolState::reverted_by_chain(chain_db_id, start_ts, end_ts, conn)
-                        .await,
-                    chain.to_string().as_str(),
-                )?)
-            }
+            Err(err) => Err(StorageError::from_diesel(
+                err,
+                "ProtocolStates",
+                chain.to_string().as_str(),
+                None,
+            )),
         }
     }
 }
@@ -784,8 +660,6 @@ where
     async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
-        system: Option<String>,
-        ids: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
@@ -800,7 +674,7 @@ where
 
         if start_ts <= end_ts {
             let all_deltas = self
-                ._get_protocol_states_delta_forward(chain, system, ids, start_ts, end_ts, conn)
+                ._get_protocol_states_delta_forward(chain, start_ts, end_ts, conn)
                 .await?;
             // Aggregate - group by component_id and merge states.
             let mut grouped: HashMap<String, ProtocolStateDelta> = HashMap::new();
@@ -822,7 +696,7 @@ where
             deltas = grouped.into_values().collect();
         } else {
             deltas = self
-                ._get_protocol_states_delta_backward(chain, system, ids, start_ts, end_ts, conn)
+                ._get_protocol_states_delta_backward(chain, start_ts, end_ts, conn)
                 .await?;
         }
 
@@ -1236,15 +1110,8 @@ mod test {
         assert_eq!(older_state.valid_to, Some(newer_state.valid_from));
     }
 
-    #[rstest]
-    #[case::by_chain(None, None)]
-    #[case::by_system(Some("ambient".to_string()), None)]
-    #[case::by_ids(None, Some(vec!["state1"]))]
     #[tokio::test]
-    async fn test_get_protocol_state_deltas_forward(
-        #[case] system: Option<String>,
-        #[case] ids: Option<Vec<&str>>,
-    ) {
+    async fn test_get_protocol_state_deltas_forward() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
 
@@ -1306,8 +1173,6 @@ mod test {
         let result = gateway
             .get_protocol_states_delta(
                 &Chain::Ethereum,
-                system,
-                ids.as_deref(),
                 Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1)))),
                 &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
                 &mut conn,
@@ -1319,15 +1184,8 @@ mod test {
         assert_eq!(result, expected)
     }
 
-    #[rstest]
-    #[case::by_chain(None, None)]
-    #[case::by_system(Some("ambient".to_string()), None)]
-    #[case::by_ids(None, Some(vec!["state1"]))]
     #[tokio::test]
-    async fn test_get_protocol_state_deltas_backward(
-        #[case] system: Option<String>,
-        #[case] ids: Option<Vec<&str>>,
-    ) {
+    async fn test_get_protocol_state_deltas_backward() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
 
@@ -1382,8 +1240,6 @@ mod test {
         let result = gateway
             .get_protocol_states_delta(
                 &Chain::Ethereum,
-                system,
-                ids.as_deref(),
                 Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2)))),
                 &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
                 &mut conn,
