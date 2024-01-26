@@ -62,6 +62,3 @@ ALTER TABLE protocol_system
 DROP CONSTRAINT name_unique;
 
 ALTER TABLE token
-DROP CONSTRAINT unique_account_id_constraint;
-
-DROP TABLE IF EXISTS protocol_component_token;

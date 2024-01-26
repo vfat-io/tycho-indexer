@@ -15,8 +15,8 @@ use crate::{
 
 use super::schema::{
     account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
-    protocol_component, protocol_component_token_junction, protocol_holds_token, protocol_state,
-    protocol_system, protocol_type, token, transaction,
+    protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
+    token, transaction,
 };
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -337,8 +337,8 @@ pub struct ProtocolComponent {
 }
 
 #[derive(Insertable)]
-#[diesel(table_name = protocol_component_token_junction)]
-pub struct NewProtocolComponentToken {
+#[diesel(table_name = protocol_holds_token)]
+pub struct NewProtocolComponentTokenRelation {
     pub protocol_component_id: i64,
     pub token_id: i64,
 }

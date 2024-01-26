@@ -236,15 +236,6 @@ diesel::table! {
     }
 }
 
-diesel::table! {
-    use diesel::sql_types::*;
-
-    protocol_component_token_junction (protocol_component_id, token_id) {
-        protocol_component_id -> Int8,
-        token_id -> Int8,
-    }
-}
-
 diesel::joinable!(account -> chain (chain_id));
 diesel::joinable!(account_balance -> account (account_id));
 diesel::joinable!(account_balance -> transaction (modify_tx));
@@ -266,8 +257,6 @@ diesel::joinable!(protocol_state -> protocol_component (protocol_component_id));
 diesel::joinable!(protocol_state -> transaction (modify_tx));
 diesel::joinable!(token -> account (account_id));
 diesel::joinable!(transaction -> block (block_id));
-diesel::joinable!(protocol_component_token_junction -> protocol_component (protocol_component_id));
-diesel::joinable!(protocol_component_token_junction -> token (token_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     account,
