@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS protocol_component(
     "attributes" jsonb,
     -- The ts at which this protocol was created. Somewhat redundant as
     --	it could be inferred from related contracts but it might not be clear
-    --	in case the protocol relates or more than one contract.
+    --	in case the protocol relates to more than one contract.
     "created_at" timestamptz NOT NULL,
     -- This is reference makes it easy to revert to a previous state by
     --	simply deleting the corresponding blocks. Once again somewhat
@@ -429,7 +429,7 @@ BEGIN
     WHERE
         valid_to IS NULL
         AND account_id = NEW.account_id
-        -- running this after inserts allows us to use upserts, 
+        -- running this after inserts allows us to use upserts,
         -- currently the application does not use that though
         AND id != NEW.id;
     RETURN NEW;
@@ -454,7 +454,7 @@ BEGIN
     WHERE
         valid_to IS NULL
         AND account_id = NEW.account_id
-        -- running this after inserts allows us to use upserts, 
+        -- running this after inserts allows us to use upserts,
         -- currently the application does not use that though
         AND id != NEW.id;
     RETURN NEW;

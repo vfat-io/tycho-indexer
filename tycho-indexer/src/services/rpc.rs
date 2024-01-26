@@ -1,15 +1,17 @@
 //! This module contains Tycho RPC implementation
 
-use std::sync::Arc;
-
 use crate::{
-    extractor::evm::Account,
+    extractor::evm,
+    hex_bytes::Bytes,
     models::Chain,
     storage::{
         self, Address, BlockHash, BlockIdentifier, BlockOrTimestamp, ContractId,
         ContractStateGateway, StorageError,
     },
 };
+
+use ethers::types::{H160, H256, U256};
+
 use actix_web::{web, HttpResponse};
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::{
@@ -17,17 +19,61 @@ use diesel_async::{
     AsyncPgConnection,
 };
 use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
+use utoipa::{IntoParams, ToSchema};
 
 use super::EvmPostgresGateway;
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct StateRequestResponse {
-    accounts: Vec<Account>,
+
+// Equivalent to evm::Account. This struct was created to avoid modifying the evm::Account
+// struct for RPC purpose.
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct EVMAccount {
+    pub chain: Chain,
+    #[schema(value_type=String)]
+    pub address: H160,
+    pub title: String,
+    #[schema(value_type=HashMap<String, String>)]
+    pub slots: HashMap<U256, U256>,
+    #[schema(value_type=String)]
+    pub balance: U256,
+    pub code: Bytes,
+    #[schema(value_type=String)]
+    pub code_hash: H256,
+    #[schema(value_type=String)]
+    pub balance_modify_tx: H256,
+    #[schema(value_type=String)]
+    pub code_modify_tx: H256,
+    #[schema(value_type=Option<String>)]
+    pub creation_tx: Option<H256>,
+}
+
+impl From<evm::Account> for EVMAccount {
+    fn from(account: evm::Account) -> Self {
+        Self {
+            chain: account.chain,
+            address: account.address,
+            title: account.title,
+            slots: account.slots,
+            balance: account.balance,
+            code: account.code,
+            code_hash: account.code_hash,
+            balance_modify_tx: account.balance_modify_tx,
+            code_modify_tx: account.code_modify_tx,
+            creation_tx: account.creation_tx,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub(crate) struct StateRequestResponse {
+    #[schema(value_type=Option<String>)]
+    accounts: Vec<EVMAccount>,
 }
 
 impl StateRequestResponse {
-    fn new(accounts: Vec<Account>) -> Self {
+    fn new(accounts: Vec<EVMAccount>) -> Self {
         Self { accounts }
     }
 }
@@ -44,15 +90,17 @@ pub enum RpcError {
     Connection(#[from] deadpool::PoolError),
 }
 
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct StateRequestParameters {
     #[serde(default = "Chain::default")]
     chain: Chain,
+    #[param(default = 0)]
     tvl_gt: Option<u64>,
+    #[param(default = 0)]
     intertia_min_gt: Option<u64>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct StateRequestBody {
     #[serde(rename = "contractIds")]
     contract_ids: Option<Vec<ContractId>>,
@@ -60,8 +108,8 @@ pub struct StateRequestBody {
     version: Version,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Version {
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub(crate) struct Version {
     timestamp: Option<NaiveDateTime>,
     block: Option<Block>,
 }
@@ -94,8 +142,9 @@ impl TryFrom<&Version> for BlockOrTimestamp {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Block {
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub(crate) struct Block {
+    #[schema(value_type=Option<String>)]
     hash: Option<BlockHash>,
     chain: Option<Chain>,
     number: Option<i64>,
@@ -114,7 +163,7 @@ impl RpcHandler {
     }
 
     #[instrument(skip(self, request, params))]
-    async fn get_state(
+    async fn get_contract_state(
         &self,
         request: &StateRequestBody,
         params: &StateRequestParameters,
@@ -122,11 +171,11 @@ impl RpcHandler {
         let mut conn = self.db_connection_pool.get().await?;
 
         info!(?request, ?params, "Getting contract state.");
-        self.get_state_inner(request, params, &mut conn)
+        self.get_contract_state_inner(request, params, &mut conn)
             .await
     }
 
-    async fn get_state_inner(
+    async fn get_contract_state_inner(
         &self,
         request: &StateRequestBody,
         params: &StateRequestParameters,
@@ -154,7 +203,12 @@ impl RpcHandler {
             .get_contracts(&params.chain, addresses, Some(&version), true, db_connection)
             .await
         {
-            Ok(accounts) => Ok(StateRequestResponse::new(accounts)),
+            Ok(accounts) => Ok(StateRequestResponse::new(
+                accounts
+                    .into_iter()
+                    .map(EVMAccount::from)
+                    .collect(),
+            )),
             Err(err) => {
                 error!(error = %err, "Error while getting contract states.");
                 Err(err.into())
@@ -163,6 +217,17 @@ impl RpcHandler {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/contract_state",
+    responses(
+        (status = 200, description = "OK", body = StateRequestResponse),
+    ),
+    request_body = StateRequestBody,
+    params(
+        StateRequestParameters
+    ),
+)]
 pub async fn contract_state(
     query: web::Query<StateRequestParameters>,
     body: web::Json<StateRequestBody>,
@@ -171,7 +236,7 @@ pub async fn contract_state(
     // Call the handler to get the state
     let response = handler
         .into_inner()
-        .get_state(&body, &query)
+        .get_contract_state(&body, &query)
         .await;
 
     match response {
@@ -399,7 +464,7 @@ mod tests {
             db_fixtures::insert_account(conn, acc_address, "account0", chain_id, Some(tid[0]))
                 .await;
 
-        db_fixtures::insert_account_balance(conn, 100, tid[0], acc_id).await;
+        db_fixtures::insert_account_balance(conn, 100, tid[0], None, acc_id).await;
         let contract_code = Code::from("1234");
         db_fixtures::insert_contract_code(conn, acc_id, tid[0], contract_code).await;
         acc_address.to_string()
@@ -423,7 +488,7 @@ mod tests {
 
         let code = Code::from("1234");
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
-        let expected = Account::new(
+        let expected = evm::Account::new(
             Chain::Ethereum,
             H160::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
             "account0".to_owned(),
@@ -453,12 +518,12 @@ mod tests {
         };
 
         let state = req_handler
-            .get_state_inner(&request, &StateRequestParameters::default(), &mut conn)
+            .get_contract_state_inner(&request, &StateRequestParameters::default(), &mut conn)
             .await
             .unwrap();
 
         assert_eq!(state.accounts.len(), 1);
-        assert_eq!(state.accounts[0], expected);
+        assert_eq!(state.accounts[0], expected.into());
     }
 
     #[test]

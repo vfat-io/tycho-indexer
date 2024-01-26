@@ -2,9 +2,21 @@
 
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
+use utoipa::ToSchema;
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    EnumString,
+    Display,
+    Default,
+    ToSchema,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -13,14 +25,6 @@ pub enum Chain {
     Ethereum,
     Starknet,
     ZkSync,
-}
-
-/// Represents the ecosystem to which a `ProtocolComponent` belongs.
-/// If you add a new enum type. Please, also add it to the migration and the orms
-#[derive(PartialEq, Debug, Clone, Display, Default, Deserialize, Serialize, Copy)]
-pub enum ProtocolSystem {
-    #[default]
-    Ambient,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
