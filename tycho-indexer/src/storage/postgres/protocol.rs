@@ -1106,12 +1106,10 @@ mod test {
     }
 
     fn protocol_state_delta() -> ProtocolStateDelta {
-        let attributes: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
-        ]
-        .into_iter()
-        .collect();
+        let attributes: HashMap<String, Bytes> =
+            vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
+                .into_iter()
+                .collect();
         ProtocolStateDelta::new("state3".to_owned(), attributes)
     }
 

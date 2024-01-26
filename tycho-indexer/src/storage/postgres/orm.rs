@@ -413,14 +413,15 @@ impl ProtocolState {
             query = query.filter(protocol_state::valid_from.le(ts));
         }
 
-        // if start timestamp is provided, we want to filter by valid_from >= start_ts
+        // if start timestamp is provided, we want to filter by valid_from > start_ts
         if let Some(ts) = start_ts {
-            query = query.filter(protocol_state::valid_from.ge(ts));
+            query = query.filter(protocol_state::valid_from.gt(ts));
         }
 
         query
             .order_by((
-                protocol_state::protocol_component_id,
+                protocol_component::external_id,
+                protocol_state::attribute_name,
                 transaction::block_id,
                 transaction::index,
             ))
@@ -460,14 +461,15 @@ impl ProtocolState {
             query = query.filter(protocol_state::valid_from.le(ts));
         }
 
-        // if start timestamp is provided, we want to filter by valid_from >= start_ts
+        // if start timestamp is provided, we want to filter by valid_from > start_ts
         if let Some(ts) = start_ts {
-            query = query.filter(protocol_state::valid_from.ge(ts));
+            query = query.filter(protocol_state::valid_from.gt(ts));
         }
 
         query
             .order_by((
                 protocol_state::protocol_component_id,
+                protocol_state::attribute_name,
                 transaction::block_id,
                 transaction::index,
             ))
@@ -501,14 +503,15 @@ impl ProtocolState {
             query = query.filter(protocol_state::valid_from.le(ts));
         }
 
-        // if start timestamp is provided, we want to filter by valid_from >= start_ts
+        // if start timestamp is provided, we want to filter by valid_from > start_ts
         if let Some(ts) = start_ts {
-            query = query.filter(protocol_state::valid_from.ge(ts));
+            query = query.filter(protocol_state::valid_from.gt(ts));
         }
 
         query
             .order_by((
                 protocol_state::protocol_component_id,
+                protocol_state::attribute_name,
                 transaction::block_id,
                 transaction::index,
             ))
