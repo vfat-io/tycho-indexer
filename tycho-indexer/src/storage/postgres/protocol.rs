@@ -225,17 +225,16 @@ where
             .flat_map(|pc| pc.get_byte_token_addresses())
             .collect();
 
-        let pc_entity_tokens_map: HashMap<(&String, i64, i64), Vec<Address>> = new
+        let pc_entity_tokens_map: HashMap<(String, i64, i64), Address> = new
             .iter()
-            .map(|pc| {
-                (
-                    (
-                        &pc.id,
-                        self.get_protocol_system_id(&pc.protocol_system),
-                        self.get_chain_id(&pc.chain),
-                    ),
-                    pc.get_byte_token_addresses(), // Value
-                )
+            .flat_map(|pc| {
+                let pc_id = pc.id.clone();
+                let protocol_system_db_id = self.get_protocol_system_id(&pc.protocol_system);
+                let chain_db_id = self.get_chain_id(&pc.chain);
+
+                pc.get_byte_token_addresses()
+                    .into_iter()
+                    .map(move |add| ((pc_id.clone(), protocol_system_db_id, chain_db_id), add))
             })
             .collect();
 
@@ -250,39 +249,32 @@ where
             .into_iter()
             .collect();
 
-        let protocol_component_token_junction: Vec<orm::NewProtocolHoldsToken> =
-            inserted_protocol_components
-                .iter()
-                .flat_map(|(component_db_id, ext_id, ps_id, chain_db_id)| {
-                    pc_entity_tokens_map
-                        .get(&(&ext_id, *ps_id, *chain_db_id))
-                        .ok_or({
-                            StorageError::NotFound(
-                                "Component".to_string(),
-                                format!(
-                                    "external_id:{} protocol_system_id:{}, chain_id:{}",
-                                    ext_id, ps_id, chain_db_id
-                                )
-                                .to_string(),
-                            )
-                        })
-                        .unwrap()
-                        .iter()
-                        .map(|add| orm::NewProtocolHoldsToken {
-                            protocol_component_id: *component_db_id,
-                            token_id: *token_add_by_id
-                                .get(add)
-                                .ok_or(StorageError::NotFound(
-                                    "Token".to_string(),
-                                    add.to_string().clone(),
-                                ))
-                                .unwrap(),
-                        })
-                })
-                .collect();
+        let protocol_component_token_junction: Result<
+            Vec<orm::NewProtocolHoldsToken>,
+            StorageError,
+        > = inserted_protocol_components
+            .into_iter()
+            .map(|(db_id, ext_id, ps_id, chain_db_id)| {
+                let t_address = pc_entity_tokens_map
+                    .get(&(ext_id, ps_id, chain_db_id))
+                    .ok_or_else(|| {
+                        StorageError::NotFound("Token".to_string(), "token_adds".to_string())
+                    })?
+                    .to_owned();
+
+                let t_id = token_add_by_id
+                    .get(&t_address)
+                    .ok_or_else(|| {
+                        StorageError::NotFound("Token".to_string(), "token_adds".to_string())
+                    })?
+                    .to_owned();
+
+                Ok(orm::NewProtocolHoldsToken { protocol_component_id: db_id, token_id: t_id })
+            })
+            .collect();
 
         diesel::insert_into(protocol_holds_token)
-            .values(&protocol_component_token_junction)
+            .values(&protocol_component_token_junction?)
             .execute(conn)
             .await?;
 
