@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use ethers::types::H160;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -1207,7 +1206,7 @@ mod test {
             protocol_system,
             protocol_type_id: protocol_type_id_1.to_string(),
             chain,
-            tokens: vec![],
+            tokens: vec![H160::from_str(WETH).unwrap()],
             contract_ids: vec![],
             static_attributes: HashMap::new(),
             change: ChangeType::Creation,
@@ -1254,6 +1253,26 @@ mod test {
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
         assert_eq!(original_component.id, inserted_data.external_id);
+
+        // assert junction table
+        let component_token_junction = schema::protocol_holds_token::table
+            .select((
+                schema::protocol_holds_token::protocol_component_id,
+                schema::protocol_holds_token::token_id,
+            ))
+            .first::<(i64, i64)>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(component_token_junction.0, inserted_data.id);
+
+        let token = schema::token::table
+            .select(schema::token::all_columns)
+            .filter(schema::token::id.eq(component_token_junction.1))
+            .load::<orm::Token>(&mut conn)
+            .await;
+
+        assert!(token.is_ok())
     }
 
     fn create_test_protocol_component(id: &str) -> ProtocolComponent {
