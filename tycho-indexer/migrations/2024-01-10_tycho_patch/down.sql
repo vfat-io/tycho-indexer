@@ -148,3 +148,4 @@ CREATE TRIGGER invalidate_previous_contract_code
     EXECUTE PROCEDURE invalidate_previous_entry_contract_code();
 
 DROP TABLE component_balance;
+

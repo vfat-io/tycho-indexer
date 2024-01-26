@@ -556,8 +556,7 @@ where
                 .component_id
                 .to_string();
             let protocol_component_id =
-                orm::ProtocolComponent::id_by_external_id(&[external_id.clone()], conn).await?
-                    [&external_id];
+                orm::ProtocolComponent::ids_by_external_ids(&[&external_id], conn).await?[0].0;
 
             let new_component_balance = component_balance.to_storage(
                 token_id,

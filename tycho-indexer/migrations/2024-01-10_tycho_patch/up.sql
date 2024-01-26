@@ -80,3 +80,4 @@ CREATE TABLE IF NOT EXISTS component_balance(
     --	state is the currently valid entry.
     "valid_to" timestamptz
 );
+

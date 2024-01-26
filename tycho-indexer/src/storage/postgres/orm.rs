@@ -442,22 +442,6 @@ pub struct ProtocolComponent {
     pub deletion_tx: Option<i64>,
 }
 
-impl ProtocolComponent {
-    pub async fn id_by_external_id(
-        external_ids: &[String],
-        conn: &mut AsyncPgConnection,
-    ) -> Result<HashMap<String, i64>, StorageError> {
-        use super::schema::protocol_component::dsl::*;
-
-        let results = protocol_component
-            .filter(external_id.eq_any(external_ids))
-            .select((external_id, id))
-            .load::<(String, i64)>(conn)
-            .await?;
-        Ok(results.into_iter().collect())
-    }
-}
-
 #[derive(Insertable, AsChangeset, Debug)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
