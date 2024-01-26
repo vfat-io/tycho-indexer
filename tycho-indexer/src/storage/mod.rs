@@ -273,6 +273,12 @@ pub trait StorableComponentBalance<S, N, I>: Sized + Send + Sync + 'static {
         protocol_component_id: i64,
         block_ts: NaiveDateTime,
     ) -> N;
+
+    /// Get a reference to the address of this contract.
+    fn token(&self) -> Address;
+
+    /// Get the transaction hash that modified this balance.
+    fn modify_tx(&self) -> TxHash;
 }
 
 #[derive(Error, Debug, PartialEq)]

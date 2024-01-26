@@ -542,16 +542,18 @@ where
 
         let mut new_component_balances = Vec::new();
         for component_balance in component_balances.iter() {
-            let token_address = Bytes::from(component_balance.token.as_bytes());
+            let token_address = component_balance.token();
             let token_id = token
                 .inner_join(account)
                 .select(schema::token::id)
                 .filter(schema::account::address.eq(token_address))
                 .first::<i64>(conn)
                 .await?;
-            let transaction_hash = Bytes::from(component_balance.modify_tx.as_bytes());
+
+            let transaction_hash = component_balance.modify_tx();
             let transaction_id = orm::Transaction::ids_by_hash(&[transaction_hash.clone()], conn)
                 .await?[&transaction_hash];
+
             let external_id = component_balance
                 .component_id
                 .to_string();

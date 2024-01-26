@@ -179,6 +179,13 @@ pub mod pg {
                 valid_to: None,
             }
         }
+        fn modify_tx(&self) -> TxHash {
+            self.modify_tx.into()
+        }
+
+        fn token(&self) -> Address {
+            self.token.into()
+        }
     }
 
     impl StorableContract<orm::Contract, orm::NewContract, i64> for evm::Account {
