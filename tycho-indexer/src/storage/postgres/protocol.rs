@@ -220,13 +220,11 @@ where
                 .await
                 .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))?;
 
-        //unique_tokens = HashSet<&Address> ) = new.iter().flatmap(|pc| pc.tokens.iter()).collect()
         let token_addresses: HashSet<Address> = new
             .iter()
             .flat_map(|pc| pc.get_byte_token_addresses())
             .collect();
 
-        //pc_entity_tokens_map = HashMap<(&String, i64. i64), Vec<&Address>> = new.iter().map(....)
         let pc_entity_tokens_map: HashMap<(&String, i64, i64), Vec<Address>> = new
             .iter()
             .map(|pc| {
@@ -241,8 +239,6 @@ where
             })
             .collect();
 
-        //token_pk_map = HashMap<Address, i64> =
-        // token.inner_join()....filter(unique_tokens).collect()
         let token_add_by_id: HashMap<Address, i64> = token
             .inner_join(account)
             .select((schema::account::address, schema::token::id))
@@ -254,10 +250,6 @@ where
             .into_iter()
             .collect();
 
-        //protocol_holds_token_data = inserted.iter().flatmap(| (db_id, ext_id, ps_id, chain_db_id)
-        // | {    pc_entity_tokens_map.get(&(&ext_id, *ps_id,
-        // *chain_db_id)).iter().map(|address| (db_id, address)
-        //})
         let protocol_component_token_junction: Vec<orm::NewProtocolHoldsToken> =
             inserted_protocol_components
                 .iter()
