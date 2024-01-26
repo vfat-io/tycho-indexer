@@ -176,7 +176,7 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{
-            account::dsl::*, protocol_component::dsl::*, protocol_component_token_junction::dsl::*,
+            account::dsl::*, protocol_component::dsl::*, protocol_holds_token::dsl::*,
             token::dsl::*,
         };
         let mut values: Vec<orm::NewProtocolComponent> = Vec::with_capacity(new.len());
@@ -198,6 +198,7 @@ where
                 txh.to_owned(),
                 pc.created_at,
             )?;
+
             values.push(new_pc);
         }
 
@@ -253,34 +254,32 @@ where
             .into_boxed()
             .load::<(Address, i64)>(conn)
             .await
-            .map_err(|err| {
-                StorageError::from_diesel(
-                    err,
-                    "Token",
-                    &new[0].chain.to_string(), /* TODO: Ask if we will ever insert Components
-                                                * for multiple chains at once. */
-                    None,
-                )
-            })?
+            .map_err(|err| StorageError::from_diesel(err, "Token", "Several Chains", None))?
             .into_iter()
             .collect();
 
-        let protocol_component_junction: Vec<orm::NewProtocolComponentToken> =
-            component_id_by_token_address
-                .into_iter()
-                .map(|(pc_id, token_adds)| {
-                    orm::NewProtocolComponentToken {
-                        protocol_component_id: pc_id,
-                        token_id: token_add_by_id
-                            .get(&token_adds)
-                            .unwrap_or(&0) // TODO: figure out what to do
-                            .to_owned(),
-                    }
-                })
-                .collect();
+        let protocol_component_token_junction: Result<
+            Vec<orm::NewProtocolComponentTokenRelation>,
+            StorageError,
+        > = component_id_by_token_address
+            .into_iter()
+            .map(|(pc_id, token_adds)| {
+                let t_id = token_add_by_id
+                    .get(&token_adds)
+                    .ok_or_else(|| {
+                        StorageError::NotFound("Token".to_string(), token_adds.to_string())
+                    })?
+                    .to_owned();
 
-        diesel::insert_into(protocol_component_token_junction)
-            .values(&protocol_component_junction)
+                Ok(orm::NewProtocolComponentTokenRelation {
+                    protocol_component_id: pc_id,
+                    token_id: t_id,
+                })
+            })
+            .collect();
+
+        diesel::insert_into(protocol_holds_token)
+            .values(&protocol_component_token_junction?)
             .execute(conn)
             .await?;
 
@@ -410,10 +409,10 @@ where
         for state in new {
             let tx_db = txns
                 .get(state.modify_tx.as_bytes())
-                .expect("Failed to find tx");
+                .expect("Failed to find tx"); // TODO: Found out that these are panics in disgues. Should we panic here?
             let component_db_id = *components
                 .get(&state.component_id)
-                .expect("Failed to find component");
+                .expect("Failed to find component"); // TODO: Found out that these are panics in disgues. Should we panic here?
             let mut new_states: Vec<(orm::NewProtocolState, i64)> =
                 ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0, tx_db.2)
                     .into_iter()
