@@ -61,7 +61,6 @@ DROP TRIGGER invalidate_previous_contract_code ON contract_code;
 
 DROP FUNCTION invalidate_previous_entry_contract_code();
 
-
 --  Saves the component balance of a protocol component.
 CREATE TABLE IF NOT EXISTS component_balance(
     "id" bigserial PRIMARY KEY,
@@ -80,4 +79,4 @@ CREATE TABLE IF NOT EXISTS component_balance(
     -- The ts at which this state stopped being valid at. Null if this
     --	state is the currently valid entry.
     "valid_to" timestamptz
-    );
+);

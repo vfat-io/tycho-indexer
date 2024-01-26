@@ -539,43 +539,28 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
-        let token_addresses: Vec<Bytes> = component_balances
-            .iter()
-            .map(|component_balance| Bytes::from(component_balance.token.as_bytes()))
-            .collect();
-
-        let account_ids = token
-            .inner_join(account)
-            .select(schema::token::id)
-            .filter(schema::account::address.eq_any(token_addresses))
-            .get_results::<i64>(conn)
-            .await?;
-
-        let transaction_hashes: Vec<TxHash> = component_balances
-            .iter()
-            .map(|component_balance| Bytes::from(component_balance.modify_tx.as_bytes()))
-            .collect();
-        let transaction_ids = orm::Transaction::ids_by_hash(&transaction_hashes, conn).await?;
-
-        let external_ids: Vec<String> = component_balances
-            .iter()
-            .map(|component_balance| {
-                component_balance
-                    .component_id
-                    .to_string()
-            })
-            .collect();
-        let protocol_component_ids =
-            orm::ProtocolComponent::id_by_external_id(&external_ids, conn).await?;
 
         let mut new_component_balances = Vec::new();
-        for (index, component_balance) in component_balances.iter().enumerate() {
-            let current_account_id = account_ids[index];
-            let transaction_id = transaction_ids[&transaction_hashes[index]];
-            let protocol_component_id = protocol_component_ids[&external_ids[index]];
+        for component_balance in component_balances.iter() {
+            let token_address = Bytes::from(component_balance.token.as_bytes());
+            let token_id = token
+                .inner_join(account)
+                .select(schema::token::id)
+                .filter(schema::account::address.eq(token_address))
+                .first::<i64>(conn)
+                .await?;
+            let transaction_hash = Bytes::from(component_balance.modify_tx.as_bytes());
+            let transaction_id = orm::Transaction::ids_by_hash(&[transaction_hash.clone()], conn)
+                .await?[&transaction_hash];
+            let external_id = component_balance
+                .component_id
+                .to_string();
+            let protocol_component_id =
+                orm::ProtocolComponent::id_by_external_id(&[external_id.clone()], conn).await?
+                    [&external_id];
 
             let new_component_balance = component_balance.to_storage(
-                current_account_id,
+                token_id,
                 transaction_id,
                 protocol_component_id,
                 block_ts,
