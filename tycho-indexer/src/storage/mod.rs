@@ -268,9 +268,9 @@ pub trait StorableComponentBalance<S, N, I>: Sized + Send + Sync + 'static {
     /// Converts a protocol type object to its storable representation (`N`).
     fn to_storage(
         &self,
-        account_id: i64,
-        modify_tx: i64,
-        protocol_component_id: i64,
+        account_id: I,
+        modify_tx: I,
+        protocol_component_id: I,
         block_ts: NaiveDateTime,
     ) -> N;
 
