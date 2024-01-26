@@ -49,3 +49,6 @@ DROP FUNCTION invalidate_previous_entry_protocol_state();
 ALTER TABLE protocol_system
 ADD CONSTRAINT name_unique UNIQUE (name);
 
+-- Make the "account_id" column of the token unique
+ALTER TABLE token
+    ADD CONSTRAINT unique_account_id_constraint UNIQUE (account_id);
