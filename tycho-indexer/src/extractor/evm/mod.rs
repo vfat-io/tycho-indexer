@@ -18,7 +18,7 @@ use crate::{
     hex_bytes::Bytes,
     models::{Chain, ExtractorIdentity, NormalisedMessage},
     pb::tycho::evm::v1 as substreams,
-    storage::{ChangeType, StateGatewayType},
+    storage::{Address, ChangeType, StateGatewayType},
 };
 
 use self::utils::TryDecode;
@@ -564,6 +564,13 @@ impl ProtocolComponent {
             creation_tx: tx_hash,
             created_at: creation_ts,
         })
+    }
+
+    pub fn get_byte_token_addresses(&self) -> Vec<Address> {
+        self.tokens
+            .iter()
+            .map(|t| Address::from(t.0))
+            .collect()
     }
 }
 
