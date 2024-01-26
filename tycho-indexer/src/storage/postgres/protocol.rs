@@ -3,7 +3,10 @@
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use ethers::types::H160;
-use std::{cmp::Ordering, collections::HashMap};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+};
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -198,7 +201,7 @@ where
             values.push(new_pc);
         }
 
-        let inserted_protocol_components: Vec<orm::ProtocolComponent> =
+        let inserted_protocol_components: Vec<(i64, String, i64, i64)> =
             diesel::insert_into(protocol_component)
                 .values(&values)
                 .on_conflict((
@@ -207,63 +210,77 @@ where
                     external_id,
                 ))
                 .do_nothing()
+                .returning((
+                    schema::protocol_component::id,
+                    schema::protocol_component::external_id,
+                    schema::protocol_component::protocol_system_id,
+                    schema::protocol_component::chain_id,
+                ))
                 .get_results(conn)
                 .await
                 .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))?;
 
-        let component_id_by_token_addresses: HashMap<i64, Vec<H160>> = inserted_protocol_components
-            .iter()
-            .zip(new.iter()) // TODO: assuming correct order here at the moment
-            .map(|(pc_orm, pc_struct)| (pc_orm.id, pc_struct.tokens.to_owned()))
-            .collect::<HashMap<_, _>>();
-
-        let token_addresses: Vec<Address> = new
-            .iter()
-            .flat_map(|pc| {
-                pc.tokens
-                    .clone()
+        let mut component_id_by_token_address = vec![];
+        for (db_id, ext_id, ps_id, chain_db_id) in inserted_protocol_components
+            .clone()
+            .into_iter()
+        {
+            if let Some(pc) = new.iter().find(|c| {
+                (c.id.clone(), c.protocol_system.clone(), c.chain) ==
+                    (
+                        ext_id.clone(),
+                        self.get_protocol_system(&ps_id),
+                        self.get_chain(&chain_db_id),
+                    )
+            }) {
+                pc.get_byte_token_addresses()
                     .into_iter()
-                    .map(|token_address| Address::from(token_address.0))
-                    .collect::<Vec<Address>>()
-            })
+                    .for_each(|t_byte_address| {
+                        component_id_by_token_address.push((db_id, t_byte_address))
+                    });
+            }
+        }
+
+        let token_addresses: HashSet<Address> = component_id_by_token_address
+            .iter()
+            .map(|(_, token_address)| token_address.clone())
             .collect();
 
-        let query = token
+        let token_add_by_id: HashMap<Address, i64> = token
             .inner_join(account)
             .select((schema::account::address, schema::token::id))
             .filter(schema::account::address.eq_any(token_addresses))
-            .into_boxed();
-
-        let token_add_by_id: HashMap<Address, i64> = query
+            .into_boxed()
             .load::<(Address, i64)>(conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(err, "Token", &new[0].chain.to_string(), None)
+                StorageError::from_diesel(
+                    err,
+                    "Token",
+                    &new[0].chain.to_string(), /* TODO: Ask if we will ever insert Components
+                                                * for multiple chains at once. */
+                    None,
+                )
             })?
             .into_iter()
             .collect();
 
-        let component_to_token_relations: Vec<orm::NewProtocolComponentToken> =
-            component_id_by_token_addresses
+        let protocol_component_junction: Vec<orm::NewProtocolComponentToken> =
+            component_id_by_token_address
                 .into_iter()
-                .flat_map(|(pc_id, token_adds)| {
-                    token_adds
-                        .into_iter()
-                        .map(|token_add| {
-                            orm::NewProtocolComponentToken {
-                                protocol_component_id: pc_id,
-                                token_id: token_add_by_id
-                                    .get(&Address::from(token_add.0))
-                                    .unwrap_or(&0) // TODO: figure out what to do
-                                    .to_owned(),
-                            }
-                        })
-                        .collect::<Vec<orm::NewProtocolComponentToken>>()
+                .map(|(pc_id, token_adds)| {
+                    orm::NewProtocolComponentToken {
+                        protocol_component_id: pc_id,
+                        token_id: token_add_by_id
+                            .get(&token_adds)
+                            .unwrap_or(&0) // TODO: figure out what to do
+                            .to_owned(),
+                    }
                 })
                 .collect();
 
         diesel::insert_into(protocol_component_token_junction)
-            .values(&component_to_token_relations)
+            .values(&protocol_component_junction)
             .execute(conn)
             .await?;
 
