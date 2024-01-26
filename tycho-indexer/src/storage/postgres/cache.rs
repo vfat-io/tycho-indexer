@@ -6,6 +6,7 @@ use std::{
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
+use ethers::types::H160;
 use lru::LruCache;
 use tokio::{
     sync::{
@@ -512,6 +513,32 @@ impl CachedGateway {
             Ok(result) => result,
             Err(_) => Err(StorageError::WriteCacheGoneAway()),
         }
+    }
+
+    pub async fn insert_component(
+        &self,
+        block: &evm::Block,
+        new: &evm::ProtocolComponent,
+    ) -> Result<(), StorageError> {
+        unimplemented!();
+    }
+
+    pub async fn upsert_state_change(
+        &self,
+        block: &evm::Block,
+        new: &evm::ProtocolStateDelta,
+    ) -> Result<(), StorageError> {
+        unimplemented!();
+    }
+
+    pub async fn upsert_tvl_change(
+        &self,
+        block: &evm::Block,
+        token: &H160,
+        new: &evm::TvlChange,
+        component_id: &str,
+    ) -> Result<(), StorageError> {
+        unimplemented!();
     }
 
     pub async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError> {
