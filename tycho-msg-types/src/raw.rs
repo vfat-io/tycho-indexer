@@ -167,7 +167,6 @@ pub struct StateRequestBody {
     pub version: Version,
 }
 
-
 // TODO: move this to generic
 impl StateRequestBody {
     pub fn new(contract_ids: Option<Vec<Vec<u8>>>, version: Version) -> Self {

@@ -107,7 +107,7 @@ pub mod hex_hashmap_key_value {
 
     use serde::{de, ser::SerializeMap, Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S, K, V>(x: &HashMap<Vec<u8>, Vec<u8>>, s: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(x: &HashMap<Vec<u8>, Vec<u8>>, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
