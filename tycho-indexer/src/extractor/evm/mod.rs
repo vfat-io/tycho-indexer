@@ -25,6 +25,7 @@ use super::{u256_num::bytes_to_f64, ExtractionError};
 pub mod ambient;
 pub mod storage;
 mod utils;
+mod native;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SwapPool {}
@@ -470,7 +471,7 @@ pub struct BlockContractChanges {
 }
 
 pub type EVMStateGateway<DB> =
-    StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token>;
+StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token>;
 
 impl Block {
     /// Parses block from tychos protobuf block message
@@ -879,22 +880,76 @@ impl ProtocolStateDelta {
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ProtocolStateDeltasWithTx {
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
     pub protocol_states: HashMap<String, ProtocolStateDelta>,
+    pub balance_changes: HashMap<String, HashMap<H160, TvlChange>>,
     pub tx: Transaction,
 }
 
 impl ProtocolStateDeltasWithTx {
     /// Parses protocol state from tychos protobuf EntityChanges message
     pub fn try_from_message(
-        msg: Vec<substreams::EntityChanges>,
-        tx: Transaction,
+        msg: substreams::TransactionEntityChanges,
+        block: &Block,
+        protocol_system: String,
+        protocol_type_id: String,
     ) -> Result<Self, ExtractionError> {
-        let mut protocol_states = HashMap::new();
-        for state_msg in msg {
-            let state = ProtocolStateDelta::try_from_message(state_msg)?;
-            protocol_states.insert(state.clone().component_id, state);
+        let tx = msg.tx.expect("TransactionEntityChanges should have a transaction");
+        let tx = Transaction::try_from_message(tx, &block.hash)?;
+
+        let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
+        let mut state_updates: HashMap<String, ProtocolStateDelta> = HashMap::new();
+        let mut balance_changes: HashMap<String, HashMap<H160, TvlChange>> = HashMap::new();
+
+        for change in msg.component_changes.into_iter() {
+            let component_id = change.id.clone();
+            let pool = ProtocolComponent::try_from_message(
+                change,
+                block.chain,
+                &protocol_system,
+                &protocol_type_id,
+                tx.hash,
+                block.ts,
+            )?;
+            new_protocol_components.insert(component_id, pool);
         }
-        Ok(Self { protocol_states, tx })
+
+        for state_msg in msg.entity_changes.into_iter() {
+            let state = ProtocolStateDelta::try_from_message(state_msg)?;
+            // Check if a state update for the same component already exists
+            // If it exists, overwrite the existing state update with the new one and log a warning
+            if state_updates.contains_key(&state.component_id) {
+                warn!(
+                    "Overwriting state update for component {} with a new one",
+                    state.component_id
+                );
+            }
+            state_updates.insert(state.clone().component_id, state);
+        }
+
+        for balance_change in msg.balance_changes.into_iter() {
+            let tvl_change = TvlChange::try_from_message(balance_change, &tx)?;
+
+            // Check if a balance change for the same token and component already exists
+            // If it exists, overwrite the existing balance change with the new one and log a warning
+            if balance_changes.contains_key(&tvl_change.component_id) {
+                if balance_changes[&tvl_change.component_id].contains_key(&tvl_change.token) {
+                    warn!(
+                        "Overwriting balance change for component {} and token {} with a new one",
+                        tvl_change.component_id, tvl_change.token
+                    );
+                }
+            } else {
+                // If component_id is not in the HashMap, initialize it with the empty HashMap as value.
+                balance_changes.insert(tvl_change.component_id.clone(), HashMap::new());
+            }
+            balance_changes
+                .get_mut(&tvl_change.component_id)
+                .unwrap()
+                .insert(tvl_change.token, tvl_change);
+        }
+
+        Ok(Self { new_protocol_components, protocol_states: state_updates, balance_changes, tx })
     }
 
     /// Merges this update with another one.
@@ -946,6 +1001,19 @@ impl ProtocolStateDeltasWithTx {
         }
         Ok(())
     }
+
+
+    pub fn has_new_protocols(&self) -> bool {
+        !self.new_protocol_components.is_empty()
+    }
+
+    pub fn has_state_changes(&self) -> bool {
+        !self.protocol_states.is_empty()
+    }
+
+    pub fn has_balance_changes(&self) -> bool {
+        !self.balance_changes.is_empty()
+    }
 }
 
 /// A container for state updates grouped by protocol component.
@@ -988,14 +1056,19 @@ impl BlockEntityChanges {
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
-            let mut state_updates = Vec::new();
+            let mut state_updates: Vec<ProtocolStateDeltasWithTx> = Vec::new();
             let mut new_protocol_components = HashMap::new();
 
             for change in msg.changes.into_iter() {
-                if let Some(tx) = change.tx {
+                if let Some(tx) = change.clone().tx {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
-                    let tx_update =
-                        ProtocolStateDeltasWithTx::try_from_message(change.entity_changes, tx)?;
+
+                    let tx_update = ProtocolStateDeltasWithTx::try_from_message(
+                        change_tx,
+                        &block,
+                        protocol_system.clone(),
+                        protocol_type_id.clone(),
+                    )?;
 
                     state_updates.push(tx_update);
                     for component in change.component_changes {
@@ -1012,7 +1085,9 @@ impl BlockEntityChanges {
                 }
             }
 
+            // Sort transactions by index
             state_updates.sort_unstable_by_key(|update| update.tx.index);
+
             return Ok(Self {
                 extractor: extractor.to_owned(),
                 chain,
@@ -1022,6 +1097,7 @@ impl BlockEntityChanges {
                 new_protocol_components,
             });
         }
+
         Err(ExtractionError::Empty)
     }
 
@@ -1059,6 +1135,18 @@ impl BlockEntityChanges {
             new_protocol_components: self.new_protocol_components,
         })
     }
+
+    pub fn get_new_protocols(&self) -> Vec<ProtocolStateDeltasWithTx> {
+        self.state_updates.iter().filter(|update| update.has_new_protocols()).cloned().collect()
+    }
+
+    pub fn get_state_change_txs(&self) -> Vec<ProtocolStateDeltasWithTx> {
+        self.state_updates.iter().filter(|update| update.has_state_changes()).cloned().collect()
+    }
+
+    pub fn get_balance_changes(&self) -> Vec<ProtocolStateDeltasWithTx> {
+        self.state_updates.iter().filter(|update| update.has_balance_changes()).cloned().collect()
+    }
 }
 
 #[cfg(test)]
@@ -1085,7 +1173,7 @@ pub mod fixtures {
         )
     }
 
-    pub fn evm_slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<U256, U256> {
+    pub fn evm_slots(data: impl IntoIterator<Item=(u64, u64)>) -> HashMap<U256, U256> {
         data.into_iter()
             .map(|(s, v)| (U256::from(s), U256::from(v)))
             .collect()
@@ -1353,9 +1441,9 @@ pub mod fixtures {
                         contracts: vec![H160::from_str(
                             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
                         )
-                        .unwrap()
-                        .0
-                        .to_vec()],
+                            .unwrap()
+                            .0
+                            .to_vec()],
                         static_att: vec![Attribute {
                             name: "key".to_owned(),
                             value: 600_u64.to_be_bytes().to_vec(),
@@ -1735,8 +1823,7 @@ mod test {
             "ambient".to_string(),
             &HashMap::from([("WeightedPool".to_string(), ProtocolType::default())]),
         )
-        .unwrap();
-
+            .unwrap();
         assert_eq!(res, block_state_changes());
     }
 
@@ -1759,14 +1846,14 @@ mod test {
                 ("key1".to_string(), Bytes::from(b"value1".to_vec())),
                 ("key2".to_string(), Bytes::from(b"value2".to_vec())),
             ]
-            .iter()
-            .cloned()
-            .collect(),
+                .iter()
+                .cloned()
+                .collect(),
             change: ChangeType::Creation,
             creation_tx: H256::from_str(
                 "0x0000000000000000000000000000000000000000000000000000000011121314",
             )
-            .unwrap(),
+                .unwrap(),
             created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         };
         let component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>> = [(
@@ -1820,8 +1907,8 @@ mod test {
                     change: ChangeType::Update,
                 },
             )]
-            .into_iter()
-            .collect(),
+                .into_iter()
+                .collect(),
             [(protocol_component.id.clone(), protocol_component)]
                 .into_iter()
                 .collect(),
@@ -1851,8 +1938,8 @@ mod test {
             ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
             ("to_be_removed".to_owned(), Bytes::from(U256::from(1))),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let del_attributes1: HashSet<String> = vec!["to_add_back".to_owned()]
             .into_iter()
             .collect();
@@ -1868,8 +1955,8 @@ mod test {
             ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
             ("to_add_back".to_owned(), Bytes::from(U256::from(200))),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let del_attributes2: HashSet<String> = vec!["to_be_removed".to_owned()]
             .into_iter()
             .collect();
@@ -1889,8 +1976,8 @@ mod test {
             ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
             ("to_add_back".to_owned(), Bytes::from(U256::from(200))),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         assert_eq!(state1.updated_attributes, expected_up_attributes);
         let expected_del_attributes: HashSet<String> = vec!["to_be_removed".to_owned()]
             .into_iter()
@@ -1903,8 +1990,8 @@ mod test {
             ("reserve".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
             ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let states: HashMap<String, ProtocolStateDelta> = vec![
             (
                 "State1".to_owned(),
@@ -1923,8 +2010,8 @@ mod test {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         ProtocolStateDeltasWithTx { protocol_states: states, tx: transaction01() }
     }
 
@@ -1936,8 +2023,8 @@ mod test {
             ("reserve".to_owned(), Bytes::from(900_u64.to_be_bytes().to_vec())),
             ("new_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let new_tx = fixtures::transaction02(HASH_256_1, HASH_256_0, 11);
         let new_states: HashMap<String, ProtocolStateDelta> = vec![(
             "State1".to_owned(),
@@ -1947,8 +2034,8 @@ mod test {
                 deleted_attributes: HashSet::new(),
             },
         )]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
 
         let tx_update = ProtocolStateDeltasWithTx { protocol_states: new_states, tx: new_tx };
 
@@ -1961,8 +2048,8 @@ mod test {
             ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
             ("new_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         assert_eq!(
             base_state
                 .protocol_states
@@ -2009,8 +2096,8 @@ mod test {
                 ("reserve1".to_owned(), Bytes::from(res1_value)),
                 ("reserve2".to_owned(), Bytes::from(res2_value)),
             ]
-            .into_iter()
-            .collect(),
+                .into_iter()
+                .collect(),
             deleted_attributes: HashSet::new(),
         }
     }
@@ -2065,8 +2152,8 @@ mod test {
             ("reserve".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec())),
             ("new".to_owned(), Bytes::from(0_u64.to_be_bytes().to_vec())),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let state_updates: HashMap<String, ProtocolStateDelta> = vec![(
             "State1".to_owned(),
             ProtocolStateDelta {
@@ -2075,8 +2162,8 @@ mod test {
                 deleted_attributes: HashSet::new(),
             },
         )]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let static_attr: HashMap<String, Bytes> =
             vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
                 .into_iter()
@@ -2140,7 +2227,7 @@ mod test {
                 ("WeightedPool".to_string(), ProtocolType::default()),
             ]),
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(res, block_entity_changes());
     }
 
@@ -2161,14 +2248,14 @@ mod test {
             ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
             ("new".to_owned(), Bytes::from(0_u64.to_be_bytes().to_vec())),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let attr2: HashMap<String, Bytes> = vec![
             ("reserve".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
             ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let state_updates: HashMap<String, ProtocolStateDelta> = vec![
             (
                 "State1".to_owned(),
@@ -2187,8 +2274,8 @@ mod test {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let static_attr: HashMap<String, Bytes> =
             vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
                 .into_iter()
@@ -2273,8 +2360,8 @@ mod test {
             ("balance".to_string(), Bytes::from(100_u64.to_be_bytes().to_vec())),
             ("factory_address".to_string(), Bytes::from(b"0x0fwe0g240g20".to_vec())),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
 
         let protocol_type_id = "WeightedPool".to_string();
         let protocol_types: HashMap<String, ProtocolType> =
@@ -2313,7 +2400,7 @@ mod test {
             protocol_component.contract_ids,
             vec![
                 H160::from_str("0x31fF2589Ee5275a2038beB855F44b9Be993aA804").unwrap(),
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
             ]
         );
         assert_eq!(protocol_component.static_attributes, expected_attribute_map);
