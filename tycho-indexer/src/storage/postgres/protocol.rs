@@ -220,32 +220,29 @@ where
                 .await
                 .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))?;
 
-        let mut component_id_by_token_address = vec![];
-        for (db_id, ext_id, ps_id, chain_db_id) in inserted_protocol_components
-            .clone()
-            .into_iter()
-        {
-            if let Some(pc) = new.iter().find(|c| {
-                (c.id.clone(), c.protocol_system.clone(), c.chain) ==
-                    (
-                        ext_id.clone(),
-                        self.get_protocol_system(&ps_id),
-                        self.get_chain(&chain_db_id),
-                    )
-            }) {
-                pc.get_byte_token_addresses()
-                    .into_iter()
-                    .for_each(|t_byte_address| {
-                        component_id_by_token_address.push((db_id, t_byte_address))
-                    });
-            }
-        }
-
-        let token_addresses: HashSet<Address> = component_id_by_token_address
+        //unique_tokens = HashSet<&Address> ) = new.iter().flatmap(|pc| pc.tokens.iter()).collect()
+        let token_addresses: HashSet<Address> = new
             .iter()
-            .map(|(_, token_address)| token_address.clone())
+            .flat_map(|pc| pc.get_byte_token_addresses())
             .collect();
 
+        //pc_entity_tokens_map = HashMap<(&String, i64. i64), Vec<&Address>> = new.iter().map(....)
+        let pc_entity_tokens_map: HashMap<(&String, i64, i64), Vec<Address>> = new
+            .iter()
+            .map(|pc| {
+                (
+                    (
+                        &pc.id,
+                        self.get_protocol_system_id(&pc.protocol_system),
+                        self.get_chain_id(&pc.chain),
+                    ),
+                    pc.get_byte_token_addresses(), // Value
+                )
+            })
+            .collect();
+
+        //token_pk_map = HashMap<Address, i64> =
+        // token.inner_join()....filter(unique_tokens).collect()
         let token_add_by_id: HashMap<Address, i64> = token
             .inner_join(account)
             .select((schema::account::address, schema::token::id))
@@ -257,28 +254,43 @@ where
             .into_iter()
             .collect();
 
-        let protocol_component_token_junction: Result<
-            Vec<orm::NewProtocolComponentTokenRelation>,
-            StorageError,
-        > = component_id_by_token_address
-            .into_iter()
-            .map(|(pc_id, token_adds)| {
-                let t_id = token_add_by_id
-                    .get(&token_adds)
-                    .ok_or_else(|| {
-                        StorageError::NotFound("Token".to_string(), token_adds.to_string())
-                    })?
-                    .to_owned();
-
-                Ok(orm::NewProtocolComponentTokenRelation {
-                    protocol_component_id: pc_id,
-                    token_id: t_id,
+        //protocol_holds_token_data = inserted.iter().flatmap(| (db_id, ext_id, ps_id, chain_db_id)
+        // | {    pc_entity_tokens_map.get(&(&ext_id, *ps_id,
+        // *chain_db_id)).iter().map(|address| (db_id, address)
+        //})
+        let protocol_component_token_junction: Vec<orm::NewProtocolHoldsToken> =
+            inserted_protocol_components
+                .iter()
+                .flat_map(|(component_db_id, ext_id, ps_id, chain_db_id)| {
+                    pc_entity_tokens_map
+                        .get(&(&ext_id, *ps_id, *chain_db_id))
+                        .ok_or({
+                            StorageError::NotFound(
+                                "Component".to_string(),
+                                format!(
+                                    "external_id:{} protocol_system_id:{}, chain_id:{}",
+                                    ext_id, ps_id, chain_db_id
+                                )
+                                .to_string(),
+                            )
+                        })
+                        .unwrap()
+                        .iter()
+                        .map(|add| orm::NewProtocolHoldsToken {
+                            protocol_component_id: *component_db_id,
+                            token_id: *token_add_by_id
+                                .get(add)
+                                .ok_or(StorageError::NotFound(
+                                    "Token".to_string(),
+                                    add.to_string().clone(),
+                                ))
+                                .unwrap(),
+                        })
                 })
-            })
-            .collect();
+                .collect();
 
         diesel::insert_into(protocol_holds_token)
-            .values(&protocol_component_token_junction?)
+            .values(&protocol_component_token_junction)
             .execute(conn)
             .await?;
 
