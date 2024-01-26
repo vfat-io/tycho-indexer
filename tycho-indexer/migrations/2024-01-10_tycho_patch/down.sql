@@ -58,7 +58,8 @@ CREATE TRIGGER invalidate_previous_protocol_state
 ALTER TABLE protocol_system
     DROP CONSTRAINT name_unique;
 
-DROP CONSTRAINT unique_account_id_constraint;
+ALTER TABLE token
+    DROP CONSTRAINT unique_account_id_constraint;
 
 CREATE OR REPLACE FUNCTION invalidate_previous_entry_contract_storage()
     RETURNS TRIGGER

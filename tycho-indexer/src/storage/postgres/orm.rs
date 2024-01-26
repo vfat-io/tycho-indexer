@@ -419,12 +419,7 @@ impl ProtocolState {
         }
 
         query
-            .order_by((
-                protocol_component::external_id,
-                protocol_state::attribute_name,
-                transaction::block_id,
-                transaction::index,
-            ))
+            .order_by((protocol_component::external_id, transaction::block_id, transaction::index))
             .select((Self::as_select(), protocol_component::external_id, transaction::hash))
             .get_results::<(Self, String, Bytes)>(conn)
             .await
@@ -469,7 +464,6 @@ impl ProtocolState {
         query
             .order_by((
                 protocol_state::protocol_component_id,
-                protocol_state::attribute_name,
                 transaction::block_id,
                 transaction::index,
             ))
@@ -511,7 +505,6 @@ impl ProtocolState {
         query
             .order_by((
                 protocol_state::protocol_component_id,
-                protocol_state::attribute_name,
                 transaction::block_id,
                 transaction::index,
             ))
