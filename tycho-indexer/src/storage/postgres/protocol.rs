@@ -16,7 +16,9 @@ use crate::{
         postgres::{
             orm,
             orm::{Account, NewAccount},
-            schema, PostgresGateway,
+            schema,
+            versioning::apply_versioning,
+            PostgresGateway,
         },
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ContractId, ProtocolGateway,
         StorableBlock, StorableComponentBalance, StorableContract, StorableProtocolComponent,
@@ -581,12 +583,14 @@ where
             new_component_balances.push(new_component_balance);
         }
 
-        diesel::insert_into(schema::component_balance::table)
-            .values(&new_component_balances)
-            .execute(conn)
-            .await
-            .map_err(|err| StorageError::from_diesel(err, "ComponentBalance", "batch", None))?;
-
+        if !component_balances.is_empty() {
+            apply_versioning::<_, orm::ComponentBalance>(&mut new_component_balances, conn).await?;
+            diesel::insert_into(schema::component_balance::table)
+                .values(&new_component_balances)
+                .execute(conn)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "ComponentBalance", "batch", None))?;
+        }
         Ok(())
     }
 

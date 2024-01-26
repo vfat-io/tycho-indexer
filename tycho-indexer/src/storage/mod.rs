@@ -257,13 +257,13 @@ pub trait StorableProtocolType<S, N, I>: Sized + Send + Sync + 'static {
 ///
 /// Generics:
 /// * `S`: This represents the storage-specific data type used when converting from storage to the
-///   transaction.
-/// * `N`: This represents the storage-specific data type used when converting from the protocol
-///   type to storage.
+///   component balance.
+/// * `N`: This represents the storage-specific data type used when converting from the component
+///   balance to storage.
 /// * `I`: Represents the type of the database identifier, which is used as an argument in the
 ///   conversion function. This facilitates the passage of database-specific foreign keys to the
 ///   `to_storage` method, thereby providing a flexible way for different databases to interact with
-///   the transaction.
+///   the component balance.
 pub trait StorableComponentBalance<S, N, I>: Sized + Send + Sync + 'static {
     /// Converts a protocol type object to its storable representation (`N`).
     fn to_storage(
@@ -694,9 +694,6 @@ pub trait ProtocolGateway {
     ) -> Result<Vec<Self::Token>, StorageError>;
 
     /// Saves multiple component balances to storage.
-    ///
-    /// Inserts token into storage. Tokens and their properties are assumed to
-    /// be immutable.
     ///
     /// # Parameters
     /// - `chain` The chain of the token.

@@ -323,6 +323,59 @@ pub struct ComponentBalance {
     pub valid_to: Option<NaiveDateTime>,
 }
 
+#[async_trait]
+impl StoredVersionedRow for ComponentBalance {
+    type EntityId = (i64, i64);
+    type PrimaryKey = i64;
+    type Version = NaiveDateTime;
+
+    fn get_pk(&self) -> Self::PrimaryKey {
+        self.id
+    }
+
+    fn get_valid_to(&self) -> Self::Version {
+        self.valid_to.expect("valid to set")
+    }
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        (self.protocol_component_id, self.token_id)
+    }
+
+    // Clippy false positive
+    #[allow(clippy::mutable_key_type)]
+    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Box<Self>>, StorageError> {
+        let (component_ids, token_ids): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
+
+        let tuple_ids = component_ids
+            .iter()
+            .zip(token_ids.iter())
+            .collect::<HashSet<_>>();
+
+        Ok(component_balance::table
+            .select(ComponentBalance::as_select())
+            .into_boxed()
+            .filter(
+                component_balance::protocol_component_id
+                    .eq_any(&component_ids)
+                    .and(component_balance::token_id.eq_any(&token_ids))
+                    .and(component_balance::valid_to.is_null()),
+            )
+            .get_results(conn)
+            .await?
+            .into_iter()
+            .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.token_id)))
+            .map(Box::new)
+            .collect())
+    }
+
+    fn table_name() -> &'static str {
+        "component_balance"
+    }
+}
+
 #[derive(AsChangeset, Insertable)]
 #[diesel(table_name = component_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -336,16 +389,16 @@ pub struct NewComponentBalance {
 }
 
 impl VersionedRow for NewComponentBalance {
-    type SortKey = (i64, NaiveDateTime, i64);
-    type EntityId = i64;
+    type SortKey = (i64, i64, NaiveDateTime);
+    type EntityId = (i64, i64);
     type Version = NaiveDateTime;
 
     fn get_entity_id(&self) -> Self::EntityId {
-        self.protocol_component_id
+        (self.protocol_component_id, self.token_id)
     }
 
     fn get_sort_key(&self) -> Self::SortKey {
-        (self.protocol_component_id, self.valid_from, self.modify_tx)
+        (self.protocol_component_id, self.token_id, self.valid_from)
     }
 
     fn set_valid_to(&mut self, end_version: Self::Version) {
