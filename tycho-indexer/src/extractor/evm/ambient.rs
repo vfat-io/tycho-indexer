@@ -300,7 +300,7 @@ where
             .cloned()
             .collect();
         self.gateway
-            .ensure_protocol_types(&*protocol_types)
+            .ensure_protocol_types(&protocol_types)
             .await;
     }
 
