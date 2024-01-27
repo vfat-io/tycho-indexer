@@ -2,12 +2,12 @@
 
 use crate::{
     extractor::evm,
-    hex_bytes::Bytes,
     models::Chain,
     storage::{
         self, Address, BlockIdentifier, BlockOrTimestamp, ContractStateGateway, StorageError,
     },
 };
+use tycho_types::Bytes;
 
 use actix_web::{web, HttpResponse};
 use diesel_async::{
@@ -202,17 +202,15 @@ pub async fn contract_state(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        hex_bytes::Bytes,
-        storage::{
-            postgres::{self, db_fixtures},
-            Code,
-        },
+    use crate::storage::{
+        postgres::{self, db_fixtures},
+        Code,
     };
     use actix_web::test;
     use chrono::{NaiveDateTime, Utc};
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
+    use tycho_types::Bytes;
 
     use std::{collections::HashMap, str::FromStr, sync::Arc};
 

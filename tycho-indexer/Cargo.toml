@@ -23,6 +23,10 @@ tracing.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 tycho-msg-types.workspace = true
+ethers.workspace = true
+diesel.workspace = true
+diesel-async.workspace = true
+tycho-types.workspace = true
 
 anyhow = "1"
 async-stream = "0.3"
@@ -32,13 +36,11 @@ tokio-retry = "0.3"
 tonic = { version = "0.9", features = ["tls-roots"] }
 prost = "0.11"
 prost-types = "0.11"
-diesel = { version = "2.1.0", features = ["postgres", "chrono", "serde_json"] }
+
 diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 diesel_migrations = "2.1.0"
-diesel-async = { version = "0.4.1", features = ["postgres", "deadpool"] }
-ethers = "^2.0.2"
-clap = { version = "4.4.2", features = ["derive", "env"] }
 
+clap = { version = "4.4.2", features = ["derive", "env"] }
 tracing-subscriber = { version = "0.3.17", default-features = false, features = [
     "env-filter",
     "fmt",
@@ -51,7 +53,6 @@ tracing-actix-web = "0.7.6"
 hex-literal = "0.4.1"
 mockall = "0.11.4"
 actix-web-opentelemetry = "0.16.0"
-bytes = "1.5.0"
 typetag = "0.2"
 utoipa = { version = "4.2.0", features = ["chrono"] }
 utoipa-swagger-ui = { version = "6.0.0", features = ["actix-web"] }

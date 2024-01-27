@@ -1,11 +1,4 @@
-use crate::serde_helpers::hex_bytes;
-use diesel::{
-    deserialize::{self, FromSql, FromSqlRow},
-    expression::AsExpression,
-    pg::Pg,
-    serialize::{self, ToSql},
-    sql_types::Binary,
-};
+use crate::serde_primitives::hex_bytes;
 use ethers::types::{H160, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -17,21 +10,19 @@ use std::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "diesel")]
+use diesel::{
+    deserialize::{self, FromSql, FromSqlRow},
+    expression::AsExpression,
+    pg::Pg,
+    serialize::{self, ToSql},
+    sql_types::Binary,
+};
+
 /// Wrapper type around Bytes to deserialize/serialize from/to hex
-#[derive(
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    Ord,
-    PartialOrd,
-    Serialize,
-    Deserialize,
-    AsExpression,
-    FromSqlRow,
-)]
-#[diesel(sql_type = Binary)]
+#[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "diesel", derive(AsExpression, FromSqlRow))]
+#[cfg_attr(feature = "diesel", diesel(sql_type = Binary))]
 pub struct Bytes(#[serde(with = "hex_bytes")] pub bytes::Bytes);
 
 fn bytes_to_hex(b: &Bytes) -> String {
@@ -126,6 +117,12 @@ impl From<Vec<u8>> for Bytes {
     }
 }
 
+impl Into<Vec<u8>> for Bytes {
+    fn into(self) -> Vec<u8> {
+        self.to_vec()
+    }
+}
+
 impl<const N: usize> From<[u8; N]> for Bytes {
     fn from(src: [u8; N]) -> Self {
         src.to_vec().into()
@@ -192,6 +189,7 @@ impl From<&str> for Bytes {
     }
 }
 
+#[cfg(feature = "diesel")]
 impl ToSql<Binary, Pg> for Bytes {
     fn to_sql<'b>(&'b self, out: &mut serialize::Output<'b, '_, Pg>) -> serialize::Result {
         let bytes_slice: &[u8] = &self.0;
@@ -199,6 +197,7 @@ impl ToSql<Binary, Pg> for Bytes {
     }
 }
 
+#[cfg(feature = "diesel")]
 impl FromSql<Binary, Pg> for Bytes {
     fn from_sql(
         bytes: <diesel::pg::Pg as diesel::backend::Backend>::RawValue<'_>,
@@ -233,12 +232,6 @@ impl From<U256> for Bytes {
         src.to_big_endian(&mut buf);
 
         Self(bytes::Bytes::from(buf.to_vec()))
-    }
-}
-
-impl Into<Vec<u8>> for Bytes {
-    fn into(self) -> Vec<u8> {
-        self.0.to_vec()
     }
 }
 

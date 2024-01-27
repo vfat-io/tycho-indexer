@@ -6,13 +6,13 @@ use diesel_derive_enum::DbEnum;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    hex_bytes::Bytes,
     models,
     storage::{
         Address, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ContractId, StorageError,
         TxHash,
     },
 };
+use tycho_types::Bytes;
 
 use super::{
     schema::{

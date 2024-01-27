@@ -4,6 +4,7 @@ members = [
     "substreams/ethereum-ambient",
     "tycho-msg-types",
     "tycho-client",
+    "tycho-types",
 ]
 resolver = "2"
 
@@ -29,6 +30,7 @@ uuid = { version = "1.4.1", features = [
 ] }
 hex = "0.4.3"
 tycho-msg-types = { path = "./tycho-msg-types" }
+tycho-types = { path = "./tycho-types" }
 futures03 = { version = "0.3.1", package = "futures", features = ["compat"] }
 thiserror = "1"
 tracing = "0.1.37"
@@ -44,3 +46,6 @@ tokio = { version = "1.27", features = [
 ] }
 tokio-tungstenite = "0.20.0"
 utoipa = { version = "4.2.0", features = ["chrono"] }
+ethers = "^2.0.2"
+diesel = { version = "2.1.0", features = ["postgres", "chrono", "serde_json"] }
+diesel-async = { version = "0.4.1", features = ["postgres", "deadpool"] }

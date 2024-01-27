@@ -7,7 +7,9 @@ use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use crate::serde_helpers::{hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value};
+use tycho_types::serde_primitives::{
+    hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value,
+};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
