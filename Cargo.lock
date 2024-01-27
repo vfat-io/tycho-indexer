@@ -5379,6 +5379,7 @@ dependencies = [
  "tracing",
  "tracing-actix-web",
  "tracing-subscriber",
+ "tycho-msg-types",
  "typetag",
  "utoipa",
  "utoipa-swagger-ui",
@@ -5396,6 +5397,7 @@ dependencies = [
  "serde_json",
  "strum",
  "strum_macros",
+ "utoipa",
  "uuid 1.5.0",
 ]
 

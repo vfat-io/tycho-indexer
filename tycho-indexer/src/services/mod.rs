@@ -5,7 +5,6 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     extractor::{evm, runner::ExtractorHandle, ExtractionError},
     models::Chain,
-    services::rpc::{Block, EVMAccount, StateRequestBody, StateRequestResponse, Version},
     storage::{postgres::PostgresGateway, ContractId},
 };
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
@@ -14,6 +13,10 @@ use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use tokio::task::JoinHandle;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+
+use tycho_msg_types::raw::{
+    BlockParam, ResponseAccount, StateRequestBody, StateRequestResponse, VersionParam,
+};
 
 mod rpc;
 mod ws;
@@ -79,13 +82,13 @@ impl ServicesBuilder {
         #[openapi(
             paths(rpc::contract_state),
             components(
-                schemas(Version),
-                schemas(Block),
+                schemas(VersionParam),
+                schemas(BlockParam),
                 schemas(ContractId),
                 schemas(StateRequestResponse),
                 schemas(StateRequestBody),
                 schemas(Chain),
-                schemas(EVMAccount),
+                schemas(ResponseAccount),
             )
         )]
         struct ApiDoc;

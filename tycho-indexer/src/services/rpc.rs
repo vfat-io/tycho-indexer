@@ -5,76 +5,63 @@ use crate::{
     hex_bytes::Bytes,
     models::Chain,
     storage::{
-        self, Address, BlockHash, BlockIdentifier, BlockOrTimestamp, ContractId,
-        ContractStateGateway, StorageError,
+        self, Address, BlockIdentifier, BlockOrTimestamp, ContractStateGateway, StorageError,
     },
 };
 
-use ethers::types::{H160, H256, U256};
-
 use actix_web::{web, HttpResponse};
-use chrono::{NaiveDateTime, Utc};
 use diesel_async::{
     pooled_connection::deadpool::{self, Pool},
     AsyncPgConnection,
 };
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
-use utoipa::{IntoParams, ToSchema};
+
+use tycho_msg_types::raw as dto;
 
 use super::EvmPostgresGateway;
 
-// Equivalent to evm::Account. This struct was created to avoid modifying the evm::Account
-// struct for RPC purpose.
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct EVMAccount {
-    pub chain: Chain,
-    #[schema(value_type=String)]
-    pub address: H160,
-    pub title: String,
-    #[schema(value_type=HashMap<String, String>)]
-    pub slots: HashMap<U256, U256>,
-    #[schema(value_type=String)]
-    pub balance: U256,
-    pub code: Bytes,
-    #[schema(value_type=String)]
-    pub code_hash: H256,
-    #[schema(value_type=String)]
-    pub balance_modify_tx: H256,
-    #[schema(value_type=String)]
-    pub code_modify_tx: H256,
-    #[schema(value_type=Option<String>)]
-    pub creation_tx: Option<H256>,
+impl From<evm::Account> for dto::ResponseAccount {
+    fn from(value: evm::Account) -> Self {
+        dto::ResponseAccount::new(
+            value.chain.into(),
+            value.address.as_bytes().to_vec(),
+            value.title.clone(),
+            value
+                .slots
+                .into_iter()
+                .map(|(k, v)| (Bytes::from(k).into(), Bytes::from(v).into()))
+                .collect(),
+            Bytes::from(value.balance).into(),
+            Bytes::from(value.code).into(),
+            Bytes::from(value.code_hash).into(),
+            Bytes::from(value.balance_modify_tx).into(),
+            Bytes::from(value.code_modify_tx).into(),
+            value
+                .creation_tx
+                .map(|tx| Bytes::from(tx).into()),
+        )
+    }
 }
 
-impl From<evm::Account> for EVMAccount {
-    fn from(account: evm::Account) -> Self {
-        Self {
-            chain: account.chain,
-            address: account.address,
-            title: account.title,
-            slots: account.slots,
-            balance: account.balance,
-            code: account.code,
-            code_hash: account.code_hash,
-            balance_modify_tx: account.balance_modify_tx,
-            code_modify_tx: account.code_modify_tx,
-            creation_tx: account.creation_tx,
+impl From<dto::Chain> for Chain {
+    fn from(value: dto::Chain) -> Self {
+        match value {
+            dto::Chain::Ethereum => Chain::Ethereum,
+            dto::Chain::Starknet => Chain::Starknet,
+            dto::Chain::ZkSync => Chain::ZkSync,
         }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub(crate) struct StateRequestResponse {
-    #[schema(value_type=Option<String>)]
-    accounts: Vec<EVMAccount>,
-}
-
-impl StateRequestResponse {
-    fn new(accounts: Vec<EVMAccount>) -> Self {
-        Self { accounts }
+impl From<Chain> for dto::Chain {
+    fn from(value: Chain) -> Self {
+        match value {
+            Chain::Ethereum => dto::Chain::Ethereum,
+            Chain::Starknet => dto::Chain::Starknet,
+            Chain::ZkSync => dto::Chain::ZkSync,
+        }
     }
 }
 
@@ -90,46 +77,18 @@ pub enum RpcError {
     Connection(#[from] deadpool::PoolError),
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
-pub struct StateRequestParameters {
-    #[serde(default = "Chain::default")]
-    chain: Chain,
-    #[param(default = 0)]
-    tvl_gt: Option<u64>,
-    #[param(default = 0)]
-    intertia_min_gt: Option<u64>,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct StateRequestBody {
-    #[serde(rename = "contractIds")]
-    contract_ids: Option<Vec<ContractId>>,
-    #[serde(default = "Version::default")]
-    version: Version,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub(crate) struct Version {
-    timestamp: Option<NaiveDateTime>,
-    block: Option<Block>,
-}
-
-impl Default for Version {
-    fn default() -> Self {
-        Version { timestamp: Some(Utc::now().naive_utc()), block: None }
-    }
-}
-
-impl TryFrom<&Version> for BlockOrTimestamp {
+impl TryFrom<&dto::VersionParam> for BlockOrTimestamp {
     type Error = RpcError;
 
-    fn try_from(version: &Version) -> Result<Self, Self::Error> {
+    fn try_from(version: &dto::VersionParam) -> Result<Self, Self::Error> {
         match (&version.timestamp, &version.block) {
             (_, Some(block)) => {
                 // If a full block is provided, we prioritize hash over number and chain
                 let block_identifier = match (&block.hash, &block.chain, &block.number) {
-                    (Some(hash), _, _) => BlockIdentifier::Hash(hash.clone()),
-                    (_, Some(chain), Some(number)) => BlockIdentifier::Number((*chain, *number)),
+                    (Some(hash), _, _) => BlockIdentifier::Hash(Bytes::from(hash.clone())),
+                    (_, Some(chain), Some(number)) => {
+                        BlockIdentifier::Number((Chain::from(*chain), *number))
+                    }
                     _ => return Err(RpcError::Parse("Insufficient block information".to_owned())),
                 };
                 Ok(BlockOrTimestamp::Block(block_identifier))
@@ -142,13 +101,6 @@ impl TryFrom<&Version> for BlockOrTimestamp {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub(crate) struct Block {
-    #[schema(value_type=Option<String>)]
-    hash: Option<BlockHash>,
-    chain: Option<Chain>,
-    number: Option<i64>,
-}
 pub struct RpcHandler {
     db_gateway: Arc<EvmPostgresGateway>,
     db_connection_pool: Pool<AsyncPgConnection>,
@@ -165,9 +117,9 @@ impl RpcHandler {
     #[instrument(skip(self, request, params))]
     async fn get_contract_state(
         &self,
-        request: &StateRequestBody,
-        params: &StateRequestParameters,
-    ) -> Result<StateRequestResponse, RpcError> {
+        request: &dto::StateRequestBody,
+        params: &dto::StateRequestParameters,
+    ) -> Result<dto::StateRequestResponse, RpcError> {
         let mut conn = self.db_connection_pool.get().await?;
 
         info!(?request, ?params, "Getting contract state.");
@@ -177,10 +129,10 @@ impl RpcHandler {
 
     async fn get_contract_state_inner(
         &self,
-        request: &StateRequestBody,
-        params: &StateRequestParameters,
+        request: &dto::StateRequestBody,
+        params: &dto::StateRequestParameters,
         db_connection: &mut AsyncPgConnection,
-    ) -> Result<StateRequestResponse, RpcError> {
+    ) -> Result<dto::StateRequestResponse, RpcError> {
         //TODO: handle when no contract is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
 
@@ -190,7 +142,7 @@ impl RpcHandler {
         let contract_ids = request.contract_ids.clone();
         let addresses: Option<Vec<Address>> = contract_ids.map(|ids| {
             ids.into_iter()
-                .map(|id| id.address)
+                .map(|id| Address::from(id.address))
                 .collect::<Vec<Address>>()
         });
         debug!(?addresses, "Getting contract states.");
@@ -200,13 +152,13 @@ impl RpcHandler {
         // TODO support additional tvl_gt and intertia_min_gt filters
         match self
             .db_gateway
-            .get_contracts(&params.chain, addresses, Some(&version), true, db_connection)
+            .get_contracts(&params.chain.into(), addresses, Some(&version), true, db_connection)
             .await
         {
-            Ok(accounts) => Ok(StateRequestResponse::new(
+            Ok(accounts) => Ok(dto::StateRequestResponse::new(
                 accounts
                     .into_iter()
-                    .map(EVMAccount::from)
+                    .map(dto::ResponseAccount::from)
                     .collect(),
             )),
             Err(err) => {
@@ -223,14 +175,14 @@ impl RpcHandler {
     responses(
         (status = 200, description = "OK", body = StateRequestResponse),
     ),
-    request_body = StateRequestBody,
+    request_body = dto::StateRequestBody,
     params(
-        StateRequestParameters
+        dto::StateRequestParameters
     ),
 )]
 pub async fn contract_state(
-    query: web::Query<StateRequestParameters>,
-    body: web::Json<StateRequestBody>,
+    query: web::Query<dto::StateRequestParameters>,
+    body: web::Json<dto::StateRequestBody>,
     handler: web::Data<RpcHandler>,
 ) -> HttpResponse {
     // Call the handler to get the state
@@ -258,6 +210,7 @@ mod tests {
         },
     };
     use actix_web::test;
+    use chrono::{NaiveDateTime, Utc};
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
 
@@ -287,22 +240,23 @@ mod tests {
         }
         "#;
 
-        let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
+        let result: dto::StateRequestBody = serde_json::from_str(json_str).unwrap();
 
-        let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092".into();
-        let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".into();
+        let contract0 = Bytes::from("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").into();
+        let block_hash =
+            Bytes::from("24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4").into();
         let block_number = 213;
 
         let expected_timestamp =
             NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
 
-        let expected = StateRequestBody {
-            contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
-            version: Version {
+        let expected = dto::StateRequestBody {
+            contract_ids: Some(vec![dto::ContractId::new(dto::Chain::Ethereum, contract0)]),
+            version: dto::VersionParam {
                 timestamp: Some(expected_timestamp),
-                block: Some(Block {
+                block: Some(dto::BlockParam {
                     hash: Some(block_hash),
-                    chain: Some(Chain::Ethereum),
+                    chain: Some(dto::Chain::Ethereum),
                     number: Some(block_number),
                 }),
             },
@@ -327,20 +281,20 @@ mod tests {
     }
     "#;
 
-        let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
+        let result: dto::StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".into();
         let block_number = 213;
         let expected_timestamp =
             NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
 
-        let expected = StateRequestBody {
+        let expected = dto::StateRequestBody {
             contract_ids: None,
-            version: Version {
+            version: dto::VersionParam {
                 timestamp: Some(expected_timestamp),
-                block: Some(Block {
+                block: Some(dto::BlockParam {
                     hash: Some(block_hash),
-                    chain: Some(Chain::Ethereum),
+                    chain: Some(dto::Chain::Ethereum),
                     number: Some(block_number),
                 }),
             },
@@ -365,7 +319,7 @@ mod tests {
     }
     "#;
 
-        let body: StateRequestBody = serde_json::from_str(json_str).unwrap();
+        let body: dto::StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let version = BlockOrTimestamp::try_from(&body.version).unwrap();
         assert_eq!(
@@ -390,7 +344,7 @@ mod tests {
     }
     "#;
 
-        let body: StateRequestBody = serde_json::from_str(json_str).unwrap();
+        let body: dto::StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let version = BlockOrTimestamp::try_from(&body.version).unwrap();
         assert_eq!(
@@ -412,13 +366,13 @@ mod tests {
     }
     "#;
 
-        let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
+        let result: dto::StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092".into();
 
-        let expected = StateRequestBody {
-            contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
-            version: Version { timestamp: Some(Utc::now().naive_utc()), block: None },
+        let expected = dto::StateRequestBody {
+            contract_ids: Some(vec![dto::ContractId::new(dto::Chain::Ethereum, contract0)]),
+            version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
 
         let time_difference = expected
@@ -509,16 +463,20 @@ mod tests {
             ),
         );
 
-        let request = StateRequestBody {
-            contract_ids: Some(vec![ContractId::new(
-                Chain::Ethereum,
-                acc_address.parse().unwrap(),
+        let request = dto::StateRequestBody {
+            contract_ids: Some(vec![dto::ContractId::new(
+                dto::Chain::Ethereum,
+                acc_address
+                    .parse::<Bytes>()
+                    .unwrap()
+                    .as_ref()
+                    .to_vec(),
             )]),
-            version: Version { timestamp: Some(Utc::now().naive_utc()), block: None },
+            version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
 
         let state = req_handler
-            .get_contract_state_inner(&request, &StateRequestParameters::default(), &mut conn)
+            .get_contract_state_inner(&request, &dto::StateRequestParameters::default(), &mut conn)
             .await
             .unwrap();
 
@@ -531,13 +489,16 @@ mod tests {
         // Define the contract address and endpoint
         let endpoint = "http://127.0.0.1:4242/v1/contract_state";
 
-        // Create the request body using the StateRequestBody struct
-        let request_body = StateRequestBody {
-            contract_ids: Some(vec![ContractId::new(
-                Chain::Ethereum,
-                Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap(),
+        // Create the request body using the dto::StateRequestBody struct
+        let request_body = dto::StateRequestBody {
+            contract_ids: Some(vec![dto::ContractId::new(
+                dto::Chain::Ethereum,
+                Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092")
+                    .unwrap()
+                    .as_ref()
+                    .to_vec(),
             )]),
-            version: Version::default(),
+            version: dto::VersionParam::default(),
         };
 
         // Serialize the request body to JSON

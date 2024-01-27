@@ -4,6 +4,7 @@ use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use strum_macros::{Display, EnumString};
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::serde_helpers::{hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value};
@@ -70,7 +71,7 @@ pub enum WebSocketMessage {
     Response(Response),
 }
 
-#[derive(Debug, PartialEq, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize, Default, ToSchema)]
 pub struct Block {
     pub number: u64,
     #[serde(with = "hex_bytes")]
@@ -79,6 +80,15 @@ pub struct Block {
     pub parent_hash: Vec<u8>,
     pub chain: Chain,
     pub ts: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct BlockParam {
+    #[schema(value_type=Option<String>)]
+    #[serde(with = "hex_bytes_option")]
+    pub hash: Option<Vec<u8>>,
+    pub chain: Option<Chain>,
+    pub number: Option<i64>,
 }
 
 #[derive(Debug, PartialEq, Clone, Default, Deserialize, Serialize)]
@@ -159,17 +169,17 @@ impl AccountUpdate {
     }
 }
 
-#[derive(Serialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
 pub struct StateRequestBody {
     #[serde(rename = "contractIds")]
     pub contract_ids: Option<Vec<ContractId>>,
-    #[serde(default = "Version::default")]
-    pub version: Version,
+    #[serde(default = "VersionParam::default")]
+    pub version: VersionParam,
 }
 
 // TODO: move this to generic
 impl StateRequestBody {
-    pub fn new(contract_ids: Option<Vec<Vec<u8>>>, version: Version) -> Self {
+    pub fn new(contract_ids: Option<Vec<Vec<u8>>>, version: VersionParam) -> Self {
         Self {
             contract_ids: contract_ids.map(|ids| {
                 ids.into_iter()
@@ -180,17 +190,20 @@ impl StateRequestBody {
         }
     }
 
-    pub fn from_block(block: Block) -> Self {
-        Self { contract_ids: None, version: Version { timestamp: block.ts, block: Some(block) } }
+    pub fn from_block(block: BlockParam) -> Self {
+        Self { contract_ids: None, version: VersionParam { timestamp: None, block: Some(block) } }
     }
 
     pub fn from_timestamp(timestamp: NaiveDateTime) -> Self {
-        Self { contract_ids: None, version: Version { timestamp, block: None } }
+        Self {
+            contract_ids: None,
+            version: VersionParam { timestamp: Some(timestamp), block: None },
+        }
     }
 }
 
 /// Response from Tycho server for a contract state request.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct StateRequestResponse {
     pub accounts: Vec<ResponseAccount>,
 }
@@ -201,28 +214,37 @@ impl StateRequestResponse {
     }
 }
 
-#[derive(PartialEq, Clone, Serialize, Deserialize, Default)]
+#[derive(PartialEq, Clone, Serialize, Deserialize, Default, ToSchema)]
 #[serde(rename = "Account")]
 /// Account struct for the response from Tycho server for a contract state request.
 ///
 /// Code is serialized as a hex string instead of a list of bytes.
 pub struct ResponseAccount {
     pub chain: Chain,
+    #[schema(value_type=String, example="0xc9f2e6ea1637E499406986ac50ddC92401ce1f58")]
     #[serde(with = "hex_bytes")]
     pub address: Vec<u8>,
+    #[schema(value_type=String, example="Protocol Vault")]
     pub title: String,
+    #[schema(value_type=HashMap<String, String>, example=json!({"0x....": "0x...."}))]
     #[serde(with = "hex_hashmap_key_value")]
     pub slots: HashMap<Vec<u8>, Vec<u8>>,
+    #[schema(value_type=HashMap<String, String>, example="0x00")]
     #[serde(with = "hex_bytes")]
     pub balance: Vec<u8>,
+    #[schema(value_type=HashMap<String, String>, example="0xBADBABE")]
     #[serde(with = "hex_bytes")]
     pub code: Vec<u8>,
+    #[schema(value_type=HashMap<String, String>, example="0x123456789")]
     #[serde(with = "hex_bytes")]
     pub code_hash: Vec<u8>,
+    #[schema(value_type=HashMap<String, String>, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
     #[serde(with = "hex_bytes")]
     pub balance_modify_tx: Vec<u8>,
+    #[schema(value_type=HashMap<String, String>, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
     #[serde(with = "hex_bytes")]
     pub code_modify_tx: Vec<u8>,
+    #[schema(value_type=HashMap<String, String>, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
     #[serde(with = "hex_bytes_option")]
     pub creation_tx: Option<Vec<u8>>,
 }
@@ -298,30 +320,32 @@ impl Display for ContractId {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct Version {
-    timestamp: NaiveDateTime,
-    block: Option<Block>,
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct VersionParam {
+    pub timestamp: Option<NaiveDateTime>,
+    pub block: Option<BlockParam>,
 }
 
-impl Version {
-    pub fn new(timestamp: NaiveDateTime, block: Option<Block>) -> Self {
+impl VersionParam {
+    pub fn new(timestamp: Option<NaiveDateTime>, block: Option<BlockParam>) -> Self {
         Self { timestamp, block }
     }
 }
 
-impl Default for Version {
+impl Default for VersionParam {
     fn default() -> Self {
-        Version { timestamp: Utc::now().naive_utc(), block: None }
+        VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None }
     }
 }
 
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct StateRequestParameters {
     #[serde(default = "Chain::default")]
-    chain: Chain,
-    tvl_gt: Option<u64>,
-    inertia_min_gt: Option<u64>,
+    pub chain: Chain,
+    #[param(default = 0)]
+    pub tvl_gt: Option<u64>,
+    #[param(default = 0)]
+    pub inertia_min_gt: Option<u64>,
 }
 
 impl StateRequestParameters {

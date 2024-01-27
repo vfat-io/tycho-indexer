@@ -22,7 +22,7 @@ thiserror.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
-
+tycho-msg-types.workspace = true
 
 anyhow = "1"
 async-stream = "0.3"

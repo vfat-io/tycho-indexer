@@ -35,11 +35,11 @@ pub struct Version<B: From<raw::Block>> {
     block: Option<B>,
 }
 
-impl<B> From<raw::Version> for Version<B>
+impl<B> From<raw::VersionParam> for Version<B>
 where
     B: From<raw::Block>,
 {
-    fn from(value: raw::Version) -> Self {
+    fn from(value: raw::VersionParam) -> Self {
         todo!()
     }
 }
@@ -61,6 +61,15 @@ where
 
 pub struct StateRequestResponse<A: From<raw::ResponseAccount>> {
     pub accounts: Vec<A>,
+}
+
+impl<A> StateRequestResponse<A>
+where
+    A: From<raw::ResponseAccount>,
+{
+    pub fn new(accounts: Vec<A>) -> Self {
+        Self { accounts }
+    }
 }
 
 impl<A> From<raw::StateRequestBody> for StateRequestResponse<A>

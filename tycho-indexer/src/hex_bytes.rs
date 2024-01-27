@@ -236,6 +236,12 @@ impl From<U256> for Bytes {
     }
 }
 
+impl Into<Vec<u8>> for Bytes {
+    fn into(self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use diesel::{insert_into, table, Insertable, Queryable};
