@@ -17,34 +17,28 @@ strum.workspace = true
 strum_macros.workspace = true
 uuid.workspace = true
 hex.workspace = true
+futures03.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+
 
 anyhow = "1"
 async-stream = "0.3"
-async-trait = "0.1.73"
-futures03 = { version = "0.3.1", package = "futures", features = ["compat"] }
-
 reqwest = "0.11"
-tokio = { version = "1.27", features = [
-    "time",
-    "sync",
-    "macros",
-    "test-util",
-    "rt-multi-thread",
-    "parking_lot",
-] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-retry = "0.3"
 tonic = { version = "0.9", features = ["tls-roots"] }
 prost = "0.11"
 prost-types = "0.11"
-thiserror = "1"
 diesel = { version = "2.1.0", features = ["postgres", "chrono", "serde_json"] }
 diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 diesel_migrations = "2.1.0"
 diesel-async = { version = "0.4.1", features = ["postgres", "deadpool"] }
 ethers = "^2.0.2"
 clap = { version = "4.4.2", features = ["derive", "env"] }
-tracing = "0.1.37"
+
 tracing-subscriber = { version = "0.3.17", default-features = false, features = [
     "env-filter",
     "fmt",
@@ -67,5 +61,5 @@ lru = "0.12.1"
 actix-rt = "2.9.0"
 actix-test = "0.1.2"
 rstest = "0.18.2"
-tokio-tungstenite = "0.20.0"
+tokio-tungstenite.workspace = true
 pretty_assertions = "1.4.0"

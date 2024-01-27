@@ -1,5 +1,10 @@
 [workspace]
-members = ["tycho-indexer", "substreams/ethereum-ambient", "tycho-msg-types"]
+members = [
+    "tycho-indexer",
+    "substreams/ethereum-ambient",
+    "tycho-msg-types",
+    "tycho-client",
+]
 resolver = "2"
 
 # profile for building substreams crates
@@ -23,3 +28,18 @@ uuid = { version = "1.4.1", features = [
     "macro-diagnostics",
 ] }
 hex = "0.4.3"
+tycho-msg-types = { path = "./tycho-msg-types" }
+futures03 = { version = "0.3.1", package = "futures", features = ["compat"] }
+thiserror = "1"
+tracing = "0.1.37"
+hyper = "0.14.27"
+async-trait = "0.1.73"
+tokio = { version = "1.27", features = [
+    "time",
+    "sync",
+    "macros",
+    "test-util",
+    "rt-multi-thread",
+    "parking_lot",
+] }
+tokio-tungstenite = "0.20.0"
