@@ -80,25 +80,27 @@ pub mod hex_bytes_option {
 }
 
 pub mod hex_hashmap_key {
+    use crate::Bytes;
+
     use super::decode_hex_with_prefix;
     use std::collections::HashMap;
 
     use serde::{de, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn serialize<S, K, V>(x: &HashMap<K, V>, s: S) -> Result<S::Ok, S::Error>
+    #[allow(clippy::mutable_key_type)]
+    pub fn serialize<S, V>(x: &HashMap<Bytes, V>, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
-        K: AsRef<[u8]>,
         V: Serialize,
     {
         let mut map = s.serialize_map(Some(x.len()))?;
-        for (k, v) in x.into_iter() {
-            map.serialize_entry(&format!("0x{}", hex::encode(k)), v)?;
+        for (k, v) in x.iter() {
+            map.serialize_entry(&format!("{k:#x}"), v)?;
         }
         map.end()
     }
 
-    pub fn deserialize<'de, V, D>(d: D) -> Result<HashMap<Vec<u8>, V>, D::Error>
+    pub fn deserialize<'de, V, D>(d: D) -> Result<HashMap<Bytes, V>, D::Error>
     where
         D: Deserializer<'de>,
         V: Deserialize<'de>,
@@ -109,7 +111,7 @@ pub mod hex_hashmap_key {
             .into_iter()
             .map(|(k, v)| {
                 let k = decode_hex_with_prefix(&k).map_err(|e| de::Error::custom(e.to_string()))?;
-                return Ok((k, v))
+                Ok((Bytes::from(k), v))
             })
             .collect::<Result<HashMap<_, _>, _>>()
     }
@@ -120,23 +122,23 @@ pub mod hex_hashmap_key_value {
 
     use serde::{de, ser::SerializeMap, Deserialize, Deserializer, Serializer};
 
+    use crate::Bytes;
+
     use super::decode_hex_with_prefix;
 
-    pub fn serialize<S>(x: &HashMap<Vec<u8>, Vec<u8>>, s: S) -> Result<S::Ok, S::Error>
+    #[allow(clippy::mutable_key_type)]
+    pub fn serialize<S>(x: &HashMap<Bytes, Bytes>, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         let mut map = s.serialize_map(Some(x.len()))?;
-        for (k, v) in x.into_iter() {
-            map.serialize_entry(
-                &format!("0x{}", hex::encode(k)),
-                &format!("0x{}", hex::encode(v)),
-            )?;
+        for (k, v) in x.iter() {
+            map.serialize_entry(&format!("{k:#x}"), &format!("{v:#x}"))?;
         }
         map.end()
     }
 
-    pub fn deserialize<'de, D>(d: D) -> Result<HashMap<Vec<u8>, Vec<u8>>, D::Error>
+    pub fn deserialize<'de, D>(d: D) -> Result<HashMap<Bytes, Bytes>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -146,7 +148,7 @@ pub mod hex_hashmap_key_value {
             .map(|(k, v)| {
                 let k = decode_hex_with_prefix(&k).map_err(|e| de::Error::custom(e.to_string()))?;
                 let v = decode_hex_with_prefix(&v).map_err(|e| de::Error::custom(e.to_string()))?;
-                return Ok((k, v))
+                Ok((k.into(), v.into()))
             })
             .collect::<Result<HashMap<_, _>, _>>()
     }

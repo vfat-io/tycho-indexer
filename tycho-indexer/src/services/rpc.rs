@@ -26,21 +26,19 @@ impl From<evm::Account> for dto::ResponseAccount {
     fn from(value: evm::Account) -> Self {
         dto::ResponseAccount::new(
             value.chain.into(),
-            value.address.as_bytes().to_vec(),
+            value.address.into(),
             value.title.clone(),
             value
                 .slots
                 .into_iter()
-                .map(|(k, v)| (Bytes::from(k).into(), Bytes::from(v).into()))
+                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
                 .collect(),
-            Bytes::from(value.balance).into(),
-            Bytes::from(value.code).into(),
-            Bytes::from(value.code_hash).into(),
-            Bytes::from(value.balance_modify_tx).into(),
-            Bytes::from(value.code_modify_tx).into(),
-            value
-                .creation_tx
-                .map(|tx| Bytes::from(tx).into()),
+            Bytes::from(value.balance),
+            value.code,
+            Bytes::from(value.code_hash),
+            Bytes::from(value.balance_modify_tx),
+            Bytes::from(value.code_modify_tx),
+            value.creation_tx.map(Bytes::from),
         )
     }
 }
@@ -85,7 +83,7 @@ impl TryFrom<&dto::VersionParam> for BlockOrTimestamp {
             (_, Some(block)) => {
                 // If a full block is provided, we prioritize hash over number and chain
                 let block_identifier = match (&block.hash, &block.chain, &block.number) {
-                    (Some(hash), _, _) => BlockIdentifier::Hash(Bytes::from(hash.clone())),
+                    (Some(hash), _, _) => BlockIdentifier::Hash(hash.clone()),
                     (_, Some(chain), Some(number)) => {
                         BlockIdentifier::Number((Chain::from(*chain), *number))
                     }
@@ -240,9 +238,12 @@ mod tests {
 
         let result: dto::StateRequestBody = serde_json::from_str(json_str).unwrap();
 
-        let contract0 = Bytes::from("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").into();
-        let block_hash =
-            Bytes::from("24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4").into();
+        let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092"
+            .parse()
+            .unwrap();
+        let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4"
+            .parse()
+            .unwrap();
         let block_number = 213;
 
         let expected_timestamp =
@@ -342,9 +343,10 @@ mod tests {
     }
     "#;
 
-        let body: dto::StateRequestBody = serde_json::from_str(json_str).unwrap();
+        let body: dto::StateRequestBody =
+            serde_json::from_str(json_str).expect("serde parsing error");
 
-        let version = BlockOrTimestamp::try_from(&body.version).unwrap();
+        let version = BlockOrTimestamp::try_from(&body.version).expect("nor block nor timestamp");
         assert_eq!(
             version,
             BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 213)))
@@ -464,11 +466,7 @@ mod tests {
         let request = dto::StateRequestBody {
             contract_ids: Some(vec![dto::ContractId::new(
                 dto::Chain::Ethereum,
-                acc_address
-                    .parse::<Bytes>()
-                    .unwrap()
-                    .as_ref()
-                    .to_vec(),
+                acc_address.parse::<Bytes>().unwrap(),
             )]),
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
@@ -491,10 +489,7 @@ mod tests {
         let request_body = dto::StateRequestBody {
             contract_ids: Some(vec![dto::ContractId::new(
                 dto::Chain::Ethereum,
-                Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092")
-                    .unwrap()
-                    .as_ref()
-                    .to_vec(),
+                Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap(),
             )]),
             version: dto::VersionParam::default(),
         };

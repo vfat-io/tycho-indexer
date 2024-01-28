@@ -7,8 +7,9 @@ use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use tycho_types::serde_primitives::{
-    hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value,
+use tycho_types::{
+    serde_primitives::{hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value},
+    Bytes,
 };
 
 #[derive(
@@ -77,9 +78,9 @@ pub enum WebSocketMessage {
 pub struct Block {
     pub number: u64,
     #[serde(with = "hex_bytes")]
-    pub hash: Vec<u8>,
+    pub hash: Bytes,
     #[serde(with = "hex_bytes")]
-    pub parent_hash: Vec<u8>,
+    pub parent_hash: Bytes,
     pub chain: Chain,
     pub ts: NaiveDateTime,
 }
@@ -87,34 +88,30 @@ pub struct Block {
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct BlockParam {
     #[schema(value_type=Option<String>)]
-    #[serde(with = "hex_bytes_option")]
-    pub hash: Option<Vec<u8>>,
+    #[serde(with = "hex_bytes_option", default)]
+    pub hash: Option<Bytes>,
+    #[serde(default)]
     pub chain: Option<Chain>,
+    #[serde(default)]
     pub number: Option<i64>,
 }
 
 #[derive(Debug, PartialEq, Clone, Default, Deserialize, Serialize)]
 pub struct Transaction {
     #[serde(with = "hex_bytes")]
-    pub hash: Vec<u8>,
+    pub hash: Bytes,
     #[serde(with = "hex_bytes")]
-    pub block_hash: Vec<u8>,
+    pub block_hash: Bytes,
     #[serde(with = "hex_bytes")]
-    pub from: Vec<u8>,
+    pub from: Bytes,
     #[serde(with = "hex_bytes_option")]
-    pub to: Option<Vec<u8>>,
+    pub to: Option<Bytes>,
     pub index: u64,
 }
 
 impl Transaction {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        hash: Vec<u8>,
-        block_hash: Vec<u8>,
-        from: Vec<u8>,
-        to: Option<Vec<u8>>,
-        index: u64,
-    ) -> Self {
+    pub fn new(hash: Bytes, block_hash: Bytes, from: Bytes, to: Option<Bytes>, index: u64) -> Self {
         Self { hash, block_hash, from, to, index }
     }
 }
@@ -129,7 +126,7 @@ pub struct BlockAccountChanges {
     chain: Chain,
     pub block: Block,
     #[serde(with = "hex_hashmap_key")]
-    pub account_updates: HashMap<Vec<u8>, AccountUpdate>,
+    pub account_updates: HashMap<Bytes, AccountUpdate>,
 }
 
 impl BlockAccountChanges {
@@ -137,7 +134,7 @@ impl BlockAccountChanges {
         extractor: String,
         chain: Chain,
         block: Block,
-        account_updates: HashMap<Vec<u8>, AccountUpdate>,
+        account_updates: HashMap<Bytes, AccountUpdate>,
     ) -> Self {
         Self { extractor, chain, block, account_updates }
     }
@@ -146,25 +143,25 @@ impl BlockAccountChanges {
 #[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
 pub struct AccountUpdate {
     #[serde(with = "hex_bytes")]
-    pub address: Vec<u8>,
+    pub address: Bytes,
     pub chain: Chain,
     #[serde(with = "hex_hashmap_key_value")]
-    pub slots: HashMap<Vec<u8>, Vec<u8>>,
+    pub slots: HashMap<Bytes, Bytes>,
     #[serde(with = "hex_bytes_option")]
-    pub balance: Option<Vec<u8>>,
+    pub balance: Option<Bytes>,
     #[serde(with = "hex_bytes_option")]
-    pub code: Option<Vec<u8>>,
+    pub code: Option<Bytes>,
     pub change: ChangeType,
 }
 
 impl AccountUpdate {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        address: Vec<u8>,
+        address: Bytes,
         chain: Chain,
-        slots: HashMap<Vec<u8>, Vec<u8>>,
-        balance: Option<Vec<u8>>,
-        code: Option<Vec<u8>>,
+        slots: HashMap<Bytes, Bytes>,
+        balance: Option<Bytes>,
+        code: Option<Bytes>,
         change: ChangeType,
     ) -> Self {
         Self { address, chain, slots, balance, code, change }
@@ -181,7 +178,7 @@ pub struct StateRequestBody {
 
 // TODO: move this to generic
 impl StateRequestBody {
-    pub fn new(contract_ids: Option<Vec<Vec<u8>>>, version: VersionParam) -> Self {
+    pub fn new(contract_ids: Option<Vec<Bytes>>, version: VersionParam) -> Self {
         Self {
             contract_ids: contract_ids.map(|ids| {
                 ids.into_iter()
@@ -225,45 +222,45 @@ pub struct ResponseAccount {
     pub chain: Chain,
     #[schema(value_type=String, example="0xc9f2e6ea1637E499406986ac50ddC92401ce1f58")]
     #[serde(with = "hex_bytes")]
-    pub address: Vec<u8>,
+    pub address: Bytes,
     #[schema(value_type=String, example="Protocol Vault")]
     pub title: String,
     #[schema(value_type=HashMap<String, String>, example=json!({"0x....": "0x...."}))]
     #[serde(with = "hex_hashmap_key_value")]
-    pub slots: HashMap<Vec<u8>, Vec<u8>>,
+    pub slots: HashMap<Bytes, Bytes>,
     #[schema(value_type=HashMap<String, String>, example="0x00")]
     #[serde(with = "hex_bytes")]
-    pub balance: Vec<u8>,
+    pub balance: Bytes,
     #[schema(value_type=HashMap<String, String>, example="0xBADBABE")]
     #[serde(with = "hex_bytes")]
-    pub code: Vec<u8>,
+    pub code: Bytes,
     #[schema(value_type=HashMap<String, String>, example="0x123456789")]
     #[serde(with = "hex_bytes")]
-    pub code_hash: Vec<u8>,
+    pub code_hash: Bytes,
     #[schema(value_type=HashMap<String, String>, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
     #[serde(with = "hex_bytes")]
-    pub balance_modify_tx: Vec<u8>,
+    pub balance_modify_tx: Bytes,
     #[schema(value_type=HashMap<String, String>, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
     #[serde(with = "hex_bytes")]
-    pub code_modify_tx: Vec<u8>,
+    pub code_modify_tx: Bytes,
     #[schema(value_type=HashMap<String, String>, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
     #[serde(with = "hex_bytes_option")]
-    pub creation_tx: Option<Vec<u8>>,
+    pub creation_tx: Option<Bytes>,
 }
 
 impl ResponseAccount {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain: Chain,
-        address: Vec<u8>,
+        address: Bytes,
         title: String,
-        slots: HashMap<Vec<u8>, Vec<u8>>,
-        balance: Vec<u8>,
-        code: Vec<u8>,
-        code_hash: Vec<u8>,
-        balance_modify_tx: Vec<u8>,
-        code_modify_tx: Vec<u8>,
-        creation_tx: Option<Vec<u8>>,
+        slots: HashMap<Bytes, Bytes>,
+        balance: Bytes,
+        code: Bytes,
+        code_hash: Bytes,
+        balance_modify_tx: Bytes,
+        code_modify_tx: Bytes,
+        creation_tx: Option<Bytes>,
     ) -> Self {
         Self {
             chain,
@@ -301,17 +298,17 @@ impl std::fmt::Debug for ResponseAccount {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ContractId {
     #[serde(with = "hex_bytes")]
-    pub address: Vec<u8>,
+    pub address: Bytes,
     pub chain: Chain,
 }
 
 /// Uniquely identifies a contract on a specific chain.
 impl ContractId {
-    pub fn new(chain: Chain, address: Vec<u8>) -> Self {
+    pub fn new(chain: Chain, address: Bytes) -> Self {
         Self { address, chain }
     }
 
-    pub fn address(&self) -> &Vec<u8> {
+    pub fn address(&self) -> &Bytes {
         &self.address
     }
 }

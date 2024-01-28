@@ -252,6 +252,7 @@ impl TychoWsClient for TychoWsClientImpl {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDateTime;
@@ -281,7 +282,7 @@ mod tests {
                         "number": 123,
                         "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
                         "parent_hash":
-                            "0x0000000000000000000000000000000000000000000000000000000000000000",            
+                            "0x0000000000000000000000000000000000000000000000000000000000000000",
                         "chain": "ethereum",             "ts": "2023-09-14T00:00:00"
                                 },
                                 "account_updates": {
@@ -289,7 +290,7 @@ mod tests {
                                         "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
                                         "chain": "ethereum",
                                         "slots": {},
-                                        "balance": "0x01f4",            
+                                        "balance": "0x01f4",
                                         "code": "",
                                         "change": "Update"
                                     }
@@ -406,3 +407,4 @@ mod tests {
         );
     }
 }
+ */

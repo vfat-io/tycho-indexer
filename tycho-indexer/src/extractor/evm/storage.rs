@@ -20,7 +20,6 @@ pub mod pg {
 
     use crate::{
         extractor::evm::utils::pad_and_parse_h160,
-        hex_bytes::Bytes,
         models,
         models::{FinancialType, ImplementationType},
         storage::{
@@ -33,7 +32,7 @@ pub mod pg {
         },
     };
     use ethers::types::{H160, H256, U256};
-    use serde_json::Value;
+    use tycho_types::Bytes;
 
     use self::storage::StorableProtocolStateDelta;
 
@@ -351,14 +350,13 @@ pub mod pg {
             protocol_system: &str,
             transaction_hash: H256,
         ) -> Result<Self, StorageError> {
-            let mut static_attributes: HashMap<String, Bytes> = HashMap::default();
-
-            if let Some(Value::Object(map)) = val.attributes {
-                static_attributes = map
-                    .into_iter()
-                    .map(|(key, value)| (key, Bytes::from(bytes::Bytes::from(value.to_string()))))
-                    .collect();
-            }
+            let static_attributes: HashMap<String, Bytes> = if let Some(v) = val.attributes {
+                serde_json::from_value(v).map_err(|_| {
+                    StorageError::DecodeError("Failed to decode static attributes.".to_string())
+                })?
+            } else {
+                Default::default()
+            };
 
             Ok(evm::ProtocolComponent {
                 id: val.external_id,
@@ -532,13 +530,11 @@ mod test {
 
     use crate::storage::postgres::orm;
 
-    use crate::{
-        hex_bytes::Bytes,
-        storage::{ContractId, StorableProtocolComponent},
-    };
+    use crate::storage::{ContractId, StorableProtocolComponent};
     use chrono::Utc;
     use ethers::prelude::{H160, H256};
     use std::str::FromStr;
+    use tycho_types::Bytes;
 
     #[test]
     fn test_storable_token_from_storage() {
@@ -585,8 +581,8 @@ mod test {
     #[test]
     fn test_from_storage_protocol_component() {
         let atts = serde_json::json!({
-            "key1": "value1",
-            "key2": "value2"
+            "key1": "0xbadbabe1",
+            "key2": "0xbadbabe2"
         });
 
         let val = orm::ProtocolComponent {
@@ -594,7 +590,7 @@ mod test {
             chain_id: 0,
             external_id: "sample_external_id".to_string(),
             protocol_type_id: 42,
-            attributes: Some(atts.clone()),
+            attributes: Some(atts),
             protocol_system_id: 0,
             created_at: Default::default(),
             deleted_at: None,
@@ -612,7 +608,7 @@ mod test {
         let chain = Chain::Ethereum;
         let protocol_system = "ambient".to_string();
 
-        let result = evm::ProtocolComponent::from_storage(
+        let protocol_component = evm::ProtocolComponent::from_storage(
             val.clone(),
             tokens.clone(),
             contract_ids.clone(),
@@ -620,11 +616,8 @@ mod test {
             &protocol_system,
             H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
                 .unwrap(),
-        );
-
-        assert!(result.is_ok());
-
-        let protocol_component = result.unwrap();
+        )
+        .expect("from_storage failed");
 
         assert_eq!(protocol_component.id, val.external_id.to_string());
         assert_eq!(protocol_component.protocol_type_name, val.protocol_type_id.to_string());
@@ -633,14 +626,8 @@ mod test {
         assert_eq!(protocol_component.contract_ids, contract_ids);
 
         let mut expected_attributes = HashMap::new();
-        expected_attributes.insert(
-            "key1".to_string(),
-            Bytes::from(bytes::Bytes::from(atts.get("key1").unwrap().to_string())),
-        );
-        expected_attributes.insert(
-            "key2".to_string(),
-            Bytes::from(bytes::Bytes::from(atts.get("key2").unwrap().to_string())),
-        );
+        expected_attributes.insert("key1".to_string(), Bytes::from_str("0xbadbabe1").unwrap());
+        expected_attributes.insert("key2".to_string(), Bytes::from_str("0xbadbabe2").unwrap());
 
         assert_eq!(protocol_component.static_attributes, expected_attributes);
     }
@@ -659,8 +646,8 @@ mod test {
             contract_ids: vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)],
             static_attributes: {
                 let mut map = HashMap::new();
-                map.insert("key1".to_string(), Bytes::from(bytes::Bytes::from("value1")));
-                map.insert("key2".to_string(), Bytes::from(bytes::Bytes::from("value2")));
+                map.insert("key1".to_string(), Bytes::from("badbabe1"));
+                map.insert("key2".to_string(), Bytes::from("badbabe2"));
                 map
             },
             change: Default::default(),
@@ -696,8 +683,7 @@ mod test {
         assert_eq!(new_protocol_component.protocol_system_id, protocol_system_id);
 
         let expected_attributes: serde_json::Value =
-            serde_json::from_str(r#"{ "key1": "0x76616c756531", "key2": "0x76616c756532" }"#)
-                .unwrap();
+            serde_json::from_str(r#"{ "key1": "0xbadbabe1", "key2": "0xbadbabe2" }"#).unwrap();
 
         assert_eq!(new_protocol_component.attributes, Some(expected_attributes));
     }

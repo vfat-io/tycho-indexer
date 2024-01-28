@@ -21,7 +21,7 @@ use diesel::{
 
 /// Wrapper type around Bytes to deserialize/serialize from/to hex
 #[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
-#[cfg_attr(feature = "diesel", derive(AsExpression, FromSqlRow))]
+#[cfg_attr(feature = "diesel", derive(AsExpression, FromSqlRow,))]
 #[cfg_attr(feature = "diesel", diesel(sql_type = Binary))]
 pub struct Bytes(#[serde(with = "hex_bytes")] pub bytes::Bytes);
 
@@ -117,9 +117,9 @@ impl From<Vec<u8>> for Bytes {
     }
 }
 
-impl Into<Vec<u8>> for Bytes {
-    fn into(self) -> Vec<u8> {
-        self.to_vec()
+impl From<Bytes> for Vec<u8> {
+    fn from(value: Bytes) -> Self {
+        value.to_vec()
     }
 }
 

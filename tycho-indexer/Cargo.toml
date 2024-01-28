@@ -26,7 +26,7 @@ tycho-msg-types.workspace = true
 ethers.workspace = true
 diesel.workspace = true
 diesel-async.workspace = true
-tycho-types.workspace = true
+tycho-types = { workspace = true, features = ["diesel"] }
 
 anyhow = "1"
 async-stream = "0.3"

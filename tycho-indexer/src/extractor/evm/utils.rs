@@ -1,6 +1,6 @@
 use ethers::types::{H160, H256, U256};
 
-use crate::hex_bytes::Bytes;
+use tycho_types::Bytes;
 
 /// Decoding trait with nice contextual error messages
 pub trait TryDecode: Sized {
@@ -18,7 +18,7 @@ pub trait TryDecode: Sized {
     /// use ethers::types::U256;
     ///
     /// let data = [0;32].into();
-    /// let balance = U256::try_decode(data.as_slice(), "balance").unwrap();
+    /// let balance = U256::try_decode(&data, "balance").unwrap();
     /// ```
     fn try_decode(v: &Bytes, type_context: &str) -> Result<Self, String>;
 }
