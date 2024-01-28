@@ -364,3 +364,96 @@ impl StateRequestParameters {
         parts.join("&")
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_parse_state_request() {
+        let json_str = r#"
+        {
+            "contractIds": [
+                {
+                    "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
+                    "chain": "ethereum"
+                }
+            ],
+            "version": {
+                "timestamp": "2069-01-01T04:20:00",
+                "block": {
+                    "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                    "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
+                    "number": 213,
+                    "chain": "ethereum"
+                }
+            }
+        }
+        "#;
+
+        let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
+
+        let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092"
+            .parse()
+            .unwrap();
+        let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4"
+            .parse()
+            .unwrap();
+        let block_number = 213;
+
+        let expected_timestamp =
+            NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
+
+        let expected = StateRequestBody {
+            contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
+            version: VersionParam {
+                timestamp: Some(expected_timestamp),
+                block: Some(BlockParam {
+                    hash: Some(block_hash),
+                    chain: Some(Chain::Ethereum),
+                    number: Some(block_number),
+                }),
+            },
+        };
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_state_request_no_contract_specified() {
+        let json_str = r#"
+    {
+        "version": {
+            "timestamp": "2069-01-01T04:20:00",
+            "block": {
+                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#;
+
+        let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
+
+        let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4".into();
+        let block_number = 213;
+        let expected_timestamp =
+            NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
+
+        let expected = StateRequestBody {
+            contract_ids: None,
+            version: VersionParam {
+                timestamp: Some(expected_timestamp),
+                block: Some(BlockParam {
+                    hash: Some(block_hash),
+                    chain: Some(Chain::Ethereum),
+                    number: Some(block_number),
+                }),
+            },
+        };
+
+        assert_eq!(result, expected);
+    }
+}
