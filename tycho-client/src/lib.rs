@@ -9,7 +9,7 @@ use async_trait::async_trait;
 
 use tokio::sync::mpsc::{self, Receiver};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
-use tycho_msg_types::raw::{
+use tycho_types::dto::{
     BlockAccountChanges, Chain, Command, ExtractorIdentity, Response, StateRequestBody,
     StateRequestParameters, StateRequestResponse, WebSocketMessage,
 };

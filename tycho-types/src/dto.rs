@@ -1,3 +1,9 @@
+//! Data Transfer Objects (or structs)
+//!
+//! These structs serve to serialise and deserialize messages between server and client, they should
+//! be very simple and ideally not contain any business logic.
+//!
+//! Structs in here implement utoipa traits so they can be used to derive an OpenAPI schema.
 use std::collections::HashMap;
 
 use chrono::{NaiveDateTime, Utc};
@@ -7,7 +13,7 @@ use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use tycho_types::{
+use crate::{
     serde_primitives::{hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value},
     Bytes,
 };
@@ -176,7 +182,6 @@ pub struct StateRequestBody {
     pub version: VersionParam,
 }
 
-// TODO: move this to generic
 impl StateRequestBody {
     pub fn new(contract_ids: Option<Vec<Bytes>>, version: VersionParam) -> Self {
         Self {

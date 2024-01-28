@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use tycho_msg_types::raw::{
+use tycho_types::dto::{
     BlockParam, ResponseAccount, StateRequestBody, StateRequestResponse, VersionParam,
 };
 

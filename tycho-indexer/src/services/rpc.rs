@@ -18,7 +18,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
-use tycho_msg_types::raw as dto;
+use tycho_types::dto;
 
 use super::EvmPostgresGateway;
 
@@ -205,7 +205,7 @@ mod tests {
         Code,
     };
     use actix_web::test;
-    use chrono::{NaiveDateTime, Utc};
+    use chrono::Utc;
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
     use tycho_types::Bytes;

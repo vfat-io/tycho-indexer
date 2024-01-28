@@ -2,7 +2,6 @@
 members = [
     "tycho-indexer",
     "substreams/ethereum-ambient",
-    "tycho-msg-types",
     "tycho-client",
     "tycho-types",
 ]
@@ -29,7 +28,6 @@ uuid = { version = "1.4.1", features = [
     "macro-diagnostics",
 ] }
 hex = "0.4.3"
-tycho-msg-types = { path = "./tycho-msg-types" }
 tycho-types = { path = "./tycho-types" }
 futures03 = { version = "0.3.1", package = "futures", features = ["compat"] }
 thiserror = "1"

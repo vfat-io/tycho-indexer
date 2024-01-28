@@ -574,10 +574,7 @@ mod test_serial_db {
             StorageError::NotFound,
         },
     };
-    use diesel_async::{
-        pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
-        AsyncConnection, AsyncPgConnection,
-    };
+    use diesel_async::AsyncPgConnection;
     use ethers::types::{H160, H256};
     use std::{str::FromStr, sync::Arc};
     use tokio::sync::{
