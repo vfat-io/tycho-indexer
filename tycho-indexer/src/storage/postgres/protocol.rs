@@ -1353,36 +1353,4 @@ mod test {
         let i_usize: usize = i as usize;
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
     }
-
-    // #[tokio::test]
-    // async fn test_revert() {
-    //     let mut conn = setup_db().await;
-    //     setup_data(&mut conn).await;
-
-    //     let block1_hash =
-    //         H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
-    //             .unwrap()
-    //             .0
-    //             .into();
-    //     let block1_ts = "2020-01-01T00:00:00"
-    //         .parse::<chrono::NaiveDateTime>()
-    //         .expect("timestamp");
-
-    //     let gateway = EVMGateway::from_connection(&mut conn).await;
-
-    //     gateway
-    //         .revert_protocol_state(&BlockIdentifier::Hash(block1_hash), &mut conn)
-    //         .await
-    //         .unwrap();
-
-    //     let states = schema::protocol_state::table
-    //         .select(orm::ProtocolState::as_select())
-    //         .get_results::<orm::ProtocolState>(&mut conn)
-    //         .await
-    //         .unwrap();
-    //     assert_eq!(states.len(), 2);
-    //     for state in states {
-    //         assert_eq!(state.valid_from, block1_ts);
-    //     }
-    // }
 }
