@@ -1002,6 +1002,13 @@ pub struct ProtocolHoldsToken {
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
+
+#[derive(Insertable)]
+#[diesel(table_name = protocol_holds_token)]
+pub struct NewProtocolHoldsToken {
+    pub protocol_component_id: i64,
+    pub token_id: i64,
+}
 /*
 pub fn get_tokens(protocol: &ProtocolComponent, conn: &mut PgConnection) -> Vec<Token> {
     let token_ids = ProtocolHoldsToken::belonging_to(protocol)
