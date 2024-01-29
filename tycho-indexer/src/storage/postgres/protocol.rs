@@ -1,27 +1,31 @@
 #![allow(unused_variables)]
-
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use std::{cmp::Ordering, collections::HashMap};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+};
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use tracing::warn;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ProtocolType},
     storage::{
         postgres::{
             orm,
             orm::{Account, NewAccount},
-            schema, PostgresGateway,
+            schema,
+            versioning::apply_versioning,
+            PostgresGateway,
         },
         Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ContractId, ProtocolGateway,
-        StorableBlock, StorableContract, StorableProtocolComponent, StorableProtocolState,
-        StorableProtocolStateDelta, StorableProtocolType, StorableToken, StorableTransaction,
-        StorageError, TxHash, Version,
+        StorableBlock, StorableComponentBalance, StorableContract, StorableProtocolComponent,
+        StorableProtocolState, StorableProtocolStateDelta, StorableProtocolType, StorableToken,
+        StorableTransaction, StorageError, TxHash, Version,
     },
 };
 
@@ -99,6 +103,7 @@ where
     type ProtocolStateDelta = ProtocolStateDelta;
     type ProtocolType = ProtocolType;
     type ProtocolComponent = ProtocolComponent;
+    type ComponentBalance = ComponentBalance;
 
     async fn get_protocol_components(
         &self,
@@ -171,7 +176,10 @@ where
         new: &[&Self::ProtocolComponent],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        use super::schema::protocol_component::dsl::*;
+        use super::schema::{
+            account::dsl::*, protocol_component::dsl::*, protocol_holds_token::dsl::*,
+            token::dsl::*,
+        };
         let mut values: Vec<orm::NewProtocolComponent> = Vec::with_capacity(new.len());
         let tx_hashes: Vec<TxHash> = new
             .iter()
@@ -191,26 +199,104 @@ where
                 .get::<TxHash>(&pc.creation_tx.into())
                 .ok_or(StorageError::DecodeError("TxHash not found".to_string()))?;
 
-            let new_pc = pc
-                .to_storage(
-                    self.get_chain_id(&pc.chain),
-                    self.get_protocol_system_id(&pc.protocol_system.to_string()),
-                    pt_id,
-                    txh.to_owned(),
-                    pc.created_at,
-                )
-                .unwrap();
+            let new_pc = pc.to_storage(
+                self.get_chain_id(&pc.chain),
+                self.get_protocol_system_id(&pc.protocol_system.to_string()),
+                pt_id,
+                txh.to_owned(),
+                pc.created_at,
+            )?;
             values.push(new_pc);
         }
 
-        diesel::insert_into(protocol_component)
-            .values(&values)
-            .on_conflict((chain_id, protocol_system_id, external_id))
-            .do_nothing()
-            .execute(conn)
+        let inserted_protocol_components: Vec<(i64, String, i64, i64)> =
+            diesel::insert_into(protocol_component)
+                .values(&values)
+                .on_conflict((
+                    schema::protocol_component::chain_id,
+                    protocol_system_id,
+                    external_id,
+                ))
+                .do_nothing()
+                .returning((
+                    schema::protocol_component::id,
+                    schema::protocol_component::external_id,
+                    schema::protocol_component::protocol_system_id,
+                    schema::protocol_component::chain_id,
+                ))
+                .get_results(conn)
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolComponent", "Batch insert", None)
+                })?;
+
+        let mut protocol_db_id_map = HashMap::new();
+        for (pc_id, ex_id, ps_id, chain_id_db) in inserted_protocol_components {
+            protocol_db_id_map.insert(
+                (ex_id, self.get_protocol_system(&ps_id), self.get_chain(&chain_id_db)),
+                pc_id,
+            );
+        }
+
+        let filtered_new_protocol_components: Vec<&&Self::ProtocolComponent> = new
+            .iter()
+            .filter(|component| {
+                let key =
+                    (component.id.clone(), component.protocol_system.clone(), component.chain);
+
+                protocol_db_id_map.get(&key).is_some()
+            })
+            .collect();
+
+        let token_addresses: HashSet<Address> = filtered_new_protocol_components
+            .iter()
+            .flat_map(|pc| pc.get_byte_token_addresses())
+            .collect();
+
+        let pc_entity_tokens_map = filtered_new_protocol_components
+            .iter()
+            .flat_map(|pc| {
+                let pc_id = protocol_db_id_map
+                    .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
+                    .expect("Could not find Protocol Component. Even though it should have."); //Because we just inserted the protocol systems, there should not be any missing.
+                                                                                               // However, trying to handle this via Results is needlessly difficult, because you
+                                                                                               // can not use flat_map on a Result.
+
+                pc.get_byte_token_addresses()
+                    .into_iter()
+                    .map(move |add| (*pc_id, add))
+                    .collect::<Vec<(i64, Address)>>()
+            })
+            .collect::<Vec<(i64, Address)>>();
+
+        let token_add_by_id: HashMap<Address, i64> = token
+            .inner_join(account)
+            .select((schema::account::address, schema::token::id))
+            .filter(schema::account::address.eq_any(token_addresses))
+            .into_boxed()
+            .load::<(Address, i64)>(conn)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))
-            .unwrap();
+            .map_err(|err| StorageError::from_diesel(err, "Token", "Several Chains", None))?
+            .into_iter()
+            .collect();
+
+        let protocol_component_token_junction: Result<
+            Vec<orm::NewProtocolHoldsToken>,
+            StorageError,
+        > = pc_entity_tokens_map
+            .iter()
+            .map(|(pc_id, t_address)| {
+                let t_id = token_add_by_id
+                    .get(t_address)
+                    .ok_or(StorageError::NotFound("Token id".to_string(), t_address.to_string()))?;
+                Ok(orm::NewProtocolHoldsToken { protocol_component_id: *pc_id, token_id: *t_id })
+            })
+            .collect();
+
+        diesel::insert_into(protocol_holds_token)
+            .values(&protocol_component_token_junction?)
+            .execute(conn)
+            .await?;
 
         Ok(())
     }
@@ -339,10 +425,15 @@ where
         for state in new {
             let tx_db = txns
                 .get(state.modify_tx.as_bytes())
-                .expect("Failed to find tx");
+                .ok_or(StorageError::NotFound("Tx id".to_string(), state.modify_tx.to_string()))?;
+
             let component_db_id = *components
                 .get(&state.component_id)
-                .expect("Failed to find component");
+                .ok_or(StorageError::NotFound(
+                    "Component id".to_string(),
+                    state.component_id.to_string(),
+                ))?;
+
             let mut new_states: Vec<(orm::NewProtocolState, i64)> =
                 ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0, tx_db.2)
                     .into_iter()
@@ -489,7 +580,6 @@ where
 
         diesel::insert_into(schema::account::table)
             .values(&new_accounts)
-            // .on_conflict(..).do_nothing() is necessary to ignore updating duplicated entries
             .on_conflict((schema::account::address, schema::account::chain_id))
             .do_nothing()
             .execute(conn)
@@ -531,6 +621,75 @@ where
             .await
             .map_err(|err| StorageError::from_diesel(err, "Token", "batch", None))?;
 
+        Ok(())
+    }
+
+    async fn add_component_balances(
+        &self,
+        chain: Chain,
+        component_balances: &[&Self::ComponentBalance],
+        block_ts: NaiveDateTime,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        use super::schema::{account::dsl::*, token::dsl::*};
+
+        let mut new_component_balances = Vec::new();
+        let token_addresses: Vec<Address> = component_balances
+            .iter()
+            .map(|component_balance| component_balance.token())
+            .collect();
+        let token_ids: HashMap<Address, i64> = token
+            .inner_join(account)
+            .select((schema::account::address, schema::token::id))
+            .filter(schema::account::address.eq_any(&token_addresses))
+            .load::<(Address, i64)>(conn)
+            .await?
+            .into_iter()
+            .collect();
+
+        let modify_txs = component_balances
+            .iter()
+            .map(|component_balance| component_balance.modify_tx())
+            .collect::<Vec<TxHash>>();
+        let transaction_ids: HashMap<TxHash, i64> =
+            orm::Transaction::ids_by_hash(&modify_txs, conn).await?;
+
+        let external_ids: Vec<&str> = component_balances
+            .iter()
+            .map(|component_balance| component_balance.component_id.as_str())
+            .collect();
+
+        let protocol_component_ids: HashMap<String, i64> =
+            orm::ProtocolComponent::ids_by_external_ids(&external_ids, conn)
+                .await?
+                .into_iter()
+                .map(|(component_id, external_id)| (external_id, component_id))
+                .collect();
+
+        for component_balance in component_balances.iter() {
+            let token_id = token_ids[&component_balance.token()];
+            let transaction_id = transaction_ids[&component_balance.modify_tx()];
+            let protocol_component_id = protocol_component_ids[&component_balance
+                .component_id
+                .to_string()];
+
+            let new_component_balance = component_balance.to_storage(
+                token_id,
+                transaction_id,
+                protocol_component_id,
+                block_ts,
+            );
+            new_component_balances.push(new_component_balance);
+        }
+
+        if !component_balances.is_empty() {
+            apply_versioning::<_, orm::ComponentBalance>(&mut new_component_balances, conn).await?;
+            diesel::insert_into(schema::component_balance::table)
+                .values(&new_component_balances)
+                .execute(conn)
+                .await
+                .map_err(|err| StorageError::from_diesel(err, "ComponentBalance", "batch", None))?;
+        }
         Ok(())
     }
 
@@ -632,7 +791,7 @@ mod test {
 
     /// This sets up the data needed to test the gateway. The setup is structured such that each
     /// protocol state's historical changes are kept together this makes it easy to reason about
-    /// that change an account should have at each version Please not that if you change
+    /// that change an account should have at each version Please note that if you change
     /// something here, also update the state fixtures right below, which contain protocol states
     /// at each version.
     async fn setup_data(conn: &mut AsyncPgConnection) -> Vec<String> {
@@ -1100,6 +1259,58 @@ mod test {
         assert_eq!(new_account, old_account);
         assert!(inserted_account.id > new_account.id);
     }
+    #[tokio::test]
+    async fn test_add_component_balances() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let tx_hash =
+            H256::from_str("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")
+                .unwrap();
+        let protocol_component_id: String = String::from("state1");
+
+        let base_token = H160::from_str(WETH.trim_start_matches("0x")).unwrap();
+        let component_balance = ComponentBalance {
+            token: base_token,
+            new_balance: Bytes::from(&[0u8]),
+            modify_tx: tx_hash,
+            component_id: protocol_component_id,
+        };
+
+        let component_balances = vec![&component_balance];
+        let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
+
+        gw.add_component_balances(Chain::Ethereum, &component_balances, block_ts, &mut conn)
+            .await
+            .unwrap();
+
+        let inserted_data = schema::component_balance::table
+            .select(orm::ComponentBalance::as_select())
+            .first::<orm::ComponentBalance>(&mut conn)
+            .await;
+
+        assert!(inserted_data.is_ok());
+        let inserted_data: orm::ComponentBalance = inserted_data.unwrap();
+
+        assert_eq!(inserted_data.new_balance, Bytes::from(&[0u8]));
+
+        let referenced_token = schema::token::table
+            .filter(schema::token::id.eq(inserted_data.token_id))
+            .select(orm::Token::as_select())
+            .first::<orm::Token>(&mut conn)
+            .await;
+        let referenced_token: orm::Token = referenced_token.unwrap();
+        assert_eq!(referenced_token.symbol, String::from("WETH"));
+
+        let referenced_component = schema::protocol_component::table
+            .filter(schema::protocol_component::id.eq(inserted_data.protocol_component_id))
+            .select(orm::ProtocolComponent::as_select())
+            .first::<orm::ProtocolComponent>(&mut conn)
+            .await;
+        let referenced_component: orm::ProtocolComponent = referenced_component.unwrap();
+        assert_eq!(referenced_component.external_id, String::from("state1"));
+    }
 
     #[tokio::test]
 
@@ -1120,7 +1331,7 @@ mod test {
             protocol_system,
             protocol_type_name: protocol_type_name_1,
             chain,
-            tokens: vec![],
+            tokens: vec![H160::from_str(WETH).unwrap()],
             contract_ids: vec![],
             static_attributes: HashMap::new(),
             change: ChangeType::Creation,
@@ -1156,6 +1367,26 @@ mod test {
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
         assert_eq!(original_component.id, inserted_data.external_id);
+
+        // assert junction table
+        let component_token_junction = schema::protocol_holds_token::table
+            .select((
+                schema::protocol_holds_token::protocol_component_id,
+                schema::protocol_holds_token::token_id,
+            ))
+            .first::<(i64, i64)>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(component_token_junction.0, inserted_data.id);
+
+        let token = schema::token::table
+            .select(schema::token::all_columns)
+            .filter(schema::token::id.eq(component_token_junction.1))
+            .load::<orm::Token>(&mut conn)
+            .await;
+
+        assert!(token.is_ok())
     }
 
     fn create_test_protocol_component(id: &str) -> ProtocolComponent {

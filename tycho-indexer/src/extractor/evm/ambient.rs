@@ -745,7 +745,7 @@ mod test_serial_db {
                 ),
             ],
             protocol_components: Vec::new(),
-            tvl_changes: Vec::new(),
+            component_balances: Vec::new(),
         }
     }
 
@@ -771,7 +771,7 @@ mod test_serial_db {
                 evm::fixtures::transaction02(TX_HASH_1, BLOCK_HASH_0, 1),
             )],
             protocol_components: Vec::new(),
-            tvl_changes: Vec::new(),
+            component_balances: Vec::new(),
         }
     }
 
