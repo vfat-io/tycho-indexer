@@ -194,7 +194,11 @@ where
             orm::Transaction::ids_by_hash(&tx_hashes, conn)
                 .await
                 .unwrap();
-
+        let pt_id = orm::ProtocolType::id_by_name(&new[0].protocol_type_name, conn)
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(err, "ProtocolType", &new[0].protocol_type_name, None)
+            })?;
         for pc in new {
             let txh = tx_hash_id_mapping
                 .get::<TxHash>(&pc.creation_tx.into())
@@ -204,6 +208,7 @@ where
                 .to_storage(
                     self.get_chain_id(&pc.chain),
                     self.get_protocol_system_id(&pc.protocol_system.to_string()),
+                    pt_id,
                     txh.to_owned(),
                     pc.created_at,
                 )
@@ -242,23 +247,24 @@ where
             .await?;
         Ok(())
     }
-    async fn upsert_protocol_type(
+    async fn add_protocol_types(
         &self,
-        new: &Self::ProtocolType,
+        new_protocol_types: &[Self::ProtocolType],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::protocol_type::dsl::*;
-
-        let values: orm::NewProtocolType = new.to_storage();
+        let values: Vec<orm::NewProtocolType> = new_protocol_types
+            .iter()
+            .map(|new_protocol_type| new_protocol_type.to_storage())
+            .collect();
 
         diesel::insert_into(protocol_type)
             .values(&values)
             .on_conflict(name)
-            .do_update()
-            .set(&values)
+            .do_nothing()
             .execute(conn)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", &values.name, None))?;
+            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", "Batch insert", None))?;
 
         Ok(())
     }
@@ -405,8 +411,8 @@ where
             let (current_state, _) = &mut state_data[i];
 
             // Check if next_state has same protocol_component_id and attribute_name
-            if current_state.protocol_component_id == next_state.protocol_component_id &&
-                current_state.attribute_name == next_state.attribute_name
+            if current_state.protocol_component_id == next_state.protocol_component_id
+                && current_state.attribute_name == next_state.attribute_name
             {
                 // Invalidate the current state
                 current_state.valid_to = Some(next_state.valid_from);
@@ -475,7 +481,7 @@ where
     ) -> Result<(), StorageError> {
         let titles: Vec<String> = tokens
             .iter()
-            .map(|token| format!("{}_{}", token.chain(), token.symbol()))
+            .map(|token| format!("{:?}_{}", token.chain(), token.symbol()))
             .collect();
 
         let addresses: Vec<_> = tokens
@@ -931,6 +937,7 @@ mod test {
     #[case::by_system(Some("ambient".to_string()), None)]
     #[case::by_ids(None, Some(vec ! ["state1"]))]
     #[tokio::test]
+
     async fn test_get_protocol_states(
         #[case] system: Option<String>,
         #[case] ids: Option<Vec<&str>>,
@@ -951,6 +958,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_get_protocol_states_at() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -994,6 +1002,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_update_protocol_states() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1258,6 +1267,147 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_get_protocol_state_deltas_forward() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        // set up deleted attribute state
+        let protocol_component_id = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state1"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        let from_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        let to_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id,
+            from_txn_id,
+            "deleted".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+            Some(to_txn_id),
+        )
+        .await;
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        // expected result
+        let mut state_delta = protocol_state_delta();
+        state_delta.component_id = "state1".to_owned();
+        state_delta.deleted_attributes = vec!["deleted".to_owned()]
+            .into_iter()
+            .collect();
+        let expected = vec![state_delta];
+
+        // test
+        let result = gateway
+            .get_protocol_states_delta(
+                &Chain::Ethereum,
+                Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1)))),
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        // asserts
+        assert_eq!(result, expected)
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_state_deltas_backward() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        // set up newly added attribute state (to be deleted on revert)
+        let protocol_component_id = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state1"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        let from_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id,
+            from_txn_id,
+            "to_delete".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+            None,
+        )
+        .await;
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        // expected result
+        let attributes: HashMap<String, Bytes> =
+            vec![("reserve1".to_owned(), Bytes::from(U256::from(1100)))]
+                .into_iter()
+                .collect();
+        let state_delta = ProtocolStateDelta {
+            component_id: "state1".to_owned(),
+            updated_attributes: attributes,
+            deleted_attributes: vec!["to_delete".to_owned()]
+                .into_iter()
+                .collect(),
+        };
+        let expected = vec![state_delta];
+
+        // test
+        let result = gateway
+            .get_protocol_states_delta(
+                &Chain::Ethereum,
+                Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2)))),
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        // asserts
+        assert_eq!(result, expected)
+    }
+
+    #[tokio::test]
     async fn test_get_or_create_protocol_system_id() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -1291,7 +1441,7 @@ mod test {
             implementation: ImplementationType::Custom,
         };
 
-        gw.upsert_protocol_type(&protocol_type, &mut conn)
+        gw.add_protocol_types(&[protocol_type], &mut conn)
             .await
             .unwrap();
 
@@ -1306,36 +1456,10 @@ mod test {
         assert_eq!(inserted_data.financial_type, orm::FinancialType::Debt);
         assert_eq!(inserted_data.attribute_schema, Some(json!({"attribute": "schema"})));
         assert_eq!(inserted_data.implementation, orm::ImplementationType::Custom);
-
-        let updated_protocol_type = models::ProtocolType {
-            name: "Protocol".to_string(),
-            financial_type: FinancialType::Leverage,
-            attribute_schema: Some(json!({"attribute": "another_schema"})),
-            implementation: ImplementationType::Vm,
-        };
-
-        gw.upsert_protocol_type(&updated_protocol_type, &mut conn)
-            .await
-            .unwrap();
-
-        let newly_inserted_data = schema::protocol_type::table
-            .filter(schema::protocol_type::name.eq("Protocol"))
-            .select(schema::protocol_type::all_columns)
-            .load::<orm::ProtocolType>(&mut conn)
-            .await
-            .unwrap();
-
-        assert_eq!(newly_inserted_data.len(), 1);
-        assert_eq!(newly_inserted_data[0].name, "Protocol".to_string());
-        assert_eq!(newly_inserted_data[0].financial_type, orm::FinancialType::Leverage);
-        assert_eq!(
-            newly_inserted_data[0].attribute_schema,
-            Some(json!({"attribute": "another_schema"}))
-        );
-        assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
     }
 
     #[tokio::test]
+
     async fn test_get_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1366,6 +1490,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_add_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1415,7 +1540,7 @@ mod test {
         .await
         .unwrap()[0];
         assert_eq!(inserted_account.id, inserted_token.account_id);
-        assert_eq!(inserted_account.title, "ethereum_USDT".to_string());
+        assert_eq!(inserted_account.title, "Ethereum_USDT".to_string());
 
         // make sure nothing changed on WETH (ids included)
         let new_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
@@ -1431,12 +1556,15 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_add_protocol_components() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
+        let protocol_type_name_1 = String::from("Test_Type_1");
         let protocol_type_id_1 =
-            db_fixtures::insert_protocol_type(&mut conn, "Test_Type_1", None, None, None).await;
+            db_fixtures::insert_protocol_type(&mut conn, &protocol_type_name_1, None, None, None)
+                .await;
         let protocol_type_id_2 =
             db_fixtures::insert_protocol_type(&mut conn, "Test_Type_2", None, None, None).await;
         let protocol_system = "ambient".to_string();
@@ -1444,7 +1572,7 @@ mod test {
         let original_component = ProtocolComponent {
             id: "test_contract_id".to_string(),
             protocol_system,
-            protocol_type_id: protocol_type_id_1.to_string(),
+            protocol_type_name: protocol_type_name_1,
             chain,
             tokens: vec![],
             contract_ids: vec![],
@@ -1471,18 +1599,7 @@ mod test {
 
         assert!(inserted_data.is_ok());
         let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
-        assert_eq!(
-            original_component.protocol_type_id,
-            inserted_data
-                .protocol_type_id
-                .to_string()
-        );
-        assert_eq!(
-            original_component.protocol_type_id,
-            inserted_data
-                .protocol_type_id
-                .to_string()
-        );
+        assert_eq!(inserted_data.protocol_type_id, protocol_type_id_1);
         assert_eq!(
             gw.get_protocol_system_id(
                 &original_component
@@ -1499,7 +1616,7 @@ mod test {
         ProtocolComponent {
             id: id.to_string(),
             protocol_system: "ambient".to_string(),
-            protocol_type_id: "type_id_1".to_string(),
+            protocol_type_name: "type_id_1".to_string(),
             chain: Chain::Ethereum,
             tokens: vec![],
             contract_ids: vec![],
@@ -1513,6 +1630,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_delete_protocol_components() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1555,6 +1673,7 @@ mod test {
     #[case::get_one(Some("zigzag".to_string()))]
     #[case::get_none(Some("ambient".to_string()))]
     #[tokio::test]
+
     async fn test_get_protocol_components_with_system_only(#[case] system: Option<String>) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1591,6 +1710,7 @@ mod test {
     #[case::get_one("state1".to_string())]
     #[case::get_none("state2".to_string())]
     #[tokio::test]
+
     async fn test_get_protocol_components_with_external_id_only(#[case] external_id: String) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1624,6 +1744,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_get_protocol_components_with_system_and_ids() {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1650,6 +1771,7 @@ mod test {
     #[case::get_one(Chain::Ethereum, 0)]
     #[case::get_none(Chain::Starknet, 1)]
     #[tokio::test]
+
     async fn test_get_protocol_components_with_chain_filter(#[case] chain: Chain, #[case] i: i64) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1663,7 +1785,7 @@ mod test {
         components.sort_by(|a, b| a.id.cmp(&b.id));
 
         let assert_message = format!(
-            "Found {} ProtocolComponents for chain {}, expecting >= 1, because there are two eth and one stark component. Two eth components are needed for the ProtocolStates",
+            "Found {} ProtocolComponents for chain {:?}, expecting >= 1, because there are two eth and one stark component. Two eth components are needed for the ProtocolStates",
             components.len(),
             chain
         );

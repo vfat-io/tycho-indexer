@@ -317,7 +317,15 @@ pub struct NewProtocolType {
     pub attribute_schema: Option<serde_json::Value>,
     pub implementation: ImplementationType,
 }
-
+impl ProtocolType {
+    pub async fn id_by_name(name: &String, conn: &mut AsyncPgConnection) -> QueryResult<i64> {
+        protocol_type::table
+            .filter(protocol_type::name.eq(name))
+            .select(protocol_type::id)
+            .first::<i64>(conn)
+            .await
+    }
+}
 #[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug, PartialEq)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
@@ -786,7 +794,11 @@ impl StoredVersionedRow for AccountBalance {
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<Box<Self>>, StorageError> {
         Ok(account_balance::table
-            .filter(account_balance::account_id.eq_any(ids))
+            .filter(
+                account_balance::account_id
+                    .eq_any(ids)
+                    .and(account_balance::valid_to.is_null()),
+            )
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await?
@@ -887,7 +899,11 @@ impl StoredVersionedRow for ContractCode {
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<Box<Self>>, StorageError> {
         Ok(contract_code::table
-            .filter(contract_code::account_id.eq_any(ids))
+            .filter(
+                contract_code::account_id
+                    .eq_any(ids)
+                    .and(contract_code::valid_to.is_null()),
+            )
             .select(Self::as_select())
             .get_results::<Self>(conn)
             .await?
