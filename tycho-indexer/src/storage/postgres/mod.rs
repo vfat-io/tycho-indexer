@@ -154,6 +154,7 @@ pub mod extraction_state;
 pub mod orm;
 pub mod protocol;
 pub mod schema;
+mod versioning;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
@@ -514,6 +515,108 @@ fn run_migrations(db_url: &str) {
 }
 
 #[cfg(test)]
+pub mod testing {
+    //! # Reusable components to write tests against the DB.
+    use diesel::sql_query;
+    use diesel_async::{
+        pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
+        AsyncPgConnection, RunQueryDsl,
+    };
+    use std::future::Future;
+
+    async fn setup_pool() -> Pool<AsyncPgConnection> {
+        let database_url =
+            std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+        let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
+        Pool::builder(config).build().unwrap()
+    }
+
+    async fn teardown(conn: &mut AsyncPgConnection) {
+        let tables = vec![
+            // put block early so most FKs cascade, it would
+            // be better to find the correct order tough.
+            "block",
+            "protocol_calls_contract",
+            "contract_storage",
+            "contract_code",
+            "account_balance",
+            "protocol_holds_token",
+            "token",
+            "account",
+            "protocol_state",
+            "protocol_component",
+            "extraction_state",
+            "protocol_type",
+            "protocol_system",
+            "transaction",
+            "chain",
+            "audit_log",
+        ];
+        for t in tables.iter() {
+            sql_query(format!("DELETE FROM {};", t))
+                .execute(conn)
+                .await
+                .unwrap_or_else(|_| panic!("Error truncating {} table", t));
+        }
+        dbg!("Teardown completed");
+    }
+
+    /// Run tests that require committing data to the db.
+    ///
+    /// This function will run tests that are expected to commit data into the database, e.g.
+    /// because the test setups are too complex for using `begin_test_transaction`. Please only use
+    /// this as a last resort as these tests are slow and have to be run serially. Using a test
+    /// transaction is preferred where possible.  
+    ///
+    /// The method will pass a connection pool to the actual test function, catch any panics and
+    /// then purge all data in the tables so that the next test can run from a clean slate.
+    ///
+    /// ## Interference with other tests
+    /// While this function runs, the db will actually contain data.
+    ///
+    /// This is likely to interfere with other tests using this same function. To mitigate this, the
+    /// test name or the package should contain the string `serial_db`, this way nextest will
+    /// automatically put these test into a separate group.
+    /// Other tests that rely on a empty db (most tests unsing test_transactions) will likely
+    /// be affected if run in parrallel with tests using this function. CI will automatically
+    /// partition the serial and parallel tests into two separate groups.
+    ///
+    /// ## Example
+    /// ```
+    /// #[tokio::test]
+    /// fn test_serial_db_mytest_name() {
+    ///     run_against_db(|connection_pool| async move {
+    ///         println!("here goes actual test code")
+    ///     }).await;
+    /// }
+    /// ```
+    ///
+    /// ## Future
+    /// We should consider moving these test to their own database. That would require running
+    /// migrations on these databases though. For now tests run fast enough though.
+    pub async fn run_against_db<F, Fut>(test_f: F)
+    where
+        F: FnOnce(Pool<AsyncPgConnection>) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send,
+    {
+        let connection_pool = setup_pool().await;
+        let inner_pool = connection_pool.clone();
+        let res = tokio::spawn(async move {
+            test_f(inner_pool).await;
+        })
+        .await;
+
+        let mut connection = connection_pool
+            .get()
+            .await
+            .expect("Failed to get a connection from the pool");
+
+        teardown(&mut connection).await;
+        res.unwrap();
+    }
+}
+
+#[cfg(test)]
 pub mod db_fixtures {
     //! # General Purpose Fixtures for Database State Modification
     //!
@@ -694,15 +797,22 @@ pub mod db_fixtures {
         contract_id: i64,
         modify_tx: i64,
         valid_from: &str,
-        slots: &[(u64, u64)],
+        valid_to: Option<&str>,
+        slots: &[(u64, u64, Option<u64>)],
     ) -> Vec<i64> {
         let ts = valid_from
             .parse::<chrono::NaiveDateTime>()
             .unwrap();
+        let end_ts = valid_to.map(|s| {
+            s.parse::<chrono::NaiveDateTime>()
+                .unwrap()
+        });
         let data = slots
             .iter()
             .enumerate()
-            .map(|(idx, (k, v))| {
+            .map(|(idx, (k, v, pv))| {
+                let previous_value =
+                    pv.map(|pv| hex::decode(format!("{:064x}", U256::from(pv))).unwrap());
                 (
                     schema::contract_storage::slot.eq(hex::decode(format!(
                         "{:064x}",
@@ -714,9 +824,11 @@ pub mod db_fixtures {
                         U256::from(*v)
                     ))
                     .unwrap()),
+                    schema::contract_storage::previous_value.eq(previous_value),
                     schema::contract_storage::account_id.eq(contract_id),
                     schema::contract_storage::modify_tx.eq(modify_tx),
                     schema::contract_storage::valid_from.eq(ts),
+                    schema::contract_storage::valid_to.eq(end_ts),
                     schema::contract_storage::ordinal.eq(idx as i64),
                 )
             })
@@ -734,6 +846,7 @@ pub mod db_fixtures {
         conn: &mut AsyncPgConnection,
         new_balance: u64,
         tx_id: i64,
+        valid_to: Option<&str>,
         account: i64,
     ) {
         let ts = schema::transaction::table
@@ -743,7 +856,10 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
-
+        let end_ts = valid_to.map(|s| {
+            s.parse::<chrono::NaiveDateTime>()
+                .unwrap()
+        });
         let mut b0 = [0; 32];
         U256::from(new_balance).to_big_endian(&mut b0);
         {
@@ -754,7 +870,7 @@ pub mod db_fixtures {
                     balance.eq(b0.as_slice()),
                     modify_tx.eq(tx_id),
                     valid_from.eq(ts),
-                    valid_to.eq(Option::<NaiveDateTime>::None),
+                    valid_to.eq(end_ts),
                 ))
                 .execute(conn)
                 .await

@@ -7,8 +7,7 @@ use std::{
 };
 
 use diesel_async::{
-    pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
-    AsyncPgConnection,
+    pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
 use lru::LruCache;
 use tokio::{
@@ -31,7 +30,7 @@ use crate::{
 };
 
 /// Represents different types of database write operations.
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub(crate) enum WriteOp {
     UpsertBlock(evm::Block),
     UpsertTx(evm::Transaction),
@@ -42,7 +41,7 @@ pub(crate) enum WriteOp {
 
 /// Represents a transaction in the database, including the block information,
 /// a list of operations to be performed, and a channel to send the result.
-pub(crate) struct DBTransaction {
+pub struct DBTransaction {
     block: evm::Block,
     operations: Vec<WriteOp>,
     tx: oneshot::Sender<Result<(), StorageError>>,
@@ -59,7 +58,7 @@ impl DBTransaction {
 }
 
 /// Represents different types of messages that can be sent to the DBCacheWriteExecutor.
-pub(crate) enum DBCacheMessage {
+pub enum DBCacheMessage {
     Write(DBTransaction),
     Flush(oneshot::Sender<Result<(), StorageError>>),
     Revert(BlockIdentifier, oneshot::Sender<Result<(), StorageError>>),
@@ -98,7 +97,7 @@ pub(crate) enum DBCacheMessage {
 /// Read Operations
 /// The class does provide read operations for completeness, but it will not consider any
 /// cached changes while reading. Any reads are direct pass through to the database.
-pub(crate) struct DBCacheWriteExecutor {
+pub struct DBCacheWriteExecutor {
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
@@ -115,7 +114,7 @@ pub(crate) struct DBCacheWriteExecutor {
 }
 
 impl DBCacheWriteExecutor {
-    pub(crate) fn new(
+    pub fn new(
         name: String,
         chain: Chain,
         pool: Pool<AsyncPgConnection>,
@@ -191,7 +190,9 @@ impl DBCacheWriteExecutor {
                         .expect("pool should be connected");
 
                     let res = conn
-                        .transaction(|conn| {
+                        .build_transaction()
+                        .repeatable_read()
+                        .run(|conn| {
                             async {
                                 for op in new_db_tx.operations {
                                     if let WriteOp::UpsertBlock(_) = op {
@@ -267,27 +268,29 @@ impl DBCacheWriteExecutor {
         let db_txs = std::mem::take(&mut self.pending_db_txs);
         let mut seen_operations: Vec<WriteOp> = Vec::new();
 
-        conn.transaction(|conn| {
-            async {
-                for op in db_txs.into_iter() {
-                    if !seen_operations.contains(&op) {
-                        // Only executes if it is not already in seen_operations
-                        match self.execute_write_op(&op, conn).await {
-                            Ok(_) => {
-                                seen_operations.push(op);
-                            }
-                            Err(e) => {
-                                // If and error happens, revert the whole transaction
-                                return Err(e);
-                            }
-                        };
+        conn.build_transaction()
+            .repeatable_read()
+            .run(|conn| {
+                async {
+                    for op in db_txs.into_iter() {
+                        if !seen_operations.contains(&op) {
+                            // Only executes if it is not already in seen_operations
+                            match self.execute_write_op(&op, conn).await {
+                                Ok(_) => {
+                                    seen_operations.push(op);
+                                }
+                                Err(e) => {
+                                    // If and error happens, revert the whole transaction
+                                    return Err(e);
+                                }
+                            };
+                        }
                     }
+                    Result::<(), StorageError>::Ok(())
                 }
-                Result::<(), StorageError>::Ok(())
-            }
-            .scope_boxed()
-        })
-        .await?;
+                .scope_boxed()
+            })
+            .await?;
 
         self.persisted_block = self.pending_block;
         self.pending_block = None;
@@ -554,19 +557,7 @@ impl DerefMut for CachedGateway {
 }
 
 #[cfg(test)]
-mod test {
-    use std::{str::FromStr, sync::Arc};
-
-    use diesel_async::{
-        pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
-        AsyncConnection, AsyncPgConnection,
-    };
-    use ethers::{prelude::H256, types::H160};
-    use tokio::sync::{
-        mpsc,
-        oneshot::{self},
-    };
-
+mod test_serial_db {
     use crate::{
         extractor::{evm, evm::EVMStateGateway},
         hex_bytes::Bytes,
@@ -576,626 +567,590 @@ mod test {
                 cache::{
                     CachedGateway, DBCacheMessage, DBCacheWriteExecutor, DBTransaction, WriteOp,
                 },
-                db_fixtures, PostgresGateway,
+                db_fixtures,
+                testing::run_against_db,
+                PostgresGateway,
             },
             BlockIdentifier, BlockOrTimestamp, StorageError,
             StorageError::NotFound,
         },
     };
+    use diesel_async::AsyncPgConnection;
+    use ethers::{prelude::H256, types::H160};
+    use std::{str::FromStr, sync::Arc};
+    use tokio::sync::{
+        mpsc,
+        oneshot::{self},
+    };
 
     use tokio::sync::mpsc::error::TryRecvError::Empty;
 
-    async fn setup_gateway() -> Pool<AsyncPgConnection> {
-        let database_url =
-            std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
-        let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
-        let pool = Pool::builder(config)
-            .max_size(1)
-            .build()
-            .unwrap();
-
-        let mut connection = pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
-        connection
-            .begin_test_transaction()
-            .await
-            .expect("Failed to start test transaction");
-
-        pool
-    }
-
     #[tokio::test]
     async fn test_write_and_flush() {
-        // Setup
-        let connection_pool = setup_gateway().await;
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
-        db_fixtures::insert_chain(&mut connection, "ethereum").await;
-        let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
-            PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut connection)
-            .await,
-        );
-        drop(connection);
-        let (tx, rx) = mpsc::channel(10);
-        let (err_tx, mut err_rx) = mpsc::channel(10);
+        run_against_db(|connection_pool| async move {
+            let mut connection = connection_pool
+                .get()
+                .await
+                .expect("Failed to get a connection from the pool");
+            db_fixtures::insert_chain(&mut connection, "ethereum").await;
+            let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
+                PostgresGateway::<
+                    evm::Block,
+                    evm::Transaction,
+                    evm::Account,
+                    evm::AccountUpdate,
+                    evm::ERC20Token,
+                >::from_connection(&mut connection)
+                .await,
+            );
 
-        let write_executor = DBCacheWriteExecutor::new(
-            "ethereum".to_owned(),
-            Chain::Ethereum,
-            connection_pool.clone(),
-            gateway.clone(),
-            rx,
-            err_tx,
-        );
+            let (tx, rx) = mpsc::channel(10);
+            let (err_tx, mut err_rx) = mpsc::channel(10);
 
-        let handle = write_executor.run();
+            let write_executor = DBCacheWriteExecutor::new(
+                "ethereum".to_owned(),
+                Chain::Ethereum,
+                connection_pool.clone(),
+                gateway.clone(),
+                rx,
+                err_tx,
+            );
 
-        // Send write block message
-        let block = get_sample_block(1);
-        let os_rx = send_write_message(&tx, block, vec![WriteOp::UpsertBlock(block)]).await;
-        os_rx
-            .await
-            .expect("Response from channel ok")
-            .expect("Transaction cached");
+            let handle = write_executor.run();
 
-        // Send flush message
-        let (os_tx_flush, os_rx_flush) = oneshot::channel();
-        tx.send(DBCacheMessage::Flush(os_tx_flush))
-            .await
-            .expect("Failed to send flush message through mpsc channel");
+            // Send write block message
+            let block = get_sample_block(1);
+            let os_rx = send_write_message(&tx, block, vec![WriteOp::UpsertBlock(block)]).await;
+            os_rx
+                .await
+                .expect("Response from channel ok")
+                .expect("Transaction cached");
 
-        os_rx_flush
-            .await
-            .expect("Response from channel ok")
-            .expect("DB transaction not flushed");
+            // Send flush message
+            let (os_tx_flush, os_rx_flush) = oneshot::channel();
+            tx.send(DBCacheMessage::Flush(os_tx_flush))
+                .await
+                .expect("Failed to send flush message through mpsc channel");
 
-        let maybe_err = err_rx
-            .try_recv()
-            .expect_err("Error channel should be empty");
+            os_rx_flush
+                .await
+                .expect("Response from channel ok")
+                .expect("DB transaction not flushed");
 
-        handle.abort();
+            let maybe_err = err_rx
+                .try_recv()
+                .expect_err("Error channel should be empty");
 
-        // Assert that block_1 has been cached and flushed with no error
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
+            handle.abort();
 
-        let block_id = BlockIdentifier::Number((Chain::Ethereum, 1));
-        let fetched_block = gateway
-            .get_block(&block_id, &mut connection)
-            .await
-            .expect("Failed to fetch extraction state");
+            let block_id = BlockIdentifier::Number((Chain::Ethereum, 1));
+            let fetched_block = gateway
+                .get_block(&block_id, &mut connection)
+                .await
+                .expect("Failed to fetch extraction state");
 
-        assert_eq!(fetched_block, block);
-        // Assert no error happened
-        assert_eq!(maybe_err, Empty);
+            assert_eq!(fetched_block, block);
+            // Assert no error happened
+            assert_eq!(maybe_err, Empty);
+        })
+        .await;
     }
 
     #[tokio::test]
     async fn test_writes_and_new_blocks() {
-        // Setup
-        let connection_pool = setup_gateway().await;
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
-        db_fixtures::insert_chain(&mut connection, "ethereum").await;
-        let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
-            PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut connection)
-            .await,
-        );
-        drop(connection);
-        let (tx, rx) = mpsc::channel(10);
-        let (err_tx, mut err_rx) = mpsc::channel(10);
+        run_against_db(|connection_pool| async move {
+            let mut connection = connection_pool
+                .get()
+                .await
+                .expect("Failed to get a connection from the pool");
+            db_fixtures::insert_chain(&mut connection, "ethereum").await;
+            let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
+                PostgresGateway::<
+                    evm::Block,
+                    evm::Transaction,
+                    evm::Account,
+                    evm::AccountUpdate,
+                    evm::ERC20Token,
+                >::from_connection(&mut connection)
+                .await,
+            );
 
-        let write_executor = DBCacheWriteExecutor::new(
-            "ethereum".to_owned(),
-            Chain::Ethereum,
-            connection_pool.clone(),
-            gateway.clone(),
-            rx,
-            err_tx,
-        );
+            let (tx, rx) = mpsc::channel(10);
+            let (err_tx, mut err_rx) = mpsc::channel(10);
 
-        let handle = write_executor.run();
+            let write_executor = DBCacheWriteExecutor::new(
+                "ethereum".to_owned(),
+                Chain::Ethereum,
+                connection_pool.clone(),
+                gateway.clone(),
+                rx,
+                err_tx,
+            );
 
-        // Send first block messages
-        let block_1 = get_sample_block(1);
-        let tx_1 = get_sample_transaction(1);
-        let extraction_state_1 = get_sample_extraction(1);
-        let os_rx_1 = send_write_message(
-            &tx,
-            block_1,
-            vec![
-                WriteOp::UpsertBlock(block_1),
-                WriteOp::UpsertTx(tx_1),
-                WriteOp::SaveExtractionState(extraction_state_1.clone()),
-            ],
-        )
-        .await;
-        os_rx_1
-            .await
-            .expect("Response from channel ok")
-            .expect("Transaction cached");
+            let handle = write_executor.run();
 
-        // Send second block messages
-        let block_2 = get_sample_block(2);
-        let os_rx_2 = send_write_message(&tx, block_2, vec![WriteOp::UpsertBlock(block_2)]).await;
-        os_rx_2
-            .await
-            .expect("Response from channel ok")
-            .expect("Transaction cached");
+            // Send first block messages
+            let block_1 = get_sample_block(1);
+            let tx_1 = get_sample_transaction(1);
+            let extraction_state_1 = get_sample_extraction(1);
+            let os_rx_1 = send_write_message(
+                &tx,
+                block_1,
+                vec![
+                    WriteOp::UpsertBlock(block_1),
+                    WriteOp::UpsertTx(tx_1),
+                    WriteOp::SaveExtractionState(extraction_state_1.clone()),
+                ],
+            )
+            .await;
+            os_rx_1
+                .await
+                .expect("Response from channel ok")
+                .expect("Transaction cached");
 
-        // Send third block messages
-        let block_3 = get_sample_block(3);
-        let os_rx_3 = send_write_message(&tx, block_3, vec![WriteOp::UpsertBlock(block_3)]).await;
-        os_rx_3
-            .await
-            .expect("Response from channel ok")
-            .expect("Transaction cached");
+            // Send second block messages
+            let block_2 = get_sample_block(2);
+            let os_rx_2 =
+                send_write_message(&tx, block_2, vec![WriteOp::UpsertBlock(block_2)]).await;
+            os_rx_2
+                .await
+                .expect("Response from channel ok")
+                .expect("Transaction cached");
 
-        let maybe_err = err_rx
-            .try_recv()
-            .expect_err("Error channel should be empty");
+            // Send third block messages
+            let block_3 = get_sample_block(3);
+            let os_rx_3 =
+                send_write_message(&tx, block_3, vec![WriteOp::UpsertBlock(block_3)]).await;
+            os_rx_3
+                .await
+                .expect("Response from channel ok")
+                .expect("Transaction cached");
 
-        handle.abort();
+            let maybe_err = err_rx
+                .try_recv()
+                .expect_err("Error channel should be empty");
 
-        // Assert that messages from block 1 and 2 has been cached and flushed, and that block 3 is
-        // still cached
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
+            handle.abort();
 
-        let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
-        let fetched_block_1 = gateway
-            .get_block(&block_id_1, &mut connection)
-            .await
-            .expect("Failed to fetch block");
+            // Assert that messages from block 1 and 2 has been cached and flushed, and that block 3
+            // is still cached
+            let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
+            let fetched_block_1 = gateway
+                .get_block(&block_id_1, &mut connection)
+                .await
+                .expect("Failed to fetch block");
 
-        let fetched_tx = gateway
-            .get_tx(&tx_1.hash.as_bytes().into(), &mut connection)
-            .await
-            .expect("Failed to fetch tx");
+            let fetched_tx = gateway
+                .get_tx(&tx_1.hash.as_bytes().into(), &mut connection)
+                .await
+                .expect("Failed to fetch tx");
 
-        let fetched_extraction_state = gateway
-            .get_state("vm:test", &Chain::Ethereum, &mut connection)
-            .await
-            .expect("Failed to fetch extraction state");
+            let fetched_extraction_state = gateway
+                .get_state("vm:test", &Chain::Ethereum, &mut connection)
+                .await
+                .expect("Failed to fetch extraction state");
 
-        let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
-        let fetched_block_2 = gateway
-            .get_block(&block_id_2, &mut connection)
-            .await
-            .expect("Failed to fetch block");
+            let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
+            let fetched_block_2 = gateway
+                .get_block(&block_id_2, &mut connection)
+                .await
+                .expect("Failed to fetch block");
 
-        let block_id_3 = BlockIdentifier::Number((Chain::Ethereum, 3));
-        let fetched_block_3 = gateway
-            .get_block(&block_id_3, &mut connection)
-            .await
-            .expect_err("Failed to fetch block");
+            let block_id_3 = BlockIdentifier::Number((Chain::Ethereum, 3));
+            let fetched_block_3 = gateway
+                .get_block(&block_id_3, &mut connection)
+                .await
+                .expect_err("Failed to fetch block");
 
-        // Assert block 1 messages have been flushed
-        assert_eq!(fetched_block_1, block_1);
-        assert_eq!(fetched_tx, tx_1);
-        assert_eq!(fetched_extraction_state, extraction_state_1);
-        // Assert block 2 messages have been flushed
-        assert_eq!(fetched_block_2, block_2);
-        // Assert block 3 is still pending in cache
-        assert_eq!(
-            fetched_block_3,
-            NotFound("Block".to_owned(), "Number((Ethereum, 3))".to_owned())
-        );
+            // Assert block 1 messages have been flushed
+            assert_eq!(fetched_block_1, block_1);
+            assert_eq!(fetched_tx, tx_1);
+            assert_eq!(fetched_extraction_state, extraction_state_1);
+            // Assert block 2 messages have been flushed
+            assert_eq!(fetched_block_2, block_2);
+            // Assert block 3 is still pending in cache
+            assert_eq!(
+                fetched_block_3,
+                NotFound("Block".to_owned(), "Number((Ethereum, 3))".to_owned())
+            );
 
-        // Assert no error happened
-        assert_eq!(maybe_err, Empty);
+            // Assert no error happened
+            assert_eq!(maybe_err, Empty);
+        })
+        .await
     }
 
     #[tokio::test]
     async fn test_revert() {
         // Setup
-        let connection_pool = setup_gateway().await;
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
-        setup_data(&mut connection).await;
-        let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
-            PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut connection)
-            .await,
-        );
-        drop(connection);
-        let (tx, rx) = mpsc::channel(10);
-        let (err_tx, mut err_rx) = mpsc::channel(10);
+        run_against_db(|connection_pool| async move {
+            let mut connection = connection_pool
+                .get()
+                .await
+                .expect("Failed to get a connection from the pool");
+            setup_data(&mut connection).await;
+            let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
+                PostgresGateway::<
+                    evm::Block,
+                    evm::Transaction,
+                    evm::Account,
+                    evm::AccountUpdate,
+                    evm::ERC20Token,
+                >::from_connection(&mut connection)
+                .await,
+            );
 
-        let write_executor = DBCacheWriteExecutor::new(
-            "ethereum".to_owned(),
-            Chain::Ethereum,
-            connection_pool.clone(),
-            gateway.clone(),
-            rx,
-            err_tx,
-        );
+            let (tx, rx) = mpsc::channel(10);
+            let (err_tx, mut err_rx) = mpsc::channel(10);
 
-        let handle = write_executor.run();
+            let write_executor = DBCacheWriteExecutor::new(
+                "ethereum".to_owned(),
+                Chain::Ethereum,
+                connection_pool.clone(),
+                gateway.clone(),
+                rx,
+                err_tx,
+            );
 
-        // Revert to block 1
-        let (os_tx, os_rx) = oneshot::channel();
-        let target = BlockIdentifier::Number((Chain::Ethereum, 1));
+            let handle = write_executor.run();
 
-        tx.send(DBCacheMessage::Revert(target, os_tx))
-            .await
-            .expect("Failed to send write message through mpsc channel");
+            // Revert to block 1
+            let (os_tx, os_rx) = oneshot::channel();
+            let target = BlockIdentifier::Number((Chain::Ethereum, 1));
 
-        os_rx
-            .await
-            .expect("Response from channel ok")
-            .expect("Revert ok");
+            tx.send(DBCacheMessage::Revert(target, os_tx))
+                .await
+                .expect("Failed to send write message through mpsc channel");
 
-        let maybe_err = err_rx
-            .try_recv()
-            .expect_err("Error channel should be empty");
+            os_rx
+                .await
+                .expect("Response from channel ok")
+                .expect("Revert ok");
 
-        handle.abort();
+            let maybe_err = err_rx
+                .try_recv()
+                .expect_err("Error channel should be empty");
 
-        // Assert that block 1 is still here and block above have been reverted
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
+            handle.abort();
 
-        let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
-        let fetched_block_1 = gateway
-            .get_block(&block_id_1, &mut connection)
-            .await
-            .expect("Failed to fetch block");
+            // Assert that block 1 is still here and block above have been reverted
+            let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
+            let fetched_block_1 = gateway
+                .get_block(&block_id_1, &mut connection)
+                .await
+                .expect("Failed to fetch block");
 
-        let fetched_tx = gateway
-            .get_tx(
-                &H256::from_str(
-                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+            let fetched_tx = gateway
+                .get_tx(
+                    &H256::from_str(
+                        "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
+                    )
+                    .unwrap()
+                    .as_bytes()
+                    .into(),
+                    &mut connection,
+                )
+                .await
+                .expect("Failed to fetch tx");
+
+            let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
+            let fetched_block_2 = gateway
+                .get_block(&block_id_2, &mut connection)
+                .await
+                .expect_err("Failed to fetch block");
+
+            // Assert block 1 and txs at this block are still there
+            assert_eq!(fetched_block_1.number, 1);
+            assert_eq!(
+                fetched_tx.block_hash,
+                H256::from_str(
+                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
                 )
                 .unwrap()
-                .as_bytes()
-                .into(),
-                &mut connection,
-            )
-            .await
-            .expect("Failed to fetch tx");
+            );
+            // Assert block 2 has been reverted
+            assert_eq!(
+                fetched_block_2,
+                NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
+            );
 
-        let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
-        let fetched_block_2 = gateway
-            .get_block(&block_id_2, &mut connection)
-            .await
-            .expect_err("Failed to fetch block");
-
-        // Assert block 1 and txs at this block are still there
-        assert_eq!(fetched_block_1.number, 1);
-        assert_eq!(
-            fetched_tx.block_hash,
-            H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
-                .unwrap()
-        );
-        // Assert block 2 has been reverted
-        assert_eq!(
-            fetched_block_2,
-            NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
-        );
-
-        // Assert no error happened
-        assert_eq!(maybe_err, Empty);
+            // Assert no error happened
+            assert_eq!(maybe_err, Empty);
+        })
+        .await;
     }
 
     #[tokio::test]
     async fn test_cached_gateway() {
         // Setup
-        let connection_pool = setup_gateway().await;
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
-        db_fixtures::insert_chain(&mut connection, "ethereum").await;
-        let gateway = Arc::new(
-            PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut connection)
-            .await,
-        );
-        drop(connection);
-        let (tx, rx) = mpsc::channel(10);
-        let (err_tx, mut err_rx) = mpsc::channel(10);
+        run_against_db(|connection_pool| async move {
+            let mut connection = connection_pool
+                .get()
+                .await
+                .expect("Failed to get a connection from the pool");
+            db_fixtures::insert_chain(&mut connection, "ethereum").await;
+            let gateway = Arc::new(
+                PostgresGateway::<
+                    evm::Block,
+                    evm::Transaction,
+                    evm::Account,
+                    evm::AccountUpdate,
+                    evm::ERC20Token,
+                >::from_connection(&mut connection)
+                .await,
+            );
+            let (tx, rx) = mpsc::channel(10);
+            let (err_tx, mut err_rx) = mpsc::channel(10);
 
-        let write_executor = DBCacheWriteExecutor::new(
-            "ethereum".to_owned(),
-            Chain::Ethereum,
-            connection_pool.clone(),
-            gateway.clone(),
-            rx,
-            err_tx,
-        );
+            let write_executor = DBCacheWriteExecutor::new(
+                "ethereum".to_owned(),
+                Chain::Ethereum,
+                connection_pool.clone(),
+                gateway.clone(),
+                rx,
+                err_tx,
+            );
 
-        let handle = write_executor.run();
-        let cached_gw = CachedGateway::new(tx, connection_pool.clone(), gateway);
+            let handle = write_executor.run();
+            let cached_gw = CachedGateway::new(tx, connection_pool.clone(), gateway);
 
-        // Send first block messages
-        let block_1 = get_sample_block(1);
-        let tx_1 = get_sample_transaction(1);
-        cached_gw
-            .upsert_block(&block_1)
-            .await
-            .expect("Upsert block 1 ok");
-        cached_gw
-            .upsert_tx(&block_1, &tx_1)
-            .await
-            .expect("Upsert tx 1 ok");
+            // Send first block messages
+            let block_1 = get_sample_block(1);
+            let tx_1 = get_sample_transaction(1);
+            cached_gw
+                .upsert_block(&block_1)
+                .await
+                .expect("Upsert block 1 ok");
+            cached_gw
+                .upsert_tx(&block_1, &tx_1)
+                .await
+                .expect("Upsert tx 1 ok");
 
-        // Send second block messages
-        let block_2 = get_sample_block(2);
-        cached_gw
-            .upsert_block(&block_2)
-            .await
-            .expect("Upsert block 2 ok");
+            // Send second block messages
+            let block_2 = get_sample_block(2);
+            cached_gw
+                .upsert_block(&block_2)
+                .await
+                .expect("Upsert block 2 ok");
 
-        // Send third block messages
-        let block_3 = get_sample_block(3);
-        cached_gw
-            .upsert_block(&block_3)
-            .await
-            .expect("Upsert block 3 ok");
+            // Send third block messages
+            let block_3 = get_sample_block(3);
+            cached_gw
+                .upsert_block(&block_3)
+                .await
+                .expect("Upsert block 3 ok");
 
-        let maybe_err = err_rx
-            .try_recv()
-            .expect_err("Error channel should be empty");
+            let maybe_err = err_rx
+                .try_recv()
+                .expect_err("Error channel should be empty");
 
-        handle.abort();
+            handle.abort();
 
-        // Assert that messages from block 1 and 2 has been cached and flushed, and that block 3 is
-        // still cached
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
+            // Assert that messages from block 1 and 2 has been cached and flushed, and that block 3
+            // is still cached
+            let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
+            let fetched_block_1 = cached_gw
+                .get_block(&block_id_1, &mut connection)
+                .await
+                .expect("Failed to fetch block");
 
-        let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
-        let fetched_block_1 = cached_gw
-            .get_block(&block_id_1, &mut connection)
-            .await
-            .expect("Failed to fetch block");
+            let fetched_tx = cached_gw
+                .get_tx(&tx_1.hash.as_bytes().into(), &mut connection)
+                .await
+                .expect("Failed to fetch tx");
 
-        let fetched_tx = cached_gw
-            .get_tx(&tx_1.hash.as_bytes().into(), &mut connection)
-            .await
-            .expect("Failed to fetch tx");
+            let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
+            let fetched_block_2 = cached_gw
+                .get_block(&block_id_2, &mut connection)
+                .await
+                .expect("Failed to fetch block");
 
-        let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
-        let fetched_block_2 = cached_gw
-            .get_block(&block_id_2, &mut connection)
-            .await
-            .expect("Failed to fetch block");
+            let block_id_3 = BlockIdentifier::Number((Chain::Ethereum, 3));
+            let fetched_block_3 = cached_gw
+                .get_block(&block_id_3, &mut connection)
+                .await
+                .expect_err("Failed to fetch block");
 
-        let block_id_3 = BlockIdentifier::Number((Chain::Ethereum, 3));
-        let fetched_block_3 = cached_gw
-            .get_block(&block_id_3, &mut connection)
-            .await
-            .expect_err("Failed to fetch block");
-
-        // Assert block 1 messages have been flushed
-        assert_eq!(fetched_block_1, block_1);
-        assert_eq!(fetched_tx, tx_1);
-        // Assert block 2 messages have been flushed
-        assert_eq!(fetched_block_2, block_2);
-        // Assert block 3 is still pending in cache
-        assert_eq!(
-            fetched_block_3,
-            NotFound("Block".to_owned(), "Number((Ethereum, 3))".to_owned())
-        );
-        // Assert no error happened
-        assert_eq!(maybe_err, Empty);
+            // Assert block 1 messages have been flushed
+            assert_eq!(fetched_block_1, block_1);
+            assert_eq!(fetched_tx, tx_1);
+            // Assert block 2 messages have been flushed
+            assert_eq!(fetched_block_2, block_2);
+            // Assert block 3 is still pending in cache
+            assert_eq!(
+                fetched_block_3,
+                NotFound("Block".to_owned(), "Number((Ethereum, 3))".to_owned())
+            );
+            // Assert no error happened
+            assert_eq!(maybe_err, Empty);
+        })
+        .await;
     }
 
     #[tokio::test]
     async fn test_cached_gateway_revert() {
-        // Setup
-        let connection_pool = setup_gateway().await;
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
-        setup_data(&mut connection).await;
-        let gateway = Arc::new(
-            PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut connection)
-            .await,
-        );
-        drop(connection);
-        let (tx, rx) = mpsc::channel(10);
-        let (err_tx, err_rx) = mpsc::channel(10);
+        run_against_db(|connection_pool| async move {
+            let mut connection = connection_pool
+                .get()
+                .await
+                .expect("Failed to get a connection from the pool");
+            setup_data(&mut connection).await;
+            let gateway = Arc::new(
+                PostgresGateway::<
+                    evm::Block,
+                    evm::Transaction,
+                    evm::Account,
+                    evm::AccountUpdate,
+                    evm::ERC20Token,
+                >::from_connection(&mut connection)
+                .await,
+            );
+            let (tx, rx) = mpsc::channel(10);
+            let (err_tx, err_rx) = mpsc::channel(10);
 
-        let write_executor = DBCacheWriteExecutor::new(
-            "ethereum".to_owned(),
-            Chain::Ethereum,
-            connection_pool.clone(),
-            gateway.clone(),
-            rx,
-            err_tx,
-        );
+            let write_executor = DBCacheWriteExecutor::new(
+                "ethereum".to_owned(),
+                Chain::Ethereum,
+                connection_pool.clone(),
+                gateway.clone(),
+                rx,
+                err_tx,
+            );
 
-        let handle = write_executor.run();
-        let cached_gw = CachedGateway::new(tx, connection_pool.clone(), gateway);
+            let handle = write_executor.run();
+            let cached_gw = CachedGateway::new(tx, connection_pool.clone(), gateway);
 
-        // Get delta from current state (None) to block 1
-        let delta_0 = cached_gw
-            .get_accounts_delta(
-                &Chain::Ethereum,
-                None,
-                &BlockOrTimestamp::Block(BlockIdentifier::Hash(
+            // Get delta from current state (None) to block 1
+            let delta_0 = cached_gw
+                .get_accounts_delta(
+                    &Chain::Ethereum,
+                    None,
+                    &BlockOrTimestamp::Block(BlockIdentifier::Hash(
+                        H256::from_str(
+                            "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                        )
+                        .unwrap()
+                        .into(),
+                    )),
+                )
+                .await
+                .unwrap();
+
+            // Revert to block 1
+            let _ = cached_gw
+                .revert_state(&BlockIdentifier::Hash(
                     H256::from_str(
                         "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
                     )
                     .unwrap()
                     .into(),
-                )),
-            )
-            .await
-            .unwrap();
+                ))
+                .await;
 
-        // Revert to block 1
-        let _ = cached_gw
-            .revert_state(&BlockIdentifier::Hash(
-                H256::from_str(
-                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+            // Assert block 2 has been reverted
+            let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
+            let fetched_block_2 = cached_gw
+                .get_block(&block_id_2, &mut connection)
+                .await
+                .expect_err("Failed to fetch block");
+
+            assert_eq!(
+                fetched_block_2,
+                NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
+            );
+
+            // Send a new block 2 after the revert
+            let block_2 = get_sample_block(2);
+            cached_gw
+                .upsert_block(&block_2)
+                .await
+                .expect("Upsert block 2 ok");
+
+            // Send a new block 3 after the revert
+            let block_3 = get_sample_block(3);
+            cached_gw
+                .upsert_block(&block_3)
+                .await
+                .expect("Upsert block 3 ok");
+
+            // Get delta from current state (None) to block 2, stores it in the lru cache
+            let delta_1 = cached_gw
+                .get_accounts_delta(
+                    &Chain::Ethereum,
+                    None,
+                    &BlockOrTimestamp::Block(BlockIdentifier::Hash(
+                        H256::from_str(
+                            "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
+                        )
+                        .unwrap()
+                        .into(),
+                    )),
                 )
-                .unwrap()
-                .into(),
-            ))
-            .await;
+                .await
+                .unwrap();
 
-        // Assert block 2 has been reverted
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
-
-        let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
-        let fetched_block_2 = cached_gw
-            .get_block(&block_id_2, &mut connection)
-            .await
-            .expect_err("Failed to fetch block");
-
-        assert_eq!(
-            fetched_block_2,
-            NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
-        );
-        drop(connection);
-
-        // Send a new block 2 after the revert
-        let block_2 = get_sample_block(2);
-        cached_gw
-            .upsert_block(&block_2)
-            .await
-            .expect("Upsert block 2 ok");
-
-        // Send a new block 3 after the revert
-        let block_3 = get_sample_block(3);
-        cached_gw
-            .upsert_block(&block_3)
-            .await
-            .expect("Upsert block 3 ok");
-
-        // Get delta from current state (None) to block 2, stores it in the lru cache
-        let delta_1 = cached_gw
-            .get_accounts_delta(
-                &Chain::Ethereum,
-                None,
-                &BlockOrTimestamp::Block(BlockIdentifier::Hash(
-                    H256::from_str(
-                        "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
-                    )
-                    .unwrap()
-                    .into(),
-                )),
-            )
-            .await
-            .unwrap();
-
-        // Revert to block 1
-        let _ = cached_gw
-            .revert_state(&BlockIdentifier::Hash(
-                H256::from_str(
-                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-                )
-                .unwrap()
-                .into(),
-            ))
-            .await;
-
-        // Assert block 2 has been reverted
-        let mut connection = connection_pool
-            .get()
-            .await
-            .expect("Failed to get a connection from the pool");
-
-        let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
-        let fetched_block_2 = cached_gw
-            .get_block(&block_id_2, &mut connection)
-            .await
-            .expect_err("Failed to fetch block");
-
-        assert_eq!(
-            fetched_block_2,
-            NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
-        );
-        drop(connection);
-
-        // Get delta from current state (None) to block 1 again, retrieve it from the lru cache
-        let delta_2 = cached_gw
-            .get_accounts_delta(
-                &Chain::Ethereum,
-                None,
-                &BlockOrTimestamp::Block(BlockIdentifier::Hash(
+            // Revert to block 1
+            let _ = cached_gw
+                .revert_state(&BlockIdentifier::Hash(
                     H256::from_str(
                         "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
                     )
                     .unwrap()
                     .into(),
-                )),
-            )
-            .await
-            .unwrap();
+                ))
+                .await;
 
-        // Get delta from current state (None) to block 2 again, retrieve it from the lru cache
-        let delta_3 = cached_gw
-            .get_accounts_delta(
-                &Chain::Ethereum,
-                None,
-                &BlockOrTimestamp::Block(BlockIdentifier::Hash(
-                    H256::from_str(
-                        "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
-                    )
-                    .unwrap()
-                    .into(),
-                )),
-            )
-            .await
-            .unwrap();
+            // Assert block 2 has been reverted
+            let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
+            let fetched_block_2 = cached_gw
+                .get_block(&block_id_2, &mut connection)
+                .await
+                .expect_err("Failed to fetch block");
 
-        handle.abort();
+            assert_eq!(
+                fetched_block_2,
+                NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
+            );
 
-        // Assert that the deltas match
-        assert_eq!(delta_0, delta_2);
-        assert_eq!(delta_1, delta_3);
+            // Get delta from current state (None) to block 1 again, retrieve it from the lru cache
+            let delta_2 = cached_gw
+                .get_accounts_delta(
+                    &Chain::Ethereum,
+                    None,
+                    &BlockOrTimestamp::Block(BlockIdentifier::Hash(
+                        H256::from_str(
+                            "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                        )
+                        .unwrap()
+                        .into(),
+                    )),
+                )
+                .await
+                .unwrap();
+
+            // Get delta from current state (None) to block 2 again, retrieve it from the lru cache
+            let delta_3 = cached_gw
+                .get_accounts_delta(
+                    &Chain::Ethereum,
+                    None,
+                    &BlockOrTimestamp::Block(BlockIdentifier::Hash(
+                        H256::from_str(
+                            "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
+                        )
+                        .unwrap()
+                        .into(),
+                    )),
+                )
+                .await
+                .unwrap();
+
+            handle.abort();
+
+            // Assert that the deltas match
+            assert_eq!(delta_0, delta_2);
+            assert_eq!(delta_1, delta_3);
+        })
+        .await;
     }
 
     fn get_sample_block(version: usize) -> evm::Block {
@@ -1333,25 +1288,30 @@ mod test {
             Some(txn[0]),
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 0, txn[0], c0).await;
+        db_fixtures::insert_account_balance(conn, 0, txn[0], Some("2020-01-01T00:00:00"), c0).await;
         db_fixtures::insert_contract_code(conn, c0, txn[0], Bytes::from_str("C0C0C0").unwrap())
             .await;
-        db_fixtures::insert_account_balance(conn, 100, txn[1], c0).await;
+        db_fixtures::insert_account_balance(conn, 100, txn[1], Some("2020-01-01T01:00:00"), c0)
+            .await;
+        db_fixtures::insert_slots(conn, c0, txn[1], "2020-01-01T00:00:00", None, &[(2, 1, None)])
+            .await;
         db_fixtures::insert_slots(
             conn,
             c0,
             txn[1],
             "2020-01-01T00:00:00",
-            &[(0, 1), (1, 5), (2, 1)],
+            Some("2020-01-01T01:00:00"),
+            &[(0, 1, None), (1, 5, None)],
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 101, txn[3], c0).await;
+        db_fixtures::insert_account_balance(conn, 101, txn[3], None, c0).await;
         db_fixtures::insert_slots(
             conn,
             c0,
             txn[3],
             "2020-01-01T01:00:00",
-            &[(0, 2), (1, 3), (5, 25), (6, 30)],
+            None,
+            &[(0, 2, Some(1)), (1, 3, Some(5)), (5, 25, None), (6, 30, None)],
         )
         .await;
 
@@ -1363,11 +1323,18 @@ mod test {
             Some(txn[2]),
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 50, txn[2], c1).await;
+        db_fixtures::insert_account_balance(conn, 50, txn[2], None, c1).await;
         db_fixtures::insert_contract_code(conn, c1, txn[2], Bytes::from_str("C1C1C1").unwrap())
             .await;
-        db_fixtures::insert_slots(conn, c1, txn[3], "2020-01-01T01:00:00", &[(0, 128), (1, 255)])
-            .await;
+        db_fixtures::insert_slots(
+            conn,
+            c1,
+            txn[3],
+            "2020-01-01T01:00:00",
+            None,
+            &[(0, 128, None), (1, 255, None)],
+        )
+        .await;
 
         let c2 = db_fixtures::insert_account(
             conn,
@@ -1377,10 +1344,18 @@ mod test {
             Some(txn[1]),
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 25, txn[1], c2).await;
+        db_fixtures::insert_account_balance(conn, 25, txn[1], None, c2).await;
         db_fixtures::insert_contract_code(conn, c2, txn[1], Bytes::from_str("C2C2C2").unwrap())
             .await;
-        db_fixtures::insert_slots(conn, c2, txn[1], "2020-01-01T00:00:00", &[(1, 2), (2, 4)]).await;
+        db_fixtures::insert_slots(
+            conn,
+            c2,
+            txn[1],
+            "2020-01-01T00:00:00",
+            None,
+            &[(1, 2, None), (2, 4, None)],
+        )
+        .await;
         db_fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
     }
 }
