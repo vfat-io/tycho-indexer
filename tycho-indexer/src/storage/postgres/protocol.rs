@@ -541,24 +541,44 @@ where
         use super::schema::{account::dsl::*, token::dsl::*};
 
         let mut new_component_balances = Vec::new();
+        let token_addresses: Vec<Address> = component_balances
+            .iter()
+            .map(|component_balance| component_balance.token())
+            .collect();
+        let token_ids: HashMap<Address, i64> = token
+            .inner_join(account)
+            .select((schema::account::address, schema::token::id))
+            .filter(schema::account::address.eq_any(&token_addresses))
+            .load::<(Address, i64)>(conn)
+            .await?
+            .into_iter()
+            .collect();
+
+        let modify_txs = component_balances
+            .iter()
+            .map(|component_balance| component_balance.modify_tx())
+            .collect::<Vec<TxHash>>();
+        let transaction_ids: HashMap<TxHash, i64> =
+            orm::Transaction::ids_by_hash(&modify_txs, conn).await?;
+
+        let external_ids: Vec<&str> = component_balances
+            .iter()
+            .map(|component_balance| component_balance.component_id.as_str())
+            .collect();
+
+        let protocol_component_ids: HashMap<String, i64> =
+            orm::ProtocolComponent::ids_by_external_ids(&external_ids, conn)
+                .await?
+                .into_iter()
+                .map(|(component_id, external_id)| (external_id, component_id))
+                .collect();
+
         for component_balance in component_balances.iter() {
-            let token_address = component_balance.token();
-            let token_id = token
-                .inner_join(account)
-                .select(schema::token::id)
-                .filter(schema::account::address.eq(token_address))
-                .first::<i64>(conn)
-                .await?;
-
-            let transaction_hash = component_balance.modify_tx();
-            let transaction_id = orm::Transaction::ids_by_hash(&[transaction_hash.clone()], conn)
-                .await?[&transaction_hash];
-
-            let external_id = component_balance
+            let token_id = token_ids[&component_balance.token()];
+            let transaction_id = transaction_ids[&component_balance.modify_tx()];
+            let protocol_component_id = protocol_component_ids[&component_balance
                 .component_id
-                .to_string();
-            let protocol_component_id =
-                orm::ProtocolComponent::ids_by_external_ids(&[&external_id], conn).await?[0].0;
+                .to_string()];
 
             let new_component_balance = component_balance.to_storage(
                 token_id,
