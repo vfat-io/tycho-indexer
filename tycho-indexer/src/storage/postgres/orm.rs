@@ -1,6 +1,10 @@
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use diesel::{dsl::sql, prelude::*, sql_types::Bool};
+use diesel::{
+    dsl::sql,
+    prelude::*,
+    sql_types::{self, Bool},
+};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
 use std::collections::{HashMap, HashSet};
@@ -567,11 +571,10 @@ impl ProtocolState {
             .inner_join(protocol_component::table)
             .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
             .filter(protocol_component::chain_id.eq(chain_id))
-            .filter(
-                protocol_state::valid_to
-                    .le(end_ts)
-                    .and(protocol_state::valid_to.ge(start_ts)),
-            )
+            // validity ends during the timeframe (potentially deleted)
+            .filter(protocol_state::valid_to.le(end_ts))
+            .filter(protocol_state::valid_to.gt(start_ts))
+            // subquery to remove those that weren't deleted (valid version exists at end_ts)
             .filter(sql::<Bool>(&sub_query))
             .order_by((
                 protocol_state::protocol_component_id,
@@ -597,16 +600,28 @@ impl ProtocolState {
         target_ts: NaiveDateTime,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(ComponentId, AttrStoreKey, Option<StoreVal>)>> {
-        // We query all states that were added between the start and target timestamps, filtered by
-        // chain. We then group it by component and attribute and order it by tx. Then we
-        // deduplicate by taking the first row per group. This gives us the first state update for
-        // each component-attribute pair. Finally, we return the component id, attribute name and
-        // previous value for each component-attribute pair. Previous value is null for state
-        // updates where an attribute was created.
-        protocol_state::table
+        // subquery to exclude entities that have a valid version at start_ts (weren't deleted)
+        let sub_query = format!("NOT EXISTS (
+                                SELECT 1 FROM protocol_state ps2
+                                WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
+                                AND ps2.attribute_name = protocol_state.attribute_name
+                                AND ps2.valid_from <= '{}'
+                                AND (ps2.valid_to > '{}' OR ps2.valid_to IS NULL)
+                            )", start_ts, start_ts);
+
+        let query = protocol_state::table
             .inner_join(protocol_component::table)
             .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
-            .filter(protocol_component::chain_id.eq(chain_id))
+            .filter(protocol_component::chain_id.eq(chain_id));
+
+        // We query all states that were added between the start and target timestamps, filtered by
+        // chain. We group it by component and attribute and order it by tx. Then we deduplicate by
+        // taking the first row per group. This gives us the first state update for each
+        // component-attribute pair. Finally, we return the component id, attribute name and
+        // previous value for each component-attribute pair. Note, previous values are null for
+        // state updates where they are the first update of that attribute (attribute
+        // creation).
+        let reverted_query = query
             .filter(protocol_state::valid_from.gt(target_ts))
             .filter(protocol_state::valid_from.le(start_ts))
             .order_by((
@@ -615,12 +630,39 @@ impl ProtocolState {
                 transaction::block_id,
                 transaction::index,
             ))
-            .select((
-                protocol_component::external_id,
+            .select(
+                sql::<(sql_types::Text, sql_types::Text, sql_types::Nullable<sql_types::Bytea>)>(
+                    "external_id, attribute_name, previous_value AS value",
+                ),
+            )
+            .distinct_on((protocol_state::protocol_component_id, protocol_state::attribute_name));
+
+        // We query all states that were deleted between the start and target timestamps. Deleted
+        // states need to be reinstated so we return the component id, attribute name and latest
+        // value of each component-attribute pair here.
+        let deleted_query = query
+            // validity ends during the timeframe (potentially deleted)
+            .filter(protocol_state::valid_to.le(start_ts))
+            .filter(protocol_state::valid_to.gt(target_ts))
+            // validity starts before the timeframe (is valid at target_ts)
+            .filter(protocol_state::valid_from.le(target_ts))
+            // subquery to remove those that weren't deleted (valid version exists at start_ts)
+            .filter(sql::<Bool>(&sub_query))
+            .order_by((
+                protocol_state::protocol_component_id,
                 protocol_state::attribute_name,
-                protocol_state::previous_value,
+                transaction::block_id,
+                transaction::index,
             ))
-            .distinct_on((protocol_state::protocol_component_id, protocol_state::attribute_name))
+            .select(
+                sql::<(sql_types::Text, sql_types::Text, sql_types::Nullable<sql_types::Bytea>)>(
+                    "external_id, attribute_name, attribute_value AS value",
+                ),
+            );
+
+        // query and merge results for both reverted updates and deleted states
+        reverted_query
+            .union_all(deleted_query)
             .get_results::<(String, String, Option<Bytes>)>(conn)
             .await
     }

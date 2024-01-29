@@ -1211,7 +1211,7 @@ mod test {
             .first::<i64>(&mut conn)
             .await
             .expect("Failed to fetch protocol component id");
-        let from_txn_id = schema::transaction::table
+        let txn_id = schema::transaction::table
             .filter(
                 schema::transaction::hash.eq(H256::from_str(
                     "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
@@ -1226,8 +1226,8 @@ mod test {
             .expect("Failed to fetch transaction id");
         db_fixtures::insert_protocol_state(
             &mut conn,
-            protocol_component_id,
-            from_txn_id,
+            protocol_component_id.clone(),
+            txn_id,
             "to_delete".to_owned(),
             Bytes::from(U256::from(1000)),
             None,
@@ -1235,13 +1235,53 @@ mod test {
         )
         .await;
 
+        // set up deleted attribute state (to be created on revert)
+        let from_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        let to_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id,
+            from_txn_id,
+            "deleted".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+            Some(to_txn_id),
+        )
+        .await;
+
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
         // expected result
-        let attributes: HashMap<String, Bytes> =
-            vec![("reserve1".to_owned(), Bytes::from(U256::from(1100)))]
-                .into_iter()
-                .collect();
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1100))),
+            ("deleted".to_owned(), Bytes::from(U256::from(1000))),
+        ]
+        .into_iter()
+        .collect();
         let state_delta = ProtocolStateDelta {
             component_id: "state1".to_owned(),
             updated_attributes: attributes,
