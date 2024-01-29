@@ -115,22 +115,25 @@ impl RpcHandler {
     #[instrument(skip(self, request, params))]
     async fn get_contract_state(
         &self,
+        chain: &Chain,
         request: &dto::StateRequestBody,
         params: &dto::StateRequestParameters,
     ) -> Result<dto::StateRequestResponse, RpcError> {
         let mut conn = self.db_connection_pool.get().await?;
 
-        info!(?request, ?params, "Getting contract state.");
-        self.get_contract_state_inner(request, params, &mut conn)
+        info!(?chain, ?request, ?params, "Getting contract state.");
+        self.get_contract_state_inner(chain, request, params, &mut conn)
             .await
     }
 
     async fn get_contract_state_inner(
         &self,
+        chain: &Chain,
         request: &dto::StateRequestBody,
         params: &dto::StateRequestParameters,
         db_connection: &mut AsyncPgConnection,
     ) -> Result<dto::StateRequestResponse, RpcError> {
+        #![allow(unused_variables)]
         //TODO: handle when no contract is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
 
@@ -150,7 +153,7 @@ impl RpcHandler {
         // TODO support additional tvl_gt and intertia_min_gt filters
         match self
             .db_gateway
-            .get_contracts(&params.chain.into(), addresses, Some(&version), true, db_connection)
+            .get_contracts(chain.into(), addresses, Some(&version), true, db_connection)
             .await
         {
             Ok(accounts) => Ok(dto::StateRequestResponse::new(
@@ -169,7 +172,7 @@ impl RpcHandler {
 
 #[utoipa::path(
     post,
-    path = "/v1/contract_state",
+    path = "/v1/{execution_env}/contract_state",
     responses(
         (status = 200, description = "OK", body = StateRequestResponse),
     ),
@@ -179,6 +182,7 @@ impl RpcHandler {
     ),
 )]
 pub async fn contract_state(
+    execution_env: web::Path<Chain>,
     query: web::Query<dto::StateRequestParameters>,
     body: web::Json<dto::StateRequestBody>,
     handler: web::Data<RpcHandler>,
@@ -186,7 +190,7 @@ pub async fn contract_state(
     // Call the handler to get the state
     let response = handler
         .into_inner()
-        .get_contract_state(&body, &query)
+        .get_contract_state(&execution_env, &body, &query)
         .await;
 
     match response {
@@ -384,7 +388,12 @@ mod tests {
         };
 
         let state = req_handler
-            .get_contract_state_inner(&request, &dto::StateRequestParameters::default(), &mut conn)
+            .get_contract_state_inner(
+                &Chain::Ethereum,
+                &request,
+                &dto::StateRequestParameters::default(),
+                &mut conn,
+            )
             .await
             .unwrap();
 
