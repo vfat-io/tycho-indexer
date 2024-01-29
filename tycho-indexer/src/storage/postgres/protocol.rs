@@ -254,7 +254,7 @@ where
             .flat_map(|pc| pc.get_byte_token_addresses())
             .collect();
 
-        let pc_entity_tokens_map = filtered_new_protocol_components
+        let pc_tokens_map = filtered_new_protocol_components
             .iter()
             .flat_map(|pc| {
                 let pc_id = protocol_db_id_map
@@ -284,7 +284,7 @@ where
         let protocol_component_token_junction: Result<
             Vec<orm::NewProtocolHoldsToken>,
             StorageError,
-        > = pc_entity_tokens_map
+        > = pc_tokens_map
             .iter()
             .map(|(pc_id, t_address)| {
                 let t_id = token_add_by_id
@@ -305,7 +305,7 @@ where
             .flat_map(|pc| pc.get_byte_contract_addresses())
             .collect();
 
-        let pc_entity_contract_map = new
+        let pc_contract_map = new
             .iter()
             .flat_map(|pc| {
                 let pc_id = protocol_db_id_map
@@ -335,7 +335,7 @@ where
         let protocol_component_contract_junction: Result<
             Vec<orm::NewProtocolComponentHoldsContract>,
             StorageError,
-        > = pc_entity_contract_map
+        > = pc_contract_map
             .iter()
             .map(|(pc_id, t_address)| {
                 let t_id = contract_add_by_id
