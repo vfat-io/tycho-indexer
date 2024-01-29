@@ -223,7 +223,9 @@ where
                 ))
                 .get_results(conn)
                 .await
-                .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))?;
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolComponent", "Batch insert", None)
+                })?;
 
         let mut protocol_db_id_map = HashMap::new();
         for (pc_id, ex_id, ps_id, chain_id_db) in inserted_protocol_components {
@@ -283,7 +285,7 @@ where
             .map(|(pc_id, t_address)| {
                 let t_id = token_add_by_id
                     .get(t_address)
-                    .ok_or(StorageError::NotFound("".to_string(), "".to_string()))?;
+                    .ok_or(StorageError::NotFound("Token id".to_string(), t_address.to_string()))?;
                 Ok(orm::NewProtocolHoldsToken { protocol_component_id: *pc_id, token_id: *t_id })
             })
             .collect();
@@ -420,10 +422,15 @@ where
         for state in new {
             let tx_db = txns
                 .get(state.modify_tx.as_bytes())
-                .expect("Failed to find tx"); // TODO: Found out that these are panics in disguise. Should we panic here?
+                .ok_or(StorageError::NotFound("Tx id".to_string(), state.modify_tx.to_string()))?;
+
             let component_db_id = *components
                 .get(&state.component_id)
-                .expect("Failed to find component"); // TODO: Found out that these are panics in disguise. Should we panic here?
+                .ok_or(StorageError::NotFound(
+                    "Component id".to_string(),
+                    state.component_id.to_string(),
+                ))?;
+
             let mut new_states: Vec<(orm::NewProtocolState, i64)> =
                 ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0, tx_db.2)
                     .into_iter()
