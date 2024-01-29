@@ -884,7 +884,6 @@ pub mod db_fixtures {
         modify_tx: i64,
         code: Code,
     ) -> i64 {
-        println!("inserting contract code");
         let ts = schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::id.eq(modify_tx))
@@ -892,9 +891,8 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
-        println!("inserting contract code");
+
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
-        println!("inserting contract code 2");
         let data = (
             schema::contract_code::code.eq(code),
             schema::contract_code::hash.eq(code_hash.as_bytes()),
@@ -902,7 +900,7 @@ pub mod db_fixtures {
             schema::contract_code::modify_tx.eq(modify_tx),
             schema::contract_code::valid_from.eq(ts),
         );
-        println!("inserting contract code 3");
+
         diesel::insert_into(schema::contract_code::table)
             .values(data)
             .returning(schema::contract_code::id)
