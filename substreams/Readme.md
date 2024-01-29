@@ -162,3 +162,14 @@ pub fn store_pool_balances(changes: BlockPoolChanges, balance_store: StoreAddBig
         mode: deltas
 ```
 Use `mode: deltas` if you want to get only values that changed in this block.
+In `map_changes` add the store as an input like:
+```rust
+#[substreams::handlers::map]
+fn map_changes(
+    block: eth::v2::Block,
+    balance_store: StoreGetBigInt,
+) -> Result<BlockContractChanges, substreams::errors::Error> {
+}
+```
+If you want to use `mode: deltas` you need to use `StoreDeltas` instead of `StoreGetBigInt`. 
+Notice that by using `StoreGetBigInt` you can get the values by key, while using `StoreDeltas` you can only loop through the values of this block.
