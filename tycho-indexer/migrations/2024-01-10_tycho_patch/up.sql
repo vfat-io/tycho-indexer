@@ -64,13 +64,13 @@ DROP FUNCTION invalidate_previous_entry_contract_code();
 CREATE TABLE IF NOT EXISTS protocol_component_holds_contract(
     "protocol_component_id" bigint REFERENCES protocol_component(id) ON DELETE CASCADE NOT NULL,
     -- we don't allow a token to be deleted unless the protocol component was removed
-    "token_id" bigint REFERENCES "contract_code"(id) NOT NULL,
+    "contract_code_id" bigint REFERENCES "contract_code"(id) NOT NULL,
     -- Timestamp this entry was inserted into this table.
     "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Timestamp this entry was inserted into this table.
     "modified_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY ("protocol_component_id", "token_id")
+    PRIMARY KEY ("protocol_component_id", "contract_code_id")
 );
 
 CREATE INDEX IF NOT EXISTS idx_protocol_component_token_protocol_component_id ON protocol_component_holds_contract(protocol_component_id);
-CREATE INDEX IF NOT EXISTS idx_protocol_component_token_token_id ON protocol_component_holds_contract(token_id);
+CREATE INDEX IF NOT EXISTS idx_protocol_component_token_token_id ON protocol_component_holds_contract(contract_code_id);
