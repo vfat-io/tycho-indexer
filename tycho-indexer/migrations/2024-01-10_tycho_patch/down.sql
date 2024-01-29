@@ -147,3 +147,4 @@ CREATE TRIGGER invalidate_previous_contract_code
     FOR EACH ROW
     EXECUTE PROCEDURE invalidate_previous_entry_contract_code();
 
+DROP TABLE IF EXISTS protocol_component_token;
