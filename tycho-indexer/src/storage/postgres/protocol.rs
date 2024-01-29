@@ -1,5 +1,4 @@
 #![allow(unused_variables)]
-
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use std::{
@@ -220,23 +219,34 @@ where
                 .await
                 .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))?;
 
+        let mut protocol_db_id_map = HashMap::new();
+        for (pc_id, ex_id, ps_id, chain_id_db) in inserted_protocol_components {
+            protocol_db_id_map.insert(
+                (ex_id, self.get_protocol_system(&ps_id), self.get_chain(&chain_id_db)),
+                pc_id,
+            );
+        }
+
         let token_addresses: HashSet<Address> = new
             .iter()
             .flat_map(|pc| pc.get_byte_token_addresses())
             .collect();
 
-        let pc_entity_tokens_map: HashMap<(String, i64, i64), Address> = new
+        let pc_entity_tokens_map = new
             .iter()
             .flat_map(|pc| {
-                let pc_id = pc.id.clone();
-                let protocol_system_db_id = self.get_protocol_system_id(&pc.protocol_system);
-                let chain_db_id = self.get_chain_id(&pc.chain);
+                let pc_id = protocol_db_id_map
+                    .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
+                    .expect("Could not find Protocol Component. Even though it should have."); //Because we just insderted the protocol systems, there should not be any missing.
+                                                                                               // However, trying to handel this via Results is needlessly difficult, because you
+                                                                                               // can not use flat_map on a Result.
 
                 pc.get_byte_token_addresses()
                     .into_iter()
-                    .map(move |add| ((pc_id.clone(), protocol_system_db_id, chain_db_id), add))
+                    .map(move |add| (*pc_id, add))
+                    .collect::<Vec<(i64, Address)>>()
             })
-            .collect();
+            .collect::<Vec<(i64, Address)>>();
 
         let token_add_by_id: HashMap<Address, i64> = token
             .inner_join(account)
@@ -252,24 +262,13 @@ where
         let protocol_component_token_junction: Result<
             Vec<orm::NewProtocolHoldsToken>,
             StorageError,
-        > = inserted_protocol_components
-            .into_iter()
-            .map(|(db_id, ext_id, ps_id, chain_db_id)| {
-                let t_address = pc_entity_tokens_map
-                    .get(&(ext_id, ps_id, chain_db_id))
-                    .ok_or_else(|| {
-                        StorageError::NotFound("Token".to_string(), "token_adds".to_string())
-                    })?
-                    .to_owned();
-
+        > = pc_entity_tokens_map
+            .iter()
+            .map(|(pc_id, t_address)| {
                 let t_id = token_add_by_id
-                    .get(&t_address)
-                    .ok_or_else(|| {
-                        StorageError::NotFound("Token".to_string(), "token_adds".to_string())
-                    })?
-                    .to_owned();
-
-                Ok(orm::NewProtocolHoldsToken { protocol_component_id: db_id, token_id: t_id })
+                    .get(t_address)
+                    .ok_or(StorageError::NotFound("".to_string(), "".to_string()))?;
+                Ok(orm::NewProtocolHoldsToken { protocol_component_id: *pc_id, token_id: *t_id })
             })
             .collect();
 
@@ -404,10 +403,10 @@ where
         for state in new {
             let tx_db = txns
                 .get(state.modify_tx.as_bytes())
-                .expect("Failed to find tx"); // TODO: Found out that these are panics in disgues. Should we panic here?
+                .expect("Failed to find tx"); // TODO: Found out that these are panics in disguise. Should we panic here?
             let component_db_id = *components
                 .get(&state.component_id)
-                .expect("Failed to find component"); // TODO: Found out that these are panics in disgues. Should we panic here?
+                .expect("Failed to find component"); // TODO: Found out that these are panics in disguise. Should we panic here?
             let mut new_states: Vec<(orm::NewProtocolState, i64)> =
                 ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0, tx_db.2)
                     .into_iter()
@@ -696,7 +695,7 @@ mod test {
 
     /// This sets up the data needed to test the gateway. The setup is structured such that each
     /// protocol state's historical changes are kept together this makes it easy to reason about
-    /// that change an account should have at each version Please not that if you change
+    /// that change an account should have at each version Please note that if you change
     /// something here, also update the state fixtures right below, which contain protocol states
     /// at each version.
     async fn setup_data(conn: &mut AsyncPgConnection) -> Vec<String> {
