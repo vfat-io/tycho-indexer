@@ -228,13 +228,10 @@ where
         }
 
         let filtered_new_protocol_components: Vec<&&Self::ProtocolComponent> = new
-            .into_iter()
+            .iter()
             .filter(|component| {
-                let key = (
-                    component.id.clone(),
-                    component.protocol_system.clone(),
-                    component.chain.clone(),
-                );
+                let key =
+                    (component.id.clone(), component.protocol_system.clone(), component.chain);
 
                 protocol_db_id_map.get(&key).is_some()
             })
