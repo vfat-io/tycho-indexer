@@ -1,16 +1,29 @@
-use futures03::{SinkExt, StreamExt};
+use futures03::{stream::SplitSink, SinkExt, StreamExt};
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
-use std::{collections::HashMap, string::ToString};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    string::ToString,
+    sync::Arc,
+};
 use thiserror::Error;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use async_trait::async_trait;
 
-use tokio::sync::mpsc::{self, Receiver};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio::{
+    net::TcpStream,
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        oneshot, Mutex,
+    },
+    task::JoinHandle,
+};
+use tokio_tungstenite::{
+    connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
+};
 use tycho_types::dto::{
-    BlockAccountChanges, Chain, Command, ExtractorIdentity, Response, StateRequestBody,
+    BlockAccountChanges, Command, ExtractorIdentity, Response, StateRequestBody,
     StateRequestParameters, StateRequestResponse, WebSocketMessage,
 };
 
@@ -48,7 +61,7 @@ impl TychoHttpClientImpl {
 }
 
 #[async_trait]
-pub trait TychoHttpClient {
+pub trait TychoRPCClient {
     async fn get_contract_state(
         &self,
         filters: &StateRequestParameters,
@@ -57,7 +70,7 @@ pub trait TychoHttpClient {
 }
 
 #[async_trait]
-impl TychoHttpClient for TychoHttpClientImpl {
+impl TychoRPCClient for TychoHttpClientImpl {
     #[instrument(skip(self, filters, request))]
     async fn get_contract_state(
         &self,
@@ -114,141 +127,312 @@ impl TychoHttpClient for TychoHttpClientImpl {
     }
 }
 
-pub struct TychoWsClientImpl {
-    uri: Uri,
+#[async_trait]
+pub trait TychoUpdatesClient {
+    /// Subscribe to an extractor and receive realtime messages
+    async fn subscribe(
+        &self,
+        extractor_id: ExtractorIdentity,
+    ) -> Result<Receiver<BlockAccountChanges>, TychoClientError>;
+
+    /// Unsubscribe from an extractor
+    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoClientError>;
+
+    /// Consumes realtime messages from the WebSocket server
+    async fn connect(&self) -> JoinHandle<()>;
 }
 
-impl TychoWsClientImpl {
+#[derive(Clone)]
+pub struct TychoWsClient {
+    uri: Uri,
+    inner: Arc<Mutex<Option<Inner>>>,
+}
+
+type WebSocketSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+
+struct SubscriptionInfo {
+    state: SubscriptionStatus,
+}
+
+enum SubscriptionStatus {
+    RequestedSubscription(oneshot::Sender<Receiver<BlockAccountChanges>>),
+    Active,
+    RequestedUnsubscription(oneshot::Sender<()>),
+}
+
+struct Inner {
+    sink: Option<WebSocketSink>,
+    cmd_tx: Sender<Command>,
+    // could be a vec and we take the first one matching if we
+    // wanted to support multiple duplicated subs.
+    pending: HashMap<ExtractorIdentity, SubscriptionInfo>,
+    subscriptions: HashMap<Uuid, SubscriptionInfo>,
+    sender: HashMap<Uuid, Sender<BlockAccountChanges>>,
+}
+
+impl Inner {
+    fn new(cmd_tx: Sender<Command>) -> Self {
+        Self {
+            sink: None,
+            cmd_tx,
+            pending: HashMap::new(),
+            subscriptions: HashMap::new(),
+            sender: HashMap::new(),
+        }
+    }
+
+    fn new_subscription(
+        &mut self,
+        id: &ExtractorIdentity,
+        ready_tx: oneshot::Sender<Receiver<BlockAccountChanges>>,
+    ) {
+        // TODO: deny subscribing twice to same extractor
+        self.pending.insert(
+            id.clone(),
+            SubscriptionInfo { state: SubscriptionStatus::RequestedSubscription(ready_tx) },
+        );
+    }
+
+    fn mark_active(&mut self, id: &ExtractorIdentity, uuid: Uuid) -> anyhow::Result<()> {
+        let mut info = self
+            .pending
+            .remove(id)
+            .expect("subsciption was not pending");
+        if let SubscriptionStatus::RequestedSubscription(ready_tx) = info.state {
+            let (tx, rx) = mpsc::channel(1);
+            info.state = SubscriptionStatus::Active;
+            self.sender.insert(uuid, tx);
+            self.subscriptions.insert(uuid, info);
+            ready_tx
+                .send(rx)
+                .expect("ready channel closed");
+            Ok(())
+        } else {
+            anyhow::bail!("invalid state transition")
+        }
+    }
+
+    async fn send(&mut self, id: &Uuid, msg: BlockAccountChanges) -> anyhow::Result<()> {
+        self.sender
+            .get_mut(id)
+            .expect("lacking sender for uuid")
+            .send(msg)
+            .await?;
+        Ok(())
+    }
+
+    fn end_subscription(&mut self, id: &Uuid, ready_tx: oneshot::Sender<()>) {
+        let info = self
+            .subscriptions
+            .get_mut(id)
+            .expect("no active subscription found");
+
+        if let SubscriptionStatus::Active = &info.state {
+            info.state = SubscriptionStatus::RequestedUnsubscription(ready_tx);
+        }
+    }
+
+    fn remove_subscription(&mut self, id: Uuid) -> anyhow::Result<()> {
+        if let Entry::Occupied(e) = self.subscriptions.entry(id) {
+            if let SubscriptionStatus::RequestedUnsubscription(tx) = e.remove().state {
+                tx.send(())
+                    .expect("failed notifying about removed subscription");
+                self.sender
+                    .remove(&id)
+                    .expect("sender channel missing");
+            } else {
+                anyhow::bail!("invalid state transition");
+            }
+        } else {
+            anyhow::bail!("invalid state transition");
+        }
+        Ok(())
+    }
+
+    async fn ws_send(&mut self, msg: Message) {
+        self.sink
+            .as_mut()
+            .expect("ws not connected")
+            .send(msg)
+            .await
+            .expect("ws send failed");
+    }
+
+    fn reset(&mut self) {
+        self.pending.clear();
+        self.subscriptions.clear();
+        self.sender.clear();
+        self.sink = None;
+    }
+}
+
+impl TychoWsClient {
     pub fn new(ws_uri: &str) -> Result<Self, TychoClientError> {
         let uri = ws_uri
             .parse::<Uri>()
             .map_err(|e| TychoClientError::UriParsing(ws_uri.to_string(), e.to_string()))?;
 
-        Ok(Self { uri })
+        Ok(Self { uri, inner: Arc::new(Mutex::new(None)) })
+    }
+
+    async fn handle_command(&self, _cmd: Command) -> Result<(), anyhow::Error> {
+        todo!()
+    }
+
+    async fn handle_msg(
+        &self,
+        msg: Result<Message, tokio_tungstenite::tungstenite::error::Error>,
+    ) -> Result<(), anyhow::Error> {
+        let mut guard = self.inner.lock().await;
+        let inner = guard
+            .as_mut()
+            .expect("ws invalid state");
+        match msg {
+            Ok(Message::Text(text)) => match serde_json::from_str::<WebSocketMessage>(&text) {
+                Ok(WebSocketMessage::BlockAccountChanges { subscription, data }) => {
+                    info!(?data, "Received a block state change, sending to channel");
+                    if let Err(_) = inner.send(&subscription, data).await {
+                        todo!()
+                    }
+                }
+                Ok(WebSocketMessage::Response(Response::NewSubscription {
+                    extractor_id,
+                    subscription_id,
+                })) => {
+                    info!(?extractor_id, ?subscription_id, "Received a new subscription");
+
+                    inner
+                        .mark_active(&extractor_id, subscription_id)
+                        .expect("failed internal transition");
+                }
+                Ok(WebSocketMessage::Response(Response::SubscriptionEnded { subscription_id })) => {
+                    info!(?subscription_id, "Received a subscription ended");
+                    inner
+                        .remove_subscription(subscription_id)
+                        .expect("failed internal transition");
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to deserialize message");
+                }
+            },
+            Ok(Message::Ping(_)) => {
+                // Respond to pings with pongs.
+                inner
+                    .ws_send(Message::Pong(Vec::new()))
+                    .await;
+            }
+            Ok(Message::Pong(_)) => {
+                // Do nothing.
+            }
+            Ok(Message::Close(_)) => {
+                inner.reset();
+                return Err(anyhow::anyhow!("Connection closed!"));
+            }
+            Ok(unknown_msg) => {
+                info!("Received an unknown message type: {:?}", unknown_msg);
+            }
+            Err(e) => {
+                inner.reset();
+                error!("Failed to get a websocket message: {}", e);
+            }
+        };
+        Ok(())
     }
 }
 
 #[async_trait]
-pub trait TychoWsClient {
-    /// Subscribe to an extractor and receive realtime messages
-    fn subscribe(&self, extractor_id: ExtractorIdentity) -> Result<(), TychoClientError>;
-
-    /// Unsubscribe from an extractor
-    fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoClientError>;
-
-    /// Consumes realtime messages from the WebSocket server
-    async fn realtime_messages(&self) -> Receiver<BlockAccountChanges>;
-}
-
-#[async_trait]
-impl TychoWsClient for TychoWsClientImpl {
+impl TychoUpdatesClient for TychoWsClient {
     #[allow(unused_variables)]
-    fn subscribe(&self, extractor_id: ExtractorIdentity) -> Result<(), TychoClientError> {
-        panic!("Not implemented");
+    async fn subscribe(
+        &self,
+        extractor_id: ExtractorIdentity,
+    ) -> Result<Receiver<BlockAccountChanges>, TychoClientError> {
+        let (ready_tx, ready_rx) = oneshot::channel();
+        {
+            let mut guard = self.inner.lock().await;
+            let inner = guard
+                .as_mut()
+                .expect("ws not connected");
+            // TODO: consider sending directly via inner here
+            inner.new_subscription(&extractor_id, ready_tx);
+            let cmd = Command::Subscribe { extractor_id };
+            inner
+                .ws_send(Message::Text(
+                    serde_json::to_string(&cmd).expect("serialize cmd encode error"),
+                ))
+                .await;
+        }
+        let rx = ready_rx
+            .await
+            .expect("ready channel closed");
+        Ok(rx)
     }
 
     #[allow(unused_variables)]
-    fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoClientError> {
-        panic!("Not implemented");
+    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoClientError> {
+        let (ready_tx, ready_rx) = oneshot::channel();
+        {
+            let mut guard = self.inner.lock().await;
+            let inner = guard
+                .as_mut()
+                .expect("ws not connected");
+            inner.end_subscription(&subscription_id, ready_tx);
+            let cmd = Command::Unsubscribe { subscription_id };
+            inner
+                .ws_send(Message::Text(
+                    serde_json::to_string(&cmd).expect("serialize cmd encode error"),
+                ))
+                .await;
+        }
+        ready_rx
+            .await
+            .expect("ready channel closed");
+        Ok(())
     }
 
-    async fn realtime_messages(&self) -> Receiver<BlockAccountChanges> {
-        // Create a channel to send and receive messages.
-        let (tx, rx) = mpsc::channel(30); //TODO: Set this properly.
-
-        // Spawn a task to connect to the WebSocket server and listen for realtime messages.
-        let ws_uri = format!("{}{}/ws", self.uri, TYCHO_SERVER_VERSION); // TODO: Set path properly
+    async fn connect(&self) -> JoinHandle<()> {
+        // TODO: disallow connecting twice.
+        let ws_uri = format!("{}{}/ws", self.uri, TYCHO_SERVER_VERSION);
         info!(?ws_uri, "Spawning task to connect to WebSocket server");
+
+        let this = self.clone();
         tokio::spawn(async move {
-            let mut active_extractors: HashMap<Uuid, ExtractorIdentity> = HashMap::new();
+            let (cmd_tx, mut cmd_rx) = mpsc::channel(30);
+            {
+                let mut guard = this.inner.as_ref().lock().await;
+                *guard = Some(Inner::new(cmd_tx));
+            }
+            let mut retry_count = 0;
+            'retry: while retry_count < 5 {
+                info!(?ws_uri, "Connecting to WebSocket server");
 
-            // Connect to Tycho server
-            info!(?ws_uri, "Connecting to WebSocket server");
-            let (ws, _) = connect_async(&ws_uri)
-                .await
-                .map_err(|e| error!(error = %e, "Failed to connect to WebSocket server"))
-                .expect("connect to websocket");
-            // Split the WebSocket into a sender and receive of messages.
-            let (mut ws_sink, ws_stream) = ws.split();
+                let (ws, _) = connect_async(&ws_uri)
+                    .await
+                    .map_err(|e| error!(error = %e, "Failed to connect to WebSocket server"))
+                    .expect("connect to websocket");
 
-            // Send a subscribe request to ambient extractor
-            // TODO: Read from config
-            let command = Command::Subscribe {
-                extractor_id: ExtractorIdentity::new(Chain::Ethereum, AMBIENT_EXTRACTOR_HANDLE),
-            };
-            let _ = ws_sink
-                .send(Message::Text(serde_json::to_string(&command).unwrap()))
-                .await
-                .map_err(|e| error!(error = %e, "Failed to send subscribe request"));
+                let (ws_sink, ws_stream) = ws.split();
 
-            // Use the stream directly to listen for messages.
-            let mut incoming_messages = ws_stream.boxed();
-            while let Some(msg) = incoming_messages.next().await {
-                match msg {
-                    Ok(Message::Text(text)) => {
-                        match serde_json::from_str::<WebSocketMessage>(&text) {
-                            Ok(WebSocketMessage::BlockAccountChanges(block_state_changes)) => {
-                                info!(
-                                    ?block_state_changes,
-                                    "Received a block state change, sending to channel"
-                                );
-                                tx.send(block_state_changes)
-                                    .await
-                                    .map_err(|e| error!(error = %e, "Failed to send message"))
-                                    .expect("send message");
-                            }
-                            Ok(WebSocketMessage::Response(Response::NewSubscription {
-                                extractor_id,
-                                subscription_id,
-                            })) => {
-                                info!(
-                                    ?extractor_id,
-                                    ?subscription_id,
-                                    "Received a new subscription"
-                                );
-                                active_extractors.insert(subscription_id, extractor_id);
-                                trace!(?active_extractors, "Active extractors");
-                            }
-                            Ok(WebSocketMessage::Response(Response::SubscriptionEnded {
-                                subscription_id,
-                            })) => {
-                                info!(?subscription_id, "Received a subscription ended");
-                                active_extractors
-                                    .remove(&subscription_id)
-                                    .expect("subscription id in active extractors");
-                            }
-                            Err(e) => {
-                                error!(error = %e, "Failed to deserialize message");
-                            }
-                        }
-                    }
-                    Ok(Message::Ping(_)) => {
-                        // Respond to pings with pongs.
-                        ws_sink
-                            .send(Message::Pong(Vec::new()))
-                            .await
-                            .unwrap();
-                    }
-                    Ok(Message::Pong(_)) => {
-                        // Do nothing.
-                    }
-                    Ok(Message::Close(_)) => {
-                        // Close the connection.
-                        drop(tx);
-                        return
-                    }
-                    Ok(unknown_msg) => {
-                        info!("Received an unknown message type: {:?}", unknown_msg);
-                    }
-                    Err(e) => {
-                        error!("Failed to get a websocket message: {}", e);
+                let mut msg_rx = ws_stream.boxed();
+                {
+                    let mut guard = this.inner.as_ref().lock().await;
+                    if let Some(inner) = guard.as_mut() {
+                        inner.sink = Some(ws_sink);
+                    };
+                }
+                loop {
+                    let res = tokio::select! {
+                        Some(msg) = msg_rx.next() => this.handle_msg(msg).await,
+                        _ = cmd_rx.recv() => break 'retry,
+                    };
+                    if let Err(e) = res {
+                        warn!(?e, ?retry_count, "Connection dropped unexpectedly; Reconnecting");
+                        retry_count += 1;
+                        continue
                     }
                 }
             }
-        });
-
-        info!("Returning receiver");
-        rx
+        })
     }
 }
 
