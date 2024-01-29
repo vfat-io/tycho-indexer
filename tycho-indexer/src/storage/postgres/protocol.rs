@@ -174,8 +174,8 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{
-            account::dsl::*, protocol_component::dsl::*, protocol_holds_token::dsl::*,
-            token::dsl::*,
+            account::dsl::*, contract_code::dsl::*, protocol_component::dsl::*,
+            protocol_component_holds_contract::dsl::*, protocol_holds_token::dsl::*, token::dsl::*,
         };
         let mut values: Vec<orm::NewProtocolComponent> = Vec::with_capacity(new.len());
         let tx_hashes: Vec<TxHash> = new
@@ -245,6 +245,7 @@ where
             })
             .collect();
 
+        // establish component-ontract junction
         let token_addresses: HashSet<Address> = filtered_new_protocol_components
             .iter()
             .flat_map(|pc| pc.get_byte_token_addresses())
@@ -292,6 +293,60 @@ where
 
         diesel::insert_into(protocol_holds_token)
             .values(&protocol_component_token_junction?)
+            .execute(conn)
+            .await?;
+
+        // establish component-ontract junction
+        let contract_addresses: HashSet<Address> = new
+            .iter()
+            .flat_map(|pc| pc.get_byte_contract_addresses())
+            .collect();
+
+        let pc_entity_contract_map = new
+            .iter()
+            .flat_map(|pc| {
+                let pc_id = protocol_db_id_map
+                    .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
+                    .expect("Could not find Protocol Component. Even though it should have."); //Because we just inserted the protocol systems, there should not be any missing.
+                                                                                               // However, trying to handel this via Results is needlessly difficult, because you
+                                                                                               // can not use flat_map on a Result.
+
+                pc.get_byte_contract_addresses()
+                    .into_iter()
+                    .map(move |add| (*pc_id, add))
+                    .collect::<Vec<(i64, Address)>>()
+            })
+            .collect::<Vec<(i64, Address)>>();
+
+        let contract_add_by_id: HashMap<Address, i64> = contract_code
+            .inner_join(account)
+            .select((schema::account::address, schema::contract_code::id))
+            .filter(schema::account::address.eq_any(contract_addresses))
+            .into_boxed()
+            .load::<(Address, i64)>(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Contract", "Several Chains", None))?
+            .into_iter()
+            .collect();
+
+        let protocol_component_contract_junction: Result<
+            Vec<orm::NewProtocolComponentHoldsContract>,
+            StorageError,
+        > = pc_entity_contract_map
+            .iter()
+            .map(|(pc_id, t_address)| {
+                let t_id = contract_add_by_id
+                    .get(t_address)
+                    .ok_or(StorageError::NotFound("".to_string(), "".to_string()))?;
+                Ok(orm::NewProtocolComponentHoldsContract {
+                    protocol_component_id: *pc_id,
+                    contract_id: *t_id,
+                })
+            })
+            .collect();
+
+        diesel::insert_into(protocol_component_holds_contract)
+            .values(&protocol_component_contract_junction?)
             .execute(conn)
             .await?;
 
