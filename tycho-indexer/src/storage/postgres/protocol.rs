@@ -227,12 +227,25 @@ where
             );
         }
 
-        let token_addresses: HashSet<Address> = new
+        let filtered_new_protocol_components: Vec<&&Self::ProtocolComponent> = new
+            .into_iter()
+            .filter(|component| {
+                let key = (
+                    component.id.clone(),
+                    component.protocol_system.clone(),
+                    component.chain.clone(),
+                );
+
+                protocol_db_id_map.get(&key).is_some()
+            })
+            .collect();
+
+        let token_addresses: HashSet<Address> = filtered_new_protocol_components
             .iter()
             .flat_map(|pc| pc.get_byte_token_addresses())
             .collect();
 
-        let pc_entity_tokens_map = new
+        let pc_entity_tokens_map = filtered_new_protocol_components
             .iter()
             .flat_map(|pc| {
                 let pc_id = protocol_db_id_map
