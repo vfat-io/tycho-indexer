@@ -17,9 +17,8 @@ use crate::{
 use super::{
     schema::{
         account, account_balance, block, chain, component_balance, contract_code, contract_storage,
-        extraction_state, protocol_component, protocol_component_holds_contract, protocol_holds_token,
-        protocol_state,
-        protocol_system, protocol_type, token, transaction,
+        extraction_state, protocol_component, protocol_component_holds_contract,
+        protocol_holds_token, protocol_state, protocol_system, protocol_type, token, transaction,
     },
     versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
 };
