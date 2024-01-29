@@ -566,6 +566,13 @@ impl ProtocolComponent {
         })
     }
 
+    pub fn get_byte_contract_addresses(&self) -> Vec<Address> {
+        self.contract_ids
+            .iter()
+            .map(|t| Address::from(t.0))
+            .collect()
+    }
+
     pub fn get_byte_token_addresses(&self) -> Vec<Address> {
         self.tokens
             .iter()
