@@ -2,15 +2,13 @@
 /// Usage: cargo run --example rpc
 use futures03::future::select_all;
 
-use crate::{
+use actix_web::dev::ServerHandle;
+use tracing::info;
+use tycho_indexer::{
     extractor::{evm, ExtractionError},
     services::ServicesBuilder,
     storage::postgres::{self, PostgresGateway},
 };
-use actix_web::dev::ServerHandle;
-use tracing::info;
-
-use tycho_indexer::{extractor, services, storage};
 
 #[tokio::main]
 async fn main() -> Result<(), ExtractionError> {
