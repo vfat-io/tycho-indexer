@@ -884,6 +884,7 @@ pub mod db_fixtures {
         modify_tx: i64,
         code: Code,
     ) -> i64 {
+        println!("inserting contract code");
         let ts = schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::id.eq(modify_tx))
@@ -891,8 +892,9 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
-
+        println!("inserting contract code");
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
+        println!("inserting contract code 2");
         let data = (
             schema::contract_code::code.eq(code),
             schema::contract_code::hash.eq(code_hash.as_bytes()),
@@ -900,7 +902,7 @@ pub mod db_fixtures {
             schema::contract_code::modify_tx.eq(modify_tx),
             schema::contract_code::valid_from.eq(ts),
         );
-
+        println!("inserting contract code 3");
         diesel::insert_into(schema::contract_code::table)
             .values(data)
             .returning(schema::contract_code::id)
@@ -1062,7 +1064,7 @@ pub mod db_fixtures {
         address: &str,
         symbol: &str,
         decimals: i32,
-    ) -> i64 {
+    ) -> (i64, i64) {
         let account_id = insert_account(conn, address, "token", chain_id, None).await;
 
         let query = diesel::insert_into(schema::token::table).values((
@@ -1072,11 +1074,14 @@ pub mod db_fixtures {
             schema::token::tax.eq(10),
             schema::token::gas.eq(vec![10]),
         ));
-        query
-            .returning(schema::token::id)
-            .get_result(conn)
-            .await
-            .unwrap()
+        (
+            account_id,
+            query
+                .returning(schema::token::id)
+                .get_result(conn)
+                .await
+                .unwrap(),
+        )
     }
 
     pub async fn get_token_by_symbol(conn: &mut AsyncPgConnection, symbol: String) -> orm::Token {
