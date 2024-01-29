@@ -15,6 +15,8 @@ pub trait TryDecode: Sized {
     ///
     /// ## Example
     /// ```
+    /// use ethers::types::U256;
+    ///
     /// let data = [0;32].into();
     /// let balance = U256::try_decode(data.as_slice(), "balance").unwrap();
     /// ```

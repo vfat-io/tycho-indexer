@@ -162,6 +162,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_save_new_state() {
         // Adds a ExtractionState to the DB named "test_extractor" and asserts for it
         let mut conn = setup_db().await;
@@ -194,6 +195,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_get_state() {
         // Tests the get_state method of the gateway by loading the state named "setup_extractor"
         let mut conn = setup_db().await;
@@ -210,6 +212,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_get_non_existing_state() {
         // Tests the get_state method of the gateway by loading a state that does not exist
         let mut conn = setup_db().await;
@@ -223,6 +226,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_update_state() {
         let mut conn = setup_db().await;
         let gateway = get_dgw(&mut conn).await;
