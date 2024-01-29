@@ -76,3 +76,23 @@ CREATE INDEX IF NOT EXISTS idx_protocol_component_token_protocol_component_id ON
 
 CREATE INDEX IF NOT EXISTS idx_protocol_component_token_token_id ON protocol_component_holds_contract(contract_code_id);
 
+--  Saves the component balance of a protocol component.
+CREATE TABLE IF NOT EXISTS component_balance(
+    "id" bigserial PRIMARY KEY,
+    -- id of the token whose tvl changed
+    "token_id" bigint REFERENCES "token"(id) NOT NULL,
+    -- new balance of the token for this component
+    "new_balance" bytea NOT NULL,
+    -- the transaction that modified the tvl of this component
+    "modify_tx" bigint REFERENCES "transaction"(id) ON DELETE CASCADE NOT NULL,
+    -- Reference to static attributes of the protocol.
+    "protocol_component_id" bigint REFERENCES protocol_component(id) NOT NULL,
+    -- Timestamp this entry was inserted into this table.
+    "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- The ts at which this state became valid at.
+    "valid_from" timestamptz NOT NULL,
+    -- The ts at which this state stopped being valid at. Null if this
+    --	state is the currently valid entry.
+    "valid_to" timestamptz
+);
+

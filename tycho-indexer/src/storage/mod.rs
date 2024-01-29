@@ -80,7 +80,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
     hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolType},
     storage::postgres::orm,
@@ -250,6 +250,35 @@ pub trait StorableProtocolType<S, N, I>: Sized + Send + Sync + 'static {
 
     /// Converts a protocol type object to its storable representation (`N`).
     fn to_storage(&self) -> N;
+}
+
+/// Lays out the necessary interface needed to store and retrieve component balances
+/// from storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   component balance.
+/// * `N`: This represents the storage-specific data type used when converting from the component
+///   balance to storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the component balance.
+pub trait StorableComponentBalance<S, N, I>: Sized + Send + Sync + 'static {
+    /// Converts a protocol type object to its storable representation (`N`).
+    fn to_storage(
+        &self,
+        account_id: I,
+        modify_tx: I,
+        protocol_component_id: I,
+        block_ts: NaiveDateTime,
+    ) -> N;
+
+    /// Get a reference to the address of this contract.
+    fn token(&self) -> Address;
+
+    /// Get the transaction hash that modified this balance.
+    fn modify_tx(&self) -> TxHash;
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -558,6 +587,12 @@ pub trait ProtocolGateway {
         i64,
     >;
 
+    type ComponentBalance: StorableComponentBalance<
+        orm::ComponentBalance,
+        orm::NewComponentBalance,
+        i64,
+    >;
+
     /// Retrieve ProtocolComponent from the db
     ///
     /// # Parameters
@@ -663,6 +698,23 @@ pub trait ProtocolGateway {
         address: Option<&[&Address]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError>;
+
+    /// Saves multiple component balances to storage.
+    ///
+    /// # Parameters
+    /// - `chain` The chain of the token.
+    /// - `component_balances` The component balances to insert.
+    ///
+    /// # Return
+    /// Ok if all component balances could be inserted, Err if at least one token failed to
+    /// insert.
+    async fn add_component_balances(
+        &self,
+        chain: Chain,
+        component_balances: &[&Self::ComponentBalance],
+        block_ts: NaiveDateTime,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 
     /// Saves multiple tokens to storage.
     ///
@@ -1085,5 +1137,6 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         ProtocolStateDelta = ProtocolStateDelta,
         ProtocolType = ProtocolType,
         ProtocolComponent = ProtocolComponent,
+        ComponentBalance = ComponentBalance,
     >,
 >;
