@@ -345,6 +345,20 @@ pub trait ChainGateway {
         hash: &TxHash,
         db: &mut Self::DB,
     ) -> Result<Self::Transaction, StorageError>;
+
+    /// Reverts the storage to a previous version.
+    ///
+    /// This modification will delete version in storage. The state will be
+    /// reset to the passed version.
+    ///
+    /// # Parameters
+    /// - `to` The version to revert to. Given a block uses VersionKind::Last behaviour.
+    /// - `db` The database gateway.
+    async fn revert_state(
+        &self,
+        to: &BlockIdentifier,
+        db: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 }
 
 /// Store and retrieve state of Extractors.
@@ -705,20 +719,6 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<ProtocolStateDelta, StorageError>;
 
-    /// Reverts the storage to a previous version.
-    ///
-    /// This modification will delete version in storage. The state will be
-    /// reset to the passed version.
-    ///
-    /// # Parameters
-    /// - `to` The version to revert to. Given a block uses VersionKind::Last behaviour.
-    /// - `conn` The database gateway.
-    async fn revert_protocol_state(
-        &self,
-        to: &BlockIdentifier,
-        conn: &mut Self::DB,
-    ) -> Result<(), StorageError>;
-
     async fn _get_or_create_protocol_system_id(
         &self,
         protocol_system: String,
@@ -1045,20 +1045,6 @@ pub trait ContractStateGateway {
         end_version: &BlockOrTimestamp,
         db: &mut Self::DB,
     ) -> Result<Vec<Self::Delta>, StorageError>;
-
-    /// Reverts the storage to a previous version.
-    ///
-    /// This modification will delete version in storage. The state will be
-    /// reset to the passed version.
-    ///
-    /// # Parameters
-    /// - `to` The version to revert to. Given a block uses VersionKind::Last behaviour.
-    /// - `db` The database gateway.
-    async fn revert_state(
-        &self,
-        to: &BlockIdentifier,
-        db: &mut Self::DB,
-    ) -> Result<(), StorageError>;
 }
 
 pub trait StateGateway<DB>:
