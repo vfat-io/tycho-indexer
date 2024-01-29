@@ -956,7 +956,6 @@ mod test {
             db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
                 .await;
 
-        println!("account_id_weth: {}", account_id_weth);
         let _ = db_fixtures::insert_contract_code(
             conn,
             account_id_weth,
