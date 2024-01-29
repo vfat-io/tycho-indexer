@@ -9,29 +9,23 @@ use extractor::{
 };
 use models::Chain;
 
-use crate::{
-    extractor::{evm, ExtractionError},
-    services::ServicesBuilder,
-    storage::postgres::{self, cache::CachedGateway, PostgresGateway},
-};
 use actix_web::dev::ServerHandle;
 use clap::Parser;
 use std::sync::Arc;
 use tokio::{sync::mpsc, task, task::JoinHandle};
 use tracing::info;
 
-mod extractor;
-mod hex_bytes;
-mod models;
-mod pb;
-mod serde_helpers;
-mod services;
-mod storage;
-mod substreams;
-
-#[cfg(test)]
-#[macro_use]
-extern crate pretty_assertions;
+use tycho_indexer::{
+    extractor,
+    extractor::{evm, ExtractionError},
+    models,
+    models::{FinancialType, ImplementationType, ProtocolType},
+    services::ServicesBuilder,
+    storage::{
+        postgres,
+        postgres::{cache::CachedGateway, PostgresGateway},
+    },
+};
 
 /// Tycho Indexer using Substreams
 ///
@@ -128,7 +122,7 @@ async fn main() -> Result<(), ExtractionError> {
         }
     });
 
-    let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
+    let write_executor = postgres::cache::DBCacheWriteExecutor::new(
         "ethereum".to_owned(),
         Chain::Ethereum,
         pool.clone(),
@@ -169,8 +163,24 @@ async fn start_ambient_extractor(
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
     let ambient_name = "vm:ambient";
     let ambient_gw = AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, cached_gw);
-    let extractor =
-        AmbientContractExtractor::new(ambient_name, Chain::Ethereum, ambient_gw).await?;
+    let ambient_protocol_types = [(
+        "vm:pool".to_string(),
+        ProtocolType::new(
+            "ambient_pool".to_string(),
+            FinancialType::Swap,
+            None,
+            ImplementationType::Vm,
+        ),
+    )]
+    .into_iter()
+    .collect();
+    let extractor = AmbientContractExtractor::new(
+        ambient_name,
+        Chain::Ethereum,
+        ambient_gw,
+        ambient_protocol_types,
+    )
+    .await?;
 
     let start_block = args.start_block;
     let stop_block = args.stop_block();

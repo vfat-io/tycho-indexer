@@ -1910,6 +1910,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_upsert_slots_against_empty_db() {
         let mut conn = setup_db().await;
         let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
@@ -1995,6 +1996,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_upsert_slots_invalidate_db_side_records() {
         let mut conn = setup_db().await;
         let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
@@ -2132,6 +2134,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn get_slots_delta_forward() {
         let mut conn = setup_db().await;
         setup_slots_delta(&mut conn).await;
@@ -2166,6 +2169,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn get_slots_delta_backward() {
         let mut conn = setup_db().await;
         setup_slots_delta(&mut conn).await;
@@ -2205,6 +2209,7 @@ mod test {
     )]
     #[case::no_start_version(None)]
     #[tokio::test]
+
     async fn get_accounts_delta_backward(#[case] start_version: Option<BlockOrTimestamp>) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2260,6 +2265,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn get_accounts_delta_forward() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2318,6 +2324,7 @@ mod test {
     #[case::forward("2020-01-01T00:00:00", "2020-01-01T01:00:00")]
     #[case::backward("2020-01-01T01:00:00", "2020-01-01T00:00:00")]
     #[tokio::test]
+
     async fn get_accounts_delta_fail(#[case] start: &str, #[case] end: &str) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
