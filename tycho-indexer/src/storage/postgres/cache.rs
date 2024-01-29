@@ -24,7 +24,7 @@ use tracing::{
 };
 
 use crate::{
-    extractor::evm::{self, AccountUpdate, EVMStateGateway},
+    extractor::evm::{self, AccountUpdate, EVMStateGateway, ProtocolStateDelta},
     models::{Chain, ExtractionState},
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
 };
@@ -37,6 +37,7 @@ pub(crate) enum WriteOp {
     SaveExtractionState(ExtractionState),
     InsertContract(evm::Account),
     UpdateContracts(Vec<(TxHash, AccountUpdate)>),
+    UpsertProtocolState(Vec<(TxHash, evm::ProtocolStateDelta)>),
 }
 
 /// Represents a transaction in the database, including the block information,
@@ -360,6 +361,16 @@ impl DBCacheWriteExecutor {
                     .update_contracts(&self.chain, changes_slice, conn)
                     .await
             }
+            WriteOp::UpsertProtocolState(deltas) => {
+                let collected_changes: Vec<(TxHash, &evm::ProtocolStateDelta)> = deltas
+                    .iter()
+                    .map(|(tx, update)| (tx.clone(), update))
+                    .collect();
+                let changes_slice = collected_changes.as_slice();
+                self.state_gateway
+                    .update_protocol_states(&self.chain, changes_slice, conn)
+                    .await
+            }
         }
     }
 }
@@ -527,6 +538,24 @@ impl CachedGateway {
         lru_cache.put(key, delta.clone());
 
         Ok(delta)
+    }
+
+    pub async fn update_protocol_states(
+        &self,
+        block: &evm::Block,
+        new: &[(TxHash, ProtocolStateDelta)],
+    ) -> Result<(), StorageError> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx =
+            DBTransaction::new(*block, vec![WriteOp::UpsertProtocolState(new.to_owned())], tx);
+        self.tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await
+            .expect("Send message to receiver ok");
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
     }
 
     pub async fn flush(&self) -> Result<Result<(), StorageError>, RecvError> {
