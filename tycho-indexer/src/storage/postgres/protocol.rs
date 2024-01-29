@@ -174,8 +174,8 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{
-            account::dsl::*, contract_code::dsl::*, protocol_component::dsl::*,
-            protocol_component_holds_contract::dsl::*, protocol_holds_token::dsl::*, token::dsl::*,
+            account::dsl::*, protocol_component::dsl::*, protocol_component_holds_contract::dsl::*,
+            protocol_holds_token::dsl::*, token::dsl::*,
         };
         let mut values: Vec<orm::NewProtocolComponent> = Vec::with_capacity(new.len());
         let tx_hashes: Vec<TxHash> = new
@@ -318,7 +318,7 @@ where
             })
             .collect::<Vec<(i64, Address)>>();
 
-        let contract_add_by_id: HashMap<Address, i64> = contract_code
+        let contract_add_by_id: HashMap<Address, i64> = schema::contract_code::table
             .inner_join(account)
             .select((schema::account::address, schema::contract_code::id))
             .filter(schema::account::address.eq_any(contract_addresses))
@@ -340,15 +340,16 @@ where
                     .ok_or(StorageError::NotFound("".to_string(), "".to_string()))?;
                 Ok(orm::NewProtocolComponentHoldsContract {
                     protocol_component_id: *pc_id,
-                    contract_id: *t_id,
+                    contract_code_id: *t_id,
                 })
             })
             .collect();
 
         diesel::insert_into(protocol_component_holds_contract)
-            .values(&protocol_component_contract_junction?)
+            .values(&protocol_component_contract_junction.unwrap())
             .execute(conn)
-            .await?;
+            .await
+            .unwrap();
 
         Ok(())
     }
@@ -876,12 +877,22 @@ mod test {
         .await;
 
         // insert tokens
-        let weth_id =
+        let (account_id_weth, weth_id) =
             db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
                 .await;
-        let usdc_id =
+        let (account_id_usdc, usdc_id) =
             db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
                 .await;
+
+        println!("account_id_weth: {}", account_id_weth);
+        let _ = db_fixtures::insert_contract_code(
+            conn,
+            account_id_weth,
+            txn[0],
+            Bytes::from_str("C0C0C0").unwrap(),
+        )
+        .await;
+
         tx_hashes.to_vec()
     }
 
@@ -1263,7 +1274,7 @@ mod test {
             protocol_type_name: protocol_type_name_1,
             chain,
             tokens: vec![H160::from_str(WETH).unwrap()],
-            contract_ids: vec![],
+            contract_ids: vec![H160::from_str(WETH).unwrap()],
             static_attributes: HashMap::new(),
             change: ChangeType::Creation,
             creation_tx: H256::from_str(
@@ -1317,7 +1328,27 @@ mod test {
             .load::<orm::Token>(&mut conn)
             .await;
 
-        assert!(token.is_ok())
+        assert!(token.is_ok());
+
+        // assert component-contract junction table
+        let component_contract_junction = schema::protocol_component_holds_contract::table
+            .select((
+                schema::protocol_component_holds_contract::protocol_component_id,
+                schema::protocol_component_holds_contract::contract_code_id,
+            ))
+            .first::<(i64, i64)>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(component_contract_junction.0, inserted_data.id);
+
+        let contract = schema::contract_code::table
+            .select(schema::contract_code::all_columns)
+            .filter(schema::contract_code::id.eq(component_contract_junction.1))
+            .load::<orm::ContractCode>(&mut conn)
+            .await;
+
+        assert!(contract.is_ok())
     }
 
     fn create_test_protocol_component(id: &str) -> ProtocolComponent {
