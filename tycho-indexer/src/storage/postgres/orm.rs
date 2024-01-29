@@ -17,8 +17,8 @@ use crate::{
 use super::{
     schema::{
         account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
-        protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
-        token, transaction,
+        protocol_component, protocol_component_holds_contract, protocol_holds_token,
+        protocol_state, protocol_system, protocol_type, token, transaction,
     },
     versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
 };
@@ -374,6 +374,13 @@ impl ProtocolComponent {
             .get_results::<(i64, String)>(conn)
             .await
     }
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = protocol_component_holds_contract)]
+pub struct NewProtocolComponentHoldsContract {
+    pub protocol_component_id: i64,
+    pub contract_id: i64,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
