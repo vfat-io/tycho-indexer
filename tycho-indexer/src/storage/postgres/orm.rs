@@ -16,9 +16,9 @@ use crate::{
 
 use super::{
     schema::{
-        account, account_balance, block, chain, contract_code, contract_storage, extraction_state,
-        protocol_component, protocol_holds_token, protocol_state, protocol_system, protocol_type,
-        token, transaction,
+        account, account_balance, block, chain, component_balance, contract_code, contract_storage,
+        extraction_state, protocol_component, protocol_holds_token, protocol_state,
+        protocol_system, protocol_type, token, transaction,
     },
     versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
 };
@@ -306,6 +306,108 @@ pub struct ProtocolType {
     pub implementation: ImplementationType,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+}
+
+#[derive(Identifiable, Queryable, Selectable)]
+#[diesel(table_name = component_balance)]
+#[diesel(belongs_to(ProtocolComponent))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ComponentBalance {
+    pub id: i64,
+    pub token_id: i64,
+    pub new_balance: Balance,
+    pub modify_tx: i64,
+    pub protocol_component_id: i64,
+    pub inserted_ts: NaiveDateTime,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
+}
+
+#[async_trait]
+impl StoredVersionedRow for ComponentBalance {
+    type EntityId = (i64, i64);
+    type PrimaryKey = i64;
+    type Version = NaiveDateTime;
+
+    fn get_pk(&self) -> Self::PrimaryKey {
+        self.id
+    }
+
+    fn get_valid_to(&self) -> Self::Version {
+        self.valid_to.expect("valid to set")
+    }
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        (self.protocol_component_id, self.token_id)
+    }
+
+    // Clippy false positive
+    #[allow(clippy::mutable_key_type)]
+    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Box<Self>>, StorageError> {
+        let (component_ids, token_ids): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
+
+        let tuple_ids = component_ids
+            .iter()
+            .zip(token_ids.iter())
+            .collect::<HashSet<_>>();
+
+        Ok(component_balance::table
+            .select(ComponentBalance::as_select())
+            .into_boxed()
+            .filter(
+                component_balance::protocol_component_id
+                    .eq_any(&component_ids)
+                    .and(component_balance::token_id.eq_any(&token_ids))
+                    .and(component_balance::valid_to.is_null()),
+            )
+            .get_results(conn)
+            .await?
+            .into_iter()
+            .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.token_id)))
+            .map(Box::new)
+            .collect())
+    }
+
+    fn table_name() -> &'static str {
+        "component_balance"
+    }
+}
+
+#[derive(AsChangeset, Insertable)]
+#[diesel(table_name = component_balance)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewComponentBalance {
+    pub token_id: i64,
+    pub new_balance: Balance,
+    pub modify_tx: i64,
+    pub protocol_component_id: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
+}
+
+impl VersionedRow for NewComponentBalance {
+    type SortKey = (i64, i64, NaiveDateTime);
+    type EntityId = (i64, i64);
+    type Version = NaiveDateTime;
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        (self.protocol_component_id, self.token_id)
+    }
+
+    fn get_sort_key(&self) -> Self::SortKey {
+        (self.protocol_component_id, self.token_id, self.valid_from)
+    }
+
+    fn set_valid_to(&mut self, end_version: Self::Version) {
+        self.valid_to = Some(end_version);
+    }
+
+    fn get_valid_from(&self) -> Self::Version {
+        self.valid_from
+    }
 }
 
 #[derive(AsChangeset, Insertable)]
