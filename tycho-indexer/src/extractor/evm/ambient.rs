@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use std::{str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use diesel_async::{
@@ -17,7 +17,7 @@ use super::{AccountUpdate, Block};
 use crate::{
     extractor::{evm, ExtractionError, Extractor, ExtractorMsg},
     hex_bytes::Bytes,
-    models::{Chain, ExtractionState, ExtractorIdentity},
+    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
@@ -40,6 +40,7 @@ pub struct AmbientContractExtractor<G> {
     // TODO: There is not reason this needs to be shared
     // try removing the Mutex
     inner: Arc<Mutex<Inner>>,
+    protocol_types: HashMap<String, ProtocolType>,
 }
 
 impl<DB> AmbientContractExtractor<DB> {
@@ -66,6 +67,9 @@ pub struct AmbientPgGateway {
 #[async_trait]
 pub trait AmbientGateway: Send + Sync {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
+
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]);
+
     async fn upsert_contract(
         &self,
         changes: &evm::BlockContractChanges,
@@ -83,6 +87,14 @@ pub trait AmbientGateway: Send + Sync {
 impl AmbientPgGateway {
     pub fn new(name: &str, chain: Chain, pool: Pool<AsyncPgConnection>, gw: CachedGateway) -> Self {
         AmbientPgGateway { name: name.to_owned(), chain, pool, state_gateway: gw }
+    }
+
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
+        let mut conn = self.pool.get().await.unwrap();
+        self.state_gateway
+            .add_protocol_types(new_protocol_types, &mut *conn)
+            .await
+            .expect("Couldn't insert protocol types");
     }
 
     #[instrument(skip_all)]
@@ -194,6 +206,10 @@ impl AmbientGateway for AmbientPgGateway {
         self.get_last_cursor(&mut conn).await
     }
 
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
+        todo!()
+    }
+
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn upsert_contract(
         &self,
@@ -233,7 +249,12 @@ impl<G> AmbientContractExtractor<G>
 where
     G: AmbientGateway,
 {
-    pub async fn new(name: &str, chain: Chain, gateway: G) -> Result<Self, ExtractionError> {
+    pub async fn new(
+        name: &str,
+        chain: Chain,
+        gateway: G,
+        protocol_types: HashMap<String, ProtocolType>,
+    ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
             Err(StorageError::NotFound(_, _)) => AmbientContractExtractor {
@@ -245,6 +266,7 @@ where
                     last_processed_block: None,
                 })),
                 protocol_system: "ambient".to_string(),
+                protocol_types,
             },
             Ok(cursor) => AmbientContractExtractor {
                 gateway,
@@ -252,9 +274,12 @@ where
                 chain,
                 inner: Arc::new(Mutex::new(Inner { cursor, last_processed_block: None })),
                 protocol_system: "ambient".to_string(),
+                protocol_types,
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
+
+        res.ensure_protocol_types().await;
         Ok(res)
     }
 }
@@ -266,6 +291,18 @@ where
 {
     fn get_id(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.name)
+    }
+
+    /// Make sure that the protocol types are present in the database.
+    async fn ensure_protocol_types(&self) {
+        let protocol_types: Vec<ProtocolType> = self
+            .protocol_types
+            .values()
+            .cloned()
+            .collect();
+        self.gateway
+            .ensure_protocol_types(&protocol_types)
+            .await;
     }
 
     async fn get_cursor(&self) -> String {
@@ -296,14 +333,16 @@ where
 
         debug!(?raw_msg, "Received message");
 
-        // TODO: figure out how/where to get this ID from (in ENG-2049)
-        let protocol_type_id = String::from("id-1");
+        let protocol_type = self
+            .protocol_types
+            .get("vm:pool")
+            .expect("Couldn't find Protocol Type");
         let msg = match evm::BlockContractChanges::try_from_message(
             raw_msg,
             &self.name,
             self.chain,
             self.protocol_system.clone(),
-            protocol_type_id,
+            protocol_type.name.clone(),
         ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
@@ -374,19 +413,45 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{extractor::evm, pb::sf::substreams::v1::BlockRef};
+    use crate::{
+        extractor::evm,
+        models::{FinancialType, ImplementationType},
+        pb::sf::substreams::v1::BlockRef,
+    };
 
     use super::*;
 
+    fn ambient_protocol_types() -> HashMap<String, ProtocolType> {
+        let mut ambient_protocol_types = HashMap::new();
+        ambient_protocol_types.insert(
+            "vm:pool".to_string(),
+            ProtocolType::new(
+                "ambient_pool".to_string(),
+                FinancialType::Swap,
+                None,
+                ImplementationType::Vm,
+            ),
+        );
+        ambient_protocol_types
+    }
     #[tokio::test]
     async fn test_get_cursor() {
         let mut gw = MockAmbientGateway::new();
+        gw.expect_ensure_protocol_types()
+            .times(1)
+            .returning(|_| ());
         gw.expect_get_cursor()
             .times(1)
             .returning(|| Ok("cursor".into()));
-        let extractor = AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, gw)
-            .await
-            .expect("extractor init ok");
+
+        let extractor = AmbientContractExtractor::new(
+            "vm:ambient",
+            Chain::Ethereum,
+            gw,
+            ambient_protocol_types(),
+        )
+        .await
+        .expect("extractor init ok");
 
         let res = extractor.get_cursor().await;
 
@@ -407,15 +472,23 @@ mod test {
     #[tokio::test]
     async fn test_handle_tick_scoped_data() {
         let mut gw = MockAmbientGateway::new();
+        gw.expect_ensure_protocol_types()
+            .times(1)
+            .returning(|_| ());
         gw.expect_get_cursor()
             .times(1)
             .returning(|| Ok("cursor".into()));
         gw.expect_upsert_contract()
             .times(1)
             .returning(|_, _| Ok(()));
-        let extractor = AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, gw)
-            .await
-            .expect("extractor init ok");
+        let extractor = AmbientContractExtractor::new(
+            "vm:ambient",
+            Chain::Ethereum,
+            gw,
+            ambient_protocol_types(),
+        )
+        .await
+        .expect("extractor init ok");
         let inp = evm::fixtures::pb_block_scoped_data(block_contract_changes_ok());
         let exp = Ok(Some(()));
 
@@ -431,15 +504,23 @@ mod test {
     #[tokio::test]
     async fn test_handle_tick_scoped_data_skip() {
         let mut gw = MockAmbientGateway::new();
+        gw.expect_ensure_protocol_types()
+            .times(1)
+            .returning(|_| ());
         gw.expect_get_cursor()
             .times(1)
             .returning(|| Ok("cursor".into()));
         gw.expect_upsert_contract()
             .times(0)
             .returning(|_, _| Ok(()));
-        let extractor = AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, gw)
-            .await
-            .expect("extractor init ok");
+        let extractor = AmbientContractExtractor::new(
+            "vm:ambient",
+            Chain::Ethereum,
+            gw,
+            ambient_protocol_types(),
+        )
+        .await
+        .expect("extractor init ok");
         let inp = evm::fixtures::pb_block_scoped_data(());
 
         let _res = extractor
@@ -461,6 +542,9 @@ mod test {
     #[tokio::test]
     async fn test_handle_revert() {
         let mut gw: MockAmbientGateway = MockAmbientGateway::new();
+        gw.expect_ensure_protocol_types()
+            .times(1)
+            .returning(|_| ());
         gw.expect_get_cursor()
             .times(1)
             .returning(|| Ok("cursor".into()));
@@ -483,9 +567,14 @@ mod test {
             })
             .times(1)
             .returning(|_, _, _| Ok(evm::BlockAccountChanges::default()));
-        let extractor = AmbientContractExtractor::new("vm:ambient", Chain::Ethereum, gw)
-            .await
-            .expect("extractor init ok");
+        let extractor = AmbientContractExtractor::new(
+            "vm:ambient",
+            Chain::Ethereum,
+            gw,
+            ambient_protocol_types(),
+        )
+        .await
+        .expect("extractor init ok");
 
         // Call handle_tick_scoped_data to initialize the last processed block.
         let inp = evm::fixtures::pb_block_scoped_data(block_contract_changes_ok());

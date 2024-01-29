@@ -363,7 +363,7 @@ pub mod pg {
             Ok(evm::ProtocolComponent {
                 id: val.external_id,
                 protocol_system: protocol_system.to_owned(),
-                protocol_type_id: val.protocol_type_id.to_string(),
+                protocol_type_name: val.protocol_type_id.to_string(),
                 chain,
                 tokens,
                 contract_ids,
@@ -378,17 +378,10 @@ pub mod pg {
             &self,
             chain_id: i64,
             protocol_system_id: i64,
+            protocol_type_id: i64,
             creation_tx: i64,
             created_at: NaiveDateTime,
         ) -> Result<orm::NewProtocolComponent, StorageError> {
-            let protocol_type_id = self
-                .protocol_type_id
-                .parse::<i64>()
-                .map_err(|err| {
-                    StorageError::DecodeError(
-                        "Could not parse protocol type id in StorableComponent".to_string(),
-                    )
-                })?;
             Ok(orm::NewProtocolComponent {
                 external_id: self.id.clone(),
                 chain_id,
@@ -634,7 +627,7 @@ mod test {
         let protocol_component = result.unwrap();
 
         assert_eq!(protocol_component.id, val.external_id.to_string());
-        assert_eq!(protocol_component.protocol_type_id, val.protocol_type_id.to_string());
+        assert_eq!(protocol_component.protocol_type_name, val.protocol_type_id.to_string());
         assert_eq!(protocol_component.chain, chain);
         assert_eq!(protocol_component.tokens, tokens);
         assert_eq!(protocol_component.contract_ids, contract_ids);
@@ -657,7 +650,7 @@ mod test {
         let protocol_component = evm::ProtocolComponent {
             id: "sample_contract_id".to_string(),
             protocol_system: "ambient".to_string(),
-            protocol_type_id: "42".to_string(),
+            protocol_type_name: "ambient_pool".to_string(),
             chain: Chain::Ethereum,
             tokens: vec![
                 H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
@@ -680,9 +673,16 @@ mod test {
 
         let chain_id = 1;
         let protocol_system_id = 2;
+        let protocol_type_id = 42;
         let creation_ts = Utc::now().naive_utc();
 
-        let result = protocol_component.to_storage(chain_id, protocol_system_id, 0, creation_ts);
+        let result = protocol_component.to_storage(
+            chain_id,
+            protocol_system_id,
+            protocol_type_id,
+            0,
+            creation_ts,
+        );
 
         assert!(result.is_ok());
 

@@ -317,7 +317,15 @@ pub struct NewProtocolType {
     pub attribute_schema: Option<serde_json::Value>,
     pub implementation: ImplementationType,
 }
-
+impl ProtocolType {
+    pub async fn id_by_name(name: &String, conn: &mut AsyncPgConnection) -> QueryResult<i64> {
+        protocol_type::table
+            .filter(protocol_type::name.eq(name))
+            .select(protocol_type::id)
+            .first::<i64>(conn)
+            .await
+    }
+}
 #[derive(Identifiable, Queryable, Associations, Selectable, Clone, Debug, PartialEq)]
 #[diesel(belongs_to(Chain))]
 #[diesel(belongs_to(ProtocolType))]
