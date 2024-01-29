@@ -248,7 +248,7 @@ where
             })
             .collect();
 
-        // establish component-contract junction
+        // establish component-token junction
         let token_addresses: HashSet<Address> = filtered_new_protocol_components
             .iter()
             .flat_map(|pc| pc.get_byte_token_addresses())
@@ -299,7 +299,7 @@ where
             .execute(conn)
             .await?;
 
-        // establish component-ontract junction
+        // establish component-contract junction
         let contract_addresses: HashSet<Address> = new
             .iter()
             .flat_map(|pc| pc.get_byte_contract_addresses())
