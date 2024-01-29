@@ -380,7 +380,7 @@ impl ProtocolComponent {
 #[diesel(table_name = protocol_component_holds_contract)]
 pub struct NewProtocolComponentHoldsContract {
     pub protocol_component_id: i64,
-    pub contract_id: i64,
+    pub contract_code_id: i64,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
