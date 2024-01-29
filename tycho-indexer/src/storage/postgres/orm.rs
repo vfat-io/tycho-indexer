@@ -543,6 +543,7 @@ impl ProtocolState {
         end_ts: NaiveDateTime,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(ComponentId, AttrStoreKey)>> {
+        // subquery to exclude entities that have a valid version at end_ts (haven't been deleted)
         let sub_query = format!("NOT EXISTS (
                                 SELECT 1 FROM protocol_state ps2
                                 WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
@@ -563,8 +564,6 @@ impl ProtocolState {
                     .le(end_ts)
                     .and(protocol_state::valid_to.ge(start_ts)),
             )
-            // subquery to exclude entities that have a valid version at end_ts (haven't been
-            // deleted)
             .filter(sql::<Bool>(&sub_query))
             .order_by((
                 protocol_state::protocol_component_id,

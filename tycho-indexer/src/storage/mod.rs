@@ -690,7 +690,7 @@ pub trait ProtocolGateway {
 
     /// Retrieve protocol state changes
     ///
-    /// Fetches all state changes that occurred for the given protocol ids/system
+    /// Fetches all state changes that occurred for the given chain
     ///
     /// # Parameters
     /// - `chain` The chain of the component
