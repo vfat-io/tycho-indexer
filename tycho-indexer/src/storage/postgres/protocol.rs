@@ -21,10 +21,10 @@ use crate::{
             orm::{Account, NewAccount},
             schema, PostgresGateway,
         },
-        Address, BlockIdentifier, BlockOrTimestamp, ChangeType, ContractDelta, ContractId,
+        Address, BlockIdentifier, BlockOrTimestamp, ComponentId, ContractDelta, ContractId,
         ProtocolGateway, StorableBlock, StorableContract, StorableProtocolComponent,
         StorableProtocolState, StorableProtocolStateDelta, StorableProtocolType, StorableToken,
-        StorableTransaction, StorageError, TxHash, Version,
+        StorableTransaction, StorageError, StoreVal, TxHash, Version,
     },
 };
 
@@ -56,15 +56,11 @@ where
     ///
     /// ## Returns:
     /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
-    fn _decode_protocol_states<F, P>(
+    fn _decode_protocol_states(
         &self,
-        result: Result<Vec<(orm::ProtocolState, String, Bytes)>, diesel::result::Error>,
+        result: Result<Vec<(orm::ProtocolState, ComponentId, StoreVal)>, diesel::result::Error>,
         context: &str,
-        mut from_storage_fn: F,
-    ) -> Result<Vec<P>, StorageError>
-    where
-        F: FnMut(Vec<orm::ProtocolState>, String, &Bytes) -> Result<P, StorageError>,
-    {
+    ) -> Result<Vec<ProtocolState>, StorageError> {
         match result {
             Ok(data_vec) => {
                 let mut protocol_states = Vec::new();
@@ -82,7 +78,7 @@ where
                     let states_slice = &data_vec[component_start..i];
                     let tx_hash = &states_slice.last().unwrap().2; // Last element has the latest transaction
 
-                    let protocol_state = from_storage_fn(
+                    let protocol_state = ProtocolState::from_storage(
                         states_slice
                             .iter()
                             .map(|x| x.0.clone())
@@ -97,107 +93,6 @@ where
             }
 
             Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
-        }
-    }
-
-    async fn _get_protocol_states_delta_forward(
-        &self,
-        chain: &Chain,
-        start_ts: NaiveDateTime,
-        end_ts: NaiveDateTime,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<ProtocolStateDelta>, StorageError> {
-        // Going forward
-        //                  ]     changes to update   ]
-        // -----------------|--------------------------|
-        //                start                     target
-        // We query for state updates between start and target version. We also query for
-        // deleted states between start and target version. We then merge the two
-        // sets of results.
-
-        let chain_db_id = self.get_chain_id(chain);
-
-        // Filter by chain
-        let mut deltas = self._decode_protocol_states(
-            orm::ProtocolState::by_chain(chain_db_id, Some(start_ts), Some(end_ts), conn).await,
-            chain.to_string().as_str(),
-            |states, id, hash| {
-                ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Update)
-            },
-        )?;
-        let deleted_deltas = self._decode_protocol_states(
-            orm::ProtocolState::deleted_by_chain(chain_db_id, start_ts, end_ts, conn).await,
-            chain.to_string().as_str(),
-            |states, id, hash| {
-                ProtocolStateDelta::from_storage(states, id, hash, ChangeType::Deletion)
-            },
-        )?;
-        deltas.extend(deleted_deltas);
-
-        Ok(deltas)
-    }
-
-    async fn _get_protocol_states_delta_backward(
-        &self,
-        chain: &Chain,
-        start_ts: NaiveDateTime,
-        end_ts: NaiveDateTime,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<ProtocolStateDelta>, StorageError> {
-        // Going backwards
-        //                  ]     changes to revert    ]
-        // -----------------|--------------------------|
-        //                target                     start
-        // We query for the previous values of all component attributes updated between
-        // start and target version.
-
-        let chain_db_id = self.get_chain_id(chain);
-
-        let result =
-            orm::ProtocolState::reverted_by_chain(chain_db_id, start_ts, end_ts, conn).await;
-        match result {
-            Ok(data_vec) => {
-                let mut deltas = Vec::new();
-
-                let mut i = 0;
-                while i < data_vec.len() {
-                    let component_start = i;
-                    let current_component_id = &data_vec[i].0;
-
-                    // Iterate until the component_id changes
-                    while i < data_vec.len() && &data_vec[i].0 == current_component_id {
-                        i += 1;
-                    }
-
-                    let states_slice = &data_vec[component_start..i];
-
-                    let mut updates = HashMap::new();
-                    let mut deleted = HashSet::new();
-                    for (component, attribute, value) in states_slice {
-                        if let Some(value) = value {
-                            updates.insert(attribute.clone(), value.clone());
-                        } else {
-                            deleted.insert(attribute.clone());
-                        }
-                    }
-                    let state_delta = ProtocolStateDelta {
-                        component_id: current_component_id.clone(),
-                        updated_attributes: updates,
-                        deleted_attributes: deleted,
-                    };
-
-                    deltas.push(state_delta);
-                }
-
-                Ok(deltas)
-            }
-
-            Err(err) => Err(StorageError::from_diesel(
-                err,
-                "ProtocolStates",
-                chain.to_string().as_str(),
-                None,
-            )),
         }
     }
 }
@@ -390,32 +285,27 @@ where
             (Some(ids), Some(system)) => {
                 warn!("Both protocol IDs and system were provided. System will be ignored.");
                 self._decode_protocol_states(
-                    orm::ProtocolState::by_id(ids, chain_db_id, None, version_ts, conn).await,
+                    orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
                     ids.join(",").as_str(),
-                    ProtocolState::from_storage,
                 )
             }
             (Some(ids), _) => self._decode_protocol_states(
-                orm::ProtocolState::by_id(ids, chain_db_id, None, version_ts, conn).await,
+                orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
                 ids.join(",").as_str(),
-                ProtocolState::from_storage,
             ),
             (_, Some(system)) => self._decode_protocol_states(
                 orm::ProtocolState::by_protocol_system(
                     system.clone(),
                     chain_db_id,
-                    None,
                     version_ts,
                     conn,
                 )
                 .await,
                 system.to_string().as_str(),
-                ProtocolState::from_storage,
             ),
             _ => self._decode_protocol_states(
-                orm::ProtocolState::by_chain(chain_db_id, None, version_ts, conn).await,
+                orm::ProtocolState::by_chain(chain_db_id, version_ts, conn).await,
                 chain.to_string().as_str(),
-                ProtocolState::from_storage,
             ),
         }
     }
@@ -670,37 +560,153 @@ where
         };
         let end_ts = end_version.to_ts(conn).await?;
 
-        let deltas;
-
         if start_ts <= end_ts {
-            let all_deltas = self
-                ._get_protocol_states_delta_forward(chain, start_ts, end_ts, conn)
-                .await?;
-            // Aggregate - group by component_id and merge states.
-            let mut grouped: HashMap<String, ProtocolStateDelta> = HashMap::new();
-            for delta in all_deltas {
-                let key = delta.component_id.clone();
-                if let Some(existing_state) = grouped.get_mut(&key) {
-                    existing_state
-                        .merge(delta)
-                        .map_err(|err| {
-                            StorageError::DecodeError(format!(
-                                "Failed to merge protocol states: {}",
-                                err
-                            ))
-                        })?;
-                } else {
-                    grouped.insert(key, delta);
-                }
-            }
-            deltas = grouped.into_values().collect();
-        } else {
-            deltas = self
-                ._get_protocol_states_delta_backward(chain, start_ts, end_ts, conn)
-                .await?;
-        }
+            // Going forward
+            //                  ]     changes to update   ]
+            // -----------------|--------------------------|
+            //                start                     target
+            // We query for state updates between start and target version. We also query for
+            // deleted states between start and target version. We then merge the two
+            // sets of results.
 
-        Ok(deltas)
+            let chain_db_id = self.get_chain_id(chain);
+
+            // fetch deleted component attributes
+            let deleted_attrs = orm::ProtocolState::deleted_attributes_by_chain(
+                chain_db_id,
+                start_ts,
+                end_ts,
+                conn,
+            )
+            .await;
+
+            // fetch updated component attributes
+            let state_updates =
+                orm::ProtocolState::deltas_by_chain(chain_db_id, start_ts, end_ts, conn).await;
+
+            // decode final state deltas
+            match state_updates {
+                Ok(data_vec) => {
+                    let mut protocol_states = Vec::new();
+
+                    let deleted_vec = match deleted_attrs {
+                        Ok(value) => value,
+                        Err(_) => Vec::new(),
+                    };
+
+                    // Variable to keep track of current position in deleted_vec
+                    let mut j = 0;
+
+                    // Variable to keep track of current position in data_vec
+                    let mut i = 0;
+
+                    while i < data_vec.len() {
+                        let component_start = i;
+                        let current_component_id = &data_vec[i].1;
+
+                        // Iterate over states until the component_id changes
+                        while i < data_vec.len() && &data_vec[i].1 == current_component_id {
+                            i += 1;
+                        }
+
+                        let deleted_start = j;
+                        // Iterate over deleted attributes until the component_id changes
+                        while j < deleted_vec.len() && &deleted_vec[j].0 == current_component_id {
+                            j += 1;
+                        }
+
+                        let states_slice = &data_vec[component_start..i];
+                        let tx_hash = &states_slice.last().unwrap().2; // Last element has the latest transaction
+                        let deleted_slice = &deleted_vec[deleted_start..j];
+
+                        let protocol_state = ProtocolStateDelta::from_storage(
+                            states_slice
+                                .iter()
+                                .map(|x| x.0.clone())
+                                .collect(),
+                            current_component_id.clone(),
+                            tx_hash,
+                            deleted_slice
+                                .iter()
+                                .map(|x| x.1.clone())
+                                .collect::<Vec<String>>(),
+                        )?;
+
+                        protocol_states.push(protocol_state);
+                    }
+                    Ok(protocol_states)
+                }
+
+                Err(err) => Err(StorageError::from_diesel(
+                    err,
+                    "ProtocolStates",
+                    chain.to_string().as_str(),
+                    None,
+                )),
+            }
+        } else {
+            // Going backwards
+            //                  ]     changes to revert    ]
+            // -----------------|--------------------------|
+            //                target                     start
+            // We query for the previous values of all component attributes updated between
+            // start and target version.
+
+            let chain_db_id = self.get_chain_id(chain);
+
+            let result =
+                orm::ProtocolState::reverted_by_chain(chain_db_id, start_ts, end_ts, conn).await;
+
+            match result {
+                Ok(data_vec) => {
+                    let mut deltas = Vec::new();
+
+                    let mut i = 0;
+                    while i < data_vec.len() {
+                        let component_start = i;
+                        let current_component_id = &data_vec[i].0;
+
+                        // Iterate until the component_id changes
+                        while i < data_vec.len() && &data_vec[i].0 == current_component_id {
+                            i += 1;
+                        }
+
+                        let states_slice = &data_vec[component_start..i];
+
+                        // sort through state updates and deletions
+                        let mut updates = HashMap::new();
+                        let mut deleted = HashSet::new();
+                        for (component, attribute, prev_value) in states_slice {
+                            if let Some(value) = prev_value {
+                                // if prev_value is not null, then the attribute was updated and
+                                // must be reverted via a reversed update
+                                updates.insert(attribute.clone(), value.clone());
+                            } else {
+                                // if prev_value is null, then the attribute was created and must be
+                                // deleted on revert
+                                deleted.insert(attribute.clone());
+                            }
+                        }
+                        let state_delta = ProtocolStateDelta {
+                            component_id: current_component_id.clone(),
+                            updated_attributes: updates,
+                            deleted_attributes: deleted,
+                        };
+
+                        deltas.push(state_delta);
+                    }
+
+                    Ok(deltas)
+                }
+
+                Err(err) => Err(StorageError::from_diesel(
+                    err,
+                    "ProtocolStates",
+                    chain.to_string().as_str(),
+                    None,
+                )),
+            }
+        }
     }
 
     async fn revert_protocol_state(

@@ -112,6 +112,9 @@ pub type Balance = Bytes;
 /// Key literal type of the contract store.
 pub type StoreKey = Bytes;
 
+/// Key literal type of the attribute store.
+pub type AttrStoreKey = String;
+
 /// Value literal type of the contract store.
 pub type StoreVal = Bytes;
 
@@ -120,6 +123,9 @@ pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
 
 /// Multiple key values stores grouped by account address.
 pub type AccountToContractStore = HashMap<Address, ContractStore>;
+
+/// Component id literal type to uniquely identify a component.
+pub type ComponentId = String;
 
 /// Identifies a block in storage.
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
@@ -528,7 +534,7 @@ pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
         val: Vec<S>,
         component_id: String,
         tx_hash: &TxHash,
-        change: ChangeType,
+        deleted_attributes: Vec<AttrStoreKey>,
     ) -> Result<Self, StorageError>;
 
     fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> Vec<N>;

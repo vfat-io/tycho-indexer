@@ -18,7 +18,7 @@ use crate::{
     hex_bytes::Bytes,
     models::{Chain, ExtractorIdentity, NormalisedMessage},
     pb::tycho::evm::v1 as substreams,
-    storage::{ChangeType, StateGatewayType},
+    storage::{AttrStoreKey, ChangeType, ComponentId, StateGatewayType, StoreVal},
 };
 
 use self::utils::TryDecode;
@@ -501,7 +501,7 @@ pub struct ProtocolComponent {
     /// address or in the case of a one-to-many relationship it could be something like
     /// 'USDC-ETH'. This is for example the case with ambient, where one contract is
     /// responsible for multiple components.
-    pub id: String,
+    pub id: ComponentId,
     // what system this component belongs to
     pub protocol_system: String,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
@@ -513,7 +513,7 @@ pub struct ProtocolComponent {
     // addresses of the related contracts
     pub contract_ids: Vec<H160>,
     // stores the static attributes
-    pub static_attributes: HashMap<String, Bytes>,
+    pub static_attributes: HashMap<AttrStoreKey, StoreVal>,
     // the type of change (creation, deletion etc)
     pub change: ChangeType,
     // Hash of the transaction in which the component got created
@@ -678,15 +678,19 @@ impl BlockContractChanges {
 /// Represents the dynamic data of `ProtocolComponent`.
 pub struct ProtocolState {
     // associates back to a component, which has metadata like type, tokens, etc.
-    pub component_id: String,
+    pub component_id: ComponentId,
     // the protocol specific attributes, validated by the components schema
-    pub attributes: HashMap<String, Bytes>,
+    pub attributes: HashMap<AttrStoreKey, StoreVal>,
     // via transaction, we can trace back when this state became valid
     pub modify_tx: H256,
 }
 
 impl ProtocolState {
-    pub fn new(component_id: String, attributes: HashMap<String, Bytes>, modify_tx: H256) -> Self {
+    pub fn new(
+        component_id: ComponentId,
+        attributes: HashMap<AttrStoreKey, StoreVal>,
+        modify_tx: H256,
+    ) -> Self {
         Self { component_id, attributes, modify_tx }
     }
 }
@@ -695,16 +699,16 @@ impl ProtocolState {
 /// Represents a change in protocol state.
 pub struct ProtocolStateDelta {
     // associates back to a component, which has metadata like type, tokens, etc.
-    pub component_id: String,
+    pub component_id: ComponentId,
     // the update protocol specific attributes, validated by the components schema
-    pub updated_attributes: HashMap<String, Bytes>,
+    pub updated_attributes: HashMap<AttrStoreKey, StoreVal>,
     // the deleted protocol specific attributes
-    pub deleted_attributes: HashSet<String>,
+    pub deleted_attributes: HashSet<AttrStoreKey>,
 }
 
 // TODO: remove dead code check skip once extractor is implemented
 impl ProtocolStateDelta {
-    pub fn new(component_id: String, attributes: HashMap<String, Bytes>) -> Self {
+    pub fn new(component_id: ComponentId, attributes: HashMap<AttrStoreKey, StoreVal>) -> Self {
         Self { component_id, updated_attributes: attributes, deleted_attributes: HashSet::new() }
     }
 

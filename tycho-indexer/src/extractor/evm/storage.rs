@@ -16,8 +16,6 @@ use chrono::NaiveDateTime;
 use std::collections::HashMap;
 
 pub mod pg {
-    use std::collections::HashSet;
-
     use crate::{
         extractor::evm::utils::pad_and_parse_h160,
         hex_bytes::Bytes,
@@ -35,7 +33,7 @@ pub mod pg {
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
 
-    use self::storage::StorableProtocolStateDelta;
+    use self::storage::{AttrStoreKey, StorableProtocolStateDelta};
 
     use super::*;
 
@@ -454,25 +452,18 @@ pub mod pg {
             vals: Vec<orm::ProtocolState>,
             component_id: String,
             tx_hash: &TxHash,
-            change: ChangeType,
+            deleted_attributes: Vec<AttrStoreKey>,
         ) -> Result<Self, StorageError> {
             let mut attr = HashMap::new();
             for val in vals {
                 attr.insert(val.attribute_name, val.attribute_value);
             }
 
-            match change {
-                ChangeType::Deletion => Ok(evm::ProtocolStateDelta {
-                    component_id,
-                    updated_attributes: HashMap::new(),
-                    deleted_attributes: attr.into_keys().collect(),
-                }),
-                _ => Ok(evm::ProtocolStateDelta {
-                    component_id,
-                    updated_attributes: attr,
-                    deleted_attributes: HashSet::new(),
-                }),
-            }
+            Ok(evm::ProtocolStateDelta {
+                component_id,
+                updated_attributes: attr,
+                deleted_attributes: deleted_attributes.into_iter().collect(),
+            })
         }
 
         // When stored, protocol states are divided into multiple protocol state db entities - one
