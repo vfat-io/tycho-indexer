@@ -1226,7 +1226,7 @@ mod test {
             .expect("Failed to fetch transaction id");
         db_fixtures::insert_protocol_state(
             &mut conn,
-            protocol_component_id.clone(),
+            protocol_component_id,
             txn_id,
             "to_delete".to_owned(),
             Bytes::from(U256::from(1000)),
