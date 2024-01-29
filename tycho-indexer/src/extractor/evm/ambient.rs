@@ -293,6 +293,7 @@ where
         ExtractorIdentity::new(self.chain, &self.name)
     }
 
+    /// Make sure that the protocol types are present in the database.
     async fn ensure_protocol_types(&self) {
         let protocol_types: Vec<ProtocolType> = self
             .protocol_types
