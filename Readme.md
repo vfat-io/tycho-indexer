@@ -248,8 +248,10 @@ diesel migration run --migration-dir ./tycho-indexer/migrations
 1. Please also make sure that the following commands pass if you have changed the code:
 
 ```sh
+# alternatively use ./check.sh
 cargo check --all
-cargo nextest run --workspace --all-features --all-targets
+cargo nextest run --workspace --all-targets --all-features -E 'not test(serial_db)'
+cargo nextest run --workspace --all-targets --all-features -E 'test(serial_db)'
 cargo +nightly fmt -- --check
 cargo +nightly clippy --all --all-features --all-targets -- -D warnings
 ```
@@ -276,6 +278,14 @@ and use the following VSCode user settings:
 "editor.defaultFormatter": "rust-lang.rust-analyzer"
 }
 ```
+
+### Tests
+
+Currently Tycho exposes a single special [test-group](https://nexte.st/book/test-groups.html) via nextest:
+
+1. `test(serial-db)`: These are tests against the database that need to commit data. To not intefere with other test that require a empty db but do not commit, we run these tests separately. Most of these tests use the `run_against_db` test harness. Test within that group are run sequentially, the remaining tests run in parallel. To add a test to this group simply ensure its name or its test package name includes the string `serial_db`.
+
+If your test does not require committing to the database there is no any other special resources there is nothing special to take care of.
 
 ### Migrations
 

@@ -1,8 +1,10 @@
 #![allow(unused_variables)]
-
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use std::{cmp::Ordering, collections::HashMap};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+};
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -174,7 +176,10 @@ where
         new: &[&Self::ProtocolComponent],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        use super::schema::protocol_component::dsl::*;
+        use super::schema::{
+            account::dsl::*, protocol_component::dsl::*, protocol_holds_token::dsl::*,
+            token::dsl::*,
+        };
         let mut values: Vec<orm::NewProtocolComponent> = Vec::with_capacity(new.len());
         let tx_hashes: Vec<TxHash> = new
             .iter()
@@ -184,31 +189,114 @@ where
             orm::Transaction::ids_by_hash(&tx_hashes, conn)
                 .await
                 .unwrap();
-
+        let pt_id = orm::ProtocolType::id_by_name(&new[0].protocol_type_name, conn)
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(err, "ProtocolType", &new[0].protocol_type_name, None)
+            })?;
         for pc in new {
             let txh = tx_hash_id_mapping
                 .get::<TxHash>(&pc.creation_tx.into())
                 .ok_or(StorageError::DecodeError("TxHash not found".to_string()))?;
 
-            let new_pc = pc
-                .to_storage(
-                    self.get_chain_id(&pc.chain),
-                    self.get_protocol_system_id(&pc.protocol_system.to_string()),
-                    txh.to_owned(),
-                    pc.created_at,
-                )
-                .unwrap();
+            let new_pc = pc.to_storage(
+                self.get_chain_id(&pc.chain),
+                self.get_protocol_system_id(&pc.protocol_system.to_string()),
+                pt_id,
+                txh.to_owned(),
+                pc.created_at,
+            )?;
             values.push(new_pc);
         }
 
-        diesel::insert_into(protocol_component)
-            .values(&values)
-            .on_conflict((chain_id, protocol_system_id, external_id))
-            .do_nothing()
-            .execute(conn)
+        let inserted_protocol_components: Vec<(i64, String, i64, i64)> =
+            diesel::insert_into(protocol_component)
+                .values(&values)
+                .on_conflict((
+                    schema::protocol_component::chain_id,
+                    protocol_system_id,
+                    external_id,
+                ))
+                .do_nothing()
+                .returning((
+                    schema::protocol_component::id,
+                    schema::protocol_component::external_id,
+                    schema::protocol_component::protocol_system_id,
+                    schema::protocol_component::chain_id,
+                ))
+                .get_results(conn)
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolComponent", "Batch insert", None)
+                })?;
+
+        let mut protocol_db_id_map = HashMap::new();
+        for (pc_id, ex_id, ps_id, chain_id_db) in inserted_protocol_components {
+            protocol_db_id_map.insert(
+                (ex_id, self.get_protocol_system(&ps_id), self.get_chain(&chain_id_db)),
+                pc_id,
+            );
+        }
+
+        let filtered_new_protocol_components: Vec<&&Self::ProtocolComponent> = new
+            .iter()
+            .filter(|component| {
+                let key =
+                    (component.id.clone(), component.protocol_system.clone(), component.chain);
+
+                protocol_db_id_map.get(&key).is_some()
+            })
+            .collect();
+
+        let token_addresses: HashSet<Address> = filtered_new_protocol_components
+            .iter()
+            .flat_map(|pc| pc.get_byte_token_addresses())
+            .collect();
+
+        let pc_entity_tokens_map = filtered_new_protocol_components
+            .iter()
+            .flat_map(|pc| {
+                let pc_id = protocol_db_id_map
+                    .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
+                    .expect("Could not find Protocol Component. Even though it should have."); //Because we just inserted the protocol systems, there should not be any missing.
+                                                                                               // However, trying to handle this via Results is needlessly difficult, because you
+                                                                                               // can not use flat_map on a Result.
+
+                pc.get_byte_token_addresses()
+                    .into_iter()
+                    .map(move |add| (*pc_id, add))
+                    .collect::<Vec<(i64, Address)>>()
+            })
+            .collect::<Vec<(i64, Address)>>();
+
+        let token_add_by_id: HashMap<Address, i64> = token
+            .inner_join(account)
+            .select((schema::account::address, schema::token::id))
+            .filter(schema::account::address.eq_any(token_addresses))
+            .into_boxed()
+            .load::<(Address, i64)>(conn)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "ProtocolComponent", "", None))
-            .unwrap();
+            .map_err(|err| StorageError::from_diesel(err, "Token", "Several Chains", None))?
+            .into_iter()
+            .collect();
+
+        let protocol_component_token_junction: Result<
+            Vec<orm::NewProtocolHoldsToken>,
+            StorageError,
+        > = pc_entity_tokens_map
+            .iter()
+            .map(|(pc_id, t_address)| {
+                let t_id = token_add_by_id
+                    .get(t_address)
+                    .ok_or(StorageError::NotFound("Token id".to_string(), t_address.to_string()))?;
+                Ok(orm::NewProtocolHoldsToken { protocol_component_id: *pc_id, token_id: *t_id })
+            })
+            .collect();
+
+        diesel::insert_into(protocol_holds_token)
+            .values(&protocol_component_token_junction?)
+            .execute(conn)
+            .await?;
 
         Ok(())
     }
@@ -232,23 +320,24 @@ where
             .await?;
         Ok(())
     }
-    async fn upsert_protocol_type(
+    async fn add_protocol_types(
         &self,
-        new: &Self::ProtocolType,
+        new_protocol_types: &[Self::ProtocolType],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::protocol_type::dsl::*;
-
-        let values: orm::NewProtocolType = new.to_storage();
+        let values: Vec<orm::NewProtocolType> = new_protocol_types
+            .iter()
+            .map(|new_protocol_type| new_protocol_type.to_storage())
+            .collect();
 
         diesel::insert_into(protocol_type)
             .values(&values)
             .on_conflict(name)
-            .do_update()
-            .set(&values)
+            .do_nothing()
             .execute(conn)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", &values.name, None))?;
+            .map_err(|err| StorageError::from_diesel(err, "ProtocolType", "Batch insert", None))?;
 
         Ok(())
     }
@@ -336,10 +425,15 @@ where
         for state in new {
             let tx_db = txns
                 .get(state.modify_tx.as_bytes())
-                .expect("Failed to find tx");
+                .ok_or(StorageError::NotFound("Tx id".to_string(), state.modify_tx.to_string()))?;
+
             let component_db_id = *components
                 .get(&state.component_id)
-                .expect("Failed to find component");
+                .ok_or(StorageError::NotFound(
+                    "Component id".to_string(),
+                    state.component_id.to_string(),
+                ))?;
+
             let mut new_states: Vec<(orm::NewProtocolState, i64)> =
                 ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0, tx_db.2)
                     .into_iter()
@@ -459,7 +553,7 @@ where
     ) -> Result<(), StorageError> {
         let titles: Vec<String> = tokens
             .iter()
-            .map(|token| format!("{}_{}", token.chain(), token.symbol()))
+            .map(|token| format!("{:?}_{}", token.chain(), token.symbol()))
             .collect();
 
         let addresses: Vec<_> = tokens
@@ -486,7 +580,6 @@ where
 
         diesel::insert_into(schema::account::table)
             .values(&new_accounts)
-            // .on_conflict(..).do_nothing() is necessary to ignore updating duplicated entries
             .on_conflict((schema::account::address, schema::account::chain_id))
             .do_nothing()
             .execute(conn)
@@ -698,7 +791,7 @@ mod test {
 
     /// This sets up the data needed to test the gateway. The setup is structured such that each
     /// protocol state's historical changes are kept together this makes it easy to reason about
-    /// that change an account should have at each version Please not that if you change
+    /// that change an account should have at each version Please note that if you change
     /// something here, also update the state fixtures right below, which contain protocol states
     /// at each version.
     async fn setup_data(conn: &mut AsyncPgConnection) -> Vec<String> {
@@ -830,6 +923,7 @@ mod test {
     #[case::by_system(Some("ambient".to_string()), None)]
     #[case::by_ids(None, Some(vec ! ["state1"]))]
     #[tokio::test]
+
     async fn test_get_protocol_states(
         #[case] system: Option<String>,
         #[case] ids: Option<Vec<&str>>,
@@ -850,6 +944,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_get_protocol_states_at() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -901,6 +996,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_update_protocol_states() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1016,6 +1112,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_get_or_create_protocol_system_id() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
@@ -1049,7 +1146,7 @@ mod test {
             implementation: ImplementationType::Custom,
         };
 
-        gw.upsert_protocol_type(&protocol_type, &mut conn)
+        gw.add_protocol_types(&[protocol_type], &mut conn)
             .await
             .unwrap();
 
@@ -1064,36 +1161,10 @@ mod test {
         assert_eq!(inserted_data.financial_type, orm::FinancialType::Debt);
         assert_eq!(inserted_data.attribute_schema, Some(json!({"attribute": "schema"})));
         assert_eq!(inserted_data.implementation, orm::ImplementationType::Custom);
-
-        let updated_protocol_type = models::ProtocolType {
-            name: "Protocol".to_string(),
-            financial_type: FinancialType::Leverage,
-            attribute_schema: Some(json!({"attribute": "another_schema"})),
-            implementation: ImplementationType::Vm,
-        };
-
-        gw.upsert_protocol_type(&updated_protocol_type, &mut conn)
-            .await
-            .unwrap();
-
-        let newly_inserted_data = schema::protocol_type::table
-            .filter(schema::protocol_type::name.eq("Protocol"))
-            .select(schema::protocol_type::all_columns)
-            .load::<orm::ProtocolType>(&mut conn)
-            .await
-            .unwrap();
-
-        assert_eq!(newly_inserted_data.len(), 1);
-        assert_eq!(newly_inserted_data[0].name, "Protocol".to_string());
-        assert_eq!(newly_inserted_data[0].financial_type, orm::FinancialType::Leverage);
-        assert_eq!(
-            newly_inserted_data[0].attribute_schema,
-            Some(json!({"attribute": "another_schema"}))
-        );
-        assert_eq!(newly_inserted_data[0].implementation, orm::ImplementationType::Vm);
     }
 
     #[tokio::test]
+
     async fn test_get_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1124,6 +1195,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_add_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1173,7 +1245,7 @@ mod test {
         .await
         .unwrap()[0];
         assert_eq!(inserted_account.id, inserted_token.account_id);
-        assert_eq!(inserted_account.title, "ethereum_USDT".to_string());
+        assert_eq!(inserted_account.title, "Ethereum_USDT".to_string());
 
         // make sure nothing changed on WETH (ids included)
         let new_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
@@ -1241,12 +1313,15 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_add_protocol_components() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
+        let protocol_type_name_1 = String::from("Test_Type_1");
         let protocol_type_id_1 =
-            db_fixtures::insert_protocol_type(&mut conn, "Test_Type_1", None, None, None).await;
+            db_fixtures::insert_protocol_type(&mut conn, &protocol_type_name_1, None, None, None)
+                .await;
         let protocol_type_id_2 =
             db_fixtures::insert_protocol_type(&mut conn, "Test_Type_2", None, None, None).await;
         let protocol_system = "ambient".to_string();
@@ -1254,9 +1329,9 @@ mod test {
         let original_component = ProtocolComponent {
             id: "test_contract_id".to_string(),
             protocol_system,
-            protocol_type_id: protocol_type_id_1.to_string(),
+            protocol_type_name: protocol_type_name_1,
             chain,
-            tokens: vec![],
+            tokens: vec![H160::from_str(WETH).unwrap()],
             contract_ids: vec![],
             static_attributes: HashMap::new(),
             change: ChangeType::Creation,
@@ -1281,18 +1356,7 @@ mod test {
 
         assert!(inserted_data.is_ok());
         let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
-        assert_eq!(
-            original_component.protocol_type_id,
-            inserted_data
-                .protocol_type_id
-                .to_string()
-        );
-        assert_eq!(
-            original_component.protocol_type_id,
-            inserted_data
-                .protocol_type_id
-                .to_string()
-        );
+        assert_eq!(inserted_data.protocol_type_id, protocol_type_id_1);
         assert_eq!(
             gw.get_protocol_system_id(
                 &original_component
@@ -1303,13 +1367,33 @@ mod test {
         );
         assert_eq!(gw.get_chain_id(&original_component.chain), inserted_data.chain_id);
         assert_eq!(original_component.id, inserted_data.external_id);
+
+        // assert junction table
+        let component_token_junction = schema::protocol_holds_token::table
+            .select((
+                schema::protocol_holds_token::protocol_component_id,
+                schema::protocol_holds_token::token_id,
+            ))
+            .first::<(i64, i64)>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(component_token_junction.0, inserted_data.id);
+
+        let token = schema::token::table
+            .select(schema::token::all_columns)
+            .filter(schema::token::id.eq(component_token_junction.1))
+            .load::<orm::Token>(&mut conn)
+            .await;
+
+        assert!(token.is_ok())
     }
 
     fn create_test_protocol_component(id: &str) -> ProtocolComponent {
         ProtocolComponent {
             id: id.to_string(),
             protocol_system: "ambient".to_string(),
-            protocol_type_id: "type_id_1".to_string(),
+            protocol_type_name: "type_id_1".to_string(),
             chain: Chain::Ethereum,
             tokens: vec![],
             contract_ids: vec![],
@@ -1323,6 +1407,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_delete_protocol_components() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1365,6 +1450,7 @@ mod test {
     #[case::get_one(Some("zigzag".to_string()))]
     #[case::get_none(Some("ambient".to_string()))]
     #[tokio::test]
+
     async fn test_get_protocol_components_with_system_only(#[case] system: Option<String>) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1401,6 +1487,7 @@ mod test {
     #[case::get_one("state1".to_string())]
     #[case::get_none("state2".to_string())]
     #[tokio::test]
+
     async fn test_get_protocol_components_with_external_id_only(#[case] external_id: String) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1434,6 +1521,7 @@ mod test {
     }
 
     #[tokio::test]
+
     async fn test_get_protocol_components_with_system_and_ids() {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1460,6 +1548,7 @@ mod test {
     #[case::get_one(Chain::Ethereum, 0)]
     #[case::get_none(Chain::Starknet, 1)]
     #[tokio::test]
+
     async fn test_get_protocol_components_with_chain_filter(#[case] chain: Chain, #[case] i: i64) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1473,7 +1562,7 @@ mod test {
         components.sort_by(|a, b| a.id.cmp(&b.id));
 
         let assert_message = format!(
-            "Found {} ProtocolComponents for chain {}, expecting >= 1, because there are two eth and one stark component. Two eth components are needed for the ProtocolStates",
+            "Found {} ProtocolComponents for chain {:?}, expecting >= 1, because there are two eth and one stark component. Two eth components are needed for the ProtocolStates",
             components.len(),
             chain
         );
