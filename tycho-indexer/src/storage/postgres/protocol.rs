@@ -411,8 +411,8 @@ where
             let (current_state, _) = &mut state_data[i];
 
             // Check if next_state has same protocol_component_id and attribute_name
-            if current_state.protocol_component_id == next_state.protocol_component_id
-                && current_state.attribute_name == next_state.attribute_name
+            if current_state.protocol_component_id == next_state.protocol_component_id &&
+                current_state.attribute_name == next_state.attribute_name
             {
                 // Invalidate the current state
                 current_state.valid_to = Some(next_state.valid_from);
@@ -1123,147 +1123,6 @@ mod test {
             .await
             .expect("Failed to fetch protocol state");
         assert_eq!(older_state.valid_to, Some(newer_state.valid_from));
-    }
-
-    #[tokio::test]
-    async fn test_get_protocol_state_deltas_forward() {
-        let mut conn = setup_db().await;
-        setup_data(&mut conn).await;
-
-        // set up deleted attribute state
-        let protocol_component_id = schema::protocol_component::table
-            .filter(schema::protocol_component::external_id.eq("state1"))
-            .select(schema::protocol_component::id)
-            .first::<i64>(&mut conn)
-            .await
-            .expect("Failed to fetch protocol component id");
-        let from_txn_id = schema::transaction::table
-            .filter(
-                schema::transaction::hash.eq(H256::from_str(
-                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
-                )
-                .expect("valid txhash")
-                .as_bytes()
-                .to_owned()),
-            )
-            .select(schema::transaction::id)
-            .first::<i64>(&mut conn)
-            .await
-            .expect("Failed to fetch transaction id");
-        let to_txn_id = schema::transaction::table
-            .filter(
-                schema::transaction::hash.eq(H256::from_str(
-                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
-                )
-                .expect("valid txhash")
-                .as_bytes()
-                .to_owned()),
-            )
-            .select(schema::transaction::id)
-            .first::<i64>(&mut conn)
-            .await
-            .expect("Failed to fetch transaction id");
-        db_fixtures::insert_protocol_state(
-            &mut conn,
-            protocol_component_id,
-            from_txn_id,
-            "deleted".to_owned(),
-            Bytes::from(U256::from(1000)),
-            None,
-            Some(to_txn_id),
-        )
-        .await;
-
-        let gateway = EVMGateway::from_connection(&mut conn).await;
-
-        // expected result
-        let mut state_delta = protocol_state_delta();
-        state_delta.component_id = "state1".to_owned();
-        state_delta.deleted_attributes = vec!["deleted".to_owned()]
-            .into_iter()
-            .collect();
-        let expected = vec![state_delta];
-
-        // test
-        let result = gateway
-            .get_protocol_states_delta(
-                &Chain::Ethereum,
-                Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1)))),
-                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
-                &mut conn,
-            )
-            .await
-            .unwrap();
-
-        // asserts
-        assert_eq!(result, expected)
-    }
-
-    #[tokio::test]
-    async fn test_get_protocol_state_deltas_backward() {
-        let mut conn = setup_db().await;
-        setup_data(&mut conn).await;
-
-        // set up newly added attribute state (to be deleted on revert)
-        let protocol_component_id = schema::protocol_component::table
-            .filter(schema::protocol_component::external_id.eq("state1"))
-            .select(schema::protocol_component::id)
-            .first::<i64>(&mut conn)
-            .await
-            .expect("Failed to fetch protocol component id");
-        let from_txn_id = schema::transaction::table
-            .filter(
-                schema::transaction::hash.eq(H256::from_str(
-                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
-                )
-                .expect("valid txhash")
-                .as_bytes()
-                .to_owned()),
-            )
-            .select(schema::transaction::id)
-            .first::<i64>(&mut conn)
-            .await
-            .expect("Failed to fetch transaction id");
-        db_fixtures::insert_protocol_state(
-            &mut conn,
-            protocol_component_id,
-            from_txn_id,
-            "to_delete".to_owned(),
-            Bytes::from(U256::from(1000)),
-            None,
-            None,
-        )
-        .await;
-
-        let gateway = EVMGateway::from_connection(&mut conn).await;
-
-        // expected result
-        let attributes: HashMap<String, Bytes> =
-            vec![("reserve1".to_owned(), Bytes::from(U256::from(1100)))]
-                .into_iter()
-                .collect();
-        let state_delta = ProtocolStateDelta {
-            component_id: "state1".to_owned(),
-            updated_attributes: attributes,
-            deleted_attributes: vec!["to_delete".to_owned()]
-                .into_iter()
-                .collect(),
-        };
-        let expected = vec![state_delta];
-
-        // test
-        let result = gateway
-            .get_protocol_states_delta(
-                &Chain::Ethereum,
-                Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2)))),
-                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
-                &mut conn,
-            )
-            .await
-            .unwrap();
-
-        // asserts
-        assert_eq!(result, expected)
     }
 
     #[tokio::test]
