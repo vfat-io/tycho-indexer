@@ -247,7 +247,7 @@ where
             .flat_map(|pc| {
                 let pc_id = protocol_db_id_map
                     .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
-                    .expect("Could not find Protocol Component. Even though it should have."); //Because we just insderted the protocol systems, there should not be any missing.
+                    .expect("Could not find Protocol Component. Even though it should have."); //Because we just inserted the protocol systems, there should not be any missing.
                                                                                                // However, trying to handel this via Results is needlessly difficult, because you
                                                                                                // can not use flat_map on a Result.
 
