@@ -73,4 +73,6 @@ CREATE TABLE IF NOT EXISTS protocol_component_holds_contract(
 );
 
 CREATE INDEX IF NOT EXISTS idx_protocol_component_token_protocol_component_id ON protocol_component_holds_contract(protocol_component_id);
+
 CREATE INDEX IF NOT EXISTS idx_protocol_component_token_token_id ON protocol_component_holds_contract(contract_code_id);
+
