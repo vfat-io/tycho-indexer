@@ -682,6 +682,7 @@ impl ProtocolState {
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(ComponentId, AttrStoreKey)>> {
         // subquery to exclude entities that have a valid version at end_ts (haven't been deleted)
+        // TODO: use parameter binding instead of string interpolation
         let sub_query = format!("NOT EXISTS (
                                 SELECT 1 FROM protocol_state ps2
                                 WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
@@ -755,6 +756,7 @@ impl ProtocolState {
             .distinct_on((protocol_state::protocol_component_id, protocol_state::attribute_name));
 
         // subquery to exclude entities that have a valid version at start_ts (weren't deleted)
+        // TODO: use parameter binding instead of string interpolation
         let sub_query = format!("NOT EXISTS (
                                 SELECT 1 FROM protocol_state ps2
                                 WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
