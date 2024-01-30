@@ -344,8 +344,6 @@ impl Default for VersionParam {
 
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct StateRequestParameters {
-    #[serde(default = "Chain::default")]
-    pub chain: Chain,
     #[param(default = 0)]
     pub tvl_gt: Option<u64>,
     #[param(default = 0)]
@@ -355,8 +353,6 @@ pub struct StateRequestParameters {
 impl StateRequestParameters {
     pub fn to_query_string(&self) -> String {
         let mut parts = vec![];
-
-        parts.push(format!("chain={}", self.chain));
 
         if let Some(tvl_gt) = self.tvl_gt {
             parts.push(format!("tvl_gt={}", tvl_gt));

@@ -404,7 +404,7 @@ mod tests {
     #[test]
     async fn test_msg() {
         // Define the contract address and endpoint
-        let endpoint = "http://127.0.0.1:4242/v1/contract_state";
+        let endpoint = "http://127.0.0.1:4242/v1/ethereum/contract_state";
 
         // Create the request body using the dto::StateRequestBody struct
         let request_body = dto::StateRequestBody {
