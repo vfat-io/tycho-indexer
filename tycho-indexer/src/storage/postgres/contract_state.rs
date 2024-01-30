@@ -1,7 +1,4 @@
-use std::{
-    collections::{hash_map::Entry, HashSet},
-    ops::Deref,
-};
+use std::collections::{hash_map::Entry, HashSet};
 
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
@@ -19,21 +16,6 @@ use tycho_types::Bytes;
 use self::versioning::{apply_delta_versioning, apply_versioning};
 
 use super::*;
-
-// Helper type to retrieve entities with their associated tx hashes.
-#[derive(Debug)]
-struct WithTxHash<T> {
-    entity: T,
-    tx: Option<TxHash>,
-}
-
-impl<T> Deref for WithTxHash<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.entity
-    }
-}
 
 struct CreatedOrDeleted<T> {
     /// Accounts that were created (and deltas are equal to their updates)

@@ -129,7 +129,9 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, str::FromStr, sync::Arc};
+use std::{
+    collections::HashMap, hash::Hash, i64, marker::PhantomData, ops::Deref, str::FromStr, sync::Arc,
+};
 
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -144,7 +146,8 @@ use crate::models::Chain;
 
 use super::{
     BlockIdentifier, BlockOrTimestamp, ContractDelta, StateGateway, StorableBlock,
-    StorableContract, StorableToken, StorableTransaction, StorageError, Version, VersionKind,
+    StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+    VersionKind,
 };
 
 pub mod cache;
@@ -237,6 +240,21 @@ type ChainEnumCache = ValueIdTableCache<Chain>;
 /// application every time we want to add another System. Hence, to diverge from the implementation
 /// of the Chain enum was a conscious decision.
 type ProtocolSystemEnumCache = ValueIdTableCache<String>;
+
+// Helper type to retrieve entities with their associated tx hashes.
+#[derive(Debug)]
+struct WithTxHash<T> {
+    entity: T,
+    tx: Option<TxHash>,
+}
+
+impl<T> Deref for WithTxHash<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entity
+    }
+}
 
 impl From<diesel::result::Error> for StorageError {
     fn from(value: diesel::result::Error) -> Self {
@@ -1019,6 +1037,7 @@ pub mod db_fixtures {
         tx_id: i64,
         attribute_name: String,
         attribute_value: Bytes,
+        previous_value: Option<Bytes>,
         valid_to_tx: Option<i64>,
     ) {
         let ts: NaiveDateTime = schema::transaction::table
@@ -1049,6 +1068,7 @@ pub mod db_fixtures {
             schema::protocol_state::valid_to.eq(valid_to_ts),
             schema::protocol_state::attribute_name.eq(attribute_name),
             schema::protocol_state::attribute_value.eq(attribute_value),
+            schema::protocol_state::previous_value.eq(previous_value),
         ));
         query
             .execute(conn)

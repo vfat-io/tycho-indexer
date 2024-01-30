@@ -17,7 +17,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 use crate::{
     models::{Chain, ExtractorIdentity, NormalisedMessage},
     pb::tycho::evm::v1 as substreams,
-    storage::{Address, ChangeType, StateGatewayType},
+    storage::{Address, AttrStoreKey, ChangeType, ComponentId, StateGatewayType, StoreVal},
 };
 use tycho_types::Bytes;
 
@@ -501,7 +501,7 @@ pub struct ProtocolComponent {
     /// address or in the case of a one-to-many relationship it could be something like
     /// 'USDC-ETH'. This is for example the case with ambient, where one contract is
     /// responsible for multiple components.
-    pub id: String,
+    pub id: ComponentId,
     // what system this component belongs to
     pub protocol_system: String,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
@@ -513,7 +513,7 @@ pub struct ProtocolComponent {
     // addresses of the related contracts
     pub contract_ids: Vec<H160>,
     // stores the static attributes
-    pub static_attributes: HashMap<String, Bytes>,
+    pub static_attributes: HashMap<AttrStoreKey, StoreVal>,
     // the type of change (creation, deletion etc)
     pub change: ChangeType,
     // Hash of the transaction in which the component got created
@@ -692,15 +692,19 @@ impl BlockContractChanges {
 /// Represents the dynamic data of `ProtocolComponent`.
 pub struct ProtocolState {
     // associates back to a component, which has metadata like type, tokens, etc.
-    pub component_id: String,
+    pub component_id: ComponentId,
     // the protocol specific attributes, validated by the components schema
-    pub attributes: HashMap<String, Bytes>,
+    pub attributes: HashMap<AttrStoreKey, StoreVal>,
     // via transaction, we can trace back when this state became valid
     pub modify_tx: H256,
 }
 
 impl ProtocolState {
-    pub fn new(component_id: String, attributes: HashMap<String, Bytes>, modify_tx: H256) -> Self {
+    pub fn new(
+        component_id: ComponentId,
+        attributes: HashMap<AttrStoreKey, StoreVal>,
+        modify_tx: H256,
+    ) -> Self {
         Self { component_id, attributes, modify_tx }
     }
 }
@@ -709,31 +713,21 @@ impl ProtocolState {
 /// Represents a change in protocol state.
 pub struct ProtocolStateDelta {
     // associates back to a component, which has metadata like type, tokens, etc.
-    pub component_id: String,
+    pub component_id: ComponentId,
     // the update protocol specific attributes, validated by the components schema
-    pub updated_attributes: HashMap<String, Bytes>,
+    pub updated_attributes: HashMap<AttrStoreKey, StoreVal>,
     // the deleted protocol specific attributes
-    pub deleted_attributes: HashSet<String>,
-    // via transaction, we can trace back when this state became valid
-    pub modify_tx: H256,
+    pub deleted_attributes: HashSet<AttrStoreKey>,
 }
 
 // TODO: remove dead code check skip once extractor is implemented
 impl ProtocolStateDelta {
-    pub fn new(component_id: String, attributes: HashMap<String, Bytes>, modify_tx: H256) -> Self {
-        Self {
-            component_id,
-            updated_attributes: attributes,
-            deleted_attributes: HashSet::new(),
-            modify_tx,
-        }
+    pub fn new(component_id: ComponentId, attributes: HashMap<AttrStoreKey, StoreVal>) -> Self {
+        Self { component_id, updated_attributes: attributes, deleted_attributes: HashSet::new() }
     }
 
     /// Parses protocol state from tychos protobuf EntityChanges message
-    pub fn try_from_message(
-        msg: substreams::EntityChanges,
-        tx: &Transaction,
-    ) -> Result<Self, ExtractionError> {
+    pub fn try_from_message(msg: substreams::EntityChanges) -> Result<Self, ExtractionError> {
         let (mut updates, mut deletions) = (HashMap::new(), HashSet::new());
 
         for attribute in msg.attributes.into_iter() {
@@ -751,7 +745,6 @@ impl ProtocolStateDelta {
             component_id: msg.component_id,
             updated_attributes: updates,
             deleted_attributes: deletions,
-            modify_tx: tx.hash,
         })
     }
 
@@ -773,7 +766,6 @@ impl ProtocolStateDelta {
                 self.component_id, other.component_id
             )));
         }
-        self.modify_tx = other.modify_tx;
         for attr in &other.deleted_attributes {
             self.updated_attributes.remove(attr);
         }
@@ -803,7 +795,7 @@ impl ProtocolStateDeltasWithTx {
     ) -> Result<Self, ExtractionError> {
         let mut protocol_states = HashMap::new();
         for state_msg in msg {
-            let state = ProtocolStateDelta::try_from_message(state_msg, &tx)?;
+            let state = ProtocolStateDelta::try_from_message(state_msg)?;
             protocol_states.insert(state.clone().component_id, state);
         }
         Ok(Self { protocol_states, tx })
@@ -1641,7 +1633,6 @@ mod test {
             component_id: "State1".to_owned(),
             updated_attributes: up_attributes1,
             deleted_attributes: del_attributes1,
-            modify_tx: H256::zero(),
         };
 
         let up_attributes2: HashMap<String, Bytes> = vec![
@@ -1659,7 +1650,6 @@ mod test {
             component_id: "State1".to_owned(),
             updated_attributes: up_attributes2.clone(),
             deleted_attributes: del_attributes2,
-            modify_tx: HASH_256_1.parse().unwrap(),
         };
 
         let res = state1.merge(state2);
@@ -1695,7 +1685,6 @@ mod test {
                     component_id: "State1".to_owned(),
                     updated_attributes: attributes.clone(),
                     deleted_attributes: HashSet::new(),
-                    modify_tx: H256::zero(),
                 },
             ),
             (
@@ -1704,7 +1693,6 @@ mod test {
                     component_id: "State2".to_owned(),
                     updated_attributes: attributes,
                     deleted_attributes: HashSet::new(),
-                    modify_tx: H256::zero(),
                 },
             ),
         ]
@@ -1730,7 +1718,6 @@ mod test {
                 component_id: "State1".to_owned(),
                 updated_attributes: new_attributes,
                 deleted_attributes: HashSet::new(),
-                modify_tx: new_tx.hash,
             },
         )]
         .into_iter()
@@ -1798,7 +1785,6 @@ mod test {
             .into_iter()
             .collect(),
             deleted_attributes: HashSet::new(),
-            modify_tx: H256::zero(),
         }
     }
 
@@ -1814,7 +1800,6 @@ mod test {
             component_id: "State2".to_owned(),
             updated_attributes: attributes2.clone(),
             deleted_attributes: HashSet::new(),
-            modify_tx: HASH_256_1.parse().unwrap(),
         };
 
         let res = state1.merge(state2);
@@ -1832,7 +1817,7 @@ mod test {
     fn test_protocol_state_update_parse_msg() {
         let msg = fixtures::pb_state_changes();
 
-        let res = ProtocolStateDelta::try_from_message(msg, &fixtures::transaction01()).unwrap();
+        let res = ProtocolStateDelta::try_from_message(msg).unwrap();
 
         assert_eq!(res, protocol_state());
     }
@@ -1861,7 +1846,6 @@ mod test {
                 component_id: "State1".to_owned(),
                 updated_attributes: attr,
                 deleted_attributes: HashSet::new(),
-                modify_tx: tx.hash,
             },
         )]
         .into_iter()
@@ -1961,7 +1945,6 @@ mod test {
                     component_id: "State1".to_owned(),
                     updated_attributes: attr1,
                     deleted_attributes: HashSet::new(),
-                    modify_tx: tx.hash,
                 },
             ),
             (
@@ -1970,7 +1953,6 @@ mod test {
                     component_id: "State2".to_owned(),
                     updated_attributes: attr2,
                     deleted_attributes: HashSet::new(),
-                    modify_tx: H256::zero(),
                 },
             ),
         ]

@@ -31,12 +31,9 @@ ALTER TABLE protocol_state
     DROP COLUMN state,
     DROP COLUMN tvl,
     DROP COLUMN inertias,
-    ADD COLUMN attribute_name VARCHAR NULL,
-    ADD COLUMN attribute_value BYTEA NULL;
-
--- Make sure either both attribute_name and attribute_value are given or neither are given
-ALTER TABLE protocol_state
-    ADD CONSTRAINT check_attribute_fields CHECK ((attribute_name IS NULL AND attribute_value IS NULL) OR (attribute_name IS NOT NULL AND attribute_value IS NOT NULL));
+    ADD COLUMN attribute_name VARCHAR NOT NULL,
+    ADD COLUMN attribute_value BYTEA NOT NULL,
+    ADD COLUMN previous_value BYTEA NULL;
 
 ALTER TABLE protocol_system
     ADD CONSTRAINT name_unique UNIQUE (name);

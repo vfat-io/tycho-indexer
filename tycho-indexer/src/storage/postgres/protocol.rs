@@ -1,9 +1,9 @@
 #![allow(unused_variables)]
 use async_trait::async_trait;
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use std::{
     cmp::Ordering,
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
 };
 
 use diesel::prelude::*;
@@ -21,14 +21,18 @@ use crate::{
             versioning::apply_versioning,
             PostgresGateway,
         },
-        Address, BlockIdentifier, BlockOrTimestamp, ContractDelta, ContractId, ProtocolGateway,
-        StorableBlock, StorableComponentBalance, StorableContract, StorableProtocolComponent,
-        StorableProtocolState, StorableProtocolStateDelta, StorableProtocolType, StorableToken,
-        StorableTransaction, StorageError, TxHash, Version,
+        Address, BlockIdentifier, BlockOrTimestamp, ComponentId, ContractDelta, ContractId,
+        ProtocolGateway, StorableBlock, StorableComponentBalance, StorableContract,
+        StorableProtocolComponent, StorableProtocolState, StorableProtocolStateDelta,
+        StorableProtocolType, StorableToken, StorableTransaction, StorageError, StoreVal, TxHash,
+        Version,
     },
 };
 use tycho_types::Bytes;
 
+use super::WithTxHash;
+
+// Private methods
 impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
 where
     B: StorableBlock<orm::Block, orm::NewBlock, i64>,
@@ -37,52 +41,64 @@ where
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
-    /// Decodes a ProtocolStates database result. Combines all matching protocol state db entities
-    /// and returns a list containing one ProtocolState per component.
+    /// # Decoding ProtocolStates from database results.
+    ///
+    /// This function takes as input the database result for querying protocol states and their
+    /// linked component id and transaction hash.
+    ///
+    /// ## Assumptions:
+    /// - It is assumed that the rows in the result are ordered by:
+    ///     1. Component ID,
+    ///     2. Transaction block, and then
+    ///     3. Transaction index.
+    ///
+    /// The function processes these individual `ProtocolState` entities and combines all entities
+    /// with matching component IDs into a single `ProtocolState`. The final output is a list
+    /// where each element is a `ProtocolState` representing a unique component.
+    ///
+    /// ## Returns:
+    /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
     fn _decode_protocol_states(
         &self,
-        result: Result<Vec<(orm::ProtocolState, String, orm::Transaction)>, diesel::result::Error>,
+        result: Result<Vec<(orm::ProtocolState, ComponentId, StoreVal)>, diesel::result::Error>,
         context: &str,
     ) -> Result<Vec<ProtocolState>, StorageError> {
         match result {
             Ok(data_vec) => {
+                // Decode final state deltas. We can assume result is sorted by component_id and
+                // transaction index. Therefore we can use slices to iterate over the data in groups
+                // of component_id. The last update for each component will have the latest
+                // transaction hash (modify_tx).
+
                 let mut protocol_states = Vec::new();
-                let (states_data, latest_tx): (
-                    HashMap<String, Vec<orm::ProtocolState>>,
-                    Option<orm::Transaction>,
-                ) = data_vec.into_iter().fold(
-                    (HashMap::new(), None),
-                    |(mut states, latest_tx), data| {
-                        states
-                            .entry(data.1)
-                            .or_insert_with(Vec::new)
-                            .push(data.0);
-                        let transaction = data.2;
-                        let latest_tx = match latest_tx {
-                            Some(latest)
-                                if latest.block_id < transaction.block_id ||
-                                    (latest.block_id == transaction.block_id &&
-                                        latest.index < transaction.index) =>
-                            {
-                                Some(transaction)
-                            }
-                            None => Some(transaction),
-                            _ => latest_tx,
-                        };
-                        (states, latest_tx)
-                    },
-                );
-                for (component_id, states) in states_data {
-                    let tx_hash = latest_tx
-                        .as_ref()
-                        .map(|tx| &tx.hash)
-                        .ok_or(StorageError::DecodeError("Modify tx hash not found".to_owned()))?;
-                    let protocol_state =
-                        ProtocolState::from_storage(states, component_id, tx_hash)?;
+
+                let mut index = 0;
+                while index < data_vec.len() {
+                    let component_start = index;
+                    let current_component_id = &data_vec[index].1;
+
+                    // Iterate until the component_id changes
+                    while index < data_vec.len() && &data_vec[index].1 == current_component_id {
+                        index += 1;
+                    }
+
+                    let states_slice = &data_vec[component_start..index];
+                    let tx_hash = &states_slice.last().unwrap().2; // Last element has the latest transaction
+
+                    let protocol_state = ProtocolState::from_storage(
+                        states_slice
+                            .iter()
+                            .map(|x| x.0.clone())
+                            .collect(),
+                        current_component_id.clone(),
+                        tx_hash,
+                    )?;
+
                     protocol_states.push(protocol_state);
                 }
                 Ok(protocol_states)
             }
+
             Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
         }
     }
@@ -451,14 +467,20 @@ where
     async fn update_protocol_states(
         &self,
         chain: &Chain,
-        new: &[ProtocolStateDelta],
+        new: &[(TxHash, ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let chain_db_id = self.get_chain_id(chain);
+
+        let new = new
+            .iter()
+            .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_owned()) })
+            .collect::<Vec<_>>();
+
         let txns: HashMap<Bytes, (i64, i64, NaiveDateTime)> = orm::Transaction::ids_and_ts_by_hash(
             new.iter()
-                .map(|state| state.modify_tx.as_bytes())
-                .collect::<Vec<&[u8]>>()
+                .filter_map(|u| u.tx.as_ref())
+                .collect::<Vec<&TxHash>>()
                 .as_slice(),
             conn,
         )
@@ -483,8 +505,11 @@ where
 
         for state in new {
             let tx_db = txns
-                .get(state.modify_tx.as_bytes())
-                .ok_or(StorageError::NotFound("Tx id".to_string(), state.modify_tx.to_string()))?;
+                .get(state.tx.as_ref().unwrap())
+                .ok_or(StorageError::NotFound(
+                    "Tx id".to_string(),
+                    state.tx.as_ref().unwrap().to_string(),
+                ))?;
 
             let component_db_id = *components
                 .get(&state.component_id)
@@ -494,7 +519,7 @@ where
                 ))?;
 
             let mut new_states: Vec<(orm::NewProtocolState, i64)> =
-                ProtocolStateDelta::to_storage(state, component_db_id, tx_db.0, tx_db.2)
+                ProtocolStateDelta::to_storage(state.entity, component_db_id, tx_db.0, tx_db.2)
                     .into_iter()
                     .map(|state| (state, tx_db.1))
                     .collect();
@@ -752,16 +777,183 @@ where
         Ok(())
     }
 
-    async fn get_state_delta(
+    async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
-        system: Option<String>,
-        id: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolStateDelta, StorageError> {
-        todo!()
+    ) -> Result<Vec<ProtocolStateDelta>, StorageError> {
+        let start_ts = match start_version {
+            Some(version) => version.to_ts(conn).await?,
+            None => Utc::now().naive_utc(),
+        };
+        let end_ts = end_version.to_ts(conn).await?;
+
+        if start_ts <= end_ts {
+            // Going forward
+            //                  ]     changes to update   ]
+            // -----------------|--------------------------|
+            //                start                     target
+            // We query for state updates between start and target version. We also query for
+            // deleted states between start and target version. We then merge the two
+            // sets of results.
+
+            let chain_db_id = self.get_chain_id(chain);
+
+            // fetch updated component attributes
+            let state_updates =
+                orm::ProtocolState::forward_deltas_by_chain(chain_db_id, start_ts, end_ts, conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(
+                            err,
+                            "ProtocolStates",
+                            chain.to_string().as_str(),
+                            None,
+                        )
+                    })?;
+
+            // fetch deleted component attributes
+            let deleted_attrs = orm::ProtocolState::deleted_attributes_by_chain(
+                chain_db_id,
+                start_ts,
+                end_ts,
+                conn,
+            )
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(err, "ProtocolStates", chain.to_string().as_str(), None)
+            })?;
+
+            // Decode final state deltas. We can assume both the deleted_attrs and state_updates
+            // are sorted by component_id and transaction index. Therefore we can use slices to
+            // iterate over the data in groups of component_id. To do this we first need to collect
+            // an ordered set of the component ids, then we can loop through deleted_attrs and
+            // state_updates in parallel, creating a slice for each component_id.
+
+            // Get sets of component_ids from state_updates and deleted_attrs
+            let state_updates_ids: BTreeSet<_> = state_updates
+                .iter()
+                .map(|item| &item.1)
+                .collect();
+            let deleted_attrs_ids: BTreeSet<_> = deleted_attrs
+                .iter()
+                .map(|item| &item.0)
+                .collect();
+            // Union of two sets gives us a sorted set of all unique component_ids
+            let mut all_component_ids = state_updates_ids.clone();
+            all_component_ids.append(&mut deleted_attrs_ids.clone());
+
+            let mut protocol_states_delta = Vec::new();
+
+            // index trackers to iterate over the state updates and deleted attributes in parallel
+            let (mut updates_index, mut deletes_index) = (0, 0);
+
+            for current_component_id in all_component_ids {
+                let component_start = updates_index;
+
+                // Iterate over states until the component_id no longer matches the current
+                // component id
+                while updates_index < state_updates.len() &&
+                    &state_updates[updates_index].1 == current_component_id
+                {
+                    updates_index += 1;
+                }
+
+                let deleted_start = deletes_index;
+                // Iterate over deleted attributes until the component_id no longer matches the
+                // current component id
+                while deletes_index < deleted_attrs.len() &&
+                    &deleted_attrs[deletes_index].0 == current_component_id
+                {
+                    deletes_index += 1;
+                }
+
+                let states_slice = &state_updates[component_start..updates_index];
+                let deleted_slice = &deleted_attrs[deleted_start..deletes_index];
+
+                let state_delta = ProtocolStateDelta::from_storage(
+                    states_slice
+                        .iter()
+                        .map(|x| x.0.clone())
+                        .collect(),
+                    current_component_id.clone(),
+                    deleted_slice
+                        .iter()
+                        .map(|x| x.1.clone())
+                        .collect::<Vec<String>>(),
+                )?;
+
+                protocol_states_delta.push(state_delta);
+            }
+            Ok(protocol_states_delta)
+        } else {
+            // Going backwards
+            //                  ]     changes to revert    ]
+            // -----------------|--------------------------|
+            //                target                     start
+            // We query for the previous values of all component attributes updated between
+            // start and target version.
+
+            let chain_db_id = self.get_chain_id(chain);
+
+            // fetch reverse attribute changes
+            let result =
+                orm::ProtocolState::reverse_delta_by_chain(chain_db_id, start_ts, end_ts, conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(
+                            err,
+                            "ProtocolStates",
+                            chain.to_string().as_str(),
+                            None,
+                        )
+                    })?;
+
+            // Decode final state deltas. We can assume result is sorted by component_id and
+            // transaction index. Therefore we can use slices to iterate over the data in groups of
+            // component_id.
+
+            let mut deltas = Vec::new();
+
+            let mut index = 0;
+            while index < result.len() {
+                let component_start = index;
+                let current_component_id = &result[index].0;
+
+                // Iterate until the component_id changes
+                while index < result.len() && &result[index].0 == current_component_id {
+                    index += 1;
+                }
+
+                let states_slice = &result[component_start..index];
+
+                // sort through state updates and deletions
+                let mut updates = HashMap::new();
+                let mut deleted = HashSet::new();
+                for (component, attribute, prev_value) in states_slice {
+                    if let Some(value) = prev_value {
+                        // if prev_value is not null, then the attribute was updated and
+                        // must be reverted via a reversed update
+                        updates.insert(attribute.clone(), value.clone());
+                    } else {
+                        // if prev_value is null, then the attribute was created and must be
+                        // deleted on revert
+                        deleted.insert(attribute.clone());
+                    }
+                }
+                let state_delta = ProtocolStateDelta {
+                    component_id: current_component_id.clone(),
+                    updated_attributes: updates,
+                    deleted_attributes: deleted,
+                };
+
+                deltas.push(state_delta);
+            }
+
+            Ok(deltas)
+        }
     }
 
     async fn revert_protocol_state(
@@ -890,18 +1082,10 @@ mod test {
             Some(orm::ImplementationType::Custom),
         )
         .await;
+
         let protocol_component_id = db_fixtures::insert_protocol_component(
             conn,
             "state1",
-            chain_id,
-            protocol_system_id_ambient,
-            protocol_type_id,
-            txn[0],
-        )
-        .await;
-        let protocol_component_id2 = db_fixtures::insert_protocol_component(
-            conn,
-            "state3",
             chain_id,
             protocol_system_id_ambient,
             protocol_type_id,
@@ -917,6 +1101,15 @@ mod test {
             txn[1],
         )
         .await;
+        db_fixtures::insert_protocol_component(
+            conn,
+            "state3",
+            chain_id,
+            protocol_system_id_ambient,
+            protocol_type_id,
+            txn[0],
+        )
+        .await;
 
         // protocol state for state1-reserve1
         db_fixtures::insert_protocol_state(
@@ -925,6 +1118,7 @@ mod test {
             txn[0],
             "reserve1".to_owned(),
             Bytes::from(U256::from(1100)),
+            None,
             Some(txn[2]),
         )
         .await;
@@ -937,6 +1131,7 @@ mod test {
             "reserve2".to_owned(),
             Bytes::from(U256::from(500)),
             None,
+            None,
         )
         .await;
 
@@ -947,6 +1142,7 @@ mod test {
             txn[3],
             "reserve1".to_owned(),
             Bytes::from(U256::from(1000)),
+            Some(Bytes::from(U256::from(1100))),
             None,
         )
         .await;
@@ -1048,19 +1244,11 @@ mod test {
     }
 
     fn protocol_state_delta() -> ProtocolStateDelta {
-        let attributes: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
-        ]
-        .into_iter()
-        .collect();
-        ProtocolStateDelta::new(
-            "state3".to_owned(),
-            attributes,
-            "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
-                .parse()
-                .unwrap(),
-        )
+        let attributes: HashMap<String, Bytes> =
+            vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
+                .into_iter()
+                .collect();
+        ProtocolStateDelta::new("state3".to_owned(), attributes)
     }
 
     #[tokio::test]
@@ -1102,6 +1290,7 @@ mod test {
             "deletable".to_owned(),
             Bytes::from(U256::from(1000)),
             None,
+            None,
         )
         .await;
 
@@ -1117,7 +1306,7 @@ mod test {
         new_state1.deleted_attributes = vec!["deletable".to_owned()]
             .into_iter()
             .collect();
-        new_state1.modify_tx = "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
+        let tx_1: H256 = "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
             .parse()
             .unwrap();
 
@@ -1130,10 +1319,17 @@ mod test {
         .into_iter()
         .collect();
         new_state2.updated_attributes = attributes2.clone();
+        let tx_2: H256 = "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
+            .parse()
+            .unwrap();
 
         // update the protocol state
         gateway
-            .update_protocol_states(&chain, &[new_state1.clone(), new_state2.clone()], &mut conn)
+            .update_protocol_states(
+                &chain,
+                &[(tx_1.into(), new_state1.clone()), (tx_2.into(), new_state2.clone())],
+                &mut conn,
+            )
             .await
             .expect("Failed to update protocol states");
 
@@ -1154,7 +1350,7 @@ mod test {
         assert_eq!(db_states[0], expected_state);
 
         // fetch the older state from the db and check it's valid_to is set correctly
-        let tx_hash1: Bytes = new_state1.modify_tx.as_bytes().into();
+        let tx_hash1: Bytes = tx_1.as_bytes().into();
         let older_state = schema::protocol_state::table
             .inner_join(schema::protocol_component::table)
             .inner_join(schema::transaction::table)
@@ -1164,9 +1360,9 @@ mod test {
             .first::<orm::ProtocolState>(&mut conn)
             .await
             .expect("Failed to fetch protocol state");
-        assert_eq!(older_state.attribute_value, Some(Bytes::from(U256::from(700))));
+        assert_eq!(older_state.attribute_value, Bytes::from(U256::from(700)));
         // fetch the newer state from the db to compare the valid_from
-        let tx_hash2: Bytes = new_state2.modify_tx.as_bytes().into();
+        let tx_hash2: Bytes = tx_2.as_bytes().into();
         let newer_state = schema::protocol_state::table
             .inner_join(schema::protocol_component::table)
             .inner_join(schema::transaction::table)
@@ -1180,7 +1376,212 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_get_protocol_states_delta_forward() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
 
+        // set up deleted attribute state
+        let protocol_component_id = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state1"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        let from_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        let to_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id,
+            from_txn_id,
+            "deleted".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+            Some(to_txn_id),
+        )
+        .await;
+
+        // set up deleted attribute different state (one that isn't also updated)
+        let protocol_component_id2 = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state3"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id2,
+            from_txn_id,
+            "deleted2".to_owned(),
+            Bytes::from(U256::from(100)),
+            None,
+            Some(to_txn_id),
+        )
+        .await;
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        // expected result
+        let mut state_delta = protocol_state_delta();
+        state_delta.component_id = "state1".to_owned();
+        state_delta.deleted_attributes = vec!["deleted".to_owned()]
+            .into_iter()
+            .collect();
+        let other_state_delta = ProtocolStateDelta {
+            component_id: "state3".to_owned(),
+            updated_attributes: HashMap::new(),
+            deleted_attributes: vec!["deleted2".to_owned()]
+                .into_iter()
+                .collect(),
+        };
+        let expected = vec![state_delta, other_state_delta];
+
+        // test
+        let result = gateway
+            .get_protocol_states_delta(
+                &Chain::Ethereum,
+                Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1)))),
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        // asserts
+        assert_eq!(result, expected)
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_states_delta_backward() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        // set up newly added attribute state (to be deleted on revert)
+        let protocol_component_id = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state1"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        let txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id,
+            txn_id,
+            "to_delete".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+            None,
+        )
+        .await;
+
+        // set up deleted attribute state (to be created on revert)
+        let from_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        let to_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id,
+            from_txn_id,
+            "deleted".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+            Some(to_txn_id),
+        )
+        .await;
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        // expected result
+        let attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(U256::from(1100))),
+            ("deleted".to_owned(), Bytes::from(U256::from(1000))),
+        ]
+        .into_iter()
+        .collect();
+        let state_delta = ProtocolStateDelta {
+            component_id: "state1".to_owned(),
+            updated_attributes: attributes,
+            deleted_attributes: vec!["to_delete".to_owned()]
+                .into_iter()
+                .collect(),
+        };
+        let expected = vec![state_delta];
+
+        // test
+        let result = gateway
+            .get_protocol_states_delta(
+                &Chain::Ethereum,
+                Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2)))),
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        // asserts
+        assert_eq!(result, expected)
+    }
+
+    #[tokio::test]
     async fn test_get_or_create_protocol_system_id() {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
