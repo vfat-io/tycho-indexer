@@ -373,8 +373,8 @@ pub mod pg {
     {
         fn from_storage(
             val: orm::ProtocolComponent,
-            tokens: Vec<H160>,
-            contract_ids: Vec<H160>,
+            tokens: &Vec<Address>,
+            contract_ids: &Vec<Address>,
             chain: Chain,
             protocol_system: &str,
             transaction_hash: H256,
@@ -387,14 +387,28 @@ pub mod pg {
                     .map(|(key, value)| (key, Bytes::from(bytes::Bytes::from(value.to_string()))))
                     .collect();
             }
+            fn convert_addresses_to_h160(
+                addresses: &Vec<Address>,
+            ) -> Result<Vec<H160>, StorageError> {
+                addresses
+                    .iter()
+                    .map(|address| {
+                        pad_and_parse_h160(address)
+                            .map_err(|err| StorageError::DecodeError(err.to_string()))
+                    })
+                    .collect()
+            }
+            let token_addresses: Result<Vec<H160>, StorageError> =
+                convert_addresses_to_h160(tokens);
+            let contract_addresses = convert_addresses_to_h160(contract_ids);
 
             Ok(evm::ProtocolComponent {
                 id: val.external_id,
                 protocol_system: protocol_system.to_owned(),
                 protocol_type_name: val.protocol_type_id.to_string(),
                 chain,
-                tokens,
-                contract_ids,
+                tokens: token_addresses?,
+                contract_ids: contract_addresses?,
                 static_attributes,
                 change: Default::default(),
                 creation_tx: transaction_hash,
@@ -555,10 +569,11 @@ mod test {
     use super::*;
     use crate::{
         extractor::evm::{utils::pad_and_parse_h160, ERC20Token},
-        storage::{postgres::orm::Token, Address, StorableToken},
+        storage::{
+            postgres::{orm, orm::Token},
+            Address, StorableToken,
+        },
     };
-
-    use crate::storage::postgres::orm;
 
     use crate::{
         hex_bytes::Bytes,
@@ -632,18 +647,34 @@ mod test {
             deletion_tx: None,
         };
 
-        let tokens = vec![
-            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+        let token_str_addresses = vec![
+            "6B175474E89094C44Da98b954EedeAC495271d0F",
+            "6B175474E89094C44Da98b954EedeAC495271d0F",
         ];
-        let contract_ids = vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)];
+        let contract_str_addresses = vec![
+            "694B89AbC4E1C3002C110D7002e11424aad3d3A5",
+            "4665e227c521849a202f808E927d1dc5F63C7941",
+        ];
+
+        let tokens: Vec<Address> = token_str_addresses
+            .clone()
+            .into_iter()
+            .map(|t_address| t_address.into())
+            .collect();
+
+        let contract_ids: Vec<Address> = contract_str_addresses
+            .clone()
+            .into_iter()
+            .map(|c_address| c_address.into())
+            .collect();
+
         let chain = Chain::Ethereum;
         let protocol_system = "ambient".to_string();
 
         let result = evm::ProtocolComponent::from_storage(
             val.clone(),
-            tokens.clone(),
-            contract_ids.clone(),
+            &tokens,
+            &contract_ids,
             chain,
             &protocol_system,
             H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
@@ -657,8 +688,20 @@ mod test {
         assert_eq!(protocol_component.id, val.external_id.to_string());
         assert_eq!(protocol_component.protocol_type_name, val.protocol_type_id.to_string());
         assert_eq!(protocol_component.chain, chain);
-        assert_eq!(protocol_component.tokens, tokens);
-        assert_eq!(protocol_component.contract_ids, contract_ids);
+        assert_eq!(
+            protocol_component.tokens,
+            token_str_addresses
+                .iter()
+                .map(|t_address| H160::from_str(t_address).unwrap())
+                .collect::<Vec<H160>>()
+        );
+        assert_eq!(
+            protocol_component.contract_ids,
+            contract_str_addresses
+                .iter()
+                .map(|c_address| H160::from_str(c_address).unwrap())
+                .collect::<Vec<H160>>()
+        );
 
         let mut expected_attributes = HashMap::new();
         expected_attributes.insert(
