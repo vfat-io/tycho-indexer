@@ -160,6 +160,7 @@ struct SubscriptionInfo {
     state: SubscriptionStatus,
 }
 
+#[derive(Debug)]
 enum SubscriptionStatus {
     RequestedSubscription(oneshot::Sender<Receiver<BlockAccountChanges>>),
     Active,
@@ -240,21 +241,29 @@ impl Inner {
         }
     }
 
-    fn remove_subscription(&mut self, id: Uuid) -> anyhow::Result<()> {
+    fn remove_subscription(&mut self, id: Uuid) {
         if let Entry::Occupied(e) = self.subscriptions.entry(id) {
-            if let SubscriptionStatus::RequestedUnsubscription(tx) = e.remove().state {
-                tx.send(())
-                    .expect("failed notifying about removed subscription");
+            let info = e.remove();
+            if let SubscriptionStatus::RequestedUnsubscription(tx) = info.state {
+                let _ = tx
+                    .send(())
+                    .map_err(|_| warn!("failed notifying about removed subscription"));
+                self.sender.remove(&id).expect(
+                    "Inconsistent internal client state: `sender` state 
+                        drifted from `info` while removing a subscription.",
+                );
+            } else {
+                warn!("Subscription: {id} ended unexpectedly!");
                 self.sender
                     .remove(&id)
                     .expect("sender channel missing");
-            } else {
-                anyhow::bail!("invalid state transition");
             }
         } else {
-            anyhow::bail!("invalid state transition");
+            error!(
+                "Received `SubscriptionEnded` for {id} but the never subscribed 
+                to it. This is likely a bug!"
+            );
         }
-        Ok(())
     }
 
     async fn ws_send(&mut self, msg: Message) {
@@ -302,6 +311,7 @@ impl TychoWsClient {
         let inner = guard
             .as_mut()
             .ok_or_else(|| anyhow::format_err!("Not connected"))?;
+        dbg!(&msg);
         match msg {
             Ok(Message::Text(text)) => match serde_json::from_str::<WebSocketMessage>(&text) {
                 Ok(WebSocketMessage::BlockAccountChanges { subscription_id, data }) => {
@@ -315,22 +325,19 @@ impl TychoWsClient {
                     subscription_id,
                 })) => {
                     info!(?extractor_id, ?subscription_id, "Received a new subscription");
-
-                    dbg!("Start marking subscription active");
                     inner
                         .mark_active(&extractor_id, subscription_id)
                         .expect("failed internal transition");
-
-                    dbg!("Subscription marked active!");
+                    dbg!("subscription active");
                 }
                 Ok(WebSocketMessage::Response(Response::SubscriptionEnded { subscription_id })) => {
                     info!(?subscription_id, "Received a subscription ended");
-                    inner
-                        .remove_subscription(subscription_id)
-                        .expect("failed internal transition");
+                    dbg!("subscription ended start");
+                    inner.remove_subscription(subscription_id);
+                    dbg!("subscription ended");
                 }
                 Err(e) => {
-                    dbg!(&e);
+                    dbg!("deserialisation failed");
                     error!(error = %e, "Failed to deserialize message");
                 }
             },
@@ -344,13 +351,16 @@ impl TychoWsClient {
                 // Do nothing.
             }
             Ok(Message::Close(_)) => {
+                dbg!("closed");
                 inner.reset();
                 return Err(anyhow::anyhow!("Connection closed!"));
             }
             Ok(unknown_msg) => {
+                dbg!(&unknown_msg);
                 info!("Received an unknown message type: {:?}", unknown_msg);
             }
             Err(e) => {
+                dbg!(&e);
                 inner.reset();
                 error!("Failed to get a websocket message: {}", e);
             }
@@ -608,6 +618,78 @@ mod tests {
             .await
             .expect("awaiting message timeout out")
             .expect("receiving message failed");
+        timeout(Duration::from_millis(100), client.close())
+            .await
+            .expect("close timed out")
+            .expect("close failed");
+        jh.await
+            .expect("ws loop errored")
+            .unwrap();
+        server_thread.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_subscription_end() {
+        let exp_comm = [
+            ExpectedComm::Receive(
+                100,
+                Message::Text(
+                    r#"
+                {
+                    "method":"subscribe",
+                    "extractor_id":{
+                    "chain":"ethereum",
+                    "name":"vm:ambient"
+                    }
+                }"#
+                    .to_owned()
+                    .replace(|c: char| c.is_whitespace(), ""),
+                ),
+            ),
+            ExpectedComm::Send(Message::Text(
+                r#"
+                {
+                    "method":"newsubscription",
+                    "extractor_id":{
+                        "chain":"ethereum",
+                        "name":"vm:ambient"
+                    },
+                    "subscription_id":"30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }"#
+                .to_owned()
+                .replace(|c: char| c.is_whitespace(), ""),
+            )),
+            ExpectedComm::Send(Message::Text(
+                r#"
+                {
+                    "method": "subscriptionended",
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }"#
+                .to_owned()
+                .replace(|c: char| c.is_whitespace(), ""),
+            )),
+        ];
+        let (addr, server_thread) = mock_tycho_ws(&exp_comm).await;
+
+        let client = TychoWsClient::new(&format!("ws://{}", addr)).unwrap();
+        let jh = client
+            .connect()
+            .await
+            .expect("connect failed");
+        let mut rx = timeout(
+            Duration::from_millis(100),
+            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+        )
+        .await
+        .expect("subscription timed out")
+        .expect("subscription failed");
+        let res = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("awaiting message timeout out");
+
+        // If the subscription ended, the channel should have been closed.
+        assert!(res.is_none());
+
         timeout(Duration::from_millis(100), client.close())
             .await
             .expect("close timed out")
