@@ -6,14 +6,12 @@ use diesel_async::RunQueryDsl;
 use ethers::utils::keccak256;
 use tracing::instrument;
 
-use crate::{
-    hex_bytes::Bytes,
-    storage::{
-        AccountToContractStore, Address, Balance, BlockIdentifier, BlockOrTimestamp, ChangeType,
-        Code, ContractDelta, ContractId, ContractStateGateway, ContractStore, StorableBlock,
-        StorableContract, StorableToken, StorableTransaction, StoreKey, StoreVal, TxHash, Version,
-    },
+use crate::storage::{
+    AccountToContractStore, Address, Balance, BlockIdentifier, BlockOrTimestamp, ChangeType, Code,
+    ContractDelta, ContractId, ContractStateGateway, ContractStore, StorableBlock,
+    StorableContract, StorableToken, StorableTransaction, StoreKey, StoreVal, TxHash, Version,
 };
+use tycho_types::Bytes;
 
 use self::versioning::{apply_delta_versioning, apply_versioning};
 
@@ -1329,15 +1327,14 @@ mod test {
     //! The tests below test the functionality using the concrete EVM types.
     use std::str::FromStr;
 
+    use crate::{
+        extractor::evm::{self, Account},
+        storage::postgres::db_fixtures,
+    };
     use diesel_async::{AsyncConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
     use rstest::rstest;
-
-    use crate::{
-        extractor::evm::{self, Account},
-        hex_bytes::Bytes,
-        storage::postgres::db_fixtures,
-    };
+    use tycho_types::Bytes;
 
     use super::*;
 
