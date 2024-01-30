@@ -381,11 +381,13 @@ struct RevertParameters {
     end_version: BlockOrTimestamp,
 }
 
+type DeltasCache = LruCache<RevertParameters, (Vec<AccountUpdate>, Vec<ProtocolStateDelta>)>;
+
 pub struct CachedGateway {
     tx: mpsc::Sender<DBCacheMessage>,
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
-    lru_cache: Mutex<LruCache<RevertParameters, (Vec<AccountUpdate>, Vec<ProtocolStateDelta>)>>,
+    lru_cache: Mutex<DeltasCache>,
 }
 
 impl CachedGateway {
