@@ -195,7 +195,7 @@ where
                 .load::<(i64, Address)>(conn)
                 .await?;
 
-        fn map_addresses(
+        fn map_addresses_to_protocol_component(
             protocol_component_to_address: Vec<(i64, Address)>,
         ) -> HashMap<i64, Vec<Address>> {
             protocol_component_to_address
@@ -207,8 +207,10 @@ where
                     acc
                 })
         }
-        let protocol_component_tokens = map_addresses(protocol_component_tokens);
-        let protocol_component_contracts = map_addresses(protocol_component_contracts);
+        let protocol_component_tokens =
+            map_addresses_to_protocol_component(protocol_component_tokens);
+        let protocol_component_contracts =
+            map_addresses_to_protocol_component(protocol_component_contracts);
 
         orm_protocol_components
             .into_iter()
