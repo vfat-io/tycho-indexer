@@ -540,7 +540,7 @@ pub mod testing {
             "contract_storage",
             "contract_code",
             "account_balance",
-            "protocol_holds_token",
+            "protocol_component_holds_token",
             "token",
             "account",
             "protocol_state",

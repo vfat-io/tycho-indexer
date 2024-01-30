@@ -171,7 +171,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    protocol_holds_token (protocol_component_id, token_id) {
+    protocol_component_holds_token (protocol_component_id, token_id) {
         protocol_component_id -> Int8,
         token_id -> Int8,
         inserted_ts -> Timestamptz,
@@ -273,8 +273,8 @@ diesel::joinable!(protocol_calls_contract -> protocol_component (protocol_compon
 diesel::joinable!(protocol_component -> chain (chain_id));
 diesel::joinable!(protocol_component -> protocol_system (protocol_system_id));
 diesel::joinable!(protocol_component -> protocol_type (protocol_type_id));
-diesel::joinable!(protocol_holds_token -> protocol_component (protocol_component_id));
-diesel::joinable!(protocol_holds_token -> token (token_id));
+diesel::joinable!(protocol_component_holds_token -> protocol_component (protocol_component_id));
+diesel::joinable!(protocol_component_holds_token -> token (token_id));
 diesel::joinable!(protocol_state -> protocol_component (protocol_component_id));
 diesel::joinable!(protocol_state -> transaction (modify_tx));
 diesel::joinable!(token -> account (account_id));
@@ -294,7 +294,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     extraction_state,
     protocol_calls_contract,
     protocol_component,
-    protocol_holds_token,
+    protocol_component_holds_token,
     protocol_state,
     protocol_system,
     protocol_type,

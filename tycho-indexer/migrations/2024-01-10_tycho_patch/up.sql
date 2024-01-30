@@ -96,3 +96,20 @@ CREATE TABLE IF NOT EXISTS component_balance(
     "valid_to" timestamptz
 );
 
+-- Rename the protocol_holds_token table to protocol_component_holds_token
+DROP TRIGGER update_modtime_protocol_holds_token ON protocol_holds_token;
+
+DROP TRIGGER audit_table_protocol_holds_token ON protocol_holds_token;
+
+ALTER TABLE protocol_holds_token RENAME TO protocol_component_holds_token;
+
+CREATE TRIGGER update_modtime_protocol_component_holds_token
+    BEFORE UPDATE ON protocol_component_holds_token
+    FOR EACH ROW
+    EXECUTE PROCEDURE update_modified_column();
+
+CREATE TRIGGER audit_table_protocol_component_holds_token
+    BEFORE UPDATE ON protocol_component_holds_token
+    FOR EACH ROW
+    EXECUTE PROCEDURE audit_trigger();
+

@@ -178,7 +178,7 @@ where
     ) -> Result<(), StorageError> {
         use super::schema::{
             account::dsl::*, protocol_component::dsl::*, protocol_component_holds_contract::dsl::*,
-            protocol_holds_token::dsl::*, token::dsl::*,
+            protocol_component_holds_token::dsl::*, token::dsl::*,
         };
         let mut values: Vec<orm::NewProtocolComponent> = Vec::with_capacity(new.len());
         let tx_hashes: Vec<TxHash> = new
@@ -282,7 +282,7 @@ where
             .collect();
 
         let protocol_component_token_junction: Result<
-            Vec<orm::NewProtocolHoldsToken>,
+            Vec<orm::NewProtocolComponentHoldsToken>,
             StorageError,
         > = pc_tokens_map
             .iter()
@@ -290,11 +290,14 @@ where
                 let t_id = token_add_by_id
                     .get(t_address)
                     .ok_or(StorageError::NotFound("Token id".to_string(), t_address.to_string()))?;
-                Ok(orm::NewProtocolHoldsToken { protocol_component_id: *pc_id, token_id: *t_id })
+                Ok(orm::NewProtocolComponentHoldsToken {
+                    protocol_component_id: *pc_id,
+                    token_id: *t_id,
+                })
             })
             .collect();
 
-        diesel::insert_into(protocol_holds_token)
+        diesel::insert_into(protocol_component_holds_token)
             .values(&protocol_component_token_junction?)
             .execute(conn)
             .await?;
@@ -1434,10 +1437,10 @@ mod test {
         assert_eq!(original_component.id, inserted_data.external_id);
 
         // assert junction table
-        let component_token_junction = schema::protocol_holds_token::table
+        let component_token_junction = schema::protocol_component_holds_token::table
             .select((
-                schema::protocol_holds_token::protocol_component_id,
-                schema::protocol_holds_token::token_id,
+                schema::protocol_component_holds_token::protocol_component_id,
+                schema::protocol_component_holds_token::token_id,
             ))
             .first::<(i64, i64)>(&mut conn)
             .await
