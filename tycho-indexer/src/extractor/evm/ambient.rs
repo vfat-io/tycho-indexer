@@ -89,14 +89,6 @@ impl AmbientPgGateway {
         AmbientPgGateway { name: name.to_owned(), chain, pool, state_gateway: gw }
     }
 
-    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
-        let mut conn = self.pool.get().await.unwrap();
-        self.state_gateway
-            .add_protocol_types(new_protocol_types, &mut *conn)
-            .await
-            .expect("Couldn't insert protocol types");
-    }
-
     #[instrument(skip_all)]
     async fn save_cursor(&self, block: &Block, new_cursor: &str) -> Result<(), StorageError> {
         let state =
@@ -207,7 +199,11 @@ impl AmbientGateway for AmbientPgGateway {
     }
 
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
-        todo!()
+        let mut conn = self.pool.get().await.unwrap();
+        self.state_gateway
+            .add_protocol_types(new_protocol_types, &mut *conn)
+            .await
+            .expect("Couldn't insert protocol types");
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
@@ -749,7 +745,7 @@ mod test_serial_db {
                 ),
             ],
             protocol_components: Vec::new(),
-            tvl_changes: Vec::new(),
+            component_balances: Vec::new(),
         }
     }
 
@@ -775,7 +771,7 @@ mod test_serial_db {
                 evm::fixtures::transaction02(TX_HASH_1, BLOCK_HASH_0, 1),
             )],
             protocol_components: Vec::new(),
-            tvl_changes: Vec::new(),
+            component_balances: Vec::new(),
         }
     }
 
