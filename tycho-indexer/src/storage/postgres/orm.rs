@@ -528,7 +528,7 @@ impl ProtocolState {
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
                 protocol_state::valid_to
-                    .gt(version_ts)
+                    .gt(version_ts) // if version_ts is None, diesel equates this expression to "False"
                     .or(protocol_state::valid_to.is_null()),
             )
             .into_boxed();
