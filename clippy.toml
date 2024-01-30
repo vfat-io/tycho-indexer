@@ -1,1 +1,1 @@
-ignore-interior-mutability = ["bytes::Bytes", "tycho_indexer::hex_bytes::Bytes"]
+ignore-interior-mutability = ["bytes::Bytes", "tycho_types::hex_bytes::Bytes"]

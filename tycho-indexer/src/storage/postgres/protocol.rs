@@ -12,7 +12,6 @@ use tracing::warn;
 
 use crate::{
     extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
-    hex_bytes::Bytes,
     models::{Chain, ProtocolType},
     storage::{
         postgres::{
@@ -28,6 +27,7 @@ use crate::{
         StorableTransaction, StorageError, TxHash, Version,
     },
 };
+use tycho_types::Bytes;
 
 impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
 where
@@ -815,11 +815,11 @@ mod test {
     use serde_json::json;
 
     use crate::{
-        hex_bytes::Bytes,
         models,
         models::{FinancialType, ImplementationType},
         storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
     };
+    use tycho_types::Bytes;
 
     use ethers::prelude::H256;
     use std::{collections::HashMap, str::FromStr};
