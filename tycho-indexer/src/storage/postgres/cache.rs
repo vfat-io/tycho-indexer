@@ -37,7 +37,7 @@ pub(crate) enum WriteOp {
     SaveExtractionState(ExtractionState),
     InsertContract(evm::Account),
     UpdateContracts(Vec<(TxHash, AccountUpdate)>),
-    UpsertProtocolState(Vec<(TxHash, evm::ProtocolStateDelta)>),
+    UpsertProtocolState(Vec<(TxHash, ProtocolStateDelta)>),
 }
 
 /// Represents a transaction in the database, including the block information,
@@ -362,7 +362,7 @@ impl DBCacheWriteExecutor {
                     .await
             }
             WriteOp::UpsertProtocolState(deltas) => {
-                let collected_changes: Vec<(TxHash, &evm::ProtocolStateDelta)> = deltas
+                let collected_changes: Vec<(TxHash, &ProtocolStateDelta)> = deltas
                     .iter()
                     .map(|(tx, update)| (tx.clone(), update))
                     .collect();
@@ -385,7 +385,7 @@ pub struct CachedGateway {
     tx: mpsc::Sender<DBCacheMessage>,
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
-    lru_cache: Mutex<LruCache<RevertParameters, Vec<AccountUpdate>>>,
+    lru_cache: Mutex<LruCache<RevertParameters, (Vec<AccountUpdate>, Vec<ProtocolStateDelta>)>>,
 }
 
 impl CachedGateway {
@@ -496,16 +496,16 @@ impl CachedGateway {
         }
     }
 
-    pub async fn get_accounts_delta(
+    pub async fn get_delta(
         &self,
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<Vec<AccountUpdate>, StorageError> {
+    ) -> Result<(Vec<AccountUpdate>, Vec<ProtocolStateDelta>), StorageError> {
         let mut lru_cache = self.lru_cache.lock().await;
 
         if start_version.is_none() {
-            warn!("Get accounts delta called with start_version = None, this might be a bug in one of the extractors")
+            warn!("Get delta called with start_version = None, this might be a bug in one of the extractors")
         }
 
         // Construct a key for the LRU cache
@@ -529,15 +529,19 @@ impl CachedGateway {
 
         // Fetch the delta from the database
         let mut db = self.pool.get().await.unwrap();
-        let delta = self
+        let accounts_delta = self
             .state_gateway
             .get_accounts_delta(chain, start_version, end_version, &mut db)
             .await?;
+        let protocol_delta = self
+            .state_gateway
+            .get_protocol_states_delta(chain, start_version, end_version, &mut db)
+            .await?;
 
         // Insert the new delta into the LRU cache
-        lru_cache.put(key, delta.clone());
+        lru_cache.put(key, (accounts_delta.clone(), protocol_delta.clone()));
 
-        Ok(delta)
+        Ok((accounts_delta, protocol_delta))
     }
 
     pub async fn update_protocol_states(
@@ -1051,7 +1055,7 @@ mod test_serial_db {
 
             // Get delta from current state (None) to block 1
             let delta_0 = cached_gw
-                .get_accounts_delta(
+                .get_delta(
                     &Chain::Ethereum,
                     None,
                     &BlockOrTimestamp::Block(BlockIdentifier::Hash(
@@ -1104,7 +1108,7 @@ mod test_serial_db {
 
             // Get delta from current state (None) to block 2, stores it in the lru cache
             let delta_1 = cached_gw
-                .get_accounts_delta(
+                .get_delta(
                     &Chain::Ethereum,
                     None,
                     &BlockOrTimestamp::Block(BlockIdentifier::Hash(
@@ -1143,7 +1147,7 @@ mod test_serial_db {
 
             // Get delta from current state (None) to block 1 again, retrieve it from the lru cache
             let delta_2 = cached_gw
-                .get_accounts_delta(
+                .get_delta(
                     &Chain::Ethereum,
                     None,
                     &BlockOrTimestamp::Block(BlockIdentifier::Hash(
@@ -1159,7 +1163,7 @@ mod test_serial_db {
 
             // Get delta from current state (None) to block 2 again, retrieve it from the lru cache
             let delta_3 = cached_gw
-                .get_accounts_delta(
+                .get_delta(
                     &Chain::Ethereum,
                     None,
                     &BlockOrTimestamp::Block(BlockIdentifier::Hash(
