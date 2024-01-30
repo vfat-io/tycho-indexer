@@ -155,14 +155,73 @@ where
             .load::<(orm::ProtocolComponent, TxHash)>(conn)
             .await?;
 
+        let protocol_component_ids = orm_protocol_components
+            .iter()
+            .map(|(pc, _)| pc.id)
+            .collect::<Vec<i64>>();
+
+        let protocol_component_tokens: Vec<(i64, Address)> = schema::protocol_holds_token::table
+            .inner_join(schema::token::table)
+            .inner_join(
+                schema::account::table.on(schema::token::account_id.eq(schema::account::id)),
+            )
+            .select((schema::protocol_holds_token::protocol_component_id, schema::account::address))
+            .filter(
+                schema::protocol_holds_token::protocol_component_id
+                    .eq_any(protocol_component_ids.clone()),
+            )
+            .load::<(i64, Address)>(conn)
+            .await?;
+
+        let protocol_component_contracts: Vec<(i64, Address)> =
+            schema::protocol_component_holds_contract::table
+                .inner_join(schema::contract_code::table)
+                .inner_join(
+                    schema::account::table
+                        .on(schema::contract_code::account_id.eq(schema::account::id)),
+                )
+                .select((
+                    schema::protocol_component_holds_contract::protocol_component_id,
+                    schema::account::address,
+                ))
+                .filter(
+                    schema::protocol_component_holds_contract::protocol_component_id
+                        .eq_any(protocol_component_ids),
+                )
+                .load::<(i64, Address)>(conn)
+                .await?;
+
+        fn map_addresses(
+            protocol_component_to_address: Vec<(i64, Address)>,
+        ) -> HashMap<i64, Vec<Address>> {
+            protocol_component_to_address
+                .into_iter()
+                .fold(HashMap::new(), |mut acc, (key, address)| {
+                    acc.entry(key)
+                        .or_default()
+                        .push(address);
+                    acc
+                })
+        }
+        let protocol_component_tokens = map_addresses(protocol_component_tokens);
+        let protocol_component_contracts = map_addresses(protocol_component_contracts);
+
         orm_protocol_components
             .into_iter()
             .map(|(pc, tx_hash)| {
                 let ps = self.get_protocol_system(&pc.protocol_system_id);
+                let default_vec = vec![];
+                let tokens_by_pc = protocol_component_tokens
+                    .get(&pc.id)
+                    .unwrap_or(&default_vec);
+                let contracts_by_pc = protocol_component_contracts
+                    .get(&pc.id)
+                    .unwrap_or(&default_vec);
+
                 ProtocolComponent::from_storage(
-                    pc,
-                    vec![],
-                    vec![],
+                    pc.clone(),
+                    tokens_by_pc,
+                    contracts_by_pc,
                     chain.to_owned(),
                     &ps,
                     tx_hash.into(),
@@ -186,9 +245,7 @@ where
             .map(|pc| pc.creation_tx.into())
             .collect();
         let tx_hash_id_mapping: HashMap<TxHash, i64> =
-            orm::Transaction::ids_by_hash(&tx_hashes, conn)
-                .await
-                .unwrap();
+            orm::Transaction::ids_by_hash(&tx_hashes, conn).await?;
         let pt_id = orm::ProtocolType::id_by_name(&new[0].protocol_type_name, conn)
             .await
             .map_err(|err| {
@@ -887,6 +944,23 @@ mod test {
             Some(orm::ImplementationType::Custom),
         )
         .await;
+
+        // insert tokens
+        let (account_id_weth, weth_id) =
+            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
+                .await;
+        let (account_id_usdc, usdc_id) =
+            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
+                .await;
+
+        let _ = db_fixtures::insert_contract_code(
+            conn,
+            account_id_weth,
+            txn[0],
+            Bytes::from_str("C0C0C0").unwrap(),
+        )
+        .await;
+
         let protocol_component_id = db_fixtures::insert_protocol_component(
             conn,
             "state1",
@@ -945,22 +1019,6 @@ mod test {
             "reserve1".to_owned(),
             Bytes::from(U256::from(1000)),
             None,
-        )
-        .await;
-
-        // insert tokens
-        let (account_id_weth, weth_id) =
-            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
-                .await;
-        let (account_id_usdc, usdc_id) =
-            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
-                .await;
-
-        let _ = db_fixtures::insert_contract_code(
-            conn,
-            account_id_weth,
-            txn[0],
-            Bytes::from_str("C0C0C0").unwrap(),
         )
         .await;
 
@@ -1658,5 +1716,7 @@ mod test {
         assert_eq!(pc.chain, chain);
         let i_usize: usize = i as usize;
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
+
+        print!("{:?}", pc.tokens)
     }
 }
