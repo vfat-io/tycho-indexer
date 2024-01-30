@@ -787,22 +787,21 @@ where
     ) -> Result<HashMap<(i64, i64), Balance>, StorageError> {
         use schema::component_balance::dsl::*;
         let res = if start_version_ts <= target_version_ts {
-            let changed_accounts_and_tokens = component_balance
+            // Going forward
+            //                  ]     changes to update   ]
+            // -----------------|--------------------------|
+            //                start                     target
+            // We query for balance updates between start and target version.
+            let changed_component_balances = component_balance
                 .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
                 .filter(schema::chain::id.eq(chain_id))
                 .filter(valid_from.gt(start_version_ts))
                 .filter(valid_from.le(target_version_ts))
                 .select((protocol_component_id, token_id))
-                .distinct()
-                .into_boxed();
+                .distinct();
 
-            let result: HashMap<(i64, i64), Balance> = component_balance
+            let result: HashMap<(i64, i64), Balance> = changed_component_balances
                 .inner_join(schema::transaction::table)
-                .filter(
-                    protocol_component_id
-                        .eq_any(&changed_accounts_and_tokens.select(protocol_component_id))
-                        .and(token_id.eq_any(changed_accounts_and_tokens.select(token_id))),
-                )
                 .filter(valid_from.le(target_version_ts))
                 .filter(
                     valid_to
@@ -824,22 +823,22 @@ where
                 .collect();
             result
         } else {
-            let changed_accounts_and_tokens = component_balance
+            // Going backwards
+            //                  ]     changes to revert    ]
+            // -----------------|--------------------------|
+            //                target                     start
+            // We query for the previous values of all (protocol_component, token) pairs updated
+            // between start and target version.
+            let changed_component_balances = component_balance
                 .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
                 .filter(schema::chain::id.eq(chain_id))
                 .filter(valid_from.gt(target_version_ts))
                 .filter(valid_from.le(start_version_ts))
                 .select((protocol_component_id, token_id))
-                .distinct()
-                .into_boxed();
+                .distinct();
 
-            let result: HashMap<(i64, i64), Balance> = component_balance
+            let result: HashMap<(i64, i64), Balance> = changed_component_balances
                 .inner_join(schema::transaction::table)
-                .filter(
-                    protocol_component_id
-                        .eq_any(&changed_accounts_and_tokens.select(protocol_component_id))
-                        .and(token_id.eq_any(changed_accounts_and_tokens.select(token_id))),
-                )
                 .filter(valid_from.le(target_version_ts))
                 .filter(
                     valid_to
@@ -850,8 +849,8 @@ where
                 .order_by((
                     protocol_component_id,
                     token_id,
-                    valid_from.desc(),
-                    schema::transaction::index.desc(),
+                    valid_from.asc(),
+                    schema::transaction::index.asc(),
                 ))
                 .distinct_on((protocol_component_id, token_id))
                 .get_results::<(i64, i64, Balance)>(conn)
