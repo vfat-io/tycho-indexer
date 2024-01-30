@@ -63,19 +63,24 @@ where
     ) -> Result<Vec<ProtocolState>, StorageError> {
         match result {
             Ok(data_vec) => {
+                // Decode final state deltas. We can assume result is sorted by component_id and
+                // transaction index. Therefore we can use slices to iterate over the data in groups
+                // of component_id. The last update for each component will have the latest
+                // transaction hash (modify_tx).
+
                 let mut protocol_states = Vec::new();
 
-                let mut i = 0;
-                while i < data_vec.len() {
-                    let component_start = i;
-                    let current_component_id = &data_vec[i].1;
+                let mut index = 0;
+                while index < data_vec.len() {
+                    let component_start = index;
+                    let current_component_id = &data_vec[index].1;
 
                     // Iterate until the component_id changes
-                    while i < data_vec.len() && &data_vec[i].1 == current_component_id {
-                        i += 1;
+                    while index < data_vec.len() && &data_vec[index].1 == current_component_id {
+                        index += 1;
                     }
 
-                    let states_slice = &data_vec[component_start..i];
+                    let states_slice = &data_vec[component_start..index];
                     let tx_hash = &states_slice.last().unwrap().2; // Last element has the latest transaction
 
                     let protocol_state = ProtocolState::from_storage(
@@ -577,6 +582,19 @@ where
 
             let chain_db_id = self.get_chain_id(chain);
 
+            // fetch updated component attributes
+            let state_updates =
+                orm::ProtocolState::forward_deltas_by_chain(chain_db_id, start_ts, end_ts, conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(
+                            err,
+                            "ProtocolStates",
+                            chain.to_string().as_str(),
+                            None,
+                        )
+                    })?;
+
             // fetch deleted component attributes
             let deleted_attrs = orm::ProtocolState::deleted_attributes_by_chain(
                 chain_db_id,
@@ -584,72 +602,60 @@ where
                 end_ts,
                 conn,
             )
-            .await;
+            .await
+            .map_err(|err| {
+                StorageError::from_diesel(err, "ProtocolStates", chain.to_string().as_str(), None)
+            })?;
 
-            // fetch updated component attributes
-            let state_updates =
-                orm::ProtocolState::deltas_by_chain(chain_db_id, start_ts, end_ts, conn).await;
+            // Decode final state deltas. We can assume both the deleted_attrs and state_updates
+            // are sorted by component_id and transaction index. Therefore we can use slices to
+            // iterate over the data in groups of component_id. To do this we first need to collect
+            // an ordered set of the componen ids.
 
-            // decode final state deltas
-            match state_updates {
-                Ok(data_vec) => {
-                    let mut protocol_states = Vec::new();
+            let mut protocol_states_delta = Vec::new();
 
-                    let deleted_vec = match deleted_attrs {
-                        Ok(value) => value,
-                        Err(_) => Vec::new(),
-                    };
+            // index trackers to iterate over the state updates and deleted attributes in parallel
+            let (mut updates_index, mut deletes_index) = (0, 0);
 
-                    // Variable to keep track of current position in deleted_vec
-                    let mut j = 0;
+            while updates_index < state_updates.len() {
+                let component_start = updates_index;
+                let current_component_id = &state_updates[updates_index].1;
 
-                    // Variable to keep track of current position in data_vec
-                    let mut i = 0;
-
-                    while i < data_vec.len() {
-                        let component_start = i;
-                        let current_component_id = &data_vec[i].1;
-
-                        // Iterate over states until the component_id changes
-                        while i < data_vec.len() && &data_vec[i].1 == current_component_id {
-                            i += 1;
-                        }
-
-                        let deleted_start = j;
-                        // Iterate over deleted attributes until the component_id changes
-                        while j < deleted_vec.len() && &deleted_vec[j].0 == current_component_id {
-                            j += 1;
-                        }
-
-                        let states_slice = &data_vec[component_start..i];
-                        let tx_hash = &states_slice.last().unwrap().2; // Last element has the latest transaction
-                        let deleted_slice = &deleted_vec[deleted_start..j];
-
-                        let protocol_state = ProtocolStateDelta::from_storage(
-                            states_slice
-                                .iter()
-                                .map(|x| x.0.clone())
-                                .collect(),
-                            current_component_id.clone(),
-                            tx_hash,
-                            deleted_slice
-                                .iter()
-                                .map(|x| x.1.clone())
-                                .collect::<Vec<String>>(),
-                        )?;
-
-                        protocol_states.push(protocol_state);
-                    }
-                    Ok(protocol_states)
+                // Iterate over states until the component_id no longer matches the current
+                // component id
+                while updates_index < state_updates.len() &&
+                    &state_updates[updates_index].1 == current_component_id
+                {
+                    updates_index += 1;
                 }
 
-                Err(err) => Err(StorageError::from_diesel(
-                    err,
-                    "ProtocolStates",
-                    chain.to_string().as_str(),
-                    None,
-                )),
+                let deleted_start = deletes_index;
+                // Iterate over deleted attributes until the component_id no longer matches the
+                // current component id
+                while deletes_index < deleted_attrs.len() &&
+                    &deleted_attrs[deletes_index].0 == current_component_id
+                {
+                    deletes_index += 1;
+                }
+
+                let states_slice = &state_updates[component_start..updates_index];
+                let deleted_slice = &deleted_attrs[deleted_start..deletes_index];
+
+                let state_delta = ProtocolStateDelta::from_storage(
+                    states_slice
+                        .iter()
+                        .map(|x| x.0.clone())
+                        .collect(),
+                    current_component_id.clone(),
+                    deleted_slice
+                        .iter()
+                        .map(|x| x.1.clone())
+                        .collect::<Vec<String>>(),
+                )?;
+
+                protocol_states_delta.push(state_delta);
             }
+            Ok(protocol_states_delta)
         } else {
             // Going backwards
             //                  ]     changes to revert    ]
@@ -660,58 +666,61 @@ where
 
             let chain_db_id = self.get_chain_id(chain);
 
+            // fetch reverse attribute changes
             let result =
-                orm::ProtocolState::reverted_by_chain(chain_db_id, start_ts, end_ts, conn).await;
+                orm::ProtocolState::reverse_delta_by_chain(chain_db_id, start_ts, end_ts, conn)
+                    .await
+                    .map_err(|err| {
+                        StorageError::from_diesel(
+                            err,
+                            "ProtocolStates",
+                            chain.to_string().as_str(),
+                            None,
+                        )
+                    })?;
 
-            match result {
-                Ok(data_vec) => {
-                    let mut deltas = Vec::new();
+            // Decode final state deltas. We can assume result is sorted by component_id and
+            // transaction index. Therefore we can use slices to iterate over the data in groups of
+            // component_id.
 
-                    let mut i = 0;
-                    while i < data_vec.len() {
-                        let component_start = i;
-                        let current_component_id = &data_vec[i].0;
+            let mut deltas = Vec::new();
 
-                        // Iterate until the component_id changes
-                        while i < data_vec.len() && &data_vec[i].0 == current_component_id {
-                            i += 1;
-                        }
+            let mut index = 0;
+            while index < result.len() {
+                let component_start = index;
+                let current_component_id = &result[index].0;
 
-                        let states_slice = &data_vec[component_start..i];
-
-                        // sort through state updates and deletions
-                        let mut updates = HashMap::new();
-                        let mut deleted = HashSet::new();
-                        for (component, attribute, prev_value) in states_slice {
-                            if let Some(value) = prev_value {
-                                // if prev_value is not null, then the attribute was updated and
-                                // must be reverted via a reversed update
-                                updates.insert(attribute.clone(), value.clone());
-                            } else {
-                                // if prev_value is null, then the attribute was created and must be
-                                // deleted on revert
-                                deleted.insert(attribute.clone());
-                            }
-                        }
-                        let state_delta = ProtocolStateDelta {
-                            component_id: current_component_id.clone(),
-                            updated_attributes: updates,
-                            deleted_attributes: deleted,
-                        };
-
-                        deltas.push(state_delta);
-                    }
-
-                    Ok(deltas)
+                // Iterate until the component_id changes
+                while index < result.len() && &result[index].0 == current_component_id {
+                    index += 1;
                 }
 
-                Err(err) => Err(StorageError::from_diesel(
-                    err,
-                    "ProtocolStates",
-                    chain.to_string().as_str(),
-                    None,
-                )),
+                let states_slice = &result[component_start..index];
+
+                // sort through state updates and deletions
+                let mut updates = HashMap::new();
+                let mut deleted = HashSet::new();
+                for (component, attribute, prev_value) in states_slice {
+                    if let Some(value) = prev_value {
+                        // if prev_value is not null, then the attribute was updated and
+                        // must be reverted via a reversed update
+                        updates.insert(attribute.clone(), value.clone());
+                    } else {
+                        // if prev_value is null, then the attribute was created and must be
+                        // deleted on revert
+                        deleted.insert(attribute.clone());
+                    }
+                }
+                let state_delta = ProtocolStateDelta {
+                    component_id: current_component_id.clone(),
+                    updated_attributes: updates,
+                    deleted_attributes: deleted,
+                };
+
+                deltas.push(state_delta);
             }
+
+            Ok(deltas)
         }
     }
 
@@ -1126,7 +1135,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_get_protocol_state_deltas_forward() {
+    async fn test_get_protocol_states_delta_forward() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
 
@@ -1178,7 +1187,7 @@ mod test {
 
         // expected result
         let mut state_delta = protocol_state_delta();
-        state_delta.component_id = "state1".to_owned();
+        // state_delta.component_id = "state1".to_owned();
         state_delta.deleted_attributes = vec!["deleted".to_owned()]
             .into_iter()
             .collect();
@@ -1200,7 +1209,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_get_protocol_state_deltas_backward() {
+    async fn test_get_protocol_states_delta_backward() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
 

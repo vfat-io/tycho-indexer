@@ -533,7 +533,6 @@ pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(
         val: Vec<S>,
         component_id: String,
-        tx_hash: &TxHash,
         deleted_attributes: Vec<AttrStoreKey>,
     ) -> Result<Self, StorageError>;
 

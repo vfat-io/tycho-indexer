@@ -398,11 +398,13 @@ pub struct ProtocolState {
 }
 
 impl ProtocolState {
-    /// Used to fetch the full state of a component at a given version.
+    /// Used to fetch the full state of a component at a given version, filtered by component ids.
     ///
     /// Retrieves all matching protocol states, filtered by component id, along with their linked
     /// component ids and transaction hashes. If no version is provided, the latest state is
-    /// returned. The results are grouped by component id and ordered by transaction.
+    /// returned. The results are grouped by component id and ordered by transaction to allow for
+    /// easy state reconstruction. It can be trusted that all state updates for a given component
+    /// are together and the updates can be applied in order with the latest update last.
     pub async fn by_id(
         component_ids: &[&str],
         chain_id: i64,
@@ -433,11 +435,16 @@ impl ProtocolState {
             .await
     }
 
-    /// Used to fetch the full state of a component at a given version.
+    /// Used to fetch the full state of a component at a given version, filtered by protocol system.
     ///
     /// Retrieves all matching protocol states, filtered by protocol system, along with their linked
     /// component ids and transaction hashes. If no version is provided, the latest state is
-    /// returned. The results are grouped by component id and ordered by transaction.
+    /// returned. The results are grouped by component id and ordered by transaction to allow for
+    /// easy state reconstruction. It can be trusted that all state updates for a given component
+    /// are together and the updates can be applied in order with the latest update last.
+    ///
+    /// Note - follows the same logic as by_ids, but filters by protocol system instead of component
+    /// ids.
     pub async fn by_protocol_system(
         system: String,
         chain_id: i64,
@@ -476,11 +483,15 @@ impl ProtocolState {
             .await
     }
 
-    /// Used to fetch the full state of a component at a given version.
+    /// Used to fetch the full state of a component at a given version, filtered by chain.
     ///
     /// Retrieves all matching protocol states, filtered by chain, along with their linked
     /// component ids and transaction hashes. If no version is provided, the latest state is
-    /// returned. The results are grouped by component id and ordered by transaction.
+    /// returned. The results are grouped by component id and ordered by transaction to allow for
+    /// easy state reconstruction. It can be trusted that all state updates for a given component
+    /// are together and the updates can be applied in order with the latest update last.
+    ///
+    /// Note - follows the same logic as by_ids, but filters by chain instead of component ids.
     pub async fn by_chain(
         chain_id: i64,
         version_ts: Option<NaiveDateTime>,
@@ -516,8 +527,11 @@ impl ProtocolState {
     /// Used to fetch all protocol state changes within the given timeframe.
     ///
     /// Retrieves all state updates applied after start_ts and still valid by end_ts, filtered by
-    /// chain. The results are grouped by component id and ordered by transaction.
-    pub async fn deltas_by_chain(
+    /// chain. Please note - this function is intended to be used to fetch forward changes/deltas.
+    /// The results are grouped by component id and ordered by transaction to allow for easy state
+    /// reconstruction. It can be trusted that all state updates for a given component are together
+    /// and the updates can be applied in order with the latest update last.
+    pub async fn forward_deltas_by_chain(
         chain_id: i64,
         start_ts: NaiveDateTime,
         end_ts: NaiveDateTime,
@@ -548,7 +562,9 @@ impl ProtocolState {
     ///
     /// Retrieves all component-attribute pairs that have a valid version at start_ts and have no
     /// valid version at end_ts. The results are grouped by component id and ordered by
-    /// transaction.
+    /// transaction to allow for easy state reconstruction. It can be trusted that all state updates
+    /// for a given component are together and the updates can be applied in order with the latest
+    /// update last.
     pub async fn deleted_attributes_by_chain(
         chain_id: i64,
         start_ts: NaiveDateTime,
@@ -593,22 +609,13 @@ impl ProtocolState {
     /// target_ts and before start_ts, filtered by chain. Please note - this function is intended to
     /// be used to fetch beckwards changes/revert deltas. Start_ts represents the more recent ts
     /// and target_ts represents the ts of the block to be reverted to. The results are grouped by
-    /// component id and ordered by transaction.
-    pub async fn reverted_by_chain(
+    /// component id to allow for easy state reconstruction.
+    pub async fn reverse_delta_by_chain(
         chain_id: i64,
         start_ts: NaiveDateTime,
         target_ts: NaiveDateTime,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(ComponentId, AttrStoreKey, Option<StoreVal>)>> {
-        // subquery to exclude entities that have a valid version at start_ts (weren't deleted)
-        let sub_query = format!("NOT EXISTS (
-                                SELECT 1 FROM protocol_state ps2
-                                WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
-                                AND ps2.attribute_name = protocol_state.attribute_name
-                                AND ps2.valid_from <= '{}'
-                                AND (ps2.valid_to > '{}' OR ps2.valid_to IS NULL)
-                            )", start_ts, start_ts);
-
         let query = protocol_state::table
             .inner_join(protocol_component::table)
             .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
@@ -636,6 +643,15 @@ impl ProtocolState {
                 ),
             )
             .distinct_on((protocol_state::protocol_component_id, protocol_state::attribute_name));
+
+        // subquery to exclude entities that have a valid version at start_ts (weren't deleted)
+        let sub_query = format!("NOT EXISTS (
+                                SELECT 1 FROM protocol_state ps2
+                                WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
+                                AND ps2.attribute_name = protocol_state.attribute_name
+                                AND ps2.valid_from <= '{}'
+                                AND (ps2.valid_to > '{}' OR ps2.valid_to IS NULL)
+                            )", start_ts, start_ts);
 
         // We query all states that were deleted between the start and target timestamps. Deleted
         // states need to be reinstated so we return the component id, attribute name and latest

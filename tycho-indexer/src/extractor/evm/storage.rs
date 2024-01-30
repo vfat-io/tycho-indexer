@@ -444,7 +444,6 @@ pub mod pg {
         fn from_storage(
             vals: Vec<orm::ProtocolState>,
             component_id: String,
-            tx_hash: &TxHash,
             deleted_attributes: Vec<AttrStoreKey>,
         ) -> Result<Self, StorageError> {
             let mut attr = HashMap::new();
