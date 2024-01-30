@@ -63,7 +63,7 @@ DROP FUNCTION invalidate_previous_entry_contract_code();
 
 CREATE TABLE IF NOT EXISTS protocol_component_holds_contract(
     "protocol_component_id" bigint REFERENCES protocol_component(id) ON DELETE CASCADE NOT NULL,
-    -- we don't allow a token to be deleted unless the protocol component was removed
+    -- we don't allow a contract to be deleted unless the protocol component was removed
     "contract_code_id" bigint REFERENCES "contract_code"(id) NOT NULL,
     -- Timestamp this entry was inserted into this table.
     "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -72,9 +72,9 @@ CREATE TABLE IF NOT EXISTS protocol_component_holds_contract(
     PRIMARY KEY ("protocol_component_id", "contract_code_id")
 );
 
-CREATE INDEX IF NOT EXISTS idx_protocol_component_contract_protocol_component_id ON protocol_component_holds_contract(protocol_component_id);
+CREATE INDEX IF NOT EXISTS idx_protocol_component_holds_contract_protocol_component_id ON protocol_component_holds_contract(protocol_component_id);
 
-CREATE INDEX IF NOT EXISTS idx_protocol_component_contract_contract_id ON protocol_component_holds_contract(contract_code_id);
+CREATE INDEX IF NOT EXISTS idx_protocol_component_holds_contract_contract_code_id ON protocol_component_holds_contract(contract_code_id);
 
 --  Saves the component balance of a protocol component.
 CREATE TABLE IF NOT EXISTS component_balance(
