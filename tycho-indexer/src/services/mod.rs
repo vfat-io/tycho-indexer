@@ -101,7 +101,7 @@ impl ServicesBuilder {
             App::new()
                 .app_data(rpc_data.clone())
                 .service(
-                    web::resource(format!("/{}/contract_state", self.prefix))
+                    web::resource(format!("/{}/{{execution_env}}/contract_state", self.prefix))
                         .route(web::post().to(rpc::contract_state)),
                 )
                 .app_data(ws_data.clone())
