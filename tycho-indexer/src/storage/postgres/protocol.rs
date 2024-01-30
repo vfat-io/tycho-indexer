@@ -216,13 +216,12 @@ where
             .into_iter()
             .map(|(pc, tx_hash)| {
                 let ps = self.get_protocol_system(&pc.protocol_system_id);
-                let default_vec = vec![];
-                let tokens_by_pc = protocol_component_tokens
+                let tokens_by_pc: &Vec<Address> = protocol_component_tokens
                     .get(&pc.id)
-                    .unwrap_or(&default_vec);
-                let contracts_by_pc = protocol_component_contracts
+                    .expect("Could not find Protocol Component.");
+                let contracts_by_pc: &Vec<Address> = protocol_component_contracts
                     .get(&pc.id)
-                    .unwrap_or(&default_vec);
+                    .expect("Could not find Protocol Component.");
 
                 ProtocolComponent::from_storage(
                     pc.clone(),
