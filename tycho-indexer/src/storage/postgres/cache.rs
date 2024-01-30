@@ -39,6 +39,7 @@ pub(crate) enum WriteOp {
     UpdateContracts(Vec<(TxHash, AccountUpdate)>),
     InsertProtocolComponent(Vec<evm::ProtocolComponent>),
     InsertTokens(Vec<evm::ERC20Token>),
+    InsertComponentBalances(Vec<evm::ComponentBalance>),
 }
 
 /// Represents a transaction in the database, including the block information,
@@ -374,6 +375,16 @@ impl DBCacheWriteExecutor {
                     .add_tokens(collected_tokens.as_slice(), conn)
                     .await
             }
+            WriteOp::InsertComponentBalances(balances) => {
+                let ts = match self.pending_block {
+                    Some(block) => block.ts,
+                    None => chrono::Utc::now().naive_utc(),
+                };
+                let collected_balances: Vec<&evm::ComponentBalance> = balances.iter().collect();
+                self.state_gateway
+                    .add_component_balances(collected_balances.as_slice(), ts, conn)
+                    .await
+            }
         }
     }
 }
@@ -568,6 +579,24 @@ impl CachedGateway {
     ) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx = DBTransaction::new(*block, vec![WriteOp::InsertTokens(Vec::from(new))], tx);
+        self.tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await
+            .expect("Send message to receiver ok");
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
+    }
+
+    pub async fn add_component_balances(
+        &self,
+        block: &evm::Block,
+        new: &[evm::ComponentBalance],
+    ) -> Result<(), StorageError> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx =
+            DBTransaction::new(*block, vec![WriteOp::InsertComponentBalances(Vec::from(new))], tx);
         self.tx
             .send(DBCacheMessage::Write(db_tx))
             .await

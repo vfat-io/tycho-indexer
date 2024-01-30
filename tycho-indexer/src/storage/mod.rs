@@ -702,7 +702,6 @@ pub trait ProtocolGateway {
     /// Saves multiple component balances to storage.
     ///
     /// # Parameters
-    /// - `chain` The chain of the token.
     /// - `component_balances` The component balances to insert.
     ///
     /// # Return
@@ -710,7 +709,6 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_component_balances(
         &self,
-        chain: Chain,
         component_balances: &[&Self::ComponentBalance],
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
