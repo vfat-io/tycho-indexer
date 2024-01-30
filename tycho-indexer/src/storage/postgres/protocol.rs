@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use std::{
     cmp::Ordering,
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
 };
 
 use diesel::prelude::*;
@@ -610,16 +610,29 @@ where
             // Decode final state deltas. We can assume both the deleted_attrs and state_updates
             // are sorted by component_id and transaction index. Therefore we can use slices to
             // iterate over the data in groups of component_id. To do this we first need to collect
-            // an ordered set of the componen ids.
+            // an ordered set of the component ids, then we can loop through deleted_attrs and
+            // state_updates in parallel, creating a slice for each component_id.
+
+            // Get sets of component_ids from state_updates and deleted_attrs
+            let state_updates_ids: BTreeSet<_> = state_updates
+                .iter()
+                .map(|item| &item.1)
+                .collect();
+            let deleted_attrs_ids: BTreeSet<_> = deleted_attrs
+                .iter()
+                .map(|item| &item.0)
+                .collect();
+            // Union of two sets gives us a sorted set of all unique component_ids
+            let mut all_component_ids = state_updates_ids.clone();
+            all_component_ids.append(&mut deleted_attrs_ids.clone());
 
             let mut protocol_states_delta = Vec::new();
 
             // index trackers to iterate over the state updates and deleted attributes in parallel
             let (mut updates_index, mut deletes_index) = (0, 0);
 
-            while updates_index < state_updates.len() {
+            for current_component_id in all_component_ids {
                 let component_start = updates_index;
-                let current_component_id = &state_updates[updates_index].1;
 
                 // Iterate over states until the component_id no longer matches the current
                 // component id
@@ -1183,15 +1196,40 @@ mod test {
         )
         .await;
 
+        // set up deleted attribute different state (one that isn't also updated)
+        let protocol_component_id2 = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state3"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id2,
+            from_txn_id,
+            "deleted2".to_owned(),
+            Bytes::from(U256::from(100)),
+            None,
+            Some(to_txn_id),
+        )
+        .await;
+
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
         // expected result
         let mut state_delta = protocol_state_delta();
-        // state_delta.component_id = "state1".to_owned();
+        state_delta.component_id = "state1".to_owned();
         state_delta.deleted_attributes = vec!["deleted".to_owned()]
             .into_iter()
             .collect();
-        let expected = vec![state_delta];
+        let other_state_delta = ProtocolStateDelta {
+            component_id: "state3".to_owned(),
+            updated_attributes: HashMap::new(),
+            deleted_attributes: vec!["deleted2".to_owned()]
+                .into_iter()
+                .collect(),
+        };
+        let expected = vec![state_delta, other_state_delta];
 
         // test
         let result = gateway
