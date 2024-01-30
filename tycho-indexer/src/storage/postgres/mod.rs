@@ -980,6 +980,7 @@ pub mod db_fixtures {
             .unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
     // Insert a new Protocol Component
     pub async fn insert_protocol_component(
         conn: &mut AsyncPgConnection,
@@ -988,6 +989,8 @@ pub mod db_fixtures {
         system_id: i64,
         type_id: i64,
         tx_id: i64,
+        token_ids: Option<Vec<i64>>,
+        contract_code_ids: Option<Vec<i64>>,
     ) -> i64 {
         let ts: NaiveDateTime = schema::transaction::table
             .inner_join(schema::block::table)
@@ -1005,11 +1008,51 @@ pub mod db_fixtures {
             schema::protocol_component::creation_tx.eq(tx_id),
             schema::protocol_component::created_at.eq(ts),
         ));
-        query
+        let component_id = query
             .returning(schema::protocol_component::id)
             .get_result(conn)
             .await
-            .unwrap()
+            .unwrap();
+
+        if let Some(t_ids) = token_ids {
+            diesel::insert_into(schema::protocol_component_holds_token::table)
+                .values(
+                    t_ids
+                        .iter()
+                        .map(|t_id| {
+                            (
+                                schema::protocol_component_holds_token::protocol_component_id
+                                    .eq(component_id),
+                                schema::protocol_component_holds_token::token_id.eq(t_id),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .execute(conn)
+                .await
+                .expect("protocol component holds token insert ok");
+        }
+
+        if let Some(cc_ids) = contract_code_ids {
+            diesel::insert_into(schema::protocol_component_holds_contract::table)
+                .values(
+                    cc_ids
+                        .iter()
+                        .map(|cc_id| {
+                            (
+                                schema::protocol_component_holds_contract::protocol_component_id
+                                    .eq(component_id),
+                                schema::protocol_component_holds_contract::contract_code_id
+                                    .eq(cc_id),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .execute(conn)
+                .await
+                .expect("protocol component holds contract code insert ok");
+        }
+        component_id
     }
 
     // Insert a new Protocol State

@@ -160,18 +160,22 @@ where
             .map(|(pc, _)| pc.id)
             .collect::<Vec<i64>>();
 
-        let protocol_component_tokens: Vec<(i64, Address)> = schema::protocol_holds_token::table
-            .inner_join(schema::token::table)
-            .inner_join(
-                schema::account::table.on(schema::token::account_id.eq(schema::account::id)),
-            )
-            .select((schema::protocol_holds_token::protocol_component_id, schema::account::address))
-            .filter(
-                schema::protocol_holds_token::protocol_component_id
-                    .eq_any(protocol_component_ids.clone()),
-            )
-            .load::<(i64, Address)>(conn)
-            .await?;
+        let protocol_component_tokens: Vec<(i64, Address)> =
+            schema::protocol_component_holds_token::table
+                .inner_join(schema::token::table)
+                .inner_join(
+                    schema::account::table.on(schema::token::account_id.eq(schema::account::id)),
+                )
+                .select((
+                    schema::protocol_component_holds_token::protocol_component_id,
+                    schema::account::address,
+                ))
+                .filter(
+                    schema::protocol_component_holds_token::protocol_component_id
+                        .eq_any(protocol_component_ids.clone()),
+                )
+                .load::<(i64, Address)>(conn)
+                .await?;
 
         let protocol_component_contracts: Vec<(i64, Address)> =
             schema::protocol_component_holds_contract::table
@@ -956,7 +960,7 @@ mod test {
             db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
                 .await;
 
-        let _ = db_fixtures::insert_contract_code(
+        let contract_code_id = db_fixtures::insert_contract_code(
             conn,
             account_id_weth,
             txn[0],
@@ -971,6 +975,8 @@ mod test {
             protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
+            Some(vec![weth_id]),
+            Some(vec![contract_code_id]),
         )
         .await;
         let protocol_component_id2 = db_fixtures::insert_protocol_component(
@@ -980,6 +986,8 @@ mod test {
             protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
+            None,
+            None,
         )
         .await;
         db_fixtures::insert_protocol_component(
@@ -989,6 +997,8 @@ mod test {
             protocol_system_id_zz,
             protocol_type_id,
             txn[1],
+            Some(vec![weth_id]),
+            Some(vec![contract_code_id]),
         )
         .await;
 
@@ -1500,6 +1510,9 @@ mod test {
                 schema::protocol_component_holds_token::protocol_component_id,
                 schema::protocol_component_holds_token::token_id,
             ))
+            .filter(
+                schema::protocol_component_holds_token::protocol_component_id.eq(inserted_data.id),
+            )
             .first::<(i64, i64)>(&mut conn)
             .await
             .unwrap();
@@ -1520,6 +1533,10 @@ mod test {
                 schema::protocol_component_holds_contract::protocol_component_id,
                 schema::protocol_component_holds_contract::contract_code_id,
             ))
+            .filter(
+                schema::protocol_component_holds_contract::protocol_component_id
+                    .eq(inserted_data.id),
+            )
             .first::<(i64, i64)>(&mut conn)
             .await
             .unwrap();
@@ -1667,7 +1684,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_get_protocol_components_with_system_and_ids() {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1694,7 +1710,6 @@ mod test {
     #[case::get_one(Chain::Ethereum, 0)]
     #[case::get_none(Chain::Starknet, 1)]
     #[tokio::test]
-
     async fn test_get_protocol_components_with_chain_filter(#[case] chain: Chain, #[case] i: i64) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -1720,6 +1735,17 @@ mod test {
         let i_usize: usize = i as usize;
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
 
-        print!("{:?}", pc.tokens)
+        println!("pc: {:?}", pc.tokens);
+        assert!(
+            pc.tokens
+                .contains(&H160::from_str(WETH).unwrap()),
+            "ProtocolComponent is missing WETH token. Check the tests' data setup"
+        );
+
+        assert!(
+            pc.contract_ids
+                .contains(&H160::from_str(WETH).unwrap()),
+            "ProtocolComponent is missing WETH contract. Check the tests' data setup"
+        );
     }
 }

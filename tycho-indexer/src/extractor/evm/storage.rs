@@ -372,8 +372,8 @@ pub mod pg {
     {
         fn from_storage(
             val: orm::ProtocolComponent,
-            tokens: &Vec<Address>,
-            contract_ids: &Vec<Address>,
+            tokens: &[Address],
+            contract_ids: &[Address],
             chain: Chain,
             protocol_system: &str,
             transaction_hash: H256,
@@ -386,9 +386,7 @@ pub mod pg {
                 Default::default()
             };
 
-            fn convert_addresses_to_h160(
-                addresses: &Vec<Address>,
-            ) -> Result<Vec<H160>, StorageError> {
+            fn convert_addresses_to_h160(addresses: &[Address]) -> Result<Vec<H160>, StorageError> {
                 addresses
                     .iter()
                     .map(|address| {
