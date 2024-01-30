@@ -765,16 +765,16 @@ pub trait ProtocolGateway {
     /// # Parameters
     /// - `chain` The chain of the component
     /// - `start_version` The version at which to start looking for changes at.
-    /// - `end_version` The version at which to stop looking for changes.
+    /// - `target_version` The version at which to stop looking for changes.
     ///
     /// # Return
     /// A hashmap containing a map of (protocol_component_id, token_id) to its respective balance
     /// change, Err if no changes were found.
     async fn get_balance_deltas(
         &self,
-        chain_id: i64,
-        start_version_ts: &NaiveDateTime,
-        target_version_ts: &NaiveDateTime,
+        chain: &Chain,
+        start_version: &BlockOrTimestamp,
+        target_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
     ) -> Result<HashMap<(i64, i64), Balance>, StorageError>;
 

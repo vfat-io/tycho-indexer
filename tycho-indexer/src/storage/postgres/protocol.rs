@@ -780,13 +780,18 @@ where
     #[instrument(skip(self, conn))]
     async fn get_balance_deltas(
         &self,
-        chain_id: i64,
-        start_version_ts: &NaiveDateTime,
-        target_version_ts: &NaiveDateTime,
+        chain: &Chain,
+        start_version: &BlockOrTimestamp,
+        target_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
     ) -> Result<HashMap<(i64, i64), Balance>, StorageError> {
         use schema::component_balance::dsl::*;
-        let res = if start_version_ts <= target_version_ts {
+        let chain_id = self.get_chain_id(chain);
+
+        let start_ts = start_version.to_ts(conn).await?;
+        let target_ts = target_version.to_ts(conn).await?;
+
+        let res = if start_ts <= target_ts {
             // Going forward
             //                  ]     changes to update   ]
             // -----------------|--------------------------|
@@ -795,17 +800,17 @@ where
             let changed_component_balances = component_balance
                 .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
                 .filter(schema::chain::id.eq(chain_id))
-                .filter(valid_from.gt(start_version_ts))
-                .filter(valid_from.le(target_version_ts))
+                .filter(valid_from.gt(start_ts))
+                .filter(valid_from.le(target_ts))
                 .select((protocol_component_id, token_id))
                 .distinct();
 
             let result: HashMap<(i64, i64), Balance> = changed_component_balances
                 .inner_join(schema::transaction::table)
-                .filter(valid_from.le(target_version_ts))
+                .filter(valid_from.le(target_ts))
                 .filter(
                     valid_to
-                        .gt(target_version_ts)
+                        .gt(target_ts)
                         .or(valid_to.is_null()),
                 )
                 .select((protocol_component_id, token_id, new_balance))
@@ -832,17 +837,17 @@ where
             let changed_component_balances = component_balance
                 .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
                 .filter(schema::chain::id.eq(chain_id))
-                .filter(valid_from.gt(target_version_ts))
-                .filter(valid_from.le(start_version_ts))
+                .filter(valid_from.gt(target_ts))
+                .filter(valid_from.le(start_ts))
                 .select((protocol_component_id, token_id))
                 .distinct();
 
             let result: HashMap<(i64, i64), Balance> = changed_component_balances
                 .inner_join(schema::transaction::table)
-                .filter(valid_from.le(target_version_ts))
+                .filter(valid_from.le(target_ts))
                 .filter(
                     valid_to
-                        .gt(target_version_ts)
+                        .gt(target_ts)
                         .or(valid_to.is_null()),
                 )
                 .select((protocol_component_id, token_id, new_balance))
@@ -1459,6 +1464,90 @@ mod test {
             .await
             .expect("Failed to fetch protocol state");
         assert_eq!(older_state.valid_to, Some(newer_state.valid_from));
+    }
+
+    #[tokio::test]
+    async fn test_get_balance_deltas_forward() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        // set up changed balances
+        let protocol_component_id = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state1"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        let token_id = schema::token::table
+            .filter(schema::token::symbol.eq("WETH"))
+            .select(schema::token::account_id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch token id");
+        let from_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+        let to_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+
+        db_fixtures::insert_component_balance(
+            &mut conn,
+            Balance::from(U256::from(1000)),
+            token_id,
+            from_txn_id,
+            protocol_component_id,
+        )
+        .await;
+        db_fixtures::insert_component_balance(
+            &mut conn,
+            Balance::from(U256::from(2000)),
+            token_id,
+            to_txn_id,
+            protocol_component_id,
+        )
+        .await;
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        let mut balance_deltas = HashMap::new();
+        balance_deltas.insert((protocol_component_id, token_id), Balance::from(U256::from(2000)));
+        let expected = balance_deltas.clone();
+
+        // test forward case
+        let result = gateway
+            .get_balance_deltas(
+                &Chain::Ethereum,
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, expected);
+
+        balance_deltas.insert((protocol_component_id, token_id), Balance::from(U256::from(1000)));
+        let expected = balance_deltas;
     }
 
     #[tokio::test]
