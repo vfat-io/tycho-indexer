@@ -45,12 +45,12 @@ pub enum TychoClientError {
 }
 
 #[derive(Debug, Clone)]
-pub struct TychoHttpClientImpl {
+pub struct TychoHttpClient {
     http_client: Client<HttpConnector>,
     uri: Uri,
 }
 
-impl TychoHttpClientImpl {
+impl TychoHttpClient {
     pub fn new(base_uri: &str) -> Result<Self, TychoClientError> {
         let uri = base_uri
             .parse::<Uri>()
@@ -70,7 +70,7 @@ pub trait TychoRPCClient {
 }
 
 #[async_trait]
-impl TychoRPCClient for TychoHttpClientImpl {
+impl TychoRPCClient for TychoHttpClient {
     #[instrument(skip(self, filters, request))]
     async fn get_contract_state(
         &self,
@@ -119,6 +119,7 @@ impl TychoRPCClient for TychoHttpClientImpl {
         let body = hyper::body::to_bytes(response.into_body())
             .await
             .map_err(|e| TychoClientError::ParseResponse(e.to_string()))?;
+
         let accounts: StateRequestResponse = serde_json::from_slice(&body)
             .map_err(|e| TychoClientError::ParseResponse(e.to_string()))?;
         info!(?accounts, "Received contract_state response from Tycho server");
@@ -301,7 +302,6 @@ impl TychoWsClient {
         let inner = guard
             .as_mut()
             .ok_or_else(|| anyhow::format_err!("Not connected"))?;
-        dbg!(&msg);
         match msg {
             Ok(Message::Text(text)) => match serde_json::from_str::<WebSocketMessage>(&text) {
                 Ok(WebSocketMessage::BlockAccountChanges { subscription_id, data }) => {
@@ -483,15 +483,13 @@ impl TychoUpdatesClient for TychoWsClient {
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDateTime;
-    use futures03::future::Join;
-    use tycho_types::dto::{AccountUpdate, Block, Chain, ChangeType};
+    use tycho_types::{dto::Chain, Bytes};
 
     use super::*;
 
     use mockito::Server;
 
-    use std::{net::SocketAddr, str::FromStr, time::Duration};
+    use std::{net::SocketAddr, time::Duration};
     use tokio::{
         net::TcpListener,
         time::{sleep, timeout},
@@ -620,9 +618,8 @@ mod tests {
         server_thread.await.unwrap();
     }
 
-    /*
     #[tokio::test]
-    async fn test_simple_route_mock_async() {
+    async fn test_get_contract_state() {
         let mut server = Server::new_async().await;
         let server_resp = r#"
         {
@@ -633,7 +630,7 @@ mod tests {
                     "title": "",
                     "slots": {},
                     "balance": "0x01f4",
-                    "code": "",
+                    "code": "0x00",
                     "code_hash": "0x5c06b7c5b3d910fd33bc2229846f9ddaf91d584d9b196e16636901ac3a77077e",
                     "balance_modify_tx": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "code_modify_tx": "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -652,7 +649,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = TychoHttpClientImpl::new(server.url().as_str()).expect("create client");
+        let client = TychoHttpClient::new(server.url().as_str()).expect("create client");
 
         let response = client
             .get_contract_state(&Default::default(), &Default::default())
@@ -663,13 +660,12 @@ mod tests {
         mocked_server.assert();
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].slots, HashMap::new());
-        assert_eq!(accounts[0].balance, 500u16.to_be_bytes());
-        assert_eq!(accounts[0].code, Vec::<u8>::new());
+        assert_eq!(accounts[0].balance, Bytes::from(500u16.to_be_bytes()));
+        assert_eq!(accounts[0].code, [0].to_vec());
         assert_eq!(
             accounts[0].code_hash,
             hex::decode("5c06b7c5b3d910fd33bc2229846f9ddaf91d584d9b196e16636901ac3a77077e")
                 .unwrap()
         );
     }
-    */
 }
