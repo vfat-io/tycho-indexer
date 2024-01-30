@@ -15,11 +15,11 @@ use tracing::warn;
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
-    hex_bytes::Bytes,
     models::{Chain, ExtractorIdentity, NormalisedMessage},
     pb::tycho::evm::v1 as substreams,
     storage::{Address, ChangeType, StateGatewayType},
 };
+use tycho_types::Bytes;
 
 use self::utils::TryDecode;
 
