@@ -24,7 +24,7 @@ use tracing::{
 };
 
 use crate::{
-    extractor::evm::{self, AccountUpdate, EVMStateGateway},
+    extractor::evm::{self, AccountUpdate, ERC20Token, EVMStateGateway, ProtocolComponent},
     models::{Chain, ExtractionState},
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
 };
@@ -37,6 +37,8 @@ pub(crate) enum WriteOp {
     SaveExtractionState(ExtractionState),
     InsertContract(evm::Account),
     UpdateContracts(Vec<(TxHash, AccountUpdate)>),
+    InsertProtocolComponent(Vec<evm::ProtocolComponent>),
+    InsertTokens(Vec<evm::ERC20Token>),
 }
 
 /// Represents a transaction in the database, including the block information,
@@ -360,6 +362,18 @@ impl DBCacheWriteExecutor {
                     .update_contracts(&self.chain, changes_slice, conn)
                     .await
             }
+            WriteOp::InsertProtocolComponent(components) => {
+                let collected_components: Vec<&ProtocolComponent> = components.iter().collect();
+                self.state_gateway
+                    .add_protocol_components(collected_components.as_slice(), conn)
+                    .await
+            }
+            WriteOp::InsertTokens(tokens) => {
+                let collected_tokens: Vec<&ERC20Token> = tokens.iter().collect();
+                self.state_gateway
+                    .add_tokens(collected_tokens.as_slice(), conn)
+                    .await
+            }
         }
     }
 }
@@ -527,6 +541,41 @@ impl CachedGateway {
         lru_cache.put(key, delta.clone());
 
         Ok(delta)
+    }
+
+    pub async fn add_protocol_components(
+        &self,
+        block: &evm::Block,
+        new: &[evm::ProtocolComponent],
+    ) -> Result<(), StorageError> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx =
+            DBTransaction::new(*block, vec![WriteOp::InsertProtocolComponent(Vec::from(new))], tx);
+        self.tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await
+            .expect("Send message to receiver ok");
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
+    }
+
+    pub async fn add_tokens(
+        &self,
+        block: &evm::Block,
+        new: &[evm::ERC20Token],
+    ) -> Result<(), StorageError> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx = DBTransaction::new(*block, vec![WriteOp::InsertTokens(Vec::from(new))], tx);
+        self.tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await
+            .expect("Send message to receiver ok");
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
     }
 
     pub async fn flush(&self) -> Result<Result<(), StorageError>, RecvError> {
