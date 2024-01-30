@@ -6,19 +6,20 @@ use diesel_derive_enum::DbEnum;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    hex_bytes::Bytes,
     models,
     storage::{
         Address, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ContractId, StorageError,
         TxHash,
     },
 };
+use tycho_types::Bytes;
 
 use super::{
     schema::{
         account, account_balance, block, chain, component_balance, contract_code, contract_storage,
         extraction_state, protocol_component, protocol_component_holds_contract,
-        protocol_holds_token, protocol_state, protocol_system, protocol_type, token, transaction,
+        protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
+        transaction,
     },
     versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
 };
@@ -1103,7 +1104,7 @@ pub struct Contract {
 #[diesel(primary_key(protocol_component_id, token_id))]
 #[diesel(belongs_to(ProtocolComponent))]
 #[diesel(belongs_to(Token))]
-#[diesel(table_name = protocol_holds_token)]
+#[diesel(table_name = protocol_component_holds_token)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ProtocolHoldsToken {
     protocol_component_id: i64,
@@ -1113,15 +1114,15 @@ pub struct ProtocolHoldsToken {
 }
 
 #[derive(Insertable)]
-#[diesel(table_name = protocol_holds_token)]
-pub struct NewProtocolHoldsToken {
+#[diesel(table_name = protocol_component_holds_token)]
+pub struct NewProtocolComponentHoldsToken {
     pub protocol_component_id: i64,
     pub token_id: i64,
 }
 /*
 pub fn get_tokens(protocol: &ProtocolComponent, conn: &mut PgConnection) -> Vec<Token> {
     let token_ids = ProtocolHoldsToken::belonging_to(protocol)
-        .select(protocol_holds_token::token_id)
+        .select(protocol_component_holds_token::token_id)
         .distinct();
     token::table
         .filter(token::id.eq_any(token_ids))

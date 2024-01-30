@@ -16,7 +16,6 @@ use tracing::{debug, info, instrument};
 use super::{AccountUpdate, Block};
 use crate::{
     extractor::{evm, ExtractionError, Extractor, ExtractorMsg},
-    hex_bytes::Bytes,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
@@ -24,6 +23,7 @@ use crate::{
     },
     storage::{postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError},
 };
+use tycho_types::Bytes;
 
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
@@ -87,14 +87,6 @@ pub trait AmbientGateway: Send + Sync {
 impl AmbientPgGateway {
     pub fn new(name: &str, chain: Chain, pool: Pool<AsyncPgConnection>, gw: CachedGateway) -> Self {
         AmbientPgGateway { name: name.to_owned(), chain, pool, state_gateway: gw }
-    }
-
-    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
-        let mut conn = self.pool.get().await.unwrap();
-        self.state_gateway
-            .add_protocol_types(new_protocol_types, &mut *conn)
-            .await
-            .expect("Couldn't insert protocol types");
     }
 
     #[instrument(skip_all)]
@@ -207,7 +199,11 @@ impl AmbientGateway for AmbientPgGateway {
     }
 
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
-        todo!()
+        let mut conn = self.pool.get().await.unwrap();
+        self.state_gateway
+            .add_protocol_types(new_protocol_types, &mut *conn)
+            .await
+            .expect("Couldn't insert protocol types");
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]

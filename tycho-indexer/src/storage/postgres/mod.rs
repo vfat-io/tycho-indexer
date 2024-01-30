@@ -540,7 +540,7 @@ pub mod testing {
             "contract_storage",
             "contract_code",
             "account_balance",
-            "protocol_holds_token",
+            "protocol_component_holds_token",
             "token",
             "account",
             "protocol_state",
@@ -651,13 +651,13 @@ pub mod db_fixtures {
     //! the entries that are crucial to your test case.
     use std::str::FromStr;
 
+    use crate::storage::Code;
     use chrono::NaiveDateTime;
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
-
-    use crate::{hex_bytes::Bytes, storage::Code};
+    use tycho_types::Bytes;
 
     use super::{
         orm::{FinancialType, ImplementationType},

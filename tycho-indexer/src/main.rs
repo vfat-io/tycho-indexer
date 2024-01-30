@@ -27,6 +27,10 @@ use tycho_indexer::{
     },
 };
 
+#[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions;
+
 /// Tycho Indexer using Substreams
 ///
 /// Extracts state from the Ethereum blockchain and stores it in a Postgres database.

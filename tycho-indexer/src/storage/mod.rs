@@ -81,10 +81,10 @@ use utoipa::ToSchema;
 
 use crate::{
     extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
-    hex_bytes::Bytes,
     models::{Chain, ExtractionState, ProtocolType},
     storage::postgres::orm,
 };
+use tycho_types::Bytes;
 
 pub mod postgres;
 
