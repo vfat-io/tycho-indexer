@@ -177,8 +177,8 @@ where
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{
-            account::dsl::*, protocol_component::dsl::*, protocol_holds_token::dsl::*,
-            token::dsl::*,
+            account::dsl::*, protocol_component::dsl::*, protocol_component_holds_contract::dsl::*,
+            protocol_component_holds_token::dsl::*, token::dsl::*,
         };
         let mut values: Vec<orm::NewProtocolComponent> = Vec::with_capacity(new.len());
         let tx_hashes: Vec<TxHash> = new
@@ -248,19 +248,20 @@ where
             })
             .collect();
 
+        // establish component-token junction
         let token_addresses: HashSet<Address> = filtered_new_protocol_components
             .iter()
             .flat_map(|pc| pc.get_byte_token_addresses())
             .collect();
 
-        let pc_entity_tokens_map = filtered_new_protocol_components
+        let pc_tokens_map = filtered_new_protocol_components
             .iter()
             .flat_map(|pc| {
                 let pc_id = protocol_db_id_map
                     .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
-                    .expect("Could not find Protocol Component. Even though it should have."); //Because we just inserted the protocol systems, there should not be any missing.
-                                                                                               // However, trying to handle this via Results is needlessly difficult, because you
-                                                                                               // can not use flat_map on a Result.
+                    .expect("Could not find Protocol Component."); //Because we just inserted the protocol systems, there should not be any missing.
+                                                                   // However, trying to handle this via Results is needlessly difficult, because you
+                                                                   // can not use flat_map on a Result.
 
                 pc.get_byte_token_addresses()
                     .into_iter()
@@ -281,22 +282,80 @@ where
             .collect();
 
         let protocol_component_token_junction: Result<
-            Vec<orm::NewProtocolHoldsToken>,
+            Vec<orm::NewProtocolComponentHoldsToken>,
             StorageError,
-        > = pc_entity_tokens_map
+        > = pc_tokens_map
             .iter()
             .map(|(pc_id, t_address)| {
                 let t_id = token_add_by_id
                     .get(t_address)
                     .ok_or(StorageError::NotFound("Token id".to_string(), t_address.to_string()))?;
-                Ok(orm::NewProtocolHoldsToken { protocol_component_id: *pc_id, token_id: *t_id })
+                Ok(orm::NewProtocolComponentHoldsToken {
+                    protocol_component_id: *pc_id,
+                    token_id: *t_id,
+                })
             })
             .collect();
 
-        diesel::insert_into(protocol_holds_token)
+        diesel::insert_into(protocol_component_holds_token)
             .values(&protocol_component_token_junction?)
             .execute(conn)
             .await?;
+
+        // establish component-contract junction
+        let contract_addresses: HashSet<Address> = new
+            .iter()
+            .flat_map(|pc| pc.get_byte_contract_addresses())
+            .collect();
+
+        let pc_contract_map = new
+            .iter()
+            .flat_map(|pc| {
+                let pc_id = protocol_db_id_map
+                    .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
+                    .expect("Could not find Protocol Component."); //Because we just inserted the protocol systems, there should not be any missing.
+                                                                   // However, trying to handel this via Results is needlessly difficult, because you
+                                                                   // can not use flat_map on a Result.
+
+                pc.get_byte_contract_addresses()
+                    .into_iter()
+                    .map(move |add| (*pc_id, add))
+                    .collect::<Vec<(i64, Address)>>()
+            })
+            .collect::<Vec<(i64, Address)>>();
+
+        let contract_add_by_id: HashMap<Address, i64> = schema::contract_code::table
+            .inner_join(account)
+            .select((schema::account::address, schema::contract_code::id))
+            .filter(schema::account::address.eq_any(contract_addresses))
+            .into_boxed()
+            .load::<(Address, i64)>(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "Contract", "Several Chains", None))?
+            .into_iter()
+            .collect();
+
+        let protocol_component_contract_junction: Result<
+            Vec<orm::NewProtocolComponentHoldsContract>,
+            StorageError,
+        > = pc_contract_map
+            .iter()
+            .map(|(pc_id, t_address)| {
+                let t_id = contract_add_by_id
+                    .get(t_address)
+                    .ok_or(StorageError::NotFound("".to_string(), "".to_string()))?;
+                Ok(orm::NewProtocolComponentHoldsContract {
+                    protocol_component_id: *pc_id,
+                    contract_code_id: *t_id,
+                })
+            })
+            .collect();
+
+        diesel::insert_into(protocol_component_holds_contract)
+            .values(&protocol_component_contract_junction.unwrap())
+            .execute(conn)
+            .await
+            .unwrap();
 
         Ok(())
     }
@@ -893,12 +952,21 @@ mod test {
         .await;
 
         // insert tokens
-        let weth_id =
+        let (account_id_weth, weth_id) =
             db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
                 .await;
-        let usdc_id =
+        let (account_id_usdc, usdc_id) =
             db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
                 .await;
+
+        let _ = db_fixtures::insert_contract_code(
+            conn,
+            account_id_weth,
+            txn[0],
+            Bytes::from_str("C0C0C0").unwrap(),
+        )
+        .await;
+
         tx_hashes.to_vec()
     }
 
@@ -1332,7 +1400,7 @@ mod test {
             protocol_type_name: protocol_type_name_1,
             chain,
             tokens: vec![H160::from_str(WETH).unwrap()],
-            contract_ids: vec![],
+            contract_ids: vec![H160::from_str(WETH).unwrap()],
             static_attributes: HashMap::new(),
             change: ChangeType::Creation,
             creation_tx: H256::from_str(
@@ -1369,10 +1437,10 @@ mod test {
         assert_eq!(original_component.id, inserted_data.external_id);
 
         // assert junction table
-        let component_token_junction = schema::protocol_holds_token::table
+        let component_token_junction = schema::protocol_component_holds_token::table
             .select((
-                schema::protocol_holds_token::protocol_component_id,
-                schema::protocol_holds_token::token_id,
+                schema::protocol_component_holds_token::protocol_component_id,
+                schema::protocol_component_holds_token::token_id,
             ))
             .first::<(i64, i64)>(&mut conn)
             .await
@@ -1386,7 +1454,27 @@ mod test {
             .load::<orm::Token>(&mut conn)
             .await;
 
-        assert!(token.is_ok())
+        assert!(token.is_ok());
+
+        // assert component-contract junction table
+        let component_contract_junction = schema::protocol_component_holds_contract::table
+            .select((
+                schema::protocol_component_holds_contract::protocol_component_id,
+                schema::protocol_component_holds_contract::contract_code_id,
+            ))
+            .first::<(i64, i64)>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(component_contract_junction.0, inserted_data.id);
+
+        let contract = schema::contract_code::table
+            .select(schema::contract_code::all_columns)
+            .filter(schema::contract_code::id.eq(component_contract_junction.1))
+            .load::<orm::ContractCode>(&mut conn)
+            .await;
+
+        assert!(contract.is_ok())
     }
 
     fn create_test_protocol_component(id: &str) -> ProtocolComponent {

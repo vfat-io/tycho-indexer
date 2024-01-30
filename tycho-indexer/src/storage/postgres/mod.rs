@@ -540,7 +540,7 @@ pub mod testing {
             "contract_storage",
             "contract_code",
             "account_balance",
-            "protocol_holds_token",
+            "protocol_component_holds_token",
             "token",
             "account",
             "protocol_state",
@@ -1062,7 +1062,7 @@ pub mod db_fixtures {
         address: &str,
         symbol: &str,
         decimals: i32,
-    ) -> i64 {
+    ) -> (i64, i64) {
         let account_id = insert_account(conn, address, "token", chain_id, None).await;
 
         let query = diesel::insert_into(schema::token::table).values((
@@ -1072,11 +1072,14 @@ pub mod db_fixtures {
             schema::token::tax.eq(10),
             schema::token::gas.eq(vec![10]),
         ));
-        query
-            .returning(schema::token::id)
-            .get_result(conn)
-            .await
-            .unwrap()
+        (
+            account_id,
+            query
+                .returning(schema::token::id)
+                .get_result(conn)
+                .await
+                .unwrap(),
+        )
     }
 
     pub async fn get_token_by_symbol(conn: &mut AsyncPgConnection, symbol: String) -> orm::Token {
