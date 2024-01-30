@@ -19,7 +19,7 @@ pub mod pg {
     use std::collections::HashSet;
 
     use crate::{
-        extractor::evm::utils::pad_and_parse_h160,
+        extractor::evm::utils::{convert_addresses_to_h160, pad_and_parse_h160},
         models,
         models::{FinancialType, ImplementationType},
         storage::{
@@ -386,15 +386,6 @@ pub mod pg {
                 Default::default()
             };
 
-            fn convert_addresses_to_h160(addresses: &[Address]) -> Result<Vec<H160>, StorageError> {
-                addresses
-                    .iter()
-                    .map(|address| {
-                        pad_and_parse_h160(address)
-                            .map_err(|err| StorageError::DecodeError(err.to_string()))
-                    })
-                    .collect()
-            }
             let token_addresses: Result<Vec<H160>, StorageError> =
                 convert_addresses_to_h160(tokens);
             let contract_addresses = convert_addresses_to_h160(contract_ids);
