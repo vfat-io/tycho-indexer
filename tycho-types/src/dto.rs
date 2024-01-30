@@ -76,7 +76,7 @@ pub enum Response {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum WebSocketMessage {
-    BlockAccountChanges { subscription: Uuid, data: BlockAccountChanges },
+    BlockAccountChanges { subscription_id: Uuid, data: BlockAccountChanges },
     Response(Response),
 }
 

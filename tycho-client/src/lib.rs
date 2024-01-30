@@ -15,7 +15,7 @@ use tokio::{
     net::TcpStream,
     sync::{
         mpsc::{self, Receiver, Sender},
-        oneshot, Mutex,
+        oneshot, Mutex, Notify,
     },
     task::JoinHandle,
 };
@@ -139,12 +139,17 @@ pub trait TychoUpdatesClient {
     async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoClientError>;
 
     /// Consumes realtime messages from the WebSocket server
-    async fn connect(&self) -> JoinHandle<()>;
+    async fn connect(&self) -> anyhow::Result<JoinHandle<anyhow::Result<()>>>;
+
+    /// Close the connection
+    async fn close(&self) -> anyhow::Result<()>;
 }
 
 #[derive(Clone)]
 pub struct TychoWsClient {
     uri: Uri,
+    conn_notify: Arc<Notify>,
+    // unset on startup or after connection ended
     inner: Arc<Mutex<Option<Inner>>>,
 }
 
@@ -161,8 +166,9 @@ enum SubscriptionStatus {
 }
 
 struct Inner {
+    // may be unset during reconnection
     sink: Option<WebSocketSink>,
-    cmd_tx: Sender<Command>,
+    cmd_tx: Sender<()>,
     // could be a vec and we take the first one matching if we
     // wanted to support multiple duplicated subs.
     pending: HashMap<ExtractorIdentity, SubscriptionInfo>,
@@ -171,7 +177,7 @@ struct Inner {
 }
 
 impl Inner {
-    fn new(cmd_tx: Sender<Command>) -> Self {
+    fn new(cmd_tx: Sender<()>) -> Self {
         Self {
             sink: None,
             cmd_tx,
@@ -203,6 +209,7 @@ impl Inner {
             info.state = SubscriptionStatus::Active;
             self.sender.insert(uuid, tx);
             self.subscriptions.insert(uuid, info);
+            dbg!("Sending ready signal");
             ready_tx
                 .send(rx)
                 .expect("ready channel closed");
@@ -272,11 +279,18 @@ impl TychoWsClient {
             .parse::<Uri>()
             .map_err(|e| TychoClientError::UriParsing(ws_uri.to_string(), e.to_string()))?;
 
-        Ok(Self { uri, inner: Arc::new(Mutex::new(None)) })
+        Ok(Self { uri, inner: Arc::new(Mutex::new(None)), conn_notify: Arc::new(Notify::new()) })
     }
 
-    async fn handle_command(&self, _cmd: Command) -> Result<(), anyhow::Error> {
-        todo!()
+    async fn is_connected(&self) -> bool {
+        let guard = self.inner.as_ref().lock().await;
+        guard.is_some()
+    }
+
+    async fn ensure_connection(&self) {
+        if !self.is_connected().await {
+            self.conn_notify.notified().await;
+        }
     }
 
     async fn handle_msg(
@@ -286,12 +300,13 @@ impl TychoWsClient {
         let mut guard = self.inner.lock().await;
         let inner = guard
             .as_mut()
-            .expect("ws invalid state");
+            .ok_or_else(|| anyhow::format_err!("Not connected"))?;
+        dbg!(&msg);
         match msg {
             Ok(Message::Text(text)) => match serde_json::from_str::<WebSocketMessage>(&text) {
-                Ok(WebSocketMessage::BlockAccountChanges { subscription, data }) => {
+                Ok(WebSocketMessage::BlockAccountChanges { subscription_id, data }) => {
                     info!(?data, "Received a block state change, sending to channel");
-                    if let Err(_) = inner.send(&subscription, data).await {
+                    if let Err(_) = inner.send(&subscription_id, data).await {
                         todo!()
                     }
                 }
@@ -301,9 +316,12 @@ impl TychoWsClient {
                 })) => {
                     info!(?extractor_id, ?subscription_id, "Received a new subscription");
 
+                    dbg!("Start marking subscription active");
                     inner
                         .mark_active(&extractor_id, subscription_id)
                         .expect("failed internal transition");
+
+                    dbg!("Subscription marked active!");
                 }
                 Ok(WebSocketMessage::Response(Response::SubscriptionEnded { subscription_id })) => {
                     info!(?subscription_id, "Received a subscription ended");
@@ -312,6 +330,7 @@ impl TychoWsClient {
                         .expect("failed internal transition");
                 }
                 Err(e) => {
+                    dbg!(&e);
                     error!(error = %e, "Failed to deserialize message");
                 }
             },
@@ -347,13 +366,13 @@ impl TychoUpdatesClient for TychoWsClient {
         &self,
         extractor_id: ExtractorIdentity,
     ) -> Result<Receiver<BlockAccountChanges>, TychoClientError> {
+        self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         {
             let mut guard = self.inner.lock().await;
             let inner = guard
                 .as_mut()
                 .expect("ws not connected");
-            // TODO: consider sending directly via inner here
             inner.new_subscription(&extractor_id, ready_tx);
             let cmd = Command::Subscribe { extractor_id };
             inner
@@ -370,6 +389,7 @@ impl TychoUpdatesClient for TychoWsClient {
 
     #[allow(unused_variables)]
     async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoClientError> {
+        self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         {
             let mut guard = self.inner.lock().await;
@@ -390,27 +410,30 @@ impl TychoUpdatesClient for TychoWsClient {
         Ok(())
     }
 
-    async fn connect(&self) -> JoinHandle<()> {
-        // TODO: disallow connecting twice.
+    async fn connect(&self) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+        if self.is_connected().await {
+            anyhow::bail!("Already connected");
+        }
         let ws_uri = format!("{}{}/ws", self.uri, TYCHO_SERVER_VERSION);
-        info!(?ws_uri, "Spawning task to connect to WebSocket server");
+        info!(?ws_uri, "Starting TychoWebsocketClient");
+        let (ws_stream, _) = connect_async(&ws_uri).await?;
+        let mut maybe_ws = Some(ws_stream);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(30);
+        {
+            let mut guard = self.inner.as_ref().lock().await;
+            *guard = Some(Inner::new(cmd_tx));
+        }
 
         let this = self.clone();
-        tokio::spawn(async move {
-            let (cmd_tx, mut cmd_rx) = mpsc::channel(30);
-            {
-                let mut guard = this.inner.as_ref().lock().await;
-                *guard = Some(Inner::new(cmd_tx));
-            }
+        let jh = tokio::spawn(async move {
             let mut retry_count = 0;
             'retry: while retry_count < 5 {
                 info!(?ws_uri, "Connecting to WebSocket server");
 
-                let (ws, _) = connect_async(&ws_uri)
-                    .await
-                    .map_err(|e| error!(error = %e, "Failed to connect to WebSocket server"))
-                    .expect("connect to websocket");
-
+                let ws = match maybe_ws {
+                    Some(ws) => ws,
+                    None => connect_async(&ws_uri).await?.0,
+                };
                 let (ws_sink, ws_stream) = ws.split();
 
                 let mut msg_rx = ws_stream.boxed();
@@ -420,126 +443,184 @@ impl TychoUpdatesClient for TychoWsClient {
                         inner.sink = Some(ws_sink);
                     };
                 }
+
+                this.conn_notify.notify_waiters();
                 loop {
                     let res = tokio::select! {
                         Some(msg) = msg_rx.next() => this.handle_msg(msg).await,
-                        _ = cmd_rx.recv() => break 'retry,
+                        _ = cmd_rx.recv() => {break 'retry},
                     };
+                    // TODO scope to connection errors only, other errors will end this task without
+                    // a reconnection attempt.
                     if let Err(e) = res {
+                        dbg!(&e);
                         warn!(?e, ?retry_count, "Connection dropped unexpectedly; Reconnecting");
                         retry_count += 1;
-                        continue
+                        maybe_ws = None;
+                        break
                     }
                 }
             }
-        })
+            // clean up before exiting
+            let mut guard = this.inner.as_ref().lock().await;
+            *guard = None;
+
+            Ok(())
+        });
+        self.conn_notify.notified().await;
+        Ok(jh)
+    }
+
+    async fn close(&self) -> anyhow::Result<()> {
+        let mut guard = self.inner.lock().await;
+        let inner = guard
+            .as_mut()
+            .ok_or_else(|| anyhow::format_err!("Not connected"))?;
+        inner.cmd_tx.send(()).await?;
+        Ok(())
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDateTime;
-    use tycho_msg_types::raw::{AccountUpdate, Block, ChangeType};
+    use futures03::future::Join;
+    use tycho_types::dto::{AccountUpdate, Block, Chain, ChangeType};
 
     use super::*;
 
     use mockito::Server;
 
-    use std::{net::TcpListener, str::FromStr};
+    use std::{net::SocketAddr, str::FromStr, time::Duration};
+    use tokio::{
+        net::TcpListener,
+        time::{sleep, timeout},
+    };
 
-    #[tokio::test]
-    async fn test_realtime_messages() {
-        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+    #[derive(Clone)]
+    enum ExpectedComm {
+        Receive(u64, Message),
+        Send(Message),
+    }
+
+    async fn mock_tycho_ws(messages: &[ExpectedComm]) -> (SocketAddr, JoinHandle<()>) {
+        let server = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("localhost bind failed");
         let addr = server.local_addr().unwrap();
+        let messages = messages.to_vec();
 
-        let server_thread = std::thread::spawn(move || {
+        let jh = tokio::spawn(async move {
             // Accept only the first connection
-            if let Ok((stream, _)) = server.accept() {
-                let mut websocket = tungstenite::accept(stream).unwrap();
+            if let Ok((stream, _)) = server.accept().await {
+                let mut websocket = tokio_tungstenite::accept_async(stream)
+                    .await
+                    .unwrap();
 
-                let test_msg_content = r#"
-                {
-                    "extractor": "vm:ambient",
-                    "chain": "ethereum",
-                    "block": {
-                        "number": 123,
-                        "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-                        "parent_hash":
-                            "0x0000000000000000000000000000000000000000000000000000000000000000",
-                        "chain": "ethereum",             "ts": "2023-09-14T00:00:00"
-                                },
-                                "account_updates": {
-                                    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
-                                        "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
-                                        "chain": "ethereum",
-                                        "slots": {},
-                                        "balance": "0x01f4",
-                                        "code": "",
-                                        "change": "Update"
-                                    }
-                                },
-                                "new_pools": {}
+                for c in messages.into_iter() {
+                    match c {
+                        ExpectedComm::Receive(t, exp) => {
+                            let msg = timeout(Duration::from_millis(t), websocket.next())
+                                .await
+                                .expect("Receive timeout")
+                                .expect("Stream exhausted")
+                                .expect("Failed to receive message.");
+
+                            assert_eq!(msg, exp)
+                        }
+                        ExpectedComm::Send(data) => websocket
+                            .send(data)
+                            .await
+                            .expect("Failed to send message"),
+                    };
                 }
-                "#;
-
-                websocket
-                    .send(Message::Text(test_msg_content.to_string()))
-                    .expect("Failed to send message");
-
+                sleep(Duration::from_millis(100)).await;
                 // Close the WebSocket connection
                 let _ = websocket.close(None);
             }
         });
-
-        // Now, you can create a client and connect to the mocked WebSocket server
-        let client = TychoWsClientImpl::new(&format!("ws://{}", addr)).unwrap();
-
-        // You can listen to the realtime_messages and expect the messages that you send from
-        // handle_connection
-        let mut rx = client.realtime_messages().await;
-        let received_msg = rx
-            .recv()
-            .await
-            .expect("receive message");
-
-        let expected_blk = Block {
-            number: 123,
-            hash: hex::decode("0000000000000000000000000000000000000000000000000000000000000000")
-                .unwrap(),
-            parent_hash: hex::decode(
-                "0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .unwrap(),
-            chain: Chain::Ethereum,
-            ts: NaiveDateTime::from_str("2023-09-14T00:00:00").unwrap(),
-        };
-        let account_update = AccountUpdate::new(
-            hex::decode("7a250d5630B4cF539739dF2C5dAcb4c659F2488D").unwrap(),
-            Chain::Ethereum,
-            HashMap::new(),
-            Some(500u16.to_be_bytes().into()),
-            Some(Vec::<u8>::new()),
-            ChangeType::Update,
-        );
-        let account_updates: HashMap<Vec<u8>, AccountUpdate> = vec![(
-            hex::decode("7a250d5630B4cF539739dF2C5dAcb4c659F2488D").unwrap(),
-            account_update,
-        )]
-        .into_iter()
-        .collect();
-        let expected = BlockAccountChanges::new(
-            "vm:ambient".to_string(),
-            Chain::Ethereum,
-            expected_blk,
-            account_updates,
-        );
-
-        assert_eq!(received_msg, expected);
-
-        server_thread.join().unwrap();
+        (addr, jh)
     }
 
+    #[tokio::test]
+    async fn test_subscribe_receive() {
+        let exp_comm = [
+            ExpectedComm::Receive(100, Message::Text(r#"
+                {
+                    "method":"subscribe",
+                    "extractor_id":{
+                    "chain":"ethereum",
+                    "name":"vm:ambient"
+                    }
+                }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
+            )),
+            ExpectedComm::Send(Message::Text(r#"
+                {
+                    "method":"newsubscription",
+                    "extractor_id":{
+                    "chain":"ethereum",
+                    "name":"vm:ambient"
+                    },
+                    "subscription_id":"30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
+            )),
+            ExpectedComm::Send(Message::Text(r#"
+                {
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
+                    "data": {
+                        "extractor": "vm:ambient",
+                        "chain": "ethereum",
+                        "block": {
+                            "number": 123,
+                            "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                            "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                            "chain": "ethereum",             
+                            "ts": "2023-09-14T00:00:00"
+                        },
+                        "account_updates": {
+                            "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                                "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                                "chain": "ethereum",
+                                "slots": {},
+                                "balance": "0x01f4",
+                                "code": "",
+                                "change": "Update"
+                            }
+                        }
+                    }
+                }
+                "#.to_owned()
+            ))
+        ];
+        let (addr, server_thread) = mock_tycho_ws(&exp_comm).await;
+
+        let client = TychoWsClient::new(&format!("ws://{}", addr)).unwrap();
+        let jh = client
+            .connect()
+            .await
+            .expect("connect failed");
+        let mut rx = timeout(
+            Duration::from_millis(100),
+            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+        )
+        .await
+        .expect("subscription timed out")
+        .expect("subscription failed");
+        let _ = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("awaiting message timeout out")
+            .expect("receiving message failed");
+        timeout(Duration::from_millis(100), client.close())
+            .await
+            .expect("close timed out")
+            .expect("close failed");
+        jh.await
+            .expect("ws loop errored")
+            .unwrap();
+        server_thread.await.unwrap();
+    }
+
+    /*
     #[tokio::test]
     async fn test_simple_route_mock_async() {
         let mut server = Server::new_async().await;
@@ -590,5 +671,5 @@ mod tests {
                 .unwrap()
         );
     }
+    */
 }
- */
