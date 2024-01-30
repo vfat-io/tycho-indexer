@@ -8,7 +8,7 @@ use std::{
 
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use tracing::warn;
+use tracing::{instrument, warn};
 
 use crate::{
     extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
@@ -21,8 +21,8 @@ use crate::{
             versioning::apply_versioning,
             PostgresGateway,
         },
-        Address, BlockIdentifier, BlockOrTimestamp, ComponentId, ContractDelta, ContractId,
-        ProtocolGateway, StorableBlock, StorableComponentBalance, StorableContract,
+        Address, Balance, BlockIdentifier, BlockOrTimestamp, ComponentId, ContractDelta,
+        ContractId, ProtocolGateway, StorableBlock, StorableComponentBalance, StorableContract,
         StorableProtocolComponent, StorableProtocolState, StorableProtocolStateDelta,
         StorableProtocolType, StorableToken, StorableTransaction, StorageError, StoreVal, TxHash,
         Version,
@@ -775,6 +775,93 @@ where
                 .map_err(|err| StorageError::from_diesel(err, "ComponentBalance", "batch", None))?;
         }
         Ok(())
+    }
+
+    #[instrument(skip(self, conn))]
+    async fn get_balance_deltas(
+        &self,
+        chain_id: i64,
+        start_version_ts: &NaiveDateTime,
+        target_version_ts: &NaiveDateTime,
+        conn: &mut Self::DB,
+    ) -> Result<HashMap<(i64, i64), Balance>, StorageError> {
+        use schema::component_balance::dsl::*;
+        let res = if start_version_ts <= target_version_ts {
+            let changed_accounts_and_tokens = component_balance
+                .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
+                .filter(schema::chain::id.eq(chain_id))
+                .filter(valid_from.gt(start_version_ts))
+                .filter(valid_from.le(target_version_ts))
+                .select((protocol_component_id, token_id))
+                .distinct()
+                .into_boxed();
+
+            let result: HashMap<(i64, i64), Balance> = component_balance
+                .inner_join(schema::transaction::table)
+                .filter(
+                    protocol_component_id
+                        .eq_any(&changed_accounts_and_tokens.select(protocol_component_id))
+                        .and(token_id.eq_any(changed_accounts_and_tokens.select(token_id))),
+                )
+                .filter(valid_from.le(target_version_ts))
+                .filter(
+                    valid_to
+                        .gt(target_version_ts)
+                        .or(valid_to.is_null()),
+                )
+                .select((protocol_component_id, token_id, new_balance))
+                .order_by((
+                    protocol_component_id,
+                    token_id,
+                    valid_from.desc(),
+                    schema::transaction::index.desc(),
+                ))
+                .distinct_on((protocol_component_id, token_id))
+                .get_results::<(i64, i64, Balance)>(conn)
+                .await?
+                .into_iter()
+                .map(|(pc_id, t_id, balance)| ((pc_id, t_id), balance))
+                .collect();
+            result
+        } else {
+            let changed_accounts_and_tokens = component_balance
+                .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
+                .filter(schema::chain::id.eq(chain_id))
+                .filter(valid_from.gt(target_version_ts))
+                .filter(valid_from.le(start_version_ts))
+                .select((protocol_component_id, token_id))
+                .distinct()
+                .into_boxed();
+
+            let result: HashMap<(i64, i64), Balance> = component_balance
+                .inner_join(schema::transaction::table)
+                .filter(
+                    protocol_component_id
+                        .eq_any(&changed_accounts_and_tokens.select(protocol_component_id))
+                        .and(token_id.eq_any(changed_accounts_and_tokens.select(token_id))),
+                )
+                .filter(valid_from.le(target_version_ts))
+                .filter(
+                    valid_to
+                        .gt(target_version_ts)
+                        .or(valid_to.is_null()),
+                )
+                .select((protocol_component_id, token_id, new_balance))
+                .order_by((
+                    protocol_component_id,
+                    token_id,
+                    valid_from.desc(),
+                    schema::transaction::index.desc(),
+                ))
+                .distinct_on((protocol_component_id, token_id))
+                .get_results::<(i64, i64, Balance)>(conn)
+                .await?
+                .into_iter()
+                .map(|(pc_id, t_id, balance)| ((pc_id, t_id), balance))
+                .collect();
+            result
+        };
+        Ok(res)
     }
 
     async fn get_protocol_states_delta(
