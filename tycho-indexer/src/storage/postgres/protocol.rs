@@ -1735,13 +1735,11 @@ mod test {
         let i_usize: usize = i as usize;
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
 
-        println!("pc: {:?}", pc.tokens);
         assert!(
             pc.tokens
                 .contains(&H160::from_str(WETH).unwrap()),
             "ProtocolComponent is missing WETH token. Check the tests' data setup"
         );
-
         assert!(
             pc.contract_ids
                 .contains(&H160::from_str(WETH).unwrap()),
