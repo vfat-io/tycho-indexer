@@ -837,8 +837,8 @@ where
             let changed_component_balances = component_balance
                 .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
                 .filter(schema::chain::id.eq(chain_id))
-                .filter(valid_from.gt(target_ts))
-                .filter(valid_from.le(start_ts))
+                .filter(valid_from.ge(target_ts))
+                .filter(valid_from.lt(start_ts))
                 .select((protocol_component_id, token_id))
                 .distinct();
 
@@ -1467,7 +1467,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_get_balance_deltas_forward() {
+    async fn test_get_balance_deltas() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
 
@@ -1530,9 +1530,9 @@ mod test {
 
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
-        let mut balance_deltas = HashMap::new();
-        balance_deltas.insert((protocol_component_id, token_id), Balance::from(U256::from(2000)));
-        let expected = balance_deltas.clone();
+        let mut expected_forward_deltas = HashMap::new();
+        expected_forward_deltas
+            .insert((protocol_component_id, token_id), Balance::from(U256::from(2000)));
 
         // test forward case
         let result = gateway
@@ -1544,10 +1544,23 @@ mod test {
             )
             .await
             .unwrap();
-        assert_eq!(result, expected);
+        assert_eq!(result, expected_forward_deltas);
 
-        balance_deltas.insert((protocol_component_id, token_id), Balance::from(U256::from(1000)));
-        let expected = balance_deltas;
+        let mut expected_backward_deltas = HashMap::new();
+        expected_backward_deltas
+            .insert((protocol_component_id, token_id), Balance::from(U256::from(1000)));
+
+        // test backward case
+        let result = gateway
+            .get_balance_deltas(
+                &Chain::Ethereum,
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
+                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, expected_backward_deltas);
     }
 
     #[tokio::test]
@@ -1912,9 +1925,9 @@ mod test {
         let tx_hash =
             H256::from_str("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")
                 .unwrap();
-        let protocol_component_id: String = String::from("state1");
-
+        let protocol_component_id: String = String::from("state2");
         let base_token = H160::from_str(WETH.trim_start_matches("0x")).unwrap();
+
         let component_balance = ComponentBalance {
             token: base_token,
             new_balance: Bytes::from(&[0u8]),
@@ -1953,11 +1966,10 @@ mod test {
             .first::<orm::ProtocolComponent>(&mut conn)
             .await;
         let referenced_component: orm::ProtocolComponent = referenced_component.unwrap();
-        assert_eq!(referenced_component.external_id, String::from("state1"));
+        assert_eq!(referenced_component.external_id, String::from("state2"));
     }
 
     #[tokio::test]
-
     async fn test_add_protocol_components() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
