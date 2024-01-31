@@ -16,11 +16,8 @@ use chrono::NaiveDateTime;
 use std::collections::HashMap;
 
 pub mod pg {
-    use std::collections::HashSet;
-
     use crate::{
-        extractor::evm::utils::pad_and_parse_h160,
-        hex_bytes::Bytes,
+        extractor::evm::utils::{convert_addresses_to_h160, pad_and_parse_h160},
         models,
         models::{FinancialType, ImplementationType},
         storage::{
@@ -28,14 +25,15 @@ pub mod pg {
                 orm,
                 orm::{NewToken, Token},
             },
-            Address, Balance, BlockHash, ChangeType, Code, StorableProtocolComponent,
-            StorableProtocolState, StorableProtocolType, StorableToken, TxHash,
+            Address, Balance, BlockHash, ChangeType, Code, StorableComponentBalance,
+            StorableProtocolComponent, StorableProtocolState, StorableProtocolType, StorableToken,
+            TxHash,
         },
     };
     use ethers::types::{H160, H256, U256};
-    use serde_json::Value;
+    use tycho_types::Bytes;
 
-    use self::storage::StorableProtocolStateDelta;
+    use self::storage::{AttrStoreKey, StorableProtocolStateDelta};
 
     use super::*;
 
@@ -157,6 +155,33 @@ pub mod pg {
                 attribute_schema: self.attribute_schema.clone(),
                 financial_type: financial_protocol_type,
             }
+        }
+    }
+    impl StorableComponentBalance<orm::ComponentBalance, orm::NewComponentBalance, i64>
+        for evm::ComponentBalance
+    {
+        fn to_storage(
+            &self,
+            token_id: i64,
+            modify_tx: i64,
+            protocol_component_id: i64,
+            block_ts: NaiveDateTime,
+        ) -> orm::NewComponentBalance {
+            orm::NewComponentBalance {
+                token_id,
+                new_balance: self.new_balance.clone(),
+                modify_tx,
+                protocol_component_id,
+                valid_from: block_ts,
+                valid_to: None,
+            }
+        }
+        fn modify_tx(&self) -> TxHash {
+            self.modify_tx.into()
+        }
+
+        fn token(&self) -> Address {
+            self.token.into()
         }
     }
 
@@ -345,28 +370,30 @@ pub mod pg {
     {
         fn from_storage(
             val: orm::ProtocolComponent,
-            tokens: Vec<H160>,
-            contract_ids: Vec<H160>,
+            tokens: &[Address],
+            contract_ids: &[Address],
             chain: Chain,
             protocol_system: &str,
             transaction_hash: H256,
         ) -> Result<Self, StorageError> {
-            let mut static_attributes: HashMap<String, Bytes> = HashMap::default();
+            let static_attributes: HashMap<String, Bytes> = if let Some(v) = val.attributes {
+                serde_json::from_value(v).map_err(|_| {
+                    StorageError::DecodeError("Failed to decode static attributes.".to_string())
+                })?
+            } else {
+                Default::default()
+            };
 
-            if let Some(Value::Object(map)) = val.attributes {
-                static_attributes = map
-                    .into_iter()
-                    .map(|(key, value)| (key, Bytes::from(bytes::Bytes::from(value.to_string()))))
-                    .collect();
-            }
-
+            let token_addresses: Result<Vec<H160>, StorageError> =
+                convert_addresses_to_h160(tokens);
+            let contract_addresses = convert_addresses_to_h160(contract_ids);
             Ok(evm::ProtocolComponent {
                 id: val.external_id,
                 protocol_system: protocol_system.to_owned(),
                 protocol_type_name: val.protocol_type_id.to_string(),
                 chain,
-                tokens,
-                contract_ids,
+                tokens: token_addresses?,
+                contract_ids: contract_addresses?,
                 static_attributes,
                 change: Default::default(),
                 creation_tx: transaction_hash,
@@ -406,9 +433,7 @@ pub mod pg {
         ) -> Result<Self, StorageError> {
             let mut attr = HashMap::new();
             for val in vals {
-                if let (Some(name), Some(value)) = (&val.attribute_name, &val.attribute_value) {
-                    attr.insert(name.clone(), value.clone());
-                }
+                attr.insert(val.attribute_name, val.attribute_value);
             }
             Ok(evm::ProtocolState::new(
                 component_id,
@@ -432,6 +457,7 @@ pub mod pg {
                     protocol_component_id,
                     attribute_name: Some(name.clone()),
                     attribute_value: Some(value.clone()),
+                    previous_value: None,
                     modify_tx: tx_id,
                     valid_from: block_ts,
                     valid_to: None,
@@ -441,60 +467,24 @@ pub mod pg {
         }
     }
 
-    impl evm::ProtocolState {
-        fn convert_attributes_to_json(&self) -> Option<serde_json::Value> {
-            // Convert Bytes to String and then to serde_json Value
-            let serialized_map: HashMap<String, serde_json::Value> = self
-                .attributes
-                .iter()
-                .map(|(k, v)| {
-                    let s = hex::encode(v);
-                    (k.clone(), serde_json::Value::String(s))
-                })
-                .collect();
-
-            // Convert HashMap<String, serde_json::Value> to serde_json::Value struct
-            match serde_json::to_value(serialized_map) {
-                Ok(value) => Some(value),
-                Err(_) => None,
-            }
-        }
-    }
-
     impl StorableProtocolStateDelta<orm::ProtocolState, orm::NewProtocolState, i64>
         for evm::ProtocolStateDelta
     {
         fn from_storage(
-            val: orm::ProtocolState,
+            vals: Vec<orm::ProtocolState>,
             component_id: String,
-            tx_hash: &TxHash,
-            change: ChangeType,
+            deleted_attributes: Vec<AttrStoreKey>,
         ) -> Result<Self, StorageError> {
-            let attr =
-                if let (Some(name), Some(value)) = (&val.attribute_name, &val.attribute_value) {
-                    vec![(name.clone(), value.clone())]
-                        .into_iter()
-                        .collect()
-                } else {
-                    std::collections::HashMap::new()
-                };
-
-            match change {
-                ChangeType::Deletion => Ok(evm::ProtocolStateDelta {
-                    component_id,
-                    updated_attributes: HashMap::new(),
-                    deleted_attributes: attr.into_keys().collect(),
-                    modify_tx: H256::try_decode(tx_hash, "tx hash")
-                        .map_err(StorageError::DecodeError)?,
-                }),
-                _ => Ok(evm::ProtocolStateDelta {
-                    component_id,
-                    updated_attributes: attr,
-                    deleted_attributes: HashSet::new(),
-                    modify_tx: H256::try_decode(tx_hash, "tx hash")
-                        .map_err(StorageError::DecodeError)?,
-                }),
+            let mut attr = HashMap::new();
+            for val in vals {
+                attr.insert(val.attribute_name, val.attribute_value);
             }
+
+            Ok(evm::ProtocolStateDelta {
+                component_id,
+                updated_attributes: attr,
+                deleted_attributes: deleted_attributes.into_iter().collect(),
+            })
         }
 
         // When stored, protocol states are divided into multiple protocol state db entities - one
@@ -512,6 +502,7 @@ pub mod pg {
                     protocol_component_id,
                     attribute_name: Some(name.clone()),
                     attribute_value: Some(value.clone()),
+                    previous_value: None,
                     modify_tx: tx_id,
                     valid_from: block_ts,
                     valid_to: None,
@@ -527,18 +518,17 @@ mod test {
     use super::*;
     use crate::{
         extractor::evm::{utils::pad_and_parse_h160, ERC20Token},
-        storage::{postgres::orm::Token, Address, StorableToken},
+        storage::{
+            postgres::{orm, orm::Token},
+            Address, StorableToken,
+        },
     };
 
-    use crate::storage::postgres::orm;
-
-    use crate::{
-        hex_bytes::Bytes,
-        storage::{ContractId, StorableProtocolComponent},
-    };
+    use crate::storage::{ContractId, StorableProtocolComponent};
     use chrono::Utc;
     use ethers::prelude::{H160, H256};
     use std::str::FromStr;
+    use tycho_types::Bytes;
 
     #[test]
     fn test_storable_token_from_storage() {
@@ -585,8 +575,8 @@ mod test {
     #[test]
     fn test_from_storage_protocol_component() {
         let atts = serde_json::json!({
-            "key1": "value1",
-            "key2": "value2"
+            "key1": "0xbadbabe1",
+            "key2": "0xbadbabe2"
         });
 
         let val = orm::ProtocolComponent {
@@ -594,7 +584,7 @@ mod test {
             chain_id: 0,
             external_id: "sample_external_id".to_string(),
             protocol_type_id: 42,
-            attributes: Some(atts.clone()),
+            attributes: Some(atts),
             protocol_system_id: 0,
             created_at: Default::default(),
             deleted_at: None,
@@ -604,43 +594,62 @@ mod test {
             deletion_tx: None,
         };
 
-        let tokens = vec![
-            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+        let token_str_addresses = vec![
+            "6B175474E89094C44Da98b954EedeAC495271d0F",
+            "6B175474E89094C44Da98b954EedeAC495271d0F",
         ];
-        let contract_ids = vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)];
+        let contract_str_addresses = vec![
+            "694B89AbC4E1C3002C110D7002e11424aad3d3A5",
+            "4665e227c521849a202f808E927d1dc5F63C7941",
+        ];
+
+        let tokens: Vec<Address> = token_str_addresses
+            .clone()
+            .into_iter()
+            .map(|t_address| t_address.into())
+            .collect();
+
+        let contract_ids: Vec<Address> = contract_str_addresses
+            .clone()
+            .into_iter()
+            .map(|c_address| c_address.into())
+            .collect();
+
         let chain = Chain::Ethereum;
         let protocol_system = "ambient".to_string();
 
-        let result = evm::ProtocolComponent::from_storage(
+        let protocol_component = evm::ProtocolComponent::from_storage(
             val.clone(),
-            tokens.clone(),
-            contract_ids.clone(),
+            &tokens,
+            &contract_ids,
             chain,
             &protocol_system,
             H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
                 .unwrap(),
-        );
-
-        assert!(result.is_ok());
-
-        let protocol_component = result.unwrap();
+        )
+        .expect("from_storage failed");
 
         assert_eq!(protocol_component.id, val.external_id.to_string());
         assert_eq!(protocol_component.protocol_type_name, val.protocol_type_id.to_string());
         assert_eq!(protocol_component.chain, chain);
-        assert_eq!(protocol_component.tokens, tokens);
-        assert_eq!(protocol_component.contract_ids, contract_ids);
+        assert_eq!(
+            protocol_component.tokens,
+            token_str_addresses
+                .iter()
+                .map(|t_address| H160::from_str(t_address).unwrap())
+                .collect::<Vec<H160>>()
+        );
+        assert_eq!(
+            protocol_component.contract_ids,
+            contract_str_addresses
+                .iter()
+                .map(|c_address| H160::from_str(c_address).unwrap())
+                .collect::<Vec<H160>>()
+        );
 
         let mut expected_attributes = HashMap::new();
-        expected_attributes.insert(
-            "key1".to_string(),
-            Bytes::from(bytes::Bytes::from(atts.get("key1").unwrap().to_string())),
-        );
-        expected_attributes.insert(
-            "key2".to_string(),
-            Bytes::from(bytes::Bytes::from(atts.get("key2").unwrap().to_string())),
-        );
+        expected_attributes.insert("key1".to_string(), Bytes::from_str("0xbadbabe1").unwrap());
+        expected_attributes.insert("key2".to_string(), Bytes::from_str("0xbadbabe2").unwrap());
 
         assert_eq!(protocol_component.static_attributes, expected_attributes);
     }
@@ -659,8 +668,8 @@ mod test {
             contract_ids: vec![H160::from_low_u64_be(2), H160::from_low_u64_be(3)],
             static_attributes: {
                 let mut map = HashMap::new();
-                map.insert("key1".to_string(), Bytes::from(bytes::Bytes::from("value1")));
-                map.insert("key2".to_string(), Bytes::from(bytes::Bytes::from("value2")));
+                map.insert("key1".to_string(), Bytes::from("badbabe1"));
+                map.insert("key2".to_string(), Bytes::from("badbabe2"));
                 map
             },
             change: Default::default(),
@@ -696,8 +705,7 @@ mod test {
         assert_eq!(new_protocol_component.protocol_system_id, protocol_system_id);
 
         let expected_attributes: serde_json::Value =
-            serde_json::from_str(r#"{ "key1": "0x76616c756531", "key2": "0x76616c756532" }"#)
-                .unwrap();
+            serde_json::from_str(r#"{ "key1": "0xbadbabe1", "key2": "0xbadbabe2" }"#).unwrap();
 
         assert_eq!(new_protocol_component.attributes, Some(expected_attributes));
     }

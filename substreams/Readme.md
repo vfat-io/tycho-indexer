@@ -115,3 +115,61 @@ To create a block test asset for ethereum do the following:
 - Run `sh scripts/download-ethereum-block-to-s3 BLOCK_NUMBER`
 
 Do not commit the block files (they are quite big).
+
+# Guide on how to make a balance store
+
+When creating a new substreams module, you mind find yourself in the need of a way to store the token balances of pools.
+This is how:
+1. In the `substreams.yaml` you need to add something like:
+```yaml
+- name: store_pool_balances
+  kind: store
+  updatePolicy: add
+  valueType: bigint
+  initialBlock: 17361664
+  inputs:
+  - map: map_pool_changes
+````
+This adds a store with an input from the `map_pool_changes` module. 
+The update policy is to add to the previous value of each key and the value type is a big integer.
+The `initialBlock` is the block from which the store will start indexing (WARNING: it is important to set this value, otherwise it will try to index from the beginning of time).
+2. Define the store module like (example from ambient):
+```rust
+#[substreams::handlers::store]
+pub fn store_pool_balances(changes: BlockPoolChanges, balance_store: StoreAddBigInt) {
+    let mut deltas = changes.balance_deltas.clone();
+    deltas.sort_by_key(|delta| delta.ordinal); // the balances need to be ordered by ordinal !!
+    for balance_delta in deltas {
+        let pool_hash_hex = hex::encode(&balance_delta.pool_hash);
+        balance_store.add(
+            balance_delta.ordinal + 1,
+            format!("{}{}", pool_hash_hex, "base"),
+            BigInt::from_bytes_le(Sign::Plus, &balance_delta.base_token_delta),
+        );
+    }
+}
+```
+(This snippet is adding only the balance of the base token)
+3. Use the store in the next module, like:
+```yaml
+  - name: map_changes
+    kind: map
+    initialBlock: 17361664
+    inputs:
+      - source: sf.ethereum.type.v2.Block
+      - map: map_pool_changes
+      - store: store_pool_balances
+        mode: deltas
+```
+Use `mode: deltas` if you want to get only values that changed in this block.
+In `map_changes` add the store as an input like:
+```rust
+#[substreams::handlers::map]
+fn map_changes(
+    block: eth::v2::Block,
+    balance_store: StoreGetBigInt,
+) -> Result<BlockContractChanges, substreams::errors::Error> {
+}
+```
+If you want to use `mode: deltas` you need to use `StoreDeltas` instead of `StoreGetBigInt`. 
+Notice that by using `StoreGetBigInt` you can get the values by key, while using `StoreDeltas` you can only loop through the values of this block.

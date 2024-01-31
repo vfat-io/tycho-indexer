@@ -80,11 +80,11 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::{
-    extractor::evm::{ProtocolComponent, ProtocolState, ProtocolStateDelta},
-    hex_bytes::Bytes,
+    extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
     models::{Chain, ExtractionState, ProtocolType},
     storage::postgres::orm,
 };
+use tycho_types::Bytes;
 
 pub mod postgres;
 
@@ -112,6 +112,9 @@ pub type Balance = Bytes;
 /// Key literal type of the contract store.
 pub type StoreKey = Bytes;
 
+/// Key literal type of the attribute store.
+pub type AttrStoreKey = String;
+
 /// Value literal type of the contract store.
 pub type StoreVal = Bytes;
 
@@ -120,6 +123,9 @@ pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
 
 /// Multiple key values stores grouped by account address.
 pub type AccountToContractStore = HashMap<Address, ContractStore>;
+
+/// Component id literal type to uniquely identify a component.
+pub type ComponentId = String;
 
 /// Identifies a block in storage.
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
@@ -250,6 +256,35 @@ pub trait StorableProtocolType<S, N, I>: Sized + Send + Sync + 'static {
 
     /// Converts a protocol type object to its storable representation (`N`).
     fn to_storage(&self) -> N;
+}
+
+/// Lays out the necessary interface needed to store and retrieve component balances
+/// from storage.
+///
+/// Generics:
+/// * `S`: This represents the storage-specific data type used when converting from storage to the
+///   component balance.
+/// * `N`: This represents the storage-specific data type used when converting from the component
+///   balance to storage.
+/// * `I`: Represents the type of the database identifier, which is used as an argument in the
+///   conversion function. This facilitates the passage of database-specific foreign keys to the
+///   `to_storage` method, thereby providing a flexible way for different databases to interact with
+///   the component balance.
+pub trait StorableComponentBalance<S, N, I>: Sized + Send + Sync + 'static {
+    /// Converts a protocol type object to its storable representation (`N`).
+    fn to_storage(
+        &self,
+        account_id: I,
+        modify_tx: I,
+        protocol_component_id: I,
+        block_ts: NaiveDateTime,
+    ) -> N;
+
+    /// Get a reference to the address of this contract.
+    fn token(&self) -> Address;
+
+    /// Get the transaction hash that modified this balance.
+    fn modify_tx(&self) -> TxHash;
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -544,10 +579,9 @@ pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
 ///   the token.
 pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(
-        val: S,
+        val: Vec<S>,
         component_id: String,
-        tx_hash: &TxHash,
-        change: ChangeType,
+        deleted_attributes: Vec<AttrStoreKey>,
     ) -> Result<Self, StorageError>;
 
     fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> Vec<N>;
@@ -574,6 +608,12 @@ pub trait ProtocolGateway {
     type ProtocolComponent: StorableProtocolComponent<
         orm::ProtocolComponent,
         orm::NewProtocolComponent,
+        i64,
+    >;
+
+    type ComponentBalance: StorableComponentBalance<
+        orm::ComponentBalance,
+        orm::NewComponentBalance,
         i64,
     >;
 
@@ -664,7 +704,7 @@ pub trait ProtocolGateway {
     async fn update_protocol_states(
         &self,
         chain: &Chain,
-        new: &[ProtocolStateDelta],
+        new: &[(TxHash, &ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -682,6 +722,21 @@ pub trait ProtocolGateway {
         address: Option<&[&Address]>,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError>;
+
+    /// Saves multiple component balances to storage.
+    ///
+    /// # Parameters
+    /// - `component_balances` The component balances to insert.
+    ///
+    /// # Return
+    /// Ok if all component balances could be inserted, Err if at least one token failed to
+    /// insert.
+    async fn add_component_balances(
+        &self,
+        component_balances: &[&Self::ComponentBalance],
+        block_ts: NaiveDateTime,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 
     /// Saves multiple tokens to storage.
     ///
@@ -701,28 +756,24 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
-    /// Retrieve protocol component state changes
+    /// Retrieve protocol state changes
     ///
-    /// Fetches all state changes that occurred for the given protocol system
+    /// Fetches all state changes that occurred for the given chain
     ///
     /// # Parameters
     /// - `chain` The chain of the component
-    /// - `system` The protocol system this component belongs to
-    /// - `id` The external id of the component e.g. address, or the pair
     /// - `start_version` The version at which to start looking for changes at.
     /// - `end_version` The version at which to stop looking for changes.
     ///
     /// # Return
-    /// A ProtocolState containing all state changes, Err if no changes were found.
-    async fn get_state_delta(
+    /// A list of ProtocolStateDeltas containing all state changes, Err if no changes were found.
+    async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
-        system: Option<String>,
-        id: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolStateDelta, StorageError>;
+    ) -> Result<Vec<ProtocolStateDelta>, StorageError>;
 
     async fn _get_or_create_protocol_system_id(
         &self,
@@ -801,8 +852,8 @@ pub trait StorableContract<S, N, I>: Sized + Send + Sync + 'static {
 pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(
         val: S,
-        tokens: Vec<H160>,
-        contract_ids: Vec<H160>,
+        tokens: &[Address],
+        contract_ids: &[Address],
         chain: Chain,
         protocol_system: &str,
         transaction_hash: H256,
@@ -1075,5 +1126,6 @@ pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
         ProtocolStateDelta = ProtocolStateDelta,
         ProtocolType = ProtocolType,
         ProtocolComponent = ProtocolComponent,
+        ComponentBalance = ComponentBalance,
     >,
 >;

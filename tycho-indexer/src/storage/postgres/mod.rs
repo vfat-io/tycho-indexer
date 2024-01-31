@@ -129,7 +129,9 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-use std::{collections::HashMap, hash::Hash, i64, marker::PhantomData, str::FromStr, sync::Arc};
+use std::{
+    collections::HashMap, hash::Hash, i64, marker::PhantomData, ops::Deref, str::FromStr, sync::Arc,
+};
 
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -144,7 +146,8 @@ use crate::models::Chain;
 
 use super::{
     BlockIdentifier, BlockOrTimestamp, ContractDelta, StateGateway, StorableBlock,
-    StorableContract, StorableToken, StorableTransaction, StorageError, Version, VersionKind,
+    StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
+    VersionKind,
 };
 
 pub mod cache;
@@ -237,6 +240,21 @@ type ChainEnumCache = ValueIdTableCache<Chain>;
 /// application every time we want to add another System. Hence, to diverge from the implementation
 /// of the Chain enum was a conscious decision.
 type ProtocolSystemEnumCache = ValueIdTableCache<String>;
+
+// Helper type to retrieve entities with their associated tx hashes.
+#[derive(Debug)]
+struct WithTxHash<T> {
+    entity: T,
+    tx: Option<TxHash>,
+}
+
+impl<T> Deref for WithTxHash<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entity
+    }
+}
 
 impl From<diesel::result::Error> for StorageError {
     fn from(value: diesel::result::Error) -> Self {
@@ -540,7 +558,7 @@ pub mod testing {
             "contract_storage",
             "contract_code",
             "account_balance",
-            "protocol_holds_token",
+            "protocol_component_holds_token",
             "token",
             "account",
             "protocol_state",
@@ -651,13 +669,13 @@ pub mod db_fixtures {
     //! the entries that are crucial to your test case.
     use std::str::FromStr;
 
+    use crate::storage::Code;
     use chrono::NaiveDateTime;
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
-
-    use crate::{hex_bytes::Bytes, storage::Code};
+    use tycho_types::Bytes;
 
     use super::{
         orm::{FinancialType, ImplementationType},
@@ -980,6 +998,7 @@ pub mod db_fixtures {
             .unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
     // Insert a new Protocol Component
     pub async fn insert_protocol_component(
         conn: &mut AsyncPgConnection,
@@ -988,6 +1007,8 @@ pub mod db_fixtures {
         system_id: i64,
         type_id: i64,
         tx_id: i64,
+        token_ids: Option<Vec<i64>>,
+        contract_code_ids: Option<Vec<i64>>,
     ) -> i64 {
         let ts: NaiveDateTime = schema::transaction::table
             .inner_join(schema::block::table)
@@ -1005,11 +1026,51 @@ pub mod db_fixtures {
             schema::protocol_component::creation_tx.eq(tx_id),
             schema::protocol_component::created_at.eq(ts),
         ));
-        query
+        let component_id = query
             .returning(schema::protocol_component::id)
             .get_result(conn)
             .await
-            .unwrap()
+            .unwrap();
+
+        if let Some(t_ids) = token_ids {
+            diesel::insert_into(schema::protocol_component_holds_token::table)
+                .values(
+                    t_ids
+                        .iter()
+                        .map(|t_id| {
+                            (
+                                schema::protocol_component_holds_token::protocol_component_id
+                                    .eq(component_id),
+                                schema::protocol_component_holds_token::token_id.eq(t_id),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .execute(conn)
+                .await
+                .expect("protocol component holds token insert ok");
+        }
+
+        if let Some(cc_ids) = contract_code_ids {
+            diesel::insert_into(schema::protocol_component_holds_contract::table)
+                .values(
+                    cc_ids
+                        .iter()
+                        .map(|cc_id| {
+                            (
+                                schema::protocol_component_holds_contract::protocol_component_id
+                                    .eq(component_id),
+                                schema::protocol_component_holds_contract::contract_code_id
+                                    .eq(cc_id),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .execute(conn)
+                .await
+                .expect("protocol component holds contract code insert ok");
+        }
+        component_id
     }
 
     // Insert a new Protocol State
@@ -1019,6 +1080,7 @@ pub mod db_fixtures {
         tx_id: i64,
         attribute_name: String,
         attribute_value: Bytes,
+        previous_value: Option<Bytes>,
         valid_to_tx: Option<i64>,
     ) {
         let ts: NaiveDateTime = schema::transaction::table
@@ -1049,6 +1111,7 @@ pub mod db_fixtures {
             schema::protocol_state::valid_to.eq(valid_to_ts),
             schema::protocol_state::attribute_name.eq(attribute_name),
             schema::protocol_state::attribute_value.eq(attribute_value),
+            schema::protocol_state::previous_value.eq(previous_value),
         ));
         query
             .execute(conn)
@@ -1062,7 +1125,7 @@ pub mod db_fixtures {
         address: &str,
         symbol: &str,
         decimals: i32,
-    ) -> i64 {
+    ) -> (i64, i64) {
         let account_id = insert_account(conn, address, "token", chain_id, None).await;
 
         let query = diesel::insert_into(schema::token::table).values((
@@ -1072,11 +1135,14 @@ pub mod db_fixtures {
             schema::token::tax.eq(10),
             schema::token::gas.eq(vec![10]),
         ));
-        query
-            .returning(schema::token::id)
-            .get_result(conn)
-            .await
-            .unwrap()
+        (
+            account_id,
+            query
+                .returning(schema::token::id)
+                .get_result(conn)
+                .await
+                .unwrap(),
+        )
     }
 
     pub async fn get_token_by_symbol(conn: &mut AsyncPgConnection, symbol: String) -> orm::Token {

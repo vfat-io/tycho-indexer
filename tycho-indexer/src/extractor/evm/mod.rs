@@ -15,11 +15,11 @@ use tracing::warn;
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
-    hex_bytes::Bytes,
     models::{Chain, ExtractorIdentity, NormalisedMessage},
     pb::tycho::evm::v1 as substreams,
-    storage::{Address, ChangeType, StateGatewayType},
+    storage::{Address, AttrStoreKey, ChangeType, ComponentId, StateGatewayType, StoreVal},
 };
+use tycho_types::Bytes;
 
 use self::utils::TryDecode;
 
@@ -32,7 +32,7 @@ mod utils;
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SwapPool {}
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ERC20Token {
     pub address: H160,
     pub symbol: String,
@@ -250,7 +250,7 @@ pub struct BlockAccountChanges {
     pub account_updates: HashMap<H160, AccountUpdate>,
     pub new_protocol_components: Vec<ProtocolComponent>,
     pub deleted_protocol_components: Vec<ProtocolComponent>,
-    pub tvl_changes: Vec<TvlChange>,
+    pub component_balances: Vec<ComponentBalance>,
 }
 
 impl BlockAccountChanges {
@@ -261,7 +261,7 @@ impl BlockAccountChanges {
         account_updates: HashMap<H160, AccountUpdate>,
         new_protocol_components: Vec<ProtocolComponent>,
         deleted_protocol_components: Vec<ProtocolComponent>,
-        tvl_change: Vec<TvlChange>,
+        component_balances: Vec<ComponentBalance>,
     ) -> Self {
         BlockAccountChanges {
             extractor: extractor.to_owned(),
@@ -270,7 +270,7 @@ impl BlockAccountChanges {
             account_updates,
             new_protocol_components,
             deleted_protocol_components,
-            tvl_changes: tvl_change,
+            component_balances,
         }
     }
 }
@@ -372,7 +372,7 @@ pub struct BlockContractChanges {
     pub block: Block,
     pub tx_updates: Vec<AccountUpdateWithTx>,
     pub protocol_components: Vec<ProtocolComponent>,
-    pub tvl_changes: Vec<TvlChange>,
+    pub component_balances: Vec<ComponentBalance>,
 }
 
 pub type EVMStateGateway<DB> =
@@ -454,22 +454,22 @@ impl AccountUpdateWithTx {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct TvlChange {
-    token: H160,
-    new_balance: f64,
+pub struct ComponentBalance {
+    pub token: H160,
+    pub new_balance: Bytes,
     // tx where the this balance was observed
-    modify_tx: H256,
-    component_id: String,
+    pub modify_tx: H256,
+    pub component_id: String,
 }
 
-impl TvlChange {
+impl ComponentBalance {
     pub fn try_from_message(
         msg: substreams::BalanceChange,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
         Ok(Self {
             token: pad_and_parse_h160(&msg.token.into()).map_err(ExtractionError::DecodeError)?,
-            new_balance: f64::from_bits(u64::from_le_bytes(msg.balance.try_into().unwrap())),
+            new_balance: Bytes::from(msg.balance),
             modify_tx: tx.hash,
             component_id: String::from_utf8(msg.component_id)
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
@@ -501,7 +501,7 @@ pub struct ProtocolComponent {
     /// address or in the case of a one-to-many relationship it could be something like
     /// 'USDC-ETH'. This is for example the case with ambient, where one contract is
     /// responsible for multiple components.
-    pub id: String,
+    pub id: ComponentId,
     // what system this component belongs to
     pub protocol_system: String,
     // more metadata information about the components general type (swap, lend, bridge, etc.)
@@ -513,7 +513,7 @@ pub struct ProtocolComponent {
     // addresses of the related contracts
     pub contract_ids: Vec<H160>,
     // stores the static attributes
-    pub static_attributes: HashMap<String, Bytes>,
+    pub static_attributes: HashMap<AttrStoreKey, StoreVal>,
     // the type of change (creation, deletion etc)
     pub change: ChangeType,
     // Hash of the transaction in which the component got created
@@ -564,6 +564,13 @@ impl ProtocolComponent {
             creation_tx: tx_hash,
             created_at: creation_ts,
         })
+    }
+
+    pub fn get_byte_contract_addresses(&self) -> Vec<Address> {
+        self.contract_ids
+            .iter()
+            .map(|t| Address::from(t.0))
+            .collect()
     }
 
     pub fn get_byte_token_addresses(&self) -> Vec<Address> {
@@ -628,7 +635,7 @@ impl BlockContractChanges {
                 block,
                 tx_updates,
                 protocol_components,
-                tvl_changes: Vec::new(),
+                component_balances: Vec::new(),
             });
         }
         Err(ExtractionError::Empty)
@@ -685,15 +692,19 @@ impl BlockContractChanges {
 /// Represents the dynamic data of `ProtocolComponent`.
 pub struct ProtocolState {
     // associates back to a component, which has metadata like type, tokens, etc.
-    pub component_id: String,
+    pub component_id: ComponentId,
     // the protocol specific attributes, validated by the components schema
-    pub attributes: HashMap<String, Bytes>,
+    pub attributes: HashMap<AttrStoreKey, StoreVal>,
     // via transaction, we can trace back when this state became valid
     pub modify_tx: H256,
 }
 
 impl ProtocolState {
-    pub fn new(component_id: String, attributes: HashMap<String, Bytes>, modify_tx: H256) -> Self {
+    pub fn new(
+        component_id: ComponentId,
+        attributes: HashMap<AttrStoreKey, StoreVal>,
+        modify_tx: H256,
+    ) -> Self {
         Self { component_id, attributes, modify_tx }
     }
 }
@@ -702,31 +713,21 @@ impl ProtocolState {
 /// Represents a change in protocol state.
 pub struct ProtocolStateDelta {
     // associates back to a component, which has metadata like type, tokens, etc.
-    pub component_id: String,
+    pub component_id: ComponentId,
     // the update protocol specific attributes, validated by the components schema
-    pub updated_attributes: HashMap<String, Bytes>,
+    pub updated_attributes: HashMap<AttrStoreKey, StoreVal>,
     // the deleted protocol specific attributes
-    pub deleted_attributes: HashSet<String>,
-    // via transaction, we can trace back when this state became valid
-    pub modify_tx: H256,
+    pub deleted_attributes: HashSet<AttrStoreKey>,
 }
 
 // TODO: remove dead code check skip once extractor is implemented
 impl ProtocolStateDelta {
-    pub fn new(component_id: String, attributes: HashMap<String, Bytes>, modify_tx: H256) -> Self {
-        Self {
-            component_id,
-            updated_attributes: attributes,
-            deleted_attributes: HashSet::new(),
-            modify_tx,
-        }
+    pub fn new(component_id: ComponentId, attributes: HashMap<AttrStoreKey, StoreVal>) -> Self {
+        Self { component_id, updated_attributes: attributes, deleted_attributes: HashSet::new() }
     }
 
     /// Parses protocol state from tychos protobuf EntityChanges message
-    pub fn try_from_message(
-        msg: substreams::EntityChanges,
-        tx: &Transaction,
-    ) -> Result<Self, ExtractionError> {
+    pub fn try_from_message(msg: substreams::EntityChanges) -> Result<Self, ExtractionError> {
         let (mut updates, mut deletions) = (HashMap::new(), HashSet::new());
 
         for attribute in msg.attributes.into_iter() {
@@ -744,7 +745,6 @@ impl ProtocolStateDelta {
             component_id: msg.component_id,
             updated_attributes: updates,
             deleted_attributes: deletions,
-            modify_tx: tx.hash,
         })
     }
 
@@ -766,7 +766,6 @@ impl ProtocolStateDelta {
                 self.component_id, other.component_id
             )));
         }
-        self.modify_tx = other.modify_tx;
         for attr in &other.deleted_attributes {
             self.updated_attributes.remove(attr);
         }
@@ -796,7 +795,7 @@ impl ProtocolStateDeltasWithTx {
     ) -> Result<Self, ExtractionError> {
         let mut protocol_states = HashMap::new();
         for state_msg in msg {
-            let state = ProtocolStateDelta::try_from_message(state_msg, &tx)?;
+            let state = ProtocolStateDelta::try_from_message(state_msg)?;
             protocol_states.insert(state.clone().component_id, state);
         }
         Ok(Self { protocol_states, tx })
@@ -1518,7 +1517,7 @@ mod test {
                 },
             ],
             protocol_components: vec![protocol_component],
-            tvl_changes: Vec::new(),
+            component_balances: Vec::new(),
         }
     }
 
@@ -1634,7 +1633,6 @@ mod test {
             component_id: "State1".to_owned(),
             updated_attributes: up_attributes1,
             deleted_attributes: del_attributes1,
-            modify_tx: H256::zero(),
         };
 
         let up_attributes2: HashMap<String, Bytes> = vec![
@@ -1652,7 +1650,6 @@ mod test {
             component_id: "State1".to_owned(),
             updated_attributes: up_attributes2.clone(),
             deleted_attributes: del_attributes2,
-            modify_tx: HASH_256_1.parse().unwrap(),
         };
 
         let res = state1.merge(state2);
@@ -1688,7 +1685,6 @@ mod test {
                     component_id: "State1".to_owned(),
                     updated_attributes: attributes.clone(),
                     deleted_attributes: HashSet::new(),
-                    modify_tx: H256::zero(),
                 },
             ),
             (
@@ -1697,7 +1693,6 @@ mod test {
                     component_id: "State2".to_owned(),
                     updated_attributes: attributes,
                     deleted_attributes: HashSet::new(),
-                    modify_tx: H256::zero(),
                 },
             ),
         ]
@@ -1723,7 +1718,6 @@ mod test {
                 component_id: "State1".to_owned(),
                 updated_attributes: new_attributes,
                 deleted_attributes: HashSet::new(),
-                modify_tx: new_tx.hash,
             },
         )]
         .into_iter()
@@ -1791,7 +1785,6 @@ mod test {
             .into_iter()
             .collect(),
             deleted_attributes: HashSet::new(),
-            modify_tx: H256::zero(),
         }
     }
 
@@ -1807,7 +1800,6 @@ mod test {
             component_id: "State2".to_owned(),
             updated_attributes: attributes2.clone(),
             deleted_attributes: HashSet::new(),
-            modify_tx: HASH_256_1.parse().unwrap(),
         };
 
         let res = state1.merge(state2);
@@ -1825,7 +1817,7 @@ mod test {
     fn test_protocol_state_update_parse_msg() {
         let msg = fixtures::pb_state_changes();
 
-        let res = ProtocolStateDelta::try_from_message(msg, &fixtures::transaction01()).unwrap();
+        let res = ProtocolStateDelta::try_from_message(msg).unwrap();
 
         assert_eq!(res, protocol_state());
     }
@@ -1854,7 +1846,6 @@ mod test {
                 component_id: "State1".to_owned(),
                 updated_attributes: attr,
                 deleted_attributes: HashSet::new(),
-                modify_tx: tx.hash,
             },
         )]
         .into_iter()
@@ -1954,7 +1945,6 @@ mod test {
                     component_id: "State1".to_owned(),
                     updated_attributes: attr1,
                     deleted_attributes: HashSet::new(),
-                    modify_tx: tx.hash,
                 },
             ),
             (
@@ -1963,7 +1953,6 @@ mod test {
                     component_id: "State2".to_owned(),
                     updated_attributes: attr2,
                     deleted_attributes: HashSet::new(),
-                    modify_tx: H256::zero(),
                 },
             ),
         ]
@@ -2096,7 +2085,7 @@ mod test {
     }
 
     #[rstest]
-    fn test_try_from_message_tvl_change() {
+    fn test_try_from_message_component_balance() {
         let tx = create_transaction();
         let expected_balance: f64 = 3000.0;
         let msg_balance = expected_balance.to_le_bytes().to_vec();
@@ -2113,9 +2102,9 @@ mod test {
             token: msg_token,
             component_id: msg_component_id,
         };
-        let from_message = TvlChange::try_from_message(msg, &tx).unwrap();
+        let from_message = ComponentBalance::try_from_message(msg, &tx).unwrap();
 
-        assert_eq!(from_message.new_balance, expected_balance);
+        assert_eq!(from_message.new_balance, msg_balance);
         assert_eq!(from_message.modify_tx, tx.hash);
         assert_eq!(from_message.token, expected_token);
         assert_eq!(from_message.component_id, expected_component_id);

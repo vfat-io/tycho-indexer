@@ -211,7 +211,9 @@ mod test {
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
 
-    use crate::{extractor::evm, hex_bytes::Bytes, models::Chain, storage::postgres::db_fixtures};
+    use crate::{extractor::evm, models::Chain, storage::postgres::db_fixtures};
+
+    use tycho_types::Bytes;
 
     use super::*;
 

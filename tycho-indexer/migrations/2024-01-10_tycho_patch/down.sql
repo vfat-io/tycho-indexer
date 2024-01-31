@@ -43,11 +43,9 @@ $$
 LANGUAGE plpgsql;
 
 ALTER TABLE protocol_state
-    DROP CONSTRAINT check_attribute_fields;
-
-ALTER TABLE protocol_state
     DROP COLUMN attribute_name,
     DROP COLUMN attribute_value,
+    DROP COLUMN previous_value,
     ADD COLUMN state jsonb NULL,
     ADD COLUMN tvl bigint NULL,
     ADD COLUMN inertias bigint[] NULL;
@@ -146,4 +144,25 @@ CREATE TRIGGER invalidate_previous_contract_code
     AFTER INSERT ON contract_code
     FOR EACH ROW
     EXECUTE PROCEDURE invalidate_previous_entry_contract_code();
+
+DROP TABLE component_balance;
+
+-- Drop the triggers from the renamed table
+DROP TRIGGER IF EXISTS update_modtime_protocol_component_holds_token ON protocol_component_holds_token;
+
+DROP TRIGGER IF EXISTS audit_table_protocol_component_holds_token ON protocol_component_holds_token;
+
+-- Rename the table back to its original name
+ALTER TABLE protocol_component_holds_token RENAME TO protocol_holds_token;
+
+-- Recreate any triggers that were originally on protocol_holds_token, if needed
+CREATE TRIGGER update_modtime_protocol_holds_token
+    BEFORE UPDATE ON protocol_holds_token
+    FOR EACH ROW
+    EXECUTE PROCEDURE update_modified_column();
+
+CREATE TRIGGER audit_table_protocol_holds_token
+    BEFORE UPDATE ON protocol_holds_token
+    FOR EACH ROW
+    EXECUTE PROCEDURE audit_trigger();
 
