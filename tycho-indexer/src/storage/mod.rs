@@ -112,6 +112,9 @@ pub type Balance = Bytes;
 /// Key literal type of the contract store.
 pub type StoreKey = Bytes;
 
+/// Key literal type of the attribute store.
+pub type AttrStoreKey = String;
+
 /// Value literal type of the contract store.
 pub type StoreVal = Bytes;
 
@@ -120,6 +123,9 @@ pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
 
 /// Multiple key values stores grouped by account address.
 pub type AccountToContractStore = HashMap<Address, ContractStore>;
+
+/// Component id literal type to uniquely identify a component.
+pub type ComponentId = String;
 
 /// Identifies a block in storage.
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
@@ -554,10 +560,9 @@ pub trait StorableProtocolState<S, N, I>: Sized + Send + Sync + 'static {
 ///   the token.
 pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(
-        val: S,
+        val: Vec<S>,
         component_id: String,
-        tx_hash: &TxHash,
-        change: ChangeType,
+        deleted_attributes: Vec<AttrStoreKey>,
     ) -> Result<Self, StorageError>;
 
     fn to_storage(&self, protocol_component_id: I, tx_id: I, block_ts: NaiveDateTime) -> Vec<N>;
@@ -680,7 +685,7 @@ pub trait ProtocolGateway {
     async fn update_protocol_states(
         &self,
         chain: &Chain,
-        new: &[ProtocolStateDelta],
+        new: &[(TxHash, ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -734,28 +739,24 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
-    /// Retrieve protocol component state changes
+    /// Retrieve protocol state changes
     ///
-    /// Fetches all state changes that occurred for the given protocol system
+    /// Fetches all state changes that occurred for the given chain
     ///
     /// # Parameters
     /// - `chain` The chain of the component
-    /// - `system` The protocol system this component belongs to
-    /// - `id` The external id of the component e.g. address, or the pair
     /// - `start_version` The version at which to start looking for changes at.
     /// - `end_version` The version at which to stop looking for changes.
     ///
     /// # Return
-    /// A ProtocolState containing all state changes, Err if no changes were found.
-    async fn get_state_delta(
+    /// A list of ProtocolStateDeltas containing all state changes, Err if no changes were found.
+    async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
-        system: Option<String>,
-        id: Option<&[&str]>,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<ProtocolStateDelta, StorageError>;
+    ) -> Result<Vec<ProtocolStateDelta>, StorageError>;
 
     /// Reverts the protocol states in storage.
     ///

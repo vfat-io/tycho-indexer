@@ -188,8 +188,9 @@ diesel::table! {
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
         protocol_component_id -> Int8,
-        attribute_name -> Nullable<Varchar>,
-        attribute_value -> Nullable<Bytea>,
+        attribute_name -> Varchar,
+        attribute_value -> Bytea,
+        previous_value -> Nullable<Bytea>,
     }
 }
 
