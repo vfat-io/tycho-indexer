@@ -32,13 +32,15 @@ use crate::TYCHO_SERVER_VERSION;
 pub enum TychoUpdateClientError {
     #[error("Failed to parse URI: {0}. Error: {1}")]
     UriParsing(String, String),
+    #[error("The requested subscription is already pending")]
+    SubscriptionAlreadyPending,
     #[error("{0}")]
     TransportError(String),
-    #[error("The client is not connected!.")]
+    #[error("The client is not connected!")]
     NotConnected,
-    #[error("The client is already connected.")]
+    #[error("The client is already connected!")]
     AlreadyConnected,
-    #[error("The server closed the connection.")]
+    #[error("The server closed the connection!")]
     ConnectionClosed,
     #[error("ConnectionError {source}")]
     ConnectionError {
@@ -80,13 +82,8 @@ pub struct TychoWsClient {
 
 type WebSocketSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 
-// TODO: get rid of it
-struct SubscriptionInfo {
-    state: SubscriptionStatus,
-}
-
 #[derive(Debug)]
-enum SubscriptionStatus {
+enum SubscriptionInfo {
     RequestedSubscription(oneshot::Sender<(Uuid, Receiver<BlockAccountChanges>)>),
     Active,
     RequestedUnsubscription(oneshot::Sender<()>),
@@ -118,22 +115,22 @@ impl Inner {
         &mut self,
         id: &ExtractorIdentity,
         ready_tx: oneshot::Sender<(Uuid, Receiver<BlockAccountChanges>)>,
-    ) {
-        // TODO: deny subscribing twice to same extractor
-        self.pending.insert(
-            id.clone(),
-            SubscriptionInfo { state: SubscriptionStatus::RequestedSubscription(ready_tx) },
-        );
+    ) -> Result<(), TychoUpdateClientError> {
+        if self.pending.contains_key(id) {
+            return Err(TychoUpdateClientError::SubscriptionAlreadyPending);
+        }
+        self.pending
+            .insert(id.clone(), SubscriptionInfo::RequestedSubscription(ready_tx));
+        Ok(())
     }
 
     fn mark_active(&mut self, extractor_id: &ExtractorIdentity, subscription_id: Uuid) {
-        if let Some(mut info) = self.pending.remove(extractor_id) {
-            if let SubscriptionStatus::RequestedSubscription(ready_tx) = info.state {
+        if let Some(info) = self.pending.remove(extractor_id) {
+            if let SubscriptionInfo::RequestedSubscription(ready_tx) = info {
                 let (tx, rx) = mpsc::channel(1);
-                info.state = SubscriptionStatus::Active;
                 self.sender.insert(subscription_id, tx);
                 self.subscriptions
-                    .insert(subscription_id, info);
+                    .insert(subscription_id, SubscriptionInfo::Active);
                 let _ = ready_tx
                     .send((subscription_id, rx))
                     .map_err(|_| {
@@ -172,8 +169,8 @@ impl Inner {
             .subscriptions
             .get_mut(subscription_id)
         {
-            if let SubscriptionStatus::Active = &info.state {
-                info.state = SubscriptionStatus::RequestedUnsubscription(ready_tx);
+            if let SubscriptionInfo::Active = info {
+                *info = SubscriptionInfo::RequestedUnsubscription(ready_tx);
             }
         } else {
             // no big deal imo so only debug lvl..
@@ -187,7 +184,7 @@ impl Inner {
             .entry(subscription_id)
         {
             let info = e.remove();
-            if let SubscriptionStatus::RequestedUnsubscription(tx) = info.state {
+            if let SubscriptionInfo::RequestedUnsubscription(tx) = info {
                 let _ = tx.send(()).map_err(|_| {
                     warn!(?subscription_id, "failed to notify about removed subscription")
                 });
@@ -206,7 +203,7 @@ impl Inner {
         } else {
             error!(
                 ?subscription_id,
-                "Received `SubscriptionEnded` for but the never subscribed 
+                "Received `SubscriptionEnded` but the never subscribed 
                 to it. This is likely a bug!"
             );
         }
@@ -380,7 +377,7 @@ impl TychoUpdatesClient for TychoWsClient {
                 .as_mut()
                 .expect("ws not connected");
             dbg!("started subscribe");
-            inner.new_subscription(&extractor_id, ready_tx);
+            inner.new_subscription(&extractor_id, ready_tx)?;
             let cmd = Command::Subscribe { extractor_id };
             inner
                 .ws_send(Message::Text(
