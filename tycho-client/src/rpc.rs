@@ -17,7 +17,7 @@ use tycho_types::dto::{StateRequestBody, StateRequestParameters, StateRequestRes
 use crate::TYCHO_SERVER_VERSION;
 
 #[derive(Error, Debug)]
-pub enum TychoClientError {
+pub enum TychoRPCError {
     /// The passed tycho url failed to parse.
     #[error("Failed to parse URI: {0}. Error: {1}")]
     UriParsing(String, String),
@@ -39,7 +39,7 @@ pub trait TychoRPCClient {
         &self,
         filters: &StateRequestParameters,
         request: &StateRequestBody,
-    ) -> Result<StateRequestResponse, TychoClientError>;
+    ) -> Result<StateRequestResponse, TychoRPCError>;
 }
 
 #[derive(Debug, Clone)]
@@ -49,10 +49,10 @@ pub struct TychoHttpClient {
 }
 
 impl TychoHttpClient {
-    pub fn new(base_uri: &str) -> Result<Self, TychoClientError> {
+    pub fn new(base_uri: &str) -> Result<Self, TychoRPCError> {
         let uri = base_uri
             .parse::<Uri>()
-            .map_err(|e| TychoClientError::UriParsing(base_uri.to_string(), e.to_string()))?;
+            .map_err(|e| TychoRPCError::UriParsing(base_uri.to_string(), e.to_string()))?;
 
         Ok(Self { http_client: Client::new(), uri })
     }
@@ -65,7 +65,7 @@ impl TychoRPCClient for TychoHttpClient {
         &self,
         filters: &StateRequestParameters,
         request: &StateRequestBody,
-    ) -> Result<StateRequestResponse, TychoClientError> {
+    ) -> Result<StateRequestResponse, TychoRPCError> {
         // Check if contract ids are specified
         if request.contract_ids.is_none() ||
             request
@@ -87,30 +87,30 @@ impl TychoRPCClient for TychoHttpClient {
         );
         debug!(%uri, "Sending contract_state request to Tycho server");
         let body = serde_json::to_string(&request)
-            .map_err(|e| TychoClientError::FormatRequest(e.to_string()))?;
+            .map_err(|e| TychoRPCError::FormatRequest(e.to_string()))?;
 
         let header = hyper::header::HeaderValue::from_str("application/json")
-            .map_err(|e| TychoClientError::FormatRequest(e.to_string()))?;
+            .map_err(|e| TychoRPCError::FormatRequest(e.to_string()))?;
 
         let req = Request::post(uri)
             .header(hyper::header::CONTENT_TYPE, header)
             .body(Body::from(body))
-            .map_err(|e| TychoClientError::FormatRequest(e.to_string()))?;
+            .map_err(|e| TychoRPCError::FormatRequest(e.to_string()))?;
         debug!(?req, "Sending request to Tycho server");
 
         let response = self
             .http_client
             .request(req)
             .await
-            .map_err(|e| TychoClientError::HttpClient(e.to_string()))?;
+            .map_err(|e| TychoRPCError::HttpClient(e.to_string()))?;
         debug!(?response, "Received response from Tycho server");
 
         let body = hyper::body::to_bytes(response.into_body())
             .await
-            .map_err(|e| TychoClientError::ParseResponse(e.to_string()))?;
+            .map_err(|e| TychoRPCError::ParseResponse(e.to_string()))?;
 
         let accounts: StateRequestResponse = serde_json::from_slice(&body)
-            .map_err(|e| TychoClientError::ParseResponse(e.to_string()))?;
+            .map_err(|e| TychoRPCError::ParseResponse(e.to_string()))?;
         info!(?accounts, "Received contract_state response from Tycho server");
 
         Ok(accounts)

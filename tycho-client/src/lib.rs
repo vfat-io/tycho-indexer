@@ -27,3 +27,6 @@ const TYCHO_SERVER_VERSION: &str = "v1";
 
 pub mod rpc;
 pub mod updates;
+
+pub use rpc::{TychoHttpClient, TychoRPCError};
+pub use updates::{TychoUpdatesError, TychoWsClient};
