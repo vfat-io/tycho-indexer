@@ -423,7 +423,7 @@ impl WsDeltasClient {
                     tungstenite::Error::Io(_) => DeltasError::from(error),
                     tungstenite::Error::Protocol(_) => DeltasError::from(error),
                     _ => DeltasError::Fatal(error.to_string()),
-                })
+                });
             }
         };
         Ok(())
@@ -553,7 +553,7 @@ impl DeltasClient for WsDeltasClient {
                                 ?retry_count,
                                 "Connection dropped unexpectedly; Reconnecting"
                             );
-                            break
+                            break;
                         } else {
                             // Other errors are considered fatal
                             break 'retry;
