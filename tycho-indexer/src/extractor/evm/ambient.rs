@@ -330,16 +330,18 @@ where
 
         debug!(?raw_msg, "Received message");
 
-        let protocol_type = self
+        let protocol_type_names = self
             .protocol_types
-            .get("vm:pool")
-            .expect("Couldn't find Protocol Type");
+            .values()
+            .map(|f| f.name.clone())
+            .collect();
+
         let msg = match evm::BlockContractChanges::try_from_message(
             raw_msg,
             &self.name,
             self.chain,
             self.protocol_system.clone(),
-            protocol_type.name.clone(),
+            protocol_type_names,
         ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
@@ -423,7 +425,7 @@ mod test {
         ambient_protocol_types.insert(
             "vm:pool".to_string(),
             ProtocolType::new(
-                "ambient_pool".to_string(),
+                "WeightedPool".to_string(),
                 FinancialType::Swap,
                 None,
                 ImplementationType::Vm,
