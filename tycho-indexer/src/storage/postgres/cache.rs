@@ -37,7 +37,7 @@ pub(crate) enum WriteOp {
     SaveExtractionState(ExtractionState),
     InsertContract(evm::Account),
     UpdateContracts(Vec<(TxHash, AccountUpdate)>),
-    InsertProtocolComponent(Vec<evm::ProtocolComponent>),
+    InsertProtocolComponents(Vec<evm::ProtocolComponent>),
     InsertTokens(Vec<evm::ERC20Token>),
     InsertComponentBalances(Vec<evm::ComponentBalance>),
 }
@@ -363,7 +363,7 @@ impl DBCacheWriteExecutor {
                     .update_contracts(&self.chain, changes_slice, conn)
                     .await
             }
-            WriteOp::InsertProtocolComponent(components) => {
+            WriteOp::InsertProtocolComponents(components) => {
                 let collected_components: Vec<&ProtocolComponent> = components.iter().collect();
                 self.state_gateway
                     .add_protocol_components(collected_components.as_slice(), conn)
@@ -561,7 +561,7 @@ impl CachedGateway {
     ) -> Result<(), StorageError> {
         let (tx, rx) = oneshot::channel();
         let db_tx =
-            DBTransaction::new(*block, vec![WriteOp::InsertProtocolComponent(Vec::from(new))], tx);
+            DBTransaction::new(*block, vec![WriteOp::InsertProtocolComponents(Vec::from(new))], tx);
         self.tx
             .send(DBCacheMessage::Write(db_tx))
             .await
@@ -661,6 +661,10 @@ mod test_serial_db {
     };
     use tycho_types::Bytes;
 
+    use crate::{
+        extractor::evm::{ComponentBalance, ERC20Token, ProtocolComponent},
+        pb::tycho::evm::v1::ChangeType,
+    };
     use tokio::sync::mpsc::error::TryRecvError::Empty;
 
     #[tokio::test]
@@ -742,6 +746,9 @@ mod test_serial_db {
                 .await
                 .expect("Failed to get a connection from the pool");
             db_fixtures::insert_chain(&mut connection, "ethereum").await;
+            db_fixtures::insert_protocol_system(&mut connection, "ambient".to_owned()).await;
+            db_fixtures::insert_protocol_type(&mut connection, "ambient_pool", None, None, None)
+                .await;
             let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
                 PostgresGateway::<
                     evm::Block,
@@ -771,6 +778,35 @@ mod test_serial_db {
             let block_1 = get_sample_block(1);
             let tx_1 = get_sample_transaction(1);
             let extraction_state_1 = get_sample_extraction(1);
+            let usdc_address =
+                H160::from_str("0xdAC17F958D2ee523a2206206994597C13D831ec7").unwrap();
+            let token = ERC20Token::new(
+                usdc_address,
+                "USDT".to_string(),
+                6,
+                0,
+                vec![Some(64), None],
+                Chain::Ethereum,
+            );
+            let protocol_component_id = "ambient_USDT-USDC".to_owned();
+            let protocol_component = ProtocolComponent {
+                id: protocol_component_id.clone(),
+                protocol_system: "ambient".to_string(),
+                protocol_type_name: "ambient_pool".to_string(),
+                chain: Default::default(),
+                tokens: vec![usdc_address],
+                contract_ids: vec![],
+                change: ChangeType::Creation.into(),
+                creation_tx: tx_1.hash,
+                static_attributes: Default::default(),
+                created_at: Default::default(),
+            };
+            let component_balance = ComponentBalance {
+                token: usdc_address,
+                new_balance: Bytes::from(&[0u8]),
+                modify_tx: tx_1.hash,
+                component_id: protocol_component_id,
+            };
             let os_rx_1 = send_write_message(
                 &tx,
                 block_1,
@@ -778,6 +814,9 @@ mod test_serial_db {
                     WriteOp::UpsertBlock(block_1),
                     WriteOp::UpsertTx(tx_1),
                     WriteOp::SaveExtractionState(extraction_state_1.clone()),
+                    WriteOp::InsertTokens(vec![token]),
+                    WriteOp::InsertProtocolComponents(vec![protocol_component]),
+                    WriteOp::InsertComponentBalances(vec![component_balance]),
                 ],
             )
             .await;
