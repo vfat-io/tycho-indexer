@@ -185,6 +185,8 @@ where
         .execute(conn)
         .await?;
 
+        // Any versioned table's rows, which have `deleted_at` set to "> block.ts"
+        // need, to be updated to be valid again (thus, deleted_at = NULL).
         diesel::update(schema::account::table.filter(schema::account::deleted_at.gt(block.ts)))
             .set(schema::account::deleted_at.eq(Option::<NaiveDateTime>::None))
             .execute(conn)
