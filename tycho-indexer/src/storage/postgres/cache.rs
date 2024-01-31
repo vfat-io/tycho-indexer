@@ -593,32 +593,20 @@ impl DerefMut for CachedGateway {
 
 #[cfg(test)]
 mod test_serial_db {
-    use crate::{
-        extractor::{evm, evm::EVMStateGateway},
-        models::{Chain, ExtractionState},
-        storage::{
-            postgres::{
-                cache::{
-                    CachedGateway, DBCacheMessage, DBCacheWriteExecutor, DBTransaction, WriteOp,
-                },
-                db_fixtures,
-                testing::run_against_db,
-                PostgresGateway,
-            },
-            BlockIdentifier, BlockOrTimestamp, StorageError,
-            StorageError::NotFound,
-        },
+    use crate::storage::{
+        postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
+        StorageError::NotFound,
     };
-    use diesel_async::AsyncPgConnection;
-    use ethers::types::{H160, H256};
-    use std::{str::FromStr, sync::Arc};
-    use tokio::sync::{
-        mpsc,
-        oneshot::{self},
+    use ethers::{
+        prelude::H256,
+        types::{H160, U256},
     };
+    use std::{collections::HashMap, str::FromStr, sync::Arc};
     use tycho_types::Bytes;
 
     use tokio::sync::mpsc::error::TryRecvError::Empty;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_write_and_flush() {
@@ -728,6 +716,11 @@ mod test_serial_db {
             let block_1 = get_sample_block(1);
             let tx_1 = get_sample_transaction(1);
             let extraction_state_1 = get_sample_extraction(1);
+            let attributes: HashMap<String, Bytes> =
+                vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
+                    .into_iter()
+                    .collect();
+            let protocol_state_delta = ProtocolStateDelta::new("state3".to_owned(), attributes);
             let os_rx_1 = send_write_message(
                 &tx,
                 block_1,
@@ -735,6 +728,10 @@ mod test_serial_db {
                     WriteOp::UpsertBlock(block_1),
                     WriteOp::UpsertTx(tx_1),
                     WriteOp::SaveExtractionState(extraction_state_1.clone()),
+                    WriteOp::UpsertProtocolState(vec![(
+                        tx_1.hash.as_bytes().into(),
+                        protocol_state_delta,
+                    )]),
                 ],
             )
             .await;
