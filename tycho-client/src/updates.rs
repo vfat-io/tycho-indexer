@@ -1,3 +1,25 @@
+//! # Tycho Updates Client
+//!
+//! This module focuses on implementing the Real-Time Updates client for the Tycho Indexer service.
+//! Utilizing this client facilitates efficient, instant communication with the indexing service,
+//! promoting seamless data synchronization.
+//!
+//! ## Websocket Implementation
+//!
+//! The present WebSocket implementation is clonable, which enables it to be shared
+//! across multiple asynchronous tasks without creating separate instances for each task. This
+//! unique feature boosts efficiency as it:
+//!
+//! - **Reduces Server Load:** By maintaining a single universal client, the load on the server is
+//!   significantly reduced. This is because fewer connections are made to the server, preventing it
+//!   from getting overwhelmed by numerous simultaneous requests.
+//! - **Conserves Resource Usage:** A single shared client requires fewer system resources than if
+//!   multiple clients were instantiated and used separately as there is some overhead for websocket
+//!   handshakes and message.
+//!
+//! Therefore, sharing one client among multiple tasks ensures optimal performance, reduces resource
+//! consumption, and enhances overall software scalability.
+use async_trait::async_trait;
 use futures03::{stream::SplitSink, SinkExt, StreamExt};
 use hyper::Uri;
 use std::{
@@ -6,11 +28,6 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use tracing::{debug, error, info, instrument, warn};
-use uuid::Uuid;
-
-use async_trait::async_trait;
-
 use tokio::{
     net::TcpStream,
     sync::{
@@ -22,31 +39,45 @@ use tokio::{
 use tokio_tungstenite::{
     connect_async, tungstenite, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
 };
+use tracing::{debug, error, info, instrument, warn};
 use tycho_types::dto::{
     BlockAccountChanges, Command, ExtractorIdentity, Response, WebSocketMessage,
 };
+use uuid::Uuid;
 
 use crate::TYCHO_SERVER_VERSION;
 
 #[derive(Error, Debug)]
 pub enum TychoUpdateClientError {
+    /// The passed tycho url failed to parse.
     #[error("Failed to parse URI: {0}. Error: {1}")]
     UriParsing(String, String),
+    /// Informs you about a subscription being already pending and is awaiting conformation from
+    /// the server.
     #[error("The requested subscription is already pending")]
     SubscriptionAlreadyPending,
+    /// Informs that an message failed to send via an internal channel or throuh the websocket
+    /// channel. This is most likely fatal and might mean that the implementation is buggy under
+    /// certain conditions.
     #[error("{0}")]
     TransportError(String),
+    /// The client has currently no active connection but it was accessed e.g. by calling
+    /// subscribe.
     #[error("The client is not connected!")]
     NotConnected,
+    /// The connect method was called while the client already had an active connection.
     #[error("The client is already connected!")]
     AlreadyConnected,
+    /// The connection was closed orderly by the server, e.g. because it restarted.
     #[error("The server closed the connection!")]
     ConnectionClosed,
+    /// The connection was closed unexpectedly by the server.
     #[error("ConnectionError {source}")]
     ConnectionError {
         #[from]
         source: tungstenite::Error,
     },
+    /// Other fatal errors: e.g. if the underlying websockets buffer is full.
     #[error("Tycho FatalError: {0}")]
     Fatal(String),
 }
@@ -54,52 +85,80 @@ pub enum TychoUpdateClientError {
 #[async_trait]
 pub trait TychoUpdatesClient {
     /// Subscribe to an extractor and receive realtime messages
+    ///
+    /// Will request a subscription from tycho and wait for confirmation of it. If the caller
+    /// cancels while waiting for confirmation the subscription may still be registered. If the
+    /// receiver was deallocated though, the first message from the subscription will remove it
+    /// again - since there is no one to inform about these messages.
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
     ) -> Result<(Uuid, Receiver<BlockAccountChanges>), TychoUpdateClientError>;
 
-    /// Unsubscribe from an extractor
+    /// Unsubscribe from an subscription
     async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoUpdateClientError>;
 
-    /// Consumes realtime messages from the WebSocket server
+    /// Start the clients message handling loop.
     async fn connect(
         &self,
     ) -> Result<JoinHandle<Result<(), TychoUpdateClientError>>, TychoUpdateClientError>;
 
-    /// Close the connection
+    /// Close the clients message handling loop.
     async fn close(&self) -> Result<(), TychoUpdateClientError>;
 }
 
 #[derive(Clone)]
 pub struct TychoWsClient {
+    /// The tycho indexer websocket uri.
     uri: Uri,
+    /// Maximum amount of reconnects to try before giving up.
     max_reconnects: u32,
+    /// Notify tasks waiting for a connection to be established.
     conn_notify: Arc<Notify>,
-    // unset on startup or after connection ended
+    /// Shared client instance state.
     inner: Arc<Mutex<Option<Inner>>>,
 }
 
 type WebSocketSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 
+/// Subscription State
+///
+/// Subscription go through a lifecycle:
+///
+/// ```text
+/// O ---> requested subscribe ----> active ----> requested unsub ---> ended
+/// ```
+///
+/// We use oneshot channels to inform the client struct about when these transition happened. E.g.
+/// because for `subscribe`` to finish, we want the state to have transition to `active` and similar
+/// for `unsubscribe`.
 #[derive(Debug)]
 enum SubscriptionInfo {
+    /// Subscription was requested we wait for server confirmation and uuid assignment.
     RequestedSubscription(oneshot::Sender<(Uuid, Receiver<BlockAccountChanges>)>),
+    /// Subscription is active.
     Active,
+    /// Unsubscription was requested, we wait for server confirmation.
     RequestedUnsubscription(oneshot::Sender<()>),
 }
 
 struct Inner {
-    // may be unset during reconnection
+    /// Websocket sender handle.
     sink: WebSocketSink,
+    /// Command channel sender handle.
     cmd_tx: Sender<()>,
-    // could be a vec and we take the first one matching if we
-    // wanted to support multiple duplicated subs.
+    /// Currently pending subscriptions.
     pending: HashMap<ExtractorIdentity, SubscriptionInfo>,
+    /// Active subscriptions.
     subscriptions: HashMap<Uuid, SubscriptionInfo>,
+    /// For eachs subscription we keep a sender handle, the receiver is returned to the caller of
+    /// subscribe.
     sender: HashMap<Uuid, Sender<BlockAccountChanges>>,
 }
 
+/// Shared state betweeen all client instances.
+///
+/// This state is behind a mutex and requires synchronisation to be read of modified.
 impl Inner {
     fn new(cmd_tx: Sender<()>, sink: WebSocketSink) -> Self {
         Self {
@@ -111,6 +170,7 @@ impl Inner {
         }
     }
 
+    /// Registers a new pending subscription.
     fn new_subscription(
         &mut self,
         id: &ExtractorIdentity,
@@ -124,6 +184,9 @@ impl Inner {
         Ok(())
     }
 
+    /// Transitions a pending subscription to active.
+    ///
+    /// Will ignore andy request to do so for subscriptions that are not pending.
     fn mark_active(&mut self, extractor_id: &ExtractorIdentity, subscription_id: Uuid) {
         if let Some(info) = self.pending.remove(extractor_id) {
             if let SubscriptionInfo::RequestedSubscription(ready_tx) = info {
@@ -157,13 +220,25 @@ impl Inner {
         }
     }
 
-    async fn send(&mut self, id: &Uuid, msg: BlockAccountChanges) -> anyhow::Result<()> {
+    /// Sends a message to a subscriptions receiver.
+    async fn send(
+        &mut self,
+        id: &Uuid,
+        msg: BlockAccountChanges,
+    ) -> Result<(), TychoUpdateClientError> {
         if let Some(sender) = self.sender.get_mut(id) {
-            sender.send(msg).await?;
+            sender
+                .send(msg)
+                .await
+                .map_err(|e| TychoUpdateClientError::TransportError(e.to_string()))?;
         }
         Ok(())
     }
 
+    /// Requests a subscription to end.
+    ///
+    /// The subsription needs to exist and be active for this to have any effect. Wll use `ready_tx`
+    /// to notify the receiver once the transition to ended completed.
     fn end_subscription(&mut self, subscription_id: &Uuid, ready_tx: oneshot::Sender<()>) {
         if let Some(info) = self
             .subscriptions
@@ -178,6 +253,12 @@ impl Inner {
         }
     }
 
+    /// Removes and fully ends a subscription
+    ///
+    /// Any calls for non existing subscriptions will be simply ignored. May panic on internal state
+    /// inconsistencies: e.g. if the subscription exists but there is no sender for it.
+    /// Will remove a subscription even it was in active or pending state before, this is to support
+    /// any server side failure of the subscription.
     fn remove_subscription(&mut self, subscription_id: Uuid) {
         if let Entry::Occupied(e) = self
             .subscriptions
@@ -209,6 +290,7 @@ impl Inner {
         }
     }
 
+    /// Sends a message through the websocket.
     async fn ws_send(&mut self, msg: Message) -> Result<(), TychoUpdateClientError> {
         self.sink.send(msg).await.map_err(|e| {
             TychoUpdateClientError::TransportError(format!(
@@ -218,7 +300,9 @@ impl Inner {
     }
 }
 
+/// Tycho client websocket implementation.
 impl TychoWsClient {
+    // Construct a new client with 5 reconnection attempts.
     pub fn new(ws_uri: &str) -> Result<Self, TychoUpdateClientError> {
         let uri = ws_uri
             .parse::<Uri>()
@@ -232,6 +316,7 @@ impl TychoWsClient {
         })
     }
 
+    // Construct a new client with a custom number of reconnection attempts.
     pub fn new_with_reconnects(
         ws_uri: &str,
         max_reconnects: u32,
@@ -248,17 +333,28 @@ impl TychoWsClient {
         })
     }
 
+    /// Ensures that the client is connected.
+    ///
+    /// This method will acquire the lock for inner.
     async fn is_connected(&self) -> bool {
         let guard = self.inner.as_ref().lock().await;
         guard.is_some()
     }
 
+    /// Waits for the client to be connected
+    ///
+    /// This method will acquires the lock for inner for a short period then waits until the
+    /// connection is established if not already connected.
     async fn ensure_connection(&self) {
         if !self.is_connected().await {
             self.conn_notify.notified().await;
         }
     }
 
+    /// Main message handling logic
+    ///
+    /// If the message returns an error, a reconnect attempt may be considered depending on the
+    /// error type.
     #[instrument(skip(self))]
     async fn handle_msg(
         &self,
@@ -344,6 +440,11 @@ impl TychoWsClient {
         Ok(())
     }
 
+    /// Helper method to force request a unsubscribe of a subscription
+    ///
+    /// This method expects to receive a mutable reference to `Inner` so it does not acquire a
+    /// lock. Used for normal unsubscribes as well to remove any subscriptions with deallocated
+    /// receivers.
     async fn unsubscribe_inner(
         inner: &mut Inner,
         subscription_id: Uuid,
@@ -460,7 +561,7 @@ impl TychoUpdatesClient for TychoWsClient {
                             TychoUpdateClientError::ConnectionClosed |
                                 TychoUpdateClientError::ConnectionError { .. }
                         ) {
-                            // Code for reconnection connection...
+                            // Prepare for reconnection
                             retry_count += 1;
                             let mut guard = this.inner.as_ref().lock().await;
                             *guard = None;
