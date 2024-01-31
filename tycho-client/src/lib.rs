@@ -20,7 +20,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_tungstenite::{
-    connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
+    connect_async, tungstenite, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
 };
 use tycho_types::dto::{
     BlockAccountChanges, Command, ExtractorIdentity, Response, StateRequestBody,
@@ -42,8 +42,25 @@ pub enum TychoClientError {
     HttpClient(String),
     #[error("Failed to parse response: {0}")]
     ParseResponse(String),
+}
+
+#[derive(Error, Debug)]
+pub enum TychoUpdateClientError {
     #[error("{0}")]
     TransportError(String),
+    #[error("The client is not connected!.")]
+    NotConnected,
+    #[error("The client is already connected.")]
+    AlreadyConnected,
+    #[error("The server closed the connection.")]
+    ConnectionClosed,
+    #[error("ConnectionError {source}")]
+    ConnectionError {
+        #[from]
+        source: tungstenite::Error,
+    },
+    #[error("Tycho FatalError: {0}")]
+    Fatal(String),
 }
 
 #[derive(Debug, Clone)]
@@ -136,21 +153,24 @@ pub trait TychoUpdatesClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
-    ) -> Result<Receiver<BlockAccountChanges>, TychoClientError>;
+    ) -> Result<Receiver<BlockAccountChanges>, TychoUpdateClientError>;
 
     /// Unsubscribe from an extractor
-    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoClientError>;
+    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoUpdateClientError>;
 
     /// Consumes realtime messages from the WebSocket server
-    async fn connect(&self) -> anyhow::Result<JoinHandle<anyhow::Result<()>>>;
+    async fn connect(
+        &self,
+    ) -> Result<JoinHandle<Result<(), TychoUpdateClientError>>, TychoUpdateClientError>;
 
     /// Close the connection
-    async fn close(&self) -> anyhow::Result<()>;
+    async fn close(&self) -> Result<(), TychoUpdateClientError>;
 }
 
 #[derive(Clone)]
 pub struct TychoWsClient {
     uri: Uri,
+    max_reconnects: u32,
     conn_notify: Arc<Notify>,
     // unset on startup or after connection ended
     inner: Arc<Mutex<Option<Inner>>>,
@@ -287,9 +307,11 @@ impl Inner {
         }
     }
 
-    async fn ws_send(&mut self, msg: Message) -> Result<(), TychoClientError> {
+    async fn ws_send(&mut self, msg: Message) -> Result<(), TychoUpdateClientError> {
         self.sink.send(msg).await.map_err(|e| {
-            TychoClientError::TransportError(format!("Failed to send message to websocket: {e}"))
+            TychoUpdateClientError::TransportError(format!(
+                "Failed to send message to websocket: {e}"
+            ))
         })
     }
 }
@@ -300,7 +322,28 @@ impl TychoWsClient {
             .parse::<Uri>()
             .map_err(|e| TychoClientError::UriParsing(ws_uri.to_string(), e.to_string()))?;
 
-        Ok(Self { uri, inner: Arc::new(Mutex::new(None)), conn_notify: Arc::new(Notify::new()) })
+        Ok(Self {
+            uri,
+            inner: Arc::new(Mutex::new(None)),
+            conn_notify: Arc::new(Notify::new()),
+            max_reconnects: 5,
+        })
+    }
+
+    pub fn new_with_reconnects(
+        ws_uri: &str,
+        max_reconnects: u32,
+    ) -> Result<Self, TychoClientError> {
+        let uri = ws_uri
+            .parse::<Uri>()
+            .map_err(|e| TychoClientError::UriParsing(ws_uri.to_string(), e.to_string()))?;
+
+        Ok(Self {
+            uri,
+            inner: Arc::new(Mutex::new(None)),
+            conn_notify: Arc::new(Notify::new()),
+            max_reconnects,
+        })
     }
 
     async fn is_connected(&self) -> bool {
@@ -317,7 +360,7 @@ impl TychoWsClient {
     async fn handle_msg(
         &self,
         msg: Result<Message, tokio_tungstenite::tungstenite::error::Error>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), TychoUpdateClientError> {
         let mut guard = self.inner.lock().await;
         dbg!(&msg);
         match msg {
@@ -326,7 +369,7 @@ impl TychoWsClient {
                     info!(?data, "Received a block state change, sending to channel");
                     let inner = guard
                         .as_mut()
-                        .ok_or_else(|| anyhow::format_err!("Not connected"))?;
+                        .ok_or_else(|| TychoUpdateClientError::NotConnected)?;
                     if let Err(_) = inner.send(&subscription_id, data).await {
                         warn!(?subscription_id, "Receiver for has gone away, unsubscribing!");
                         let (tx, _) = oneshot::channel();
@@ -340,7 +383,7 @@ impl TychoWsClient {
                     info!(?extractor_id, ?subscription_id, "Received a new subscription");
                     let inner = guard
                         .as_mut()
-                        .ok_or_else(|| anyhow::format_err!("Not connected"))?;
+                        .ok_or_else(|| TychoUpdateClientError::NotConnected)?;
                     inner.mark_active(&extractor_id, subscription_id);
                     dbg!("subscription active");
                 }
@@ -349,7 +392,7 @@ impl TychoWsClient {
                     dbg!("subscription ended start");
                     let inner = guard
                         .as_mut()
-                        .ok_or_else(|| anyhow::format_err!("Not connected"))?;
+                        .ok_or_else(|| TychoUpdateClientError::NotConnected)?;
                     inner.remove_subscription(subscription_id);
                     dbg!("subscription ended");
                 }
@@ -362,7 +405,7 @@ impl TychoWsClient {
                 // Respond to pings with pongs.
                 let inner = guard
                     .as_mut()
-                    .ok_or_else(|| anyhow::format_err!("Not connected"))?;
+                    .ok_or_else(|| TychoUpdateClientError::NotConnected)?;
                 if let Err(error) = inner
                     .ws_send(Message::Pong(Vec::new()))
                     .await
@@ -375,17 +418,23 @@ impl TychoWsClient {
             }
             Ok(Message::Close(_)) => {
                 dbg!("closed");
-                return Err(anyhow::anyhow!("Connection closed!"));
+                return Err(TychoUpdateClientError::ConnectionClosed);
             }
             Ok(unknown_msg) => {
                 dbg!(&unknown_msg);
                 info!("Received an unknown message type: {:?}", unknown_msg);
             }
-            // TODO: better scope error types here
             Err(error) => {
-                dbg!(&error);
                 error!(?error, "Websocket error");
-                return Err(anyhow::anyhow!("Websocket error!"));
+                return Err(match &error {
+                    tungstenite::Error::ConnectionClosed => TychoUpdateClientError::from(error),
+                    tungstenite::Error::AlreadyClosed => {
+                        warn!("Received AlreadyClosed error which is indicative of a bug!");
+                        TychoUpdateClientError::from(error)
+                    }
+                    tungstenite::Error::Io(_) => TychoUpdateClientError::from(error),
+                    _ => TychoUpdateClientError::Fatal(error.to_string()),
+                })
             }
         };
         Ok(())
@@ -395,7 +444,7 @@ impl TychoWsClient {
         inner: &mut Inner,
         subscription_id: Uuid,
         ready_tx: oneshot::Sender<()>,
-    ) -> Result<(), TychoClientError> {
+    ) -> Result<(), TychoUpdateClientError> {
         inner.end_subscription(&subscription_id, ready_tx);
         let cmd = Command::Unsubscribe { subscription_id };
         inner
@@ -413,7 +462,7 @@ impl TychoUpdatesClient for TychoWsClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
-    ) -> Result<Receiver<BlockAccountChanges>, TychoClientError> {
+    ) -> Result<Receiver<BlockAccountChanges>, TychoUpdateClientError> {
         dbg!("entered subscribe");
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
@@ -438,7 +487,7 @@ impl TychoUpdatesClient for TychoWsClient {
         Ok(rx)
     }
 
-    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoClientError> {
+    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoUpdateClientError> {
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         {
@@ -454,9 +503,11 @@ impl TychoUpdatesClient for TychoWsClient {
         Ok(())
     }
 
-    async fn connect(&self) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+    async fn connect(
+        &self,
+    ) -> Result<JoinHandle<Result<(), TychoUpdateClientError>>, TychoUpdateClientError> {
         if self.is_connected().await {
-            anyhow::bail!("Already connected");
+            return Err(TychoUpdateClientError::AlreadyConnected);
         }
         let (cmd_tx, mut cmd_rx) = mpsc::channel(30);
         let ws_uri = format!("{}{}/ws", self.uri, TYCHO_SERVER_VERSION);
@@ -473,7 +524,7 @@ impl TychoUpdatesClient for TychoWsClient {
         let this = self.clone();
         let jh = tokio::spawn(async move {
             let mut retry_count = 0;
-            'retry: while retry_count < 5 {
+            'retry: while retry_count < this.max_reconnects {
                 dbg!("client: starting (re)connection");
                 info!(?ws_uri, "Connecting to WebSocket server");
 
@@ -520,12 +571,16 @@ impl TychoUpdatesClient for TychoWsClient {
         Ok(jh)
     }
 
-    async fn close(&self) -> anyhow::Result<()> {
+    async fn close(&self) -> Result<(), TychoUpdateClientError> {
         let mut guard = self.inner.lock().await;
         let inner = guard
             .as_mut()
-            .ok_or_else(|| anyhow::format_err!("Not connected"))?;
-        inner.cmd_tx.send(()).await?;
+            .ok_or_else(|| TychoUpdateClientError::NotConnected)?;
+        inner
+            .cmd_tx
+            .send(())
+            .await
+            .map_err(|e| TychoUpdateClientError::TransportError(e.to_string()))?;
         Ok(())
     }
 }
@@ -798,7 +853,7 @@ mod tests {
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 1).await;
         let client = TychoWsClient::new(&format!("ws://{}", addr)).unwrap();
-        let jh: JoinHandle<anyhow::Result<()>> = client
+        let jh: JoinHandle<Result<(), TychoUpdateClientError>> = client
             .connect()
             .await
             .expect("connect failed");
