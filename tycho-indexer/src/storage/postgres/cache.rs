@@ -827,7 +827,7 @@ mod test_serial_db {
                 token: usdc_address,
                 new_balance: Bytes::from(&[0u8]),
                 modify_tx: tx_1.hash,
-                component_id: protocol_component_id,
+                component_id: protocol_component_id.clone(),
             };
             let os_rx_1 = send_write_message(
                 &tx,
@@ -853,7 +853,7 @@ mod test_serial_db {
                 vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
                     .into_iter()
                     .collect();
-            let protocol_state_delta = ProtocolStateDelta::new("state1".to_owned(), attributes);
+            let protocol_state_delta = ProtocolStateDelta::new(protocol_component_id, attributes);
             let os_rx_2 = send_write_message(
                 &tx,
                 block_2,
