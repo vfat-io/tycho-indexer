@@ -218,10 +218,10 @@ where
                 let ps = self.get_protocol_system(&pc.protocol_system_id);
                 let tokens_by_pc: &Vec<Address> = protocol_component_tokens
                     .get(&pc.id)
-                    .expect("Could not find Protocol Component.");
+                    .expect("Could not find Tokens for Protocol Component."); // We expect all protocol components to have tokens.
                 let contracts_by_pc: &Vec<Address> = protocol_component_contracts
                     .get(&pc.id)
-                    .expect("Could not find Protocol Component.");
+                    .expect("Could not find Contracts for Protocol Component."); // We expect all protocol components to have contracts.
 
                 ProtocolComponent::from_storage(
                     pc.clone(),
@@ -987,8 +987,8 @@ mod test {
             protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
-            None,
-            None,
+            Some(vec![weth_id]),
+            Some(vec![contract_code_id]),
         )
         .await;
         db_fixtures::insert_protocol_component(
