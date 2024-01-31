@@ -17,7 +17,7 @@ use tycho_types::dto::{StateRequestBody, StateRequestParameters, StateRequestRes
 use crate::TYCHO_SERVER_VERSION;
 
 #[derive(Error, Debug)]
-pub enum TychoRPCError {
+pub enum RPCError {
     /// The passed tycho url failed to parse.
     #[error("Failed to parse URI: {0}. Error: {1}")]
     UriParsing(String, String),
@@ -33,39 +33,39 @@ pub enum TychoRPCError {
 }
 
 #[async_trait]
-pub trait TychoRPCClient {
+pub trait RPCClient {
     /// Retrieves a snapshot of contract state.
     async fn get_contract_state(
         &self,
         filters: &StateRequestParameters,
         request: &StateRequestBody,
-    ) -> Result<StateRequestResponse, TychoRPCError>;
+    ) -> Result<StateRequestResponse, RPCError>;
 }
 
 #[derive(Debug, Clone)]
-pub struct TychoHttpClient {
+pub struct HttpRPCClient {
     http_client: Client<HttpConnector>,
     uri: Uri,
 }
 
-impl TychoHttpClient {
-    pub fn new(base_uri: &str) -> Result<Self, TychoRPCError> {
+impl HttpRPCClient {
+    pub fn new(base_uri: &str) -> Result<Self, RPCError> {
         let uri = base_uri
             .parse::<Uri>()
-            .map_err(|e| TychoRPCError::UriParsing(base_uri.to_string(), e.to_string()))?;
+            .map_err(|e| RPCError::UriParsing(base_uri.to_string(), e.to_string()))?;
 
         Ok(Self { http_client: Client::new(), uri })
     }
 }
 
 #[async_trait]
-impl TychoRPCClient for TychoHttpClient {
+impl RPCClient for HttpRPCClient {
     #[instrument(skip(self, filters, request))]
     async fn get_contract_state(
         &self,
         filters: &StateRequestParameters,
         request: &StateRequestBody,
-    ) -> Result<StateRequestResponse, TychoRPCError> {
+    ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
         if request.contract_ids.is_none() ||
             request
@@ -86,31 +86,31 @@ impl TychoRPCClient for TychoHttpClient {
             filters.to_query_string()
         );
         debug!(%uri, "Sending contract_state request to Tycho server");
-        let body = serde_json::to_string(&request)
-            .map_err(|e| TychoRPCError::FormatRequest(e.to_string()))?;
+        let body =
+            serde_json::to_string(&request).map_err(|e| RPCError::FormatRequest(e.to_string()))?;
 
         let header = hyper::header::HeaderValue::from_str("application/json")
-            .map_err(|e| TychoRPCError::FormatRequest(e.to_string()))?;
+            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
 
         let req = Request::post(uri)
             .header(hyper::header::CONTENT_TYPE, header)
             .body(Body::from(body))
-            .map_err(|e| TychoRPCError::FormatRequest(e.to_string()))?;
+            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
         debug!(?req, "Sending request to Tycho server");
 
         let response = self
             .http_client
             .request(req)
             .await
-            .map_err(|e| TychoRPCError::HttpClient(e.to_string()))?;
+            .map_err(|e| RPCError::HttpClient(e.to_string()))?;
         debug!(?response, "Received response from Tycho server");
 
         let body = hyper::body::to_bytes(response.into_body())
             .await
-            .map_err(|e| TychoRPCError::ParseResponse(e.to_string()))?;
+            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
 
-        let accounts: StateRequestResponse = serde_json::from_slice(&body)
-            .map_err(|e| TychoRPCError::ParseResponse(e.to_string()))?;
+        let accounts: StateRequestResponse =
+            serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         info!(?accounts, "Received contract_state response from Tycho server");
 
         Ok(accounts)
@@ -158,7 +158,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = TychoHttpClient::new(server.url().as_str()).expect("create client");
+        let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
 
         let response = client
             .get_contract_state(&Default::default(), &Default::default())

@@ -1,6 +1,6 @@
-//! # Tycho Updates Client
+//! # Deltas Client
 //!
-//! This module focuses on implementing the Real-Time Updates client for the Tycho Indexer service.
+//! This module focuses on implementing the Real-Time Deltas client for the Tycho Indexer service.
 //! Utilizing this client facilitates efficient, instant communication with the indexing service,
 //! promoting seamless data synchronization.
 //!
@@ -48,7 +48,7 @@ use uuid::Uuid;
 use crate::TYCHO_SERVER_VERSION;
 
 #[derive(Error, Debug)]
-pub enum TychoUpdatesError {
+pub enum DeltasError {
     /// The passed tycho url failed to parse.
     #[error("Failed to parse URI: {0}. Error: {1}")]
     UriParsing(String, String),
@@ -83,7 +83,7 @@ pub enum TychoUpdatesError {
 }
 
 #[async_trait]
-pub trait TychoUpdatesClient {
+pub trait DeltasClient {
     /// Subscribe to an extractor and receive realtime messages
     ///
     /// Will request a subscription from tycho and wait for confirmation of it. If the caller
@@ -93,21 +93,20 @@ pub trait TychoUpdatesClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
-    ) -> Result<(Uuid, Receiver<BlockAccountChanges>), TychoUpdatesError>;
+    ) -> Result<(Uuid, Receiver<BlockAccountChanges>), DeltasError>;
 
     /// Unsubscribe from an subscription
-    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoUpdatesError>;
+    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), DeltasError>;
 
     /// Start the clients message handling loop.
-    async fn connect(&self)
-        -> Result<JoinHandle<Result<(), TychoUpdatesError>>, TychoUpdatesError>;
+    async fn connect(&self) -> Result<JoinHandle<Result<(), DeltasError>>, DeltasError>;
 
     /// Close the clients message handling loop.
-    async fn close(&self) -> Result<(), TychoUpdatesError>;
+    async fn close(&self) -> Result<(), DeltasError>;
 }
 
 #[derive(Clone)]
-pub struct TychoWsClient {
+pub struct WsDeltasClient {
     /// The tycho indexer websocket uri.
     uri: Uri,
     /// Maximum amount of reconnects to try before giving up.
@@ -174,9 +173,9 @@ impl Inner {
         &mut self,
         id: &ExtractorIdentity,
         ready_tx: oneshot::Sender<(Uuid, Receiver<BlockAccountChanges>)>,
-    ) -> Result<(), TychoUpdatesError> {
+    ) -> Result<(), DeltasError> {
         if self.pending.contains_key(id) {
-            return Err(TychoUpdatesError::SubscriptionAlreadyPending);
+            return Err(DeltasError::SubscriptionAlreadyPending);
         }
         self.pending
             .insert(id.clone(), SubscriptionInfo::RequestedSubscription(ready_tx));
@@ -220,12 +219,12 @@ impl Inner {
     }
 
     /// Sends a message to a subscriptions receiver.
-    async fn send(&mut self, id: &Uuid, msg: BlockAccountChanges) -> Result<(), TychoUpdatesError> {
+    async fn send(&mut self, id: &Uuid, msg: BlockAccountChanges) -> Result<(), DeltasError> {
         if let Some(sender) = self.sender.get_mut(id) {
             sender
                 .send(msg)
                 .await
-                .map_err(|e| TychoUpdatesError::TransportError(e.to_string()))?;
+                .map_err(|e| DeltasError::TransportError(e.to_string()))?;
         }
         Ok(())
     }
@@ -286,20 +285,20 @@ impl Inner {
     }
 
     /// Sends a message through the websocket.
-    async fn ws_send(&mut self, msg: Message) -> Result<(), TychoUpdatesError> {
+    async fn ws_send(&mut self, msg: Message) -> Result<(), DeltasError> {
         self.sink.send(msg).await.map_err(|e| {
-            TychoUpdatesError::TransportError(format!("Failed to send message to websocket: {e}"))
+            DeltasError::TransportError(format!("Failed to send message to websocket: {e}"))
         })
     }
 }
 
 /// Tycho client websocket implementation.
-impl TychoWsClient {
+impl WsDeltasClient {
     // Construct a new client with 5 reconnection attempts.
-    pub fn new(ws_uri: &str) -> Result<Self, TychoUpdatesError> {
+    pub fn new(ws_uri: &str) -> Result<Self, DeltasError> {
         let uri = ws_uri
             .parse::<Uri>()
-            .map_err(|e| TychoUpdatesError::UriParsing(ws_uri.to_string(), e.to_string()))?;
+            .map_err(|e| DeltasError::UriParsing(ws_uri.to_string(), e.to_string()))?;
 
         Ok(Self {
             uri,
@@ -310,13 +309,10 @@ impl TychoWsClient {
     }
 
     // Construct a new client with a custom number of reconnection attempts.
-    pub fn new_with_reconnects(
-        ws_uri: &str,
-        max_reconnects: u32,
-    ) -> Result<Self, TychoUpdatesError> {
+    pub fn new_with_reconnects(ws_uri: &str, max_reconnects: u32) -> Result<Self, DeltasError> {
         let uri = ws_uri
             .parse::<Uri>()
-            .map_err(|e| TychoUpdatesError::UriParsing(ws_uri.to_string(), e.to_string()))?;
+            .map_err(|e| DeltasError::UriParsing(ws_uri.to_string(), e.to_string()))?;
 
         Ok(Self {
             uri,
@@ -352,7 +348,7 @@ impl TychoWsClient {
     async fn handle_msg(
         &self,
         msg: Result<Message, tokio_tungstenite::tungstenite::error::Error>,
-    ) -> Result<(), TychoUpdatesError> {
+    ) -> Result<(), DeltasError> {
         let mut guard = self.inner.lock().await;
 
         match msg {
@@ -361,11 +357,11 @@ impl TychoWsClient {
                     info!(?data, "Received a block state change, sending to channel");
                     let inner = guard
                         .as_mut()
-                        .ok_or_else(|| TychoUpdatesError::NotConnected)?;
+                        .ok_or_else(|| DeltasError::NotConnected)?;
                     if let Err(_) = inner.send(&subscription_id, data).await {
                         warn!(?subscription_id, "Receiver for has gone away, unsubscribing!");
                         let (tx, _) = oneshot::channel();
-                        let _ = TychoWsClient::unsubscribe_inner(inner, subscription_id, tx).await;
+                        let _ = WsDeltasClient::unsubscribe_inner(inner, subscription_id, tx).await;
                     }
                 }
                 Ok(WebSocketMessage::Response(Response::NewSubscription {
@@ -375,7 +371,7 @@ impl TychoWsClient {
                     info!(?extractor_id, ?subscription_id, "Received a new subscription");
                     let inner = guard
                         .as_mut()
-                        .ok_or_else(|| TychoUpdatesError::NotConnected)?;
+                        .ok_or_else(|| DeltasError::NotConnected)?;
                     inner.mark_active(&extractor_id, subscription_id);
                 }
                 Ok(WebSocketMessage::Response(Response::SubscriptionEnded { subscription_id })) => {
@@ -383,7 +379,7 @@ impl TychoWsClient {
 
                     let inner = guard
                         .as_mut()
-                        .ok_or_else(|| TychoUpdatesError::NotConnected)?;
+                        .ok_or_else(|| DeltasError::NotConnected)?;
                     inner.remove_subscription(subscription_id);
                 }
                 Err(e) => {
@@ -394,7 +390,7 @@ impl TychoWsClient {
                 // Respond to pings with pongs.
                 let inner = guard
                     .as_mut()
-                    .ok_or_else(|| TychoUpdatesError::NotConnected)?;
+                    .ok_or_else(|| DeltasError::NotConnected)?;
                 if let Err(error) = inner
                     .ws_send(Message::Pong(Vec::new()))
                     .await
@@ -406,7 +402,7 @@ impl TychoWsClient {
                 // Do nothing.
             }
             Ok(Message::Close(_)) => {
-                return Err(TychoUpdatesError::ConnectionClosed);
+                return Err(DeltasError::ConnectionClosed);
             }
             Ok(unknown_msg) => {
                 info!("Received an unknown message type: {:?}", unknown_msg);
@@ -414,14 +410,14 @@ impl TychoWsClient {
             Err(error) => {
                 error!(?error, "Websocket error");
                 return Err(match &error {
-                    tungstenite::Error::ConnectionClosed => TychoUpdatesError::from(error),
+                    tungstenite::Error::ConnectionClosed => DeltasError::from(error),
                     tungstenite::Error::AlreadyClosed => {
                         warn!("Received AlreadyClosed error which is indicative of a bug!");
-                        TychoUpdatesError::from(error)
+                        DeltasError::from(error)
                     }
-                    tungstenite::Error::Io(_) => TychoUpdatesError::from(error),
-                    tungstenite::Error::Protocol(_) => TychoUpdatesError::from(error),
-                    _ => TychoUpdatesError::Fatal(error.to_string()),
+                    tungstenite::Error::Io(_) => DeltasError::from(error),
+                    tungstenite::Error::Protocol(_) => DeltasError::from(error),
+                    _ => DeltasError::Fatal(error.to_string()),
                 })
             }
         };
@@ -437,7 +433,7 @@ impl TychoWsClient {
         inner: &mut Inner,
         subscription_id: Uuid,
         ready_tx: oneshot::Sender<()>,
-    ) -> Result<(), TychoUpdatesError> {
+    ) -> Result<(), DeltasError> {
         inner.end_subscription(&subscription_id, ready_tx);
         let cmd = Command::Unsubscribe { subscription_id };
         inner
@@ -450,13 +446,13 @@ impl TychoWsClient {
 }
 
 #[async_trait]
-impl TychoUpdatesClient for TychoWsClient {
+impl DeltasClient for WsDeltasClient {
     #[allow(unused_variables)]
     #[instrument(skip(self))]
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
-    ) -> Result<(Uuid, Receiver<BlockAccountChanges>), TychoUpdatesError> {
+    ) -> Result<(Uuid, Receiver<BlockAccountChanges>), DeltasError> {
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         {
@@ -481,7 +477,7 @@ impl TychoUpdatesClient for TychoWsClient {
     }
 
     #[instrument(skip(self))]
-    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoUpdatesError> {
+    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), DeltasError> {
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         {
@@ -490,7 +486,7 @@ impl TychoUpdatesClient for TychoWsClient {
                 .as_mut()
                 .expect("ws not connected");
 
-            TychoWsClient::unsubscribe_inner(inner, subscription_id, ready_tx).await?;
+            WsDeltasClient::unsubscribe_inner(inner, subscription_id, ready_tx).await?;
         }
         ready_rx
             .await
@@ -500,11 +496,9 @@ impl TychoUpdatesClient for TychoWsClient {
     }
 
     #[instrument(skip(self))]
-    async fn connect(
-        &self,
-    ) -> Result<JoinHandle<Result<(), TychoUpdatesError>>, TychoUpdatesError> {
+    async fn connect(&self) -> Result<JoinHandle<Result<(), DeltasError>>, DeltasError> {
         if self.is_connected().await {
-            return Err(TychoUpdatesError::AlreadyConnected);
+            return Err(DeltasError::AlreadyConnected);
         }
         let ws_uri = format!("{}{}/ws", self.uri, TYCHO_SERVER_VERSION);
         info!(?ws_uri, "Starting TychoWebsocketClient");
@@ -543,8 +537,7 @@ impl TychoUpdatesClient for TychoWsClient {
                     if let Err(error) = res {
                         if matches!(
                             error,
-                            TychoUpdatesError::ConnectionClosed |
-                                TychoUpdatesError::ConnectionError { .. }
+                            DeltasError::ConnectionClosed | DeltasError::ConnectionError { .. }
                         ) {
                             // Prepare for reconnection
                             retry_count += 1;
@@ -575,16 +568,16 @@ impl TychoUpdatesClient for TychoWsClient {
     }
 
     #[instrument(skip(self))]
-    async fn close(&self) -> Result<(), TychoUpdatesError> {
+    async fn close(&self) -> Result<(), DeltasError> {
         let mut guard = self.inner.lock().await;
         let inner = guard
             .as_mut()
-            .ok_or_else(|| TychoUpdatesError::NotConnected)?;
+            .ok_or_else(|| DeltasError::NotConnected)?;
         inner
             .cmd_tx
             .send(())
             .await
-            .map_err(|e| TychoUpdatesError::TransportError(e.to_string()))?;
+            .map_err(|e| DeltasError::TransportError(e.to_string()))?;
         Ok(())
     }
 }
@@ -611,6 +604,7 @@ mod tests {
         messages: &[ExpectedComm],
         reconnects: usize,
     ) -> (SocketAddr, JoinHandle<()>) {
+        // zero port here means the OS chooses an open port
         let server = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("localhost bind failed");
@@ -702,7 +696,7 @@ mod tests {
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
 
-        let client = TychoWsClient::new(&format!("ws://{}", addr)).unwrap();
+        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
         let jh = client
             .connect()
             .await
@@ -785,7 +779,7 @@ mod tests {
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
 
-        let client = TychoWsClient::new(&format!("ws://{}", addr)).unwrap();
+        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
         let jh = client
             .connect()
             .await
@@ -862,7 +856,7 @@ mod tests {
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
 
-        let client = TychoWsClient::new(&format!("ws://{}", addr)).unwrap();
+        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
         let jh = client
             .connect()
             .await
@@ -942,8 +936,8 @@ mod tests {
             ))
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 1).await;
-        let client = TychoWsClient::new(&format!("ws://{}", addr)).unwrap();
-        let jh: JoinHandle<Result<(), TychoUpdatesError>> = client
+        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
+        let jh: JoinHandle<Result<(), DeltasError>> = client
             .connect()
             .await
             .expect("connect failed");
