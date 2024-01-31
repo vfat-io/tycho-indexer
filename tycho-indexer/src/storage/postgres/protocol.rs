@@ -83,7 +83,12 @@ where
                     }
 
                     let states_slice = &data_vec[component_start..index];
-                    let tx_hash = &states_slice.last().unwrap().2; // Last element has the latest transaction
+                    let tx_hash = &states_slice
+                        .last()
+                        .ok_or(StorageError::Unexpected(
+                            "Could not get tx_hash from ProtocolState".to_string(),
+                        ))?
+                        .2; // Last element has the latest transaction
 
                     let protocol_state = ProtocolState::from_storage(
                         states_slice
@@ -171,14 +176,78 @@ where
             .load::<(orm::ProtocolComponent, TxHash)>(conn)
             .await?;
 
+        let protocol_component_ids = orm_protocol_components
+            .iter()
+            .map(|(pc, _)| pc.id)
+            .collect::<Vec<i64>>();
+
+        let protocol_component_tokens: Vec<(i64, Address)> =
+            schema::protocol_component_holds_token::table
+                .inner_join(schema::token::table)
+                .inner_join(
+                    schema::account::table.on(schema::token::account_id.eq(schema::account::id)),
+                )
+                .select((
+                    schema::protocol_component_holds_token::protocol_component_id,
+                    schema::account::address,
+                ))
+                .filter(
+                    schema::protocol_component_holds_token::protocol_component_id
+                        .eq_any(protocol_component_ids.clone()),
+                )
+                .load::<(i64, Address)>(conn)
+                .await?;
+
+        let protocol_component_contracts: Vec<(i64, Address)> =
+            schema::protocol_component_holds_contract::table
+                .inner_join(schema::contract_code::table)
+                .inner_join(
+                    schema::account::table
+                        .on(schema::contract_code::account_id.eq(schema::account::id)),
+                )
+                .select((
+                    schema::protocol_component_holds_contract::protocol_component_id,
+                    schema::account::address,
+                ))
+                .filter(
+                    schema::protocol_component_holds_contract::protocol_component_id
+                        .eq_any(protocol_component_ids),
+                )
+                .load::<(i64, Address)>(conn)
+                .await?;
+
+        fn map_addresses_to_protocol_component(
+            protocol_component_to_address: Vec<(i64, Address)>,
+        ) -> HashMap<i64, Vec<Address>> {
+            protocol_component_to_address
+                .into_iter()
+                .fold(HashMap::new(), |mut acc, (key, address)| {
+                    acc.entry(key)
+                        .or_default()
+                        .push(address);
+                    acc
+                })
+        }
+        let protocol_component_tokens =
+            map_addresses_to_protocol_component(protocol_component_tokens);
+        let protocol_component_contracts =
+            map_addresses_to_protocol_component(protocol_component_contracts);
+
         orm_protocol_components
             .into_iter()
             .map(|(pc, tx_hash)| {
                 let ps = self.get_protocol_system(&pc.protocol_system_id);
+                let tokens_by_pc: &Vec<Address> = protocol_component_tokens
+                    .get(&pc.id)
+                    .expect("Could not find Tokens for Protocol Component."); // We expect all protocol components to have tokens.
+                let contracts_by_pc: &Vec<Address> = protocol_component_contracts
+                    .get(&pc.id)
+                    .expect("Could not find Contracts for Protocol Component."); // We expect all protocol components to have contracts.
+
                 ProtocolComponent::from_storage(
-                    pc,
-                    vec![],
-                    vec![],
+                    pc.clone(),
+                    tokens_by_pc,
+                    contracts_by_pc,
                     chain.to_owned(),
                     &ps,
                     tx_hash.into(),
@@ -202,9 +271,7 @@ where
             .map(|pc| pc.creation_tx.into())
             .collect();
         let tx_hash_id_mapping: HashMap<TxHash, i64> =
-            orm::Transaction::ids_by_hash(&tx_hashes, conn)
-                .await
-                .unwrap();
+            orm::Transaction::ids_by_hash(&tx_hashes, conn).await?;
         let pt_id = orm::ProtocolType::id_by_name(&new[0].protocol_type_name, conn)
             .await
             .map_err(|err| {
@@ -368,10 +435,9 @@ where
             .collect();
 
         diesel::insert_into(protocol_component_holds_contract)
-            .values(&protocol_component_contract_junction.unwrap())
+            .values(&protocol_component_contract_junction?)
             .execute(conn)
-            .await
-            .unwrap();
+            .await?;
 
         Ok(())
     }
@@ -467,7 +533,7 @@ where
     async fn update_protocol_states(
         &self,
         chain: &Chain,
-        new: &[(TxHash, ProtocolStateDelta)],
+        new: &[(TxHash, &ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let chain_db_id = self.get_chain_id(chain);
@@ -504,12 +570,15 @@ where
         let mut state_data: Vec<(orm::NewProtocolState, i64)> = Vec::new();
 
         for state in new {
-            let tx_db = txns
-                .get(state.tx.as_ref().unwrap())
-                .ok_or(StorageError::NotFound(
-                    "Tx id".to_string(),
-                    state.tx.as_ref().unwrap().to_string(),
+            let tx = state
+                .tx
+                .as_ref()
+                .ok_or(StorageError::Unexpected(
+                    "Could not reference tx in ProtocolStateDelta object".to_string(),
                 ))?;
+            let tx_db = txns
+                .get(tx)
+                .ok_or(StorageError::NotFound("Tx id".to_string(), tx.to_string()))?;
 
             let component_db_id = *components
                 .get(&state.component_id)
@@ -710,7 +779,6 @@ where
 
     async fn add_component_balances(
         &self,
-        chain: Chain,
         component_balances: &[&Self::ComponentBalance],
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
@@ -1181,6 +1249,22 @@ mod test {
         )
         .await;
 
+        // insert tokens
+        let (account_id_weth, weth_id) =
+            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
+                .await;
+        let (account_id_usdc, usdc_id) =
+            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
+                .await;
+
+        let contract_code_id = db_fixtures::insert_contract_code(
+            conn,
+            account_id_weth,
+            txn[0],
+            Bytes::from_str("C0C0C0").unwrap(),
+        )
+        .await;
+
         let protocol_component_id = db_fixtures::insert_protocol_component(
             conn,
             "state1",
@@ -1188,6 +1272,19 @@ mod test {
             protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
+            Some(vec![weth_id]),
+            Some(vec![contract_code_id]),
+        )
+        .await;
+        let protocol_component_id2 = db_fixtures::insert_protocol_component(
+            conn,
+            "state3",
+            chain_id,
+            protocol_system_id_ambient,
+            protocol_type_id,
+            txn[0],
+            Some(vec![weth_id]),
+            Some(vec![contract_code_id]),
         )
         .await;
         db_fixtures::insert_protocol_component(
@@ -1197,15 +1294,8 @@ mod test {
             protocol_system_id_zz,
             protocol_type_id,
             txn[1],
-        )
-        .await;
-        db_fixtures::insert_protocol_component(
-            conn,
-            "state3",
-            chain_id,
-            protocol_system_id_ambient,
-            protocol_type_id,
-            txn[0],
+            Some(vec![weth_id]),
+            Some(vec![contract_code_id]),
         )
         .await;
 
@@ -1242,22 +1332,6 @@ mod test {
             Bytes::from(U256::from(1000)),
             Some(Bytes::from(U256::from(1100))),
             None,
-        )
-        .await;
-
-        // insert tokens
-        let (account_id_weth, weth_id) =
-            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
-                .await;
-        let (account_id_usdc, usdc_id) =
-            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
-                .await;
-
-        let _ = db_fixtures::insert_contract_code(
-            conn,
-            account_id_weth,
-            txn[0],
-            Bytes::from_str("C0C0C0").unwrap(),
         )
         .await;
 
@@ -1425,7 +1499,7 @@ mod test {
         gateway
             .update_protocol_states(
                 &chain,
-                &[(tx_1.into(), new_state1.clone()), (tx_2.into(), new_state2.clone())],
+                &[(tx_1.into(), &new_state1), (tx_2.into(), &new_state2)],
                 &mut conn,
             )
             .await
@@ -1945,7 +2019,7 @@ mod test {
         let component_balances = vec![&component_balance];
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
-        gw.add_component_balances(Chain::Ethereum, &component_balances, block_ts, &mut conn)
+        gw.add_component_balances(&component_balances, block_ts, &mut conn)
             .await
             .unwrap();
 
@@ -2037,6 +2111,9 @@ mod test {
                 schema::protocol_component_holds_token::protocol_component_id,
                 schema::protocol_component_holds_token::token_id,
             ))
+            .filter(
+                schema::protocol_component_holds_token::protocol_component_id.eq(inserted_data.id),
+            )
             .first::<(i64, i64)>(&mut conn)
             .await
             .unwrap();
@@ -2057,6 +2134,10 @@ mod test {
                 schema::protocol_component_holds_contract::protocol_component_id,
                 schema::protocol_component_holds_contract::contract_code_id,
             ))
+            .filter(
+                schema::protocol_component_holds_contract::protocol_component_id
+                    .eq(inserted_data.id),
+            )
             .first::<(i64, i64)>(&mut conn)
             .await
             .unwrap();
@@ -2204,7 +2285,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_get_protocol_components_with_system_and_ids() {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -2231,7 +2311,6 @@ mod test {
     #[case::get_one(Chain::Ethereum, 0)]
     #[case::get_none(Chain::Starknet, 1)]
     #[tokio::test]
-
     async fn test_get_protocol_components_with_chain_filter(#[case] chain: Chain, #[case] i: i64) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -2256,5 +2335,16 @@ mod test {
         assert_eq!(pc.chain, chain);
         let i_usize: usize = i as usize;
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
+
+        assert!(
+            pc.tokens
+                .contains(&H160::from_str(WETH).unwrap()),
+            "ProtocolComponent is missing WETH token. Check the tests' data setup"
+        );
+        assert!(
+            pc.contract_ids
+                .contains(&H160::from_str(WETH).unwrap()),
+            "ProtocolComponent is missing WETH contract. Check the tests' data setup"
+        );
     }
 }

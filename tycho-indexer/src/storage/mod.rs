@@ -685,7 +685,7 @@ pub trait ProtocolGateway {
     async fn update_protocol_states(
         &self,
         chain: &Chain,
-        new: &[(TxHash, ProtocolStateDelta)],
+        new: &[(TxHash, &ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -707,7 +707,6 @@ pub trait ProtocolGateway {
     /// Saves multiple component balances to storage.
     ///
     /// # Parameters
-    /// - `chain` The chain of the token.
     /// - `component_balances` The component balances to insert.
     ///
     /// # Return
@@ -715,7 +714,6 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_component_balances(
         &self,
-        chain: Chain,
         component_balances: &[&Self::ComponentBalance],
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
@@ -870,8 +868,8 @@ pub trait StorableContract<S, N, I>: Sized + Send + Sync + 'static {
 pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(
         val: S,
-        tokens: Vec<H160>,
-        contract_ids: Vec<H160>,
+        tokens: &[Address],
+        contract_ids: &[Address],
         chain: Chain,
         protocol_system: &str,
         transaction_hash: H256,
