@@ -358,7 +358,11 @@ impl WsDeltasClient {
                     let inner = guard
                         .as_mut()
                         .ok_or_else(|| DeltasError::NotConnected)?;
-                    if let Err(_) = inner.send(&subscription_id, data).await {
+                    if inner
+                        .send(&subscription_id, data)
+                        .await
+                        .is_err()
+                    {
                         warn!(?subscription_id, "Receiver for has gone away, unsubscribing!");
                         let (tx, _) = oneshot::channel();
                         let _ = WsDeltasClient::unsubscribe_inner(inner, subscription_id, tx).await;
@@ -637,7 +641,7 @@ mod tests {
                     }
                     sleep(Duration::from_millis(100)).await;
                     // Close the WebSocket connection
-                    let _ = websocket.close(None);
+                    let _ = websocket.close(None).await;
                 }
             }
         });
@@ -964,7 +968,7 @@ mod tests {
         }
         let res = jh.await.expect("ws client join failed");
         // 3rd client reconnect attempt should fail
-        assert!(matches!(res, Err(_)));
+        assert!(res.is_err());
         server_thread
             .await
             .expect("ws server loop errored");
