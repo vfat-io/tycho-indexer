@@ -591,7 +591,7 @@ impl DerefMut for CachedGateway {
 #[cfg(test)]
 mod test_serial_db {
     use crate::storage::{
-        postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
+        postgres::{db_fixtures, orm, testing::run_against_db, PostgresGateway},
         StorageError::NotFound,
     };
     use ethers::{
@@ -713,11 +713,6 @@ mod test_serial_db {
             let block_1 = get_sample_block(1);
             let tx_1 = get_sample_transaction(1);
             let extraction_state_1 = get_sample_extraction(1);
-            let attributes: HashMap<String, Bytes> =
-                vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
-                    .into_iter()
-                    .collect();
-            let protocol_state_delta = ProtocolStateDelta::new("state3".to_owned(), attributes);
             let os_rx_1 = send_write_message(
                 &tx,
                 block_1,
@@ -725,10 +720,6 @@ mod test_serial_db {
                     WriteOp::UpsertBlock(block_1),
                     WriteOp::UpsertTx(tx_1),
                     WriteOp::SaveExtractionState(extraction_state_1.clone()),
-                    WriteOp::UpsertProtocolState(vec![(
-                        tx_1.hash.as_bytes().into(),
-                        protocol_state_delta,
-                    )]),
                 ],
             )
             .await;
@@ -739,8 +730,23 @@ mod test_serial_db {
 
             // Send second block messages
             let block_2 = get_sample_block(2);
-            let os_rx_2 =
-                send_write_message(&tx, block_2, vec![WriteOp::UpsertBlock(block_2)]).await;
+            let attributes: HashMap<String, Bytes> =
+                vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
+                    .into_iter()
+                    .collect();
+            let protocol_state_delta = ProtocolStateDelta::new("state1".to_owned(), attributes);
+            let os_rx_2 = send_write_message(
+                &tx,
+                block_2,
+                vec![
+                    WriteOp::UpsertBlock(block_2),
+                    WriteOp::UpsertProtocolState(vec![(
+                        tx_1.hash.as_bytes().into(),
+                        protocol_state_delta,
+                    )]),
+                ],
+            )
+            .await;
             os_rx_2
                 .await
                 .expect("Response from channel ok")
@@ -1065,6 +1071,9 @@ mod test_serial_db {
                 .await
                 .unwrap();
 
+            // Assert protocol state delta is correctly fetched
+            assert_eq!(delta_0.1.len(), 1);
+
             // Revert to block 1
             let _ = cached_gw
                 .revert_state(&BlockIdentifier::Hash(
@@ -1275,40 +1284,30 @@ mod test_serial_db {
 
     //noinspection SpellCheckingInspection
     async fn setup_data(conn: &mut AsyncPgConnection) {
+        // set up blocks and txns
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let tx_hashes = [
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945".to_string(),
+            "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54".to_string(),
+            "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7".to_string(),
+            "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388".to_string(),
+        ];
+
         let txn = db_fixtures::insert_txns(
             conn,
             &[
-                (
-                    // deploy c0
-                    blk[0],
-                    1i64,
-                    "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-                ),
-                (
-                    // change c0 state, deploy c2
-                    blk[0],
-                    2i64,
-                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
-                ),
+                (blk[0], 1i64, &tx_hashes[0]),
+                (blk[0], 2i64, &tx_hashes[1]),
                 // ----- Block 01 LAST
-                (
-                    // deploy c1, delete c2
-                    blk[1],
-                    1i64,
-                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
-                ),
-                (
-                    // change c0 and c1 state
-                    blk[1],
-                    2i64,
-                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
-                ),
+                (blk[1], 1i64, &tx_hashes[2]),
+                (blk[1], 2i64, &tx_hashes[3]),
                 // ----- Block 02 LAST
             ],
         )
         .await;
+
+        // set up contract data
         let c0 = db_fixtures::insert_account(
             conn,
             "6B175474E89094C44Da98b954EedeAC495271d0F",
@@ -1386,5 +1385,39 @@ mod test_serial_db {
         )
         .await;
         db_fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
+
+        // set up protocol state data
+        let protocol_system_id =
+            db_fixtures::insert_protocol_system(conn, "ambient".to_owned()).await;
+        let protocol_type_id = db_fixtures::insert_protocol_type(
+            conn,
+            "Pool",
+            Some(orm::FinancialType::Swap),
+            None,
+            Some(orm::ImplementationType::Custom),
+        )
+        .await;
+        let protocol_component_id = db_fixtures::insert_protocol_component(
+            conn,
+            "state1",
+            chain_id,
+            protocol_system_id,
+            protocol_type_id,
+            txn[0],
+            None,
+            None,
+        )
+        .await;
+        // protocol state for state1-reserve1
+        db_fixtures::insert_protocol_state(
+            conn,
+            protocol_component_id,
+            txn[0],
+            "reserve1".to_owned(),
+            Bytes::from(U256::from(1100)),
+            None,
+            Some(txn[2]),
+        )
+        .await;
     }
 }
