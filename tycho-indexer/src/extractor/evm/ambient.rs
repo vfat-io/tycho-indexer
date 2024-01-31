@@ -341,11 +341,7 @@ impl AmbientGateway for AmbientPgGateway {
         changes: &evm::BlockContractChanges,
         new_cursor: &str,
     ) -> Result<(), StorageError> {
-        let mut conn = self.pool.get().await.unwrap();
-        conn.transaction(|_conn| {
-            async move { self.forward(changes, new_cursor).await }.scope_boxed()
-        })
-        .await?;
+        self.forward(changes, new_cursor).await;
         Ok(())
     }
 
@@ -357,15 +353,7 @@ impl AmbientGateway for AmbientPgGateway {
         new_cursor: &str,
     ) -> Result<evm::BlockAccountChanges, StorageError> {
         let mut conn = self.pool.get().await.unwrap();
-        let res = conn
-            .transaction(|conn| {
-                async move {
-                    self.backward(current, to, new_cursor, conn)
-                        .await
-                }
-                .scope_boxed()
-            })
-            .await?;
+        let res = self.backward(current, to, new_cursor, conn).await?;
         Ok(res)
     }
 }
