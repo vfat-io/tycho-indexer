@@ -1194,15 +1194,6 @@ mod test {
             Some(vec![contract_code_id]),
         )
         .await;
-        db_fixtures::insert_protocol_component(
-            conn,
-            "state3",
-            chain_id,
-            protocol_system_id_ambient,
-            protocol_type_id,
-            txn[0],
-        )
-        .await;
 
         // protocol state for state1-reserve1
         db_fixtures::insert_protocol_state(
