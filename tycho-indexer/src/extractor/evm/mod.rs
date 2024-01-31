@@ -484,7 +484,7 @@ pub struct BlockContractChanges {
 }
 
 pub type EVMStateGateway<DB> =
-StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token>;
+    StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token>;
 
 impl Block {
     /// Parses block from tychos protobuf block message
@@ -1201,7 +1201,7 @@ pub mod fixtures {
         )
     }
 
-    pub fn evm_slots(data: impl IntoIterator<Item=(u64, u64)>) -> HashMap<U256, U256> {
+    pub fn evm_slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<U256, U256> {
         data.into_iter()
             .map(|(s, v)| (U256::from(s), U256::from(v)))
             .collect()
@@ -1313,7 +1313,7 @@ pub mod fixtures {
                         token: hex::decode(
                             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
                         )
-                        .unwrap(),
+                    .unwrap(),
                         balance: 50000000.encode_to_vec(),
                         component_id: "WETH-CAI".as_bytes().to_vec(),
                     }],
@@ -1469,9 +1469,9 @@ pub mod fixtures {
                         contracts: vec![H160::from_str(
                             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
                         )
-                            .unwrap()
-                            .0
-                            .to_vec()],
+                        .unwrap()
+                        .0
+                        .to_vec()],
                         static_att: vec![Attribute {
                             name: "key".to_owned(),
                             value: 600_u64.to_be_bytes().to_vec(),
@@ -1851,7 +1851,7 @@ mod test {
             "ambient".to_string(),
             &HashMap::from([("WeightedPool".to_string(), ProtocolType::default())]),
         )
-            .unwrap();
+        .unwrap();
         assert_eq!(res, block_state_changes());
     }
 
@@ -1874,14 +1874,14 @@ mod test {
                 ("key1".to_string(), Bytes::from(b"value1".to_vec())),
                 ("key2".to_string(), Bytes::from(b"value2".to_vec())),
             ]
-                .iter()
-                .cloned()
-                .collect(),
+            .iter()
+            .cloned()
+            .collect(),
             change: ChangeType::Creation,
             creation_tx: H256::from_str(
                 "0x0000000000000000000000000000000000000000000000000000000011121314",
             )
-                .unwrap(),
+            .unwrap(),
             created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         };
         let component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>> = [(
@@ -1935,8 +1935,8 @@ mod test {
                     change: ChangeType::Update,
                 },
             )]
-                .into_iter()
-                .collect(),
+            .into_iter()
+            .collect(),
             [(protocol_component.id.clone(), protocol_component)]
                 .into_iter()
                 .collect(),
@@ -1966,8 +1966,8 @@ mod test {
             ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
             ("to_be_removed".to_owned(), Bytes::from(U256::from(1))),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let del_attributes1: HashSet<String> = vec!["to_add_back".to_owned()]
             .into_iter()
             .collect();
@@ -1983,8 +1983,8 @@ mod test {
             ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
             ("to_add_back".to_owned(), Bytes::from(U256::from(200))),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let del_attributes2: HashSet<String> = vec!["to_be_removed".to_owned()]
             .into_iter()
             .collect();
@@ -2004,8 +2004,8 @@ mod test {
             ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
             ("to_add_back".to_owned(), Bytes::from(U256::from(200))),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         assert_eq!(state1.updated_attributes, expected_up_attributes);
         let expected_del_attributes: HashSet<String> = vec!["to_be_removed".to_owned()]
             .into_iter()
@@ -2018,8 +2018,8 @@ mod test {
             ("reserve".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
             ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let states: HashMap<String, ProtocolStateDelta> = vec![
             (
                 "State1".to_owned(),
@@ -2038,8 +2038,8 @@ mod test {
                 },
             ),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         ProtocolStateDeltasWithTx { protocol_states: states, tx: transaction01() }
     }
 
@@ -2051,8 +2051,8 @@ mod test {
             ("reserve".to_owned(), Bytes::from(900_u64.to_be_bytes().to_vec())),
             ("new_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let new_tx = fixtures::transaction02(HASH_256_1, HASH_256_0, 11);
         let new_states: HashMap<String, ProtocolStateDelta> = vec![(
             "State1".to_owned(),
@@ -2062,8 +2062,8 @@ mod test {
                 deleted_attributes: HashSet::new(),
             },
         )]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
 
         let tx_update = ProtocolStateDeltasWithTx { protocol_states: new_states, tx: new_tx };
 
@@ -2076,8 +2076,8 @@ mod test {
             ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
             ("new_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         assert_eq!(
             base_state
                 .protocol_states
@@ -2124,8 +2124,8 @@ mod test {
                 ("reserve1".to_owned(), Bytes::from(res1_value)),
                 ("reserve2".to_owned(), Bytes::from(res2_value)),
             ]
-                .into_iter()
-                .collect(),
+            .into_iter()
+            .collect(),
             deleted_attributes: HashSet::new(),
         }
     }
@@ -2180,8 +2180,8 @@ mod test {
             ("reserve".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec())),
             ("new".to_owned(), Bytes::from(0_u64.to_be_bytes().to_vec())),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let state_updates: HashMap<String, ProtocolStateDelta> = vec![(
             "State1".to_owned(),
             ProtocolStateDelta {
@@ -2190,8 +2190,8 @@ mod test {
                 deleted_attributes: HashSet::new(),
             },
         )]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let static_attr: HashMap<String, Bytes> =
             vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
                 .into_iter()
@@ -2255,7 +2255,7 @@ mod test {
                 ("WeightedPool".to_string(), ProtocolType::default()),
             ]),
         )
-            .unwrap();
+        .unwrap();
         assert_eq!(res, block_entity_changes());
     }
 
@@ -2276,14 +2276,14 @@ mod test {
             ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
             ("new".to_owned(), Bytes::from(0_u64.to_be_bytes().to_vec())),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let attr2: HashMap<String, Bytes> = vec![
             ("reserve".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
             ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let state_updates: HashMap<String, ProtocolStateDelta> = vec![
             (
                 "State1".to_owned(),
@@ -2302,8 +2302,8 @@ mod test {
                 },
             ),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let static_attr: HashMap<String, Bytes> =
             vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
                 .into_iter()
@@ -2388,8 +2388,8 @@ mod test {
             ("balance".to_string(), Bytes::from(100_u64.to_be_bytes().to_vec())),
             ("factory_address".to_string(), Bytes::from(b"0x0fwe0g240g20".to_vec())),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
 
         let protocol_type_id = "WeightedPool".to_string();
         let protocol_types: HashMap<String, ProtocolType> =

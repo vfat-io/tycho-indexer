@@ -223,7 +223,7 @@ impl DBCacheWriteExecutor {
                                 }
                                 Result::<(), StorageError>::Ok(())
                             }
-                                .scope_boxed()
+                            .scope_boxed()
                         })
                         .await;
 
@@ -1372,11 +1372,11 @@ mod test_serial_db {
                 hash: H256::from_str(
                     "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
                 )
-                    .expect("tx hash ok"),
+                .expect("tx hash ok"),
                 block_hash: H256::from_str(
                     "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
                 )
-                    .expect("block hash ok"),
+                .expect("block hash ok"),
                 from: H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980")
                     .expect("from ok"),
                 to: Some(
@@ -1437,7 +1437,7 @@ mod test_serial_db {
                 // ----- Block 02 LAST
             ],
         )
-            .await;
+        .await;
 
         // set up contract data
         let c0 = db_fixtures::insert_account(
@@ -1447,7 +1447,7 @@ mod test_serial_db {
             chain_id,
             Some(txn[0]),
         )
-            .await;
+        .await;
         db_fixtures::insert_account_balance(conn, 0, txn[0], Some("2020-01-01T00:00:00"), c0).await;
         db_fixtures::insert_contract_code(conn, c0, txn[0], Bytes::from_str("C0C0C0").unwrap())
             .await;
@@ -1463,7 +1463,7 @@ mod test_serial_db {
             Some("2020-01-01T01:00:00"),
             &[(0, 1, None), (1, 5, None)],
         )
-            .await;
+        .await;
         db_fixtures::insert_account_balance(conn, 101, txn[3], None, c0).await;
         db_fixtures::insert_slots(
             conn,
@@ -1473,7 +1473,7 @@ mod test_serial_db {
             None,
             &[(0, 2, Some(1)), (1, 3, Some(5)), (5, 25, None), (6, 30, None)],
         )
-            .await;
+        .await;
 
         let c1 = db_fixtures::insert_account(
             conn,
@@ -1482,7 +1482,7 @@ mod test_serial_db {
             chain_id,
             Some(txn[2]),
         )
-            .await;
+        .await;
         db_fixtures::insert_account_balance(conn, 50, txn[2], None, c1).await;
         db_fixtures::insert_contract_code(conn, c1, txn[2], Bytes::from_str("C1C1C1").unwrap())
             .await;
@@ -1494,7 +1494,7 @@ mod test_serial_db {
             None,
             &[(0, 128, None), (1, 255, None)],
         )
-            .await;
+        .await;
 
         let c2 = db_fixtures::insert_account(
             conn,
@@ -1503,7 +1503,7 @@ mod test_serial_db {
             chain_id,
             Some(txn[1]),
         )
-            .await;
+        .await;
         db_fixtures::insert_account_balance(conn, 25, txn[1], None, c2).await;
         db_fixtures::insert_contract_code(conn, c2, txn[1], Bytes::from_str("C2C2C2").unwrap())
             .await;
@@ -1515,7 +1515,7 @@ mod test_serial_db {
             None,
             &[(1, 2, None), (2, 4, None)],
         )
-            .await;
+        .await;
         db_fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
 
         // set up protocol state data
