@@ -1,4 +1,5 @@
-use std::{str::FromStr, sync::Arc};
+use core::slice::SlicePattern;
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use diesel_async::{
@@ -13,7 +14,7 @@ use tracing::{debug, instrument};
 
 use crate::{
     extractor::{evm, evm::Block, ExtractionError, Extractor, ExtractorMsg},
-    models::{Chain, ExtractionState, ExtractorIdentity},
+    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockEntityChanges,
@@ -35,6 +36,7 @@ pub struct NativeContractExtractor<G> {
     chain: Chain,
     protocol_system: String,
     inner: Arc<Mutex<Inner>>,
+    protocol_types: HashMap<String, ProtocolType>,
 }
 
 struct MockGateway;
@@ -57,13 +59,15 @@ pub struct NativePgGateway {
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
     state_gateway: CachedGateway,
-    // protocol_ids: Vec<String>,
 }
 
 #[automock]
 #[async_trait]
 pub trait NativeGateway: Send + Sync {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
+
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]);
+
     async fn upsert_contract(
         &self,
         changes: &evm::BlockEntityChanges,
@@ -111,16 +115,16 @@ impl NativePgGateway {
 
         let mut txs: Vec<evm::Transaction> = vec![];
 
-        let mut new_protocol_components: Vec<(TxHash, evm::ProtocolComponent)> = vec![];
+        let mut new_protocol_components: Vec<(evm::ProtocolComponent)> = vec![];
         let mut state_updates: Vec<(TxHash, evm::ProtocolStateDelta)> = vec![];
-        let mut tvl_changes: Vec<(TxHash, evm::TvlChange)> = vec![];
+        let mut balance_changes: Vec<(evm::ComponentBalance)> = vec![];
 
         for tx in changes.state_updates.iter() {
             txs.push(tx.tx.clone());
             let hash: TxHash = tx.tx.hash.into();
 
             for (_component_id, new_protocol_component) in tx.new_protocol_components.iter() {
-                new_protocol_components.push((hash.clone(), new_protocol_component.clone()));
+                new_protocol_components.push(new_protocol_component.clone());
             }
 
             for (_component_id, state_change) in tx.protocol_states.iter() {
@@ -129,7 +133,7 @@ impl NativePgGateway {
 
             for (_component_id, tokens) in tx.balance_changes.iter() {
                 for (_token, tvl_change) in tokens {
-                    tvl_changes.push((hash.clone(), tvl_change.clone()));
+                    balance_changes.push(tvl_change.clone());
                 }
             }
         }
@@ -137,49 +141,14 @@ impl NativePgGateway {
         let block = &changes.block;
 
         self.state_gateway
-            .add_protocol_components(block, new_protocol_components)
+            .add_protocol_components(block, new_protocol_components.as_slice())
             .await?;
         self.state_gateway
-            .add_protocol_states(block, state_updates)
+            .update_protocol_states(block, state_updates.as_slice())
             .await?;
         self.state_gateway
-            .add_component_balances(block, tvl_changes)
+            .add_component_balances(block, balance_changes.as_slice())
             .await?;
-
-        // TODO: Wait for my new interfaces now
-
-        // for tx in changes.state_updates.iter() {
-        //     self.state_gateway
-        //         .upsert_tx(&changes.block, &tx.tx)
-        //         .await?;
-        //     if tx.has_new_protocols() {
-        //         for (component_id, new_protocol_component) in tx.new_protocol_components.iter() {
-        //             debug!(component_id = %component_id, "New protocol component found at");
-        //             self.state_gateway
-        //                 .insert_component(&changes.block, new_protocol_component)
-        //                 .await?;
-        //         }
-        //     }
-        //
-        //     if tx.has_state_changes() {
-        //         for (component_id, state_change) in tx.protocol_states.iter() {
-        //             debug!(component_id = %component_id, "State change found at");
-        //             self.state_gateway
-        //                 .update_protocol_states(&changes.block, state_change)
-        //                 .await?;
-        //         }
-        //     }
-        //
-        //     if tx.has_balance_changes() {
-        //         for (component_id, tokens) in tx.balance_changes.iter() {
-        //             for (token, tvl_change) in tokens {
-        //                 self.state_gateway
-        //                     .upsert_tvl_change(&changes.block, token, tvl_change, component_id)
-        //                     .await?;
-        //             }
-        //         }
-        //     }
-        // }
 
         self.save_cursor(&changes.block, new_cursor)
             .await?;
@@ -203,14 +172,29 @@ impl NativePgGateway {
         let target = BlockOrTimestamp::Block(to.clone());
 
         // CHECK: Here there's an assumption that self.name == protocol_system
-        // Check - get_state_delta only returns me a state change for a specific protocol id. Is
-        // there a method in which I can get all state changeS? ANS: YES LOUISE READ MY MIND
+
+        let allowed_components: Vec<String> = self
+            .state_gateway
+            .get_protocol_components(&self.chain, Some(self.name.clone()), None, conn)
+            .await?
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
 
         let state_updates = self
             .state_gateway
-            .get_delta(&self.chain, Some(self.name.clone()), None, start.as_ref(), &target, conn)
-            // Filter by protocol_system
-            .await?;
+            .get_delta(&self.chain, start.as_ref(), &target)
+            .await?
+            .1
+            .into_iter()
+            .filter_map(|u: evm::ProtocolStateDelta| {
+                if allowed_components.contains(&u.component_id) {
+                    Some((u.component_id.clone(), u))
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         self.state_gateway
             .revert_state(to)
@@ -223,7 +207,6 @@ impl NativePgGateway {
             extractor: self.name.clone(),
             chain: self.chain,
             block,
-            // TODO: Map this thinggggg
             state_updates,
         })
     }
@@ -242,6 +225,14 @@ impl NativeGateway for NativePgGateway {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
         let mut conn = self.pool.get().await.unwrap();
         self.get_last_cursor(&mut conn).await
+    }
+
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
+        let mut conn = self.pool.get().await.unwrap();
+        self.state_gateway
+            .add_protocol_types(new_protocol_types, &mut *conn)
+            .await
+            .expect("Couldn't insert protocol types");
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
@@ -288,6 +279,17 @@ where
         ExtractorIdentity::new(self.chain, &self.name)
     }
 
+    async fn ensure_protocol_types(&self) {
+        let protocol_types: Vec<ProtocolType> = self
+            .protocol_types
+            .values()
+            .cloned()
+            .collect();
+        self.gateway
+            .ensure_protocol_types(&protocol_types)
+            .await;
+    }
+
     async fn get_cursor(&self) -> String {
         String::from_utf8(self.inner.lock().await.cursor.clone()).expect("Cursor is utf8")
     }
@@ -316,9 +318,7 @@ where
 
         debug!(?raw_msg, "Received message");
 
-        // TODO: How can I get this protocol type id?
-        let protocol_type_id = String::from("id-1");
-
+        // Validate protocol_type_id
         let msg = match evm::BlockEntityChanges::try_from_message(
             raw_msg,
             &self.name,
