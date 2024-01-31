@@ -1561,7 +1561,7 @@ mod test {
             .expect("Failed to fetch protocol component id");
         let token_id = schema::token::table
             .filter(schema::token::symbol.eq("WETH"))
-            .select(schema::token::account_id)
+            .select(schema::token::id)
             .first::<i64>(&mut conn)
             .await
             .expect("Failed to fetch token id");
