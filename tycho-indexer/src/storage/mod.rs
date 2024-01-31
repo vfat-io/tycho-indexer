@@ -850,8 +850,8 @@ pub trait StorableContract<S, N, I>: Sized + Send + Sync + 'static {
 pub trait StorableProtocolComponent<S, N, I>: Sized + Send + Sync + 'static {
     fn from_storage(
         val: S,
-        tokens: Vec<H160>,
-        contract_ids: Vec<H160>,
+        tokens: &[Address],
+        contract_ids: &[Address],
         chain: Chain,
         protocol_system: &str,
         transaction_hash: H256,
