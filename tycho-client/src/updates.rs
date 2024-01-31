@@ -55,7 +55,7 @@ pub trait TychoUpdatesClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
-    ) -> Result<Receiver<BlockAccountChanges>, TychoUpdateClientError>;
+    ) -> Result<(Uuid, Receiver<BlockAccountChanges>), TychoUpdateClientError>;
 
     /// Unsubscribe from an extractor
     async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoUpdateClientError>;
@@ -80,13 +80,14 @@ pub struct TychoWsClient {
 
 type WebSocketSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 
+// TODO: get rid of it
 struct SubscriptionInfo {
     state: SubscriptionStatus,
 }
 
 #[derive(Debug)]
 enum SubscriptionStatus {
-    RequestedSubscription(oneshot::Sender<Receiver<BlockAccountChanges>>),
+    RequestedSubscription(oneshot::Sender<(Uuid, Receiver<BlockAccountChanges>)>),
     Active,
     RequestedUnsubscription(oneshot::Sender<()>),
 }
@@ -116,7 +117,7 @@ impl Inner {
     fn new_subscription(
         &mut self,
         id: &ExtractorIdentity,
-        ready_tx: oneshot::Sender<Receiver<BlockAccountChanges>>,
+        ready_tx: oneshot::Sender<(Uuid, Receiver<BlockAccountChanges>)>,
     ) {
         // TODO: deny subscribing twice to same extractor
         self.pending.insert(
@@ -133,13 +134,15 @@ impl Inner {
                 self.sender.insert(subscription_id, tx);
                 self.subscriptions
                     .insert(subscription_id, info);
-                let _ = ready_tx.send(rx).map_err(|_| {
-                    warn!(
-                        ?extractor_id,
-                        ?subscription_id,
-                        "Subscriber for has gone away. Ignoring."
-                    )
-                });
+                let _ = ready_tx
+                    .send((subscription_id, rx))
+                    .map_err(|_| {
+                        warn!(
+                            ?extractor_id,
+                            ?subscription_id,
+                            "Subscriber for has gone away. Ignoring."
+                        )
+                    });
             } else {
                 error!(
                     ?extractor_id,
@@ -336,6 +339,7 @@ impl TychoWsClient {
                         TychoUpdateClientError::from(error)
                     }
                     tungstenite::Error::Io(_) => TychoUpdateClientError::from(error),
+                    tungstenite::Error::Protocol(_) => TychoUpdateClientError::from(error),
                     _ => TychoUpdateClientError::Fatal(error.to_string()),
                 })
             }
@@ -366,7 +370,7 @@ impl TychoUpdatesClient for TychoWsClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
-    ) -> Result<Receiver<BlockAccountChanges>, TychoUpdateClientError> {
+    ) -> Result<(Uuid, Receiver<BlockAccountChanges>), TychoUpdateClientError> {
         dbg!("entered subscribe");
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
@@ -393,6 +397,7 @@ impl TychoUpdatesClient for TychoWsClient {
 
     #[instrument(skip(self))]
     async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), TychoUpdateClientError> {
+        dbg!("entered unsubscribe");
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         {
@@ -400,11 +405,13 @@ impl TychoUpdatesClient for TychoWsClient {
             let inner = guard
                 .as_mut()
                 .expect("ws not connected");
+            dbg!("started unsubscribe");
             TychoWsClient::unsubscribe_inner(inner, subscription_id, ready_tx).await?;
         }
         ready_rx
             .await
             .expect("ready channel closed");
+        dbg!("finished unsubscribe");
         Ok(())
     }
 
@@ -415,18 +422,17 @@ impl TychoUpdatesClient for TychoWsClient {
         if self.is_connected().await {
             return Err(TychoUpdateClientError::AlreadyConnected);
         }
-        let (cmd_tx, mut cmd_rx) = mpsc::channel(30);
         let ws_uri = format!("{}{}/ws", self.uri, TYCHO_SERVER_VERSION);
         info!(?ws_uri, "Starting TychoWebsocketClient");
+
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(30);
         let (conn, _) = connect_async(&ws_uri).await?;
         let (ws_tx, ws_rx) = conn.split();
         let mut ws_rx = Some(ws_rx);
-
         {
             let mut guard = self.inner.as_ref().lock().await;
             *guard = Some(Inner::new(cmd_tx.clone(), ws_tx));
         }
-
         let this = self.clone();
         let jh = tokio::spawn(async move {
             let mut retry_count = 0;
@@ -621,7 +627,7 @@ mod tests {
             .connect()
             .await
             .expect("connect failed");
-        let mut rx = timeout(
+        let (_, mut rx) = timeout(
             Duration::from_millis(100),
             client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
         )
@@ -643,7 +649,98 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscription_end() {
+    async fn test_unsubscribe() {
+        let exp_comm = [
+            ExpectedComm::Receive(
+                100,
+                Message::Text(
+                    r#"
+                {
+                    "method": "subscribe",
+                    "extractor_id":{
+                        "chain": "ethereum",
+                        "name": "vm:ambient"
+                    }
+                }"#
+                    .to_owned()
+                    .replace(|c: char| c.is_whitespace(), ""),
+                ),
+            ),
+            ExpectedComm::Send(Message::Text(
+                r#"
+                {
+                    "method": "newsubscription",
+                    "extractor_id":{
+                        "chain": "ethereum",
+                        "name": "vm:ambient"
+                    },
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }"#
+                .to_owned()
+                .replace(|c: char| c.is_whitespace(), ""),
+            )),
+            ExpectedComm::Receive(
+                100,
+                Message::Text(
+                    r#"
+                {
+                    "method": "unsubscribe",
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }
+                "#
+                    .to_owned()
+                    .replace(|c: char| c.is_whitespace(), ""),
+                ),
+            ),
+            ExpectedComm::Send(Message::Text(
+                r#"
+                {
+                    "method": "subscriptionended",
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }
+                "#
+                .to_owned()
+                .replace(|c: char| c.is_whitespace(), ""),
+            )),
+        ];
+        let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
+
+        let client = TychoWsClient::new(&format!("ws://{}", addr)).unwrap();
+        let jh = client
+            .connect()
+            .await
+            .expect("connect failed");
+        let (sub_id, mut rx) = timeout(
+            Duration::from_millis(100),
+            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+        )
+        .await
+        .expect("subscription timed out")
+        .expect("subscription failed");
+
+        timeout(Duration::from_millis(100), client.unsubscribe(sub_id))
+            .await
+            .expect("unsubscribe timed out")
+            .expect("unsubscribe failed");
+        let res = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("awaiting message timeout out");
+
+        // If the subscription ended, the channel should have been closed.
+        assert!(res.is_none());
+
+        timeout(Duration::from_millis(100), client.close())
+            .await
+            .expect("close timed out")
+            .expect("close failed");
+        jh.await
+            .expect("ws loop errored")
+            .unwrap();
+        server_thread.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_subscription_unexpected_end() {
         let exp_comm = [
             ExpectedComm::Receive(
                 100,
@@ -690,7 +787,7 @@ mod tests {
             .connect()
             .await
             .expect("connect failed");
-        let mut rx = timeout(
+        let (_, mut rx) = timeout(
             Duration::from_millis(100),
             client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
         )
@@ -773,7 +870,7 @@ mod tests {
 
         for iteration in 0..2 {
             dbg!(iteration);
-            let mut rx = timeout(
+            let (_, mut rx) = timeout(
                 Duration::from_millis(100),
                 client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
             )
