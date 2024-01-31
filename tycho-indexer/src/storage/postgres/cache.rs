@@ -595,7 +595,6 @@ impl DerefMut for CachedGateway {
 mod test_serial_db {
     use crate::{
         extractor::{evm, evm::EVMStateGateway},
-        hex_bytes::Bytes,
         models::{Chain, ExtractionState},
         storage::{
             postgres::{
@@ -611,12 +610,13 @@ mod test_serial_db {
         },
     };
     use diesel_async::AsyncPgConnection;
-    use ethers::{prelude::H256, types::H160};
+    use ethers::types::{H160, H256};
     use std::{str::FromStr, sync::Arc};
     use tokio::sync::{
         mpsc,
         oneshot::{self},
     };
+    use tycho_types::Bytes;
 
     use tokio::sync::mpsc::error::TryRecvError::Empty;
 

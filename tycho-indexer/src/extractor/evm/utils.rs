@@ -1,6 +1,8 @@
 use ethers::types::{H160, H256, U256};
 
-use crate::hex_bytes::Bytes;
+use tycho_types::Bytes;
+
+use crate::storage::{Address, StorageError};
 
 /// Decoding trait with nice contextual error messages
 pub trait TryDecode: Sized {
@@ -18,7 +20,7 @@ pub trait TryDecode: Sized {
     /// use ethers::types::U256;
     ///
     /// let data = [0;32].into();
-    /// let balance = U256::try_decode(data.as_slice(), "balance").unwrap();
+    /// let balance = U256::try_decode(&data, "balance").unwrap();
     /// ```
     fn try_decode(v: &Bytes, type_context: &str) -> Result<Self, String>;
 }
@@ -68,6 +70,16 @@ pub fn pad_and_parse_h160(v: &Bytes) -> Result<H160, String> {
     data[start_index..].copy_from_slice(v);
 
     Ok(H160::from(data))
+}
+
+/// Converts a slice of addresses to a vector of H160
+pub fn convert_addresses_to_h160(addresses: &[Address]) -> Result<Vec<H160>, StorageError> {
+    addresses
+        .iter()
+        .map(|address| {
+            pad_and_parse_h160(address).map_err(|err| StorageError::DecodeError(err.to_string()))
+        })
+        .collect()
 }
 
 /// Parses a tuple of U256 representing an slot entry
