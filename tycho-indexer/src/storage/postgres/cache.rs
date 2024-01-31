@@ -21,7 +21,9 @@ use tracing::{
 };
 
 use crate::{
-    extractor::evm::{self, AccountUpdate, EVMStateGateway, ProtocolStateDelta},
+    extractor::evm::{
+        self, AccountUpdate, ERC20Token, EVMStateGateway, ProtocolComponent, ProtocolStateDelta,
+    },
     models::{Chain, ExtractionState},
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
 };
@@ -34,6 +36,9 @@ pub(crate) enum WriteOp {
     SaveExtractionState(ExtractionState),
     InsertContract(evm::Account),
     UpdateContracts(Vec<(TxHash, AccountUpdate)>),
+    InsertProtocolComponents(Vec<evm::ProtocolComponent>),
+    InsertTokens(Vec<evm::ERC20Token>),
+    InsertComponentBalances(Vec<evm::ComponentBalance>),
     UpsertProtocolState(Vec<(TxHash, ProtocolStateDelta)>),
 }
 
@@ -358,6 +363,28 @@ impl DBCacheWriteExecutor {
                     .update_contracts(&self.chain, changes_slice, conn)
                     .await
             }
+            WriteOp::InsertProtocolComponents(components) => {
+                let collected_components: Vec<&ProtocolComponent> = components.iter().collect();
+                self.state_gateway
+                    .add_protocol_components(collected_components.as_slice(), conn)
+                    .await
+            }
+            WriteOp::InsertTokens(tokens) => {
+                let collected_tokens: Vec<&ERC20Token> = tokens.iter().collect();
+                self.state_gateway
+                    .add_tokens(collected_tokens.as_slice(), conn)
+                    .await
+            }
+            WriteOp::InsertComponentBalances(balances) => {
+                let ts = match self.pending_block {
+                    Some(block) => block.ts,
+                    None => chrono::Utc::now().naive_utc(),
+                };
+                let collected_balances: Vec<&evm::ComponentBalance> = balances.iter().collect();
+                self.state_gateway
+                    .add_component_balances(collected_balances.as_slice(), ts, conn)
+                    .await
+            }
             WriteOp::UpsertProtocolState(deltas) => {
                 let collected_changes: Vec<(TxHash, &ProtocolStateDelta)> = deltas
                     .iter()
@@ -561,6 +588,59 @@ impl CachedGateway {
         }
     }
 
+    pub async fn add_protocol_components(
+        &self,
+        block: &evm::Block,
+        new: &[evm::ProtocolComponent],
+    ) -> Result<(), StorageError> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx =
+            DBTransaction::new(*block, vec![WriteOp::InsertProtocolComponents(Vec::from(new))], tx);
+        self.tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await
+            .expect("Send message to receiver ok");
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
+    }
+
+    pub async fn add_tokens(
+        &self,
+        block: &evm::Block,
+        new: &[evm::ERC20Token],
+    ) -> Result<(), StorageError> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx = DBTransaction::new(*block, vec![WriteOp::InsertTokens(Vec::from(new))], tx);
+        self.tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await
+            .expect("Send message to receiver ok");
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
+    }
+
+    pub async fn add_component_balances(
+        &self,
+        block: &evm::Block,
+        new: &[evm::ComponentBalance],
+    ) -> Result<(), StorageError> {
+        let (tx, rx) = oneshot::channel();
+        let db_tx =
+            DBTransaction::new(*block, vec![WriteOp::InsertComponentBalances(Vec::from(new))], tx);
+        self.tx
+            .send(DBCacheMessage::Write(db_tx))
+            .await
+            .expect("Send message to receiver ok");
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(StorageError::WriteCacheGoneAway()),
+        }
+    }
+
     pub async fn flush(&self) -> Result<Result<(), StorageError>, RecvError> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -601,6 +681,10 @@ mod test_serial_db {
     use std::{collections::HashMap, str::FromStr, sync::Arc};
     use tycho_types::Bytes;
 
+    use crate::{
+        extractor::evm::{ComponentBalance, ERC20Token, ProtocolComponent},
+        pb::tycho::evm::v1::ChangeType,
+    };
     use tokio::sync::mpsc::error::TryRecvError::Empty;
 
     use super::*;
@@ -684,6 +768,9 @@ mod test_serial_db {
                 .await
                 .expect("Failed to get a connection from the pool");
             db_fixtures::insert_chain(&mut connection, "ethereum").await;
+            db_fixtures::insert_protocol_system(&mut connection, "ambient".to_owned()).await;
+            db_fixtures::insert_protocol_type(&mut connection, "ambient_pool", None, None, None)
+                .await;
             let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
                 PostgresGateway::<
                     evm::Block,
@@ -713,6 +800,35 @@ mod test_serial_db {
             let block_1 = get_sample_block(1);
             let tx_1 = get_sample_transaction(1);
             let extraction_state_1 = get_sample_extraction(1);
+            let usdc_address =
+                H160::from_str("0xdAC17F958D2ee523a2206206994597C13D831ec7").unwrap();
+            let token = ERC20Token::new(
+                usdc_address,
+                "USDT".to_string(),
+                6,
+                0,
+                vec![Some(64), None],
+                Chain::Ethereum,
+            );
+            let protocol_component_id = "ambient_USDT-USDC".to_owned();
+            let protocol_component = ProtocolComponent {
+                id: protocol_component_id.clone(),
+                protocol_system: "ambient".to_string(),
+                protocol_type_name: "ambient_pool".to_string(),
+                chain: Default::default(),
+                tokens: vec![usdc_address],
+                contract_ids: vec![],
+                change: ChangeType::Creation.into(),
+                creation_tx: tx_1.hash,
+                static_attributes: Default::default(),
+                created_at: Default::default(),
+            };
+            let component_balance = ComponentBalance {
+                token: usdc_address,
+                new_balance: Bytes::from(&[0u8]),
+                modify_tx: tx_1.hash,
+                component_id: protocol_component_id,
+            };
             let os_rx_1 = send_write_message(
                 &tx,
                 block_1,
@@ -720,6 +836,9 @@ mod test_serial_db {
                     WriteOp::UpsertBlock(block_1),
                     WriteOp::UpsertTx(tx_1),
                     WriteOp::SaveExtractionState(extraction_state_1.clone()),
+                    WriteOp::InsertTokens(vec![token]),
+                    WriteOp::InsertProtocolComponents(vec![protocol_component]),
+                    WriteOp::InsertComponentBalances(vec![component_balance]),
                 ],
             )
             .await;

@@ -83,7 +83,12 @@ where
                     }
 
                     let states_slice = &data_vec[component_start..index];
-                    let tx_hash = &states_slice.last().unwrap().2; // Last element has the latest transaction
+                    let tx_hash = &states_slice
+                        .last()
+                        .ok_or(StorageError::Unexpected(
+                            "Could not get tx_hash from ProtocolState".to_string(),
+                        ))?
+                        .2; // Last element has the latest transaction
 
                     let protocol_state = ProtocolState::from_storage(
                         states_slice
@@ -430,10 +435,9 @@ where
             .collect();
 
         diesel::insert_into(protocol_component_holds_contract)
-            .values(&protocol_component_contract_junction.unwrap())
+            .values(&protocol_component_contract_junction?)
             .execute(conn)
-            .await
-            .unwrap();
+            .await?;
 
         Ok(())
     }
@@ -566,12 +570,15 @@ where
         let mut state_data: Vec<(orm::NewProtocolState, i64)> = Vec::new();
 
         for state in new {
-            let tx_db = txns
-                .get(state.tx.as_ref().unwrap())
-                .ok_or(StorageError::NotFound(
-                    "Tx id".to_string(),
-                    state.tx.as_ref().unwrap().to_string(),
+            let tx = state
+                .tx
+                .as_ref()
+                .ok_or(StorageError::Unexpected(
+                    "Could not reference tx in ProtocolStateDelta object".to_string(),
                 ))?;
+            let tx_db = txns
+                .get(tx)
+                .ok_or(StorageError::NotFound("Tx id".to_string(), tx.to_string()))?;
 
             let component_db_id = *components
                 .get(&state.component_id)
@@ -772,7 +779,6 @@ where
 
     async fn add_component_balances(
         &self,
-        chain: Chain,
         component_balances: &[&Self::ComponentBalance],
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
@@ -1818,7 +1824,7 @@ mod test {
         let component_balances = vec![&component_balance];
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
-        gw.add_component_balances(Chain::Ethereum, &component_balances, block_ts, &mut conn)
+        gw.add_component_balances(&component_balances, block_ts, &mut conn)
             .await
             .unwrap();
 
