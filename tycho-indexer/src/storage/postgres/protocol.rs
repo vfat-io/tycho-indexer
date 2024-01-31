@@ -533,7 +533,7 @@ where
     async fn update_protocol_states(
         &self,
         chain: &Chain,
-        new: &[(TxHash, ProtocolStateDelta)],
+        new: &[(TxHash, &ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let chain_db_id = self.get_chain_id(chain);
@@ -1401,7 +1401,7 @@ mod test {
         gateway
             .update_protocol_states(
                 &chain,
-                &[(tx_1.into(), new_state1.clone()), (tx_2.into(), new_state2.clone())],
+                &[(tx_1.into(), &new_state1), (tx_2.into(), &new_state2)],
                 &mut conn,
             )
             .await
