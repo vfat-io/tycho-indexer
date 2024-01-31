@@ -799,19 +799,23 @@ where
             // We query for balance updates between start and target version.
             let changed_component_balances = component_balance
                 .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
-                .filter(schema::chain::id.eq(chain_id))
-                .filter(valid_from.gt(start_ts))
-                .filter(valid_from.le(target_ts))
+                .filter(
+                    schema::chain::id
+                        .eq(chain_id)
+                        .and(valid_from.gt(start_ts))
+                        .and(valid_from.le(target_ts)),
+                )
                 .select((protocol_component_id, token_id))
                 .distinct();
 
             let result: HashMap<(i64, i64), Balance> = changed_component_balances
                 .inner_join(schema::transaction::table)
-                .filter(valid_from.le(target_ts))
                 .filter(
-                    valid_to
-                        .gt(target_ts)
-                        .or(valid_to.is_null()),
+                    valid_from.le(target_ts).and(
+                        valid_to
+                            .gt(target_ts)
+                            .or(valid_to.is_null()),
+                    ),
                 )
                 .select((protocol_component_id, token_id, new_balance))
                 .order_by((
@@ -836,9 +840,12 @@ where
             // between start and target version.
             let changed_component_balances = component_balance
                 .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
-                .filter(schema::chain::id.eq(chain_id))
-                .filter(valid_from.ge(target_ts))
-                .filter(valid_from.lt(start_ts))
+                .filter(
+                    schema::chain::id
+                        .eq(chain_id)
+                        .and(valid_from.ge(target_ts))
+                        .and(valid_from.lt(start_ts)),
+                )
                 .select((protocol_component_id, token_id))
                 .distinct();
 
