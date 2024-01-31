@@ -779,7 +779,6 @@ where
 
     async fn add_component_balances(
         &self,
-        chain: Chain,
         component_balances: &[&Self::ComponentBalance],
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
@@ -1825,7 +1824,7 @@ mod test {
         let component_balances = vec![&component_balance];
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
-        gw.add_component_balances(Chain::Ethereum, &component_balances, block_ts, &mut conn)
+        gw.add_component_balances(&component_balances, block_ts, &mut conn)
             .await
             .unwrap();
 
