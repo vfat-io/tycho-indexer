@@ -756,12 +756,32 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolStateDelta>, StorageError>;
 
+    /// Retrieve protocol component balance changes
+    ///
+    /// Fetches all balance changes that occurred for the given protocol system
+    ///
+    /// # Parameters
+    /// - `chain` The chain of the component
+    /// - `start_version` The version at which to start looking for changes at.
+    /// - `target_version` The version at which to stop looking for changes.
+    ///
+    /// # Return
+    /// A hashmap containing a map of (protocol_component_id, token_id) to its respective balance
+    /// change, Err if no changes were found.
+    async fn get_balance_deltas(
+        &self,
+        chain: &Chain,
+        start_version: &BlockOrTimestamp,
+        target_version: &BlockOrTimestamp,
+        conn: &mut Self::DB,
+    ) -> Result<HashMap<(i64, i64), Balance>, StorageError>;
+
     /// Reverts the protocol states in storage.
     ///
     /// Deletes all protocol states that were set after the given block.
     ///
     /// # Parameters
-    /// - `to` The block at which the we must revert to.
+    /// - `to` The block at which we must revert to.
     ///
     /// # Return
     /// Ok if the revert was successful, Err if it was not.
