@@ -7,9 +7,9 @@ use ethers::utils::keccak256;
 use tracing::instrument;
 
 use crate::storage::{
-    AccountToContractStore, Address, Balance, BlockIdentifier, BlockOrTimestamp, ChangeType, Code,
-    ContractDelta, ContractId, ContractStateGateway, ContractStore, StorableBlock,
-    StorableContract, StorableToken, StorableTransaction, StoreKey, StoreVal, TxHash, Version,
+    AccountToContractStore, Address, Balance, BlockOrTimestamp, ChangeType, Code, ContractDelta,
+    ContractId, ContractStateGateway, ContractStore, StorableBlock, StorableContract,
+    StorableToken, StorableTransaction, StoreKey, StoreVal, TxHash, Version,
 };
 use tycho_types::Bytes;
 
