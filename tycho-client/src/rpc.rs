@@ -1,3 +1,10 @@
+//! # Tycho RPC Client
+//!
+//! The objective of this module is to provide swift and simplified access to the Remote Procedure
+//! Call (RPC) endpoints of Tycho. These endpoints are chiefly responsible for facilitating data
+//! queries, especially querying snapshots of data.
+//!
+//! Currently we provide only a HTTP implementation.
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
 use std::string::ToString;
 use thiserror::Error;
@@ -11,18 +18,23 @@ use crate::TYCHO_SERVER_VERSION;
 
 #[derive(Error, Debug)]
 pub enum TychoClientError {
+    /// The passed tycho url failed to parse.
     #[error("Failed to parse URI: {0}. Error: {1}")]
     UriParsing(String, String),
+    /// The request data is not correctly formed.
     #[error("Failed to format request: {0}")]
     FormatRequest(String),
+    /// Errors forwarded from the HTTP protocol.
     #[error("Unexpected HTTP client error: {0}")]
     HttpClient(String),
+    /// The response from the server could not be parsed correctly.
     #[error("Failed to parse response: {0}")]
     ParseResponse(String),
 }
 
 #[async_trait]
 pub trait TychoRPCClient {
+    /// Retrieves a snapshot of contract state.
     async fn get_contract_state(
         &self,
         filters: &StateRequestParameters,
