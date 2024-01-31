@@ -346,14 +346,19 @@ pub trait ChainGateway {
         db: &mut Self::DB,
     ) -> Result<Self::Transaction, StorageError>;
 
-    /// Reverts the storage to a previous version.
+    /// Reverts the blockchain storage to a previous version.
     ///
-    /// This modification will delete version in storage. The state will be
-    /// reset to the passed version.
+    /// Reverting state signifies deleting database history. Only the main branch will be kept.
+    ///
+    /// Blocks that are greater than the provided block (`to`) are deleted and any versioned rows
+    /// which were invalidated in the deleted blocks are updated to be valid again.
     ///
     /// # Parameters
     /// - `to` The version to revert to. Given a block uses VersionKind::Last behaviour.
     /// - `db` The database gateway.
+    ///
+    /// # Returns
+    /// - An Ok if the revert is successful, or a `StorageError` if not.
     async fn revert_state(
         &self,
         to: &BlockIdentifier,

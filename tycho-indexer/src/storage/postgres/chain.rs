@@ -137,7 +137,8 @@ where
         // All entities and version updates are connected to the block via a
         // cascade delete, this ensures that the state is reverted by simply
         // deleting the correct blocks, which then triggers cascading deletes on
-        // child entries.
+        // child entries. All blocks after the `to` block are deleted - the `to`
+        // block and its connected data persists.
         diesel::delete(
             schema::block::table
                 .filter(schema::block::number.gt(block.number))
