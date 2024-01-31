@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
-
 use std::{
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
@@ -1038,7 +1035,7 @@ mod test_serial_db {
                 .await,
             );
             let (tx, rx) = mpsc::channel(10);
-            let (err_tx, err_rx) = mpsc::channel(10);
+            let (err_tx, _) = mpsc::channel(10);
 
             let write_executor = DBCacheWriteExecutor::new(
                 "ethereum".to_owned(),
