@@ -363,63 +363,10 @@ impl StateRequestParameters {
         }
 
         let mut res = parts.join("&");
-        if !res.is_empty() {
+        if res.len() > 0 {
             res = format!("?{res}");
         }
         res
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
-pub struct TokensRequestBody {
-    #[serde(rename = "tokenAddresses")]
-    #[schema(value_type=Option<Vec<String>>)]
-    pub token_addresses: Option<Vec<Bytes>>,
-}
-
-impl TokensRequestBody {
-    pub fn new(token_addresses: Option<Vec<Bytes>>) -> Self {
-        Self { token_addresses }
-    }
-}
-
-/// Response from Tycho server for a tokens request.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct TokensRequestResponse {
-    pub tokens: Vec<ResponseToken>,
-}
-
-impl TokensRequestResponse {
-    pub fn new(tokens: Vec<ResponseToken>) -> Self {
-        Self { tokens }
-    }
-}
-
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
-#[serde(rename = "Token")]
-/// Token struct for the response from Tycho server for a tokens request.
-pub struct ResponseToken {
-    pub chain: Chain,
-    #[schema(value_type=String, example="0xc9f2e6ea1637E499406986ac50ddC92401ce1f58")]
-    #[serde(with = "hex_bytes")]
-    pub address: Bytes,
-    #[schema(value_type=String, example="WETH")]
-    pub symbol: String,
-    pub decimals: u32,
-    pub tax: u64,
-    pub gas: Vec<Option<u64>>,
-}
-
-impl ResponseToken {
-    pub fn new(
-        chain: Chain,
-        address: Bytes,
-        symbol: String,
-        decimals: u32,
-        tax: u64,
-        gas: Vec<Option<u64>>,
-    ) -> Self {
-        Self { chain, address, symbol, decimals, tax, gas }
     }
 }
 
