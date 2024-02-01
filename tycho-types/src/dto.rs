@@ -406,17 +406,54 @@ pub struct ResponseToken {
     pub gas: Vec<Option<u64>>,
 }
 
-impl ResponseToken {
-    pub fn new(
-        chain: Chain,
-        address: Bytes,
-        symbol: String,
-        decimals: u32,
-        tax: u64,
-        gas: Vec<Option<u64>>,
-    ) -> Self {
-        Self { chain, address, symbol, decimals, tax, gas }
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+pub struct ProtocolComponentsRequestBody {
+    pub protocol_system: Option<String>,
+    #[serde(rename = "componentAddresses")]
+    pub component_ids: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
+pub struct ProtocolComponentRequestParameters {
+    #[param(default = 0)]
+    pub tvl_gt: Option<u64>,
+}
+
+impl ProtocolComponentsRequestBody {
+    pub fn new(protocol_system: Option<String>, component_ids: Option<Vec<String>>) -> Self {
+        Self { protocol_system, component_ids }
     }
+}
+
+/// Response from Tycho server for a protocol components request.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ProtocolComponentRequestResponse {
+    pub protocol_components: Vec<ResponseProtocolComponent>,
+}
+
+impl ProtocolComponentRequestResponse {
+    pub fn new(protocol_components: Vec<ResponseProtocolComponent>) -> Self {
+        Self { protocol_components }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+#[serde(rename = "ProtocolComponent")]
+/// Protocol Component struct for the response from Tycho server for a tokens request.
+pub struct ResponseProtocolComponent {
+    pub chain: Chain,
+    pub id: String,
+    pub protocol_system: String,
+    pub protocol_type_name: String,
+    #[schema(value_type=Vec<String>)]
+    pub tokens: Vec<Bytes>,
+    #[schema(value_type=Vec<String>)]
+    pub contract_ids: Vec<Bytes>,
+    #[schema(value_type=HashMap<String, String>)]
+    pub static_attributes: HashMap<String, Bytes>,
+    #[schema(value_type=String)]
+    pub creation_tx: Bytes,
+    pub created_at: NaiveDateTime,
 }
 
 #[cfg(test)]
