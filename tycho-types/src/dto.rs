@@ -425,19 +425,13 @@ impl ResponseToken {
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
 pub struct TokensRequestBody {
-    #[serde(rename = "contractIds")]
-    pub contract_ids: Option<Vec<ContractId>>,
+    #[serde(rename = "tokenAddresses")]
+    pub token_addresses: Option<Vec<Bytes>>,
 }
 
 impl TokensRequestBody {
-    pub fn new(contract_ids: Option<Vec<Bytes>>) -> Self {
-        Self {
-            contract_ids: contract_ids.map(|ids| {
-                ids.into_iter()
-                    .map(|id| ContractId::new(Chain::Ethereum, id))
-                    .collect()
-            }),
-        }
+    pub fn new(token_addresses: Option<Vec<Bytes>>) -> Self {
+        Self { token_addresses }
     }
 }
 
@@ -463,7 +457,6 @@ pub struct ResponseToken {
     pub address: Bytes,
     #[schema(value_type=String, example="WETH")]
     pub symbol: String,
-    #[schema(value_type=HashMap<String, String>, example="0xBADBABE")]
     pub decimals: u32,
     pub tax: u64,
     pub gas: Vec<Option<u64>>,
