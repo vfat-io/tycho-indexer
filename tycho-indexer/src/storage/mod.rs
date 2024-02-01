@@ -380,6 +380,25 @@ pub trait ChainGateway {
         hash: &TxHash,
         db: &mut Self::DB,
     ) -> Result<Self::Transaction, StorageError>;
+
+    /// Reverts the blockchain storage to a previous version.
+    ///
+    /// Reverting state signifies deleting database history. Only the main branch will be kept.
+    ///
+    /// Blocks that are greater than the provided block (`to`) are deleted and any versioned rows
+    /// which were invalidated in the deleted blocks are updated to be valid again.
+    ///
+    /// # Parameters
+    /// - `to` The version to revert to. Given a block uses VersionKind::Last behaviour.
+    /// - `db` The database gateway.
+    ///
+    /// # Returns
+    /// - An Ok if the revert is successful, or a `StorageError` if not.
+    async fn revert_state(
+        &self,
+        to: &BlockIdentifier,
+        db: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 }
 
 /// Store and retrieve state of Extractors.
@@ -776,21 +795,6 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<HashMap<(i64, i64), Balance>, StorageError>;
 
-    /// Reverts the protocol states in storage.
-    ///
-    /// Deletes all protocol states that were set after the given block.
-    ///
-    /// # Parameters
-    /// - `to` The block at which we must revert to.
-    ///
-    /// # Return
-    /// Ok if the revert was successful, Err if it was not.
-    async fn revert_protocol_state(
-        &self,
-        to: &BlockIdentifier,
-        conn: &mut Self::DB,
-    ) -> Result<(), StorageError>;
-
     async fn _get_or_create_protocol_system_id(
         &self,
         protocol_system: String,
@@ -1118,20 +1122,6 @@ pub trait ContractStateGateway {
         end_version: &BlockOrTimestamp,
         db: &mut Self::DB,
     ) -> Result<Vec<Self::Delta>, StorageError>;
-
-    /// Reverts the storage to a previous version.
-    ///
-    /// This modification will delete version in storage. The state will be
-    /// reset to the passed version.
-    ///
-    /// # Parameters
-    /// - `to` The version to revert to. Given a block uses VersionKind::Last behaviour.
-    /// - `db` The database gateway.
-    async fn revert_state(
-        &self,
-        to: &BlockIdentifier,
-        db: &mut Self::DB,
-    ) -> Result<(), StorageError>;
 }
 
 pub trait StateGateway<DB>:

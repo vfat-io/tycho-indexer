@@ -21,8 +21,8 @@ use crate::{
             versioning::apply_versioning,
             PostgresGateway,
         },
-        Address, Balance, BlockIdentifier, BlockOrTimestamp, ComponentId, ContractDelta,
-        ContractId, ProtocolGateway, StorableBlock, StorableComponentBalance, StorableContract,
+        Address, Balance, BlockOrTimestamp, ComponentId, ContractDelta, ContractId,
+        ProtocolGateway, StorableBlock, StorableComponentBalance, StorableContract,
         StorableProtocolComponent, StorableProtocolState, StorableProtocolStateDelta,
         StorableProtocolType, StorableToken, StorableTransaction, StorageError, StoreVal, TxHash,
         Version,
@@ -1122,14 +1122,6 @@ where
         }
     }
 
-    async fn revert_protocol_state(
-        &self,
-        to: &BlockIdentifier,
-        conn: &mut Self::DB,
-    ) -> Result<(), StorageError> {
-        todo!()
-    }
-
     async fn _get_or_create_protocol_system_id(
         &self,
         new: String,
@@ -1164,7 +1156,7 @@ mod test {
     use super::*;
     use crate::{
         extractor::evm::{self, ERC20Token},
-        storage::ChangeType,
+        storage::{BlockIdentifier, ChangeType},
     };
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Utc};
     use diesel_async::AsyncConnection;
