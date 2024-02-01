@@ -201,18 +201,12 @@ impl RpcHandler {
         request: &dto::TokensRequestBody,
         db_connection: &mut AsyncPgConnection,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
-        let contract_ids = request.contract_ids.clone();
-        let addresses: Option<Vec<Address>> = contract_ids.map(|ids| {
-            ids.into_iter()
-                .map(|id| Address::from(id.address))
-                .collect()
-        });
-
-        debug!(?addresses, "Getting tokens.");
-        let address_refs: Option<Vec<&Address>> = addresses
+        let address_refs: Option<Vec<&Address>> = request
+            .token_addresses
             .as_ref()
             .map(|vec| vec.iter().collect());
         let addresses_slice = address_refs.as_deref();
+        debug!(?addresses_slice, "Getting tokens.");
 
         match self
             .db_gateway
@@ -226,7 +220,7 @@ impl RpcHandler {
                     .collect(),
             )),
             Err(err) => {
-                error!(error = %err, "Error while getting contract states.");
+                error!(error = %err, "Error while getting tokens.");
                 Err(err.into())
             }
         }
@@ -312,6 +306,7 @@ mod tests {
     const WETH: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
     const USDT: &str = "dAC17F958D2ee523a2206206994597C13D831ec7";
+    const DAI: &str = "6B175474E89094C44Da98b954EedeAC495271d0F";
 
     #[test]
     async fn test_validate_version_priority() {
@@ -521,10 +516,11 @@ mod tests {
     }
 
     pub async fn setup_tokens(conn: &mut AsyncPgConnection) {
-        // Adds WETH and USDC to the DB
+        // Adds WETH, USDC and DAI to the DB
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         db_fixtures::insert_token(conn, chain_id, WETH, "WETH", 18).await;
         db_fixtures::insert_token(conn, chain_id, USDC, "USDC", 6).await;
+        db_fixtures::insert_token(conn, chain_id, DAI, "DAI", 18).await;
     }
     #[tokio::test]
     async fn test_get_tokens() {
@@ -544,9 +540,9 @@ mod tests {
 
         // request for 2 tokens that are in the DB (WETH and USDC)
         let request = dto::TokensRequestBody {
-            contract_ids: Some(vec![
-                dto::ContractId::new(dto::Chain::Ethereum, USDC.parse::<Bytes>().unwrap()),
-                dto::ContractId::new(dto::Chain::Ethereum, WETH.parse::<Bytes>().unwrap()),
+            token_addresses: Some(vec![
+                USDC.parse::<Bytes>().unwrap(),
+                WETH.parse::<Bytes>().unwrap(),
             ]),
         };
 
@@ -560,12 +556,8 @@ mod tests {
         assert_eq!(tokens.tokens[1].symbol, "WETH");
 
         // request for 1 token that is not in the DB (USDT)
-        let request = dto::TokensRequestBody {
-            contract_ids: Some(vec![dto::ContractId::new(
-                dto::Chain::Ethereum,
-                USDT.parse::<Bytes>().unwrap(),
-            )]),
-        };
+        let request =
+            dto::TokensRequestBody { token_addresses: Some(vec![USDT.parse::<Bytes>().unwrap()]) };
 
         let tokens = req_handler
             .get_tokens_inner(&Chain::Ethereum, &request, &mut conn)
@@ -573,5 +565,15 @@ mod tests {
             .unwrap();
 
         assert_eq!(tokens.tokens.len(), 0);
+
+        // request without any address filter -> should return all tokens
+        let request = dto::TokensRequestBody { token_addresses: None };
+
+        let tokens = req_handler
+            .get_tokens_inner(&Chain::Ethereum, &request, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(tokens.tokens.len(), 3);
     }
 }
