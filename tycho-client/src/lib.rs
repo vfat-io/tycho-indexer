@@ -26,6 +26,7 @@
 const TYCHO_SERVER_VERSION: &str = "v1";
 
 pub mod deltas;
+pub mod feed;
 pub mod rpc;
 
 pub use deltas::{DeltasError, WsDeltasClient};

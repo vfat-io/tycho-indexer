@@ -5207,6 +5207,7 @@ dependencies = [
  "futures 0.3.30",
  "hex",
  "hyper",
+ "lru",
  "mockito",
  "serde",
  "serde_json",
@@ -5214,7 +5215,6 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
- "tungstenite",
  "tycho-types",
  "uuid 1.7.0",
 ]
