@@ -669,7 +669,7 @@ pub mod db_fixtures {
     //! the entries that are crucial to your test case.
     use std::str::FromStr;
 
-    use crate::storage::Code;
+    use crate::storage::{Balance, Code};
     use chrono::NaiveDateTime;
     use diesel::prelude::*;
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -963,6 +963,34 @@ pub mod db_fixtures {
                 .await
                 .expect("delete storage table ok");
         }
+    }
+
+    // Insert a new Component Balance
+    pub async fn insert_component_balance(
+        conn: &mut AsyncPgConnection,
+        balance: Balance,
+        token_id: i64,
+        tx_id: i64,
+        protocol_component_id: i64,
+    ) {
+        let ts: NaiveDateTime = schema::transaction::table
+            .inner_join(schema::block::table)
+            .filter(schema::transaction::id.eq(tx_id))
+            .select(schema::block::ts)
+            .first::<NaiveDateTime>(conn)
+            .await
+            .expect("setup tx id not found");
+        diesel::insert_into(schema::component_balance::table)
+            .values((
+                schema::component_balance::protocol_component_id.eq(protocol_component_id),
+                schema::component_balance::token_id.eq(token_id),
+                schema::component_balance::modify_tx.eq(tx_id),
+                schema::component_balance::new_balance.eq(balance),
+                schema::component_balance::valid_from.eq(ts),
+            ))
+            .execute(conn)
+            .await
+            .expect("component balance insert failed");
     }
 
     // Insert a new Protocol System
