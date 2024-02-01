@@ -288,13 +288,6 @@ impl NormalisedMessage for BlockAccountChanges {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProtocolComponentsWithTx {
-    pub new_components: Vec<ProtocolComponent>,
-    pub deleted_components: Vec<ProtocolComponent>,
-    pub tx: Transaction,
-}
-
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccountUpdateWithTx {
@@ -378,8 +371,8 @@ pub struct BlockContractChanges {
     chain: Chain,
     pub block: Block,
     pub tx_updates: Vec<AccountUpdateWithTx>,
-    pub protocol_components: Vec<ProtocolComponentsWithTx>,
-    pub component_balances: Vec<ComponentBalancesWithTx>,
+    pub protocol_components: Vec<ProtocolComponent>,
+    pub component_balances: Vec<ComponentBalance>,
 }
 
 pub type EVMStateGateway<DB> =
@@ -467,12 +460,6 @@ pub struct ComponentBalance {
     // tx where the this balance was observed
     pub modify_tx: H256,
     pub component_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ComponentBalancesWithTx {
-    pub new_balances: Vec<ComponentBalance>,
-    pub tx: Transaction,
 }
 
 impl ComponentBalance {
@@ -619,7 +606,7 @@ impl BlockContractChanges {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
             let mut tx_updates = Vec::new();
-            let mut protocol_components_with_tx = Vec::new();
+            let mut protocol_components = Vec::new();
 
             for change in msg.changes.into_iter() {
                 if let Some(tx) = change.tx {
@@ -628,7 +615,6 @@ impl BlockContractChanges {
                         let update = AccountUpdateWithTx::try_from_message(el, &tx, chain)?;
                         tx_updates.push(update);
                     }
-                    let mut protocol_components = Vec::new();
                     for component_msg in change.component_changes.into_iter() {
                         let component = ProtocolComponent::try_from_message(
                             component_msg,
@@ -640,12 +626,6 @@ impl BlockContractChanges {
                         )?;
                         protocol_components.push(component);
                     }
-
-                    protocol_components_with_tx.push(ProtocolComponentsWithTx {
-                        new_components: protocol_components,
-                        deleted_components: Vec::new(),
-                        tx,
-                    });
                 }
             }
             tx_updates.sort_unstable_by_key(|update| update.tx.index);
@@ -654,7 +634,7 @@ impl BlockContractChanges {
                 chain,
                 block,
                 tx_updates,
-                protocol_components: protocol_components_with_tx,
+                protocol_components,
                 component_balances: Vec::new(),
             });
         }
@@ -692,16 +672,6 @@ impl BlockContractChanges {
                 }
             }
         }
-        let new_protocol_components = self
-            .protocol_components
-            .iter()
-            .flat_map(|pc_with_tx| pc_with_tx.new_components.clone())
-            .collect::<Vec<ProtocolComponent>>();
-        let deleted_protocol_components = self
-            .protocol_components
-            .into_iter()
-            .flat_map(|pc_with_tx| pc_with_tx.deleted_components)
-            .collect::<Vec<ProtocolComponent>>();
 
         Ok(BlockAccountChanges::new(
             &self.extractor,
@@ -711,12 +681,9 @@ impl BlockContractChanges {
                 .into_iter()
                 .map(|(k, v)| (k, v.update))
                 .collect(),
-            new_protocol_components,
-            deleted_protocol_components,
-            self.component_balances
-                .into_iter()
-                .flat_map(|cb| cb.new_balances)
-                .collect(),
+            self.protocol_components,
+            Vec::new(),
+            Vec::new(),
         ))
     }
 }
@@ -1549,11 +1516,7 @@ mod test {
                     tx,
                 },
             ],
-            protocol_components: vec![ProtocolComponentsWithTx {
-                new_components: vec![protocol_component],
-                deleted_components: Vec::new(),
-                tx,
-            }],
+            protocol_components: vec![protocol_component],
             component_balances: Vec::new(),
         }
     }
