@@ -785,15 +785,15 @@ pub trait ProtocolGateway {
     /// - `target_version` The version at which to stop looking for changes.
     ///
     /// # Return
-    /// A hashmap containing a map of (protocol_component_id, token_id) to its respective balance
-    /// change, Err if no changes were found.
+    /// A hashmap containing a map of (protocol_external_id, token_address) to its respective
+    /// balance change, Err if no changes were found.
     async fn get_balance_deltas(
         &self,
         chain: &Chain,
         start_version: &BlockOrTimestamp,
         target_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<HashMap<(i64, i64), Balance>, StorageError>;
+    ) -> Result<HashMap<(String, Address), Balance>, StorageError>;
 
     async fn _get_or_create_protocol_system_id(
         &self,

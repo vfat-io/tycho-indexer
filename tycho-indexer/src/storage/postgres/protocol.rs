@@ -852,7 +852,7 @@ where
         start_version: &BlockOrTimestamp,
         target_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<HashMap<(i64, i64), Balance>, StorageError> {
+    ) -> Result<HashMap<(String, Address), Balance>, StorageError> {
         use schema::component_balance::dsl::*;
         let chain_id = self.get_chain_id(chain);
 
@@ -876,7 +876,7 @@ where
                 .select((protocol_component_id, token_id))
                 .distinct();
 
-            let result: HashMap<(i64, i64), Balance> = changed_component_balances
+            let result: HashMap<(String, Address), Balance> = changed_component_balances
                 .inner_join(schema::transaction::table)
                 .filter(
                     valid_from.le(target_ts).and(
@@ -885,7 +885,6 @@ where
                             .or(valid_to.is_null()),
                     ),
                 )
-                .select((protocol_component_id, token_id, new_balance))
                 .order_by((
                     protocol_component_id,
                     token_id,
@@ -893,10 +892,18 @@ where
                     schema::transaction::index.desc(),
                 ))
                 .distinct_on((protocol_component_id, token_id))
-                .get_results::<(i64, i64, Balance)>(conn)
+                .inner_join(schema::token::table.inner_join(schema::account::table))
+                .select((
+                    schema::protocol_component::external_id,
+                    schema::account::address,
+                    new_balance,
+                ))
+                .get_results::<(String, Address, Balance)>(conn)
                 .await?
                 .into_iter()
-                .map(|(pc_id, t_id, balance)| ((pc_id, t_id), balance))
+                .map(|(external_id, token_address, balance)| {
+                    ((external_id, token_address), balance)
+                })
                 .collect();
             result
         } else {
@@ -917,7 +924,7 @@ where
                 .select((protocol_component_id, token_id))
                 .distinct();
 
-            let result: HashMap<(i64, i64), Balance> = changed_component_balances
+            let result: HashMap<(String, Address), Balance> = changed_component_balances
                 .inner_join(schema::transaction::table)
                 .filter(valid_from.le(target_ts))
                 .filter(
@@ -925,7 +932,6 @@ where
                         .gt(target_ts)
                         .or(valid_to.is_null()),
                 )
-                .select((protocol_component_id, token_id, new_balance))
                 .order_by((
                     protocol_component_id,
                     token_id,
@@ -933,10 +939,18 @@ where
                     schema::transaction::index.asc(),
                 ))
                 .distinct_on((protocol_component_id, token_id))
-                .get_results::<(i64, i64, Balance)>(conn)
+                .inner_join(schema::token::table.inner_join(schema::account::table))
+                .select((
+                    schema::protocol_component::external_id,
+                    schema::account::address,
+                    new_balance,
+                ))
+                .get_results::<(String, Address, Balance)>(conn)
                 .await?
                 .into_iter()
-                .map(|(pc_id, t_id, balance)| ((pc_id, t_id), balance))
+                .map(|(external_id, token_address, balance)| {
+                    ((external_id, token_address), balance)
+                })
                 .collect();
             result
         };
@@ -1543,20 +1557,26 @@ mod test {
     async fn test_get_balance_deltas() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
-
+        let protocol_external_id = String::from("state1");
         // set up changed balances
         let protocol_component_id = schema::protocol_component::table
-            .filter(schema::protocol_component::external_id.eq("state1"))
+            .filter(schema::protocol_component::external_id.eq(protocol_external_id.clone()))
             .select(schema::protocol_component::id)
             .first::<i64>(&mut conn)
             .await
             .expect("Failed to fetch protocol component id");
-        let token_id = schema::token::table
+        let (token_id, account_id) = schema::token::table
             .filter(schema::token::symbol.eq("WETH"))
-            .select(schema::token::id)
-            .first::<i64>(&mut conn)
+            .select((schema::token::id, schema::token::account_id))
+            .first::<(i64, i64)>(&mut conn)
             .await
-            .expect("Failed to fetch token id");
+            .expect("Failed to fetch token id and acccount id");
+        let token_address = schema::account::table
+            .filter(schema::account::id.eq(account_id))
+            .select(schema::account::address)
+            .first::<Address>(&mut conn)
+            .await
+            .expect("Failed to fetch token address");
         let from_txn_id = schema::transaction::table
             .filter(
                 schema::transaction::hash.eq(H256::from_str(
@@ -1604,8 +1624,10 @@ mod test {
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
         let mut expected_forward_deltas = HashMap::new();
-        expected_forward_deltas
-            .insert((protocol_component_id, token_id), Balance::from(U256::from(2000)));
+        expected_forward_deltas.insert(
+            (protocol_external_id.clone(), token_address.clone()),
+            Balance::from(U256::from(2000)),
+        );
 
         // test forward case
         let result = gateway
@@ -1620,8 +1642,10 @@ mod test {
         assert_eq!(result, expected_forward_deltas);
 
         let mut expected_backward_deltas = HashMap::new();
-        expected_backward_deltas
-            .insert((protocol_component_id, token_id), Balance::from(U256::from(1000)));
+        expected_backward_deltas.insert(
+            (protocol_external_id.clone(), token_address.clone()),
+            Balance::from(U256::from(1000)),
+        );
 
         // test backward case
         let result = gateway
