@@ -81,7 +81,7 @@ impl ServicesBuilder {
     ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
         #[derive(OpenApi)]
         #[openapi(
-            paths(rpc::contract_state),
+            paths(rpc::contract_state, rpc::tokens),
             components(
                 schemas(VersionParam),
                 schemas(BlockParam),

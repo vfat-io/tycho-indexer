@@ -19,7 +19,10 @@ use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
 use crate::storage::ProtocolGateway;
-use tycho_types::{dto, dto::ResponseToken};
+use tycho_types::{
+    dto,
+    dto::{ResponseToken, StateRequestParameters},
+};
 
 use super::EvmPostgresGateway;
 
@@ -233,9 +236,10 @@ impl RpcHandler {
     responses(
         (status = 200, description = "OK", body = StateRequestResponse),
     ),
-    request_body = dto::StateRequestBody,
+    request_body = StateRequestBody,
     params(
-        dto::StateRequestParameters
+        ("execution_env" = Chain, description = "Execution environment"),
+        StateRequestParameters
     ),
 )]
 pub async fn contract_state(
@@ -265,7 +269,10 @@ pub async fn contract_state(
     responses(
         (status = 200, description = "OK", body = TokensRequestResponse),
     ),
-    request_body = dto::TokensRequestBody,
+    request_body = TokensRequestBody,
+    params(
+        ("execution_env" = Chain, description = "Execution environment"),
+    ),
 )]
 pub async fn tokens(
     execution_env: web::Path<Chain>,
