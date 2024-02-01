@@ -849,14 +849,17 @@ where
     async fn get_balance_deltas(
         &self,
         chain: &Chain,
-        start_version: &BlockOrTimestamp,
+        start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
     ) -> Result<HashMap<(String, Address), Balance>, StorageError> {
         use schema::component_balance::dsl::*;
         let chain_id = self.get_chain_id(chain);
 
-        let start_ts = start_version.to_ts(conn).await?;
+        let start_ts = match start_version {
+            Some(version) => version.to_ts(conn).await?,
+            None => Utc::now().naive_utc(),
+        };
         let target_ts = target_version.to_ts(conn).await?;
 
         let res = if start_ts <= target_ts {
@@ -1633,7 +1636,7 @@ mod test {
         let result = gateway
             .get_balance_deltas(
                 &Chain::Ethereum,
-                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
+                Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1)))),
                 &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
                 &mut conn,
             )
@@ -1651,7 +1654,7 @@ mod test {
         let result = gateway
             .get_balance_deltas(
                 &Chain::Ethereum,
-                &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))),
+                Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2)))),
                 &BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 1))),
                 &mut conn,
             )

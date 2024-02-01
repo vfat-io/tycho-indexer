@@ -790,7 +790,7 @@ pub trait ProtocolGateway {
     async fn get_balance_deltas(
         &self,
         chain: &Chain,
-        start_version: &BlockOrTimestamp,
+        start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
     ) -> Result<HashMap<(String, Address), Balance>, StorageError>;
