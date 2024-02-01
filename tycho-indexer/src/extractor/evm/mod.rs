@@ -862,9 +862,7 @@ pub struct BlockEntityChangesResult {
     chain: Chain,
     pub block: Block,
     pub state_updates: HashMap<String, ProtocolStateDelta>,
-    pub new_protocol_components: Vec<ProtocolComponent>,
-    pub deleted_protocol_components: Vec<ProtocolComponent>,
-    pub component_balances: Vec<ComponentBalance>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
 /// A container for state updates grouped by transaction
@@ -877,8 +875,7 @@ pub struct BlockEntityChanges {
     chain: Chain,
     pub block: Block,
     pub state_updates: Vec<ProtocolStateDeltasWithTx>,
-    pub protocol_components: Vec<ProtocolComponent>,
-    pub component_balances: Vec<ComponentBalance>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
 // TODO: remove dead code check skip once extractor is implemented
@@ -894,7 +891,7 @@ impl BlockEntityChanges {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
             let mut state_updates = Vec::new();
-            let mut protocol_components = Vec::new();
+            let mut new_protocol_components = HashMap::new();
 
             for change in msg.changes.into_iter() {
                 if let Some(tx) = change.tx {
@@ -904,7 +901,7 @@ impl BlockEntityChanges {
 
                     state_updates.push(tx_update);
                     for component in change.component_changes {
-                        let component = ProtocolComponent::try_from_message(
+                        let pool = ProtocolComponent::try_from_message(
                             component,
                             chain,
                             &protocol_system,
@@ -912,7 +909,7 @@ impl BlockEntityChanges {
                             tx.hash,
                             block.ts,
                         )?;
-                        protocol_components.push(component);
+                        new_protocol_components.insert(pool.id.clone(), pool);
                     }
                 }
             }
@@ -923,8 +920,7 @@ impl BlockEntityChanges {
                 chain,
                 block,
                 state_updates,
-                protocol_components,
-                component_balances: Vec::new(),
+                new_protocol_components,
             });
         }
         Err(ExtractionError::Empty)
@@ -960,9 +956,7 @@ impl BlockEntityChanges {
             chain: self.chain,
             block: self.block,
             state_updates: aggregated_states.protocol_states,
-            new_protocol_components: self.protocol_components,
-            deleted_protocol_components: Vec::new(),
-            component_balances: Vec::new(),
+            new_protocol_components: self.new_protocol_components,
         })
     }
 }
@@ -1860,23 +1854,28 @@ mod test {
             vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
                 .into_iter()
                 .collect();
-        let protocol_components = vec![ProtocolComponent {
-            id: "Pool".to_owned(),
-            protocol_system: "ambient".to_string(),
-            protocol_type_name: "Pool".to_owned(),
-            chain: Chain::Ethereum,
-            tokens: vec![
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-            ],
-            static_attributes: static_attr,
-            contract_ids: vec![
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
-            ],
-            change: ChangeType::Creation,
-            creation_tx: tx.hash,
-            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
-        }];
+        let new_protocol_components: HashMap<String, ProtocolComponent> = vec![(
+            "Pool".to_owned(),
+            ProtocolComponent {
+                id: "Pool".to_owned(),
+                protocol_system: "ambient".to_string(),
+                protocol_type_name: "Pool".to_owned(),
+                chain: Chain::Ethereum,
+                tokens: vec![
+                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                ],
+                static_attributes: static_attr,
+                contract_ids: vec![
+                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
+                ],
+                change: ChangeType::Creation,
+                creation_tx: tx.hash,
+                created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+            },
+        )]
+        .into_iter()
+        .collect();
         BlockEntityChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
@@ -1895,8 +1894,7 @@ mod test {
                 protocol_state_with_tx(),
                 ProtocolStateDeltasWithTx { protocol_states: state_updates, tx },
             ],
-            protocol_components,
-            component_balances: Vec::new(),
+            new_protocol_components,
         }
     }
 
@@ -1964,23 +1962,28 @@ mod test {
             vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
                 .into_iter()
                 .collect();
-        let new_protocol_components = vec![ProtocolComponent {
-            id: "Pool".to_owned(),
-            protocol_system: "ambient".to_string(),
-            protocol_type_name: "Pool".to_owned(),
-            chain: Chain::Ethereum,
-            tokens: vec![
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-            ],
-            static_attributes: static_attr,
-            contract_ids: vec![
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
-            ],
-            change: ChangeType::Creation,
-            creation_tx: tx.hash,
-            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
-        }];
+        let new_protocol_components: HashMap<String, ProtocolComponent> = vec![(
+            "Pool".to_owned(),
+            ProtocolComponent {
+                id: "Pool".to_owned(),
+                protocol_system: "ambient".to_string(),
+                protocol_type_name: "Pool".to_owned(),
+                chain: Chain::Ethereum,
+                tokens: vec![
+                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                ],
+                static_attributes: static_attr,
+                contract_ids: vec![
+                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
+                ],
+                change: ChangeType::Creation,
+                creation_tx: tx.hash,
+                created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+            },
+        )]
+        .into_iter()
+        .collect();
         BlockEntityChangesResult {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
@@ -1995,8 +1998,6 @@ mod test {
             },
             state_updates,
             new_protocol_components,
-            deleted_protocol_components: Vec::new(),
-            component_balances: Vec::new(),
         }
     }
 
