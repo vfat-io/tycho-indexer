@@ -426,6 +426,7 @@ impl ResponseToken {
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
 pub struct TokensRequestBody {
     #[serde(rename = "tokenAddresses")]
+    #[schema(value_type=Option<Vec<String>>)]
     pub token_addresses: Option<Vec<Bytes>>,
 }
 
