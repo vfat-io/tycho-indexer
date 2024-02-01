@@ -5,17 +5,13 @@ use substreams_ethereum::pb::eth::v2::{self as eth};
 use substreams_helper::{common::HasAddresser, hex::Hexable};
 
 use crate::{
-    pb::tycho::evm::{
-        uniswap::v2::Pool,
-        v1::{Block, Transaction},
-    },
+    pb::tycho::evm::v1::{Block, ProtocolComponent, Transaction},
     store_key::StoreKey,
 };
 
 pub struct PoolAddresser<'a> {
-    pub store: &'a StoreGetProto<Pool>,
+    pub store: &'a StoreGetProto<ProtocolComponent>,
 }
-
 
 impl<'a> HasAddresser for PoolAddresser<'a> {
     fn has_address(&self, key: Address) -> bool {

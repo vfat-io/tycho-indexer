@@ -9,19 +9,22 @@ use substreams_helper::{event_handler::EventHandler, hex::Hexable};
 use crate::{
     abi::factory::events::PairCreated,
     pb::tycho::evm::v1::{
-        Attribute, ChangeType, FinancialType, ImplementationType, ProtocolComponent, ProtocolType,
-        SameTypeTransactionChanges, Transaction, TransactionEntityChanges,
+        Attribute, Block, BlockEntityChanges, ChangeType, FinancialType, ImplementationType,
+        ProtocolComponent, ProtocolType, Transaction, TransactionEntityChanges,
     },
 };
 
 #[substreams::handlers::map]
 pub fn map_pools_created(
     block: eth::Block,
-) -> Result<SameTypeTransactionChanges, substreams::errors::Error> {
+) -> Result<BlockEntityChanges, substreams::errors::Error> {
     let mut new_pools: Vec<TransactionEntityChanges> = vec![];
 
     get_pools(&block, &mut new_pools);
-    Ok(SameTypeTransactionChanges { changes: new_pools })
+
+    let tycho_block: Block = block.into();
+
+    Ok(BlockEntityChanges { block: Some(tycho_block), changes: new_pools })
 }
 
 fn get_pools(block: &eth::Block, new_pools: &mut Vec<TransactionEntityChanges>) {

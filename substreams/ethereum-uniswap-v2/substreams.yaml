@@ -24,7 +24,7 @@ modules:
     inputs:
       - source: sf.ethereum.type.v2.Block
     output:
-      type: proto:tycho.evm.v1.SameTypeTransactionChanges
+      type: proto:tycho.evm.v1.BlockEntityChanges
 
   - name: store_pools
     kind: store
