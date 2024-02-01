@@ -21,8 +21,8 @@ use crate::{
             versioning::apply_versioning,
             PostgresGateway,
         },
-        Address, Balance, BlockOrTimestamp, ComponentId, ContractDelta, ContractId,
-        ProtocolGateway, StorableBlock, StorableComponentBalance, StorableContract,
+        Address, Balance, BalanceDeltaKey, BlockOrTimestamp, ComponentId, ContractDelta,
+        ContractId, ProtocolGateway, StorableBlock, StorableComponentBalance, StorableContract,
         StorableProtocolComponent, StorableProtocolState, StorableProtocolStateDelta,
         StorableProtocolType, StorableToken, StorableTransaction, StorageError, StoreVal, TxHash,
         Version,
@@ -852,7 +852,7 @@ where
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<HashMap<(String, Address), Balance>, StorageError> {
+    ) -> Result<HashMap<BalanceDeltaKey, Balance>, StorageError> {
         use schema::component_balance::dsl::*;
         let chain_id = self.get_chain_id(chain);
 
@@ -879,7 +879,7 @@ where
                 .select((protocol_component_id, token_id))
                 .distinct();
 
-            let result: HashMap<(String, Address), Balance> = changed_component_balances
+            let result: HashMap<BalanceDeltaKey, Balance> = changed_component_balances
                 .inner_join(schema::transaction::table)
                 .filter(
                     valid_from.le(target_ts).and(
@@ -905,7 +905,7 @@ where
                 .await?
                 .into_iter()
                 .map(|(external_id, token_address, balance)| {
-                    ((external_id, token_address), balance)
+                    (BalanceDeltaKey(external_id, token_address), balance)
                 })
                 .collect();
             result
@@ -927,7 +927,7 @@ where
                 .select((protocol_component_id, token_id))
                 .distinct();
 
-            let result: HashMap<(String, Address), Balance> = changed_component_balances
+            let result: HashMap<BalanceDeltaKey, Balance> = changed_component_balances
                 .inner_join(schema::transaction::table)
                 .filter(valid_from.le(target_ts))
                 .filter(
@@ -952,7 +952,7 @@ where
                 .await?
                 .into_iter()
                 .map(|(external_id, token_address, balance)| {
-                    ((external_id, token_address), balance)
+                    (BalanceDeltaKey(external_id, token_address), balance)
                 })
                 .collect();
             result
@@ -1626,9 +1626,9 @@ mod test {
 
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
-        let mut expected_forward_deltas = HashMap::new();
+        let mut expected_forward_deltas: HashMap<BalanceDeltaKey, Balance> = HashMap::new();
         expected_forward_deltas.insert(
-            (protocol_external_id.clone(), token_address.clone()),
+            BalanceDeltaKey(protocol_external_id.clone(), token_address.clone()),
             Balance::from(U256::from(2000)),
         );
 
@@ -1644,9 +1644,9 @@ mod test {
             .unwrap();
         assert_eq!(result, expected_forward_deltas);
 
-        let mut expected_backward_deltas = HashMap::new();
+        let mut expected_backward_deltas: HashMap<BalanceDeltaKey, Bytes> = HashMap::new();
         expected_backward_deltas.insert(
-            (protocol_external_id.clone(), token_address.clone()),
+            BalanceDeltaKey(protocol_external_id.clone(), token_address.clone()),
             Balance::from(U256::from(1000)),
         );
 

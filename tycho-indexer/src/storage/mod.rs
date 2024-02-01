@@ -497,6 +497,9 @@ impl ContractId {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub struct BalanceDeltaKey(String, Address);
+
 impl Display for ContractId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}: 0x{}", self.chain, hex::encode(&self.address))
@@ -793,7 +796,7 @@ pub trait ProtocolGateway {
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<HashMap<(String, Address), Balance>, StorageError>;
+    ) -> Result<HashMap<BalanceDeltaKey, Balance>, StorageError>;
 
     async fn _get_or_create_protocol_system_id(
         &self,
