@@ -16,19 +16,14 @@ pub struct PoolAddresser<'a> {
     pub store: &'a StoreGetProto<Pool>,
 }
 
-impl<'a> PoolAddresser<'a> {
+
+impl<'a> HasAddresser for PoolAddresser<'a> {
     fn has_address(&self, key: Address) -> bool {
         let pool = self
             .store
             .get_last(StoreKey::Pool.get_unique_pool_key(&key.to_hex()));
 
         pool.is_some()
-    }
-}
-
-impl<'a> HasAddresser for PoolAddresser<'a> {
-    fn has_address(&self, key: Address) -> bool {
-        self.has_address(key)
     }
 }
 

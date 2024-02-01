@@ -30,7 +30,7 @@ fn get_pools(block: &eth::Block, new_pools: &mut Vec<TransactionEntityChanges>) 
         let tycho_tx: Transaction = _tx.into();
 
         new_pools.push(TransactionEntityChanges {
-            tx: Option::from(tycho_tx),
+            tx: Some(tycho_tx),
             entity_changes: vec![],
             component_changes: vec![ProtocolComponent {
                 id: event.pair.to_hex(),
@@ -45,7 +45,7 @@ fn get_pools(block: &eth::Block, new_pools: &mut Vec<TransactionEntityChanges>) 
                     },
                 ],
                 change: i32::from(ChangeType::Creation),
-                protocol_type: Option::from(ProtocolType {
+                protocol_type: Some(ProtocolType {
                     name: "UniswapV2".to_string(),
                     financial_type: FinancialType::Swap.into(),
                     attribute_schema: vec![],

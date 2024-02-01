@@ -12,7 +12,7 @@ pub fn store_pools(
     pools_created: SameTypeTransactionChanges,
     store: StoreSetIfNotExistsProto<Pool>,
 ) {
-    // Store pools. Required so the next maps can match any event to a known pool by their address
+    // Store pools. Required so the next steps can match any event to a known pool by their address
 
     for change in pools_created.changes {
         //  Use ordinal 0 because the address should be unique, so ordering doesn't matter.

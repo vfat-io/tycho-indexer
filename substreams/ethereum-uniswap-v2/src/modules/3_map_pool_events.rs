@@ -36,7 +36,7 @@ pub fn map_pool_events(
     let tycho_block: Block = block.into();
 
     let block_entity_changes =
-        BlockEntityChanges { block: Option::from(tycho_block), changes: tx_entity_changes };
+        BlockEntityChanges { block: Some(tycho_block), changes: tx_entity_changes };
 
     Ok(block_entity_changes)
 }
@@ -53,14 +53,14 @@ fn handle_sync(
     for change in &created_pairs.changes {
         let transaction = change.tx.as_ref().unwrap(); // get reference instead of value
         tx_changes_map.insert(transaction.hash.clone(), change.clone()); // clone because we're
-                                                                         // working with references
+        // working with references
     }
 
     let mut on_sync = |event: Sync, _tx: &eth::TransactionTrace, _log: &eth::Log| {
         let pool_address = _log.address.to_hex();
 
         let pool = store.must_get_last(StoreKey::Pool.get_unique_pool_key(pool_address.as_str()));
-        // Convert reserves to hex
+        // Convert reserves to bytes
         let reserve0: Vec<u8> = event.reserve0.to_signed_bytes_le();
         let reserve1: Vec<u8> = event.reserve1.to_signed_bytes_le();
 
@@ -109,7 +109,7 @@ fn handle_sync(
                 // This transaction did not create a pool
                 let tycho_tx: Transaction = _tx.into();
                 let change: TransactionEntityChanges = TransactionEntityChanges {
-                    tx: Option::from(tycho_tx),
+                    tx: Some(tycho_tx),
                     component_changes: vec![],
                     entity_changes,
                     balance_changes,
