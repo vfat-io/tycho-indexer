@@ -12,7 +12,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use async_trait::async_trait;
 
-use tycho_types::dto::{StateRequestBody, StateRequestParameters, StateRequestResponse};
+use tycho_types::dto::{Chain, StateRequestBody, StateRequestParameters, StateRequestResponse};
 
 use crate::TYCHO_SERVER_VERSION;
 
@@ -37,6 +37,7 @@ pub trait RPCClient {
     /// Retrieves a snapshot of contract state.
     async fn get_contract_state(
         &self,
+        chain: Chain,
         filters: &StateRequestParameters,
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError>;
@@ -63,6 +64,7 @@ impl RPCClient for HttpRPCClient {
     #[instrument(skip(self, filters, request))]
     async fn get_contract_state(
         &self,
+        chain: Chain,
         filters: &StateRequestParameters,
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
@@ -78,11 +80,12 @@ impl RPCClient for HttpRPCClient {
         }
 
         let uri = format!(
-            "{}/{}/contract_state?{}",
+            "{}/{}/{}/contract_state{}",
             self.uri
                 .to_string()
                 .trim_end_matches('/'),
             TYCHO_SERVER_VERSION,
+            chain,
             filters.to_query_string()
         );
         debug!(%uri, "Sending contract_state request to Tycho server");
@@ -108,7 +111,6 @@ impl RPCClient for HttpRPCClient {
         let body = hyper::body::to_bytes(response.into_body())
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
-
         let accounts: StateRequestResponse =
             serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         info!(?accounts, "Received contract_state response from Tycho server");
@@ -152,7 +154,7 @@ mod tests {
         serde_json::from_str::<StateRequestResponse>(server_resp).expect("deserialize");
 
         let mocked_server = server
-            .mock("POST", "/v1/contract_state?chain=ethereum")
+            .mock("POST", "/v1/ethereum/contract_state")
             .expect(1)
             .with_body(server_resp)
             .create_async()
@@ -161,7 +163,7 @@ mod tests {
         let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
 
         let response = client
-            .get_contract_state(&Default::default(), &Default::default())
+            .get_contract_state(Chain::Ethereum, &Default::default(), &Default::default())
             .await
             .expect("get state");
         let accounts = response.accounts;

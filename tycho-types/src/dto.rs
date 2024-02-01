@@ -362,7 +362,11 @@ impl StateRequestParameters {
             parts.push(format!("inertia_min_gt={}", inertia));
         }
 
-        parts.join("&")
+        let mut res = parts.join("&");
+        if res.len() > 0 {
+            res = format!("?{res}");
+        }
+        res
     }
 }
 
