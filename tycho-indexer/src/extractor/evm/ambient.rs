@@ -1,6 +1,10 @@
 #![allow(unused_variables)]
 
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use diesel_async::{
@@ -99,6 +103,40 @@ impl AmbientPgGateway {
         Ok(())
     }
 
+    async fn get_new_tokens(&self, protocol_components: Vec<evm::ProtocolComponent>) -> Vec<H160> {
+        let mut conn = self
+            .pool
+            .get()
+            .await
+            .expect("pool should be connected");
+
+        let mut tokens_set = HashSet::new();
+        for component in protocol_components {
+            for token in &component.tokens {
+                tokens_set.insert(*token);
+            }
+        }
+        let mut addresses = Vec::new();
+        for token in &tokens_set {
+            let byte_slice = token.as_bytes();
+            addresses.push(Bytes::from(byte_slice.to_vec()));
+        }
+
+        let address_refs: Vec<&Bytes> = addresses.iter().collect();
+        let addresses_option = Some(address_refs.as_slice());
+
+        let db_tokens = self
+            .state_gateway
+            .get_tokens(self.chain, addresses_option, &mut conn)
+            .await
+            .unwrap(); // TODO be better
+
+        for token in db_tokens {
+            tokens_set.remove(&token.address);
+        }
+        tokens_set.into_iter().collect()
+    }
+
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn forward(
         &self,
@@ -106,6 +144,11 @@ impl AmbientPgGateway {
         new_cursor: &str,
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
+        // gather all tokens from all protocol components
+        // get them all from DB and identify the new ones
+        // call TokenPreProcessor to get the token metadata
+        // insert the new tokens into the DB
+
         self.state_gateway
             .upsert_block(&changes.block)
             .await?;
@@ -121,6 +164,8 @@ impl AmbientPgGateway {
                     .insert_contract(&changes.block, &new)
                     .await?;
             }
+            // insert new protocol components
+            // insert new component balances
         }
         let collected_changes: Vec<(Bytes, AccountUpdate)> = changes
             .tx_updates
