@@ -1,0 +1,976 @@
+//! # Deltas Client
+//!
+//! This module focuses on implementing the Real-Time Deltas client for the Tycho Indexer service.
+//! Utilizing this client facilitates efficient, instant communication with the indexing service,
+//! promoting seamless data synchronization.
+//!
+//! ## Websocket Implementation
+//!
+//! The present WebSocket implementation is clonable, which enables it to be shared
+//! across multiple asynchronous tasks without creating separate instances for each task. This
+//! unique feature boosts efficiency as it:
+//!
+//! - **Reduces Server Load:** By maintaining a single universal client, the load on the server is
+//!   significantly reduced. This is because fewer connections are made to the server, preventing it
+//!   from getting overwhelmed by numerous simultaneous requests.
+//! - **Conserves Resource Usage:** A single shared client requires fewer system resources than if
+//!   multiple clients were instantiated and used separately as there is some overhead for websocket
+//!   handshakes and message.
+//!
+//! Therefore, sharing one client among multiple tasks ensures optimal performance, reduces resource
+//! consumption, and enhances overall software scalability.
+use async_trait::async_trait;
+use futures03::{stream::SplitSink, SinkExt, StreamExt};
+use hyper::Uri;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    string::ToString,
+    sync::Arc,
+};
+use thiserror::Error;
+use tokio::{
+    net::TcpStream,
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        oneshot, Mutex, Notify,
+    },
+    task::JoinHandle,
+};
+use tokio_tungstenite::{
+    connect_async, tungstenite, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
+};
+use tracing::{debug, error, info, instrument, warn};
+use tycho_types::dto::{
+    BlockAccountChanges, Command, ExtractorIdentity, Response, WebSocketMessage,
+};
+use uuid::Uuid;
+
+use crate::TYCHO_SERVER_VERSION;
+
+#[derive(Error, Debug)]
+pub enum DeltasError {
+    /// The passed tycho url failed to parse.
+    #[error("Failed to parse URI: {0}. Error: {1}")]
+    UriParsing(String, String),
+    /// Informs you about a subscription being already pending and is awaiting conformation from
+    /// the server.
+    #[error("The requested subscription is already pending")]
+    SubscriptionAlreadyPending,
+    /// Informs that an message failed to send via an internal channel or throuh the websocket
+    /// channel. This is most likely fatal and might mean that the implementation is buggy under
+    /// certain conditions.
+    #[error("{0}")]
+    TransportError(String),
+    /// The client has currently no active connection but it was accessed e.g. by calling
+    /// subscribe.
+    #[error("The client is not connected!")]
+    NotConnected,
+    /// The connect method was called while the client already had an active connection.
+    #[error("The client is already connected!")]
+    AlreadyConnected,
+    /// The connection was closed orderly by the server, e.g. because it restarted.
+    #[error("The server closed the connection!")]
+    ConnectionClosed,
+    /// The connection was closed unexpectedly by the server.
+    #[error("ConnectionError {source}")]
+    ConnectionError {
+        #[from]
+        source: tungstenite::Error,
+    },
+    /// Other fatal errors: e.g. if the underlying websockets buffer is full.
+    #[error("Tycho FatalError: {0}")]
+    Fatal(String),
+}
+
+#[async_trait]
+pub trait DeltasClient {
+    /// Subscribe to an extractor and receive realtime messages
+    ///
+    /// Will request a subscription from tycho and wait for confirmation of it. If the caller
+    /// cancels while waiting for confirmation the subscription may still be registered. If the
+    /// receiver was deallocated though, the first message from the subscription will remove it
+    /// again - since there is no one to inform about these messages.
+    async fn subscribe(
+        &self,
+        extractor_id: ExtractorIdentity,
+    ) -> Result<(Uuid, Receiver<BlockAccountChanges>), DeltasError>;
+
+    /// Unsubscribe from an subscription
+    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), DeltasError>;
+
+    /// Start the clients message handling loop.
+    async fn connect(&self) -> Result<JoinHandle<Result<(), DeltasError>>, DeltasError>;
+
+    /// Close the clients message handling loop.
+    async fn close(&self) -> Result<(), DeltasError>;
+}
+
+#[derive(Clone)]
+pub struct WsDeltasClient {
+    /// The tycho indexer websocket uri.
+    uri: Uri,
+    /// Maximum amount of reconnects to try before giving up.
+    max_reconnects: u32,
+    /// Notify tasks waiting for a connection to be established.
+    conn_notify: Arc<Notify>,
+    /// Shared client instance state.
+    inner: Arc<Mutex<Option<Inner>>>,
+}
+
+type WebSocketSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+
+/// Subscription State
+///
+/// Subscription go through a lifecycle:
+///
+/// ```text
+/// O ---> requested subscribe ----> active ----> requested unsub ---> ended
+/// ```
+///
+/// We use oneshot channels to inform the client struct about when these transition happened. E.g.
+/// because for `subscribe`` to finish, we want the state to have transition to `active` and similar
+/// for `unsubscribe`.
+#[derive(Debug)]
+enum SubscriptionInfo {
+    /// Subscription was requested we wait for server confirmation and uuid assignment.
+    RequestedSubscription(oneshot::Sender<(Uuid, Receiver<BlockAccountChanges>)>),
+    /// Subscription is active.
+    Active,
+    /// Unsubscription was requested, we wait for server confirmation.
+    RequestedUnsubscription(oneshot::Sender<()>),
+}
+
+/// Internal struct containing shared state between of WsDeltaClient instances.
+struct Inner {
+    /// Websocket sender handle.
+    sink: WebSocketSink,
+    /// Command channel sender handle.
+    cmd_tx: Sender<()>,
+    /// Currently pending subscriptions.
+    pending: HashMap<ExtractorIdentity, SubscriptionInfo>,
+    /// Active subscriptions.
+    subscriptions: HashMap<Uuid, SubscriptionInfo>,
+    /// For eachs subscription we keep a sender handle, the receiver is returned to the caller of
+    /// subscribe.
+    sender: HashMap<Uuid, Sender<BlockAccountChanges>>,
+}
+
+/// Shared state betweeen all client instances.
+///
+/// This state is behind a mutex and requires synchronisation to be read of modified.
+impl Inner {
+    fn new(cmd_tx: Sender<()>, sink: WebSocketSink) -> Self {
+        Self {
+            sink,
+            cmd_tx,
+            pending: HashMap::new(),
+            subscriptions: HashMap::new(),
+            sender: HashMap::new(),
+        }
+    }
+
+    /// Registers a new pending subscription.
+    fn new_subscription(
+        &mut self,
+        id: &ExtractorIdentity,
+        ready_tx: oneshot::Sender<(Uuid, Receiver<BlockAccountChanges>)>,
+    ) -> Result<(), DeltasError> {
+        if self.pending.contains_key(id) {
+            return Err(DeltasError::SubscriptionAlreadyPending);
+        }
+        self.pending
+            .insert(id.clone(), SubscriptionInfo::RequestedSubscription(ready_tx));
+        Ok(())
+    }
+
+    /// Transitions a pending subscription to active.
+    ///
+    /// Will ignore any request to do so for subscriptions that are not pending.
+    fn mark_active(&mut self, extractor_id: &ExtractorIdentity, subscription_id: Uuid) {
+        if let Some(info) = self.pending.remove(extractor_id) {
+            if let SubscriptionInfo::RequestedSubscription(ready_tx) = info {
+                let (tx, rx) = mpsc::channel(1);
+                self.sender.insert(subscription_id, tx);
+                self.subscriptions
+                    .insert(subscription_id, SubscriptionInfo::Active);
+                let _ = ready_tx
+                    .send((subscription_id, rx))
+                    .map_err(|_| {
+                        warn!(
+                            ?extractor_id,
+                            ?subscription_id,
+                            "Subscriber for has gone away. Ignoring."
+                        )
+                    });
+            } else {
+                error!(
+                    ?extractor_id,
+                    ?subscription_id,
+                    "Pending subscription was not in the correct state to 
+                    transition to active. Ignoring!"
+                )
+            }
+        } else {
+            error!(
+                ?extractor_id,
+                ?subscription_id,
+                "Tried to mark an unkown subscription as active. Ignoring!"
+            );
+        }
+    }
+
+    /// Sends a message to a subscriptions receiver.
+    async fn send(&mut self, id: &Uuid, msg: BlockAccountChanges) -> Result<(), DeltasError> {
+        if let Some(sender) = self.sender.get_mut(id) {
+            sender
+                .send(msg)
+                .await
+                .map_err(|e| DeltasError::TransportError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Requests a subscription to end.
+    ///
+    /// The subsription needs to exist and be active for this to have any effect. Wll use `ready_tx`
+    /// to notify the receiver once the transition to ended completed.
+    fn end_subscription(&mut self, subscription_id: &Uuid, ready_tx: oneshot::Sender<()>) {
+        if let Some(info) = self
+            .subscriptions
+            .get_mut(subscription_id)
+        {
+            if let SubscriptionInfo::Active = info {
+                *info = SubscriptionInfo::RequestedUnsubscription(ready_tx);
+            }
+        } else {
+            // no big deal imo so only debug lvl..
+            debug!(?subscription_id, "Tried unsubscribing from a non existent subscription");
+        }
+    }
+
+    /// Removes and fully ends a subscription
+    ///
+    /// Any calls for non existing subscriptions will be simply ignored. May panic on internal state
+    /// inconsistencies: e.g. if the subscription exists but there is no sender for it.
+    /// Will remove a subscription even it was in active or pending state before, this is to support
+    /// any server side failure of the subscription.
+    fn remove_subscription(&mut self, subscription_id: Uuid) {
+        if let Entry::Occupied(e) = self
+            .subscriptions
+            .entry(subscription_id)
+        {
+            let info = e.remove();
+            if let SubscriptionInfo::RequestedUnsubscription(tx) = info {
+                let _ = tx.send(()).map_err(|_| {
+                    warn!(?subscription_id, "failed to notify about removed subscription")
+                });
+                self.sender
+                    .remove(&subscription_id)
+                    .expect(
+                        "Inconsistent internal client state: `sender` state 
+                        drifted from `info` while removing a subscription.",
+                    );
+            } else {
+                warn!(?subscription_id, "Subscription ended unexpectedly!");
+                self.sender
+                    .remove(&subscription_id)
+                    .expect("sender channel missing");
+            }
+        } else {
+            error!(
+                ?subscription_id,
+                "Received `SubscriptionEnded`, but was never subscribed 
+                to it. This is likely a bug!"
+            );
+        }
+    }
+
+    /// Sends a message through the websocket.
+    async fn ws_send(&mut self, msg: Message) -> Result<(), DeltasError> {
+        self.sink.send(msg).await.map_err(|e| {
+            DeltasError::TransportError(format!("Failed to send message to websocket: {e}"))
+        })
+    }
+}
+
+/// Tycho client websocket implementation.
+impl WsDeltasClient {
+    // Construct a new client with 5 reconnection attempts.
+    pub fn new(ws_uri: &str) -> Result<Self, DeltasError> {
+        let uri = ws_uri
+            .parse::<Uri>()
+            .map_err(|e| DeltasError::UriParsing(ws_uri.to_string(), e.to_string()))?;
+
+        Ok(Self {
+            uri,
+            inner: Arc::new(Mutex::new(None)),
+            conn_notify: Arc::new(Notify::new()),
+            max_reconnects: 5,
+        })
+    }
+
+    // Construct a new client with a custom number of reconnection attempts.
+    pub fn new_with_reconnects(ws_uri: &str, max_reconnects: u32) -> Result<Self, DeltasError> {
+        let uri = ws_uri
+            .parse::<Uri>()
+            .map_err(|e| DeltasError::UriParsing(ws_uri.to_string(), e.to_string()))?;
+
+        Ok(Self {
+            uri,
+            inner: Arc::new(Mutex::new(None)),
+            conn_notify: Arc::new(Notify::new()),
+            max_reconnects,
+        })
+    }
+
+    /// Ensures that the client is connected.
+    ///
+    /// This method will acquire the lock for inner.
+    async fn is_connected(&self) -> bool {
+        let guard = self.inner.as_ref().lock().await;
+        guard.is_some()
+    }
+
+    /// Waits for the client to be connected
+    ///
+    /// This method acquires the lock for inner for a short period, then waits until the  
+    /// connection is established if not already connected.
+    async fn ensure_connection(&self) {
+        if !self.is_connected().await {
+            self.conn_notify.notified().await;
+        }
+    }
+
+    /// Main message handling logic
+    ///
+    /// If the message returns an error, a reconnect attempt may be considered depending on the
+    /// error type.
+    #[instrument(skip(self))]
+    async fn handle_msg(
+        &self,
+        msg: Result<Message, tokio_tungstenite::tungstenite::error::Error>,
+    ) -> Result<(), DeltasError> {
+        let mut guard = self.inner.lock().await;
+
+        match msg {
+            Ok(Message::Text(text)) => match serde_json::from_str::<WebSocketMessage>(&text) {
+                Ok(WebSocketMessage::BlockAccountChanges { subscription_id, data }) => {
+                    info!(?data, "Received a block state change, sending to channel");
+                    let inner = guard
+                        .as_mut()
+                        .ok_or_else(|| DeltasError::NotConnected)?;
+                    if inner
+                        .send(&subscription_id, data)
+                        .await
+                        .is_err()
+                    {
+                        warn!(?subscription_id, "Receiver for has gone away, unsubscribing!");
+                        let (tx, _) = oneshot::channel();
+                        let _ = WsDeltasClient::unsubscribe_inner(inner, subscription_id, tx).await;
+                    }
+                }
+                Ok(WebSocketMessage::Response(Response::NewSubscription {
+                    extractor_id,
+                    subscription_id,
+                })) => {
+                    info!(?extractor_id, ?subscription_id, "Received a new subscription");
+                    let inner = guard
+                        .as_mut()
+                        .ok_or_else(|| DeltasError::NotConnected)?;
+                    inner.mark_active(&extractor_id, subscription_id);
+                }
+                Ok(WebSocketMessage::Response(Response::SubscriptionEnded { subscription_id })) => {
+                    info!(?subscription_id, "Received a subscription ended");
+
+                    let inner = guard
+                        .as_mut()
+                        .ok_or_else(|| DeltasError::NotConnected)?;
+                    inner.remove_subscription(subscription_id);
+                }
+                Err(e) => {
+                    error!(error = %e, message=text, "Failed to deserialize message");
+                }
+            },
+            Ok(Message::Ping(_)) => {
+                // Respond to pings with pongs.
+                let inner = guard
+                    .as_mut()
+                    .ok_or_else(|| DeltasError::NotConnected)?;
+                if let Err(error) = inner
+                    .ws_send(Message::Pong(Vec::new()))
+                    .await
+                {
+                    debug!(?error, "Failed to send pong!");
+                }
+            }
+            Ok(Message::Pong(_)) => {
+                // Do nothing.
+            }
+            Ok(Message::Close(_)) => {
+                return Err(DeltasError::ConnectionClosed);
+            }
+            Ok(unknown_msg) => {
+                info!("Received an unknown message type: {:?}", unknown_msg);
+            }
+            Err(error) => {
+                error!(?error, "Websocket error");
+                return Err(match &error {
+                    tungstenite::Error::ConnectionClosed => DeltasError::from(error),
+                    tungstenite::Error::AlreadyClosed => {
+                        warn!("Received AlreadyClosed error which is indicative of a bug!");
+                        DeltasError::from(error)
+                    }
+                    tungstenite::Error::Io(_) => DeltasError::from(error),
+                    tungstenite::Error::Protocol(_) => DeltasError::from(error),
+                    _ => DeltasError::Fatal(error.to_string()),
+                })
+            }
+        };
+        Ok(())
+    }
+
+    /// Helper method to force request a unsubscribe of a subscription
+    ///
+    /// This method expects to receive a mutable reference to `Inner` so it does not acquire a
+    /// lock. Used for normal unsubscribes as well to remove any subscriptions with deallocated
+    /// receivers.
+    async fn unsubscribe_inner(
+        inner: &mut Inner,
+        subscription_id: Uuid,
+        ready_tx: oneshot::Sender<()>,
+    ) -> Result<(), DeltasError> {
+        inner.end_subscription(&subscription_id, ready_tx);
+        let cmd = Command::Unsubscribe { subscription_id };
+        inner
+            .ws_send(Message::Text(
+                serde_json::to_string(&cmd).expect("serialize cmd encode error"),
+            ))
+            .await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl DeltasClient for WsDeltasClient {
+    #[instrument(skip(self))]
+    async fn subscribe(
+        &self,
+        extractor_id: ExtractorIdentity,
+    ) -> Result<(Uuid, Receiver<BlockAccountChanges>), DeltasError> {
+        self.ensure_connection().await;
+        let (ready_tx, ready_rx) = oneshot::channel();
+        {
+            let mut guard = self.inner.lock().await;
+            let inner = guard
+                .as_mut()
+                .expect("ws not connected");
+
+            inner.new_subscription(&extractor_id, ready_tx)?;
+            let cmd = Command::Subscribe { extractor_id };
+            inner
+                .ws_send(Message::Text(
+                    serde_json::to_string(&cmd).expect("serialize cmd encode error"),
+                ))
+                .await?;
+        }
+        let rx = ready_rx
+            .await
+            .expect("ready channel closed");
+
+        Ok(rx)
+    }
+
+    #[instrument(skip(self))]
+    async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), DeltasError> {
+        self.ensure_connection().await;
+        let (ready_tx, ready_rx) = oneshot::channel();
+        {
+            let mut guard = self.inner.lock().await;
+            let inner = guard
+                .as_mut()
+                .expect("ws not connected");
+
+            WsDeltasClient::unsubscribe_inner(inner, subscription_id, ready_tx).await?;
+        }
+        ready_rx
+            .await
+            .expect("ready channel closed");
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn connect(&self) -> Result<JoinHandle<Result<(), DeltasError>>, DeltasError> {
+        if self.is_connected().await {
+            return Err(DeltasError::AlreadyConnected);
+        }
+        let ws_uri = format!("{}{}/ws", self.uri, TYCHO_SERVER_VERSION);
+        info!(?ws_uri, "Starting TychoWebsocketClient");
+
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(30);
+        let (conn, _) = connect_async(&ws_uri).await?;
+        let (ws_tx, ws_rx) = conn.split();
+        let mut ws_rx = Some(ws_rx);
+        {
+            let mut guard = self.inner.as_ref().lock().await;
+            *guard = Some(Inner::new(cmd_tx.clone(), ws_tx));
+        }
+        let this = self.clone();
+        let jh = tokio::spawn(async move {
+            let mut retry_count = 0;
+            'retry: while retry_count < this.max_reconnects {
+                info!(?ws_uri, "Connecting to WebSocket server");
+
+                let mut msg_rx = if let Some(stream) = ws_rx.take() {
+                    stream.boxed()
+                } else {
+                    let (conn, _) = connect_async(&ws_uri).await?;
+                    let (ws_tx_new, ws_rx_new) = conn.split();
+                    let mut guard = this.inner.as_ref().lock().await;
+                    *guard = Some(Inner::new(cmd_tx.clone(), ws_tx_new));
+                    ws_rx_new.boxed()
+                };
+
+                this.conn_notify.notify_waiters();
+
+                loop {
+                    let res = tokio::select! {
+                        Some(msg) = msg_rx.next() => this.handle_msg(msg).await,
+                        _ = cmd_rx.recv() => {break 'retry},
+                    };
+                    if let Err(error) = res {
+                        if matches!(
+                            error,
+                            DeltasError::ConnectionClosed | DeltasError::ConnectionError { .. }
+                        ) {
+                            // Prepare for reconnection
+                            retry_count += 1;
+                            let mut guard = this.inner.as_ref().lock().await;
+                            *guard = None;
+
+                            warn!(
+                                ?error,
+                                ?retry_count,
+                                "Connection dropped unexpectedly; Reconnecting"
+                            );
+                            break
+                        } else {
+                            // Other errors are considered fatal
+                            break 'retry;
+                        }
+                    }
+                }
+            }
+            // clean up before exiting
+            let mut guard = this.inner.as_ref().lock().await;
+            *guard = None;
+
+            Ok(())
+        });
+        self.conn_notify.notified().await;
+        Ok(jh)
+    }
+
+    #[instrument(skip(self))]
+    async fn close(&self) -> Result<(), DeltasError> {
+        let mut guard = self.inner.lock().await;
+        let inner = guard
+            .as_mut()
+            .ok_or_else(|| DeltasError::NotConnected)?;
+        inner
+            .cmd_tx
+            .send(())
+            .await
+            .map_err(|e| DeltasError::TransportError(e.to_string()))?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tycho_types::dto::Chain;
+
+    use super::*;
+
+    use std::{net::SocketAddr, time::Duration};
+    use tokio::{
+        net::TcpListener,
+        time::{sleep, timeout},
+    };
+
+    #[derive(Clone)]
+    enum ExpectedComm {
+        Receive(u64, Message),
+        Send(Message),
+    }
+
+    async fn mock_tycho_ws(
+        messages: &[ExpectedComm],
+        reconnects: usize,
+    ) -> (SocketAddr, JoinHandle<()>) {
+        // zero port here means the OS chooses an open port
+        let server = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("localhost bind failed");
+        let addr = server.local_addr().unwrap();
+        let messages = messages.to_vec();
+
+        let jh = tokio::spawn(async move {
+            for _ in 0..(reconnects + 1) {
+                if let Ok((stream, _)) = server.accept().await {
+                    let mut websocket = tokio_tungstenite::accept_async(stream)
+                        .await
+                        .unwrap();
+
+                    for c in messages.iter().cloned() {
+                        match c {
+                            ExpectedComm::Receive(t, exp) => {
+                                let msg = timeout(Duration::from_millis(t), websocket.next())
+                                    .await
+                                    .expect("Receive timeout")
+                                    .expect("Stream exhausted")
+                                    .expect("Failed to receive message.");
+
+                                assert_eq!(msg, exp)
+                            }
+                            ExpectedComm::Send(data) => websocket
+                                .send(data)
+                                .await
+                                .expect("Failed to send message"),
+                        };
+                    }
+                    sleep(Duration::from_millis(100)).await;
+                    // Close the WebSocket connection
+                    let _ = websocket.close(None).await;
+                }
+            }
+        });
+        (addr, jh)
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_receive() {
+        let exp_comm = [
+            ExpectedComm::Receive(100, Message::Text(r#"
+                {
+                    "method":"subscribe",
+                    "extractor_id":{
+                    "chain":"ethereum",
+                    "name":"vm:ambient"
+                    }
+                }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
+            )),
+            ExpectedComm::Send(Message::Text(r#"
+                {
+                    "method":"newsubscription",
+                    "extractor_id":{
+                    "chain":"ethereum",
+                    "name":"vm:ambient"
+                    },
+                    "subscription_id":"30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
+            )),
+            ExpectedComm::Send(Message::Text(r#"
+                {
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
+                    "data": {
+                        "extractor": "vm:ambient",
+                        "chain": "ethereum",
+                        "block": {
+                            "number": 123,
+                            "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                            "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                            "chain": "ethereum",             
+                            "ts": "2023-09-14T00:00:00"
+                        },
+                        "account_updates": {
+                            "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                                "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                                "chain": "ethereum",
+                                "slots": {},
+                                "balance": "0x01f4",
+                                "code": "",
+                                "change": "Update"
+                            }
+                        }
+                    }
+                }
+                "#.to_owned()
+            ))
+        ];
+        let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
+
+        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
+        let jh = client
+            .connect()
+            .await
+            .expect("connect failed");
+        let (_, mut rx) = timeout(
+            Duration::from_millis(100),
+            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+        )
+        .await
+        .expect("subscription timed out")
+        .expect("subscription failed");
+        let _ = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("awaiting message timeout out")
+            .expect("receiving message failed");
+        timeout(Duration::from_millis(100), client.close())
+            .await
+            .expect("close timed out")
+            .expect("close failed");
+        jh.await
+            .expect("ws loop errored")
+            .unwrap();
+        server_thread.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_unsubscribe() {
+        let exp_comm = [
+            ExpectedComm::Receive(
+                100,
+                Message::Text(
+                    r#"
+                {
+                    "method": "subscribe",
+                    "extractor_id":{
+                        "chain": "ethereum",
+                        "name": "vm:ambient"
+                    }
+                }"#
+                    .to_owned()
+                    .replace(|c: char| c.is_whitespace(), ""),
+                ),
+            ),
+            ExpectedComm::Send(Message::Text(
+                r#"
+                {
+                    "method": "newsubscription",
+                    "extractor_id":{
+                        "chain": "ethereum",
+                        "name": "vm:ambient"
+                    },
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }"#
+                .to_owned()
+                .replace(|c: char| c.is_whitespace(), ""),
+            )),
+            ExpectedComm::Receive(
+                100,
+                Message::Text(
+                    r#"
+                {
+                    "method": "unsubscribe",
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }
+                "#
+                    .to_owned()
+                    .replace(|c: char| c.is_whitespace(), ""),
+                ),
+            ),
+            ExpectedComm::Send(Message::Text(
+                r#"
+                {
+                    "method": "subscriptionended",
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }
+                "#
+                .to_owned()
+                .replace(|c: char| c.is_whitespace(), ""),
+            )),
+        ];
+        let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
+
+        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
+        let jh = client
+            .connect()
+            .await
+            .expect("connect failed");
+        let (sub_id, mut rx) = timeout(
+            Duration::from_millis(100),
+            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+        )
+        .await
+        .expect("subscription timed out")
+        .expect("subscription failed");
+
+        timeout(Duration::from_millis(100), client.unsubscribe(sub_id))
+            .await
+            .expect("unsubscribe timed out")
+            .expect("unsubscribe failed");
+        let res = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("awaiting message timeout out");
+
+        // If the subscription ended, the channel should have been closed.
+        assert!(res.is_none());
+
+        timeout(Duration::from_millis(100), client.close())
+            .await
+            .expect("close timed out")
+            .expect("close failed");
+        jh.await
+            .expect("ws loop errored")
+            .unwrap();
+        server_thread.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_subscription_unexpected_end() {
+        let exp_comm = [
+            ExpectedComm::Receive(
+                100,
+                Message::Text(
+                    r#"
+                {
+                    "method":"subscribe",
+                    "extractor_id":{
+                    "chain":"ethereum",
+                    "name":"vm:ambient"
+                    }
+                }"#
+                    .to_owned()
+                    .replace(|c: char| c.is_whitespace(), ""),
+                ),
+            ),
+            ExpectedComm::Send(Message::Text(
+                r#"
+                {
+                    "method":"newsubscription",
+                    "extractor_id":{
+                        "chain":"ethereum",
+                        "name":"vm:ambient"
+                    },
+                    "subscription_id":"30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }"#
+                .to_owned()
+                .replace(|c: char| c.is_whitespace(), ""),
+            )),
+            ExpectedComm::Send(Message::Text(
+                r#"
+                {
+                    "method": "subscriptionended",
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }"#
+                .to_owned()
+                .replace(|c: char| c.is_whitespace(), ""),
+            )),
+        ];
+        let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
+
+        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
+        let jh = client
+            .connect()
+            .await
+            .expect("connect failed");
+        let (_, mut rx) = timeout(
+            Duration::from_millis(100),
+            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+        )
+        .await
+        .expect("subscription timed out")
+        .expect("subscription failed");
+        let res = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("awaiting message timeout out");
+
+        // If the subscription ended, the channel should have been closed.
+        assert!(res.is_none());
+
+        timeout(Duration::from_millis(100), client.close())
+            .await
+            .expect("close timed out")
+            .expect("close failed");
+        jh.await
+            .expect("ws loop errored")
+            .unwrap();
+        server_thread.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_reconnect() {
+        let exp_comm = [
+            ExpectedComm::Receive(100, Message::Text(r#"
+                {
+                    "method":"subscribe",
+                    "extractor_id":{
+                    "chain":"ethereum",
+                    "name":"vm:ambient"
+                    }
+                }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
+            )),
+            ExpectedComm::Send(Message::Text(r#"
+                {
+                    "method":"newsubscription",
+                    "extractor_id":{
+                    "chain":"ethereum",
+                    "name":"vm:ambient"
+                    },
+                    "subscription_id":"30b740d1-cf09-4e0e-8cfe-b1434d447ece"
+                }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
+            )),
+            ExpectedComm::Send(Message::Text(r#"
+                {
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
+                    "data": {
+                        "extractor": "vm:ambient",
+                        "chain": "ethereum",
+                        "block": {
+                            "number": 123,
+                            "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                            "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                            "chain": "ethereum",             
+                            "ts": "2023-09-14T00:00:00"
+                        },
+                        "account_updates": {
+                            "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                                "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                                "chain": "ethereum",
+                                "slots": {},
+                                "balance": "0x01f4",
+                                "code": "",
+                                "change": "Update"
+                            }
+                        }
+                    }
+                }
+                "#.to_owned()
+            ))
+        ];
+        let (addr, server_thread) = mock_tycho_ws(&exp_comm, 1).await;
+        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
+        let jh: JoinHandle<Result<(), DeltasError>> = client
+            .connect()
+            .await
+            .expect("connect failed");
+
+        for _ in 0..2 {
+            let (_, mut rx) = timeout(
+                Duration::from_millis(100),
+                client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+            )
+            .await
+            .expect("subscription timed out")
+            .expect("subscription failed");
+
+            let _ = timeout(Duration::from_millis(100), rx.recv())
+                .await
+                .expect("awaiting message timeout out")
+                .expect("receiving message failed");
+
+            // wait for the connection to drop
+            let res = timeout(Duration::from_millis(200), rx.recv())
+                .await
+                .expect("awaiting closed connection timeout out");
+            assert!(res.is_none());
+        }
+        let res = jh.await.expect("ws client join failed");
+        // 3rd client reconnect attempt should fail
+        assert!(res.is_err());
+        server_thread
+            .await
+            .expect("ws server loop errored");
+    }
+}

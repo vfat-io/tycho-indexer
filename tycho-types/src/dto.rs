@@ -76,7 +76,7 @@ pub enum Response {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum WebSocketMessage {
-    BlockAccountChanges(BlockAccountChanges),
+    BlockAccountChanges { subscription_id: Uuid, data: BlockAccountChanges },
     Response(Response),
 }
 
@@ -362,7 +362,11 @@ impl StateRequestParameters {
             parts.push(format!("inertia_min_gt={}", inertia));
         }
 
-        parts.join("&")
+        let mut res = parts.join("&");
+        if !res.is_empty() {
+            res = format!("?{res}");
+        }
+        res
     }
 }
 
