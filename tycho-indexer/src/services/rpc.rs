@@ -90,8 +90,8 @@ impl From<evm::ProtocolComponent> for ResponseProtocolComponent {
             tokens: protocol_component
                 .tokens
                 .into_iter()
-                .map(|h| {
-                    let bytes = h.as_bytes().to_vec();
+                .map(|token| {
+                    let bytes = token.as_bytes().to_vec();
                     Bytes::from(bytes)
                 })
                 .collect(),
