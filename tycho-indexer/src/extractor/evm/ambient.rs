@@ -103,7 +103,10 @@ impl AmbientPgGateway {
         Ok(())
     }
 
-    async fn get_new_tokens(&self, protocol_components: Vec<evm::ProtocolComponent>) -> Vec<H160> {
+    async fn get_new_tokens(
+        &self,
+        protocol_components: Vec<evm::ProtocolComponent>,
+    ) -> Result<Vec<H160>, StorageError> {
         let mut conn = self
             .pool
             .get()
@@ -128,13 +131,12 @@ impl AmbientPgGateway {
         let db_tokens = self
             .state_gateway
             .get_tokens(self.chain, addresses_option, &mut conn)
-            .await
-            .unwrap(); // TODO be better
+            .await?;
 
         for token in db_tokens {
             tokens_set.remove(&token.address);
         }
-        tokens_set.into_iter().collect()
+        Ok(tokens_set.into_iter().collect())
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
@@ -144,9 +146,12 @@ impl AmbientPgGateway {
         new_cursor: &str,
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
-        // gather all tokens from all protocol components
-        // get them all from DB and identify the new ones
-        // call TokenPreProcessor to get the token metadata
+
+        let new_tokens = self
+            .get_new_tokens(changes.protocol_components.clone())
+            .await?;
+
+        // TODO: call TokenPreProcessor to get the token metadata
         // insert the new tokens into the DB
 
         self.state_gateway
@@ -647,7 +652,7 @@ mod test_serial_db {
     //! between this component and the actual db interactions
     use crate::storage::{
         postgres,
-        postgres::{testing::run_against_db, PostgresGateway},
+        postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
         ChangeType, ContractId,
     };
     use ethers::types::U256;
@@ -944,6 +949,83 @@ mod test_serial_db {
             assert_eq!(account, exp_account);
             // Assert no error happened
             assert_eq!(maybe_err, Empty);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_get_new_tokens() {
+        run_against_db(|pool| async move {
+            let mut conn = pool
+                .get()
+                .await
+                .expect("pool should get a connection");
+            let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
+
+            let evm_gw = Arc::new(
+                PostgresGateway::<
+                    evm::Block,
+                    evm::Transaction,
+                    evm::Account,
+                    evm::AccountUpdate,
+                    evm::ERC20Token,
+                >::from_connection(&mut conn)
+                .await,
+            );
+            let (tx, rx) = channel(10);
+            let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
+            let gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool.clone(), cached_gw);
+
+            let weth_address: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+            let usdc_address: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+            let usdt_address: &str = "dAC17F958D2ee523a2206206994597C13D831ec7";
+            db_fixtures::insert_token(&mut conn, chain_id, weth_address, "WETH", 18).await;
+            db_fixtures::insert_token(&mut conn, chain_id, usdc_address, "USDC", 6).await;
+
+            let component_1 = evm::ProtocolComponent {
+                id: "ambient_USDC_WETH".to_owned(),
+                protocol_system: "ambient".to_string(),
+                protocol_type_name: "vm:pool".to_string(),
+                chain: Default::default(),
+                tokens: vec![
+                    H160::from_str(weth_address).expect("Invalid H160 address"),
+                    H160::from_str(usdc_address).expect("Invalid H160 address"),
+                ],
+                contract_ids: vec![],
+                creation_tx: Default::default(),
+                static_attributes: Default::default(),
+                created_at: Default::default(),
+                change: Default::default(),
+            };
+            let component_2 = evm::ProtocolComponent {
+                id: "ambient_USDT_WETH".to_owned(),
+                protocol_system: "ambient".to_string(),
+                protocol_type_name: "vm:pool".to_string(),
+                chain: Default::default(),
+                tokens: vec![
+                    H160::from_str(weth_address).expect("Invalid H160 address"),
+                    H160::from_str(usdt_address).expect("Invalid H160 address"),
+                ],
+                contract_ids: vec![],
+                creation_tx: Default::default(),
+                static_attributes: Default::default(),
+                created_at: Default::default(),
+                change: Default::default(),
+            };
+            // get no new tokens
+            let new_tokens = gw
+                .get_new_tokens(vec![component_1.clone()])
+                .await
+                .unwrap();
+            assert_eq!(new_tokens.len(), 0);
+
+            // get one new token
+            let new_tokens = gw
+                .get_new_tokens(vec![component_1, component_2])
+                .await
+                .unwrap();
+            assert_eq!(new_tokens.len(), 1);
+            assert_eq!(new_tokens[0], H160::from_str(usdt_address).expect("Invalid H160 address"));
         })
         .await;
     }
