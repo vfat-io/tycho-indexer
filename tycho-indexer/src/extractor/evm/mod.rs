@@ -15,7 +15,7 @@ use tracing::warn;
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
-    models::{Chain, ExtractorIdentity, NormalisedMessage},
+    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolType},
     pb::tycho::evm::v1 as substreams,
     storage::{Address, AttrStoreKey, ChangeType, ComponentId, StateGatewayType, StoreVal},
 };
@@ -527,7 +527,7 @@ impl ProtocolComponent {
         msg: substreams::ProtocolComponent,
         chain: Chain,
         protocol_system: &str,
-        protocol_type_names: Vec<String>,
+        protocol_types: &HashMap<String, ProtocolType>,
         tx_hash: H256,
         creation_ts: NaiveDateTime,
     ) -> Result<Self, ExtractionError> {
@@ -557,8 +557,7 @@ impl ProtocolComponent {
             .clone()
             .ok_or(ExtractionError::DecodeError("Missing protocol type".to_owned()))?;
 
-        // Raise error if protocol_type.name is not in protocol_type_names
-        if !protocol_type_names.contains(&protocol_type.name) {
+        if !protocol_types.contains_key(&protocol_type.name) {
             return Err(ExtractionError::DecodeError(format!(
                 "Unknown protocol type name: {}",
                 protocol_type.name
@@ -614,7 +613,7 @@ impl BlockContractChanges {
         extractor: &str,
         chain: Chain,
         protocol_system: String,
-        protocol_type_names: Vec<String>,
+        protocol_types: &HashMap<String, ProtocolType>,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
@@ -633,7 +632,7 @@ impl BlockContractChanges {
                             component_msg,
                             chain,
                             &protocol_system,
-                            protocol_type_names.clone(),
+                            protocol_types,
                             tx.hash,
                             block.ts,
                         )?;
@@ -899,7 +898,7 @@ impl BlockEntityChanges {
         extractor: &str,
         chain: Chain,
         protocol_system: String,
-        protocol_type_names: Vec<String>,
+        protocol_types: &HashMap<String, ProtocolType>,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
@@ -918,7 +917,7 @@ impl BlockEntityChanges {
                             component,
                             chain,
                             &protocol_system,
-                            protocol_type_names.clone(),
+                            protocol_types,
                             tx.hash,
                             block.ts,
                         )?;
@@ -1543,7 +1542,7 @@ mod test {
             "test",
             Chain::Ethereum,
             "ambient".to_string(),
-            vec!["WeightedPool".to_string()],
+            &HashMap::from([("WeightedPool".to_string(), ProtocolType::default())]),
         )
         .unwrap();
         assert_eq!(res, block_state_changes());
@@ -1920,7 +1919,10 @@ mod test {
             "test",
             Chain::Ethereum,
             "ambient".to_string(),
-            vec!["Pool".to_string(), "WeightedPool".to_string()],
+            &HashMap::from([
+                ("Pool".to_string(), ProtocolType::default()),
+                ("WeightedPool".to_string(), ProtocolType::default()),
+            ]),
         )
         .unwrap();
         assert_eq!(res, block_entity_changes());
@@ -2058,14 +2060,15 @@ mod test {
         .collect();
 
         let protocol_type_id = "WeightedPool".to_string();
-        let protocol_type_names: Vec<String> = vec![protocol_type_id.clone()];
+        let protocol_types: HashMap<String, ProtocolType> =
+            HashMap::from([(protocol_type_id.clone(), ProtocolType::default())]);
 
         // Call the try_from_message method
         let result = ProtocolComponent::try_from_message(
             msg,
             expected_chain,
             &expected_protocol_system,
-            protocol_type_names,
+            &protocol_types,
             H256::from_str("0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac")
                 .unwrap(),
             Default::default(),

@@ -168,7 +168,7 @@ async fn start_ambient_extractor(
     let ambient_name = "vm:ambient";
     let ambient_gw = AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, cached_gw);
     let ambient_protocol_types = [(
-        "vm:pool".to_string(),
+        "ambient_pool".to_string(),
         ProtocolType::new(
             "ambient_pool".to_string(),
             FinancialType::Swap,
