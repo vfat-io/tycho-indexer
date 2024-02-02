@@ -15,7 +15,8 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use tycho_types::dto::{
-    BlockParam, ResponseAccount, ResponseToken, StateRequestBody, StateRequestResponse,
+    BlockParam, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ResponseAccount,
+    ResponseProtocolComponent, ResponseToken, StateRequestBody, StateRequestResponse,
     TokensRequestBody, TokensRequestResponse, VersionParam,
 };
 
@@ -81,7 +82,7 @@ impl ServicesBuilder {
     ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
         #[derive(OpenApi)]
         #[openapi(
-            paths(rpc::contract_state, rpc::tokens),
+            paths(rpc::contract_state, rpc::tokens, rpc::protocol_components),
             components(
                 schemas(VersionParam),
                 schemas(BlockParam),
@@ -93,6 +94,9 @@ impl ServicesBuilder {
                 schemas(TokensRequestBody),
                 schemas(TokensRequestResponse),
                 schemas(ResponseToken),
+                schemas(ProtocolComponentsRequestBody),
+                schemas(ProtocolComponentRequestResponse),
+                schemas(ResponseProtocolComponent),
             )
         )]
         struct ApiDoc;
@@ -111,6 +115,13 @@ impl ServicesBuilder {
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/tokens", self.prefix))
                         .route(web::post().to(rpc::tokens)),
+                )
+                .service(
+                    web::resource(format!(
+                        "/{}/{{execution_env}}/protocol_components",
+                        self.prefix
+                    ))
+                    .route(web::post().to(rpc::protocol_components)),
                 )
                 .app_data(ws_data.clone())
                 .service(
