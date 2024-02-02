@@ -298,7 +298,7 @@ impl RpcHandler {
                     .collect(),
             )),
             Err(err) => {
-                error!(error = %err, "Error while getting tokens.");
+                error!(error = %err, "Error while getting protocol components.");
                 Err(err.into())
             }
         }
