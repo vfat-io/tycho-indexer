@@ -868,25 +868,20 @@ where
             // -----------------|--------------------------|
             //                start                     target
             // We query for balance updates between start and target version.
-            let changed_component_balances = component_balance
+            component_balance
                 .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
+                .inner_join(schema::transaction::table)
+                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .filter(
                     schema::chain::id
                         .eq(chain_id)
                         .and(valid_from.gt(start_ts))
-                        .and(valid_from.le(target_ts)),
-                )
-                .select((protocol_component_id, token_id))
-                .distinct();
-
-            changed_component_balances
-                .inner_join(schema::transaction::table)
-                .filter(
-                    valid_from.le(target_ts).and(
-                        valid_to
-                            .gt(target_ts)
-                            .or(valid_to.is_null()),
-                    ),
+                        .and(valid_from.le(target_ts))
+                        .and(
+                            valid_to
+                                .gt(target_ts)
+                                .or(valid_to.is_null()),
+                        ),
                 )
                 .order_by((
                     protocol_component_id,
@@ -895,7 +890,6 @@ where
                     schema::transaction::index.desc(),
                 ))
                 .distinct_on((protocol_component_id, token_id))
-                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .select((
                     schema::protocol_component::external_id,
                     schema::account::address,
@@ -919,24 +913,20 @@ where
             //                target                     start
             // We query for the previous values of all (protocol_component, token) pairs updated
             // between start and target version.
-            let changed_component_balances = component_balance
+            component_balance
                 .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
+                .inner_join(schema::transaction::table)
+                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .filter(
                     schema::chain::id
                         .eq(chain_id)
                         .and(valid_from.ge(target_ts))
-                        .and(valid_from.lt(start_ts)),
-                )
-                .select((protocol_component_id, token_id))
-                .distinct();
-
-            changed_component_balances
-                .inner_join(schema::transaction::table)
-                .filter(valid_from.le(target_ts))
-                .filter(
-                    valid_to
-                        .gt(target_ts)
-                        .or(valid_to.is_null()),
+                        .and(valid_from.lt(start_ts))
+                        .and(
+                            valid_to
+                                .gt(target_ts)
+                                .or(valid_to.is_null()),
+                        ),
                 )
                 .order_by((
                     protocol_component_id,
@@ -945,7 +935,6 @@ where
                     schema::transaction::index.asc(),
                 ))
                 .distinct_on((protocol_component_id, token_id))
-                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .select((
                     schema::protocol_component::external_id,
                     schema::account::address,
