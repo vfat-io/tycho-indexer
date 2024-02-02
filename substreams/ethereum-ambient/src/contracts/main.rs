@@ -146,7 +146,7 @@ pub fn decode_pool_init(call: &Call) -> Result<Option<ProtocolComponent>, anyhow
                     static_att: vec![static_attribute],
                     change: crate::pb::tycho::evm::v1::ChangeType::Creation.into(),
                     protocol_type: Some(crate::pb::tycho::evm::v1::ProtocolType {
-                        name: "Ambient".to_string(),
+                        name: "ambient_pool".to_string(),
                         attribute_schema: vec![],
                         financial_type: 0,
                         implementation_type: 0,

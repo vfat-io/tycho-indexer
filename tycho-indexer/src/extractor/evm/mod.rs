@@ -527,7 +527,7 @@ impl ProtocolComponent {
         msg: substreams::ProtocolComponent,
         chain: Chain,
         protocol_system: &str,
-        protocol_type_name: &str,
+        protocol_type_names: Vec<String>,
         tx_hash: H256,
         creation_ts: NaiveDateTime,
     ) -> Result<Self, ExtractionError> {
@@ -552,9 +552,22 @@ impl ProtocolComponent {
             .map(|attribute| Ok((attribute.name, Bytes::from(attribute.value))))
             .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
 
+        let protocol_type = msg
+            .protocol_type
+            .clone()
+            .ok_or(ExtractionError::DecodeError("Missing protocol type".to_owned()))?;
+
+        // Raise error if protocol_type.name is not in protocol_type_names
+        if !protocol_type_names.contains(&protocol_type.name) {
+            return Err(ExtractionError::DecodeError(format!(
+                "Unknown protocol type name: {}",
+                protocol_type.name
+            )));
+        }
+
         Ok(Self {
             id: msg.id.clone(),
-            protocol_type_name: protocol_type_name.to_owned(),
+            protocol_type_name: protocol_type.name,
             protocol_system: protocol_system.to_owned(),
             tokens,
             contract_ids,
@@ -601,7 +614,7 @@ impl BlockContractChanges {
         extractor: &str,
         chain: Chain,
         protocol_system: String,
-        protocol_type_name: String,
+        protocol_type_names: Vec<String>,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
@@ -620,7 +633,7 @@ impl BlockContractChanges {
                             component_msg,
                             chain,
                             &protocol_system,
-                            &protocol_type_name,
+                            protocol_type_names.clone(),
                             tx.hash,
                             block.ts,
                         )?;
@@ -886,7 +899,7 @@ impl BlockEntityChanges {
         extractor: &str,
         chain: Chain,
         protocol_system: String,
-        protocol_type_id: String,
+        protocol_type_names: Vec<String>,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
@@ -905,7 +918,7 @@ impl BlockEntityChanges {
                             component,
                             chain,
                             &protocol_system,
-                            &protocol_type_id,
+                            protocol_type_names.clone(),
                             tx.hash,
                             block.ts,
                         )?;
@@ -1454,7 +1467,7 @@ mod test {
         let protocol_component = ProtocolComponent {
             id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
             protocol_system: "ambient".to_string(),
-            protocol_type_name: String::from("id-1"),
+            protocol_type_name: String::from("WeightedPool"),
             chain: Chain::Ethereum,
             tokens: vec![
                 H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
@@ -1530,7 +1543,7 @@ mod test {
             "test",
             Chain::Ethereum,
             "ambient".to_string(),
-            String::from("id-1"),
+            vec!["WeightedPool".to_string()],
         )
         .unwrap();
         assert_eq!(res, block_state_changes());
@@ -1541,7 +1554,7 @@ mod test {
         let protocol_component = ProtocolComponent {
             id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
             protocol_system: "ambient".to_string(),
-            protocol_type_name: String::from("id-1"),
+            protocol_type_name: String::from("WeightedPool"),
             chain: Chain::Ethereum,
             tokens: vec![
                 H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
@@ -1859,7 +1872,7 @@ mod test {
             ProtocolComponent {
                 id: "Pool".to_owned(),
                 protocol_system: "ambient".to_string(),
-                protocol_type_name: "Pool".to_owned(),
+                protocol_type_name: "WeightedPool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec![
                     H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
@@ -1907,7 +1920,7 @@ mod test {
             "test",
             Chain::Ethereum,
             "ambient".to_string(),
-            "Pool".to_owned(),
+            vec!["Pool".to_string(), "WeightedPool".to_string()],
         )
         .unwrap();
         assert_eq!(res, block_entity_changes());
@@ -1967,7 +1980,7 @@ mod test {
             ProtocolComponent {
                 id: "Pool".to_owned(),
                 protocol_system: "ambient".to_string(),
-                protocol_type_name: "Pool".to_owned(),
+                protocol_type_name: "WeightedPool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec![
                     H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
@@ -2043,14 +2056,16 @@ mod test {
         ]
         .into_iter()
         .collect();
-        let protocol_type_id = String::from("id-1");
+
+        let protocol_type_id = "WeightedPool".to_string();
+        let protocol_type_names: Vec<String> = vec![protocol_type_id.clone()];
 
         // Call the try_from_message method
         let result = ProtocolComponent::try_from_message(
             msg,
             expected_chain,
             &expected_protocol_system,
-            &protocol_type_id,
+            protocol_type_names,
             H256::from_str("0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac")
                 .unwrap(),
             Default::default(),
