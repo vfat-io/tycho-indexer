@@ -668,6 +668,7 @@ mod tests {
                     "subscription_id":"30b740d1-cf09-4e0e-8cfe-b1434d447ece"
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
+            // VM block message
             ExpectedComm::Send(Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
@@ -717,6 +718,45 @@ mod tests {
                     }
                 }
                 "#.to_owned()
+            )),
+            // Native protocol block message
+            ExpectedComm::Send(Message::Text(r#"
+                {
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
+                    "delta": {
+                        "extractor": "vm:ambient",
+                        "chain": "ethereum",
+                        "block": {
+                            "number": 123,
+                            "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                            "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                            "chain": "ethereum",             
+                            "ts": "2023-09-14T00:00:00"
+                        },
+                        "state_updates": {
+                            "component_1": {
+                                "component_id": "component_1",
+                                "updated_attributes": {"attr1": "0x01"},
+                                "deleted_attributes": ["attr2"]
+                            }
+                        },
+                        "new_protocol_components": {
+                            "protocol_1": {
+                                "id": "protocol_1",
+                                "protocol_system": "system_1",
+                                "protocol_type_name": "type_1",
+                                "chain": "ethereum",
+                                "tokens": ["0x01", "0x02"],
+                                "contract_ids": ["0x01", "0x02"],
+                                "static_attributes": {"attr1": "0x01f4"},
+                                "change": "Update",
+                                "creation_tx": "0x01",
+                                "created_at": "2023-09-14T00:00:00"
+                            }
+                        }
+                    }
+                }
+                "#.to_owned()
             ))
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
@@ -733,6 +773,10 @@ mod tests {
         .await
         .expect("subscription timed out")
         .expect("subscription failed");
+        let _ = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("awaiting message timeout out")
+            .expect("receiving message failed");
         let _ = timeout(Duration::from_millis(100), rx.recv())
             .await
             .expect("awaiting message timeout out")
