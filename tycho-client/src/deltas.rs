@@ -140,6 +140,7 @@ enum SubscriptionInfo {
     RequestedUnsubscription(oneshot::Sender<()>),
 }
 
+/// Internal struct containing shared state between of WsDeltaClient instances.
 struct Inner {
     /// Websocket sender handle.
     sink: WebSocketSink,
@@ -184,7 +185,7 @@ impl Inner {
 
     /// Transitions a pending subscription to active.
     ///
-    /// Will ignore andy request to do so for subscriptions that are not pending.
+    /// Will ignore any request to do so for subscriptions that are not pending.
     fn mark_active(&mut self, extractor_id: &ExtractorIdentity, subscription_id: Uuid) {
         if let Some(info) = self.pending.remove(extractor_id) {
             if let SubscriptionInfo::RequestedSubscription(ready_tx) = info {
@@ -278,7 +279,7 @@ impl Inner {
         } else {
             error!(
                 ?subscription_id,
-                "Received `SubscriptionEnded` but the never subscribed 
+                "Received `SubscriptionEnded`, but was never subscribed 
                 to it. This is likely a bug!"
             );
         }
@@ -332,7 +333,7 @@ impl WsDeltasClient {
 
     /// Waits for the client to be connected
     ///
-    /// This method will acquires the lock for inner for a short period then waits until the
+    /// This method acquires the lock for inner for a short period, then waits until the  
     /// connection is established if not already connected.
     async fn ensure_connection(&self) {
         if !self.is_connected().await {
@@ -451,7 +452,6 @@ impl WsDeltasClient {
 
 #[async_trait]
 impl DeltasClient for WsDeltasClient {
-    #[allow(unused_variables)]
     #[instrument(skip(self))]
     async fn subscribe(
         &self,

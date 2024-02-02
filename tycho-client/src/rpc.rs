@@ -88,6 +88,7 @@ impl RPCClient for HttpRPCClient {
             chain,
             filters.to_query_string()
         );
+        dbg!(&uri);
         debug!(%uri, "Sending contract_state request to Tycho server");
         let body =
             serde_json::to_string(&request).map_err(|e| RPCError::FormatRequest(e.to_string()))?;

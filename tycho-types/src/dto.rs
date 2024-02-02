@@ -363,7 +363,7 @@ impl StateRequestParameters {
         }
 
         let mut res = parts.join("&");
-        if res.len() > 0 {
+        if !res.is_empty() {
             res = format!("?{res}");
         }
         res
