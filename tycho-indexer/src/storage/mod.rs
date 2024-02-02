@@ -277,6 +277,7 @@ pub trait StorableComponentBalance<S, N, I>: Sized + Send + Sync + 'static {
         account_id: I,
         modify_tx: I,
         protocol_component_id: I,
+        previous_balance: Option<Balance>,
         block_ts: NaiveDateTime,
     ) -> N;
 

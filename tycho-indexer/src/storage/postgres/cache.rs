@@ -835,7 +835,7 @@ mod test_serial_db {
             };
             let component_balance = ComponentBalance {
                 token: usdc_address,
-                new_balance: Bytes::from(&[0u8]),
+                balance: Bytes::from(&[0u8]),
                 modify_tx: tx_1.hash,
                 component_id: protocol_component_id.clone(),
             };

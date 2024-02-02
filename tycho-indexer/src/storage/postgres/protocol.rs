@@ -825,10 +825,27 @@ where
                 .component_id
                 .to_string()];
 
+            let previous_component_balance: Option<Balance> = schema::component_balance::table
+                .filter(
+                    schema::component_balance::protocol_component_id
+                        .eq(protocol_component_id)
+                        .and(schema::component_balance::token_id.eq(token_id))
+                        .and(schema::component_balance::valid_to.is_null()),
+                )
+                .order_by(schema::component_balance::valid_from.desc())
+                .select(schema::component_balance::new_balance)
+                .first::<Balance>(conn)
+                .await
+                .optional()
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ComponentBalance", "previous_balance", None)
+                })?;
+
             let new_component_balance = component_balance.to_storage(
                 token_id,
                 transaction_id,
                 protocol_component_id,
+                previous_component_balance,
                 block_ts,
             );
             new_component_balances.push(new_component_balance);
@@ -902,7 +919,7 @@ where
                 .map(|(external_id, address, balance, tx)| ComponentBalance {
                     component_id: external_id,
                     token: address.into(),
-                    new_balance: balance,
+                    balance,
                     modify_tx: tx.into(),
                 })
                 .collect()
@@ -938,7 +955,7 @@ where
                 .select((
                     schema::protocol_component::external_id,
                     schema::account::address,
-                    new_balance,
+                    previous_balance,
                     schema::transaction::hash,
                 ))
                 .get_results::<(String, Address, Balance, TxHash)>(conn)
@@ -947,7 +964,7 @@ where
                 .map(|(external_id, address, balance, tx)| ComponentBalance {
                     component_id: external_id,
                     token: address.into(),
-                    new_balance: balance,
+                    balance,
                     modify_tx: tx.into(),
                 })
                 .collect()
@@ -1599,6 +1616,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(1000)),
+            Balance::from(U256::from(0)),
             token_id,
             from_txn_id,
             protocol_component_id,
@@ -1607,6 +1625,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(2000)),
+            Balance::from(U256::from(1000)),
             token_id,
             to_txn_id,
             protocol_component_id,
@@ -1618,7 +1637,7 @@ mod test {
         let expected_forward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
             component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
-            new_balance: Balance::from(U256::from(2000)),
+            balance: Balance::from(U256::from(2000)),
             modify_tx: to_tx_hash,
         }];
 
@@ -1637,7 +1656,7 @@ mod test {
         let expected_backward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
             component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
-            new_balance: Balance::from(U256::from(1000)),
+            balance: Balance::from(U256::from(0)),
             modify_tx: from_tx_hash,
         }];
 
@@ -2016,14 +2035,16 @@ mod test {
         let tx_hash =
             H256::from_str("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")
                 .unwrap();
+
         let protocol_component_id: String = String::from("state2");
         let base_token = H160::from_str(WETH.trim_start_matches("0x")).unwrap();
 
+        // Test the case where a previous balance doesn't exist
         let component_balance = ComponentBalance {
-            token: base_token,
-            new_balance: Bytes::from(&[0u8]),
-            modify_tx: tx_hash,
-            component_id: protocol_component_id,
+            token: base_token.clone(),
+            balance: Balance::from(U256::from(1000)),
+            modify_tx: tx_hash.clone(),
+            component_id: protocol_component_id.clone(),
         };
 
         let component_balances = vec![&component_balance];
@@ -2041,7 +2062,8 @@ mod test {
         assert!(inserted_data.is_ok());
         let inserted_data: orm::ComponentBalance = inserted_data.unwrap();
 
-        assert_eq!(inserted_data.new_balance, Bytes::from(&[0u8]));
+        assert_eq!(inserted_data.new_balance, Balance::from(U256::from(1000)));
+        assert_eq!(inserted_data.previous_balance, Balance::from(U256::from(0)),);
 
         let referenced_token = schema::token::table
             .filter(schema::token::id.eq(inserted_data.token_id))
@@ -2058,6 +2080,38 @@ mod test {
             .await;
         let referenced_component: orm::ProtocolComponent = referenced_component.unwrap();
         assert_eq!(referenced_component.external_id, String::from("state2"));
+
+        // Test the case where there was a previous balance
+
+        let new_tx_hash =
+            H256::from_str("0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7")
+                .unwrap();
+        let updated_component_balance = ComponentBalance {
+            token: base_token.clone(),
+            balance: Balance::from(U256::from(2000)),
+            modify_tx: new_tx_hash.clone(),
+            component_id: protocol_component_id.clone(),
+        };
+
+        let updated_component_balances = vec![&updated_component_balance];
+        let new_block_ts = NaiveDateTime::from_timestamp_opt(2000, 0).unwrap();
+
+        gw.add_component_balances(&updated_component_balances, new_block_ts, &mut conn)
+            .await
+            .unwrap();
+
+        // Obtain newest inserted value
+        let new_inserted_data = schema::component_balance::table
+            .select(orm::ComponentBalance::as_select())
+            .order_by(schema::component_balance::id.desc())
+            .first::<orm::ComponentBalance>(&mut conn)
+            .await;
+
+        assert!(new_inserted_data.is_ok());
+        let new_inserted_data: orm::ComponentBalance = new_inserted_data.unwrap();
+
+        assert_eq!(new_inserted_data.new_balance, Balance::from(U256::from(2000)));
+        assert_eq!(new_inserted_data.previous_balance, Balance::from(U256::from(1000)));
     }
 
     #[tokio::test]

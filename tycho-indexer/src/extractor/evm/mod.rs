@@ -456,7 +456,7 @@ impl AccountUpdateWithTx {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ComponentBalance {
     pub token: H160,
-    pub new_balance: Bytes,
+    pub balance: Bytes,
     // tx where the this balance was observed
     pub modify_tx: H256,
     pub component_id: String,
@@ -469,7 +469,7 @@ impl ComponentBalance {
     ) -> Result<Self, ExtractionError> {
         Ok(Self {
             token: pad_and_parse_h160(&msg.token.into()).map_err(ExtractionError::DecodeError)?,
-            new_balance: Bytes::from(msg.balance),
+            balance: Bytes::from(msg.balance),
             modify_tx: tx.hash,
             component_id: String::from_utf8(msg.component_id)
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
@@ -2119,7 +2119,7 @@ mod test {
         };
         let from_message = ComponentBalance::try_from_message(msg, &tx).unwrap();
 
-        assert_eq!(from_message.new_balance, msg_balance);
+        assert_eq!(from_message.balance, msg_balance);
         assert_eq!(from_message.modify_tx, tx.hash);
         assert_eq!(from_message.token, expected_token);
         assert_eq!(from_message.component_id, expected_component_id);
