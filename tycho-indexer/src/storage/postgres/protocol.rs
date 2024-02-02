@@ -2041,9 +2041,9 @@ mod test {
 
         // Test the case where a previous balance doesn't exist
         let component_balance = ComponentBalance {
-            token: base_token.clone(),
+            token: base_token,
             balance: Balance::from(U256::from(1000)),
-            modify_tx: tx_hash.clone(),
+            modify_tx: tx_hash,
             component_id: protocol_component_id.clone(),
         };
 
@@ -2087,9 +2087,9 @@ mod test {
             H256::from_str("0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7")
                 .unwrap();
         let updated_component_balance = ComponentBalance {
-            token: base_token.clone(),
+            token: base_token,
             balance: Balance::from(U256::from(2000)),
-            modify_tx: new_tx_hash.clone(),
+            modify_tx: new_tx_hash,
             component_id: protocol_component_id.clone(),
         };
 
