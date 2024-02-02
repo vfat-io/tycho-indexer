@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
 };
@@ -23,10 +22,11 @@ use tracing::{
 
 use crate::{
     extractor::evm::{
-        self, AccountUpdate, ERC20Token, EVMStateGateway, ProtocolComponent, ProtocolStateDelta,
+        self, AccountUpdate, ComponentBalance, ERC20Token, EVMStateGateway, ProtocolComponent,
+        ProtocolStateDelta,
     },
     models::{Chain, ExtractionState},
-    storage::{Balance, BalanceDeltaKey, BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
+    storage::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
 };
 
 /// Represents different types of database write operations.
@@ -408,7 +408,7 @@ struct RevertParameters {
 
 type DeltasCache = LruCache<
     RevertParameters,
-    (Vec<AccountUpdate>, Vec<ProtocolStateDelta>, HashMap<BalanceDeltaKey, Balance>),
+    (Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
 >;
 
 pub struct CachedGateway {
@@ -531,10 +531,8 @@ impl CachedGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<
-        (Vec<AccountUpdate>, Vec<ProtocolStateDelta>, HashMap<BalanceDeltaKey, Balance>),
-        StorageError,
-    > {
+    ) -> Result<(Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>), StorageError>
+    {
         let mut lru_cache = self.lru_cache.lock().await;
 
         if start_version.is_none() {
