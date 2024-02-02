@@ -559,6 +559,8 @@ pub mod testing {
             "contract_code",
             "account_balance",
             "protocol_component_holds_token",
+            "protocol_component_holds_contract",
+            "component_balance",
             "token",
             "account",
             "protocol_state",
