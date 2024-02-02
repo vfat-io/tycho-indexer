@@ -785,8 +785,7 @@ pub trait ProtocolGateway {
     /// - `target_version` The version at which to stop looking for changes.
     ///
     /// # Return
-    /// A hashmap containing a map of (protocol_external_id, token_address) to its respective
-    /// balance change, Err if no changes were found.
+    /// A vec containing ComponentBalance objects for changed components.
     async fn get_balance_deltas(
         &self,
         chain: &Chain,
