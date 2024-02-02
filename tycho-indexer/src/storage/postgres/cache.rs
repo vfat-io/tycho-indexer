@@ -22,7 +22,8 @@ use tracing::{
 
 use crate::{
     extractor::evm::{
-        self, AccountUpdate, ERC20Token, EVMStateGateway, ProtocolComponent, ProtocolStateDelta,
+        self, AccountUpdate, ComponentBalance, ERC20Token, EVMStateGateway, ProtocolComponent,
+        ProtocolStateDelta,
     },
     models::{Chain, ExtractionState},
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
@@ -405,7 +406,10 @@ struct RevertParameters {
     end_version: BlockOrTimestamp,
 }
 
-type DeltasCache = LruCache<RevertParameters, (Vec<AccountUpdate>, Vec<ProtocolStateDelta>)>;
+type DeltasCache = LruCache<
+    RevertParameters,
+    (Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
+>;
 
 pub struct CachedGateway {
     tx: mpsc::Sender<DBCacheMessage>,
@@ -527,7 +531,8 @@ impl CachedGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<(Vec<AccountUpdate>, Vec<ProtocolStateDelta>), StorageError> {
+    ) -> Result<(Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>), StorageError>
+    {
         let mut lru_cache = self.lru_cache.lock().await;
 
         if start_version.is_none() {
@@ -563,11 +568,16 @@ impl CachedGateway {
             .state_gateway
             .get_protocol_states_delta(chain, start_version, end_version, &mut db)
             .await?;
+        let balance_deltas = self
+            .state_gateway
+            .get_balance_deltas(chain, start_version, end_version, &mut db)
+            .await?;
 
         // Insert the new delta into the LRU cache
-        lru_cache.put(key, (accounts_delta.clone(), protocol_delta.clone()));
+        lru_cache
+            .put(key, (accounts_delta.clone(), protocol_delta.clone(), balance_deltas.clone()));
 
-        Ok((accounts_delta, protocol_delta))
+        Ok((accounts_delta, protocol_delta, balance_deltas))
     }
 
     pub async fn update_protocol_states(
