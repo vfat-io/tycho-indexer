@@ -4,7 +4,7 @@
 //! be very simple and ideally not contain any business logic.
 //!
 //! Structs in here implement utoipa traits so they can be used to derive an OpenAPI schema.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,9 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    serde_primitives::{hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value},
+    serde_primitives::{
+        hex_bytes, hex_bytes_option, hex_bytes_vec, hex_hashmap_key, hex_hashmap_key_value,
+    },
     Bytes,
 };
 
@@ -72,11 +74,18 @@ pub enum Response {
     SubscriptionEnded { subscription_id: Uuid },
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+#[serde(untagged)]
+pub enum Deltas {
+    VM(BlockAccountChanges),
+    Native(BlockEntityChangesResult),
+}
+
 /// A message sent from the server to the client
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum WebSocketMessage {
-    BlockAccountChanges { subscription_id: Uuid, data: BlockAccountChanges },
+    BlockChanges { subscription_id: Uuid, delta: Deltas },
     Response(Response),
 }
 
@@ -126,6 +135,8 @@ impl Transaction {
 ///
 /// Hold a single update per account. This is a condensed form of
 /// [BlockStateChanges].
+///
+/// TODO - update once new structure is merged
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct BlockAccountChanges {
     extractor: String,
@@ -133,16 +144,30 @@ pub struct BlockAccountChanges {
     pub block: Block,
     #[serde(with = "hex_hashmap_key")]
     pub account_updates: HashMap<Bytes, AccountUpdate>,
+    pub new_protocol_components: Vec<ProtocolComponent>,
+    pub deleted_protocol_components: Vec<ProtocolComponent>,
+    pub component_balances: Vec<ComponentBalance>,
 }
 
 impl BlockAccountChanges {
     pub fn new(
-        extractor: String,
+        extractor: &str,
         chain: Chain,
         block: Block,
         account_updates: HashMap<Bytes, AccountUpdate>,
+        new_protocol_components: Vec<ProtocolComponent>,
+        deleted_protocol_components: Vec<ProtocolComponent>,
+        component_balances: Vec<ComponentBalance>,
     ) -> Self {
-        Self { extractor, chain, block, account_updates }
+        BlockAccountChanges {
+            extractor: extractor.to_owned(),
+            chain,
+            block,
+            account_updates,
+            new_protocol_components,
+            deleted_protocol_components,
+            component_balances,
+        }
     }
 }
 
@@ -172,6 +197,57 @@ impl AccountUpdate {
     ) -> Self {
         Self { address, chain, slots, balance, code, change }
     }
+}
+
+/// Represents the static parts of a protocol component.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+pub struct ProtocolComponent {
+    pub id: String,
+    pub protocol_system: String,
+    pub protocol_type_name: String,
+    pub chain: Chain,
+    #[serde(with = "hex_bytes_vec")]
+    pub tokens: Vec<Bytes>,
+    #[serde(with = "hex_bytes_vec")]
+    pub contract_ids: Vec<Bytes>,
+    pub static_attributes: HashMap<String, Bytes>,
+    pub change: ChangeType,
+    #[serde(with = "hex_bytes")]
+    pub creation_tx: Bytes,
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ComponentBalance {
+    #[serde(with = "hex_bytes")]
+    pub token: Bytes,
+    pub new_balance: Bytes,
+    #[serde(with = "hex_bytes")]
+    pub modify_tx: Bytes,
+    pub component_id: String,
+}
+
+/// A container for state updates grouped by protocol component.
+///
+/// Hold a single update per component. This is a condensed form of
+/// [BlockEntityChanges].
+///
+/// TODO - update once new structure is merged
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+pub struct BlockEntityChangesResult {
+    extractor: String,
+    chain: Chain,
+    pub block: Block,
+    pub state_updates: HashMap<String, ProtocolStateDelta>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
+}
+
+#[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
+/// Represents a change in protocol state.
+pub struct ProtocolStateDelta {
+    pub component_id: String,
+    pub updated_attributes: HashMap<String, Bytes>,
+    pub deleted_attributes: HashSet<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
