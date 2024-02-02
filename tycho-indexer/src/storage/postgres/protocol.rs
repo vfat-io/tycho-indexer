@@ -879,7 +879,7 @@ where
                 .select((protocol_component_id, token_id))
                 .distinct();
 
-            let result = changed_component_balances
+            changed_component_balances
                 .inner_join(schema::transaction::table)
                 .filter(
                     valid_from.le(target_ts).and(
@@ -906,13 +906,12 @@ where
                 .await?
                 .into_iter()
                 .map(|(external_id, address, balance, tx)| ComponentBalance {
-                    component_id: external_id.into(),
+                    component_id: external_id,
                     token: address.into(),
-                    new_balance: balance.into(),
+                    new_balance: balance,
                     modify_tx: tx.into(),
                 })
-                .collect();
-            result
+                .collect()
         } else {
             // Going backwards
             //                  ]     changes to revert    ]
@@ -931,7 +930,7 @@ where
                 .select((protocol_component_id, token_id))
                 .distinct();
 
-            let result = changed_component_balances
+            changed_component_balances
                 .inner_join(schema::transaction::table)
                 .filter(valid_from.le(target_ts))
                 .filter(
@@ -957,13 +956,12 @@ where
                 .await?
                 .into_iter()
                 .map(|(external_id, address, balance, tx)| ComponentBalance {
-                    component_id: external_id.into(),
+                    component_id: external_id,
                     token: address.into(),
-                    new_balance: balance.into(),
+                    new_balance: balance,
                     modify_tx: tx.into(),
                 })
-                .collect();
-            result
+                .collect()
         };
         Ok(res)
     }
@@ -1628,13 +1626,12 @@ mod test {
 
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
-        let mut expected_forward_deltas: Vec<ComponentBalance> = Vec::new();
-        expected_forward_deltas.push(ComponentBalance {
+        let expected_forward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
             component_id: protocol_external_id.clone().into(),
             token: token_address.clone().into(),
             new_balance: Balance::from(U256::from(2000)),
-            modify_tx: to_tx_hash.clone(),
-        });
+            modify_tx: to_tx_hash,
+        }];
 
         // test forward case
         let result = gateway
@@ -1648,13 +1645,12 @@ mod test {
             .unwrap();
         assert_eq!(result, expected_forward_deltas);
 
-        let mut expected_backward_deltas: Vec<ComponentBalance> = Vec::new();
-        expected_backward_deltas.push(ComponentBalance {
+        let expected_backward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
             component_id: protocol_external_id.clone().into(),
             token: token_address.clone().into(),
             new_balance: Balance::from(U256::from(1000)),
-            modify_tx: from_tx_hash.clone(),
-        });
+            modify_tx: from_tx_hash,
+        }];
 
         // test backward case
         let result = gateway
