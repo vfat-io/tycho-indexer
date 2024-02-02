@@ -1,5 +1,5 @@
+use itertools::Itertools;
 use std::collections::HashMap;
-
 use substreams::store::{StoreGet, StoreGetProto};
 use substreams_ethereum::pb::eth::v2::{self as eth};
 
@@ -18,6 +18,7 @@ use crate::{
     traits::PoolAddresser,
 };
 
+// Auxiliary struct to serve as a key for the HashMaps.
 #[derive(Clone, Hash, Eq, PartialEq)]
 struct ComponentKey<T> {
     component_id: String,
@@ -38,17 +39,17 @@ struct PartialChanges {
 }
 
 impl PartialChanges {
+    // Consolidate the entity changes into a vector of EntityChanges. Initially, the entity changes
+    // are in a map to prevent duplicates. For each transaction, we need to have only one final
+    // state change, per state. Example:
+    // If we have two sync events for the same pool (in the same tx), we need to have only one final
+    // state change for the reserves. This will be the last sync event, as it is the final state
+    // of the pool after the transaction.
     fn consolidate_entity_changes(self) -> Vec<EntityChanges> {
-        let mut entity_changes_map: HashMap<String, Vec<Attribute>> = HashMap::new();
-
-        for (key, attribute) in self.entity_changes {
-            entity_changes_map
-                .entry(key.component_id)
-                .or_default()
-                .push(attribute);
-        }
-
-        entity_changes_map
+        self.entity_changes
+            .into_iter()
+            .map(|(key, attribute)| (key.component_id, attribute))
+            .into_group_map()
             .into_iter()
             .map(|(component_id, attributes)| EntityChanges { component_id, attributes })
             .collect()
@@ -72,6 +73,16 @@ pub fn map_pool_events(
     Ok(block_entity_changes)
 }
 
+/// Handle the sync events and update the reserves of the pools.
+///
+/// This function is called for each block, and it will handle the sync events for each transaction.
+/// On UniswapV2, Sync events are emitted on every reserve-altering function call, so we can use
+/// only this event to keep track of the pool state.
+///
+/// This function also relies on an intermediate HashMap to store the changes for each transaction.
+/// This is necessary because we need to consolidate the changes for each transaction before adding
+/// them to the block_entity_changes. This HashMap prevents us from having duplicate changes for the
+/// same pool and token. See the PartialChanges struct for more details.
 fn handle_sync(
     block: &eth::Block,
     tx_changes: &mut HashMap<Vec<u8>, PartialChanges>,
@@ -124,11 +135,26 @@ fn handle_sync(
     };
 
     let mut eh = EventHandler::new(block);
+    // Filter the sync events by the pool address, to make sure we don't process events for other
+    // Protocols that use the same event signature.
     eh.filter_by_address(PoolAddresser { store });
     eh.on::<Sync, _>(&mut on_sync);
     eh.handle_events();
 }
 
+/// Merge the changes from the sync events with the create_pool events previously mapped on
+/// block_entity_changes.
+///
+/// Parameters:
+/// - tx_changes: HashMap with the changes for each transaction. This is the same HashMap used in
+///   handle_sync
+/// - block_entity_changes: The BlockEntityChanges struct that will be updated with the changes from
+///   the sync events.
+/// This HashMap comes pre-filled with the changes for the create_pool events, mapped in
+/// 1_map_pool_created.
+///
+/// This function is called after the handle_sync function, and it is expected that
+/// block_entity_changes will be complete after this function ends.
 fn merge_block(
     tx_changes: &mut HashMap<Vec<u8>, PartialChanges>,
     block_entity_changes: &mut BlockEntityChanges,
@@ -137,7 +163,11 @@ fn merge_block(
     // map_pool_created step. If there are sync events for this transaction, add them to the
     // block_entity_changes and the corresponding balance changes.
     for change in block_entity_changes.changes.iter_mut() {
-        let tx = change.tx.as_mut().unwrap();
+        let tx = change
+            .clone()
+            .tx
+            .expect("Transaction not found")
+            .clone();
         // If there are sync events for this transaction, add them to the block_entity_changes
         if let Some(partial_changes) = tx_changes.remove(&tx.hash) {
             change.entity_changes = partial_changes
@@ -150,6 +180,11 @@ fn merge_block(
         }
     }
 
+    // If there are any transactions left in the tx_changes, it means that they are transactions
+    // that changed the state of the pools, but were not included in the block_entity_changes.
+    // This happens for every regular transaction that does not actually create a pool. By the
+    // end of this function, we expect block_entity_changes to be up-to-date with the changes
+    // for all sync and new_pools in the block.
     for partial_changes in tx_changes.values() {
         block_entity_changes
             .changes
