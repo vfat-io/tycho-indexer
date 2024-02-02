@@ -69,8 +69,8 @@ impl RPCClient for HttpRPCClient {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.contract_ids.is_none()
-            || request
+        if request.contract_ids.is_none() ||
+            request
                 .contract_ids
                 .as_ref()
                 .unwrap()

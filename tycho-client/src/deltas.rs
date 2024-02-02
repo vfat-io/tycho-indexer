@@ -671,7 +671,7 @@ mod tests {
             ExpectedComm::Send(Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "data": {
+                    "delta": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -690,7 +690,30 @@ mod tests {
                                 "code": "",
                                 "change": "Update"
                             }
-                        }
+                        },
+                        "new_protocol_components": [
+                                {
+                                    "id": "protocol_1",
+                                    "protocol_system": "system_1",
+                                    "protocol_type_name": "type_1",
+                                    "chain": "ethereum",
+                                    "tokens": ["0x01", "0x02"],
+                                    "contract_ids": ["0x01", "0x02"],
+                                    "static_attributes": {"attr1": "0x01f4"},
+                                    "change": "Update",
+                                    "creation_tx": "0x01",
+                                    "created_at": "2023-09-14T00:00:00"
+                                }
+                            ],
+                            "deleted_protocol_components": [],
+                            "component_balances": [
+                                {
+                                    "token": "0x01",
+                                    "new_balance": "0x01f4",
+                                    "modify_tx": "0x01",
+                                    "component_id": "protocol_1"
+                                }
+                            ]
                     }
                 }
                 "#.to_owned()
@@ -912,7 +935,7 @@ mod tests {
             ExpectedComm::Send(Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "data": {
+                    "delta": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -931,7 +954,30 @@ mod tests {
                                 "code": "",
                                 "change": "Update"
                             }
-                        }
+                        },
+                        "new_protocol_components": [
+                                {
+                                    "id": "protocol_1",
+                                    "protocol_system": "system_1",
+                                    "protocol_type_name": "type_1",
+                                    "chain": "ethereum",
+                                    "tokens": ["0x01", "0x02"],
+                                    "contract_ids": ["0x01", "0x02"],
+                                    "static_attributes": {"attr1": "0x01f4"},
+                                    "change": "Update",
+                                    "creation_tx": "0x01",
+                                    "created_at": "2023-09-14T00:00:00"
+                                }
+                            ],
+                            "deleted_protocol_components": [],
+                            "component_balances": [
+                                {
+                                    "token": "0x01",
+                                    "new_balance": "0x01f4",
+                                    "modify_tx": "0x01",
+                                    "component_id": "protocol_1"
+                                }
+                            ]
                     }
                 }
                 "#.to_owned()
