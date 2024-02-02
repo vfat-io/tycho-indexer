@@ -1627,7 +1627,7 @@ mod test {
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
         let expected_forward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
-            component_id: protocol_external_id.clone().into(),
+            component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
             new_balance: Balance::from(U256::from(2000)),
             modify_tx: to_tx_hash,
@@ -1646,7 +1646,7 @@ mod test {
         assert_eq!(result, expected_forward_deltas);
 
         let expected_backward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
-            component_id: protocol_external_id.clone().into(),
+            component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
             new_balance: Balance::from(U256::from(1000)),
             modify_tx: from_tx_hash,
