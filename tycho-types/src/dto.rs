@@ -113,8 +113,8 @@ pub struct BlockParam {
     pub number: Option<i64>,
 }
 
-impl From<Block> for BlockParam {
-    fn from(value: Block) -> Self {
+impl From<&Block> for BlockParam {
+    fn from(value: &Block) -> Self {
         todo!()
     }
 }
