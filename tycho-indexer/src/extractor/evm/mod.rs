@@ -1456,7 +1456,7 @@ mod test {
         let mut right = left.clone();
         right.tx = tx;
 
-        let res = left.merge(right);
+        let res = left.merge_account_updates(right);
 
         assert_eq!(res, exp);
     }
