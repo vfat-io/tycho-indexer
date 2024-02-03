@@ -24,12 +24,14 @@ pub struct StateSynchronizer {
     extractor_id: ExtractorIdentity,
     rpc_client: HttpRPCClient,
     deltas_client: WsDeltasClient,
-    // we will need to request a snapthot for components that we did not emit a
+    // we will need to request a snapshot for components that we did not emit a
     // snapshot for yet but are relevant now, e.g. because min tvl threshold exceeded.
     last_snapshot_components: Vec<()>,
     last_served_block_hash: Arc<Mutex<Option<Bytes>>>,
     last_synced_block: Arc<Mutex<Option<Block>>>,
+    // TODO: since we may return a mix of snapshots and deltas the value type should be a vector.
     pending_deltas: Arc<Mutex<HashMap<Bytes, StateMsg>>>,
+    min_tvl_threshold: f64,
 }
 
 pub enum StateMsg {

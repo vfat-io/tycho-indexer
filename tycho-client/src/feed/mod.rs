@@ -1,29 +1,29 @@
-use std::{borrow::Borrow, collections::HashMap, thread::current, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
-use anyhow::anyhow;
-use chrono::{Local, NaiveDate, NaiveDateTime, Utc};
-use futures03::{
-    future::join_all,
-    stream::{FuturesUnordered, SelectAll},
-    FutureExt,
-};
+use chrono::{Local, NaiveDateTime};
+use futures03::{future::join_all, stream::FuturesUnordered};
+
 use tokio::{
     sync::mpsc::{self, Receiver},
     task::JoinHandle,
-    time::{error::Elapsed, timeout},
+    time::timeout,
 };
-use tracing::warn;
+use tracing::{info, warn};
 use tycho_types::dto::{Block, ExtractorIdentity};
 
 use crate::{deltas::DeltasClient, HttpRPCClient, WsDeltasClient};
 
-use self::synchronizer::{StateMsg, StateSynchronizer};
+use self::{
+    block_history::{BlockHistory, BlockPosition},
+    synchronizer::{StateMsg, StateSynchronizer},
+};
 
+mod block_history;
 mod synchronizer;
 
 type BlockSyncResult<T> = anyhow::Result<T>;
 
-struct BlockSynchronizer {
+pub struct BlockSynchronizer {
     rpc_client: HttpRPCClient,
     deltas_client: WsDeltasClient,
     synchronizers: HashMap<ExtractorIdentity, StateSynchronizer>,
@@ -51,7 +51,7 @@ pub struct SynchronizerHandle {
 }
 
 impl SynchronizerHandle {
-    async fn try_advance(&mut self, expected_height: u64, max_wait: u64) {
+    async fn try_advance(&mut self, block_history: &BlockHistory, max_wait: u64) {
         match &self.state {
             SynchronizerState::Started | SynchronizerState::Ended => {
                 // TODO: warn, should not happen, ignore
@@ -59,20 +59,20 @@ impl SynchronizerHandle {
             SynchronizerState::Advanced(b) => {
                 let future_block = b.clone();
                 // Transition to ready once we arrived at the expected height
-                self.transition(future_block, expected_height);
+                self.transition(future_block, block_history);
             }
             SynchronizerState::Ready(previous_block) => {
                 // Try to recv the next expected block, update state accordingly.
-                self.handle_ready_state(max_wait, expected_height, previous_block.clone())
+                self.handle_ready_state(max_wait, block_history, previous_block.clone())
                     .await;
             }
             SynchronizerState::Delayed(_) => {
                 // try to catch up all currently queued blocks until the expected block
-                self.try_catch_up(expected_height, max_wait)
+                self.try_catch_up(block_history, max_wait)
                     .await;
             }
             SynchronizerState::Stale(_) => {
-                self.try_catch_up(expected_height, max_wait)
+                self.try_catch_up(block_history, max_wait)
                     .await;
             }
         }
@@ -81,11 +81,11 @@ impl SynchronizerHandle {
     async fn handle_ready_state(
         &mut self,
         max_wait: u64,
-        expected_height: u64,
+        block_history: &BlockHistory,
         previous_block: Block,
     ) {
         match timeout(Duration::from_millis(max_wait), self.rx.recv()).await {
-            Ok(Some(b)) => self.transition(b, expected_height),
+            Ok(Some(b)) => self.transition(b, block_history),
             Ok(None) => {
                 self.state = SynchronizerState::Ended;
                 self.modfiy_ts = Local::now().naive_utc();
@@ -97,12 +97,14 @@ impl SynchronizerHandle {
         }
     }
 
-    async fn try_catch_up(&mut self, to: u64, max_wait: u64) {
+    async fn try_catch_up(&mut self, block_history: &BlockHistory, max_wait: u64) {
         let mut results = Vec::new();
-        while let Ok(msg) = self.rx.try_recv() {
-            let msg_height = msg.number;
-            results.push(Ok(Some(msg)));
-            if to >= msg_height {
+        while let Ok(block) = self.rx.try_recv() {
+            let block_pos = block_history
+                .determine_block_position(&block)
+                .unwrap();
+            results.push(Ok(Some(block)));
+            if matches!(block_pos, BlockPosition::Latest) {
                 break;
             }
         }
@@ -118,18 +120,36 @@ impl SynchronizerHandle {
 
         if let Some(b) = blocks.pop() {
             // we were able to get at least one block out
-            self.transition(b, to);
+            self.transition(b, block_history);
         }
     }
 
-    fn transition(&mut self, latest_retrieved: Block, expected_height: u64) {
+    fn transition(&mut self, latest_retrieved: Block, block_history: &BlockHistory) {
         // TODO: special handling for reverts required here
-        if latest_retrieved.number == expected_height {
-            self.state = SynchronizerState::Ready(latest_retrieved.clone());
-        } else if latest_retrieved.number > expected_height {
-            self.state = SynchronizerState::Advanced(latest_retrieved.clone());
-        } else {
-            self.state = SynchronizerState::Delayed(latest_retrieved.clone());
+        match block_history
+            .determine_block_position(&latest_retrieved)
+            .expect("Block positiion could not be determined.")
+        {
+            BlockPosition::NextExpected => {
+                self.state = SynchronizerState::Ready(latest_retrieved.clone());
+            }
+            BlockPosition::Latest | BlockPosition::Delayed => {
+                let now = Local::now().naive_utc();
+                if self
+                    .modfiy_ts
+                    .signed_duration_since(now) >
+                    chrono::Duration::seconds(60)
+                {
+                    // TODO: warn
+                    self.state = SynchronizerState::Stale(latest_retrieved.clone());
+                } else {
+                    self.state = SynchronizerState::Delayed(latest_retrieved.clone());
+                }
+            }
+            BlockPosition::Advanced => {
+                // TODO: warn
+                self.state = SynchronizerState::Advanced(latest_retrieved.clone());
+            }
         }
         self.modfiy_ts = Local::now().naive_utc();
     }
@@ -141,6 +161,8 @@ impl BlockSynchronizer {
     ) -> BlockSyncResult<(JoinHandle<BlockSyncResult<()>>, Receiver<Vec<StateMsg>>)> {
         let ws_task = self.deltas_client.connect().await?;
         let state_sync_tasks = FuturesUnordered::new();
+        // TODO: fill with last X blocks
+        let mut block_history = BlockHistory::new(vec![], 15);
         let mut state_synchronizers = HashMap::with_capacity(self.synchronizers.len());
 
         // No await in here so all synchronizers start at the same time!!
@@ -208,11 +230,16 @@ impl BlockSynchronizer {
             if !blocks.iter().all(|v| first == *v) {
                 anyhow::bail!("not all synchronizers on same block!")
             }
+            let start_block = first;
+            let n_healthy = blocks.len();
+            info!(?start_block, ?n_healthy, "Block synchronisation started successfully!")
         } else {
             anyhow::bail!("Not a single synchronizer healthy!")
         }
 
-        let mut current_block = blocks[0].clone();
+        block_history
+            .push(blocks[0].clone())
+            .expect("history not avail");
         let (sync_tx, sync_rx) = mpsc::channel(30);
         let jh = tokio::spawn(async move {
             loop {
@@ -225,7 +252,15 @@ impl BlockSynchronizer {
                                 .synchronizers
                                 .get(id)
                                 .expect("state invalid");
-                            pulled_data_fut.push(sync.get_pending(current_block.hash.clone()));
+                            pulled_data_fut.push(
+                                sync.get_pending(
+                                    block_history
+                                        .latest()
+                                        .expect("block")
+                                        .hash
+                                        .clone(),
+                                ),
+                            );
                         }
                         _ => continue,
                     }
@@ -245,12 +280,12 @@ impl BlockSynchronizer {
                 // timeout
                 let mut recv_futures = Vec::new();
                 for sh in state_synchronizers.values_mut() {
-                    recv_futures.push(sh.try_advance(current_block.number + 1, 300));
+                    recv_futures.push(sh.try_advance(&block_history, 300));
                 }
                 join_all(recv_futures).await;
 
                 // Purge any bad synchronizers
-                state_synchronizers.retain(|k, v| match v.state {
+                state_synchronizers.retain(|_, v| match v.state {
                     SynchronizerState::Started | SynchronizerState::Ended => false,
                     SynchronizerState::Stale(_) => false,
                     SynchronizerState::Ready(_) => true,
@@ -258,16 +293,20 @@ impl BlockSynchronizer {
                     SynchronizerState::Advanced(_) => true,
                 });
 
-                current_block = state_synchronizers
-                    .values()
-                    .into_iter()
-                    .filter_map(|v| match &v.state {
-                        SynchronizerState::Ready(b) => Some(b),
-                        _ => None,
-                    })
-                    .next()
-                    .expect("Did not advance")
-                    .clone();
+                block_history
+                    .push(
+                        state_synchronizers
+                            .values()
+                            .into_iter()
+                            .filter_map(|v| match &v.state {
+                                SynchronizerState::Ready(b) => Some(b),
+                                _ => None,
+                            })
+                            .next()
+                            .expect("Did not advance")
+                            .clone(),
+                    )
+                    .expect("history bad");
             }
             Ok(())
         });
