@@ -143,6 +143,7 @@ pub struct BlockAccountChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
+    pub revert: bool,
     #[serde(with = "hex_hashmap_key")]
     pub account_updates: HashMap<Bytes, AccountUpdate>,
     pub new_protocol_components: Vec<ProtocolComponent>,
@@ -155,6 +156,7 @@ impl BlockAccountChanges {
         extractor: &str,
         chain: Chain,
         block: Block,
+        revert: bool,
         account_updates: HashMap<Bytes, AccountUpdate>,
         new_protocol_components: Vec<ProtocolComponent>,
         deleted_protocol_components: Vec<ProtocolComponent>,
@@ -164,6 +166,7 @@ impl BlockAccountChanges {
             extractor: extractor.to_owned(),
             chain,
             block,
+            revert,
             account_updates,
             new_protocol_components,
             deleted_protocol_components,
@@ -243,6 +246,7 @@ pub struct BlockEntityChangesResult {
     extractor: String,
     chain: Chain,
     pub block: Block,
+    pub revert: bool,
     pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
