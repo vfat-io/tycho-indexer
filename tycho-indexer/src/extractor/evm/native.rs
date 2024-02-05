@@ -24,7 +24,7 @@ use crate::{
     },
 };
 
-// TODO: Maybe use the same Inner as AmbientExtractor
+// TODO: Use the same Inner as AmbientExtractor
 pub struct Inner {
     cursor: Vec<u8>,
     last_processed_block: Option<Block>,
@@ -115,9 +115,9 @@ impl NativePgGateway {
 
         let mut txs: Vec<evm::Transaction> = vec![];
 
-        let mut new_protocol_components: Vec<(evm::ProtocolComponent)> = vec![];
+        let mut new_protocol_components: Vec<evm::ProtocolComponent> = vec![];
         let mut state_updates: Vec<(TxHash, evm::ProtocolStateDelta)> = vec![];
-        let mut balance_changes: Vec<(evm::ComponentBalance)> = vec![];
+        let mut balance_changes: Vec<evm::ComponentBalance> = vec![];
 
         for tx in changes.state_updates.iter() {
             txs.push(tx.tx.clone());
