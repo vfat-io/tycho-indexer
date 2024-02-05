@@ -354,7 +354,7 @@ impl AmbientGateway for AmbientPgGateway {
     ) -> Result<evm::BlockAccountChanges, StorageError> {
         let mut conn = self.pool.get().await.unwrap();
         let res = self
-            .backward(current, to, new_cursor, conn)
+            .backward(current, to, new_cursor, &mut conn)
             .await?;
         Ok(res)
     }
