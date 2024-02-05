@@ -159,7 +159,32 @@ impl AmbientPgGateway {
             .await?;
 
         // TODO: call TokenPreProcessor to get the token metadata
-        // insert the new tokens into the DB
+        // This is temporary and these values should be used to mock the TokenPreProcessor in the
+        // tests
+        let new_tokens = vec![
+            evm::ERC20Token::new(
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .expect("Invalid H160 address"),
+                "WETH".to_string(),
+                18,
+                0,
+                vec![],
+                Default::default(),
+            ),
+            evm::ERC20Token::new(
+                H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                    .expect("Invalid H160 address"),
+                "USDC".to_string(),
+                6,
+                0,
+                vec![],
+                Default::default(),
+            ),
+        ];
+
+        self.state_gateway
+            .add_tokens(&changes.block, &new_tokens)
+            .await?;
 
         self.state_gateway
             .upsert_block(&changes.block)
@@ -178,8 +203,16 @@ impl AmbientPgGateway {
                         .await?;
                 }
             }
-            // insert new protocol components
-            // insert new component balances
+            if !update.protocol_components.is_empty() {
+                self.state_gateway
+                    .add_protocol_components(&changes.block, &update.protocol_components)
+                    .await?;
+            }
+            if !update.component_balances.is_empty() {
+                self.state_gateway
+                    .add_component_balances(&changes.block, &update.component_balances)
+                    .await?;
+            }
         }
         let collected_changes: Vec<(Bytes, AccountUpdate)> = changes
             .tx_updates
@@ -662,10 +695,13 @@ mod test_serial_db {
     //!
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
-    use crate::storage::{
-        postgres,
-        postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
-        ChangeType, ContractId,
+    use crate::{
+        extractor::evm::{ComponentBalance, ProtocolComponent},
+        storage::{
+            postgres,
+            postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
+            ChangeType, ContractId,
+        },
     };
     use ethers::types::U256;
     use mpsc::channel;
@@ -689,6 +725,8 @@ mod test_serial_db {
             .await
             .expect("pool should get a connection");
         postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
+        postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None).await;
         let evm_gw = Arc::new(
             PostgresGateway::<
                 evm::Block,
@@ -778,6 +816,11 @@ mod test_serial_db {
     }
 
     fn ambient_creation_and_update() -> evm::BlockContractChanges {
+        let base_token = H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+            .expect("Invalid H160 address");
+        let quote_token = H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+            .expect("Invalid H160 address");
+        let component_id = "ambient_USDC_ETH".to_string();
         evm::BlockContractChanges {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
@@ -798,8 +841,24 @@ mod test_serial_db {
                     )]
                     .into_iter()
                     .collect(),
-                    HashMap::new(),
-                    HashMap::new(),
+                    vec![ProtocolComponent {
+                        id: component_id.clone(),
+                        protocol_system: "ambient".to_string(),
+                        protocol_type_name: "vm:pool".to_string(),
+                        chain: Chain::Ethereum,
+                        tokens: vec![base_token, quote_token],
+                        contract_ids: vec![H160(AMBIENT_CONTRACT)],
+                        static_attributes: Default::default(),
+                        change: Default::default(),
+                        creation_tx: TX_HASH_0.parse().unwrap(),
+                        created_at: Default::default(),
+                    }],
+                    vec![ComponentBalance {
+                        token: base_token,
+                        new_balance: Bytes::from(&[0u8]),
+                        modify_tx: TX_HASH_0.parse().unwrap(),
+                        component_id: component_id.clone(),
+                    }],
                     evm::fixtures::transaction02(TX_HASH_0, evm::fixtures::HASH_256_0, 1),
                 ),
                 evm::TransactionVMUpdates::new(
@@ -816,8 +875,13 @@ mod test_serial_db {
                     )]
                     .into_iter()
                     .collect(),
-                    HashMap::new(),
-                    HashMap::new(),
+                    vec![],
+                    vec![ComponentBalance {
+                        token: base_token,
+                        new_balance: Bytes::from(&[0u8]),
+                        modify_tx: TX_HASH_1.parse().unwrap(),
+                        component_id,
+                    }],
                     evm::fixtures::transaction02(TX_HASH_1, evm::fixtures::HASH_256_0, 2),
                 ),
             ],
@@ -896,6 +960,37 @@ mod test_serial_db {
             assert_eq!(res, exp);
             // Assert no error happened
             assert_eq!(maybe_err, Empty);
+
+            let tokens = cached_gw
+                .get_tokens(Chain::Ethereum, None, &mut conn)
+                .await
+                .unwrap();
+            assert_eq!(tokens.len(), 2);
+
+            let protocol_components = cached_gw
+                .get_protocol_components(&Chain::Ethereum, None, None, &mut conn)
+                .await
+                .unwrap();
+            assert_eq!(protocol_components.len(), 1);
+            assert_eq!(protocol_components[0].creation_tx, TX_HASH_0.parse().unwrap());
+
+            let component_balances = cached_gw
+                .get_balance_deltas(
+                    &Chain::Ethereum,
+                    None,
+                    &BlockOrTimestamp::Block(BlockIdentifier::Number((
+                        Chain::Ethereum,
+                        msg.block.number as i64,
+                    ))),
+                    &mut conn,
+                )
+                .await
+                .unwrap();
+            println!("BALNACES {:?}", component_balances);
+            // we only retrieve the latest balance (the one from the update in TX_HASH_1)
+            assert_eq!(component_balances.len(), 1);
+            assert_eq!(component_balances[0].modify_tx, TX_HASH_1.parse().unwrap());
+            assert_eq!(component_balances[0].component_id, "ambient_USDC_ETH");
         })
         .await;
     }
@@ -908,6 +1003,9 @@ mod test_serial_db {
                 .await
                 .expect("pool should get a connection");
             postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
+            postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
+            postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None)
+                .await;
             let evm_gw = Arc::new(
                 PostgresGateway::<
                     evm::Block,
