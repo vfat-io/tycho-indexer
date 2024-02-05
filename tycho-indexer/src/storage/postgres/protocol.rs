@@ -886,11 +886,11 @@ where
             //                start                     target
             // We query for balance updates between start and target version.
             component_balance
-                .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
+                .inner_join(schema::protocol_component::table)
                 .inner_join(schema::transaction::table)
                 .inner_join(schema::token::table.inner_join(schema::account::table))
                 .filter(
-                    schema::chain::id
+                    schema::protocol_component::chain_id
                         .eq(chain_id)
                         .and(valid_from.gt(start_ts))
                         .and(valid_from.le(target_ts))
@@ -931,11 +931,11 @@ where
             // We query for the previous values of all (protocol_component, token) pairs updated
             // between start and target version.
             component_balance
-                .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
+                .inner_join(schema::protocol_component::table)
                 .inner_join(schema::transaction::table)
                 .inner_join(schema::token::table.inner_join(schema::account::table))
                 .filter(
-                    schema::chain::id
+                    schema::protocol_component::chain_id
                         .eq(chain_id)
                         .and(valid_from.ge(target_ts))
                         .and(valid_from.lt(start_ts))
