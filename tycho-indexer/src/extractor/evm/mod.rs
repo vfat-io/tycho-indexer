@@ -1127,40 +1127,22 @@ pub mod fixtures {
                         to: vec![0x51, 0x52, 0x53, 0x54],
                         index: 2,
                     }),
-                    contract_changes: vec![
-                        ContractChange {
-                            address: vec![0x61, 0x62, 0x63, 0x64],
-                            balance: vec![0x71, 0x72, 0x73, 0x74],
-                            code: vec![0x81, 0x82, 0x83, 0x84],
-                            slots: vec![
-                                ContractSlot {
-                                    slot: vec![0xa1, 0xa2, 0xa3, 0xa4],
-                                    value: vec![0xb1, 0xb2, 0xb3, 0xb4],
-                                },
-                                ContractSlot {
-                                    slot: vec![0xc1, 0xc2, 0xc3, 0xc4],
-                                    value: vec![0xd1, 0xd2, 0xd3, 0xd4],
-                                },
-                            ],
-                            change: ChangeType::Update.into(),
-                        },
-                        /*ContractChange {
-                            address: vec![0x61, 0x62, 0x63, 0x64],
-                            balance: vec![0xf1, 0xf2, 0xf3, 0xf4],
-                            code: vec![0x01, 0x02, 0x03, 0x04],
-                            slots: vec![
-                                ContractSlot {
-                                    slot: vec![0x91, 0x92, 0x93, 0x94],
-                                    value: vec![0xa1, 0xa2, 0xa3, 0xa4],
-                                },
-                                ContractSlot {
-                                    slot: vec![0xb1, 0xb2, 0xb3, 0xb4],
-                                    value: vec![0xc1, 0xc2, 0xc3, 0xc4],
-                                },
-                            ],
-                            change: ChangeType::Update.into(),
-                        },*/
-                    ],
+                    contract_changes: vec![ContractChange {
+                        address: vec![0x61, 0x62, 0x63, 0x64],
+                        balance: vec![0x71, 0x72, 0x73, 0x74],
+                        code: vec![0x81, 0x82, 0x83, 0x84],
+                        slots: vec![
+                            ContractSlot {
+                                slot: vec![0xa1, 0xa2, 0xa3, 0xa4],
+                                value: vec![0xb1, 0xb2, 0xb3, 0xb4],
+                            },
+                            ContractSlot {
+                                slot: vec![0xc1, 0xc2, 0xc3, 0xc4],
+                                value: vec![0xd1, 0xd2, 0xd3, 0xd4],
+                            },
+                        ],
+                        change: ChangeType::Update.into(),
+                    }],
                     component_changes: vec![ProtocolComponent {
                         id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
                         tokens: vec![
@@ -1585,12 +1567,6 @@ mod test {
             to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
             index: 2,
         };
-        println!(
-            "{:?}",
-            H256::from_str(HASH_256_1)
-                .unwrap()
-                .as_bytes()
-        );
         let tx_5 = Transaction {
             hash: H256::from_str(HASH_256_1).unwrap(),
             block_hash: H256::from_low_u64_be(
