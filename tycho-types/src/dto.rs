@@ -83,6 +83,22 @@ pub enum Deltas {
     Native(BlockEntityChangesResult),
 }
 
+impl Deltas {
+    pub fn get_block(&self) -> &Block {
+        match self {
+            Deltas::VM(data) => &data.block,
+            Deltas::Native(data) => &data.block,
+        }
+    }
+
+    pub fn is_revert(&self) -> bool {
+        match self {
+            Deltas::VM(data) => data.revert,
+            Deltas::Native(data) => data.revert,
+        }
+    }
+}
+
 /// A message sent from the server to the client
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]

@@ -3,18 +3,19 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::{
     sync::{
         mpsc::{channel, Receiver, Sender},
-        Mutex, RwLock,
+        Mutex,
     },
     task::JoinHandle,
 };
 use tycho_types::{
     dto::{
-        Block, BlockAccountChanges, BlockParam, ExtractorIdentity, ResponseAccount,
+        Block, BlockAccountChanges, BlockParam, Deltas, ExtractorIdentity, ResponseAccount,
         StateRequestBody, StateRequestParameters, VersionParam,
     },
     Bytes,
 };
 
+use super::Header;
 use crate::{deltas::DeltasClient, rpc::RPCClient, HttpRPCClient, WsDeltasClient};
 
 type SyncResult<T> = anyhow::Result<T>;
@@ -26,24 +27,29 @@ pub struct StateSynchronizer {
     deltas_client: WsDeltasClient,
     // we will need to request a snapshot for components that we did not emit a
     // snapshot for yet but are relevant now, e.g. because min tvl threshold exceeded.
+    // Currently waiting for necessary endpoints to be implemented.
+    #[allow(dead_code)]
     last_snapshot_components: Vec<()>,
     last_served_block_hash: Arc<Mutex<Option<Bytes>>>,
-    last_synced_block: Arc<Mutex<Option<Block>>>,
-    // TODO: since we may return a mix of snapshots and deltas the value type should be a vector.
-    pending_deltas: Arc<Mutex<HashMap<Bytes, StateMsg>>>,
+    last_synced_block: Arc<Mutex<Option<Header>>>,
+    // Since we may return a mix of snapshots and deltas (e.g. if a new component crossed the tvl
+    // threshold) the value type is a vector.
+    pending_deltas: Arc<Mutex<HashMap<Bytes, Vec<StateMsg>>>>,
+    // Waiting for the rpc endpoints to support tvl.
+    #[allow(dead_code)]
     min_tvl_threshold: f64,
 }
 
 pub enum StateMsg {
-    Snapshot { block: Block, state: Vec<ResponseAccount> },
-    Deltas(BlockAccountChanges),
+    Snapshot { header: Header, state: Vec<ResponseAccount> },
+    Deltas { header: Header, deltas: Deltas },
 }
 
 impl StateMsg {
-    pub fn get_block(&self) -> &Block {
+    pub fn get_block(&self) -> &Header {
         match self {
-            StateMsg::Snapshot { block, state } => block,
-            StateMsg::Deltas(delta) => &delta.block,
+            StateMsg::Snapshot { header, .. } => header,
+            StateMsg::Deltas { header, .. } => header,
         }
     }
 }
@@ -69,11 +75,18 @@ impl StateSynchronizer {
         // If this is the first request, we have to hit a snapshot else this will error!
         while Some(&current_hash) != target_hash.as_ref() {
             if let Some(data) = state.remove(&current_hash) {
-                if let StateMsg::Deltas(delta) = &data {
-                    current_hash = delta.block.parent_hash.clone();
-                    to_serve.push(data);
-                } else {
-                    to_serve.push(data);
+                let mut is_all_snapshots = true;
+                for msg in data.into_iter() {
+                    if let StateMsg::Deltas { header, deltas } = &msg {
+                        current_hash = deltas.get_block().parent_hash.clone();
+                        to_serve.push(msg);
+                        is_all_snapshots = false;
+                    } else {
+                        to_serve.push(msg);
+                        is_all_snapshots &= true;
+                    }
+                }
+                if is_all_snapshots {
                     break;
                 }
             } else {
@@ -85,7 +98,7 @@ impl StateSynchronizer {
         Ok(to_serve)
     }
 
-    pub fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Block>)> {
+    pub fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)> {
         let (mut block_tx, block_rx) = channel(15);
 
         let this = self.clone();
@@ -104,45 +117,52 @@ impl StateSynchronizer {
         Ok((jh, block_rx))
     }
 
-    async fn state_sync(self, block_tx: &mut Sender<Block>) -> SyncResult<()> {
+    async fn state_sync(self, block_tx: &mut Sender<Header>) -> SyncResult<()> {
         let (_, mut msg_rx) = self
             .deltas_client
             .subscribe(self.extractor_id.clone())
             .await?;
+
+        // we need to wait 2 messages because of cache gateways insertion delay.
+        let _ = msg_rx
+            .recv()
+            .await
+            .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
         let first_msg = msg_rx
             .recv()
             .await
             .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
 
-        let block = first_msg.block.clone();
-        let params = StateRequestParameters {
-            chain: self.extractor_id.chain,
-            tvl_gt: None,
-            inertia_min_gt: None,
-        };
+        let block = first_msg.get_block().clone();
+        let params = StateRequestParameters { tvl_gt: None, inertia_min_gt: None };
         let body = StateRequestBody {
             contract_ids: None,
             version: VersionParam::new(None, Some(BlockParam::from(&block))),
         };
+        // TODO: only request components we are interested in
         let snapshot = self
             .rpc_client
-            .get_contract_state(&params, &body)
+            .get_contract_state(self.extractor_id.chain, &params, &body)
             .await?;
+        let header = Header::from_block(first_msg.get_block(), first_msg.is_revert());
         self.pending_deltas.lock().await.insert(
-            first_msg.block.hash.clone(),
-            StateMsg::Snapshot { block: block.clone(), state: snapshot.accounts },
+            header.hash.clone(),
+            vec![StateMsg::Snapshot { header: header.clone(), state: snapshot.accounts }],
         );
-        *self.last_synced_block.lock().await = Some(block.clone());
-        block_tx.send(block.clone()).await?;
+        *self.last_synced_block.lock().await = Some(header.clone());
+        block_tx.send(header.clone()).await?;
         loop {
             if let Some(deltas) = msg_rx.recv().await {
-                let block = deltas.block.clone();
-                self.pending_deltas
-                    .lock()
-                    .await
-                    .insert(block.hash.clone(), StateMsg::Deltas(deltas));
-                *self.last_synced_block.lock().await = Some(block.clone());
-                block_tx.send(block).await?;
+                let header = Header::from_block(deltas.get_block(), deltas.is_revert());
+                // TODO: Three branches here, either we are not interested in the delta, we already
+                // have been interested or we just became interested (in this case we need to get a
+                // snapshot first though)
+                self.pending_deltas.lock().await.insert(
+                    block.hash.clone(),
+                    vec![StateMsg::Deltas { header: header.clone(), deltas }],
+                );
+                *self.last_synced_block.lock().await = Some(header.clone());
+                block_tx.send(header).await?;
             } else {
                 self.pending_deltas.lock().await.clear();
                 *self.last_synced_block.lock().await = None;

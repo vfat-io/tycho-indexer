@@ -1,17 +1,19 @@
 use std::{collections::HashMap, time::Duration};
 
 use chrono::{Local, NaiveDateTime};
-use futures03::{future::join_all, stream::FuturesUnordered};
+use futures03::{future::join_all, stream::FuturesUnordered, StreamExt};
 
+use crate::{deltas::DeltasClient, HttpRPCClient, WsDeltasClient};
 use tokio::{
     sync::mpsc::{self, Receiver},
     task::JoinHandle,
     time::timeout,
 };
 use tracing::{info, warn};
-use tycho_types::dto::{Block, ExtractorIdentity};
-
-use crate::{deltas::DeltasClient, HttpRPCClient, WsDeltasClient};
+use tycho_types::{
+    dto::{Block, ExtractorIdentity},
+    Bytes,
+};
 
 use self::{
     block_history::{BlockHistory, BlockPosition},
@@ -21,25 +23,41 @@ use self::{
 mod block_history;
 mod synchronizer;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Header {
+    pub hash: Bytes,
+    pub number: u64,
+    pub parent_hash: Bytes,
+    pub revert: bool,
+}
+
+impl Header {
+    fn from_block(_: &Block, _: bool) -> Self {
+        todo!()
+    }
+}
+
 type BlockSyncResult<T> = anyhow::Result<T>;
 
 pub struct BlockSynchronizer {
     rpc_client: HttpRPCClient,
     deltas_client: WsDeltasClient,
     synchronizers: HashMap<ExtractorIdentity, StateSynchronizer>,
+    block_time: u64,
+    max_wait: u64,
 }
 
 enum SynchronizerState {
     Started,
-    Ready(Block),
+    Ready(Header),
     // TODO: looks like stale and delayed are the same, if a delayed synchronizer makes basically
     // no progress, we consider it stale at that point we should purge it.
-    Stale(Block),
-    Delayed(Block),
+    Stale(Header),
+    Delayed(Header),
     // For this to happen we must have a gap, and a gap usually means a new snapshot from the
     // StateSynchroniser. This can only happen if we are processing too slow and the one of the
     // synchronisers restarts e.g. because tycho ended the subscription.
-    Advanced(Block),
+    Advanced(Header),
     Ended,
 }
 
@@ -47,7 +65,7 @@ pub struct SynchronizerHandle {
     state: SynchronizerState,
     sync: StateSynchronizer,
     modfiy_ts: NaiveDateTime,
-    rx: Receiver<Block>,
+    rx: Receiver<Header>,
 }
 
 impl SynchronizerHandle {
@@ -82,7 +100,7 @@ impl SynchronizerHandle {
         &mut self,
         max_wait: u64,
         block_history: &BlockHistory,
-        previous_block: Block,
+        previous_block: Header,
     ) {
         match timeout(Duration::from_millis(max_wait), self.rx.recv()).await {
             Ok(Some(b)) => self.transition(b, block_history),
@@ -124,7 +142,7 @@ impl SynchronizerHandle {
         }
     }
 
-    fn transition(&mut self, latest_retrieved: Block, block_history: &BlockHistory) {
+    fn transition(&mut self, latest_retrieved: Header, block_history: &BlockHistory) {
         // TODO: special handling for reverts required here
         match block_history
             .determine_block_position(&latest_retrieved)
@@ -161,8 +179,6 @@ impl BlockSynchronizer {
     ) -> BlockSyncResult<(JoinHandle<BlockSyncResult<()>>, Receiver<Vec<StateMsg>>)> {
         let ws_task = self.deltas_client.connect().await?;
         let state_sync_tasks = FuturesUnordered::new();
-        // TODO: fill with last X blocks
-        let mut block_history = BlockHistory::new(vec![], 15);
         let mut state_synchronizers = HashMap::with_capacity(self.synchronizers.len());
 
         // No await in here so all synchronizers start at the same time!!
@@ -237,9 +253,7 @@ impl BlockSynchronizer {
             anyhow::bail!("Not a single synchronizer healthy!")
         }
 
-        block_history
-            .push(blocks[0].clone())
-            .expect("history not avail");
+        let mut block_history = BlockHistory::new(vec![blocks[0].clone()], 15);
         let (sync_tx, sync_rx) = mpsc::channel(30);
         let jh = tokio::spawn(async move {
             loop {
@@ -276,11 +290,19 @@ impl BlockSynchronizer {
                     .collect::<Vec<_>>();
                 sync_tx.send(synced_msgs).await?;
 
-                // Wait for the next emission, this is guaranteed to return within the specified
-                // timeout
+                // Here we simply wait block_time + max_wait. This will not work for chains with
+                // unkown block times but is simple enough for now.
+                // If we would like to support unkown block times we could: Instruct all handles to
+                // await the max block time, if a header arrives within that time transition as
+                // usual, but via a select statement get notified (using e.g. Notify) if any other
+                // handle finishes before the timeout. Then await again but this time only for
+                // max_wait and then proceed as usual. So basically each try_advance task would have
+                // a select statement that allows it to exit the first timeout
+                // preemtpively if any other try_advance task finished earlier.
                 let mut recv_futures = Vec::new();
                 for sh in state_synchronizers.values_mut() {
-                    recv_futures.push(sh.try_advance(&block_history, 300));
+                    recv_futures
+                        .push(sh.try_advance(&block_history, self.block_time + self.max_wait));
                 }
                 join_all(recv_futures).await;
 
@@ -303,6 +325,7 @@ impl BlockSynchronizer {
                                 _ => None,
                             })
                             .next()
+                            // no synchronizers is ready
                             .expect("Did not advance")
                             .clone(),
                     )

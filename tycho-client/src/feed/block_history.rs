@@ -3,7 +3,7 @@ use std::{collections::VecDeque, num::NonZeroUsize};
 use lru::LruCache;
 
 use super::Header;
-use tracing::{error, warn};
+use tracing::error;
 use tycho_types::Bytes;
 
 pub struct BlockHistory {
