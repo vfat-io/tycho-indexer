@@ -12,7 +12,10 @@ use tracing::{debug, error, info, instrument, warn};
 
 use async_trait::async_trait;
 
-use tycho_types::dto::{Chain, StateRequestBody, StateRequestParameters, StateRequestResponse};
+use tycho_types::dto::{
+    Chain, ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
+    ProtocolComponentsRequestBody, StateRequestBody, StateRequestParameters, StateRequestResponse,
+};
 
 use crate::TYCHO_SERVER_VERSION;
 
@@ -41,6 +44,12 @@ pub trait RPCClient {
         filters: &StateRequestParameters,
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError>;
+
+    async fn get_protocol_components(
+        &self,
+        filters: &ProtocolComponentRequestParameters,
+        request: &ProtocolComponentsRequestBody,
+    ) -> Result<ProtocolComponentRequestResponse, RPCError>;
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +126,14 @@ impl RPCClient for HttpRPCClient {
         info!(?accounts, "Received contract_state response from Tycho server");
 
         Ok(accounts)
+    }
+
+    async fn get_protocol_components(
+        &self,
+        filters: &ProtocolComponentRequestParameters,
+        request: &ProtocolComponentsRequestBody,
+    ) -> Result<ProtocolComponentRequestResponse, RPCError> {
+        todo!()
     }
 }
 
