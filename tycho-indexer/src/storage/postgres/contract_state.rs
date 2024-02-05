@@ -7,9 +7,9 @@ use ethers::utils::keccak256;
 use tracing::instrument;
 
 use crate::storage::{
-    AccountToContractStore, Address, Balance, BlockIdentifier, BlockOrTimestamp, ChangeType, Code,
-    ContractDelta, ContractId, ContractStateGateway, ContractStore, StorableBlock,
-    StorableContract, StorableToken, StorableTransaction, StoreKey, StoreVal, TxHash, Version,
+    AccountToContractStore, Address, Balance, BlockOrTimestamp, ChangeType, Code, ContractDelta,
+    ContractId, ContractStateGateway, ContractStore, StorableBlock, StorableContract,
+    StorableToken, StorableTransaction, StoreKey, StoreVal, TxHash, Version,
 };
 use tycho_types::Bytes;
 
@@ -1241,83 +1241,6 @@ where
             .collect::<Result<HashMap<_, _>, _>>()?;
         Ok(deltas.into_values().collect())
     }
-
-    async fn revert_state(
-        &self,
-        to: &BlockIdentifier,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<(), StorageError> {
-        // To revert all changes of a chain, we need to delete & modify entries
-        // from a big number of tables. Reverting state, signifies deleting
-        // history. We will not keep any branches in the db only the main branch
-        // will be kept.
-        let block = orm::Block::by_id(to, conn).await?;
-
-        // All entities and version updates are connected to the block via a
-        // cascade delete, this ensures that the state is reverted by simply
-        // deleting the correct blocks, which then triggers cascading deletes on
-        // child entries.
-        diesel::delete(
-            schema::block::table
-                .filter(schema::block::number.gt(block.number))
-                .filter(schema::block::chain_id.eq(block.chain_id)),
-        )
-        .execute(conn)
-        .await?;
-
-        // Any versioned table's rows, which have `valid_to` set to "> block.ts"
-        // need, to be updated to be valid again (thus, valid_to = NULL).
-        diesel::update(
-            schema::contract_storage::table.filter(schema::contract_storage::valid_to.gt(block.ts)),
-        )
-        .set(schema::contract_storage::valid_to.eq(Option::<NaiveDateTime>::None))
-        .execute(conn)
-        .await?;
-
-        diesel::update(
-            schema::account_balance::table.filter(schema::account_balance::valid_to.gt(block.ts)),
-        )
-        .set(schema::account_balance::valid_to.eq(Option::<NaiveDateTime>::None))
-        .execute(conn)
-        .await?;
-
-        diesel::update(
-            schema::contract_code::table.filter(schema::contract_code::valid_to.gt(block.ts)),
-        )
-        .set(schema::contract_code::valid_to.eq(Option::<NaiveDateTime>::None))
-        .execute(conn)
-        .await?;
-
-        diesel::update(
-            schema::protocol_state::table.filter(schema::protocol_state::valid_to.gt(block.ts)),
-        )
-        .set(schema::protocol_state::valid_to.eq(Option::<NaiveDateTime>::None))
-        .execute(conn)
-        .await?;
-
-        diesel::update(
-            schema::protocol_calls_contract::table
-                .filter(schema::protocol_calls_contract::valid_to.gt(block.ts)),
-        )
-        .set(schema::protocol_calls_contract::valid_to.eq(Option::<NaiveDateTime>::None))
-        .execute(conn)
-        .await?;
-
-        diesel::update(schema::account::table.filter(schema::account::deleted_at.gt(block.ts)))
-            .set(schema::account::deleted_at.eq(Option::<NaiveDateTime>::None))
-            .execute(conn)
-            .await?;
-
-        diesel::update(
-            schema::protocol_component::table
-                .filter(schema::protocol_component::deleted_at.gt(block.ts)),
-        )
-        .set(schema::protocol_component::deleted_at.eq(Option::<NaiveDateTime>::None))
-        .execute(conn)
-        .await?;
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -2406,58 +2329,5 @@ mod test {
             .await;
 
         assert_eq!(res, exp);
-    }
-
-    #[tokio::test]
-
-    async fn test_revert() {
-        let mut conn = setup_db().await;
-        setup_data(&mut conn).await;
-        let block1_hash =
-            H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
-                .unwrap()
-                .0
-                .into();
-        let c0_address =
-            Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").expect("c0 address valid");
-        let exp_slots: HashMap<U256, U256> = vec![
-            (U256::from(0), U256::from(1)),
-            (U256::from(1), U256::from(5)),
-            (U256::from(2), U256::from(1)),
-        ]
-        .into_iter()
-        .collect();
-        let gw = EvmGateway::from_connection(&mut conn).await;
-
-        gw.revert_state(&BlockIdentifier::Hash(block1_hash), &mut conn)
-            .await
-            .unwrap();
-
-        let slots: HashMap<U256, U256> = schema::contract_storage::table
-            .inner_join(schema::account::table)
-            .filter(schema::account::address.eq(c0_address))
-            .select((schema::contract_storage::slot, schema::contract_storage::value))
-            .get_results::<(Bytes, Option<Bytes>)>(&mut conn)
-            .await
-            .unwrap()
-            .iter()
-            .map(|(k, v)| {
-                (
-                    U256::from_big_endian(k),
-                    v.as_ref()
-                        .map(|rv| U256::from_big_endian(rv))
-                        .unwrap_or_else(U256::zero),
-                )
-            })
-            .collect();
-        assert_eq!(slots, exp_slots);
-
-        let c1 = schema::account::table
-            .filter(schema::account::title.eq("c1"))
-            .select(schema::account::id)
-            .get_results::<i64>(&mut conn)
-            .await
-            .unwrap();
-        assert_eq!(c1.len(), 0);
     }
 }

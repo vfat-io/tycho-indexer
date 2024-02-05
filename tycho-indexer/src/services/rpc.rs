@@ -7,7 +7,7 @@ use crate::{
         self, Address, BlockIdentifier, BlockOrTimestamp, ContractStateGateway, StorageError,
     },
 };
-use tycho_types::Bytes;
+use tycho_types::{dto::ProtocolComponentRequestParameters, Bytes};
 
 use actix_web::{web, HttpResponse};
 use diesel_async::{
@@ -18,7 +18,11 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
-use tycho_types::dto;
+use crate::storage::ProtocolGateway;
+use tycho_types::{
+    dto,
+    dto::{ResponseProtocolComponent, ResponseToken, StateRequestParameters},
+};
 
 use super::EvmPostgresGateway;
 
@@ -63,6 +67,48 @@ impl From<Chain> for dto::Chain {
     }
 }
 
+impl From<evm::ERC20Token> for ResponseToken {
+    fn from(token: evm::ERC20Token) -> Self {
+        Self {
+            address: token.address.into(),
+            symbol: token.symbol,
+            decimals: token.decimals,
+            tax: token.tax,
+            chain: token.chain.into(),
+            gas: token.gas,
+        }
+    }
+}
+
+impl From<evm::ProtocolComponent> for ResponseProtocolComponent {
+    fn from(protocol_component: evm::ProtocolComponent) -> Self {
+        Self {
+            chain: protocol_component.chain.into(),
+            id: protocol_component.id,
+            protocol_system: protocol_component.protocol_system,
+            protocol_type_name: protocol_component.protocol_type_name,
+            tokens: protocol_component
+                .tokens
+                .into_iter()
+                .map(|token| {
+                    let bytes = token.as_bytes().to_vec();
+                    Bytes::from(bytes)
+                })
+                .collect(),
+            contract_ids: protocol_component
+                .contract_ids
+                .into_iter()
+                .map(|h| {
+                    let bytes = h.as_bytes().to_vec();
+                    Bytes::from(bytes)
+                })
+                .collect(),
+            static_attributes: protocol_component.static_attributes,
+            creation_tx: protocol_component.creation_tx.into(),
+            created_at: protocol_component.created_at,
+        }
+    }
+}
 #[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Failed to parse JSON: {0}")]
@@ -168,6 +214,95 @@ impl RpcHandler {
             }
         }
     }
+
+    async fn get_tokens(
+        &self,
+        chain: &Chain,
+        request: &dto::TokensRequestBody,
+    ) -> Result<dto::TokensRequestResponse, RpcError> {
+        let mut conn = self.db_connection_pool.get().await?;
+
+        info!(?chain, ?request, "Getting tokens.");
+        self.get_tokens_inner(chain, request, &mut conn)
+            .await
+    }
+
+    async fn get_tokens_inner(
+        &self,
+        chain: &Chain,
+        request: &dto::TokensRequestBody,
+        db_connection: &mut AsyncPgConnection,
+    ) -> Result<dto::TokensRequestResponse, RpcError> {
+        let address_refs: Option<Vec<&Address>> = request
+            .token_addresses
+            .as_ref()
+            .map(|vec| vec.iter().collect());
+        let addresses_slice = address_refs.as_deref();
+        debug!(?addresses_slice, "Getting tokens.");
+
+        match self
+            .db_gateway
+            .get_tokens(*chain, addresses_slice, db_connection)
+            .await
+        {
+            Ok(tokens) => Ok(dto::TokensRequestResponse::new(
+                tokens
+                    .into_iter()
+                    .map(dto::ResponseToken::from)
+                    .collect(),
+            )),
+            Err(err) => {
+                error!(error = %err, "Error while getting tokens.");
+                Err(err.into())
+            }
+        }
+    }
+
+    async fn get_protocol_components(
+        &self,
+        chain: &Chain,
+        request: &dto::ProtocolComponentsRequestBody,
+        params: &dto::ProtocolComponentRequestParameters,
+    ) -> Result<dto::ProtocolComponentRequestResponse, RpcError> {
+        let mut conn = self.db_connection_pool.get().await?;
+
+        info!(?chain, ?request, "Getting tokens.");
+        self.get_protocol_components_inner(chain, request, params, &mut conn)
+            .await
+    }
+
+    async fn get_protocol_components_inner(
+        &self,
+        chain: &Chain,
+        request: &dto::ProtocolComponentsRequestBody,
+        params: &dto::ProtocolComponentRequestParameters,
+        db_connection: &mut AsyncPgConnection,
+    ) -> Result<dto::ProtocolComponentRequestResponse, RpcError> {
+        #![allow(unused_variables)]
+        let system = request.protocol_system.clone();
+        let ids_strs: Option<Vec<&str>> = request
+            .component_ids
+            .as_ref()
+            .map(|vec| vec.iter().map(AsRef::as_ref).collect());
+
+        let ids_slice = ids_strs.as_deref();
+        match self
+            .db_gateway
+            .get_protocol_components(chain, system, ids_slice, db_connection)
+            .await
+        {
+            Ok(components) => Ok(dto::ProtocolComponentRequestResponse::new(
+                components
+                    .into_iter()
+                    .map(dto::ResponseProtocolComponent::from)
+                    .collect(),
+            )),
+            Err(err) => {
+                error!(error = %err, "Error while getting protocol components.");
+                Err(err.into())
+            }
+        }
+    }
 }
 
 #[utoipa::path(
@@ -176,9 +311,10 @@ impl RpcHandler {
     responses(
         (status = 200, description = "OK", body = StateRequestResponse),
     ),
-    request_body = dto::StateRequestBody,
+    request_body = StateRequestBody,
     params(
-        dto::StateRequestParameters
+        ("execution_env" = Chain, description = "Execution environment"),
+        StateRequestParameters
     ),
 )]
 pub async fn contract_state(
@@ -202,6 +338,70 @@ pub async fn contract_state(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/{execution_env}/tokens",
+    responses(
+        (status = 200, description = "OK", body = TokensRequestResponse),
+    ),
+    request_body = TokensRequestBody,
+    params(
+        ("execution_env" = Chain, description = "Execution environment"),
+    ),
+)]
+pub async fn tokens(
+    execution_env: web::Path<Chain>,
+    body: web::Json<dto::TokensRequestBody>,
+    handler: web::Data<RpcHandler>,
+) -> HttpResponse {
+    // Call the handler to get tokens
+    let response = handler
+        .into_inner()
+        .get_tokens(&execution_env, &body)
+        .await;
+
+    match response {
+        Ok(state) => HttpResponse::Ok().json(state),
+        Err(err) => {
+            error!(error = %err, ?body, "Error while getting tokens.");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/{execution_env}/protocol_components",
+    responses(
+        (status = 200, description = "OK", body = ProtocolComponentRequestResponse),
+    ),
+    request_body = ProtocolComponentsRequestBody,
+    params(
+        ("execution_env" = Chain, description = "Execution environment"),
+        ProtocolComponentRequestParameters
+    ),
+)]
+pub async fn protocol_components(
+    execution_env: web::Path<Chain>,
+    body: web::Json<dto::ProtocolComponentsRequestBody>,
+    params: web::Query<dto::ProtocolComponentRequestParameters>,
+    handler: web::Data<RpcHandler>,
+) -> HttpResponse {
+    // Call the handler to get tokens
+    let response = handler
+        .into_inner()
+        .get_protocol_components(&execution_env, &body, &params)
+        .await;
+
+    match response {
+        Ok(state) => HttpResponse::Ok().json(state),
+        Err(err) => {
+            error!(error = %err, ?body, "Error while getting tokens.");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::storage::{
@@ -217,6 +417,11 @@ mod tests {
     use std::{collections::HashMap, str::FromStr, sync::Arc};
 
     use super::*;
+
+    const WETH: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+    const USDC: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+    const USDT: &str = "dAC17F958D2ee523a2206206994597C13D831ec7";
+    const DAI: &str = "6B175474E89094C44Da98b954EedeAC495271d0F";
 
     #[test]
     async fn test_validate_version_priority() {
@@ -423,5 +628,157 @@ mod tests {
             "curl -X POST -H \"Content-Type: application/json\" -d '{}' {}",
             json_data, endpoint
         );
+    }
+
+    pub async fn setup_tokens(conn: &mut AsyncPgConnection) {
+        // Adds WETH, USDC and DAI to the DB
+        let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        db_fixtures::insert_token(conn, chain_id, WETH, "WETH", 18).await;
+        db_fixtures::insert_token(conn, chain_id, USDC, "USDC", 6).await;
+        db_fixtures::insert_token(conn, chain_id, DAI, "DAI", 18).await;
+    }
+    #[tokio::test]
+    async fn test_get_tokens() {
+        let db_url = std::env::var("DATABASE_URL").unwrap();
+        let pool = postgres::connect(&db_url)
+            .await
+            .unwrap();
+        let cloned_pool = pool.clone();
+        let mut conn = cloned_pool.get().await.unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
+        setup_tokens(&mut conn).await;
+
+        let db_gateway = Arc::new(EvmPostgresGateway::from_connection(&mut conn).await);
+        let req_handler = RpcHandler::new(db_gateway, pool);
+
+        // request for 2 tokens that are in the DB (WETH and USDC)
+        let request = dto::TokensRequestBody {
+            token_addresses: Some(vec![
+                USDC.parse::<Bytes>().unwrap(),
+                WETH.parse::<Bytes>().unwrap(),
+            ]),
+        };
+
+        let tokens = req_handler
+            .get_tokens_inner(&Chain::Ethereum, &request, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(tokens.tokens.len(), 2);
+        assert_eq!(tokens.tokens[0].symbol, "USDC");
+        assert_eq!(tokens.tokens[1].symbol, "WETH");
+
+        // request for 1 token that is not in the DB (USDT)
+        let request =
+            dto::TokensRequestBody { token_addresses: Some(vec![USDT.parse::<Bytes>().unwrap()]) };
+
+        let tokens = req_handler
+            .get_tokens_inner(&Chain::Ethereum, &request, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(tokens.tokens.len(), 0);
+
+        // request without any address filter -> should return all tokens
+        let request = dto::TokensRequestBody { token_addresses: None };
+
+        let tokens = req_handler
+            .get_tokens_inner(&Chain::Ethereum, &request, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(tokens.tokens.len(), 3);
+    }
+
+    pub async fn setup_components(conn: &mut AsyncPgConnection) {
+        let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let tx_ids = db_fixtures::insert_txns(
+            conn,
+            &[(blk[0], 1i64, "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")],
+        )
+        .await;
+        let protocol_system_id =
+            db_fixtures::insert_protocol_system(conn, "ambient".to_owned()).await;
+        db_fixtures::insert_protocol_system(conn, "curve".to_owned()).await;
+
+        let protocol_type_id =
+            db_fixtures::insert_protocol_type(conn, "Pool", None, None, None).await;
+        let (_, weth_id) = db_fixtures::insert_token(conn, chain_id, WETH, "WETH", 18).await;
+        let (_, usdc_id) = db_fixtures::insert_token(conn, chain_id, USDC, "USDC", 6).await;
+
+        let pool_account = db_fixtures::insert_account(
+            conn,
+            "aaaaaaaaa24eeeb8d57d431224f73832bc34f688",
+            "ambient_pool",
+            chain_id,
+            Some(tx_ids[0]),
+        )
+        .await;
+
+        let contract_code_id = db_fixtures::insert_contract_code(
+            conn,
+            pool_account,
+            tx_ids[0],
+            Bytes::from_str("C0C0C0").unwrap(),
+        )
+        .await;
+
+        db_fixtures::insert_protocol_component(
+            conn,
+            "ambient_USDC_ETH",
+            chain_id,
+            protocol_system_id,
+            protocol_type_id,
+            tx_ids[0],
+            Option::from(vec![usdc_id, weth_id]),
+            Option::from(vec![contract_code_id]),
+        )
+        .await;
+    }
+    #[tokio::test]
+    async fn test_get_protocol_components() {
+        let db_url = std::env::var("DATABASE_URL").unwrap();
+        let pool = postgres::connect(&db_url)
+            .await
+            .unwrap();
+        let cloned_pool = pool.clone();
+        let mut conn = cloned_pool.get().await.unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
+        setup_components(&mut conn).await;
+
+        let db_gateway = Arc::new(EvmPostgresGateway::from_connection(&mut conn).await);
+        let req_handler = RpcHandler::new(db_gateway, pool);
+
+        // request for ambient protocol components - there is one
+        let request = dto::ProtocolComponentsRequestBody {
+            protocol_system: Option::from("ambient".to_string()),
+            component_ids: None,
+        };
+        let params = dto::ProtocolComponentRequestParameters::default();
+
+        let components = req_handler
+            .get_protocol_components_inner(&Chain::Ethereum, &request, &params, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(components.protocol_components.len(), 1);
+
+        // request for curve protocol components - there are none
+        let request = dto::ProtocolComponentsRequestBody {
+            protocol_system: Option::from("curve".to_string()),
+            component_ids: None,
+        };
+
+        let components = req_handler
+            .get_protocol_components_inner(&Chain::Ethereum, &request, &params, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(components.protocol_components.len(), 0);
     }
 }

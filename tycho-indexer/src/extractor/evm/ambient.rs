@@ -341,16 +341,12 @@ where
 
         debug!(?raw_msg, "Received message");
 
-        let protocol_type = self
-            .protocol_types
-            .get("vm:pool")
-            .expect("Couldn't find Protocol Type");
         let msg = match evm::BlockContractChanges::try_from_message(
             raw_msg,
             &self.name,
             self.chain,
             self.protocol_system.clone(),
-            protocol_type.name.clone(),
+            &self.protocol_types,
         ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
@@ -432,9 +428,9 @@ mod test {
     fn ambient_protocol_types() -> HashMap<String, ProtocolType> {
         let mut ambient_protocol_types = HashMap::new();
         ambient_protocol_types.insert(
-            "vm:pool".to_string(),
+            "WeightedPool".to_string(),
             ProtocolType::new(
-                "ambient_pool".to_string(),
+                "WeightedPool".to_string(),
                 FinancialType::Swap,
                 None,
                 ImplementationType::Vm,
@@ -442,6 +438,7 @@ mod test {
         );
         ambient_protocol_types
     }
+
     #[tokio::test]
     async fn test_get_cursor() {
         let mut gw = MockAmbientGateway::new();

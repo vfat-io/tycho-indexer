@@ -4,7 +4,7 @@
 //! be very simple and ideally not contain any business logic.
 //!
 //! Structs in here implement utoipa traits so they can be used to derive an OpenAPI schema.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,9 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    serde_primitives::{hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value},
+    serde_primitives::{
+        hex_bytes, hex_bytes_option, hex_bytes_vec, hex_hashmap_key, hex_hashmap_key_value,
+    },
     Bytes,
 };
 
@@ -72,11 +74,18 @@ pub enum Response {
     SubscriptionEnded { subscription_id: Uuid },
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+#[serde(untagged)]
+pub enum Deltas {
+    VM(BlockAccountChanges),
+    Native(BlockEntityChangesResult),
+}
+
 /// A message sent from the server to the client
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum WebSocketMessage {
-    BlockAccountChanges(BlockAccountChanges),
+    BlockChanges { subscription_id: Uuid, delta: Deltas },
     Response(Response),
 }
 
@@ -126,6 +135,8 @@ impl Transaction {
 ///
 /// Hold a single update per account. This is a condensed form of
 /// [BlockStateChanges].
+///
+/// TODO - update once new structure is merged
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct BlockAccountChanges {
     extractor: String,
@@ -133,16 +144,30 @@ pub struct BlockAccountChanges {
     pub block: Block,
     #[serde(with = "hex_hashmap_key")]
     pub account_updates: HashMap<Bytes, AccountUpdate>,
+    pub new_protocol_components: Vec<ProtocolComponent>,
+    pub deleted_protocol_components: Vec<ProtocolComponent>,
+    pub component_balances: Vec<ComponentBalance>,
 }
 
 impl BlockAccountChanges {
     pub fn new(
-        extractor: String,
+        extractor: &str,
         chain: Chain,
         block: Block,
         account_updates: HashMap<Bytes, AccountUpdate>,
+        new_protocol_components: Vec<ProtocolComponent>,
+        deleted_protocol_components: Vec<ProtocolComponent>,
+        component_balances: Vec<ComponentBalance>,
     ) -> Self {
-        Self { extractor, chain, block, account_updates }
+        BlockAccountChanges {
+            extractor: extractor.to_owned(),
+            chain,
+            block,
+            account_updates,
+            new_protocol_components,
+            deleted_protocol_components,
+            component_balances,
+        }
     }
 }
 
@@ -172,6 +197,57 @@ impl AccountUpdate {
     ) -> Self {
         Self { address, chain, slots, balance, code, change }
     }
+}
+
+/// Represents the static parts of a protocol component.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+pub struct ProtocolComponent {
+    pub id: String,
+    pub protocol_system: String,
+    pub protocol_type_name: String,
+    pub chain: Chain,
+    #[serde(with = "hex_bytes_vec")]
+    pub tokens: Vec<Bytes>,
+    #[serde(with = "hex_bytes_vec")]
+    pub contract_ids: Vec<Bytes>,
+    pub static_attributes: HashMap<String, Bytes>,
+    pub change: ChangeType,
+    #[serde(with = "hex_bytes")]
+    pub creation_tx: Bytes,
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ComponentBalance {
+    #[serde(with = "hex_bytes")]
+    pub token: Bytes,
+    pub new_balance: Bytes,
+    #[serde(with = "hex_bytes")]
+    pub modify_tx: Bytes,
+    pub component_id: String,
+}
+
+/// A container for state updates grouped by protocol component.
+///
+/// Hold a single update per component. This is a condensed form of
+/// [BlockEntityChanges].
+///
+/// TODO - update once new structure is merged
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+pub struct BlockEntityChangesResult {
+    extractor: String,
+    chain: Chain,
+    pub block: Block,
+    pub state_updates: HashMap<String, ProtocolStateDelta>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
+}
+
+#[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
+/// Represents a change in protocol state.
+pub struct ProtocolStateDelta {
+    pub component_id: String,
+    pub updated_attributes: HashMap<String, Bytes>,
+    pub deleted_attributes: HashSet<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
@@ -362,8 +438,102 @@ impl StateRequestParameters {
             parts.push(format!("inertia_min_gt={}", inertia));
         }
 
-        parts.join("&")
+        let mut res = parts.join("&");
+        if !res.is_empty() {
+            res = format!("?{res}");
+        }
+        res
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+pub struct TokensRequestBody {
+    #[serde(rename = "tokenAddresses")]
+    #[schema(value_type=Option<Vec<String>>)]
+    pub token_addresses: Option<Vec<Bytes>>,
+}
+
+impl TokensRequestBody {
+    pub fn new(token_addresses: Option<Vec<Bytes>>) -> Self {
+        Self { token_addresses }
+    }
+}
+
+/// Response from Tycho server for a tokens request.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct TokensRequestResponse {
+    pub tokens: Vec<ResponseToken>,
+}
+
+impl TokensRequestResponse {
+    pub fn new(tokens: Vec<ResponseToken>) -> Self {
+        Self { tokens }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+#[serde(rename = "Token")]
+/// Token struct for the response from Tycho server for a tokens request.
+pub struct ResponseToken {
+    pub chain: Chain,
+    #[schema(value_type=String, example="0xc9f2e6ea1637E499406986ac50ddC92401ce1f58")]
+    #[serde(with = "hex_bytes")]
+    pub address: Bytes,
+    #[schema(value_type=String, example="WETH")]
+    pub symbol: String,
+    pub decimals: u32,
+    pub tax: u64,
+    pub gas: Vec<Option<u64>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+pub struct ProtocolComponentsRequestBody {
+    pub protocol_system: Option<String>,
+    #[serde(rename = "componentAddresses")]
+    pub component_ids: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
+pub struct ProtocolComponentRequestParameters {
+    #[param(default = 0)]
+    pub tvl_gt: Option<u64>,
+}
+
+impl ProtocolComponentsRequestBody {
+    pub fn new(protocol_system: Option<String>, component_ids: Option<Vec<String>>) -> Self {
+        Self { protocol_system, component_ids }
+    }
+}
+
+/// Response from Tycho server for a protocol components request.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ProtocolComponentRequestResponse {
+    pub protocol_components: Vec<ResponseProtocolComponent>,
+}
+
+impl ProtocolComponentRequestResponse {
+    pub fn new(protocol_components: Vec<ResponseProtocolComponent>) -> Self {
+        Self { protocol_components }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+#[serde(rename = "ProtocolComponent")]
+/// Protocol Component struct for the response from Tycho server for a tokens request.
+pub struct ResponseProtocolComponent {
+    pub chain: Chain,
+    pub id: String,
+    pub protocol_system: String,
+    pub protocol_type_name: String,
+    #[schema(value_type=Vec<String>)]
+    pub tokens: Vec<Bytes>,
+    #[schema(value_type=Vec<String>)]
+    pub contract_ids: Vec<Bytes>,
+    #[schema(value_type=HashMap<String, String>)]
+    pub static_attributes: HashMap<String, Bytes>,
+    #[schema(value_type=String)]
+    pub creation_tx: Bytes,
+    pub created_at: NaiveDateTime,
 }
 
 #[cfg(test)]
