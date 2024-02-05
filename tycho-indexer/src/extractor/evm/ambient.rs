@@ -119,10 +119,10 @@ impl AmbientPgGateway {
                 tokens_set.insert(*token);
             }
         }
-        let mut addresses = Vec::new();
+        let mut addresses = HashSet::new();
         for token in &tokens_set {
             let byte_slice = token.as_bytes();
-            addresses.push(Bytes::from(byte_slice.to_vec()));
+            addresses.insert(Bytes::from(byte_slice.to_vec()));
         }
 
         let address_refs: Vec<&Bytes> = addresses.iter().collect();
