@@ -114,15 +114,13 @@ impl AmbientPgGateway {
             .expect("pool should be connected");
 
         let mut tokens_set = HashSet::new();
+        let mut addresses = HashSet::new();
         for component in protocol_components {
             for token in &component.tokens {
                 tokens_set.insert(*token);
+                let byte_slice = token.as_bytes();
+                addresses.insert(Bytes::from(byte_slice.to_vec()));
             }
-        }
-        let mut addresses = HashSet::new();
-        for token in &tokens_set {
-            let byte_slice = token.as_bytes();
-            addresses.insert(Bytes::from(byte_slice.to_vec()));
         }
 
         let address_refs: Vec<&Bytes> = addresses.iter().collect();
