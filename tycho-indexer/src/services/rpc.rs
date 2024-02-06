@@ -21,7 +21,7 @@ use tracing::{debug, error, info, instrument};
 use crate::storage::ProtocolGateway;
 use tycho_types::{
     dto,
-    dto::{ProtocolComponent, ResponseToken, StateRequestParameters},
+    dto::{ResponseToken, StateRequestParameters},
 };
 
 use super::EvmPostgresGateway;
@@ -139,7 +139,7 @@ impl From<evm::ERC20Token> for ResponseToken {
     }
 }
 
-impl From<evm::ProtocolComponent> for ProtocolComponent {
+impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
     fn from(protocol_component: evm::ProtocolComponent) -> Self {
         Self {
             chain: protocol_component.chain.into(),
