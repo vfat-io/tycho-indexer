@@ -152,7 +152,7 @@ impl From<&TransactionUpdates> for Vec<Account> {
                     update.chain,
                     update.address,
                     format!("{:#020x}", update.address),
-                    update.slots.clone(),
+                    update.slots,
                     update.balance.unwrap_or_default(),
                     update.code.clone().unwrap_or_default(),
                     update
@@ -383,19 +383,19 @@ impl TransactionUpdates {
     pub fn merge(&mut self, other: &TransactionUpdates) -> Result<(), ExtractionError> {
         if self.tx.block_hash != other.tx.block_hash {
             return Err(ExtractionError::MergeError(format!(
-                "Can't merge AccountUpdates from different blocks: 0x{:x} != 0x{:x}",
+                "Can't merge TransactionUpdates from different blocks: 0x{:x} != 0x{:x}",
                 self.tx.block_hash, other.tx.block_hash,
             )));
         }
         if self.tx.hash == other.tx.hash {
             return Err(ExtractionError::MergeError(format!(
-                "Can't merge AccountUpdates from the same transaction: 0x{:x}",
+                "Can't merge TransactionUpdates from the same transaction: 0x{:x}",
                 self.tx.hash
             )));
         }
         if self.tx.index > other.tx.index {
             return Err(ExtractionError::MergeError(format!(
-                "Can't merge AccountUpdates with lower transaction index: {} > {}",
+                "Can't merge TransactionUpdates with lower transaction index: {} > {}",
                 self.tx.index, other.tx.index
             )));
         }
