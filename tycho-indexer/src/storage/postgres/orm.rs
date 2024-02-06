@@ -2,8 +2,11 @@ use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
     dsl::sql,
+    pg::Pg,
     prelude::*,
-    sql_types::{self, Bool},
+    query_builder::{BoxedSqlQuery, SqlQuery},
+    sql_query,
+    sql_types::{self, BigInt, Bool, Double},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
@@ -20,10 +23,10 @@ use tycho_types::Bytes;
 
 use super::{
     schema::{
-        account, account_balance, block, chain, component_balance, contract_code, contract_storage,
-        extraction_state, protocol_component, protocol_component_holds_contract,
+        account, account_balance, block, chain, component_balance, component_tvl, contract_code,
+        contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
         protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
-        transaction,
+        token_price, transaction,
     },
     versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
 };
@@ -1379,40 +1382,58 @@ pub struct NewProtocolComponentHoldsToken {
     pub protocol_component_id: i64,
     pub token_id: i64,
 }
-/*
-pub fn get_tokens(protocol: &ProtocolComponent, conn: &mut PgConnection) -> Vec<Token> {
-    let token_ids = ProtocolHoldsToken::belonging_to(protocol)
-        .select(protocol_component_holds_token::token_id)
-        .distinct();
-    token::table
-        .filter(token::id.eq_any(token_ids))
-        .load::<Token>(conn)
-        .expect("Could not load tokens")
+
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
+#[belongs_to(Token)]
+#[diesel(table_name = token_price)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct TokenPrice {
+    id: i64,
+    token_id: i64,
+    price: f64,
+    pub inserted_ts: NaiveDateTime,
+    pub modified_ts: NaiveDateTime,
 }
 
-pub struct ProtocolComponentWithToken {
-    pub protocol: ProtocolComponent,
-    pub tokens: Vec<Token>,
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
+#[belongs_to(ProtocolComponent)]
+#[diesel(table_name = component_tvl)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ComponentTVL {
+    id: i64,
+    protocol_component_id: i64,
+    tvl: f64,
+    pub inserted_ts: NaiveDateTime,
+    pub modified_ts: NaiveDateTime,
 }
 
-pub fn add_tokens(
-    protocols: Vec<ProtocolComponent>,
-    conn: &mut PgConnection,
-) -> Result<Vec<ProtocolComponentWithToken>, Box<dyn Error + Send + Sync>> {
-    let tokens: Vec<(ProtocolHoldsToken, Token)> = ProtocolHoldsToken::belonging_to(&protocols)
-        .inner_join(token::table)
-        .select((ProtocolHoldsToken::as_select(), Token::as_select()))
-        .load(conn)?;
-
-    let res = tokens
-        .grouped_by(&protocols)
-        .into_iter()
-        .zip(protocols)
-        .map(|(t, p)| ProtocolComponentWithToken {
-            protocol: p,
-            tokens: t.into_iter().map(|(_, tok)| tok).collect(),
-        })
-        .collect();
-    Ok(res)
+impl ComponentTVL {
+    fn update_many(new_tvl_values: HashMap<i64, f64>) -> BoxedSqlQuery<'static, Pg, SqlQuery> {
+        // Generate bind parameter 2-tuples the result will look like '($1, $2), ($3, $4), ...'
+        // These are later subsituted with the primary key and valid to values.
+        let bind_params = (1..=new_tvl_values.len() * 2)
+            .map(|i| if i % 2 == 0 { format!("${}", i) } else { format!("(${}", i) })
+            .collect::<Vec<String>>()
+            .chunks(2)
+            .map(|chunk| chunk.join(", ") + ")")
+            .collect::<Vec<String>>()
+            .join(", ");
+        let query_tmpl = format!(
+            r#"
+            UPDATE component_tvl as t set
+                tvl = m.tvl
+            FROM (
+                VALUES {}
+            ) as m(id, tvl) 
+            WHERE t.protocol_component_id = m.id;
+            "#,
+            bind_params
+        );
+        let mut q = sql_query(query_tmpl).into_boxed();
+        for (k, v) in new_tvl_values.iter() {
+            q = q.bind::<BigInt, _>(*k);
+            q = q.bind::<Double, _>(*v);
+        }
+        q
+    }
 }
- */

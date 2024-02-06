@@ -76,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_protocol_component_holds_contract_contract_code_i
 --  Saves the component balance of a protocol component.
 CREATE TABLE IF NOT EXISTS component_balance(
     "id" bigserial PRIMARY KEY,
-    -- id of the token whose tvl changed
+    -- id of the token whose balance changed
     "token_id" bigint REFERENCES "token"(id) NOT NULL,
     -- new balance of the token for this component
     "new_balance" bytea NOT NULL,
@@ -111,6 +111,50 @@ CREATE TRIGGER update_modtime_protocol_component_holds_token
 
 CREATE TRIGGER audit_table_protocol_component_holds_token
     BEFORE UPDATE ON protocol_component_holds_token
+    FOR EACH ROW
+    EXECUTE PROCEDURE audit_trigger();
+
+CREATE TABLE IF NOT EXISTS token_price(
+    "id" bigserial PRIMARY KEY,
+    -- Id of the token whose price we record here.
+    "token_id" bigint REFERENCES "token"(id) NOT NULL UNIQUE,
+    -- Price in native token denomination.
+    "price" double precision NOT NULL,
+    -- Timestamp this entry was inserted into this table.
+    "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Timestamp this entry was last modified in this table.
+    "modified_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TRIGGER update_modtime_token_price
+    BEFORE UPDATE ON token_price
+    FOR EACH ROW
+    EXECUTE PROCEDURE update_modified_column();
+
+CREATE TRIGGER audit_table_token_price
+    BEFORE UPDATE ON protocol_component_holds_token
+    FOR EACH ROW
+    EXECUTE PROCEDURE audit_trigger();
+
+CREATE TABLE IF NOT EXISTS component_tvl(
+    "id" bigserial PRIMARY KEY,
+    -- Id of the component whose tvl we record here.
+    "protocol_component_id" bigint REFERENCES protocol_component(id) NOT NULL,
+    -- Tvl in native token denomination.
+    "tvl" double precision NOT NULL,
+    -- Timestamp this entry was inserted into this table.
+    "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Timestamp this entry was last modified in this table.
+    "modified_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TRIGGER update_modtime_component_tvl
+    BEFORE UPDATE ON component_tvl
+    FOR EACH ROW
+    EXECUTE PROCEDURE update_modified_column();
+
+CREATE TRIGGER audit_table_component_tvl
+    BEFORE UPDATE ON component_tvl
     FOR EACH ROW
     EXECUTE PROCEDURE audit_trigger();
 
