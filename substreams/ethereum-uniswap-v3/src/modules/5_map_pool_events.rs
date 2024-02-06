@@ -6,9 +6,11 @@ use substreams_helper::hex::Hexable;
 
 use crate::{
     events::{get_log_changed_attributes, get_log_changed_balances},
-    pb::tycho::evm::{
+    pb::{
+        tycho::evm::v1::{
+            BalanceChange, Block, BlockEntityChanges, EntityChanges, TransactionEntityChanges,
+        },
         uniswap::v3::Pool,
-        v1::{BalanceChange, Block, BlockEntityChanges, EntityChanges, TransactionEntityChanges},
     },
 };
 

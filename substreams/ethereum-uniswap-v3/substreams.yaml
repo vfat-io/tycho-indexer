@@ -30,7 +30,7 @@ modules:
     kind: store
     initialBlock: 12369621
     updatePolicy: set_if_not_exists
-    valueType: proto:tycho.evm.uniswap.v3.Pool
+    valueType: proto:uniswap.v3.Pool
     inputs:
       - map: map_pools_created
 

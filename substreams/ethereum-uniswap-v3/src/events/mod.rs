@@ -7,9 +7,9 @@ use crate::{
     abi::pool::events::{
         Burn, Collect, CollectProtocol, Flash, Initialize, Mint, SetFeeProtocol, Swap,
     },
-    pb::tycho::evm::{
+    pb::{
+        tycho::evm::v1::Attribute,
         uniswap::v3::{BalanceDelta, Pool},
-        v1::Attribute,
     },
 };
 

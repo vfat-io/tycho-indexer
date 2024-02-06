@@ -8,7 +8,7 @@ use substreams_helper::hex::Hexable;
 
 use crate::{
     events::get_log_changed_balances,
-    pb::tycho::evm::uniswap::v3::{BalanceDeltas, Pool},
+    pb::uniswap::v3::{BalanceDeltas, Pool},
 };
 
 #[substreams::handlers::map]

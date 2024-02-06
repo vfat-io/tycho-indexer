@@ -5,7 +5,7 @@ use substreams_helper::storage_change::StorageChangesFilter;
 
 use crate::{
     abi::pool::events::Swap,
-    pb::tycho::evm::{uniswap::v3::Pool, v1::Attribute},
+    pb::{tycho::evm::v1::Attribute, uniswap::v3::Pool},
     storage::{constants::TRACKED_SLOTS, pool_storage::UniswapPoolStorage},
 };
 

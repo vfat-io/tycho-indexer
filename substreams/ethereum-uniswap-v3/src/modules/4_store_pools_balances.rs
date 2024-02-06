@@ -1,4 +1,4 @@
-use crate::pb::tycho::evm::uniswap::v3::BalanceDeltas;
+use crate::pb::uniswap::v3::BalanceDeltas;
 use num_bigint::Sign;
 use substreams::{
     scalar::BigInt,
