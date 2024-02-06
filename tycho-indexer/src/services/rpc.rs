@@ -638,14 +638,11 @@ pub async fn protocol_state(
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{
-        postgres::{self, db_fixtures},
-        Code,
-    };
+    use crate::storage::postgres::{self, db_fixtures};
     use actix_web::test;
     use chrono::Utc;
     use diesel_async::AsyncConnection;
-    use ethers::types::{H160, H256, U256};
+    use ethers::types::{H160, U256};
     use tycho_types::Bytes;
 
     use std::{collections::HashMap, str::FromStr, sync::Arc};
@@ -884,8 +881,6 @@ mod tests {
         let db_gateway = Arc::new(EvmPostgresGateway::from_connection(&mut conn).await);
         let req_handler = RpcHandler::new(db_gateway, pool);
 
-        let code = Code::from("1234");
-        let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
         let expected = evm::Account {
             chain: Chain::Ethereum,
             address: "0x6b175474e89094c44da98b954eedeac495271d0f"
