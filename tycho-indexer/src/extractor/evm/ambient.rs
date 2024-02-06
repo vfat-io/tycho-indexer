@@ -267,11 +267,11 @@ impl AmbientPgGateway {
 
         let target = BlockOrTimestamp::Block(to.clone());
         let address = H160(AMBIENT_CONTRACT);
-        let account_updates = self
+        let (account_updates, _, component_balances) = self
             .state_gateway
             .get_delta(&self.chain, start.as_ref(), &target)
-            .await?
-            .0
+            .await?;
+        let account_updates = account_updates
             .into_iter()
             .filter_map(|u| if u.address == address { Some((u.address, u)) } else { None })
             .collect();
@@ -291,7 +291,7 @@ impl AmbientPgGateway {
             // TODO: get protocol components from gateway (in ENG-2049)
             HashMap::new(),
             HashMap::new(),
-            HashMap::new(),
+            component_balances,
         );
         Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
     }
