@@ -1408,7 +1408,7 @@ pub struct ComponentTVL {
 }
 
 impl ComponentTVL {
-    fn update_many(new_tvl_values: HashMap<i64, f64>) -> BoxedSqlQuery<'static, Pg, SqlQuery> {
+    pub fn upsert_many(new_tvl_values: &HashMap<i64, f64>) -> BoxedSqlQuery<'static, Pg, SqlQuery> {
         // Generate bind parameter 2-tuples the result will look like '($1, $2), ($3, $4), ...'
         // These are later subsituted with the primary key and valid to values.
         let bind_params = (1..=new_tvl_values.len() * 2)
@@ -1420,12 +1420,10 @@ impl ComponentTVL {
             .join(", ");
         let query_tmpl = format!(
             r#"
-            UPDATE component_tvl as t set
-                tvl = m.tvl
-            FROM (
-                VALUES {}
-            ) as m(id, tvl) 
-            WHERE t.protocol_component_id = m.id;
+            INSERT INTO component_tvl (protocol_component_id, tvl)
+            VALUES {}
+            ON CONFLICT (protocol_component_id) 
+            DO UPDATE SET tvl = EXCLUDED.tvl;
             "#,
             bind_params
         );

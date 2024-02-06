@@ -799,13 +799,14 @@ pub trait ProtocolGateway {
 
     async fn get_token_prices(
         &self,
+        chain: Chain,
         conn: &mut Self::DB,
     ) -> Result<HashMap<Bytes, f64>, StorageError>;
 
-    async fn update_component_tvl(
+    async fn upsert_component_tvl(
         &self,
         chain: Chain,
-        new_tvl_values: HashMap<String, f64>,
+        tvl_values: &HashMap<String, f64>,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 }

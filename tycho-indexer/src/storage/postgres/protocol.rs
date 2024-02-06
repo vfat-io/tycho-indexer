@@ -16,7 +16,7 @@ use crate::{
     storage::{
         postgres::{
             orm,
-            orm::{Account, NewAccount},
+            orm::{Account, ComponentTVL, NewAccount},
             schema,
             versioning::apply_delta_versioning,
             PostgresGateway,
@@ -1170,18 +1170,53 @@ where
 
     async fn get_token_prices(
         &self,
+        chain: Chain,
         conn: &mut Self::DB,
     ) -> Result<HashMap<Bytes, f64>, StorageError> {
-        todo!()
+        use schema::token_price::dsl::*;
+        let chain_id = self.get_chain_id(&chain);
+        Ok(token_price
+            .inner_join(schema::token::table.inner_join(schema::account::table))
+            .select((schema::account::address, price))
+            .filter(schema::account::chain_id.eq(chain_id))
+            .get_results::<(Bytes, f64)>(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "TokenPrice", &chain.to_string(), None))?
+            .into_iter()
+            .collect::<HashMap<_, _>>())
     }
 
-    async fn update_component_tvl(
+    async fn upsert_component_tvl(
         &self,
         chain: Chain,
-        new_tvl_values: HashMap<String, f64>,
+        tvl_values: &HashMap<String, f64>,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        todo!()
+        use schema::protocol_component::dsl::*;
+
+        let external_db_id_map: HashMap<String, i64> = protocol_component
+            .select((external_id, id))
+            .filter(external_id.eq_any(tvl_values.keys()))
+            .get_results::<(String, i64)>(conn)
+            .await?
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+
+        let upsert_map: HashMap<_, _> = tvl_values
+            .iter()
+            .filter_map(|(component_id, v)| {
+                if let Some(db_id) = external_db_id_map.get(component_id) {
+                    Some((*db_id, *v))
+                } else {
+                    warn!(?component_id, "Tried to upsert tvl for unknown compoent!");
+                    None
+                }
+            })
+            .collect();
+        ComponentTVL::upsert_many(&upsert_map)
+            .execute(conn)
+            .await?;
+        Ok(())
     }
 }
 
