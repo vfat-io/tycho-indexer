@@ -420,21 +420,23 @@ impl TransactionVMUpdates {
             .extend(other.protocol_components.clone());
 
         // Add new component balances and overwrite existing ones
-        for (component_id, balances) in other
+        for (component_id, balance_by_token_map) in other
             .component_balances
             .clone()
             .into_iter()
         {
-            match self
+            // Check if the key exists in the first map
+            if let Some(existing_inner_map) = self
                 .component_balances
-                .entry(component_id)
+                .get_mut(&component_id)
             {
-                Entry::Occupied(mut e) => {
-                    e.get_mut().extend(balances);
+                // Iterate through the inner map and update values
+                for (inner_key, value) in balance_by_token_map {
+                    existing_inner_map.insert(inner_key, value);
                 }
-                Entry::Vacant(e) => {
-                    e.insert(balances);
-                }
+            } else {
+                self.component_balances
+                    .insert(component_id, balance_by_token_map);
             }
         }
 
