@@ -171,6 +171,7 @@ pub mod pg {
                 token_id,
                 new_balance: self.balance.clone(),
                 previous_value: Balance::from(U256::from(0)),
+                balance_float: self.balance_float,
                 modify_tx,
                 protocol_component_id,
                 valid_from: block_ts,

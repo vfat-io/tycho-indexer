@@ -40,9 +40,7 @@ use tokio_tungstenite::{
     connect_async, tungstenite, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
 };
 use tracing::{debug, error, info, instrument, warn};
-use tycho_types::dto::{
-    BlockAccountChanges, Command, ExtractorIdentity, Response, WebSocketMessage,
-};
+use tycho_types::dto::{Command, Deltas, ExtractorIdentity, Response, WebSocketMessage};
 use uuid::Uuid;
 
 use crate::TYCHO_SERVER_VERSION;
@@ -93,7 +91,7 @@ pub trait DeltasClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
-    ) -> Result<(Uuid, Receiver<BlockAccountChanges>), DeltasError>;
+    ) -> Result<(Uuid, Receiver<Deltas>), DeltasError>;
 
     /// Unsubscribe from an subscription
     async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), DeltasError>;
@@ -133,7 +131,7 @@ type WebSocketSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Messa
 #[derive(Debug)]
 enum SubscriptionInfo {
     /// Subscription was requested we wait for server confirmation and uuid assignment.
-    RequestedSubscription(oneshot::Sender<(Uuid, Receiver<BlockAccountChanges>)>),
+    RequestedSubscription(oneshot::Sender<(Uuid, Receiver<Deltas>)>),
     /// Subscription is active.
     Active,
     /// Unsubscription was requested, we wait for server confirmation.
@@ -152,7 +150,7 @@ struct Inner {
     subscriptions: HashMap<Uuid, SubscriptionInfo>,
     /// For eachs subscription we keep a sender handle, the receiver is returned to the caller of
     /// subscribe.
-    sender: HashMap<Uuid, Sender<BlockAccountChanges>>,
+    sender: HashMap<Uuid, Sender<Deltas>>,
 }
 
 /// Shared state betweeen all client instances.
@@ -173,7 +171,7 @@ impl Inner {
     fn new_subscription(
         &mut self,
         id: &ExtractorIdentity,
-        ready_tx: oneshot::Sender<(Uuid, Receiver<BlockAccountChanges>)>,
+        ready_tx: oneshot::Sender<(Uuid, Receiver<Deltas>)>,
     ) -> Result<(), DeltasError> {
         if self.pending.contains_key(id) {
             return Err(DeltasError::SubscriptionAlreadyPending);
@@ -220,7 +218,7 @@ impl Inner {
     }
 
     /// Sends a message to a subscriptions receiver.
-    async fn send(&mut self, id: &Uuid, msg: BlockAccountChanges) -> Result<(), DeltasError> {
+    async fn send(&mut self, id: &Uuid, msg: Deltas) -> Result<(), DeltasError> {
         if let Some(sender) = self.sender.get_mut(id) {
             sender
                 .send(msg)
@@ -354,13 +352,13 @@ impl WsDeltasClient {
 
         match msg {
             Ok(Message::Text(text)) => match serde_json::from_str::<WebSocketMessage>(&text) {
-                Ok(WebSocketMessage::BlockAccountChanges { subscription_id, data }) => {
-                    info!(?data, "Received a block state change, sending to channel");
+                Ok(WebSocketMessage::BlockChanges { subscription_id, delta }) => {
+                    info!(?delta, "Received a block state change, sending to channel");
                     let inner = guard
                         .as_mut()
                         .ok_or_else(|| DeltasError::NotConnected)?;
                     if inner
-                        .send(&subscription_id, data)
+                        .send(&subscription_id, delta)
                         .await
                         .is_err()
                     {
@@ -423,7 +421,7 @@ impl WsDeltasClient {
                     tungstenite::Error::Io(_) => DeltasError::from(error),
                     tungstenite::Error::Protocol(_) => DeltasError::from(error),
                     _ => DeltasError::Fatal(error.to_string()),
-                })
+                });
             }
         };
         Ok(())
@@ -456,7 +454,7 @@ impl DeltasClient for WsDeltasClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
-    ) -> Result<(Uuid, Receiver<BlockAccountChanges>), DeltasError> {
+    ) -> Result<(Uuid, Receiver<Deltas>), DeltasError> {
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         {
@@ -553,7 +551,7 @@ impl DeltasClient for WsDeltasClient {
                                 ?retry_count,
                                 "Connection dropped unexpectedly; Reconnecting"
                             );
-                            break
+                            break;
                         } else {
                             // Other errors are considered fatal
                             break 'retry;
@@ -670,10 +668,11 @@ mod tests {
                     "subscription_id":"30b740d1-cf09-4e0e-8cfe-b1434d447ece"
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
+            // VM block message
             ExpectedComm::Send(Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "data": {
+                    "delta": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -683,6 +682,7 @@ mod tests {
                             "chain": "ethereum",             
                             "ts": "2023-09-14T00:00:00"
                         },
+                        "revert": false,
                         "account_updates": {
                             "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
                                 "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
@@ -691,6 +691,69 @@ mod tests {
                                 "balance": "0x01f4",
                                 "code": "",
                                 "change": "Update"
+                            }
+                        },
+                        "new_protocol_components": [
+                                {
+                                    "id": "protocol_1",
+                                    "protocol_system": "system_1",
+                                    "protocol_type_name": "type_1",
+                                    "chain": "ethereum",
+                                    "tokens": ["0x01", "0x02"],
+                                    "contract_ids": ["0x01", "0x02"],
+                                    "static_attributes": {"attr1": "0x01f4"},
+                                    "change": "Update",
+                                    "creation_tx": "0x01",
+                                    "created_at": "2023-09-14T00:00:00"
+                                }
+                            ],
+                            "deleted_protocol_components": [],
+                            "component_balances": [
+                                {
+                                    "token": "0x01",
+                                    "new_balance": "0x01f4",
+                                    "modify_tx": "0x01",
+                                    "component_id": "protocol_1"
+                                }
+                            ]
+                    }
+                }
+                "#.to_owned()
+            )),
+            // Native protocol block message
+            ExpectedComm::Send(Message::Text(r#"
+                {
+                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
+                    "delta": {
+                        "extractor": "vm:ambient",
+                        "chain": "ethereum",
+                        "block": {
+                            "number": 123,
+                            "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                            "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                            "chain": "ethereum",             
+                            "ts": "2023-09-14T00:00:00"
+                        },
+                        "revert": false,
+                        "state_updates": {
+                            "component_1": {
+                                "component_id": "component_1",
+                                "updated_attributes": {"attr1": "0x01"},
+                                "deleted_attributes": ["attr2"]
+                            }
+                        },
+                        "new_protocol_components": {
+                            "protocol_1": {
+                                "id": "protocol_1",
+                                "protocol_system": "system_1",
+                                "protocol_type_name": "type_1",
+                                "chain": "ethereum",
+                                "tokens": ["0x01", "0x02"],
+                                "contract_ids": ["0x01", "0x02"],
+                                "static_attributes": {"attr1": "0x01f4"},
+                                "change": "Update",
+                                "creation_tx": "0x01",
+                                "created_at": "2023-09-14T00:00:00"
                             }
                         }
                     }
@@ -712,6 +775,10 @@ mod tests {
         .await
         .expect("subscription timed out")
         .expect("subscription failed");
+        let _ = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("awaiting message timeout out")
+            .expect("receiving message failed");
         let _ = timeout(Duration::from_millis(100), rx.recv())
             .await
             .expect("awaiting message timeout out")
@@ -914,7 +981,7 @@ mod tests {
             ExpectedComm::Send(Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "data": {
+                    "delta": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -924,6 +991,7 @@ mod tests {
                             "chain": "ethereum",             
                             "ts": "2023-09-14T00:00:00"
                         },
+                        "revert": false,
                         "account_updates": {
                             "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
                                 "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
@@ -933,7 +1001,30 @@ mod tests {
                                 "code": "",
                                 "change": "Update"
                             }
-                        }
+                        },
+                        "new_protocol_components": [
+                                {
+                                    "id": "protocol_1",
+                                    "protocol_system": "system_1",
+                                    "protocol_type_name": "type_1",
+                                    "chain": "ethereum",
+                                    "tokens": ["0x01", "0x02"],
+                                    "contract_ids": ["0x01", "0x02"],
+                                    "static_attributes": {"attr1": "0x01f4"},
+                                    "change": "Update",
+                                    "creation_tx": "0x01",
+                                    "created_at": "2023-09-14T00:00:00"
+                                }
+                            ],
+                            "deleted_protocol_components": [],
+                            "component_balances": [
+                                {
+                                    "token": "0x01",
+                                    "new_balance": "0x01f4",
+                                    "modify_tx": "0x01",
+                                    "component_id": "protocol_1"
+                                }
+                            ]
                     }
                 }
                 "#.to_owned()

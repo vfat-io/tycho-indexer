@@ -88,6 +88,7 @@ diesel::table! {
         token_id -> Int8,
         new_balance -> Bytea,
         previous_value -> Bytea,
+        balance_float -> Float8,
         modify_tx -> Int8,
         protocol_component_id -> Int8,
         inserted_ts -> Timestamptz,

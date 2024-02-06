@@ -2,7 +2,7 @@ version: '3.1'
 services:
   db:
     image: postgres:15.3
-    restart: always
+    restart: "always"
     environment:
       POSTGRES_PASSWORD: mypassword
       POSTGRES_DB: tycho_indexer_0
@@ -13,7 +13,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
   tycho-indexer:
     image: ${TYCHO_IMAGE}
-    restart: no
+    restart: "no"
     depends_on:
       - db
     healthcheck:
