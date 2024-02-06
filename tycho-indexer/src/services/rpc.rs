@@ -1602,6 +1602,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(delta.protocols.len(), 1);
-        assert_eq!(delta, expected.into());
+        assert_eq!(delta, expected);
     }
 }
