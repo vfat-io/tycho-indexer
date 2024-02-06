@@ -193,8 +193,8 @@ impl AccountUpdate {
         Self { address, chain, slots, balance, code, change }
     }
 
-    // Converting into via self as references saves us from cloning the whole struct of
-    // BlockContractChanges in forward.
+    // Converting AccountUpdate into Account with a references saves us from cloning the whole
+    // struct of BlockContractChanges in the forward function in ambient.rs.
     pub fn ref_into_account(&self, tx: &Transaction) -> Account {
         let code = &self.code.clone().unwrap_or_default();
         Account::new(
