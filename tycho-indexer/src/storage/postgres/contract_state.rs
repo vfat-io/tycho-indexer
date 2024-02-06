@@ -524,7 +524,7 @@ where
                 for (slot, value) in storage.iter() {
                     new_entries.push(orm::NewSlot {
                         slot,
-                        value: value.as_ref(),
+                        value: value.clone(),
                         previous_value: None,
                         account_id: *account_id,
                         modify_tx: *modify_tx,

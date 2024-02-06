@@ -41,14 +41,13 @@ use diesel::{
     pg::Pg,
     query_builder::{BoxedSqlQuery, SqlQuery},
     sql_query,
-    sql_types::{BigInt, Binary, Timestamp},
+    sql_types::{BigInt, Timestamp},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use std::{collections::HashMap, hash::Hash};
 
 use crate::storage::StorageError;
 use std::fmt::Debug;
-use tycho_types::Bytes;
 
 /// Trait indicating that a struct can be inserted into a versioned table.
 ///
@@ -85,9 +84,6 @@ pub trait DeltaVersionedRow {
 
     /// Exposes the current value.
     fn get_value(&self) -> Self::Value;
-
-    /// Exposes the previous value.
-    fn get_previous_value(&self) -> Option<Bytes>;
 
     /// Sets the previous value.
     fn set_previous_value(&mut self, previous_value: Self::Value);
@@ -228,58 +224,6 @@ fn build_batch_update_query<'a, O: StoredVersionedRow>(
     query
 }
 
-/// Builds a update query that updates multiple rows at once, setting the previous value.
-///
-/// Builds a query that will take update multiple rows end versions. The rows are identified by
-/// their primary key and the version is retrieved from the `end_versions` parameter.
-///
-/// Building such a query with pure diesel is currently not supported as this query updates each
-/// primary key with a unique value. See: https://github.com/diesel-rs/diesel/discussions/2879
-fn build_batch_update_query_delta_versioning<'a, O: StoredVersionedRow + DeltaVersionedRow>(
-    objects: &'a [Box<O>],
-    table_name: &str,
-    end_versions: &'a HashMap<O::EntityId, O::Version>,
-) -> BoxedSqlQuery<'a, Pg, SqlQuery> {
-    // Generate bind parameter 3-tuples the result will look like '($1, $2, $3), ($4, $5, $6), ...'
-    // These are later substituted with the `primary key`, `valid to`, and `previous value` values.
-    let bind_params = (1..=objects.len() * 3)
-        .map(|i| if i % 3 != 1 { format!("${}", i) } else { format!("(${}", i) })
-        .collect::<Vec<String>>()
-        .chunks(3)
-        .map(|chunk| chunk.join(", ") + ")")
-        .collect::<Vec<String>>()
-        .join(", ");
-    let query_str = format!(
-        r#"
-        UPDATE {} as t set
-            valid_to = m.valid_to,
-            previous_value = m.previous_value
-        FROM (
-            VALUES {}
-        ) as m(id, valid_to, previous_value) 
-        WHERE t.id = m.id;
-        "#,
-        table_name, bind_params
-    );
-    let mut query = sql_query(query_str).into_boxed();
-    for o in objects.iter() {
-        let valid_to = *end_versions
-            .get(&o.get_entity_id())
-            .expect("versions present for all rows");
-        let previous_value: Option<Bytes> = o.get_previous_value();
-
-        query = query
-            .bind::<BigInt, _>(o.get_pk().into())
-            .bind::<Timestamp, _>(valid_to.into());
-
-        if let Some(previous_value) = previous_value {
-            let previous_value: Bytes = previous_value.into();
-            query = query.bind::<Binary, _>(previous_value);
-        }
-    }
-    query
-}
-
 /// Applies and execute versioning logic for a set of new entries.
 ///
 /// This function will execute the following steps:
@@ -309,6 +253,13 @@ where
     Ok(())
 }
 
+#[async_trait]
+pub trait StoredDeltaVersionedRow: StoredVersionedRow {
+    type Value: Clone + Debug;
+
+    fn get_value(&self) -> Self::Value;
+}
+
 /// Applies and executes delta versioning logic for a set of new entries.
 ///
 /// Same as `apply_versioning` but also takes care of previous value columns.
@@ -318,7 +269,7 @@ pub async fn apply_delta_versioning<'a, N, S>(
 ) -> Result<(), StorageError>
 where
     N: VersionedRow + DeltaVersionedRow + Debug,
-    S: StoredVersionedRow<EntityId = N::EntityId, Version = N::Version> + DeltaVersionedRow,
+    S: StoredDeltaVersionedRow<EntityId = N::EntityId, Version = N::Version, Value = N::Value>,
     <N as VersionedRow>::EntityId: Clone,
 {
     if new_data.is_empty() {
@@ -326,8 +277,23 @@ where
     }
     let end_versions = set_delta_versioning_attributes(new_data);
     let db_rows = S::latest_versions_by_ids(end_versions.keys().cloned(), conn).await?;
+
+    // Not terribly efficient but works (using find is very inefficient especially if new data is
+    // big)
+    for r in db_rows.iter() {
+        let current_id = r.get_entity_id();
+        // find the first new entry with this id, we assume new_data is correctly sorted.
+        if let Some(new_entry) = new_data
+            .iter_mut()
+            .find(|new| new.get_entity_id() == current_id)
+        {
+            // set this new entries previous value
+            new_entry.set_previous_value(r.get_value());
+        }
+    }
+
     if !db_rows.is_empty() {
-        build_batch_update_query_delta_versioning(&db_rows, S::table_name(), &end_versions)
+        build_batch_update_query(&db_rows, S::table_name(), &end_versions)
             .execute(conn)
             .await?;
     }

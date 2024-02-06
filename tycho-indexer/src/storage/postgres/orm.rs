@@ -12,8 +12,8 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     models,
     storage::{
-        Address, AttrStoreKey, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ComponentId,
-        ContractId, StorageError, StoreVal, TxHash,
+        postgres::versioning::StoredDeltaVersionedRow, Address, AttrStoreKey, Balance, BlockHash,
+        BlockIdentifier, Code, CodeHash, ComponentId, ContractId, StorageError, StoreVal, TxHash,
     },
 };
 use tycho_types::Bytes;
@@ -427,10 +427,6 @@ impl DeltaVersionedRow for NewComponentBalance {
     fn set_previous_value(&mut self, previous_value: Self::Value) {
         self.previous_value = previous_value
     }
-
-    fn get_previous_value(&self) -> Option<Bytes> {
-        Some(self.previous_value.clone())
-    }
 }
 
 impl DeltaVersionedRow for ComponentBalance {
@@ -443,9 +439,13 @@ impl DeltaVersionedRow for ComponentBalance {
     fn set_previous_value(&mut self, previous_value: Self::Value) {
         self.previous_value = previous_value
     }
+}
 
-    fn get_previous_value(&self) -> Option<Bytes> {
-        Some(self.previous_value.clone())
+impl StoredDeltaVersionedRow for ComponentBalance {
+    type Value = Balance;
+
+    fn get_value(&self) -> Self::Value {
+        self.new_balance.clone()
     }
 }
 
@@ -1292,9 +1292,13 @@ impl DeltaVersionedRow for ContractStorage {
     fn set_previous_value(&mut self, previous_value: Self::Value) {
         self.previous_value = previous_value
     }
+}
 
-    fn get_previous_value(&self) -> Option<Bytes> {
-        self.previous_value.clone()
+impl StoredDeltaVersionedRow for ContractStorage {
+    type Value = Option<Bytes>;
+
+    fn get_value(&self) -> Self::Value {
+        self.value.clone()
     }
 }
 
@@ -1303,8 +1307,8 @@ impl DeltaVersionedRow for ContractStorage {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewSlot<'a> {
     pub slot: &'a Bytes,
-    pub value: Option<&'a Bytes>,
-    pub previous_value: Option<&'a Bytes>,
+    pub value: Option<Bytes>,
+    pub previous_value: Option<Bytes>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub ordinal: i64,
@@ -1335,18 +1339,14 @@ impl<'a> VersionedRow for NewSlot<'a> {
 }
 
 impl<'a> DeltaVersionedRow for NewSlot<'a> {
-    type Value = Option<&'a Bytes>;
+    type Value = Option<Bytes>;
 
     fn get_value(&self) -> Self::Value {
-        self.value
+        self.value.clone()
     }
 
     fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value
-    }
-
-    fn get_previous_value(&self) -> Option<Bytes> {
-        self.previous_value.cloned()
+        self.previous_value = previous_value;
     }
 }
 
