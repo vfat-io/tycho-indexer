@@ -778,7 +778,7 @@ mod test_serial_db {
             chain: Chain::Ethereum,
             block: evm::Block::default(),
             tx_updates: vec![
-                evm::TransactionUpdates::new(
+                evm::TransactionVMUpdates::new(
                     vec![AccountUpdate::new(
                         H160(AMBIENT_CONTRACT),
                         Chain::Ethereum,
@@ -791,7 +791,7 @@ mod test_serial_db {
                     vec![],
                     evm::fixtures::transaction02(TX_HASH_0, evm::fixtures::HASH_256_0, 1),
                 ),
-                evm::TransactionUpdates::new(
+                evm::TransactionVMUpdates::new(
                     vec![AccountUpdate::new(
                         H160(AMBIENT_CONTRACT),
                         Chain::Ethereum,
@@ -820,7 +820,7 @@ mod test_serial_db {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
             block,
-            tx_updates: vec![evm::TransactionUpdates::new(
+            tx_updates: vec![evm::TransactionVMUpdates::new(
                 vec![AccountUpdate::new(
                     H160(AMBIENT_CONTRACT),
                     Chain::Ethereum,

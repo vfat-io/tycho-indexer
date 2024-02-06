@@ -132,7 +132,7 @@ impl Account {
     }
 }
 
-impl From<&TransactionUpdates> for Vec<Account> {
+impl From<&TransactionVMUpdates> for Vec<Account> {
     /// Creates a full account from a change.
     ///
     /// This can be used to get an insertable an account if we know the update
@@ -142,7 +142,7 @@ impl From<&TransactionUpdates> for Vec<Account> {
     /// missing, it will use the corresponding types default.
     /// Will use the associated transaction as creation, balance and code modify
     /// transaction.
-    fn from(value: &TransactionUpdates) -> Self {
+    fn from(value: &TransactionVMUpdates) -> Self {
         value
             .account_updates
             .clone()
@@ -253,7 +253,7 @@ impl AccountUpdate {
     ///
     /// There are no further validation checks within this method, hence it
     /// could be used as needed. However, you should give preference to
-    /// utilizing [TransactionUpdates] for merging, when possible.
+    /// utilizing [TransactionVMUpdates] for merging, when possible.
     ///
     /// # Errors
     ///
@@ -341,7 +341,7 @@ impl NormalisedMessage for BlockAccountChanges {
 
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq)]
-pub struct TransactionUpdates {
+pub struct TransactionVMUpdates {
     // TODO: for ambient it works to have only a single update here but long
     // term we need to be able to store changes to multiple accounts per
     // transactions.
@@ -349,11 +349,9 @@ pub struct TransactionUpdates {
     pub protocol_components: Vec<ProtocolComponent>,
     pub component_balances: Vec<ComponentBalance>,
     pub tx: Transaction,
-    // pub protocol_components: Vec<ProtocolComponent>,
-    // pub component_balances: Vec<ComponentBalance>,
 }
 
-impl TransactionUpdates {
+impl TransactionVMUpdates {
     pub fn new(
         account_updates: Vec<AccountUpdate>,
         protocol_components: Vec<ProtocolComponent>,
@@ -380,7 +378,7 @@ impl TransactionUpdates {
     /// # Errors
     /// This method will return `ExtractionError::MergeError` if any of the above
     /// conditions is violated.
-    pub fn merge(&mut self, other: &TransactionUpdates) -> Result<(), ExtractionError> {
+    pub fn merge(&mut self, other: &TransactionVMUpdates) -> Result<(), ExtractionError> {
         if self.tx.block_hash != other.tx.block_hash {
             return Err(ExtractionError::MergeError(format!(
                 "Can't merge TransactionUpdates from different blocks: 0x{:x} != 0x{:x}",
@@ -470,7 +468,7 @@ impl TransactionUpdates {
     }
 }
 
-impl Deref for TransactionUpdates {
+impl Deref for TransactionVMUpdates {
     type Target = Vec<AccountUpdate>;
 
     fn deref(&self) -> &Self::Target {
@@ -487,7 +485,7 @@ pub struct BlockContractChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
-    pub tx_updates: Vec<TransactionUpdates>,
+    pub tx_updates: Vec<TransactionVMUpdates>,
 }
 
 pub type EVMStateGateway<DB> =
@@ -719,7 +717,7 @@ impl BlockContractChanges {
                         )?;
                         protocol_components.push(component);
                     }
-                    tx_updates.push(TransactionUpdates::new(
+                    tx_updates.push(TransactionVMUpdates::new(
                         account_updates,
                         protocol_components,
                         Vec::new(),
@@ -1438,9 +1436,9 @@ mod test {
         )
     }
 
-    fn update_w_tx() -> TransactionUpdates {
+    fn update_w_tx() -> TransactionVMUpdates {
         let code = vec![0, 0, 0, 0];
-        TransactionUpdates::new(
+        TransactionVMUpdates::new(
             vec![AccountUpdate::new(
                 "0xe688b84b23f322a994A53dbF8E15FA82CDB71127"
                     .parse()
@@ -1610,7 +1608,7 @@ mod test {
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
             tx_updates: vec![
-                TransactionUpdates {
+                TransactionVMUpdates {
                     account_updates: vec![AccountUpdate::new(
                         H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                         Chain::Ethereum,
@@ -1623,7 +1621,7 @@ mod test {
                     component_balances: vec![],
                     tx,
                 },
-                TransactionUpdates {
+                TransactionVMUpdates {
                     account_updates: vec![AccountUpdate::new(
                         H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                         Chain::Ethereum,
