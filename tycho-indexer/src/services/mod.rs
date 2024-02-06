@@ -15,20 +15,22 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use tycho_types::dto::{
-    BlockParam, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ResponseAccount,
-    ResponseProtocolComponent, ResponseToken, StateRequestBody, StateRequestResponse,
-    TokensRequestBody, TokensRequestResponse, VersionParam,
+    AccountUpdate, BlockParam, ChangeType, ContractDeltaRequestBody, ContractDeltaRequestResponse,
+    ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolId,
+    ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseAccount,
+    ResponseProtocolComponent, ResponseProtocolState, ResponseToken, StateRequestBody,
+    StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
 };
 
 mod rpc;
 mod ws;
 
 pub type EvmPostgresGateway = PostgresGateway<
-    evm::Block,
-    evm::Transaction,
-    evm::Account,
-    evm::AccountUpdate,
-    evm::ERC20Token,
+    evm::Block,         //B
+    evm::Transaction,   //TX
+    evm::Account,       //A
+    evm::AccountUpdate, //D
+    evm::ERC20Token,    //T
 >;
 
 pub struct ServicesBuilder {
@@ -82,7 +84,13 @@ impl ServicesBuilder {
     ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
         #[derive(OpenApi)]
         #[openapi(
-            paths(rpc::contract_state, rpc::tokens, rpc::protocol_components),
+            paths(
+                rpc::contract_state,
+                rpc::tokens,
+                rpc::protocol_components,
+                rpc::contract_delta,
+                rpc::protocol_state
+            ),
             components(
                 schemas(VersionParam),
                 schemas(BlockParam),
@@ -97,6 +105,14 @@ impl ServicesBuilder {
                 schemas(ProtocolComponentsRequestBody),
                 schemas(ProtocolComponentRequestResponse),
                 schemas(ResponseProtocolComponent),
+                schemas(ContractDeltaRequestBody),
+                schemas(ContractDeltaRequestResponse),
+                schemas(ProtocolStateRequestBody),
+                schemas(ProtocolStateRequestResponse),
+                schemas(AccountUpdate),
+                schemas(ProtocolId),
+                schemas(ResponseProtocolState),
+                schemas(ChangeType),
             )
         )]
         struct ApiDoc;
@@ -111,6 +127,14 @@ impl ServicesBuilder {
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/contract_state", self.prefix))
                         .route(web::post().to(rpc::contract_state)),
+                )
+                .service(
+                    web::resource(format!("/{}/{{execution_env}}/contract_delta", self.prefix))
+                        .route(web::post().to(rpc::contract_delta)),
+                )
+                .service(
+                    web::resource(format!("/{}/{{execution_env}}/protocol_state", self.prefix))
+                        .route(web::post().to(rpc::protocol_state)),
                 )
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/tokens", self.prefix))

@@ -682,6 +682,7 @@ mod tests {
                             "chain": "ethereum",             
                             "ts": "2023-09-14T00:00:00"
                         },
+                        "revert": false,
                         "account_updates": {
                             "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
                                 "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
@@ -733,6 +734,7 @@ mod tests {
                             "chain": "ethereum",             
                             "ts": "2023-09-14T00:00:00"
                         },
+                        "revert": false,
                         "state_updates": {
                             "component_1": {
                                 "component_id": "component_1",
@@ -989,6 +991,7 @@ mod tests {
                             "chain": "ethereum",             
                             "ts": "2023-09-14T00:00:00"
                         },
+                        "revert": false,
                         "account_updates": {
                             "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
                                 "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",

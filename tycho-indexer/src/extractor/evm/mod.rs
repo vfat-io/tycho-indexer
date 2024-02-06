@@ -295,6 +295,7 @@ pub struct BlockAccountChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
+    pub revert: bool,
     pub account_updates: HashMap<H160, AccountUpdate>,
     pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
@@ -302,10 +303,12 @@ pub struct BlockAccountChanges {
 }
 
 impl BlockAccountChanges {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor: &str,
         chain: Chain,
         block: Block,
+        revert: bool,
         account_updates: HashMap<H160, AccountUpdate>,
         new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
         deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
@@ -315,6 +318,7 @@ impl BlockAccountChanges {
             extractor: extractor.to_owned(),
             chain,
             block,
+            revert,
             account_updates,
             new_protocol_components,
             deleted_protocol_components,
@@ -447,6 +451,7 @@ pub struct BlockContractChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
+    pub revert: bool,
     pub tx_updates: Vec<TransactionVMUpdates>,
 }
 
@@ -688,7 +693,13 @@ impl BlockContractChanges {
                 }
             }
             tx_updates.sort_unstable_by_key(|update| update.tx.index);
-            return Ok(Self { extractor: extractor.to_owned(), chain, block, tx_updates });
+            return Ok(Self {
+                extractor: extractor.to_owned(),
+                chain,
+                block,
+                revert: false,
+                tx_updates,
+            });
         }
         Err(ExtractionError::Empty)
     }
@@ -727,6 +738,7 @@ impl BlockContractChanges {
             &self.extractor,
             self.chain,
             self.block,
+            self.revert,
             tx_update.account_updates.clone(),
             tx_update.protocol_components.clone(),
             HashMap::new(),
@@ -908,6 +920,7 @@ pub struct BlockEntityChangesResult {
     extractor: String,
     chain: Chain,
     pub block: Block,
+    pub revert: bool,
     pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
@@ -921,6 +934,7 @@ pub struct BlockEntityChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
+    pub revert: bool,
     pub state_updates: Vec<ProtocolStateDeltasWithTx>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
@@ -966,6 +980,7 @@ impl BlockEntityChanges {
                 extractor: extractor.to_owned(),
                 chain,
                 block,
+                revert: false,
                 state_updates,
                 new_protocol_components,
             });
@@ -1002,6 +1017,7 @@ impl BlockEntityChanges {
             extractor: self.extractor,
             chain: self.chain,
             block: self.block,
+            revert: self.revert,
             state_updates: aggregated_states.protocol_states,
             new_protocol_components: self.new_protocol_components,
         })
@@ -1577,6 +1593,7 @@ mod test {
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
+            revert: false,
             tx_updates: vec![
                 TransactionVMUpdates {
                     account_updates: [(
@@ -1684,6 +1701,7 @@ mod test {
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
+            false,
             vec![(
                 address,
                 AccountUpdate {
@@ -1997,6 +2015,7 @@ mod test {
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
+            revert: false,
             state_updates: vec![
                 protocol_state_with_tx(),
                 ProtocolStateDeltasWithTx { protocol_states: state_updates, tx },
@@ -2106,6 +2125,7 @@ mod test {
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
+            revert: false,
             state_updates,
             new_protocol_components,
         }

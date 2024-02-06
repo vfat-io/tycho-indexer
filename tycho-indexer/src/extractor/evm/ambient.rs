@@ -242,6 +242,7 @@ impl AmbientPgGateway {
             &self.name,
             self.chain,
             block,
+            true,
             account_updates,
             // TODO: get protocol components from gateway (in ENG-2049)
             HashMap::new(),
@@ -781,6 +782,7 @@ mod test_serial_db {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
             block: evm::Block::default(),
+            revert: false,
             tx_updates: vec![
                 evm::TransactionVMUpdates::new(
                     [(
@@ -834,6 +836,7 @@ mod test_serial_db {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
             block,
+            revert: false,
             tx_updates: vec![evm::TransactionVMUpdates::new(
                 [(
                     H160(AMBIENT_CONTRACT),
