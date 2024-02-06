@@ -26,6 +26,18 @@ use tycho_types::{
 
 use super::EvmPostgresGateway;
 
+#[derive(Error, Debug)]
+pub enum RpcError {
+    #[error("Failed to parse JSON: {0}")]
+    Parse(String),
+
+    #[error("Failed to get storage: {0}")]
+    Storage(#[from] StorageError),
+
+    #[error("Failed to get database connection: {0}")]
+    Connection(#[from] deadpool::PoolError),
+}
+
 impl From<evm::Account> for dto::ResponseAccount {
     fn from(value: evm::Account) -> Self {
         dto::ResponseAccount::new(
@@ -44,6 +56,33 @@ impl From<evm::Account> for dto::ResponseAccount {
             Bytes::from(value.code_modify_tx),
             value.creation_tx.map(Bytes::from),
         )
+    }
+}
+
+impl From<evm::AccountUpdate> for dto::AccountUpdate {
+    fn from(account_update: evm::AccountUpdate) -> Self {
+        Self {
+            address: account_update.address.into(),
+            chain: account_update.chain.into(),
+            slots: account_update
+                .slots
+                .into_iter()
+                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
+                .collect(),
+            balance: account_update.balance.map(Bytes::from),
+            code: account_update.code,
+            change: account_update.change.into(),
+        }
+    }
+}
+
+impl From<storage::ChangeType> for dto::ChangeType {
+    fn from(value: storage::ChangeType) -> Self {
+        match value {
+            storage::ChangeType::Update => dto::ChangeType::Update,
+            storage::ChangeType::Creation => dto::ChangeType::Creation,
+            storage::ChangeType::Deletion => dto::ChangeType::Deletion,
+        }
     }
 }
 
@@ -109,17 +148,6 @@ impl From<evm::ProtocolComponent> for ResponseProtocolComponent {
         }
     }
 }
-#[derive(Error, Debug)]
-pub enum RpcError {
-    #[error("Failed to parse JSON: {0}")]
-    Parse(String),
-
-    #[error("Failed to get storage: {0}")]
-    Storage(#[from] StorageError),
-
-    #[error("Failed to get database connection: {0}")]
-    Connection(#[from] deadpool::PoolError),
-}
 
 impl TryFrom<&dto::VersionParam> for BlockOrTimestamp {
     type Error = RpcError;
@@ -158,7 +186,7 @@ impl RpcHandler {
         Self { db_gateway, db_connection_pool }
     }
 
-    #[instrument(skip(self, request, params))]
+    #[instrument(skip(self, chain, request, params))]
     async fn get_contract_state(
         &self,
         chain: &Chain,
@@ -210,6 +238,70 @@ impl RpcHandler {
             )),
             Err(err) => {
                 error!(error = %err, "Error while getting contract states.");
+                Err(err.into())
+            }
+        }
+    }
+
+    #[instrument(skip(self, chain, request, params))]
+    async fn get_contract_delta(
+        &self,
+        chain: &Chain,
+        request: &dto::ContractDeltaRequestBody,
+        params: &dto::StateRequestParameters,
+    ) -> Result<dto::ContractDeltaRequestResponse, RpcError> {
+        let mut conn = self.db_connection_pool.get().await?;
+
+        info!(?request, ?params, "Getting contract delta.");
+        self.get_contract_delta_inner(chain, request, params, &mut conn)
+            .await
+    }
+
+    async fn get_contract_delta_inner(
+        &self,
+        chain: &Chain,
+        request: &dto::ContractDeltaRequestBody,
+        params: &dto::StateRequestParameters,
+        db_connection: &mut AsyncPgConnection,
+    ) -> Result<dto::ContractDeltaRequestResponse, RpcError> {
+        #![allow(unused_variables)]
+        //TODO: handle when no contract is specified with filters
+        let start = BlockOrTimestamp::try_from(&request.start)?;
+        let end = BlockOrTimestamp::try_from(&request.end)?;
+
+        // Get the contract IDs from the request
+        let contract_ids = request.contract_ids.clone();
+        let addresses: Option<Vec<Address>> = contract_ids.map(|ids| {
+            ids.into_iter()
+                .map(|id| id.address)
+                .collect::<Vec<Address>>()
+        });
+        debug!(?addresses, "Getting contract states.");
+        let addresses = addresses.as_deref();
+
+        // Get the contract deltas from the database
+        // TODO: support additional tvl_gt and intertia_min_gt filters
+        match self
+            .db_gateway
+            .get_accounts_delta(chain, Some(&start), &end, db_connection)
+            .await
+        {
+            Ok(mut accounts) => {
+                // Filter by contract addresses if specified
+                // TODO: this is not efficient, we should filter in the database query directly in
+                // get_accounts_delta
+                if let Some(contract_addrs) = addresses {
+                    accounts.retain(|acc| contract_addrs.contains(&acc.address.into()));
+                }
+                Ok(dto::ContractDeltaRequestResponse::new(
+                    accounts
+                        .into_iter()
+                        .map(dto::AccountUpdate::from)
+                        .collect(),
+                ))
+            }
+            Err(err) => {
+                error!(error = %err, "Error while getting contract delta.");
                 Err(err.into())
             }
         }
@@ -333,6 +425,39 @@ pub async fn contract_state(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, ?query, "Error while getting contract state.");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/{execution_env}/contract_delta",
+    responses(
+        (status = 200, description = "OK", body = ContractDeltaRequestResponse),
+    ),
+    request_body = ContractDeltaRequestBody,
+    params(
+        ("execution_env" = Chain, description = "Execution environment"),
+        StateRequestParameters
+    ),
+)]
+pub async fn contract_delta(
+    execution_env: web::Path<Chain>,
+    params: web::Query<dto::StateRequestParameters>,
+    body: web::Json<dto::ContractDeltaRequestBody>,
+    handler: web::Data<RpcHandler>,
+) -> HttpResponse {
+    // Call the handler to get the state delta
+    let response = handler
+        .into_inner()
+        .get_contract_delta(&execution_env, &body, &params)
+        .await;
+
+    match response {
+        Ok(state) => HttpResponse::Ok().json(state),
+        Err(err) => {
+            error!(error = %err, ?body, "Error while getting contract state delta.");
             HttpResponse::InternalServerError().finish()
         }
     }
@@ -513,35 +638,122 @@ mod tests {
         assert_eq!(result.version.block, expected.version.block);
     }
 
-    pub async fn setup_account(conn: &mut AsyncPgConnection) -> String {
+    pub async fn setup_contract_data(conn: &mut AsyncPgConnection) -> String {
         // Adds fixtures: chain, block, transaction, account, account_balance
         let acc_address = "6B175474E89094C44Da98b954EedeAC495271d0F";
+
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
-        let tid = db_fixtures::insert_txns(
+        let txn = db_fixtures::insert_txns(
             conn,
             &[
                 (
+                    // deploy c0
                     blk[0],
                     1i64,
                     "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
                 ),
                 (
+                    // change c0 state, deploy c2
+                    blk[0],
+                    2i64,
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                ),
+                // ----- Block 01 LAST
+                (
+                    // deploy c1, delete c2
                     blk[1],
                     1i64,
                     "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
                 ),
+                (
+                    // change c0 and c1 state
+                    blk[1],
+                    2i64,
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                ),
+                // ----- Block 02 LAST
             ],
         )
         .await;
-        // Insert account and balances
-        let acc_id =
-            db_fixtures::insert_account(conn, acc_address, "account0", chain_id, Some(tid[0]))
-                .await;
 
-        db_fixtures::insert_account_balance(conn, 100, tid[0], None, acc_id).await;
-        let contract_code = Code::from("1234");
-        db_fixtures::insert_contract_code(conn, acc_id, tid[0], contract_code).await;
+        // Account C0
+        let c0 = db_fixtures::insert_account(conn, acc_address, "account0", chain_id, Some(txn[0]))
+            .await;
+        db_fixtures::insert_account_balance(conn, 0, txn[0], Some("2020-01-01T00:00:00"), c0).await;
+        db_fixtures::insert_contract_code(conn, c0, txn[0], Bytes::from_str("C0C0C0").unwrap())
+            .await;
+        db_fixtures::insert_account_balance(conn, 100, txn[1], Some("2020-01-01T01:00:00"), c0)
+            .await;
+        // Slot 2 is never modified again
+        db_fixtures::insert_slots(conn, c0, txn[1], "2020-01-01T00:00:00", None, &[(2, 1, None)])
+            .await;
+        // First version for slots 0 and 1.
+        db_fixtures::insert_slots(
+            conn,
+            c0,
+            txn[1],
+            "2020-01-01T00:00:00",
+            Some("2020-01-01T01:00:00"),
+            &[(0, 1, None), (1, 5, None)],
+        )
+        .await;
+        db_fixtures::insert_account_balance(conn, 101, txn[3], None, c0).await;
+        // Second and final version for 0 and 1, new slots 5 and 6
+        db_fixtures::insert_slots(
+            conn,
+            c0,
+            txn[3],
+            "2020-01-01T01:00:00",
+            None,
+            &[(0, 2, Some(1)), (1, 3, Some(5)), (5, 25, None), (6, 30, None)],
+        )
+        .await;
+
+        // Account C1
+        let c1 = db_fixtures::insert_account(
+            conn,
+            "73BcE791c239c8010Cd3C857d96580037CCdd0EE",
+            "c1",
+            chain_id,
+            Some(txn[2]),
+        )
+        .await;
+        db_fixtures::insert_account_balance(conn, 50, txn[2], None, c1).await;
+        db_fixtures::insert_contract_code(conn, c1, txn[2], Bytes::from_str("C1C1C1").unwrap())
+            .await;
+        db_fixtures::insert_slots(
+            conn,
+            c1,
+            txn[3],
+            "2020-01-01T01:00:00",
+            None,
+            &[(0, 128, None), (1, 255, None)],
+        )
+        .await;
+
+        // Account C2
+        let c2 = db_fixtures::insert_account(
+            conn,
+            "94a3F312366b8D0a32A00986194053C0ed0CdDb1",
+            "c2",
+            chain_id,
+            Some(txn[1]),
+        )
+        .await;
+        db_fixtures::insert_account_balance(conn, 25, txn[1], None, c2).await;
+        db_fixtures::insert_contract_code(conn, c2, txn[1], Bytes::from_str("C2C2C2").unwrap())
+            .await;
+        db_fixtures::insert_slots(
+            conn,
+            c2,
+            txn[1],
+            "2020-01-01T00:00:00",
+            None,
+            &[(1, 2, None), (2, 4, None)],
+        )
+        .await;
+        db_fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
         acc_address.to_string()
     }
 
@@ -556,7 +768,7 @@ mod tests {
         conn.begin_test_transaction()
             .await
             .unwrap();
-        let acc_address = setup_account(&mut conn).await;
+        let acc_address = setup_contract_data(&mut conn).await;
 
         let db_gateway = Arc::new(EvmPostgresGateway::from_connection(&mut conn).await);
         let req_handler = RpcHandler::new(db_gateway, pool);
@@ -780,5 +992,81 @@ mod tests {
             .unwrap();
 
         assert_eq!(components.protocol_components.len(), 0);
+    }
+
+    fn evm_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap<U256, U256> {
+        data.into_iter()
+            .map(|(s, v)| (U256::from(s), U256::from(v)))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_get_contract_delta() {
+        // Setup
+        let db_url = std::env::var("DATABASE_URL").unwrap();
+        let pool = postgres::connect(&db_url)
+            .await
+            .unwrap();
+        let mut conn = pool.get().await.unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
+        let acc_address = setup_contract_data(&mut conn).await;
+
+        let db_gateway = Arc::new(EvmPostgresGateway::from_connection(&mut conn).await);
+        let req_handler = RpcHandler::new(db_gateway, pool);
+
+        let expected = evm::AccountUpdate::new(
+            H160::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+            Chain::Ethereum,
+            evm_slots([(6, 30), (5, 25), (1, 3), (0, 2)]),
+            Some(U256::from(101)),
+            None,
+            storage::ChangeType::Update,
+        );
+
+        let request = dto::ContractDeltaRequestBody {
+            contract_ids: Some(vec![dto::ContractId::new(
+                Chain::Ethereum.into(),
+                acc_address.parse().unwrap(),
+            )]),
+            start: dto::VersionParam {
+                timestamp: None,
+                block: Some(dto::BlockParam {
+                    hash: Some(
+                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
+                            .parse()
+                            .unwrap(),
+                    ),
+                    chain: None,
+                    number: None,
+                }),
+            },
+            end: dto::VersionParam {
+                timestamp: None,
+                block: Some(dto::BlockParam {
+                    hash: Some(
+                        "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
+                            .parse()
+                            .unwrap(),
+                    ),
+                    chain: None,
+                    number: None,
+                }),
+            },
+        };
+
+        let delta = req_handler
+            .get_contract_delta_inner(
+                &Chain::Ethereum,
+                &request,
+                &StateRequestParameters::default(),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(delta.accounts.len(), 1);
+        assert_eq!(delta.accounts[0], expected.into());
     }
 }

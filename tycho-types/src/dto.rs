@@ -38,6 +38,7 @@ pub enum ChangeType {
     Update,
     Deletion,
     Creation,
+    Unspecified,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -171,7 +172,7 @@ impl BlockAccountChanges {
     }
 }
 
-#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
+#[derive(PartialEq, Serialize, Deserialize, Clone, Debug, ToSchema)]
 pub struct AccountUpdate {
     #[serde(with = "hex_bytes")]
     pub address: Bytes,
@@ -534,6 +535,27 @@ pub struct ResponseProtocolComponent {
     #[schema(value_type=String)]
     pub creation_tx: Bytes,
     pub created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ContractDeltaRequestBody {
+    #[serde(rename = "contractIds")]
+    pub contract_ids: Option<Vec<ContractId>>,
+    #[serde(default = "VersionParam::default")]
+    pub start: VersionParam,
+    #[serde(default = "VersionParam::default")]
+    pub end: VersionParam,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ContractDeltaRequestResponse {
+    pub accounts: Vec<AccountUpdate>,
+}
+
+impl ContractDeltaRequestResponse {
+    pub fn new(accounts: Vec<AccountUpdate>) -> Self {
+        Self { accounts }
+    }
 }
 
 #[cfg(test)]
