@@ -986,7 +986,7 @@ mod test_serial_db {
                 )
                 .await
                 .unwrap();
-            println!("BALNACES {:?}", component_balances);
+
             // we only retrieve the latest balance (the one from the update in TX_HASH_1)
             assert_eq!(component_balances.len(), 1);
             assert_eq!(component_balances[0].modify_tx, TX_HASH_1.parse().unwrap());
