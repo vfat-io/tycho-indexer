@@ -296,6 +296,8 @@ pub struct AccountUpdateWithTx {
     // transactions.
     pub update: AccountUpdate,
     pub tx: Transaction,
+    // pub protocol_components: Vec<ProtocolComponent>,
+    // pub component_balances: Vec<ComponentBalance>,
 }
 
 impl AccountUpdateWithTx {
