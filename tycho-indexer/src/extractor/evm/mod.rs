@@ -356,11 +356,11 @@ pub struct TransactionUpdates {
 impl TransactionUpdates {
     pub fn new(
         account_updates: Vec<AccountUpdate>,
-        protocol_componets: Vec<ProtocolComponent>,
+        protocol_components: Vec<ProtocolComponent>,
         component_balances: Vec<ComponentBalance>,
         tx: Transaction,
     ) -> Self {
-        Self { account_updates, protocol_components: protocol_componets, component_balances, tx }
+        Self { account_updates, protocol_components, component_balances, tx }
     }
 
     /// Merges this update with another one.
