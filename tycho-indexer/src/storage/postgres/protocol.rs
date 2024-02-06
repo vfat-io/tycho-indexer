@@ -159,6 +159,7 @@ where
         chain: &Chain,
         system: Option<String>,
         ids: Option<&[&str]>,
+        min_tvl: Option<f64>,
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolComponent>, StorageError> {
         use super::schema::{protocol_component::dsl::*, transaction::dsl::*};
@@ -166,6 +167,7 @@ where
 
         let mut query = protocol_component
             .inner_join(transaction.on(creation_tx.eq(schema::transaction::id)))
+            .left_join(schema::component_tvl::table)
             .select((orm::ProtocolComponent::as_select(), hash))
             .into_boxed();
 
@@ -198,6 +200,10 @@ where
             (_, _) => {
                 query = query.filter(chain_id.eq(chain_id_value));
             }
+        }
+
+        if let Some(thr) = min_tvl {
+            query = query.filter(schema::component_tvl::tvl.gt(thr));
         }
 
         let orm_protocol_components = query
@@ -2331,7 +2337,7 @@ mod test {
         let chain = Chain::Starknet;
 
         let result = gw
-            .get_protocol_components(&chain, system.clone(), None, &mut conn)
+            .get_protocol_components(&chain, system.clone(), None, None, &mut conn)
             .await;
 
         assert!(result.is_ok());
@@ -2370,7 +2376,7 @@ mod test {
         let chain = Chain::Ethereum;
 
         let result = gw
-            .get_protocol_components(&chain, None, ids, &mut conn)
+            .get_protocol_components(&chain, None, ids, None, &mut conn)
             .await;
 
         match external_id.as_str() {
@@ -2402,7 +2408,7 @@ mod test {
         let ids = Some(["state1", "state2"].as_slice());
         let chain = Chain::Ethereum;
         let result = gw
-            .get_protocol_components(&chain, Some(system), ids, &mut conn)
+            .get_protocol_components(&chain, Some(system), ids, None, &mut conn)
             .await;
 
         let components = result.unwrap();
@@ -2425,7 +2431,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let result = gw
-            .get_protocol_components(&chain, None, None, &mut conn)
+            .get_protocol_components(&chain, None, None, None, &mut conn)
             .await;
 
         let mut components = result.unwrap();
