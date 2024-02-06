@@ -145,8 +145,13 @@ impl AmbientPgGateway {
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
 
+        let protocol_components = changes
+            .tx_updates
+            .iter()
+            .flat_map(|tx_u| tx_u.protocol_components.clone())
+            .collect();
         let new_tokens = self
-            .get_new_tokens(changes.protocol_components.clone())
+            .get_new_tokens(protocol_components)
             .await?;
 
         // TODO: call TokenPreProcessor to get the token metadata
