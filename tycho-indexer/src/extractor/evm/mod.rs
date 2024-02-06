@@ -6,10 +6,7 @@ use ethers::{
     utils::keccak256,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    ops::Deref,
-};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
@@ -147,7 +144,7 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
             .account_updates
             .clone()
             .into_iter()
-            .map(|update| {
+            .map(|(_, update)| {
                 let acc = Account::new(
                     update.chain,
                     update.address,
@@ -299,9 +296,9 @@ pub struct BlockAccountChanges {
     chain: Chain,
     pub block: Block,
     pub account_updates: HashMap<H160, AccountUpdate>,
-    pub new_protocol_components: Vec<ProtocolComponent>,
-    pub deleted_protocol_components: Vec<ProtocolComponent>,
-    pub component_balances: Vec<ComponentBalance>,
+    pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
+    pub deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
+    pub component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
 }
 
 impl BlockAccountChanges {
@@ -310,9 +307,9 @@ impl BlockAccountChanges {
         chain: Chain,
         block: Block,
         account_updates: HashMap<H160, AccountUpdate>,
-        new_protocol_components: Vec<ProtocolComponent>,
-        deleted_protocol_components: Vec<ProtocolComponent>,
-        component_balances: Vec<ComponentBalance>,
+        new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
+        deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
+        component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
     ) -> Self {
         BlockAccountChanges {
             extractor: extractor.to_owned(),
@@ -345,17 +342,17 @@ pub struct TransactionVMUpdates {
     // TODO: for ambient it works to have only a single update here but long
     // term we need to be able to store changes to multiple accounts per
     // transactions.
-    pub account_updates: Vec<AccountUpdate>,
-    pub protocol_components: Vec<ProtocolComponent>,
-    pub component_balances: Vec<ComponentBalance>,
+    pub account_updates: HashMap<H160, AccountUpdate>,
+    pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
+    pub component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
     pub tx: Transaction,
 }
 
 impl TransactionVMUpdates {
     pub fn new(
-        account_updates: Vec<AccountUpdate>,
-        protocol_components: Vec<ProtocolComponent>,
-        component_balances: Vec<ComponentBalance>,
+        account_updates: HashMap<H160, AccountUpdate>,
+        protocol_components: HashMap<ComponentId, ProtocolComponent>,
+        component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
         tx: Transaction,
     ) -> Self {
         Self { account_updates, protocol_components, component_balances, tx }
@@ -399,21 +396,12 @@ impl TransactionVMUpdates {
         }
         self.tx = other.tx;
 
-        // Map AccountUpdates by address
-        let mut account_updates: HashMap<H160, AccountUpdate> = self
-            .account_updates
-            .clone()
-            .into_iter()
-            .map(|update| (update.address, update))
-            .collect();
-
-        // Merge AccountUpdates
-        for update in other
+        for (address, update) in other
             .account_updates
             .clone()
             .into_iter()
         {
-            match account_updates.entry(update.address) {
+            match self.account_updates.entry(address) {
                 Entry::Occupied(mut e) => {
                     e.get_mut().merge(update)?;
                 }
@@ -423,56 +411,30 @@ impl TransactionVMUpdates {
             }
         }
 
-        self.account_updates = account_updates
-            .into_values()
-            .collect::<Vec<AccountUpdate>>();
-
+        // Add new protocol components
         self.protocol_components
             .extend(other.protocol_components.clone());
 
-        let mut component_balances_by_id_map: HashMap<(ComponentId, H160), ComponentBalance> = self
-            .component_balances
-            .clone()
-            .into_iter()
-            .map(|cb| ((cb.component_id.clone(), cb.token), cb))
-            .collect();
-
-        for cb in other
+        // Add new component balances and overwrite existing ones
+        for (component_id, balances) in other
             .component_balances
             .clone()
             .into_iter()
         {
-            match component_balances_by_id_map.entry((cb.component_id.clone(), cb.token)) {
+            match self
+                .component_balances
+                .entry(component_id)
+            {
                 Entry::Occupied(mut e) => {
-                    e.get_mut().new_balance = cb.new_balance;
-                    e.get_mut().modify_tx = cb.modify_tx;
+                    e.get_mut().extend(balances);
                 }
                 Entry::Vacant(e) => {
-                    e.insert(cb);
+                    e.insert(balances);
                 }
             }
         }
 
-        self.component_balances = component_balances_by_id_map
-            .into_values()
-            .collect();
-
         Ok(())
-    }
-
-    fn map_account_update_by_address(self) -> HashMap<H160, AccountUpdate> {
-        self.account_updates
-            .into_iter()
-            .map(|update| (update.address, update))
-            .collect()
-    }
-}
-
-impl Deref for TransactionVMUpdates {
-    type Target = Vec<AccountUpdate>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.account_updates
     }
 }
 
@@ -698,13 +660,13 @@ impl BlockContractChanges {
             let mut tx_updates = Vec::new();
 
             for change in msg.changes.into_iter() {
-                let mut account_updates = Vec::new();
-                let mut protocol_components = Vec::new();
+                let mut account_updates = HashMap::new();
+                let mut protocol_components = HashMap::new();
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
                     for el in change.contract_changes.into_iter() {
                         let update = AccountUpdate::try_from_message(el, chain)?;
-                        account_updates.push(update);
+                        account_updates.insert(update.address, update);
                     }
                     for component_msg in change.component_changes.into_iter() {
                         let component = ProtocolComponent::try_from_message(
@@ -715,12 +677,12 @@ impl BlockContractChanges {
                             tx.hash,
                             block.ts,
                         )?;
-                        protocol_components.push(component);
+                        protocol_components.insert(component.id.clone(), component);
                     }
                     tx_updates.push(TransactionVMUpdates::new(
                         account_updates,
                         protocol_components,
-                        Vec::new(),
+                        HashMap::new(),
                         tx,
                     ));
                 }
@@ -765,11 +727,9 @@ impl BlockContractChanges {
             &self.extractor,
             self.chain,
             self.block,
-            tx_update
-                .clone()
-                .map_account_update_by_address(),
-            tx_update.protocol_components,
-            Vec::new(),
+            tx_update.account_updates.clone(),
+            tx_update.protocol_components.clone(),
+            HashMap::new(),
             tx_update.component_balances,
         ))
     }
@@ -1436,10 +1396,14 @@ mod test {
         )
     }
 
-    fn update_w_tx() -> TransactionVMUpdates {
+    fn tx_update() -> TransactionVMUpdates {
         let code = vec![0, 0, 0, 0];
-        TransactionVMUpdates::new(
-            vec![AccountUpdate::new(
+        let mut account_updates = HashMap::new();
+        account_updates.insert(
+            "0xe688b84b23f322a994A53dbF8E15FA82CDB71127"
+                .parse()
+                .unwrap(),
+            AccountUpdate::new(
                 "0xe688b84b23f322a994A53dbF8E15FA82CDB71127"
                     .parse()
                     .unwrap(),
@@ -1448,9 +1412,13 @@ mod test {
                 Some(U256::from(10000)),
                 Some(code.into()),
                 ChangeType::Update,
-            )],
-            vec![],
-            vec![],
+            ),
+        );
+
+        TransactionVMUpdates::new(
+            account_updates,
+            HashMap::new(),
+            HashMap::new(),
             fixtures::transaction01(),
         )
     }
@@ -1483,13 +1451,15 @@ mod test {
 
     #[test]
     fn test_account_from_update_w_tx() {
-        let update = update_w_tx();
+        let update = tx_update();
         let exp = account01();
 
         assert_eq!(
             update
                 .account_updates
-                .first()
+                .values()
+                .into_iter()
+                .next()
                 .unwrap()
                 .ref_into_account(&update.tx),
             exp
@@ -1542,7 +1512,7 @@ mod test {
         #[case] tx: Transaction,
         #[case] exp: Result<(), ExtractionError>,
     ) {
-        let mut left = update_w_tx();
+        let mut left = tx_update();
         let mut right = left.clone();
         right.tx = tx;
 
@@ -1609,29 +1579,47 @@ mod test {
             },
             tx_updates: vec![
                 TransactionVMUpdates {
-                    account_updates: vec![AccountUpdate::new(
+                    account_updates: [(
                         H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
-                        Chain::Ethereum,
-                        fixtures::evm_slots([(2711790500, 2981278644), (3250766788, 3520254932)]),
-                        Some(U256::from(1903326068)),
-                        Some(vec![129, 130, 131, 132].into()),
-                        ChangeType::Update,
-                    )],
-                    protocol_components: vec![protocol_component.clone()],
-                    component_balances: vec![],
+                        AccountUpdate::new(
+                            H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                            Chain::Ethereum,
+                            fixtures::evm_slots([
+                                (2711790500, 2981278644),
+                                (3250766788, 3520254932),
+                            ]),
+                            Some(U256::from(1903326068)),
+                            Some(vec![129, 130, 131, 132].into()),
+                            ChangeType::Update,
+                        ),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    protocol_components: [(protocol_component.id.clone(), protocol_component)]
+                        .into_iter()
+                        .collect(),
+                    component_balances: HashMap::new(),
                     tx,
                 },
                 TransactionVMUpdates {
-                    account_updates: vec![AccountUpdate::new(
+                    account_updates: [(
                         H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
-                        Chain::Ethereum,
-                        fixtures::evm_slots([(2981278644, 3250766788), (2442302356, 2711790500)]),
-                        Some(U256::from(4059231220u64)),
-                        Some(vec![1, 2, 3, 4].into()),
-                        ChangeType::Update,
-                    )],
-                    protocol_components: vec![],
-                    component_balances: vec![],
+                        AccountUpdate::new(
+                            H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                            Chain::Ethereum,
+                            fixtures::evm_slots([
+                                (2981278644, 3250766788),
+                                (2442302356, 2711790500),
+                            ]),
+                            Some(U256::from(4059231220u64)),
+                            Some(vec![1, 2, 3, 4].into()),
+                            ChangeType::Update,
+                        ),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    protocol_components: HashMap::new(),
+                    component_balances: HashMap::new(),
                     tx: tx_5,
                 },
             ],
@@ -1714,9 +1702,11 @@ mod test {
             )]
             .into_iter()
             .collect(),
-            vec![protocol_component],
-            Vec::new(),
-            Vec::new(),
+            [(protocol_component.id.clone(), protocol_component)]
+                .into_iter()
+                .collect(),
+            HashMap::new(),
+            HashMap::new(),
         )
     }
 

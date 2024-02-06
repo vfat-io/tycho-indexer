@@ -148,7 +148,11 @@ impl AmbientPgGateway {
         let protocol_components = changes
             .tx_updates
             .iter()
-            .flat_map(|tx_u| tx_u.protocol_components.clone())
+            .flat_map(|tx_u| {
+                tx_u.protocol_components
+                    .values()
+                    .cloned()
+            })
             .collect();
         let new_tokens = self
             .get_new_tokens(protocol_components)
@@ -165,7 +169,7 @@ impl AmbientPgGateway {
             self.state_gateway
                 .upsert_tx(&changes.block, &update.tx)
                 .await?;
-            for acc_update in update.account_updates.iter() {
+            for (_, acc_update) in update.account_updates.iter() {
                 if acc_update.is_creation() {
                     let new: evm::Account = acc_update.ref_into_account(&update.tx);
                     info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
@@ -185,8 +189,8 @@ impl AmbientPgGateway {
                     .account_updates
                     .clone()
                     .into_iter()
-                    .filter(|acc_u| acc_u.is_update())
-                    .map(|acc_u| (tycho_types::Bytes::from(u.tx.hash), acc_u))
+                    .filter(|(_, acc_u)| acc_u.is_update())
+                    .map(|(_, acc_u)| (tycho_types::Bytes::from(u.tx.hash), acc_u))
                     .collect();
                 a
             })
@@ -240,9 +244,9 @@ impl AmbientPgGateway {
             block,
             account_updates,
             // TODO: get protocol components from gateway (in ENG-2049)
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
         );
         Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
     }
@@ -779,29 +783,39 @@ mod test_serial_db {
             block: evm::Block::default(),
             tx_updates: vec![
                 evm::TransactionVMUpdates::new(
-                    vec![AccountUpdate::new(
+                    [(
                         H160(AMBIENT_CONTRACT),
-                        Chain::Ethereum,
-                        HashMap::new(),
-                        None,
-                        Some(vec![0, 0, 0, 0].into()),
-                        ChangeType::Creation,
-                    )],
-                    vec![],
-                    vec![],
+                        AccountUpdate::new(
+                            H160(AMBIENT_CONTRACT),
+                            Chain::Ethereum,
+                            HashMap::new(),
+                            None,
+                            Some(vec![0, 0, 0, 0].into()),
+                            ChangeType::Creation,
+                        ),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    HashMap::new(),
+                    HashMap::new(),
                     evm::fixtures::transaction02(TX_HASH_0, evm::fixtures::HASH_256_0, 1),
                 ),
                 evm::TransactionVMUpdates::new(
-                    vec![AccountUpdate::new(
+                    [(
                         H160(AMBIENT_CONTRACT),
-                        Chain::Ethereum,
-                        evm::fixtures::evm_slots([(1, 200)]),
-                        Some(U256::from(1000)),
-                        None,
-                        ChangeType::Update,
-                    )],
-                    vec![],
-                    vec![],
+                        AccountUpdate::new(
+                            H160(AMBIENT_CONTRACT),
+                            Chain::Ethereum,
+                            evm::fixtures::evm_slots([(1, 200)]),
+                            Some(U256::from(1000)),
+                            None,
+                            ChangeType::Update,
+                        ),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    HashMap::new(),
+                    HashMap::new(),
                     evm::fixtures::transaction02(TX_HASH_1, evm::fixtures::HASH_256_0, 2),
                 ),
             ],
@@ -821,16 +835,21 @@ mod test_serial_db {
             chain: Chain::Ethereum,
             block,
             tx_updates: vec![evm::TransactionVMUpdates::new(
-                vec![AccountUpdate::new(
+                [(
                     H160(AMBIENT_CONTRACT),
-                    Chain::Ethereum,
-                    evm::fixtures::evm_slots([(42, 0xbadbabe)]),
-                    Some(U256::from(2000)),
-                    None,
-                    ChangeType::Update,
-                )],
-                vec![],
-                vec![],
+                    AccountUpdate::new(
+                        H160(AMBIENT_CONTRACT),
+                        Chain::Ethereum,
+                        evm::fixtures::evm_slots([(42, 0xbadbabe)]),
+                        Some(U256::from(2000)),
+                        None,
+                        ChangeType::Update,
+                    ),
+                )]
+                .into_iter()
+                .collect(),
+                HashMap::new(),
+                HashMap::new(),
                 evm::fixtures::transaction02(TX_HASH_2, BLOCK_HASH_0, 1),
             )],
         }
