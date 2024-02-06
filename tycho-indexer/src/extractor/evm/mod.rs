@@ -1514,15 +1514,15 @@ mod test {
     #[rstest]
     #[case::diff_block(
     fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
-    Err(ExtractionError::MergeError(format ! ("Can't merge AccountUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
+    Err(ExtractionError::MergeError(format ! ("Can't merge TransactionUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
     )]
     #[case::same_tx(
     fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
-    Err(ExtractionError::MergeError(format ! ("Can't merge AccountUpdates from the same transaction: 0x{:x}", H256::zero())))
+    Err(ExtractionError::MergeError(format ! ("Can't merge TransactionUpdates from the same transaction: 0x{:x}", H256::zero())))
     )]
     #[case::lower_idx(
     fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
-    Err(ExtractionError::MergeError("Can't merge AccountUpdates with lower transaction index: 10 > 1".to_owned()))
+    Err(ExtractionError::MergeError("Can't merge TransactionUpdates with lower transaction index: 10 > 1".to_owned()))
     )]
     fn test_merge_account_update_w_tx(
         #[case] tx: Transaction,
