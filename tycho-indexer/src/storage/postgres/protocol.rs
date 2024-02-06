@@ -898,15 +898,17 @@ where
                     schema::protocol_component::external_id,
                     schema::account::address,
                     new_balance,
+                    balance_float,
                     schema::transaction::hash,
                 ))
-                .get_results::<(String, Address, Balance, TxHash)>(conn)
+                .get_results::<(String, Address, Balance, f64, TxHash)>(conn)
                 .await?
                 .into_iter()
-                .map(|(external_id, address, balance, tx)| ComponentBalance {
+                .map(|(external_id, address, balance, bal_f64, tx)| ComponentBalance {
                     component_id: external_id,
                     token: address.into(),
                     new_balance: balance,
+                    balance_float: bal_f64,
                     modify_tx: tx.into(),
                 })
                 .collect()
@@ -957,6 +959,7 @@ where
                     component_id: external_id,
                     token: address.into(),
                     new_balance: balance,
+                    balance_float: f64::NAN,
                     modify_tx: tx.into(),
                 })
                 .collect()
@@ -1604,6 +1607,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(1000)),
+            1000.0,
             token_id,
             from_txn_id,
             protocol_component_id,
@@ -1612,6 +1616,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(2000)),
+            2000.0,
             token_id,
             to_txn_id,
             protocol_component_id,
@@ -1624,6 +1629,7 @@ mod test {
             component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
             new_balance: Balance::from(U256::from(2000)),
+            balance_float: 2000.0,
             modify_tx: to_tx_hash,
         }];
 
@@ -1643,11 +1649,12 @@ mod test {
             component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
             new_balance: Balance::from(U256::from(1000)),
+            balance_float: 0.0,
             modify_tx: from_tx_hash,
         }];
 
         // test backward case
-        let result = gateway
+        let mut result = gateway
             .get_balance_deltas(
                 &Chain::Ethereum,
                 Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2)))),
@@ -1656,6 +1663,9 @@ mod test {
             )
             .await
             .unwrap();
+        // workaround for nan type
+        assert!(result[0].balance_float.is_nan());
+        result[0].balance_float = 0.0;
         assert_eq!(result, expected_backward_deltas);
     }
 
@@ -2023,6 +2033,7 @@ mod test {
         let component_balance = ComponentBalance {
             token: base_token,
             new_balance: Bytes::from(&[0u8]),
+            balance_float: 0.0,
             modify_tx: tx_hash,
             component_id: protocol_component_id,
         };
