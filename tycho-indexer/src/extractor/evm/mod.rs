@@ -255,6 +255,7 @@ pub struct BlockAccountChanges {
 }
 
 impl BlockAccountChanges {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor: &str,
         chain: Chain,
