@@ -76,7 +76,7 @@ pub enum Response {
     SubscriptionEnded { subscription_id: Uuid },
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum Deltas {
     VM(BlockAccountChanges),
@@ -645,6 +645,40 @@ impl ProtocolDeltaRequestResponse {
     pub fn new(protocols: Vec<ProtocolStateDelta>) -> Self {
         Self { protocols }
     }
+}
+
+impl ResponseProtocolComponent {
+    pub fn get_id(&self) -> ProtocolComponentId {
+        ProtocolComponentId {
+            chain: self.chain,
+            system: self.protocol_system.clone(),
+            id: self.id.clone(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Hash, Eq)]
+pub struct ProtocolComponentId {
+    pub chain: Chain,
+    pub system: String,
+    pub id: String,
+}
+
+impl ProtocolComponent {
+    pub fn get_id(&self) -> ProtocolComponentId {
+        ProtocolComponentId {
+            chain: self.chain,
+            system: self.protocol_system.clone(),
+            id: self.id.clone(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Hash, Eq)]
+pub struct ProtocolComponentId {
+    pub chain: Chain,
+    pub system: String,
+    pub id: String,
 }
 
 #[cfg(test)]

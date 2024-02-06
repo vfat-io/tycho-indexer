@@ -17,7 +17,7 @@ use tycho_types::{
 
 use self::{
     block_history::{BlockHistory, BlockPosition},
-    synchronizer::{StateMsg, StateSynchronizer},
+    synchronizer::{StateMessage, StateSynchronizer},
 };
 
 mod block_history;
@@ -143,7 +143,6 @@ impl SynchronizerHandle {
     }
 
     fn transition(&mut self, latest_retrieved: Header, block_history: &BlockHistory) {
-        // TODO: special handling for reverts required here
         match block_history
             .determine_block_position(&latest_retrieved)
             .expect("Block positiion could not be determined.")
@@ -173,10 +172,20 @@ impl SynchronizerHandle {
     }
 }
 
+struct FeedMessage {
+    state_msgs: Vec<StateMessage>,
+}
+
+impl FeedMessage {
+    fn new(state_msgs: Vec<StateMessage>) -> Self {
+        Self { state_msgs }
+    }
+}
+
 impl BlockSynchronizer {
     pub async fn run(
         mut self,
-    ) -> BlockSyncResult<(JoinHandle<BlockSyncResult<()>>, Receiver<Vec<StateMsg>>)> {
+    ) -> BlockSyncResult<(JoinHandle<BlockSyncResult<()>>, Receiver<FeedMessage>)> {
         let ws_task = self.deltas_client.connect().await?;
         let state_sync_tasks = FuturesUnordered::new();
         let mut state_synchronizers = HashMap::with_capacity(self.synchronizers.len());
@@ -286,9 +295,10 @@ impl BlockSynchronizer {
                         Ok(v) => Some(v),
                         Err(_) => None,
                     })
-                    .flatten()
                     .collect::<Vec<_>>();
-                sync_tx.send(synced_msgs).await?;
+                sync_tx
+                    .send(FeedMessage::new(synced_msgs))
+                    .await?;
 
                 // Here we simply wait block_time + max_wait. This will not work for chains with
                 // unkown block times but is simple enough for now.
