@@ -6,7 +6,6 @@ use std::{
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
-use ethers::types::H160;
 use lru::LruCache;
 use tokio::{
     sync::{

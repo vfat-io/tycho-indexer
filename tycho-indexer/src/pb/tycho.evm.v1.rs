@@ -91,7 +91,7 @@ pub struct ProtocolComponent {
 /// component as a whole.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ComponentBalance {
+pub struct BalanceChange {
     /// The address of the ERC20 token whose balance changed.
     #[prost(bytes = "vec", tag = "1")]
     pub token: ::prost::alloc::vec::Vec<u8>,

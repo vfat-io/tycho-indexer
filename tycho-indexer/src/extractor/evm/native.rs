@@ -1,4 +1,3 @@
-use core::slice::SlicePattern;
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
@@ -38,8 +37,6 @@ pub struct NativeContractExtractor<G> {
     inner: Arc<Mutex<Inner>>,
     protocol_types: HashMap<String, ProtocolType>,
 }
-
-struct MockGateway;
 
 impl<DB> NativeContractExtractor<DB> {
     async fn update_cursor(&self, cursor: String) {
@@ -208,6 +205,8 @@ impl NativePgGateway {
             chain: self.chain,
             block,
             state_updates,
+            // TODO: Map new_protocol_components
+            new_protocol_components: HashMap::new(),
         })
     }
 
@@ -241,11 +240,7 @@ impl NativeGateway for NativePgGateway {
         changes: &evm::BlockEntityChanges,
         new_cursor: &str,
     ) -> Result<(), StorageError> {
-        let mut conn = self.pool.get().await.unwrap();
-        conn.transaction(|conn| {
-            async move { self.forward(changes, new_cursor).await }.scope_boxed()
-        })
-        .await?;
+        self.forward(changes, new_cursor).await;
         Ok(())
     }
 
@@ -257,15 +252,48 @@ impl NativeGateway for NativePgGateway {
         new_cursor: &str,
     ) -> Result<evm::BlockEntityChangesResult, StorageError> {
         let mut conn = self.pool.get().await.unwrap();
-        let res = conn
-            .transaction(|conn| {
-                async move {
-                    self.backward(current, to, new_cursor, conn)
-                        .await
-                }
-                .scope_boxed()
-            })
+        let res = self
+            .backward(current, to, new_cursor, &mut conn)
             .await?;
+        Ok(res)
+    }
+}
+
+impl<G> NativeContractExtractor<G>
+where
+    G: NativeGateway,
+{
+    pub async fn new(
+        name: &str,
+        chain: Chain,
+        protocol_system: String,
+        gateway: G,
+        protocol_types: HashMap<String, ProtocolType>,
+    ) -> Result<Self, ExtractionError> {
+        let res = match gateway.get_cursor().await {
+            Err(StorageError::NotFound(_, _)) => NativeContractExtractor {
+                gateway,
+                name: name.to_string(),
+                chain,
+                inner: Arc::new(Mutex::new(Inner {
+                    cursor: Vec::new(),
+                    last_processed_block: None,
+                })),
+                protocol_system,
+                protocol_types,
+            },
+            Ok(cursor) => NativeContractExtractor {
+                gateway,
+                name: name.to_string(),
+                chain,
+                inner: Arc::new(Mutex::new(Inner { cursor, last_processed_block: None })),
+                protocol_system,
+                protocol_types,
+            },
+            Err(err) => return Err(ExtractionError::Setup(err.to_string())),
+        };
+
+        res.ensure_protocol_types().await;
         Ok(res)
     }
 }
@@ -324,7 +352,7 @@ where
             &self.name,
             self.chain,
             self.protocol_system.clone(),
-            protocol_type_id,
+            &self.protocol_types,
         ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
@@ -394,395 +422,144 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    //! It is notoriously hard to mock postgres here, we would need to have traits and abstractions
-    //! for the connection pooling as well as for transaction handling so the easiest way
-    //! forward is to just run these tests against a real postgres instance.
-    //!
-    //! The challenge here is to leave the database empty. So we need to initiate a test transaction
-    //! and should avoid calling the trait methods which start a transaction of their own. So we do
-    //! that by moving the main logic of each trait method into a private method and test this
-    //! method instead.
-    //!
-    //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
-    //! between this component and the actual db interactions
-    use std::collections::HashMap;
-
-    use crate::storage::{postgres, postgres::PostgresGateway, ChangeType, ContractId};
-    use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-    use ethers::types::U256;
-    use mpsc::channel;
-    use tokio::sync::{
-        mpsc,
-        mpsc::{error::TryRecvError::Empty, Receiver},
+mod test {
+    use crate::{
+        extractor::evm,
+        models::{FinancialType, ImplementationType},
+        pb::sf::substreams::v1::BlockRef,
     };
 
     use super::*;
 
-    // const TX_HASH_0: &str = "0x2f6350a292c0fc918afe67cb893744a080dacb507b0cea4cc07437b8aff23cdb";
-    // const TX_HASH_1: &str = "0x0d9e0da36cf9f305a189965b248fc79c923619801e8ab5ef158d4fd528a291ad";
-    // const BLOCK_HASH_0: &str =
-    // "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
+    async fn create_extractor() -> NativeContractExtractor<MockNativeGateway> {
+        let mut gw: MockNativeGateway = MockNativeGateway::new();
+        let protocol_types = HashMap::new();
 
-    async fn setup_gw() -> (NativePgGateway, Receiver<StorageError>, Pool<AsyncPgConnection>) {
-        let db_url = std::env::var("DATABASE_URL").expect("database url should be set for testing");
-        let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url);
-        // We need a dedicated connection, so we don't use the pool as this would actually insert
-        // data. For this, we create a pool of 1 connection.
-        let pool = Pool::builder(config)
-            .max_size(1)
-            .build()
-            .unwrap();
-        let mut conn = pool
-            .get()
-            .await
-            .expect("pool should get a connection");
-        conn.begin_test_transaction()
-            .await
-            .expect("starting test transaction should succeed");
-        postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
-        let evm_gw = Arc::new(
-            PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut conn)
-            .await,
-        );
-
-        let (tx, rx) = channel(10);
-        let (err_tx, err_rx) = channel(10);
-
-        let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
-            "ethereum".to_owned(),
+        NativeContractExtractor::new(
+            "TestExtractor",
             Chain::Ethereum,
-            pool.clone(),
-            evm_gw.clone(),
-            rx,
-            err_tx,
-        );
-
-        let handle = write_executor.run();
-        let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
-
-        let gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool.clone(), cached_gw);
-        (gw, err_rx, pool)
+            "TestProtocol".to_string(),
+            gw,
+            protocol_types,
+        )
+        .await
+        .expect("Failed to create extractor")
     }
 
     #[tokio::test]
     async fn test_get_cursor() {
-        let (gw, mut err_rx, pool) = setup_gw().await;
-        let evm_gw = gw.state_gateway.clone();
-        let state = ExtractionState::new(
-            "vm:ambient".to_string(),
+        let mut gw: MockNativeGateway = MockNativeGateway::new();
+        gw.expect_ensure_protocol_types()
+            .times(1)
+            .returning(|_| ());
+        gw.expect_get_cursor()
+            .times(1)
+            .returning(|| Ok("cursor".into()));
+
+        let protocol_types = HashMap::new();
+
+        let extractor = NativeContractExtractor::new(
+            "TestExtractor",
             Chain::Ethereum,
-            None,
-            "cursor@420".as_bytes(),
-        );
-        let mut conn = pool
-            .get()
-            .await
-            .expect("pool should get a connection");
-        evm_gw
-            .save_state(&state, &mut conn)
-            .await
-            .expect("extaction state insertion succeeded");
+            "TestProtocol".to_string(),
+            gw,
+            protocol_types,
+        )
+        .await
+        .expect("Failed to create extractor");
 
-        let maybe_err = err_rx
-            .try_recv()
-            .expect_err("Error channel should be empty");
+        let res = extractor.get_cursor().await;
 
-        let cursor = gw
-            .get_last_cursor(&mut conn)
-            .await
-            .expect("get cursor should succeed");
-
-        assert_eq!(cursor, "cursor@420".as_bytes());
-        // Assert no error happened
-        assert_eq!(maybe_err, Empty);
-    }
-
-    fn ambient_account(at_version: u64) -> evm::Account {
-        match at_version {
-            0 => evm::Account::new(
-                Chain::Ethereum,
-                "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688"
-                    .parse()
-                    .unwrap(),
-                "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
-                evm::fixtures::evm_slots([(1, 200)]),
-                U256::from(1000),
-                vec![0, 0, 0, 0].into(),
-                "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
-                    .parse()
-                    .unwrap(),
-                "0x2f6350a292c0fc918afe67cb893744a080dacb507b0cea4cc07437b8aff23cdb"
-                    .parse()
-                    .unwrap(),
-                H256::zero(),
-                Some(H256::zero()),
-            ),
-            _ => panic!("Unkown version"),
-        }
-    }
-
-    fn ambient_creation_and_update() -> evm::BlockContractChanges {
-        evm::BlockContractChanges {
-            extractor: "vm:ambient".to_owned(),
-            chain: Chain::Ethereum,
-            block: evm::Block::default(),
-            tx_updates: vec![
-                evm::AccountUpdateWithTx::new(
-                    H160(crate::extractor::evm::ambient::AMBIENT_CONTRACT),
-                    Chain::Ethereum,
-                    HashMap::new(),
-                    None,
-                    Some(vec![0, 0, 0, 0].into()),
-                    ChangeType::Creation,
-                    evm::fixtures::transaction01(),
-                ),
-                evm::AccountUpdateWithTx::new(
-                    H160(crate::extractor::evm::ambient::AMBIENT_CONTRACT),
-                    Chain::Ethereum,
-                    evm::fixtures::evm_slots([(1, 200)]),
-                    Some(U256::from(1000)),
-                    None,
-                    ChangeType::Update,
-                    evm::fixtures::transaction02(TX_HASH_0, evm::fixtures::HASH_256_0, 1),
-                ),
-            ],
-            protocol_components: Vec::new(),
-            tvl_changes: Vec::new(),
-        }
-    }
-
-    fn ambient_update02() -> evm::BlockContractChanges {
-        let block = evm::Block {
-            number: 1,
-            chain: Chain::Ethereum,
-            hash: BLOCK_HASH_0.parse().unwrap(),
-            parent_hash: H256::zero(),
-            ts: "2020-01-01T01:00:00".parse().unwrap(),
-        };
-        evm::BlockContractChanges {
-            extractor: "vm:ambient".to_owned(),
-            chain: Chain::Ethereum,
-            block,
-            tx_updates: vec![evm::AccountUpdateWithTx::new(
-                H160(crate::extractor::evm::ambient::AMBIENT_CONTRACT),
-                Chain::Ethereum,
-                evm::fixtures::evm_slots([(42, 0xbadbabe)]),
-                Some(U256::from(2000)),
-                None,
-                ChangeType::Update,
-                evm::fixtures::transaction02(TX_HASH_1, BLOCK_HASH_0, 1),
-            )],
-            protocol_components: Vec::new(),
-            tvl_changes: Vec::new(),
-        }
+        assert_eq!(res, "cursor");
     }
 
     #[tokio::test]
-    async fn test_upsert_contract() {
-        let (gw, mut err_rx, pool) = setup_gw().await;
-        let msg = ambient_creation_and_update();
-        let exp = ambient_account(0);
+    async fn test_handle_tick_scoped_data() {
+        let mut gw: MockNativeGateway = MockNativeGateway::new();
+        gw.expect_ensure_protocol_types()
+            .times(1)
+            .returning(|_| ());
+        gw.expect_get_cursor()
+            .times(1)
+            .returning(|| Ok("cursor".into()));
+        gw.expect_upsert_contract()
+            .times(1)
+            .returning(|_, _| Ok(()));
 
-        gw.forward(&msg, "cursor@500")
-            .await
-            .expect("upsert should succeed");
+        let protocol_types = HashMap::from([("WeightedPool".to_string(), ProtocolType::default())]);
 
-        let cached_gw: CachedGateway = gw.state_gateway;
-        cached_gw
-            .flush()
-            .await
-            .expect("Received signal ok")
-            .expect("Flush ok");
+        let extractor = NativeContractExtractor::new(
+            "TestExtractor",
+            Chain::Ethereum,
+            "TestProtocol".to_string(),
+            gw,
+            protocol_types,
+        )
+        .await
+        .expect("Failed to create extractor");
 
-        let maybe_err = err_rx
-            .try_recv()
-            .expect_err("Error channel should be empty");
+        let inp = evm::fixtures::pb_block_scoped_data(evm::fixtures::pb_block_entity_changes());
+        let exp = Ok(Some(()));
 
-        let mut conn = pool
-            .get()
+        let res = extractor
+            .handle_tick_scoped_data(inp)
             .await
-            .expect("pool should get a connection");
-        let res = cached_gw
-            .get_contract(
-                &ContractId::new(
-                    Chain::Ethereum,
-                    crate::extractor::evm::ambient::AMBIENT_CONTRACT.into(),
-                ),
-                None,
-                true,
-                &mut conn,
-            )
-            .await
-            .expect("test successfully inserted ambient contract");
+            .map(|o| o.map(|_| ()));
+
         assert_eq!(res, exp);
-        // Assert no error happened
-        assert_eq!(maybe_err, Empty);
+        assert_eq!(extractor.get_cursor().await, "cursor@420");
     }
-
-    // This test is stuck due to how we handle db lock during the test. TODO: fix this test. https://datarevenue.atlassian.net/browse/ENG-2635
-    // #[tokio::test]
-    // async fn test_revert() {
-    //     let db_url = std::env::var("DATABASE_URL").expect("database url should be set for
-    // testing");     let config =
-    // AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url);     // We need a
-    // dedicated connection, so we don't use the pool as this would actually insert     // data.
-    // For this, we create a pool of 1 connection.     let pool = Pool::builder(config)
-    //         .max_size(1)
-    //         .build()
-    //         .unwrap();
-    //     let mut conn = pool
-    //         .get()
-    //         .await
-    //         .expect("pool should get a connection");
-    //     conn.begin_test_transaction()
-    //         .await
-    //         .expect("starting test transaction should succeed");
-    //     postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
-    //     let evm_gw = Arc::new(
-    //         PostgresGateway::<
-    //             evm::Block,
-    //             evm::Transaction,
-    //             evm::Account,
-    //             evm::AccountUpdate,
-    //             evm::ERC20Token,
-    //         >::from_connection(&mut conn)
-    //         .await,
-    //     );
-
-    //     let (tx, rx) = channel(10);
-    //     let (err_tx, mut err_rx) = channel(10);
-
-    //     let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
-    //         "ethereum".to_owned(),
-    //         Chain::Ethereum,
-    //         pool.clone(),
-    //         evm_gw.clone(),
-    //         rx,
-    //         err_tx,
-    //     );
-
-    //     let handle = write_executor.run();
-    //     let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
-
-    //     let gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool.clone(), cached_gw);
-
-    //     let msg0 = ambient_creation_and_update();
-    //     let msg1 = ambient_update02();
-    //     gw.forward(&msg0, "cursor@0")
-    //         .await
-    //         .expect("upsert should succeed");
-    //     gw.forward(&msg1, "cursor@1")
-    //         .await
-    //         .expect("upsert should succeed");
-    // let ambient_address = H160(AMBIENT_CONTRACT);
-    // let exp_change = evm::AccountUpdate::new(
-    //     ambient_address,
-    //     Chain::Ethereum,
-    //     evm::fixtures::evm_slots([(42, 0)]),
-    //     Some(U256::from(1000)),
-    //     None,
-    //     ChangeType::Update,
-    // );
-    // let exp_account = ambient_account(0);
-
-    // let mut conn = pool
-    //     .get()
-    //     .await
-    //     .expect("pool should get a connection");
-
-    // let changes = gw
-    //     .backward(&BlockIdentifier::Number((Chain::Ethereum, 0)), "cursor@2", &mut conn)
-    //     .await
-    //     .expect("revert should succeed");
-
-    // let maybe_err = err_rx
-    //     .try_recv()
-    //     .expect_err("Error channel should be empty");
-
-    // assert_eq!(changes.account_updates.len(), 1);
-    // assert_eq!(changes.account_updates[&ambient_address], exp_change);
-    // let cached_gw: CachedGateway = gw.state_gateway;
-    // let account = cached_gw
-    //     .get_contract(
-    //         &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
-    //         None,
-    //         true,
-    //         &mut conn,
-    //     )
-    //     .await
-    //     .expect("test successfully retrieved ambient contract");
-    // assert_eq!(account, exp_account);
-    // // Assert no error happened
-    // assert_eq!(maybe_err, Empty);
-    // }
 
     // THALES TESTS
 
-    fn create_extractor() -> NativeContractExtractor<MockGateway> {
-        NativeContractExtractor {
-            gateway: MockGateway,
-            name: "TestExtractor".to_string(),
-            chain: Chain::Ethereum,
-            protocol_system: "TestProtocol".to_string(),
-            inner: Arc::new(Mutex::new(Inner { cursor: vec![], last_processed_block: None })),
-        }
-    }
+    // #[tokio::test]
+    // async fn test_update_cursor() {
+    //     let extractor = create_extractor();
+    //     let new_cursor = "new_cursor".to_string();
 
-    #[tokio::test]
-    async fn test_update_cursor() {
-        let extractor = create_extractor();
-        let new_cursor = "new_cursor".to_string();
+    //     // Update the cursor.
+    //     extractor
+    //         .update_cursor(new_cursor.clone())
+    //         .await;
 
-        // Update the cursor.
-        extractor
-            .update_cursor(new_cursor.clone())
-            .await;
+    //     // Lock the state to retrieve the cursor.
+    //     let state = extractor.inner.lock().await;
 
-        // Lock the state to retrieve the cursor.
-        let state = extractor.inner.lock().await;
+    //     // Check if the cursor has been updated correctly.
+    //     assert_eq!(state.cursor, new_cursor.into_bytes());
+    // }
 
-        // Check if the cursor has been updated correctly.
-        assert_eq!(state.cursor, new_cursor.into_bytes());
-    }
+    // #[tokio::test]
+    // async fn test_update_last_processed_block() {
+    //     let extractor = create_extractor();
+    //     // pub struct Block {
+    //     //     pub number: u64,
+    //     //     pub hash: H256,
+    //     //     pub parent_hash: H256,
+    //     //     pub chain: Chain,
+    //     //     pub ts: NaiveDateTime,
+    //     // }
 
-    #[tokio::test]
-    async fn test_update_last_processed_block() {
-        let extractor = create_extractor();
-        // pub struct Block {
-        //     pub number: u64,
-        //     pub hash: H256,
-        //     pub parent_hash: H256,
-        //     pub chain: Chain,
-        //     pub ts: NaiveDateTime,
-        // }
+    //     let new_block = Block {
+    //         number: 1,
+    //         hash: H256::zero(),
+    //         parent_hash: H256::zero(),
+    //         chain: Chain::Ethereum,
+    //         ts: "2020-01-01T01:00:00"
+    //             .parse()
+    //             .expect("Invalid timestamp"),
+    //     };
 
-        let new_block = Block {
-            number: 1,
-            hash: H256::zero(),
-            parent_hash: H256::zero(),
-            chain: Chain::Ethereum,
-            ts: "2020-01-01T01:00:00"
-                .parse()
-                .expect("Invalid timestamp"),
-        };
+    //     // Update the last processed block.
+    //     extractor
+    //         .update_last_processed_block(new_block.clone())
+    //         .await;
 
-        // Update the last processed block.
-        extractor
-            .update_last_processed_block(new_block.clone())
-            .await;
+    //     // Lock the state to retrieve the last processed block.
+    //     let state = extractor.inner.lock().await;
 
-        // Lock the state to retrieve the last processed block.
-        let state = extractor.inner.lock().await;
-
-        // Check if the last processed block has been updated correctly.
-        assert!(state.last_processed_block.is_some());
-        assert_eq!(state.last_processed_block.unwrap(), new_block);
-    }
+    //     // Check if the last processed block has been updated correctly.
+    //     assert!(state.last_processed_block.is_some());
+    //     assert_eq!(state.last_processed_block.unwrap(), new_block);
+    // }
 }

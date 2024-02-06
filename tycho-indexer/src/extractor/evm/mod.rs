@@ -14,10 +14,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 use crate::{
     models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolType},
     pb::tycho::evm::v1 as substreams,
-    storage::{
-        postgres::schema::account_balance::balance, Address, AttrStoreKey, ChangeType, ComponentId,
-        StateGatewayType, StoreVal,
-    },
+    storage::{Address, AttrStoreKey, ChangeType, ComponentId, StateGatewayType, StoreVal},
 };
 use tycho_types::Bytes;
 
@@ -544,7 +541,7 @@ pub struct ComponentBalance {
 
 impl ComponentBalance {
     pub fn try_from_message(
-        msg: substreams::ComponentBalance,
+        msg: substreams::BalanceChange,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
         let balance_float = bytes_to_f64(&msg.balance).unwrap_or(f64::NAN);
@@ -924,7 +921,7 @@ impl ProtocolChangesWithTx {
         // First, parse the new protocol components
         for change in msg.component_changes.into_iter() {
             let component = ProtocolComponent::try_from_message(
-                change,
+                change.clone(),
                 block.chain,
                 &protocol_system,
                 &protocol_types,
@@ -1044,7 +1041,7 @@ impl ProtocolChangesWithTx {
         // should never happen.
         for (key, value) in other.new_protocol_components {
             match self.new_protocol_components.entry(key) {
-                Entry::Occupied(entry) => {
+                Entry::Occupied(mut entry) => {
                     warn!(
                         "Overwriting new protocol component for id {} with a new one. This should never happen! Please check logic",
                         entry.get().id
@@ -1118,10 +1115,10 @@ impl BlockEntityChanges {
 
             for change in msg.changes.into_iter() {
                 if let Some(tx) = change.clone().tx {
-                    let tx = Transaction::try_from_message(tx, &block.hash)?;
+                    let tycho_tx = Transaction::try_from_message(tx, &block.hash)?;
 
                     let tx_update = ProtocolChangesWithTx::try_from_message(
-                        tx,
+                        change.clone(),
                         &block,
                         protocol_system.clone(),
                         protocol_types,
@@ -1134,7 +1131,7 @@ impl BlockEntityChanges {
                             chain,
                             &protocol_system,
                             protocol_types,
-                            tx.hash,
+                            tycho_tx.hash,
                             block.ts,
                         )?;
                         new_protocol_components.insert(pool.id.clone(), pool);
