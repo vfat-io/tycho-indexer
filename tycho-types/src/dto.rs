@@ -205,19 +205,23 @@ impl AccountUpdate {
 }
 
 /// Represents the static parts of a protocol component.
-#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize, ToSchema)]
 pub struct ProtocolComponent {
     pub id: String,
     pub protocol_system: String,
     pub protocol_type_name: String,
     pub chain: Chain,
     #[serde(with = "hex_bytes_vec")]
+    #[schema(value_type=Vec<String>)]
     pub tokens: Vec<Bytes>,
     #[serde(with = "hex_bytes_vec")]
+    #[schema(value_type=Vec<String>)]
     pub contract_ids: Vec<Bytes>,
+    #[schema(value_type=HashMap<String, String>)]
     pub static_attributes: HashMap<String, Bytes>,
     pub change: ChangeType,
     #[serde(with = "hex_bytes")]
+    #[schema(value_type=String)]
     pub creation_tx: Bytes,
     pub created_at: NaiveDateTime,
 }
@@ -247,10 +251,11 @@ pub struct BlockEntityChangesResult {
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
-#[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize, ToSchema)]
 /// Represents a change in protocol state.
 pub struct ProtocolStateDelta {
     pub component_id: String,
+    #[schema(value_type=HashMap<String, String>)]
     pub updated_attributes: HashMap<String, Bytes>,
     pub deleted_attributes: HashSet<String>,
 }
@@ -513,32 +518,13 @@ impl ProtocolComponentsRequestBody {
 /// Response from Tycho server for a protocol components request.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct ProtocolComponentRequestResponse {
-    pub protocol_components: Vec<ResponseProtocolComponent>,
+    pub protocol_components: Vec<ProtocolComponent>,
 }
 
 impl ProtocolComponentRequestResponse {
-    pub fn new(protocol_components: Vec<ResponseProtocolComponent>) -> Self {
+    pub fn new(protocol_components: Vec<ProtocolComponent>) -> Self {
         Self { protocol_components }
     }
-}
-
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
-#[serde(rename = "ProtocolComponent")]
-/// Protocol Component struct for the response from Tycho server for a protocol component request.
-pub struct ResponseProtocolComponent {
-    pub chain: Chain,
-    pub id: String,
-    pub protocol_system: String,
-    pub protocol_type_name: String,
-    #[schema(value_type=Vec<String>)]
-    pub tokens: Vec<Bytes>,
-    #[schema(value_type=Vec<String>)]
-    pub contract_ids: Vec<Bytes>,
-    #[schema(value_type=HashMap<String, String>)]
-    pub static_attributes: HashMap<String, Bytes>,
-    #[schema(value_type=String)]
-    pub creation_tx: Bytes,
-    pub created_at: NaiveDateTime,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
@@ -596,6 +582,28 @@ impl ProtocolStateRequestResponse {
         Self { accounts }
     }
 }
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ProtocolDeltaRequestBody {
+    #[serde(rename = "contractIds")]
+    pub component_ids: Option<Vec<String>>,
+    #[serde(default = "VersionParam::default")]
+    pub start: VersionParam,
+    #[serde(default = "VersionParam::default")]
+    pub end: VersionParam,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ProtocolDeltaRequestResponse {
+    pub protocols: Vec<ProtocolStateDelta>,
+}
+
+impl ProtocolDeltaRequestResponse {
+    pub fn new(protocols: Vec<ProtocolStateDelta>) -> Self {
+        Self { protocols }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

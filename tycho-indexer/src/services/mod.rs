@@ -16,10 +16,11 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use tycho_types::dto::{
     AccountUpdate, BlockParam, ChangeType, ContractDeltaRequestBody, ContractDeltaRequestResponse,
-    ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolId,
-    ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseAccount,
-    ResponseProtocolComponent, ResponseProtocolState, ResponseToken, StateRequestBody,
-    StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
+    ProtocolComponent, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody,
+    ProtocolDeltaRequestBody, ProtocolDeltaRequestResponse, ProtocolId, ProtocolStateDelta,
+    ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState,
+    ResponseToken, StateRequestBody, StateRequestResponse, TokensRequestBody,
+    TokensRequestResponse, VersionParam,
 };
 
 mod rpc;
@@ -89,7 +90,8 @@ impl ServicesBuilder {
                 rpc::tokens,
                 rpc::protocol_components,
                 rpc::contract_delta,
-                rpc::protocol_state
+                rpc::protocol_state,
+                rpc::protocol_delta
             ),
             components(
                 schemas(VersionParam),
@@ -104,7 +106,7 @@ impl ServicesBuilder {
                 schemas(ResponseToken),
                 schemas(ProtocolComponentsRequestBody),
                 schemas(ProtocolComponentRequestResponse),
-                schemas(ResponseProtocolComponent),
+                schemas(ProtocolComponent),
                 schemas(ContractDeltaRequestBody),
                 schemas(ContractDeltaRequestResponse),
                 schemas(ProtocolStateRequestBody),
@@ -113,6 +115,9 @@ impl ServicesBuilder {
                 schemas(ProtocolId),
                 schemas(ResponseProtocolState),
                 schemas(ChangeType),
+                schemas(ProtocolDeltaRequestBody),
+                schemas(ProtocolDeltaRequestResponse),
+                schemas(ProtocolStateDelta),
             )
         )]
         struct ApiDoc;
@@ -135,6 +140,10 @@ impl ServicesBuilder {
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/protocol_state", self.prefix))
                         .route(web::post().to(rpc::protocol_state)),
+                )
+                .service(
+                    web::resource(format!("/{}/{{execution_env}}/protocol_delta", self.prefix))
+                        .route(web::post().to(rpc::protocol_delta)),
                 )
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/tokens", self.prefix))
