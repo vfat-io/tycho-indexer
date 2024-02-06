@@ -32,12 +32,13 @@ pub enum Chain {
     ZkSync,
 }
 
-#[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize, ToSchema)]
 pub enum ChangeType {
     #[default]
     Update,
     Deletion,
     Creation,
+    Unspecified,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -171,16 +172,20 @@ impl BlockAccountChanges {
     }
 }
 
-#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
+#[derive(PartialEq, Serialize, Deserialize, Clone, Debug, ToSchema)]
 pub struct AccountUpdate {
     #[serde(with = "hex_bytes")]
+    #[schema(value_type=Vec<String>)]
     pub address: Bytes,
     pub chain: Chain,
     #[serde(with = "hex_hashmap_key_value")]
+    #[schema(value_type=HashMap<String, String>)]
     pub slots: HashMap<Bytes, Bytes>,
     #[serde(with = "hex_bytes_option")]
+    #[schema(value_type=Option<String>)]
     pub balance: Option<Bytes>,
     #[serde(with = "hex_bytes_option")]
+    #[schema(value_type=Option<String>)]
     pub code: Option<Bytes>,
     pub change: ChangeType,
 }
@@ -519,7 +524,7 @@ impl ProtocolComponentRequestResponse {
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 #[serde(rename = "ProtocolComponent")]
-/// Protocol Component struct for the response from Tycho server for a tokens request.
+/// Protocol Component struct for the response from Tycho server for a protocol component request.
 pub struct ResponseProtocolComponent {
     pub chain: Chain,
     pub id: String,
@@ -536,6 +541,61 @@ pub struct ResponseProtocolComponent {
     pub created_at: NaiveDateTime,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ContractDeltaRequestBody {
+    #[serde(rename = "contractIds")]
+    pub contract_ids: Option<Vec<ContractId>>,
+    #[serde(default = "VersionParam::default")]
+    pub start: VersionParam,
+    #[serde(default = "VersionParam::default")]
+    pub end: VersionParam,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ContractDeltaRequestResponse {
+    pub accounts: Vec<AccountUpdate>,
+}
+
+impl ContractDeltaRequestResponse {
+    pub fn new(accounts: Vec<AccountUpdate>) -> Self {
+        Self { accounts }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+pub struct ProtocolId {
+    pub id: String,
+    pub chain: Chain,
+}
+/// Protocol Component struct for the response from Tycho server for a protocol state request.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize, ToSchema)]
+pub struct ResponseProtocolState {
+    pub component_id: String,
+    #[schema(value_type=HashMap<String, String>)]
+    pub attributes: HashMap<String, Bytes>,
+    #[schema(value_type=String)]
+    pub modify_tx: Bytes,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ProtocolStateRequestBody {
+    #[serde(rename = "protocolIds")]
+    pub protocol_ids: Option<Vec<ProtocolId>>,
+    #[serde(rename = "protocolSystem")]
+    pub protocol_system: Option<String>,
+    #[serde(default = "VersionParam::default")]
+    pub version: VersionParam,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ProtocolStateRequestResponse {
+    pub accounts: Vec<ResponseProtocolState>,
+}
+impl ProtocolStateRequestResponse {
+    pub fn new(accounts: Vec<ResponseProtocolState>) -> Self {
+        Self { accounts }
+    }
+}
 #[cfg(test)]
 mod test {
     use super::*;
