@@ -797,11 +797,17 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<Vec<ComponentBalance>, StorageError>;
 
-    async fn _get_or_create_protocol_system_id(
+    async fn get_token_prices(
         &self,
-        protocol_system: String,
         conn: &mut Self::DB,
-    ) -> Result<i64, StorageError>;
+    ) -> Result<HashMap<Bytes, f64>, StorageError>;
+
+    async fn update_component_tvl(
+        &self,
+        chain: Chain,
+        new_tvl_values: HashMap<String, f64>,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 }
 
 /// Lays out the necessary interface needed to store and retrieve contracts from

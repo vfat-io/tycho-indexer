@@ -1384,7 +1384,7 @@ pub struct NewProtocolComponentHoldsToken {
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
-#[belongs_to(Token)]
+#[diesel(belongs_to(Token))]
 #[diesel(table_name = token_price)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct TokenPrice {
@@ -1396,7 +1396,7 @@ pub struct TokenPrice {
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
-#[belongs_to(ProtocolComponent)]
+#[diesel(belongs_to(ProtocolComponent))]
 #[diesel(table_name = component_tvl)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ComponentTVL {

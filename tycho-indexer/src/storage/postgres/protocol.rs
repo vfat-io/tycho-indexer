@@ -107,6 +107,34 @@ where
             Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
         }
     }
+
+    async fn _get_or_create_protocol_system_id(
+        &self,
+        new: String,
+        conn: &mut <PostgresGateway<B, TX, A, D, T> as ProtocolGateway>::DB,
+    ) -> Result<i64, StorageError> {
+        use super::schema::protocol_system::dsl::*;
+
+        let existing_entry = protocol_system
+            .filter(name.eq(new.to_string().clone()))
+            .first::<orm::ProtocolSystem>(conn)
+            .await;
+
+        if let Ok(entry) = existing_entry {
+            return Ok(entry.id);
+        } else {
+            let new_entry = orm::NewProtocolSystem { name: new.to_string() };
+
+            let inserted_protocol_system = diesel::insert_into(protocol_system)
+                .values(&new_entry)
+                .get_result::<orm::ProtocolSystem>(conn)
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
+                })?;
+            Ok(inserted_protocol_system.id)
+        }
+    }
 }
 
 #[async_trait]
@@ -1140,32 +1168,20 @@ where
         }
     }
 
-    async fn _get_or_create_protocol_system_id(
+    async fn get_token_prices(
         &self,
-        new: String,
         conn: &mut Self::DB,
-    ) -> Result<i64, StorageError> {
-        use super::schema::protocol_system::dsl::*;
+    ) -> Result<HashMap<Bytes, f64>, StorageError> {
+        todo!()
+    }
 
-        let existing_entry = protocol_system
-            .filter(name.eq(new.to_string().clone()))
-            .first::<orm::ProtocolSystem>(conn)
-            .await;
-
-        if let Ok(entry) = existing_entry {
-            return Ok(entry.id);
-        } else {
-            let new_entry = orm::NewProtocolSystem { name: new.to_string() };
-
-            let inserted_protocol_system = diesel::insert_into(protocol_system)
-                .values(&new_entry)
-                .get_result::<orm::ProtocolSystem>(conn)
-                .await
-                .map_err(|err| {
-                    StorageError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
-                })?;
-            Ok(inserted_protocol_system.id)
-        }
+    async fn update_component_tvl(
+        &self,
+        chain: Chain,
+        new_tvl_values: HashMap<String, f64>,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        todo!()
     }
 }
 
