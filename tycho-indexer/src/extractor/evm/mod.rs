@@ -1196,7 +1196,14 @@ pub mod fixtures {
                         change: ChangeType::Update.into(),
                     }],
                     component_changes: vec![],
-                    balance_changes: vec![],
+                    balance_changes: vec![BalanceChange {
+                        token: hex::decode(
+                            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
+                        )
+                        .unwrap(),
+                        balance: 10.encode_to_vec(),
+                        component_id: "WETH-CAI".encode(),
+                    }],
                 },
             ],
         }
@@ -1386,9 +1393,10 @@ mod test {
     use std::str::FromStr;
 
     use actix_web::body::MessageBody;
+    use diesel_async::RunQueryDsl;
     use rstest::rstest;
 
-    use crate::extractor::evm::fixtures::transaction01;
+    use crate::extractor::evm::fixtures::{pb_block_contract_changes, transaction01};
 
     use super::*;
 
@@ -2242,5 +2250,51 @@ mod test {
         assert_eq!(from_message.modify_tx, tx.hash);
         assert_eq!(from_message.token, expected_token);
         assert_eq!(from_message.component_id, expected_component_id);
+    }
+
+    #[rstest]
+    fn test_merge() {
+        let block_changes = block_state_changes();
+        let mut tx_update = block_changes.tx_updates[0].clone();
+
+        tx_update
+            .merge(block_changes.tx_updates.last().unwrap())
+            .unwrap();
+
+        println!("{:?}", tx_update.account_updates);
+
+        assert_eq!(
+            tx_update.component_balances,
+            block_changes
+                .tx_updates
+                .last()
+                .unwrap()
+                .component_balances
+        );
+        assert_eq!(tx_update.protocol_components, block_changes.tx_updates[0].protocol_components);
+
+        let mut acc_update = block_changes
+            .tx_updates
+            .last()
+            .unwrap()
+            .account_updates
+            .clone()
+            .into_values()
+            .next()
+            .unwrap();
+
+        acc_update.slots = fixtures::evm_slots([
+            (2442302356, 2711790500),
+            (2711790500, 2981278644),
+            (3250766788, 3520254932),
+            (2981278644, 3250766788),
+        ]);
+
+        let acc_update = [(acc_update.address, acc_update)]
+            .iter()
+            .cloned()
+            .collect();
+
+        assert_eq!(tx_update.account_updates, acc_update);
     }
 }
