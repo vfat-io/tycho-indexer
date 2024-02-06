@@ -419,7 +419,6 @@ impl VersionedRow for NewComponentBalance {
 
 impl DeltaVersionedRow for NewComponentBalance {
     type Value = Balance;
-    type PreviousValue = Option<Balance>;
 
     fn get_value(&self) -> Self::Value {
         self.new_balance.clone()
@@ -429,14 +428,13 @@ impl DeltaVersionedRow for NewComponentBalance {
         self.previous_value = previous_value
     }
 
-    fn get_previous_value(&self) -> Self::PreviousValue {
+    fn get_previous_value(&self) -> Option<Bytes> {
         Some(self.previous_value.clone())
     }
 }
 
 impl DeltaVersionedRow for ComponentBalance {
     type Value = Balance;
-    type PreviousValue = Option<Balance>;
 
     fn get_value(&self) -> Self::Value {
         self.new_balance.clone()
@@ -446,7 +444,7 @@ impl DeltaVersionedRow for ComponentBalance {
         self.previous_value = previous_value
     }
 
-    fn get_previous_value(&self) -> Self::PreviousValue {
+    fn get_previous_value(&self) -> Option<Bytes> {
         Some(self.previous_value.clone())
     }
 }
@@ -1286,7 +1284,6 @@ impl StoredVersionedRow for ContractStorage {
 
 impl DeltaVersionedRow for ContractStorage {
     type Value = Option<Bytes>;
-    type PreviousValue = Option<Bytes>;
 
     fn get_value(&self) -> Self::Value {
         self.value.clone()
@@ -1296,7 +1293,7 @@ impl DeltaVersionedRow for ContractStorage {
         self.previous_value = previous_value
     }
 
-    fn get_previous_value(&self) -> Self::PreviousValue {
+    fn get_previous_value(&self) -> Option<Bytes> {
         self.previous_value.clone()
     }
 }
@@ -1339,7 +1336,6 @@ impl<'a> VersionedRow for NewSlot<'a> {
 
 impl<'a> DeltaVersionedRow for NewSlot<'a> {
     type Value = Option<&'a Bytes>;
-    type PreviousValue = Option<&'a Bytes>;
 
     fn get_value(&self) -> Self::Value {
         self.value
@@ -1349,8 +1345,8 @@ impl<'a> DeltaVersionedRow for NewSlot<'a> {
         self.previous_value = previous_value
     }
 
-    fn get_previous_value(&self) -> Self::PreviousValue {
-        self.previous_value
+    fn get_previous_value(&self) -> Option<Bytes> {
+        self.previous_value.cloned()
     }
 }
 

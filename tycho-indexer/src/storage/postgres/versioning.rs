@@ -47,7 +47,6 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use std::{collections::HashMap, hash::Hash};
 
 use crate::storage::StorageError;
-use diesel::dsl::Nullable;
 use std::fmt::Debug;
 use tycho_types::Bytes;
 
@@ -83,13 +82,12 @@ pub trait VersionedRow {
 /// to build both forward and backward delta changes while avoiding self joins.
 pub trait DeltaVersionedRow {
     type Value: Clone + Debug;
-    type PreviousValue: Clone + Debug;
 
     /// Exposes the current value.
     fn get_value(&self) -> Self::Value;
 
     /// Exposes the previous value.
-    fn get_previous_value(&self) -> Self::PreviousValue;
+    fn get_previous_value(&self) -> Option<Bytes>;
 
     /// Sets the previous value.
     fn set_previous_value(&mut self, previous_value: Self::Value);
@@ -275,15 +273,9 @@ fn build_batch_update_query_delta_versioning<'a, O: StoredVersionedRow + DeltaVe
             .bind::<Timestamp, _>(valid_to.into());
 
         if let Some(previous_value) = previous_value {
-            query = query.bind::<Binary, _>(previous_value.into());
-        } else {
-            query = query.bind::<Nullable<Binary>, _>(None);
+            let previous_value: Bytes = previous_value.into();
+            query = query.bind::<Binary, _>(previous_value);
         }
-
-        query = query
-            .bind::<BigInt, _>(o.get_pk().into())
-            .bind::<Timestamp, _>(valid_to.into())
-            .bind::<Binary, _>(previous_value.into());
     }
     query
 }
