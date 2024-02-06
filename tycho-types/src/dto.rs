@@ -520,7 +520,7 @@ impl ProtocolComponentRequestResponse {
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 #[serde(rename = "ProtocolComponent")]
-/// Protocol Component struct for the response from Tycho server for a tokens request.
+/// Protocol Component struct for the response from Tycho server for a protocol component request.
 pub struct ResponseProtocolComponent {
     pub chain: Chain,
     pub id: String,
@@ -558,6 +558,40 @@ impl ContractDeltaRequestResponse {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+pub struct ProtocolId {
+    pub id: String,
+    pub chain: Chain,
+}
+/// Protocol Component struct for the response from Tycho server for a protocol state request.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize, ToSchema)]
+pub struct ResponseProtocolState {
+    pub component_id: String,
+    #[schema(value_type=HashMap<String, String>)]
+    pub attributes: HashMap<String, Bytes>,
+    #[schema(value_type=String)]
+    pub modify_tx: Bytes,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ProtocolStateRequestBody {
+    #[serde(rename = "protocolIds")]
+    pub protocol_ids: Option<Vec<ProtocolId>>,
+    #[serde(rename = "protocolSystem")]
+    pub protocol_system: Option<String>,
+    #[serde(default = "VersionParam::default")]
+    pub version: VersionParam,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct ProtocolStateRequestResponse {
+    pub accounts: Vec<ResponseProtocolState>,
+}
+impl ProtocolStateRequestResponse {
+    pub fn new(accounts: Vec<ResponseProtocolState>) -> Self {
+        Self { accounts }
+    }
+}
 #[cfg(test)]
 mod test {
     use super::*;

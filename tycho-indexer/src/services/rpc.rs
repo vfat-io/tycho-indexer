@@ -14,7 +14,7 @@ use diesel_async::{
     pooled_connection::deadpool::{self, Pool},
     AsyncPgConnection,
 };
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
@@ -56,6 +56,16 @@ impl From<evm::Account> for dto::ResponseAccount {
             Bytes::from(value.code_modify_tx),
             value.creation_tx.map(Bytes::from),
         )
+    }
+}
+
+impl From<evm::ProtocolState> for dto::ResponseProtocolState {
+    fn from(protocol_state: evm::ProtocolState) -> Self {
+        Self {
+            component_id: protocol_state.component_id,
+            attributes: protocol_state.attributes,
+            modify_tx: protocol_state.modify_tx.into(),
+        }
     }
 }
 
@@ -271,13 +281,13 @@ impl RpcHandler {
 
         // Get the contract IDs from the request
         let contract_ids = request.contract_ids.clone();
-        let addresses: Option<Vec<Address>> = contract_ids.map(|ids| {
+        let addresses: Option<HashSet<Address>> = contract_ids.map(|ids| {
             ids.into_iter()
                 .map(|id| id.address)
-                .collect::<Vec<Address>>()
+                .collect::<HashSet<Address>>() // Change here to collect into a HashSet
         });
         debug!(?addresses, "Getting contract states.");
-        let addresses = addresses.as_deref();
+        let addresses: Option<&HashSet<Address>> = addresses.as_ref();
 
         // Get the contract deltas from the database
         // TODO: support additional tvl_gt and intertia_min_gt filters
@@ -291,7 +301,10 @@ impl RpcHandler {
                 // TODO: this is not efficient, we should filter in the database query directly in
                 // get_accounts_delta
                 if let Some(contract_addrs) = addresses {
-                    accounts.retain(|acc| contract_addrs.contains(&acc.address.into()));
+                    accounts.retain(|acc| {
+                        let address = Address::from(acc.address);
+                        contract_addrs.contains(&address)
+                    });
                 }
                 Ok(dto::ContractDeltaRequestResponse::new(
                     accounts
@@ -302,6 +315,69 @@ impl RpcHandler {
             }
             Err(err) => {
                 error!(error = %err, "Error while getting contract delta.");
+                Err(err.into())
+            }
+        }
+    }
+
+    #[instrument(skip(self, request, params))]
+    async fn get_protocol_state(
+        &self,
+        chain: &Chain,
+        request: &dto::ProtocolStateRequestBody,
+        params: &dto::StateRequestParameters,
+    ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
+        let mut conn = self.db_connection_pool.get().await?;
+
+        info!(?request, ?params, "Getting protocol state.");
+        self.get_protocol_state_inner(chain, request, params, &mut conn)
+            .await
+    }
+
+    async fn get_protocol_state_inner(
+        &self,
+        chain: &Chain,
+        request: &dto::ProtocolStateRequestBody,
+        params: &dto::StateRequestParameters,
+        db_connection: &mut AsyncPgConnection,
+    ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
+        #![allow(unused_variables)]
+        //TODO: handle when no id is specified with filters
+        let at = BlockOrTimestamp::try_from(&request.version)?;
+
+        let version = storage::Version(at, storage::VersionKind::Last);
+
+        // Get the protocol IDs from the request
+        let protocol_ids: Option<Vec<dto::ProtocolId>> = request.protocol_ids.clone();
+        let ids: Option<Vec<&str>> = protocol_ids.as_ref().map(|ids| {
+            ids.iter()
+                .map(|id| id.id.as_str())
+                .collect::<Vec<&str>>()
+        });
+        debug!(?ids, "Getting protocol states.");
+        let ids = ids.as_deref();
+
+        // Get the protocol states from the database
+        // TODO support additional tvl_gt and intertia_min_gt filters
+        match self
+            .db_gateway
+            .get_protocol_states(
+                chain,
+                Some(version),
+                request.protocol_system.clone(),
+                ids,
+                db_connection,
+            )
+            .await
+        {
+            Ok(accounts) => Ok(dto::ProtocolStateRequestResponse::new(
+                accounts
+                    .into_iter()
+                    .map(dto::ResponseProtocolState::from)
+                    .collect(),
+            )),
+            Err(err) => {
+                error!(error = %err, "Error while getting protocol states.");
                 Err(err.into())
             }
         }
@@ -527,6 +603,39 @@ pub async fn protocol_components(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/{execution_env}/protocol_state",
+    responses(
+        (status = 200, description = "OK", body = ProtocolStateRequestResponse),
+    ),
+    request_body = ProtocolStateRequestBody,
+    params(
+        ("execution_env" = Chain, description = "Execution environment"),
+        StateRequestParameters
+    ),
+)]
+pub async fn protocol_state(
+    execution_env: web::Path<Chain>,
+    body: web::Json<dto::ProtocolStateRequestBody>,
+    params: web::Query<dto::StateRequestParameters>,
+    handler: web::Data<RpcHandler>,
+) -> HttpResponse {
+    // Call the handler to get tokens
+    let response = handler
+        .into_inner()
+        .get_protocol_state(&execution_env, &body, &params)
+        .await;
+
+    match response {
+        Ok(state) => HttpResponse::Ok().json(state),
+        Err(err) => {
+            error!(error = %err, ?body, "Error while getting tokens.");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::storage::{
@@ -540,6 +649,8 @@ mod tests {
     use tycho_types::Bytes;
 
     use std::{collections::HashMap, str::FromStr, sync::Arc};
+
+    use self::storage::postgres::orm;
 
     use super::*;
 
@@ -775,26 +886,30 @@ mod tests {
 
         let code = Code::from("1234");
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
-        let expected = evm::Account::new(
-            Chain::Ethereum,
-            H160::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-            "account0".to_owned(),
-            HashMap::new(),
-            U256::from(100),
-            code,
-            code_hash,
-            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+        let expected = evm::Account {
+            chain: Chain::Ethereum,
+            address: "0x6b175474e89094c44da98b954eedeac495271d0f"
                 .parse()
                 .unwrap(),
-            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+            title: "account0".to_owned(),
+            slots: evm_slots([(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
+            balance: U256::from(101),
+            code: Bytes::from_str("C0C0C0").unwrap(),
+            code_hash: "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                 .parse()
                 .unwrap(),
-            Some(
+            balance_modify_tx: "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
+                .parse()
+                .unwrap(),
+            code_modify_tx: "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+                .parse()
+                .unwrap(),
+            creation_tx: Some(
                 "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
                     .parse()
                     .unwrap(),
             ),
-        );
+        };
 
         let request = dto::StateRequestBody {
             contract_ids: Some(vec![dto::ContractId::new(
@@ -950,6 +1065,188 @@ mod tests {
         )
         .await;
     }
+
+    async fn setup_protocol_data(conn: &mut AsyncPgConnection) -> Vec<String> {
+        let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
+        let chain_id_sn = db_fixtures::insert_chain(conn, "starknet").await;
+        let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let tx_hashes = [
+            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945".to_string(),
+            "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54".to_string(),
+            "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7".to_string(),
+            "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388".to_string(),
+        ];
+
+        let txn = db_fixtures::insert_txns(
+            conn,
+            &[
+                (blk[0], 1i64, &tx_hashes[0]),
+                (blk[0], 2i64, &tx_hashes[1]),
+                // ----- Block 01 LAST
+                (blk[1], 1i64, &tx_hashes[2]),
+                (blk[1], 2i64, &tx_hashes[3]),
+                // ----- Block 02 LAST
+            ],
+        )
+        .await;
+
+        let protocol_system_id_ambient =
+            db_fixtures::insert_protocol_system(conn, "ambient".to_owned()).await;
+        let protocol_system_id_zz =
+            db_fixtures::insert_protocol_system(conn, "zigzag".to_owned()).await;
+
+        let protocol_type_id = db_fixtures::insert_protocol_type(
+            conn,
+            "Pool",
+            Some(orm::FinancialType::Swap),
+            None,
+            Some(orm::ImplementationType::Custom),
+        )
+        .await;
+
+        // insert tokens
+        let (account_id_weth, weth_id) =
+            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
+                .await;
+        let (_account_id_usdc, _usdc_id) =
+            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
+                .await;
+
+        let contract_code_id = db_fixtures::insert_contract_code(
+            conn,
+            account_id_weth,
+            txn[0],
+            Bytes::from_str("C0C0C0").unwrap(),
+        )
+        .await;
+
+        let protocol_component_id = db_fixtures::insert_protocol_component(
+            conn,
+            "state1",
+            chain_id,
+            protocol_system_id_ambient,
+            protocol_type_id,
+            txn[0],
+            Some(vec![weth_id]),
+            Some(vec![contract_code_id]),
+        )
+        .await;
+        let _protocol_component_id2 = db_fixtures::insert_protocol_component(
+            conn,
+            "state3",
+            chain_id,
+            protocol_system_id_ambient,
+            protocol_type_id,
+            txn[0],
+            Some(vec![weth_id]),
+            Some(vec![contract_code_id]),
+        )
+        .await;
+        db_fixtures::insert_protocol_component(
+            conn,
+            "state2",
+            chain_id_sn,
+            protocol_system_id_zz,
+            protocol_type_id,
+            txn[1],
+            Some(vec![weth_id]),
+            Some(vec![contract_code_id]),
+        )
+        .await;
+
+        // protocol state for state1-reserve1
+        db_fixtures::insert_protocol_state(
+            conn,
+            protocol_component_id,
+            txn[0],
+            "reserve1".to_owned(),
+            Bytes::from(U256::from(1100)),
+            None,
+            Some(txn[2]),
+        )
+        .await;
+
+        // protocol state for state1-reserve2
+        db_fixtures::insert_protocol_state(
+            conn,
+            protocol_component_id,
+            txn[0],
+            "reserve2".to_owned(),
+            Bytes::from(U256::from(500)),
+            None,
+            None,
+        )
+        .await;
+
+        // protocol state update for state1-reserve1
+        db_fixtures::insert_protocol_state(
+            conn,
+            protocol_component_id,
+            txn[3],
+            "reserve1".to_owned(),
+            Bytes::from(U256::from(1000)),
+            Some(Bytes::from(U256::from(1100))),
+            None,
+        )
+        .await;
+
+        tx_hashes.to_vec()
+    }
+
+    fn evm_attributes<'a>(
+        data: impl IntoIterator<Item = (&'a str, i32)>,
+    ) -> HashMap<String, Bytes> {
+        data.into_iter()
+            .map(|(s, v)| (s.to_owned(), Bytes::from(U256::from(v))))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_state() {
+        let db_url = std::env::var("DATABASE_URL").unwrap();
+        let pool = postgres::connect(&db_url)
+            .await
+            .unwrap();
+        let mut conn = pool.get().await.unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
+        setup_protocol_data(&mut conn).await;
+
+        let db_gateway = Arc::new(EvmPostgresGateway::from_connection(&mut conn).await);
+        let req_handler = RpcHandler::new(db_gateway, pool);
+
+        let expected = evm::ProtocolState {
+            component_id: "state1".to_owned(),
+            attributes: evm_attributes([("reserve1", 1000), ("reserve2", 500)]),
+            modify_tx: "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
+                .parse()
+                .unwrap(),
+        };
+
+        let request = dto::ProtocolStateRequestBody {
+            protocol_ids: Some(vec![dto::ProtocolId {
+                id: "state1".to_owned(),
+                chain: dto::Chain::Ethereum,
+            }]),
+            protocol_system: None,
+            version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
+        };
+
+        let state = req_handler
+            .get_protocol_state_inner(
+                &Chain::Ethereum,
+                &request,
+                &StateRequestParameters::default(),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(state.accounts.len(), 1);
+        assert_eq!(state.accounts[0], expected.into());
+    }
+
     #[tokio::test]
     async fn test_get_protocol_components() {
         let db_url = std::env::var("DATABASE_URL").unwrap();

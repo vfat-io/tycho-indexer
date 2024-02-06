@@ -82,7 +82,13 @@ impl ServicesBuilder {
     ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
         #[derive(OpenApi)]
         #[openapi(
-            paths(rpc::contract_state, rpc::tokens, rpc::protocol_components, rpc::contract_delta),
+            paths(
+                rpc::contract_state,
+                rpc::tokens,
+                rpc::protocol_components,
+                rpc::contract_delta,
+                rpc::protocol_state
+            ),
             components(
                 schemas(VersionParam),
                 schemas(BlockParam),
@@ -115,6 +121,10 @@ impl ServicesBuilder {
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/contract_delta", self.prefix))
                         .route(web::post().to(rpc::contract_delta)),
+                )
+                .service(
+                    web::resource(format!("/{}/{{execution_env}}/protocol_state", self.prefix))
+                        .route(web::post().to(rpc::protocol_state)),
                 )
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/tokens", self.prefix))
