@@ -480,17 +480,16 @@ impl RpcHandler {
         }
     }
 
-    #[instrument(skip(self, chain, request, params))]
+    #[instrument(skip(self, chain, request))]
     async fn get_protocol_delta(
         &self,
         chain: &Chain,
         request: &dto::ProtocolDeltaRequestBody,
-        params: &dto::StateRequestParameters,
     ) -> Result<dto::ProtocolDeltaRequestResponse, RpcError> {
         let mut conn = self.db_connection_pool.get().await?;
 
-        info!(?request, ?params, "Getting protocol delta.");
-        self.get_protocol_delta_inner(chain, request, params, &mut conn)
+        info!(?request, "Getting protocol delta.");
+        self.get_protocol_delta_inner(chain, request, &mut conn)
             .await
     }
 
@@ -498,11 +497,8 @@ impl RpcHandler {
         &self,
         chain: &Chain,
         request: &dto::ProtocolDeltaRequestBody,
-        params: &dto::StateRequestParameters,
         db_connection: &mut AsyncPgConnection,
     ) -> Result<dto::ProtocolDeltaRequestResponse, RpcError> {
-        #![allow(unused_variables)]
-        //TODO: handle when no contract is specified with filters
         let start = BlockOrTimestamp::try_from(&request.start)?;
         let end = BlockOrTimestamp::try_from(&request.end)?;
 
@@ -515,14 +511,14 @@ impl RpcHandler {
         debug!(?component_ids, "Getting protocol states delta.");
         let component_ids: Option<&HashSet<String>> = component_ids.as_ref();
 
-        // Get the contract deltas from the database
+        // Get the protocol state deltas from the database
         match self
             .db_gateway
             .get_protocol_states_delta(chain, Some(&start), &end, db_connection)
             .await
         {
             Ok(mut components) => {
-                // Filter by contract addresses if specified in the request
+                // Filter by component id if specified in the request
                 // PERF: This is not efficient, we should filter in the query
                 if let Some(component_ids) = component_ids {
                     components.retain(|acc| {
@@ -723,13 +719,12 @@ pub async fn protocol_state(
 pub async fn protocol_delta(
     execution_env: web::Path<Chain>,
     body: web::Json<dto::ProtocolDeltaRequestBody>,
-    params: web::Query<dto::StateRequestParameters>,
     handler: web::Data<RpcHandler>,
 ) -> HttpResponse {
     // Call the handler to get protocol deltas
     let response = handler
         .into_inner()
-        .get_protocol_delta(&execution_env, &body, &params)
+        .get_protocol_delta(&execution_env, &body)
         .await;
 
     match response {
@@ -1592,12 +1587,7 @@ mod tests {
         };
 
         let delta = req_handler
-            .get_protocol_delta_inner(
-                &Chain::Ethereum,
-                &request,
-                &StateRequestParameters::default(),
-                &mut conn,
-            )
+            .get_protocol_delta_inner(&Chain::Ethereum, &request, &mut conn)
             .await
             .unwrap();
 

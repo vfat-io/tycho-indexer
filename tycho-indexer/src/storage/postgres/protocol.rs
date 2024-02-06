@@ -1265,9 +1265,8 @@ mod test {
         let (account_id_weth, weth_id) =
             db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
                 .await;
-        let (_account_id_usdc, _usdc_id) =
-            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
-                .await;
+
+        db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6).await;
 
         let contract_code_id = db_fixtures::insert_contract_code(
             conn,
@@ -1288,7 +1287,7 @@ mod test {
             Some(vec![contract_code_id]),
         )
         .await;
-        let _protocol_component_id2 = db_fixtures::insert_protocol_component(
+        db_fixtures::insert_protocol_component(
             conn,
             "state3",
             chain_id,
@@ -2071,8 +2070,7 @@ mod test {
         let protocol_type_id_1 =
             db_fixtures::insert_protocol_type(&mut conn, &protocol_type_name_1, None, None, None)
                 .await;
-        let _protocol_type_id_2 =
-            db_fixtures::insert_protocol_type(&mut conn, "Test_Type_2", None, None, None).await;
+        db_fixtures::insert_protocol_type(&mut conn, "Test_Type_2", None, None, None).await;
         let protocol_system = "ambient".to_string();
         let chain = Chain::Ethereum;
         let original_component = ProtocolComponent {
