@@ -143,8 +143,8 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
         value
             .account_updates
             .clone()
-            .into_iter()
-            .map(|(_, update)| {
+            .into_values()
+            .map(|update| {
                 let acc = Account::new(
                     update.chain,
                     update.address,
@@ -1474,7 +1474,6 @@ mod test {
             update
                 .account_updates
                 .values()
-                .into_iter()
                 .next()
                 .unwrap()
                 .ref_into_account(&update.tx),
