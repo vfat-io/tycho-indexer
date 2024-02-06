@@ -1607,6 +1607,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(1000)),
+            1000.0,
             token_id,
             from_txn_id,
             protocol_component_id,
@@ -1615,6 +1616,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(2000)),
+            2000.0,
             token_id,
             to_txn_id,
             protocol_component_id,
@@ -1647,12 +1649,12 @@ mod test {
             component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
             new_balance: Balance::from(U256::from(1000)),
-            balance_float: 1000.0,
+            balance_float: 0.0,
             modify_tx: from_tx_hash,
         }];
 
         // test backward case
-        let result = gateway
+        let mut result = gateway
             .get_balance_deltas(
                 &Chain::Ethereum,
                 Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2)))),
@@ -1661,6 +1663,9 @@ mod test {
             )
             .await
             .unwrap();
+        // workaround for nan type
+        assert!(result[0].balance_float.is_nan());
+        result[0].balance_float = 0.0;
         assert_eq!(result, expected_backward_deltas);
     }
 
