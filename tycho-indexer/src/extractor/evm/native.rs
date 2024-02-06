@@ -204,6 +204,7 @@ impl NativePgGateway {
             extractor: self.name.clone(),
             chain: self.chain,
             block,
+            revert: true,
             state_updates,
             // TODO: Map new_protocol_components
             new_protocol_components: HashMap::new(),
@@ -428,17 +429,22 @@ mod test {
         models::{FinancialType, ImplementationType},
         pb::sf::substreams::v1::BlockRef,
     };
+    use tycho_types::Bytes;
 
     use super::*;
 
-    async fn create_extractor() -> NativeContractExtractor<MockNativeGateway> {
-        let mut gw: MockNativeGateway = MockNativeGateway::new();
+    use std::collections::HashMap;
+
+    const EXTRACTOR_NAME: &str = "TestExtractor";
+    const TEST_PROTOCOL: &str = "TestProtocol";
+
+    async fn create_extractor(gw: MockNativeGateway) -> NativeContractExtractor<MockNativeGateway> {
         let protocol_types = HashMap::new();
 
         NativeContractExtractor::new(
-            "TestExtractor",
+            EXTRACTOR_NAME,
             Chain::Ethereum,
-            "TestProtocol".to_string(),
+            TEST_PROTOCOL.to_string(),
             gw,
             protocol_types,
         )
@@ -448,7 +454,7 @@ mod test {
 
     #[tokio::test]
     async fn test_get_cursor() {
-        let mut gw: MockNativeGateway = MockNativeGateway::new();
+        let mut gw = MockNativeGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -456,18 +462,7 @@ mod test {
             .times(1)
             .returning(|| Ok("cursor".into()));
 
-        let protocol_types = HashMap::new();
-
-        let extractor = NativeContractExtractor::new(
-            "TestExtractor",
-            Chain::Ethereum,
-            "TestProtocol".to_string(),
-            gw,
-            protocol_types,
-        )
-        .await
-        .expect("Failed to create extractor");
-
+        let extractor = create_extractor(gw).await;
         let res = extractor.get_cursor().await;
 
         assert_eq!(res, "cursor");
@@ -475,7 +470,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data() {
-        let mut gw: MockNativeGateway = MockNativeGateway::new();
+        let mut gw = MockNativeGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -487,16 +482,7 @@ mod test {
             .returning(|_, _| Ok(()));
 
         let protocol_types = HashMap::from([("WeightedPool".to_string(), ProtocolType::default())]);
-
-        let extractor = NativeContractExtractor::new(
-            "TestExtractor",
-            Chain::Ethereum,
-            "TestProtocol".to_string(),
-            gw,
-            protocol_types,
-        )
-        .await
-        .expect("Failed to create extractor");
+        let extractor = create_extractor(gw).await;
 
         let inp = evm::fixtures::pb_block_scoped_data(evm::fixtures::pb_block_entity_changes());
         let exp = Ok(Some(()));
@@ -508,6 +494,80 @@ mod test {
 
         assert_eq!(res, exp);
         assert_eq!(extractor.get_cursor().await, "cursor@420");
+    }
+
+    // TODO: What is this testing?
+    // #[tokio::test]
+    // async fn test_handle_tick_scoped_data_skip() {
+    //     let mut gw = MockNativeGateway::new();
+    //     gw.expect_ensure_protocol_types()
+    //         .times(1)
+    //         .returning(|_| ());
+    //     gw.expect_get_cursor()
+    //         .times(1)
+    //         .returning(|| Ok("cursor".into()));
+    //     gw.expect_upsert_contract()
+    //         .times(0)
+    //         .returning(|_, _| Ok(()));
+
+    //     let protocol_types = HashMap::from([("WeightedPool".to_string(),
+    // ProtocolType::default())]);     let extractor = create_extractor(gw).await;
+
+    //     let inp = evm::fixtures::pb_block_scoped_data(());
+    //     let res = extractor
+    //         .handle_tick_scoped_data(inp)
+    //         .await;
+
+    //     assert_eq!(res, Ok(None));
+    //     assert_eq!(extractor.get_cursor().await, "cursor@420");
+    // }
+
+    #[tokio::test]
+    async fn test_handle_revert() {
+        let mut gw = MockNativeGateway::new();
+        gw.expect_ensure_protocol_types()
+            .times(1)
+            .returning(|_| ());
+        gw.expect_get_cursor()
+            .times(1)
+            .returning(|| Ok("cursor".into()));
+
+        gw.expect_upsert_contract()
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        gw.expect_revert()
+            .withf(|c, v, cursor| {
+                c.clone().unwrap() ==
+                    BlockIdentifier::Hash(
+                        Bytes::from_str(
+                            "0x0000000000000000000000000000000000000000000000000000000031323334",
+                        )
+                        .unwrap(),
+                    ) &&
+                    v == &BlockIdentifier::Hash(evm::fixtures::HASH_256_0.into()) &&
+                    cursor == "cursor@400"
+            })
+            .times(1)
+            .returning(|_, _, _| Ok(evm::BlockEntityChanges::default()));
+        let extractor = create_extractor(gw).await;
+        // Call handle_tick_scoped_data to initialize the last processed block.
+        let inp = evm::fixtures::pb_block_scoped_data(evm::fixtures::pb_block_entity_changes());
+
+        let res = extractor
+            .handle_tick_scoped_data(inp)
+            .await
+            .unwrap();
+
+        let inp = BlockUndoSignal {
+            last_valid_block: Some(BlockRef { id: evm::fixtures::HASH_256_0.into(), number: 400 }),
+            last_valid_cursor: "cursor@400".into(),
+        };
+
+        let res = extractor.handle_revert(inp).await;
+
+        assert!(matches!(res, Ok(None)));
+        assert_eq!(extractor.get_cursor().await, "cursor@400");
     }
 
     // THALES TESTS

@@ -1088,7 +1088,7 @@ pub struct BlockEntityChangesResult {
 ///
 /// Hold the detailed state changes for a block alongside with protocol
 /// component changes.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub struct BlockEntityChanges {
     extractor: String,
     chain: Chain,
@@ -1114,7 +1114,7 @@ impl BlockEntityChanges {
             let mut new_protocol_components = HashMap::new();
 
             for change in msg.changes.into_iter() {
-                if let Some(tx) = change.clone().tx {
+                if let Some(tx) = change.tx.clone() {
                     let tycho_tx = Transaction::try_from_message(tx, &block.hash)?;
 
                     let tx_update = ProtocolChangesWithTx::try_from_message(
