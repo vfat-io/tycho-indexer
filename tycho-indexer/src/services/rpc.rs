@@ -290,16 +290,13 @@ impl RpcHandler {
         let addresses: Option<&HashSet<Address>> = addresses.as_ref();
 
         // Get the contract deltas from the database
-        // TODO: support additional tvl_gt and intertia_min_gt filters
         match self
             .db_gateway
             .get_accounts_delta(chain, Some(&start), &end, db_connection)
             .await
         {
             Ok(mut accounts) => {
-                // Filter by contract addresses if specified
-                // TODO: this is not efficient, we should filter in the database query directly in
-                // get_accounts_delta
+                // Filter by contract addresses if specified in the request
                 if let Some(contract_addrs) = addresses {
                     accounts.retain(|acc| {
                         let address = Address::from(acc.address);
@@ -358,7 +355,6 @@ impl RpcHandler {
         let ids = ids.as_deref();
 
         // Get the protocol states from the database
-        // TODO support additional tvl_gt and intertia_min_gt filters
         match self
             .db_gateway
             .get_protocol_states(
@@ -621,7 +617,7 @@ pub async fn protocol_state(
     params: web::Query<dto::StateRequestParameters>,
     handler: web::Data<RpcHandler>,
 ) -> HttpResponse {
-    // Call the handler to get tokens
+    // Call the handler to get protocol states
     let response = handler
         .into_inner()
         .get_protocol_state(&execution_env, &body, &params)
@@ -630,7 +626,7 @@ pub async fn protocol_state(
     match response {
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
-            error!(error = %err, ?body, "Error while getting tokens.");
+            error!(error = %err, ?body, "Error while getting protocol states.");
             HttpResponse::InternalServerError().finish()
         }
     }
