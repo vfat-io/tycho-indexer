@@ -15,9 +15,11 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use tycho_types::dto::{
-    BlockParam, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ResponseAccount,
-    ResponseProtocolComponent, ResponseToken, StateRequestBody, StateRequestResponse,
-    TokensRequestBody, TokensRequestResponse, VersionParam,
+    AccountUpdate, BlockParam, ChangeType, ContractDeltaRequestBody, ContractDeltaRequestResponse,
+    ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolId,
+    ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseAccount,
+    ResponseProtocolComponent, ResponseProtocolState, ResponseToken, StateRequestBody,
+    StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
 };
 
 mod rpc;
@@ -103,6 +105,14 @@ impl ServicesBuilder {
                 schemas(ProtocolComponentsRequestBody),
                 schemas(ProtocolComponentRequestResponse),
                 schemas(ResponseProtocolComponent),
+                schemas(ContractDeltaRequestBody),
+                schemas(ContractDeltaRequestResponse),
+                schemas(ProtocolStateRequestBody),
+                schemas(ProtocolStateRequestResponse),
+                schemas(AccountUpdate),
+                schemas(ProtocolId),
+                schemas(ResponseProtocolState),
+                schemas(ChangeType),
             )
         )]
         struct ApiDoc;

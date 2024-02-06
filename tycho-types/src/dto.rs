@@ -32,7 +32,7 @@ pub enum Chain {
     ZkSync,
 }
 
-#[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize, ToSchema)]
 pub enum ChangeType {
     #[default]
     Update,
@@ -175,13 +175,17 @@ impl BlockAccountChanges {
 #[derive(PartialEq, Serialize, Deserialize, Clone, Debug, ToSchema)]
 pub struct AccountUpdate {
     #[serde(with = "hex_bytes")]
+    #[schema(value_type=Vec<String>)]
     pub address: Bytes,
     pub chain: Chain,
     #[serde(with = "hex_hashmap_key_value")]
+    #[schema(value_type=HashMap<String, String>)]
     pub slots: HashMap<Bytes, Bytes>,
     #[serde(with = "hex_bytes_option")]
+    #[schema(value_type=Option<String>)]
     pub balance: Option<Bytes>,
     #[serde(with = "hex_bytes_option")]
+    #[schema(value_type=Option<String>)]
     pub code: Option<Bytes>,
     pub change: ChangeType,
 }
