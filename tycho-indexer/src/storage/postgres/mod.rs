@@ -987,7 +987,7 @@ pub mod db_fixtures {
                 schema::component_balance::token_id.eq(token_id),
                 schema::component_balance::modify_tx.eq(tx_id),
                 schema::component_balance::new_balance.eq(new_balance),
-                schema::component_balance::previous_balance.eq(previous_balance),
+                schema::component_balance::previous_value.eq(previous_balance),
                 schema::component_balance::valid_from.eq(ts),
             ))
             .execute(conn)

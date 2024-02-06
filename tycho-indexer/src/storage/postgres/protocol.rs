@@ -18,7 +18,7 @@ use crate::{
             orm,
             orm::{Account, NewAccount},
             schema,
-            versioning::apply_versioning,
+            versioning::apply_delta_versioning,
             PostgresGateway,
         },
         Address, Balance, BlockOrTimestamp, ComponentId, ContractDelta, ContractId,
@@ -825,34 +825,18 @@ where
                 .component_id
                 .to_string()];
 
-            let previous_component_balance: Option<Balance> = schema::component_balance::table
-                .filter(
-                    schema::component_balance::protocol_component_id
-                        .eq(protocol_component_id)
-                        .and(schema::component_balance::token_id.eq(token_id))
-                        .and(schema::component_balance::valid_to.is_null()),
-                )
-                .order_by(schema::component_balance::valid_from.desc())
-                .select(schema::component_balance::new_balance)
-                .first::<Balance>(conn)
-                .await
-                .optional()
-                .map_err(|err| {
-                    StorageError::from_diesel(err, "ComponentBalance", "previous_balance", None)
-                })?;
-
             let new_component_balance = component_balance.to_storage(
                 token_id,
                 transaction_id,
                 protocol_component_id,
-                previous_component_balance,
                 block_ts,
             );
             new_component_balances.push(new_component_balance);
         }
 
         if !component_balances.is_empty() {
-            apply_versioning::<_, orm::ComponentBalance>(&mut new_component_balances, conn).await?;
+            apply_delta_versioning::<_, orm::ComponentBalance>(&mut new_component_balances, conn)
+                .await?;
             diesel::insert_into(schema::component_balance::table)
                 .values(&new_component_balances)
                 .execute(conn)
@@ -955,7 +939,7 @@ where
                 .select((
                     schema::protocol_component::external_id,
                     schema::account::address,
-                    previous_balance,
+                    previous_value,
                     schema::transaction::hash,
                 ))
                 .get_results::<(String, Address, Balance, TxHash)>(conn)
@@ -2063,7 +2047,7 @@ mod test {
         let inserted_data: orm::ComponentBalance = inserted_data.unwrap();
 
         assert_eq!(inserted_data.new_balance, Balance::from(U256::from(1000)));
-        assert_eq!(inserted_data.previous_balance, Balance::from(U256::from(0)),);
+        assert_eq!(inserted_data.previous_value, Balance::from(U256::from(0)),);
 
         let referenced_token = schema::token::table
             .filter(schema::token::id.eq(inserted_data.token_id))
@@ -2082,7 +2066,6 @@ mod test {
         assert_eq!(referenced_component.external_id, String::from("state2"));
 
         // Test the case where there was a previous balance
-
         let new_tx_hash =
             H256::from_str("0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7")
                 .unwrap();
@@ -2111,7 +2094,7 @@ mod test {
         let new_inserted_data: orm::ComponentBalance = new_inserted_data.unwrap();
 
         assert_eq!(new_inserted_data.new_balance, Balance::from(U256::from(2000)));
-        assert_eq!(new_inserted_data.previous_balance, Balance::from(U256::from(1000)));
+        assert_eq!(new_inserted_data.previous_value, Balance::from(U256::from(1000)));
     }
 
     #[tokio::test]

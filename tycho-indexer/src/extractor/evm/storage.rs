@@ -165,13 +165,12 @@ pub mod pg {
             token_id: i64,
             modify_tx: i64,
             protocol_component_id: i64,
-            previous_balance: Option<Balance>,
             block_ts: NaiveDateTime,
         ) -> orm::NewComponentBalance {
             orm::NewComponentBalance {
                 token_id,
                 new_balance: self.balance.clone(),
-                previous_balance: previous_balance.unwrap_or(Balance::from(U256::from(0))),
+                previous_value: Balance::from(U256::from(0)),
                 modify_tx,
                 protocol_component_id,
                 valid_from: block_ts,

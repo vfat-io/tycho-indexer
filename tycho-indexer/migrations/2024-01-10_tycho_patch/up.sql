@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS component_balance(
     -- new balance of the token for this component
     "new_balance" bytea NOT NULL,
     -- new balance of the token for this component
-    "previous_balance" bytea NOT NULL,
+    "previous_value" bytea NOT NULL,
     -- the transaction that modified the tvl of this component
     "modify_tx" bigint REFERENCES "transaction"(id) ON DELETE CASCADE NOT NULL,
     -- Reference to static attributes of the protocol.
