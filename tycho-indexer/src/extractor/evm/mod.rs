@@ -429,6 +429,9 @@ impl TransactionUpdates {
             .into_values()
             .collect::<Vec<AccountUpdate>>();
 
+        self.protocol_components
+            .extend(other.protocol_components.clone());
+
         let mut component_balances_by_id_map: HashMap<(ComponentId, H160), ComponentBalance> = self
             .component_balances
             .clone()
@@ -748,24 +751,17 @@ impl BlockContractChanges {
     ///
     /// This returns an error if there was a problem during merge. The error
     /// type is `ExtractionError`.
-    pub fn aggregate_updates(mut self) -> Result<BlockAccountChanges, ExtractionError> {
-        self.tx_updates
-            .sort_unstable_by_key(|update| update.tx.index);
-        let mut tx_update = self
-            .tx_updates
+    pub fn aggregate_updates(self) -> Result<BlockAccountChanges, ExtractionError> {
+        let mut sorted_tx_updates = self.tx_updates.clone();
+        sorted_tx_updates.sort_unstable_by_key(|update| update.tx.index);
+
+        let mut tx_update = sorted_tx_updates
             .first()
             .cloned()
             .ok_or(ExtractionError::Empty)?;
 
-        let mut protocol_components = self
-            .tx_updates
-            .first()
-            .ok_or(ExtractionError::Empty)?
-            .protocol_components
-            .clone();
-        for update in self.tx_updates.into_iter().skip(1) {
+        for update in sorted_tx_updates.into_iter().skip(1) {
             tx_update.merge(&update.clone())?;
-            protocol_components.extend(update.clone().protocol_components);
         }
         Ok(BlockAccountChanges::new(
             &self.extractor,
@@ -774,7 +770,7 @@ impl BlockContractChanges {
             tx_update
                 .clone()
                 .map_account_update_by_address(),
-            protocol_components,
+            tx_update.protocol_components,
             Vec::new(),
             tx_update.component_balances,
         ))
