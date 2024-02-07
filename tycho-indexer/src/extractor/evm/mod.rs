@@ -905,7 +905,7 @@ impl ProtocolChangesWithTx {
     pub fn try_from_message(
         msg: substreams::TransactionEntityChanges,
         block: &Block,
-        protocol_system: String,
+        protocol_system: &str,
         protocol_types: &HashMap<String, ProtocolType>,
     ) -> Result<Self, ExtractionError> {
         let tx = Transaction::try_from_message(
@@ -924,7 +924,7 @@ impl ProtocolChangesWithTx {
             let component = ProtocolComponent::try_from_message(
                 change.clone(),
                 block.chain,
-                &protocol_system,
+                protocol_system,
                 protocol_types,
                 tx.hash,
                 block.ts,
@@ -942,7 +942,7 @@ impl ProtocolChangesWithTx {
                     e.insert(state);
                 }
                 Entry::Occupied(mut e) => {
-                    warn!("Overwriting state update for component {} with a new one", e.key());
+                    warn!("Received two state updates for the same component. Overwriting state for component {}", e.key());
                     e.insert(state);
                 }
             }
@@ -963,7 +963,7 @@ impl ProtocolChangesWithTx {
                 token_balances.insert(component_balance.token, component_balance)
             {
                 warn!(
-                    "Overwriting balance change for component {} and token {} with a new one",
+                    "Received two balance updates for the same component id: {} and token {}. Overwriting balance change",
                     existing_balance.component_id, existing_balance.token
                 );
             }
@@ -1057,18 +1057,6 @@ impl ProtocolChangesWithTx {
 
         Ok(())
     }
-
-    pub fn has_new_protocols(&self) -> bool {
-        !self.new_protocol_components.is_empty()
-    }
-
-    pub fn has_state_changes(&self) -> bool {
-        !self.protocol_states.is_empty()
-    }
-
-    pub fn has_balance_changes(&self) -> bool {
-        !self.balance_changes.is_empty()
-    }
 }
 
 /// A container for state updates grouped by protocol component.
@@ -1106,12 +1094,12 @@ impl BlockEntityChanges {
         msg: substreams::BlockEntityChanges,
         extractor: &str,
         chain: Chain,
-        protocol_system: String,
+        protocol_system: &str,
         protocol_types: &HashMap<String, ProtocolType>,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
-            let mut state_updates: Vec<ProtocolChangesWithTx> = Vec::new();
+            let mut update_txs: Vec<ProtocolChangesWithTx> = Vec::new();
             let mut new_protocol_components = HashMap::new();
 
             for change in msg.changes.into_iter() {
@@ -1121,16 +1109,16 @@ impl BlockEntityChanges {
                     let tx_update = ProtocolChangesWithTx::try_from_message(
                         change.clone(),
                         &block,
-                        protocol_system.clone(),
+                        protocol_system,
                         protocol_types,
                     )?;
 
-                    state_updates.push(tx_update);
+                    update_txs.push(tx_update);
                     for component in change.component_changes {
                         let pool = ProtocolComponent::try_from_message(
                             component,
                             chain,
-                            &protocol_system,
+                            protocol_system,
                             protocol_types,
                             tycho_tx.hash,
                             block.ts,
@@ -1140,15 +1128,15 @@ impl BlockEntityChanges {
                 }
             }
 
-            // Sort transactions by index
-            state_updates.sort_unstable_by_key(|update| update.tx.index);
+            // Sort updates by transaction by index
+            update_txs.sort_unstable_by_key(|update| update.tx.index);
 
             return Ok(Self {
                 extractor: extractor.to_owned(),
                 chain,
                 block,
                 revert: false,
-                state_updates,
+                state_updates: update_txs,
                 new_protocol_components,
             });
         }
@@ -1172,7 +1160,7 @@ impl BlockEntityChanges {
     pub fn aggregate_updates(self) -> Result<BlockEntityChangesResult, ExtractionError> {
         let base = ProtocolChangesWithTx::default();
 
-        let aggregated_states = self
+        let aggregated_changes = self
             .state_updates
             .iter()
             .try_fold(base, |mut acc_state, new_state| {
@@ -1186,33 +1174,9 @@ impl BlockEntityChanges {
             chain: self.chain,
             block: self.block,
             revert: self.revert,
-            state_updates: aggregated_states.protocol_states,
+            state_updates: aggregated_changes.protocol_states,
             new_protocol_components: self.new_protocol_components,
         })
-    }
-
-    pub fn get_new_protocols(&self) -> Vec<ProtocolChangesWithTx> {
-        self.state_updates
-            .iter()
-            .filter(|update| update.has_new_protocols())
-            .cloned()
-            .collect()
-    }
-
-    pub fn get_state_change_txs(&self) -> Vec<ProtocolChangesWithTx> {
-        self.state_updates
-            .iter()
-            .filter(|update| update.has_state_changes())
-            .cloned()
-            .collect()
-    }
-
-    pub fn get_balance_changes(&self) -> Vec<ProtocolChangesWithTx> {
-        self.state_updates
-            .iter()
-            .filter(|update| update.has_balance_changes())
-            .cloned()
-            .collect()
     }
 }
 
@@ -2289,7 +2253,7 @@ mod test {
             msg,
             "test",
             Chain::Ethereum,
-            "ambient".to_string(),
+            "ambient",
             &HashMap::from([
                 ("Pool".to_string(), ProtocolType::default()),
                 ("WeightedPool".to_string(), ProtocolType::default()),

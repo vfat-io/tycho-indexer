@@ -275,8 +275,6 @@ where
                 let tokens_by_pc: &Vec<Address> = protocol_component_tokens
                     .get(&pc.id)
                     .expect("Could not find Tokens for Protocol Component."); // We expect all protocol components to have tokens.
-                                                                              // TODO: This is down for discussion - don't forget to remove this if not needed or
-                                                                              // deleting this comment.
                 let binding = Vec::new();
                 let contracts_by_pc: &Vec<Address> = protocol_component_contracts
                     .get(&pc.id)
@@ -2606,8 +2604,8 @@ mod test {
     }
 
     #[rstest]
-    #[case::ethereum(Chain::Ethereum, &["state1", "state3", "no_tvl"])]
-    #[case::starknet(Chain::Starknet, &["state2"])]
+    #[case::ethereum(Chain::Ethereum, & ["state1", "state3", "no_tvl"])]
+    #[case::starknet(Chain::Starknet, & ["state2"])]
     #[tokio::test]
     async fn test_get_protocol_components_with_chain_filter(
         #[case] chain: Chain,
@@ -2633,10 +2631,10 @@ mod test {
     }
 
     #[rstest]
-    #[case::empty(Some(10.0), &[])]
-    #[case::all(None, &["state1", "state3", "no_tvl"])]
-    #[case::with_tvl(Some(0.0), &["state1", "state3"])]
-    #[case::with_tvl(Some(1.0), &["state1"])]
+    #[case::empty(Some(10.0), & [])]
+    #[case::all(None, & ["state1", "state3", "no_tvl"])]
+    #[case::with_tvl(Some(0.0), & ["state1", "state3"])]
+    #[case::with_tvl(Some(1.0), & ["state1"])]
     #[tokio::test]
     async fn test_get_protocol_components_with_min_tvl(
         #[case] min_tvl: Option<f64>,

@@ -20,7 +20,6 @@ use crate::{
     },
 };
 
-// TODO: Use the same Inner as AmbientExtractor
 pub struct Inner {
     cursor: Vec<u8>,
     last_processed_block: Option<Block>,
@@ -37,9 +36,8 @@ pub struct NativeContractExtractor<G> {
 
 impl<DB> NativeContractExtractor<DB> {
     async fn update_cursor(&self, cursor: String) {
-        let cursor_bytes: Vec<u8> = cursor.into();
         let mut state = self.inner.lock().await;
-        state.cursor = cursor_bytes;
+        state.cursor = cursor.into();
     }
 
     async fn update_last_processed_block(&self, block: Block) {
@@ -62,7 +60,7 @@ pub trait NativeGateway: Send + Sync {
 
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]);
 
-    async fn upsert_contract(
+    async fn advance(
         &self,
         changes: &evm::BlockEntityChanges,
         new_cursor: &str,
@@ -118,19 +116,21 @@ impl NativePgGateway {
 
             let hash: TxHash = tx.tx.hash.into();
 
-            for (_component_id, new_protocol_component) in tx.new_protocol_components.iter() {
-                new_protocol_components.push(new_protocol_component.clone());
-            }
+            new_protocol_components.extend(
+                tx.new_protocol_components
+                    .values()
+                    .cloned(),
+            );
 
-            for (_component_id, state_change) in tx.protocol_states.iter() {
-                state_updates.push((hash.clone(), state_change.clone()));
-            }
+            state_updates.extend(
+                tx.protocol_states.values().map(|state_change| (hash.clone(), state_change.clone())),
+            );
 
-            for (_component_id, tokens) in tx.balance_changes.iter() {
-                for tvl_change in tokens.values() {
-                    balance_changes.push(tvl_change.clone());
-                }
-            }
+            balance_changes.extend(
+                tx.balance_changes
+                    .iter()
+                    .flat_map(|(_component_id, tokens)| tokens.values().cloned()),
+            );
         }
 
         let block = &changes.block;
@@ -241,7 +241,7 @@ impl NativeGateway for NativePgGateway {
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
-    async fn upsert_contract(
+    async fn advance(
         &self,
         changes: &evm::BlockEntityChanges,
         new_cursor: &str,
@@ -341,7 +341,7 @@ where
         &self,
         inp: BlockScopedData,
     ) -> Result<Option<ExtractorMsg>, ExtractionError> {
-        let _data = inp
+        let data = inp
             .output
             .as_ref()
             .unwrap()
@@ -349,7 +349,7 @@ where
             .as_ref()
             .unwrap();
 
-        let raw_msg = BlockEntityChanges::decode(_data.value.as_slice())?;
+        let raw_msg = BlockEntityChanges::decode(data.value.as_slice())?;
 
         debug!(?raw_msg, "Received message");
 
@@ -358,7 +358,7 @@ where
             raw_msg,
             &self.name,
             self.chain,
-            self.protocol_system.clone(),
+            &self.protocol_system,
             &self.protocol_types,
         ) {
             Ok(changes) => {
@@ -377,7 +377,7 @@ where
         };
 
         self.gateway
-            .upsert_contract(&msg, inp.cursor.as_ref())
+            .advance(&msg, inp.cursor.as_ref())
             .await?;
 
         self.update_cursor(inp.cursor).await;
@@ -480,7 +480,7 @@ mod test {
         gw.expect_get_cursor()
             .times(1)
             .returning(|| Ok("cursor".into()));
-        gw.expect_upsert_contract()
+        gw.expect_advance()
             .times(1)
             .returning(|_, _| Ok(()));
 
@@ -508,7 +508,7 @@ mod test {
     //     gw.expect_get_cursor()
     //         .times(1)
     //         .returning(|| Ok("cursor".into()));
-    //     gw.expect_upsert_contract()
+    //     gw.expect_advance()
     //         .times(0)
     //         .returning(|_, _| Ok(()));
 
@@ -534,7 +534,7 @@ mod test {
             .times(1)
             .returning(|| Ok("cursor".into()));
 
-        gw.expect_upsert_contract()
+        gw.expect_advance()
             .times(1)
             .returning(|_, _| Ok(()));
 
@@ -819,7 +819,7 @@ mod test_serial_db {
     }
 
     #[tokio::test]
-    async fn test_upsert_contract() {
+    async fn test_forward() {
         run_against_db(|pool| async move {
             let (gw, mut err_rx, pool) = setup_gw(pool).await;
             let msg = native_pool_creation();
