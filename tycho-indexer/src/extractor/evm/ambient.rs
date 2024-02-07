@@ -17,7 +17,7 @@ use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
-use super::{AccountUpdate, Block, TokenQuality};
+use super::{AccountUpdate, Block};
 use crate::{
     extractor::{evm, ExtractionError, Extractor, ExtractorMsg},
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
@@ -170,7 +170,7 @@ impl AmbientPgGateway {
                 0,
                 vec![],
                 Default::default(),
-                TokenQuality::Normal,
+                100,
             ),
             evm::ERC20Token::new(
                 H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
@@ -180,7 +180,7 @@ impl AmbientPgGateway {
                 0,
                 vec![],
                 Default::default(),
-                TokenQuality::Normal,
+                100,
             ),
         ];
 

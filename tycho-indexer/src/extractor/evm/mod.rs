@@ -29,15 +29,6 @@ mod utils;
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SwapPool {}
 
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
-pub enum TokenQuality {
-    #[default]
-    Normal,
-    Rebase,
-    Tax,
-    Scam,
-}
-
 #[derive(Debug, PartialEq, Clone)]
 pub struct ERC20Token {
     pub address: H160,
@@ -46,7 +37,12 @@ pub struct ERC20Token {
     pub tax: u64,
     pub gas: Vec<Option<u64>>,
     pub chain: Chain,
-    pub quality: TokenQuality,
+    /// Quality is between 0-100, where:
+    ///  - 100: Normal token
+    ///  - 75: Rebase token
+    ///  - 50: Fee token
+    ///  - 0: Scam token that we shouldn't use
+    pub quality: u32,
 }
 
 impl ERC20Token {
@@ -57,7 +53,7 @@ impl ERC20Token {
         tax: u64,
         gas: Vec<Option<u64>>,
         chain: Chain,
-        quality: TokenQuality,
+        quality: u32,
     ) -> Self {
         ERC20Token { address, symbol, decimals, tax, gas, chain, quality }
     }

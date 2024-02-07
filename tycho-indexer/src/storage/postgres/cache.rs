@@ -819,7 +819,7 @@ mod test_serial_db {
                 0,
                 vec![Some(64), None],
                 Chain::Ethereum,
-                evm::TokenQuality::Normal,
+                100,
             );
             let protocol_component_id = "ambient_USDT-USDC".to_owned();
             let protocol_component = ProtocolComponent {

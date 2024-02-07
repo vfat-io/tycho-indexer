@@ -12,10 +12,6 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "implementation_type"))]
     pub struct ImplementationType;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "token_quality"))]
-    pub struct TokenQuality;
 }
 
 diesel::table! {
@@ -247,8 +243,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    use diesel::sql_types::*;
-    use super::sql_types::TokenQuality;
     token (id) {
         id -> Int8,
         account_id -> Int8,
@@ -259,7 +253,7 @@ diesel::table! {
         gas -> Array<Nullable<Int8>>,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
-        quality -> TokenQuality,
+        quality -> Int4,
     }
 }
 
