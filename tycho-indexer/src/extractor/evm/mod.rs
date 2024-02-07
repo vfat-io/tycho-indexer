@@ -7,6 +7,7 @@ use ethers::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
+use itertools::Itertools;
 use tracing::log::warn;
 
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
@@ -1351,7 +1352,7 @@ pub mod fixtures {
                         token: hex::decode(
                             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".trim_start_matches("0x"),
                         )
-                    .unwrap(),
+                        .unwrap(),
                         balance: 50000000.encode_to_vec(),
                         component_id: "WETH-CAI".as_bytes().to_vec(),
                     }],

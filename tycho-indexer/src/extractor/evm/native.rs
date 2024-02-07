@@ -1,17 +1,12 @@
-use std::{
-    collections::{HashMap},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-use ethers::types::{H256};
+use ethers::types::H256;
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, instrument};
-
 
 use crate::{
     extractor::{evm, evm::Block, ExtractionError, Extractor, ExtractorMsg},
@@ -183,7 +178,7 @@ impl NativePgGateway {
 
         let allowed_components: Vec<String> = self
             .state_gateway
-            .get_protocol_components(&self.chain, Some(self.name.clone()), None, conn)
+            .get_protocol_components(&self.chain, Some(self.name.clone()), None, None, conn)
             .await?
             .into_iter()
             .map(|c| c.id)
@@ -839,8 +834,7 @@ mod test_serial_db {
                     H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
                 ],
                 contract_ids: vec![],
-                creation_tx: evm::fixtures::transaction01()
-                    .hash,
+                creation_tx: evm::fixtures::transaction01().hash,
                 static_attributes: Default::default(),
                 created_at: Default::default(),
                 change: Default::default(),
@@ -870,6 +864,7 @@ mod test_serial_db {
                     &Chain::Ethereum,
                     None,
                     Some([CREATED_CONTRACT].as_slice()),
+                    None,
                     &mut conn,
                 )
                 .await
@@ -973,6 +968,7 @@ mod test_serial_db {
                     &Chain::Ethereum,
                     None,
                     Some([CREATED_CONTRACT].as_slice()),
+                    None,
                     &mut conn,
                 )
                 .await
