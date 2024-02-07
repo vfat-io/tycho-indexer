@@ -321,6 +321,7 @@ pub struct ComponentBalance {
     pub id: i64,
     pub token_id: i64,
     pub new_balance: Balance,
+    pub balance_float: f64,
     pub modify_tx: i64,
     pub protocol_component_id: i64,
     pub inserted_ts: NaiveDateTime,
@@ -387,6 +388,7 @@ impl StoredVersionedRow for ComponentBalance {
 pub struct NewComponentBalance {
     pub token_id: i64,
     pub new_balance: Balance,
+    pub balance_float: f64,
     pub modify_tx: i64,
     pub protocol_component_id: i64,
     pub valid_from: NaiveDateTime,

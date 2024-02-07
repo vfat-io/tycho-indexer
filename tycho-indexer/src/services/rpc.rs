@@ -21,7 +21,7 @@ use tracing::{debug, error, info, instrument};
 use crate::storage::ProtocolGateway;
 use tycho_types::{
     dto,
-    dto::{ResponseProtocolComponent, ResponseToken, StateRequestParameters},
+    dto::{ResponseToken, StateRequestParameters},
 };
 
 use super::EvmPostgresGateway;
@@ -65,6 +65,16 @@ impl From<evm::ProtocolState> for dto::ResponseProtocolState {
             component_id: protocol_state.component_id,
             attributes: protocol_state.attributes,
             modify_tx: protocol_state.modify_tx.into(),
+        }
+    }
+}
+
+impl From<evm::ProtocolStateDelta> for dto::ProtocolStateDelta {
+    fn from(protocol_state: evm::ProtocolStateDelta) -> Self {
+        Self {
+            component_id: protocol_state.component_id,
+            updated_attributes: protocol_state.updated_attributes,
+            deleted_attributes: protocol_state.deleted_attributes,
         }
     }
 }
@@ -129,7 +139,7 @@ impl From<evm::ERC20Token> for ResponseToken {
     }
 }
 
-impl From<evm::ProtocolComponent> for ResponseProtocolComponent {
+impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
     fn from(protocol_component: evm::ProtocolComponent) -> Self {
         Self {
             chain: protocol_component.chain.into(),
@@ -155,6 +165,7 @@ impl From<evm::ProtocolComponent> for ResponseProtocolComponent {
             static_attributes: protocol_component.static_attributes,
             creation_tx: protocol_component.creation_tx.into(),
             created_at: protocol_component.created_at,
+            change: protocol_component.change.into(),
         }
     }
 }
@@ -284,7 +295,7 @@ impl RpcHandler {
         let addresses: Option<HashSet<Address>> = contract_ids.map(|ids| {
             ids.into_iter()
                 .map(|id| id.address)
-                .collect::<HashSet<Address>>() // Change here to collect into a HashSet
+                .collect::<HashSet<Address>>()
         });
         debug!(?addresses, "Getting contract states.");
         let addresses: Option<&HashSet<Address>> = addresses.as_ref();
@@ -297,6 +308,7 @@ impl RpcHandler {
         {
             Ok(mut accounts) => {
                 // Filter by contract addresses if specified in the request
+                // PERF: This is not efficient, we should filter in the query
                 if let Some(contract_addrs) = addresses {
                     accounts.retain(|acc| {
                         let address = Address::from(acc.address);
@@ -458,11 +470,71 @@ impl RpcHandler {
             Ok(components) => Ok(dto::ProtocolComponentRequestResponse::new(
                 components
                     .into_iter()
-                    .map(dto::ResponseProtocolComponent::from)
+                    .map(dto::ProtocolComponent::from)
                     .collect(),
             )),
             Err(err) => {
                 error!(error = %err, "Error while getting protocol components.");
+                Err(err.into())
+            }
+        }
+    }
+
+    #[instrument(skip(self, chain, request))]
+    async fn get_protocol_delta(
+        &self,
+        chain: &Chain,
+        request: &dto::ProtocolDeltaRequestBody,
+    ) -> Result<dto::ProtocolDeltaRequestResponse, RpcError> {
+        let mut conn = self.db_connection_pool.get().await?;
+
+        info!(?request, "Getting protocol delta.");
+        self.get_protocol_delta_inner(chain, request, &mut conn)
+            .await
+    }
+
+    async fn get_protocol_delta_inner(
+        &self,
+        chain: &Chain,
+        request: &dto::ProtocolDeltaRequestBody,
+        db_connection: &mut AsyncPgConnection,
+    ) -> Result<dto::ProtocolDeltaRequestResponse, RpcError> {
+        let start = BlockOrTimestamp::try_from(&request.start)?;
+        let end = BlockOrTimestamp::try_from(&request.end)?;
+
+        // Get the components IDs from the request
+        let ids = request.component_ids.clone();
+        let component_ids: Option<HashSet<String>> = ids.map(|ids| {
+            ids.into_iter()
+                .collect::<HashSet<String>>()
+        });
+        debug!(?component_ids, "Getting protocol states delta.");
+        let component_ids: Option<&HashSet<String>> = component_ids.as_ref();
+
+        // Get the protocol state deltas from the database
+        match self
+            .db_gateway
+            .get_protocol_states_delta(chain, Some(&start), &end, db_connection)
+            .await
+        {
+            Ok(mut components) => {
+                // Filter by component id if specified in the request
+                // PERF: This is not efficient, we should filter in the query
+                if let Some(component_ids) = component_ids {
+                    components.retain(|acc| {
+                        let id: String = acc.component_id.clone();
+                        component_ids.contains(&id)
+                    });
+                }
+                Ok(dto::ProtocolDeltaRequestResponse::new(
+                    components
+                        .into_iter()
+                        .map(dto::ProtocolStateDelta::from)
+                        .collect(),
+                ))
+            }
+            Err(err) => {
+                error!(error = %err, "Error while getting protocol state delta.");
                 Err(err.into())
             }
         }
@@ -632,11 +704,44 @@ pub async fn protocol_state(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/{execution_env}/protocol_delta",
+    responses(
+        (status = 200, description = "OK", body = ProtocolDeltaRequestResponse),
+    ),
+    request_body = ProtocolDeltaRequestBody,
+    params(
+        ("execution_env" = Chain, description = "Execution environment"),
+        StateRequestParameters
+    ),
+)]
+pub async fn protocol_delta(
+    execution_env: web::Path<Chain>,
+    body: web::Json<dto::ProtocolDeltaRequestBody>,
+    handler: web::Data<RpcHandler>,
+) -> HttpResponse {
+    // Call the handler to get protocol deltas
+    let response = handler
+        .into_inner()
+        .get_protocol_delta(&execution_env, &body)
+        .await;
+
+    match response {
+        Ok(state) => HttpResponse::Ok().json(state),
+        Err(err) => {
+            error!(error = %err, ?body, "Error while getting protocol deltas.");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::storage::postgres::{self, db_fixtures};
+    use crate::storage::postgres::{self, db_fixtures, schema};
     use actix_web::test;
     use chrono::Utc;
+    use diesel::{prelude::*, ExpressionMethods};
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, U256};
     use tycho_types::Bytes;
@@ -644,6 +749,17 @@ mod tests {
     use std::{collections::HashMap, str::FromStr, sync::Arc};
 
     use self::storage::postgres::orm;
+
+    use crate::{
+        extractor::evm::{self},
+        storage::BlockIdentifier,
+    };
+
+    use ethers::prelude::H256;
+
+    use diesel_async::{AsyncPgConnection, RunQueryDsl};
+
+    use crate::{models::Chain, storage::BlockOrTimestamp};
 
     use super::*;
 
@@ -1356,5 +1472,126 @@ mod tests {
 
         assert_eq!(delta.accounts.len(), 1);
         assert_eq!(delta.accounts[0], expected.into());
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_delta() {
+        // Setup
+        let db_url = std::env::var("DATABASE_URL").unwrap();
+        let pool = postgres::connect(&db_url)
+            .await
+            .unwrap();
+        let mut conn = pool.get().await.unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
+
+        setup_protocol_data(&mut conn).await;
+
+        // set up deleted attribute state
+        let protocol_component_id = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state1"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+
+        let from_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+
+        let to_txn_id = schema::transaction::table
+            .filter(
+                schema::transaction::hash.eq(H256::from_str(
+                    "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
+                )
+                .expect("valid txhash")
+                .as_bytes()
+                .to_owned()),
+            )
+            .select(schema::transaction::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id,
+            from_txn_id,
+            "deleted".to_owned(),
+            Bytes::from(U256::from(1000)),
+            None,
+            Some(to_txn_id),
+        )
+        .await;
+
+        // set up deleted attribute different state (one that isn't also updated)
+        let protocol_component_id2 = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state3"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        db_fixtures::insert_protocol_state(
+            &mut conn,
+            protocol_component_id2,
+            from_txn_id,
+            "deleted2".to_owned(),
+            Bytes::from(U256::from(100)),
+            None,
+            Some(to_txn_id),
+        )
+        .await;
+
+        let db_gateway = Arc::new(EvmPostgresGateway::from_connection(&mut conn).await);
+        let req_handler = RpcHandler::new(db_gateway, pool);
+
+        let expected = dto::ProtocolDeltaRequestResponse {
+            protocols: vec![dto::ProtocolStateDelta {
+                component_id: "state3".to_owned(),
+                updated_attributes: HashMap::new(),
+                deleted_attributes: vec!["deleted2".to_owned()]
+                    .into_iter()
+                    .collect(),
+            }],
+        };
+
+        let request = dto::ProtocolDeltaRequestBody {
+            component_ids: Some(vec!["state3".to_owned()]), // Filter to only "state3"
+            start: dto::VersionParam {
+                timestamp: None,
+                block: Some(dto::BlockParam {
+                    hash: None,
+                    chain: Some(dto::Chain::Ethereum),
+                    number: Some(1),
+                }),
+            },
+            end: dto::VersionParam {
+                timestamp: None,
+                block: Some(dto::BlockParam {
+                    hash: None,
+                    chain: Some(dto::Chain::Ethereum),
+                    number: Some(2),
+                }),
+            },
+        };
+
+        let delta = req_handler
+            .get_protocol_delta_inner(&Chain::Ethereum, &request, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(delta.protocols.len(), 1);
+        assert_eq!(delta, expected);
     }
 }

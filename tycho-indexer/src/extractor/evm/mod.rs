@@ -19,7 +19,7 @@ use tycho_types::Bytes;
 
 use self::utils::TryDecode;
 
-use super::ExtractionError;
+use super::{u256_num::bytes_to_f64, ExtractionError};
 
 pub mod ambient;
 pub mod storage;
@@ -504,6 +504,10 @@ impl Transaction {
 pub struct ComponentBalance {
     pub token: H160,
     pub new_balance: Bytes,
+    /// the balance as a float value, its main usage is to allow for fast queries and tvl
+    /// calculation. Not available for backward revert deltas. In this case the balance will be
+    /// NaN.
+    pub balance_float: f64,
     // tx where the this balance was observed
     pub modify_tx: H256,
     pub component_id: ComponentId,
@@ -514,9 +518,11 @@ impl ComponentBalance {
         msg: substreams::BalanceChange,
         tx: &Transaction,
     ) -> Result<Self, ExtractionError> {
+        let balance_float = bytes_to_f64(&msg.balance).unwrap_or(f64::NAN);
         Ok(Self {
             token: pad_and_parse_h160(&msg.token.into()).map_err(ExtractionError::DecodeError)?,
             new_balance: Bytes::from(msg.balance),
+            balance_float,
             modify_tx: tx.hash,
             component_id: String::from_utf8(msg.component_id)
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
