@@ -2601,55 +2601,32 @@ mod test {
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[0].to_string()).unwrap());
     }
 
-    /*
     #[rstest]
-    #[case::get_one(Chain::Ethereum, 0)]
-    #[case::get_none(Chain::Starknet, 1)]
+    #[case::ethereum(Chain::Ethereum, &["state1", "state3", "no_tvl"])]
+    #[case::starknet(Chain::Starknet, &["state2"])]
     #[tokio::test]
-    async fn test_get_protocol_components_with_chain_filter(#[case] chain: Chain, #[case] i: i64) {
+    async fn test_get_protocol_components_with_chain_filter(
+        #[case] chain: Chain,
+        #[case] exp_ids: &[&str],
+    ) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp = exp_ids
+            .into_iter()
+            .map(|&s| s.to_owned())
+            .collect::<HashSet<_>>();
 
-        let mut components = gw
+        let components = gw
             .get_protocol_components(&chain, None, None, None, &mut conn)
             .await
-            .expect("failed retrieving components");
-        components.sort_by(|a, b| a.id.cmp(&b.id));
+            .expect("failed retrieving components")
+            .into_iter()
+            .map(|c| c.id)
+            .collect::<HashSet<_>>();
 
-        // there are two eth and one stark component.
-        assert!(!components.is_empty());
-        let pc = &components[0];
-        assert_eq!(pc.id, format!("state{}", i + 1).to_string());
-        assert_eq!(pc.chain, chain);
-        let i_usize: usize = i as usize;
-        assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
-        match chain {
-            Chain::Ethereum => {
-                let mut tokens = pc.tokens.clone();
-                tokens.sort_unstable();
-                assert_eq!(
-                    tokens,
-                    vec![H160::from_str(WETH).unwrap(), H160::from_str(USDC).unwrap()]
-                )
-            }
-            Chain::Starknet => {
-                let mut tokens = pc.tokens.clone();
-                tokens.sort_unstable();
-                assert_eq!(
-                    tokens,
-                    vec![H160::from_str(LUSD).unwrap(), H160::from_str(USDC).unwrap()]
-                )
-            }
-            _ => panic!("Unexpected chain returned"),
-        };
-        assert!(
-            pc.contract_ids
-                .contains(&H160::from_str(WETH).unwrap()),
-            "ProtocolComponent is missing WETH contract. Check the tests' data setup"
-        );
+        assert_eq!(components, exp);
     }
-     */
 
     #[rstest]
     #[case::empty(Some(10.0), &[])]
