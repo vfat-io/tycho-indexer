@@ -2299,6 +2299,7 @@ mod test {
                         new_balance: Bytes::from(0_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
+                        balance_float: 0.0,
                     },
                 )]
                 .into_iter()
@@ -2337,6 +2338,7 @@ mod test {
                         new_balance: Bytes::from(500000_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
+                        balance_float: 500000.0,
                     },
                 )]
                 .into_iter()
