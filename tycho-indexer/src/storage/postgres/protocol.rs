@@ -536,7 +536,7 @@ where
         new: &[(TxHash, &ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        let chain_id = self.get_chain_id(chain);
+        let chain_db_id = self.get_chain_id(chain);
         let new = new
             .iter()
             .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_owned()) })
@@ -559,7 +559,7 @@ where
                 .map(|state| state.component_id.as_str())
                 .collect::<Vec<&str>>()
                 .as_slice(),
-            chain_id,
+            chain_db_id,
             conn,
         )
         .await?

@@ -479,11 +479,8 @@ impl ProtocolComponent {
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(i64, String)>> {
         protocol_component::table
-            .filter(
-                protocol_component::external_id
-                    .eq_any(external_ids)
-                    .and(protocol_component::chain_id.eq(chain_db_id)),
-            )
+            .filter(protocol_component::external_id.eq_any(external_ids))
+            .filter(protocol_component::chain_id.eq(chain_db_id))
             .select((protocol_component::id, protocol_component::external_id))
             .get_results::<(i64, String)>(conn)
             .await
