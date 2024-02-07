@@ -2221,6 +2221,7 @@ mod test {
                 tax: 0,
                 gas: vec![Some(64), None],
                 chain: Chain::Ethereum,
+                quality: evm::TokenQuality::Normal,
             },
             &ERC20Token {
                 address: H160::from_str(WETH).unwrap(),
@@ -2229,6 +2230,7 @@ mod test {
                 tax: 0,
                 gas: vec![Some(100), None],
                 chain: Chain::Ethereum,
+                quality: evm::TokenQuality::Normal,
             },
         ];
 

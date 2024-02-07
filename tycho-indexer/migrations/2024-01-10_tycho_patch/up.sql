@@ -168,3 +168,13 @@ CREATE TRIGGER audit_table_component_tvl
     FOR EACH ROW
     EXECUTE PROCEDURE audit_trigger();
 
+CREATE TYPE token_quality AS ENUM(
+    'normal',
+    'rebase',
+    'tax',
+    'scam'
+);
+
+ALTER TABLE token
+    ADD COLUMN quality token_quality NOT NULL DEFAULT 'normal';
+

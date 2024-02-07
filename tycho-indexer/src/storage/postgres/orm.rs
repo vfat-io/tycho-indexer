@@ -926,6 +926,16 @@ pub struct NewAccount<'a> {
     pub deleted_at: Option<NaiveDateTime>,
 }
 
+#[derive(Debug, DbEnum, Clone, PartialEq, Default)]
+#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::TokenQuality"]
+pub enum TokenQuality {
+    #[default]
+    Normal,
+    Rebase,
+    Tax,
+    Scam,
+}
+
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug, PartialEq)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name = token)]
@@ -939,6 +949,7 @@ pub struct Token {
     pub gas: Vec<Option<i64>>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+    pub quality: TokenQuality,
 }
 
 #[derive(AsChangeset, Insertable, Debug)]
@@ -950,6 +961,7 @@ pub struct NewToken {
     pub decimals: i32,
     pub tax: i64,
     pub gas: Vec<Option<i64>>,
+    pub quality: TokenQuality,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]

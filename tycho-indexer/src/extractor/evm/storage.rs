@@ -17,7 +17,10 @@ use std::collections::HashMap;
 
 pub mod pg {
     use crate::{
-        extractor::evm::utils::{convert_addresses_to_h160, pad_and_parse_h160},
+        extractor::evm::{
+            utils::{convert_addresses_to_h160, pad_and_parse_h160},
+            TokenQuality,
+        },
         models,
         models::{FinancialType, ImplementationType},
         storage::{
@@ -326,6 +329,12 @@ pub mod pg {
         fn from_storage(val: Token, contract: storage::ContractId) -> Result<Self, StorageError> {
             let address =
                 pad_and_parse_h160(contract.address()).map_err(StorageError::DecodeError)?;
+            let quality: TokenQuality = match val.quality {
+                orm::TokenQuality::Normal => TokenQuality::Normal,
+                orm::TokenQuality::Rebase => TokenQuality::Rebase,
+                orm::TokenQuality::Tax => TokenQuality::Tax,
+                orm::TokenQuality::Scam => TokenQuality::Scam,
+            };
             Ok(evm::ERC20Token::new(
                 address,
                 val.symbol,
@@ -336,10 +345,17 @@ pub mod pg {
                     .map(|item| item.map(|i| i as u64))
                     .collect(),
                 contract.chain,
+                quality,
             ))
         }
 
         fn to_storage(&self, contract_id: i64) -> orm::NewToken {
+            let orm_quality: orm::TokenQuality = match self.quality {
+                TokenQuality::Normal => orm::TokenQuality::Normal,
+                TokenQuality::Rebase => orm::TokenQuality::Rebase,
+                TokenQuality::Tax => orm::TokenQuality::Tax,
+                TokenQuality::Scam => orm::TokenQuality::Scam,
+            };
             NewToken {
                 account_id: contract_id,
                 symbol: self.symbol.clone(),
@@ -351,6 +367,7 @@ pub mod pg {
                     .into_iter()
                     .map(|item| item.map(|i| i as i64))
                     .collect(),
+                quality: orm_quality,
             }
         }
 
@@ -544,6 +561,7 @@ mod test {
             gas: vec![Some(64), None],
             inserted_ts: Default::default(),
             modified_ts: Default::default(),
+            quality: orm::TokenQuality::Normal,
         };
         let contract_id = ContractId::new(Chain::Ethereum, token_address.clone());
         let result = ERC20Token::from_storage(orm_token, contract_id);
@@ -565,6 +583,7 @@ mod test {
             tax: 0,
             gas: vec![Some(64), None],
             chain: Chain::Ethereum,
+            quality: evm::TokenQuality::Normal,
         };
 
         let new_token = erc_token.to_storage(22);
