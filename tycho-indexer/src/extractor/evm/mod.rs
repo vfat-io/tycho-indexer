@@ -683,6 +683,9 @@ impl BlockContractChanges {
             for change in msg.changes.into_iter() {
                 let mut account_updates = HashMap::new();
                 let mut protocol_components = HashMap::new();
+                let mut balances_changes: HashMap<ComponentId, HashMap<H160, ComponentBalance>> =
+                    HashMap::new();
+
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
                     for el in change.contract_changes.into_iter() {
@@ -700,10 +703,24 @@ impl BlockContractChanges {
                         )?;
                         protocol_components.insert(component.id.clone(), component);
                     }
+
+                    for balance_change in change.balance_changes.into_iter() {
+                        let component_id =
+                            String::from_utf8(balance_change.component_id.clone())
+                                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
+                        let token_address = H160::from_slice(balance_change.token.as_slice());
+                        let balance = ComponentBalance::try_from_message(balance_change, &tx)?;
+
+                        balances_changes
+                            .entry(component_id)
+                            .or_default()
+                            .insert(token_address, balance);
+                    }
+
                     tx_updates.push(TransactionVMUpdates::new(
                         account_updates,
                         protocol_components,
-                        HashMap::new(),
+                        balances_changes,
                         tx,
                     ));
                 }
