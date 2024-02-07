@@ -351,9 +351,6 @@ impl NormalisedMessage for BlockAccountChanges {
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransactionVMUpdates {
-    // TODO: for ambient it works to have only a single update here but long
-    // term we need to be able to store changes to multiple accounts per
-    // transactions.
     pub account_updates: HashMap<H160, AccountUpdate>,
     pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
     pub component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
