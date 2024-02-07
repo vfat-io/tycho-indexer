@@ -3,7 +3,7 @@
 # stabilised.
 set -e
 
-SUBSTREAM_PKGS=$(cargo ws list | grep -i substreams)
+SUBSTREAM_PKGS=$(cargo ws list | grep -i substreams | grep -v -e substreams-common -e substreams-helper)
 WORKDIR=$(pwd)
 TYCHO_INDEXER=tycho-indexer
 
