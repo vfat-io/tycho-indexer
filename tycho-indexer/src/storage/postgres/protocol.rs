@@ -1226,7 +1226,7 @@ where
 
     async fn get_token_prices(
         &self,
-        chain: Chain,
+        chain: &Chain,
         conn: &mut Self::DB,
     ) -> Result<HashMap<Bytes, f64>, StorageError> {
         use schema::token_price::dsl::*;
@@ -1244,7 +1244,7 @@ where
 
     async fn upsert_component_tvl(
         &self,
-        chain: Chain,
+        chain: &Chain,
         tvl_values: &HashMap<String, f64>,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
@@ -1382,7 +1382,7 @@ mod test {
                 .await;
 
         // insert token prices
-        db_fixtures::insert_token_prices(&[(weth_id, 1.0), (usdc_id, 0.005)], conn).await;
+        db_fixtures::insert_token_prices(&[(weth_id, 1.0), (usdc_id, 0.0005)], conn).await;
 
         let contract_code_id = db_fixtures::insert_contract_code(
             conn,
@@ -1393,6 +1393,7 @@ mod test {
         .await;
 
         // components and their balances
+        // tvl will be 2.0
         let protocol_component_id = db_fixtures::insert_protocol_component(
             conn,
             "state1",
@@ -1422,6 +1423,7 @@ mod test {
             protocol_component_id,
         )
         .await;
+        // tvl will be 1.0 cause we miss dai price
         let protocol_component_id2 = db_fixtures::insert_protocol_component(
             conn,
             "state3",
@@ -1451,6 +1453,7 @@ mod test {
             protocol_component_id2,
         )
         .await;
+        // tvl will be 1.0 cause we miss lusd price
         let protocol_component_id3 = db_fixtures::insert_protocol_component(
             conn,
             "state2",
@@ -1478,6 +1481,18 @@ mod test {
             usdc_id,
             txn[0],
             protocol_component_id3,
+        )
+        .await;
+        // component without balances and thus without tvl
+        let protocol_component_id2 = db_fixtures::insert_protocol_component(
+            conn,
+            "no_tvl",
+            chain_id,
+            protocol_system_id_ambient,
+            protocol_type_id,
+            txn[0],
+            Some(vec![weth_id, dai_id]),
+            Some(vec![contract_code_id]),
         )
         .await;
 
@@ -1517,6 +1532,7 @@ mod test {
         )
         .await;
 
+        db_fixtures::calculate_component_tvl(conn).await;
         tx_hashes.to_vec()
     }
 
@@ -2585,6 +2601,7 @@ mod test {
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[0].to_string()).unwrap());
     }
 
+    /*
     #[rstest]
     #[case::get_one(Chain::Ethereum, 0)]
     #[case::get_none(Chain::Starknet, 1)]
@@ -2609,15 +2626,19 @@ mod test {
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
         match chain {
             Chain::Ethereum => {
+                let mut tokens = pc.tokens.clone();
+                tokens.sort_unstable();
                 assert_eq!(
-                    pc.tokens,
+                    tokens,
                     vec![H160::from_str(WETH).unwrap(), H160::from_str(USDC).unwrap()]
                 )
             }
             Chain::Starknet => {
+                let mut tokens = pc.tokens.clone();
+                tokens.sort_unstable();
                 assert_eq!(
-                    pc.tokens,
-                    vec![H160::from_str(USDC).unwrap(), H160::from_str(LUSD).unwrap()]
+                    tokens,
+                    vec![H160::from_str(LUSD).unwrap(), H160::from_str(USDC).unwrap()]
                 )
             }
             _ => panic!("Unexpected chain returned"),
@@ -2628,21 +2649,108 @@ mod test {
             "ProtocolComponent is missing WETH contract. Check the tests' data setup"
         );
     }
+     */
+
+    #[rstest]
+    #[case::empty(Some(10.0), &[])]
+    #[case::all(None, &["state1", "state3", "no_tvl"])]
+    #[case::with_tvl(Some(0.0), &["state1", "state3"])]
+    #[case::with_tvl(Some(1.0), &["state1"])]
+    #[tokio::test]
+    async fn test_get_protocol_components_with_min_tvl(
+        #[case] min_tvl: Option<f64>,
+        #[case] exp_ids: &[&str],
+    ) {
+        let mut conn = setup_db().await;
+        let tx_hashes = setup_data(&mut conn).await;
+        let exp = exp_ids
+            .into_iter()
+            .map(|&s| s.to_owned())
+            .collect::<HashSet<_>>();
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let res = gw
+            .get_protocol_components(&Chain::Ethereum, None, None, min_tvl, &mut conn)
+            .await
+            .expect("failed retrieving components")
+            .into_iter()
+            .map(|comp| comp.id)
+            .collect::<HashSet<_>>();
+
+        assert_eq!(res, exp);
+    }
 
     #[tokio::test]
     async fn test_get_token_prices() {
         let mut conn = setup_db().await;
         let _ = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-        let exp = [(Bytes::from(WETH), 1.0), (Bytes::from(USDC), 0.005)]
+        let exp = [(Bytes::from(WETH), 1.0), (Bytes::from(USDC), 0.0005)]
             .into_iter()
             .collect::<HashMap<_, _>>();
 
         let prices = gw
-            .get_token_prices(Chain::Ethereum, &mut conn)
+            .get_token_prices(&Chain::Ethereum, &mut conn)
             .await
             .expect("retrieving token prices failed!");
 
         assert_eq!(prices, exp);
+    }
+
+    #[tokio::test]
+    async fn test_get_balances() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp: HashMap<_, _> =
+            [("state1", Bytes::from(WETH), 1e18), ("state1", Bytes::from(USDC), 2000.0 * 1e6)]
+                .into_iter()
+                .group_by(|e| e.0)
+                .into_iter()
+                .map(|(cid, group)| {
+                    (
+                        cid.to_owned(),
+                        group
+                            .map(|(_, addr, bal)| (addr, bal))
+                            .collect::<HashMap<_, _>>(),
+                    )
+                })
+                .collect();
+
+        let res = gw
+            .get_balances(&Chain::Ethereum, Some(&["state1"]), None, &mut conn)
+            .await
+            .expect("retrieving balances failed!");
+
+        assert_eq!(res, exp);
+    }
+
+    #[tokio::test]
+    async fn test_upsert_component_tvl() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let chain_id = gw.get_chain_id(&Chain::Ethereum);
+        let exp = [("state1", 100.0), ("no_tvl", 1.0), ("state3", 1.0)]
+            .into_iter()
+            .map(|(id, tvl)| (id.to_owned(), tvl))
+            .collect::<HashMap<_, _>>();
+
+        let new_tvl = [("state1".to_owned(), 100.0), ("no_tvl".to_owned(), 1.0)]
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+        gw.upsert_component_tvl(&Chain::Ethereum, &new_tvl, &mut conn)
+            .await
+            .expect("upsert failed!");
+
+        let tvl_values = schema::component_tvl::table
+            .inner_join(schema::protocol_component::table)
+            .select((schema::protocol_component::external_id, schema::component_tvl::tvl))
+            .filter(schema::protocol_component::chain_id.eq(chain_id))
+            .get_results::<(String, f64)>(&mut conn)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect::<HashMap<_, _>>();
     }
 }

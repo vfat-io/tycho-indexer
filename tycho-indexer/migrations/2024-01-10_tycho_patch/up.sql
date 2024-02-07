@@ -139,7 +139,7 @@ CREATE TRIGGER audit_table_token_price
 CREATE TABLE IF NOT EXISTS component_tvl(
     "id" bigserial PRIMARY KEY,
     -- Id of the component whose tvl we record here.
-    "protocol_component_id" bigint REFERENCES protocol_component(id) NOT NULL,
+    "protocol_component_id" bigint REFERENCES protocol_component(id) NOT NULL UNIQUE,
     -- Tvl in native token denomination.
     "tvl" double precision NOT NULL,
     -- Timestamp this entry was inserted into this table.

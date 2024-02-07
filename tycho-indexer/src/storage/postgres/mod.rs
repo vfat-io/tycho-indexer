@@ -1210,8 +1210,8 @@ pub mod db_fixtures {
             r#"
         INSERT INTO component_tvl (protocol_component_id, tvl)
         SELECT 
-            bal.protocol_component_id, as protocol_component_id
-            SUM(bal.balance_float * token_price.price / POWER(10.0, token.decimal)) as tvl
+            bal.protocol_component_id as protocol_component_id,
+            SUM(bal.balance_float * token_price.price / POWER(10.0, token.decimals)) as tvl
         FROM 
             component_balance AS bal 
         INNER JOIN 
