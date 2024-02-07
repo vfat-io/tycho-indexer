@@ -971,6 +971,7 @@ pub mod db_fixtures {
     pub async fn insert_component_balance(
         conn: &mut AsyncPgConnection,
         balance: Balance,
+        previous_balance: Balance,
         balance_float: f64,
         token_id: i64,
         tx_id: i64,
@@ -990,6 +991,7 @@ pub mod db_fixtures {
                 schema::component_balance::modify_tx.eq(tx_id),
                 schema::component_balance::new_balance.eq(balance),
                 schema::component_balance::balance_float.eq(balance_float),
+                schema::component_balance::previous_value.eq(previous_balance),
                 schema::component_balance::valid_from.eq(ts),
             ))
             .execute(conn)
