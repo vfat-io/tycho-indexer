@@ -383,7 +383,7 @@ impl DBCacheWriteExecutor {
                 };
                 let collected_balances: Vec<&evm::ComponentBalance> = balances.iter().collect();
                 self.state_gateway
-                    .add_component_balances(collected_balances.as_slice(), ts, conn)
+                    .add_component_balances(collected_balances.as_slice(), &self.chain, ts, conn)
                     .await
             }
             WriteOp::UpsertProtocolState(deltas) => {
@@ -835,7 +835,8 @@ mod test_serial_db {
             };
             let component_balance = ComponentBalance {
                 token: usdc_address,
-                new_balance: Bytes::from(&[0u8]),
+                balance_float: 0.0,
+                balance: Bytes::from(&[0u8]),
                 modify_tx: tx_1.hash,
                 component_id: protocol_component_id.clone(),
             };

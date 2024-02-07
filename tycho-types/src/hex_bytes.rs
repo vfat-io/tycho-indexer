@@ -235,6 +235,67 @@ impl From<U256> for Bytes {
     }
 }
 
+impl From<Bytes> for u128 {
+    fn from(src: Bytes) -> Self {
+        let bytes_slice = src.as_ref();
+
+        // Create an array with zeros.
+        let mut u128_bytes: [u8; 16] = [0; 16];
+
+        // Copy bytes from bytes_slice to u128_bytes.
+        u128_bytes[..bytes_slice.len()].copy_from_slice(bytes_slice);
+
+        // Convert to u128 using little-endian
+        u128::from_le_bytes(u128_bytes)
+    }
+}
+
+impl From<Bytes> for i128 {
+    fn from(src: Bytes) -> Self {
+        let bytes_slice = src.as_ref();
+
+        // Create an array with zeros.
+        let mut u128_bytes: [u8; 16] = [0; 16];
+
+        // Copy bytes from bytes_slice to u128_bytes.
+        u128_bytes[..bytes_slice.len()].copy_from_slice(bytes_slice);
+
+        // Convert to i128 using little-endian
+        i128::from_le_bytes(u128_bytes)
+    }
+}
+
+impl From<Bytes> for U256 {
+    fn from(src: Bytes) -> Self {
+        let bytes_slice = src.as_ref();
+
+        // Create an array with zeros.
+        let mut u256_bytes: [u8; 32] = [0; 32];
+
+        // Copy bytes from bytes_slice to u256_bytes.
+        u256_bytes[..bytes_slice.len()].copy_from_slice(bytes_slice);
+
+        // Convert the bytes array to U256 using little-endian.
+        U256::from_little_endian(&u256_bytes)
+    }
+}
+
+impl From<Bytes> for i32 {
+    fn from(src: Bytes) -> Self {
+        let bytes_slice = src.as_ref();
+
+        // Create an array with zeros.
+        let mut i32_bytes: [u8; 4] = [0; 4];
+
+        // Copy bytes from bytes_slice to i32_bytes.
+        let len = 4.min(bytes_slice.len());
+        i32_bytes[..len].copy_from_slice(&bytes_slice[..len]);
+
+        // Convert to i32 using little-endian
+        i32::from_le_bytes(i32_bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use diesel::{insert_into, table, Insertable, Queryable};
@@ -372,5 +433,33 @@ mod tests {
             .unwrap();
 
         assert_eq!(inserted[0].data, example_bytes);
+    }
+
+    #[test]
+    fn test_u128_from_bytes() {
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let result: u128 = u128::from(data.clone());
+        assert_eq!(result, u128::from_str("67305985").unwrap());
+    }
+
+    #[test]
+    fn test_i128_from_bytes() {
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let result: i128 = i128::from(data.clone());
+        assert_eq!(result, i128::from_str("67305985").unwrap());
+    }
+
+    #[test]
+    fn test_u256_from_bytes() {
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let result: U256 = U256::from(data);
+        assert_eq!(result, U256::from_dec_str("67305985").unwrap());
+    }
+
+    #[test]
+    fn test_i32_from_bytes() {
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let result: i32 = i32::from(data);
+        assert_eq!(result, i32::from_str("67305985").unwrap());
     }
 }
