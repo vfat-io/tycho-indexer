@@ -168,3 +168,6 @@ CREATE TRIGGER audit_table_component_tvl
     FOR EACH ROW
     EXECUTE PROCEDURE audit_trigger();
 
+ALTER TABLE token
+    ADD COLUMN quality int NOT NULL DEFAULT 0;
+

@@ -253,6 +253,7 @@ diesel::table! {
         gas -> Array<Nullable<Int8>>,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
+        quality -> Int4,
     }
 }
 

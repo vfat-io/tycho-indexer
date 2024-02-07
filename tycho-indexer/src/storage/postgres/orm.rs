@@ -939,6 +939,7 @@ pub struct Token {
     pub gas: Vec<Option<i64>>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+    pub quality: i32,
 }
 
 #[derive(AsChangeset, Insertable, Debug)]
@@ -950,6 +951,7 @@ pub struct NewToken {
     pub decimals: i32,
     pub tax: i64,
     pub gas: Vec<Option<i64>>,
+    pub quality: i32,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]

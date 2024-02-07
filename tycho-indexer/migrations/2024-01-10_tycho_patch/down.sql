@@ -176,3 +176,6 @@ ALTER TABLE protocol_component
 ALTER TABLE protocol_component
     DROP CONSTRAINT protocol_component_chain_id_external_id_key;
 
+ALTER TABLE token
+    DROP COLUMN quality;
+
