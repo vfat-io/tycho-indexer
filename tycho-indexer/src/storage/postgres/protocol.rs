@@ -2628,4 +2628,21 @@ mod test {
             "ProtocolComponent is missing WETH contract. Check the tests' data setup"
         );
     }
+
+    #[tokio::test]
+    async fn test_get_token_prices() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp = [(Bytes::from(WETH), 1.0), (Bytes::from(USDC), 0.005)]
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+
+        let prices = gw
+            .get_token_prices(Chain::Ethereum, &mut conn)
+            .await
+            .expect("retrieving token prices failed!");
+
+        assert_eq!(prices, exp);
+    }
 }
