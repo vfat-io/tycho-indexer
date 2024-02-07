@@ -873,7 +873,7 @@ mod test_serial_db {
                             base_token,
                             ComponentBalance {
                                 token: base_token,
-                                new_balance: Bytes::from(&[0u8]),
+                                balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
                                 modify_tx: TX_HASH_0.parse().unwrap(),
                                 component_id: component_id.clone(),
@@ -903,7 +903,7 @@ mod test_serial_db {
                             base_token,
                             ComponentBalance {
                                 token: base_token,
-                                new_balance: Bytes::from(&[0u8]),
+                                balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
                                 modify_tx: TX_HASH_1.parse().unwrap(),
                                 component_id: component_id.clone(),

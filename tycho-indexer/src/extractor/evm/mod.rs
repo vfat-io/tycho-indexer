@@ -2301,7 +2301,7 @@ mod test {
                     H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                     ComponentBalance {
                         token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666),
-                        new_balance: Bytes::from(0_i32.to_le_bytes()),
+                        balance: Bytes::from(0_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
                         balance_float: 0.0,
@@ -2340,7 +2340,7 @@ mod test {
                     H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                     ComponentBalance {
                         token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666),
-                        new_balance: Bytes::from(500000_i32.to_le_bytes()),
+                        balance: Bytes::from(500000_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
                         balance_float: 500000.0,
