@@ -508,7 +508,7 @@ impl Transaction {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ComponentBalance {
     pub token: H160,
-    pub new_balance: Bytes,
+    pub balance: Bytes,
     /// the balance as a float value, its main usage is to allow for fast queries and tvl
     /// calculation. Not available for backward revert deltas. In this case the balance will be
     /// NaN.
@@ -526,7 +526,7 @@ impl ComponentBalance {
         let balance_float = bytes_to_f64(&msg.balance).unwrap_or(f64::NAN);
         Ok(Self {
             token: pad_and_parse_h160(&msg.token.into()).map_err(ExtractionError::DecodeError)?,
-            new_balance: Bytes::from(msg.balance),
+            balance: Bytes::from(msg.balance),
             balance_float,
             modify_tx: tx.hash,
             component_id: String::from_utf8(msg.component_id)
@@ -2262,7 +2262,7 @@ mod test {
         };
         let from_message = ComponentBalance::try_from_message(msg, &tx).unwrap();
 
-        assert_eq!(from_message.new_balance, msg_balance);
+        assert_eq!(from_message.balance, msg_balance);
         assert_eq!(from_message.modify_tx, tx.hash);
         assert_eq!(from_message.token, expected_token);
         assert_eq!(from_message.component_id, expected_component_id);
@@ -2301,7 +2301,7 @@ mod test {
                     H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                     ComponentBalance {
                         token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666),
-                        new_balance: Bytes::from(0_i32.to_le_bytes()),
+                        balance: Bytes::from(0_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
                         balance_float: 0.0,
@@ -2340,7 +2340,7 @@ mod test {
                     H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                     ComponentBalance {
                         token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666),
-                        new_balance: Bytes::from(500000_i32.to_le_bytes()),
+                        balance: Bytes::from(500000_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
                         balance_float: 500000.0,

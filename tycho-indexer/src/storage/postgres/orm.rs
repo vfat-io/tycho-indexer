@@ -12,8 +12,8 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     models,
     storage::{
-        Address, AttrStoreKey, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ComponentId,
-        ContractId, StorageError, StoreVal, TxHash,
+        postgres::versioning::StoredDeltaVersionedRow, Address, AttrStoreKey, Balance, BlockHash,
+        BlockIdentifier, Code, CodeHash, ComponentId, ContractId, StorageError, StoreVal, TxHash,
     },
 };
 use tycho_types::Bytes;
@@ -322,6 +322,7 @@ pub struct ComponentBalance {
     pub token_id: i64,
     pub new_balance: Balance,
     pub balance_float: f64,
+    pub previous_value: Balance,
     pub modify_tx: i64,
     pub protocol_component_id: i64,
     pub inserted_ts: NaiveDateTime,
@@ -382,12 +383,13 @@ impl StoredVersionedRow for ComponentBalance {
     }
 }
 
-#[derive(AsChangeset, Insertable)]
+#[derive(AsChangeset, Insertable, Debug)]
 #[diesel(table_name = component_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewComponentBalance {
     pub token_id: i64,
     pub new_balance: Balance,
+    pub previous_value: Balance,
     pub balance_float: f64,
     pub modify_tx: i64,
     pub protocol_component_id: i64,
@@ -414,6 +416,38 @@ impl VersionedRow for NewComponentBalance {
 
     fn get_valid_from(&self) -> Self::Version {
         self.valid_from
+    }
+}
+
+impl DeltaVersionedRow for NewComponentBalance {
+    type Value = Balance;
+
+    fn get_value(&self) -> Self::Value {
+        self.new_balance.clone()
+    }
+
+    fn set_previous_value(&mut self, previous_value: Self::Value) {
+        self.previous_value = previous_value
+    }
+}
+
+impl DeltaVersionedRow for ComponentBalance {
+    type Value = Balance;
+
+    fn get_value(&self) -> Self::Value {
+        self.new_balance.clone()
+    }
+
+    fn set_previous_value(&mut self, previous_value: Self::Value) {
+        self.previous_value = previous_value
+    }
+}
+
+impl StoredDeltaVersionedRow for ComponentBalance {
+    type Value = Balance;
+
+    fn get_value(&self) -> Self::Value {
+        self.new_balance.clone()
     }
 }
 
@@ -1250,13 +1284,33 @@ impl StoredVersionedRow for ContractStorage {
     }
 }
 
+impl DeltaVersionedRow for ContractStorage {
+    type Value = Option<Bytes>;
+
+    fn get_value(&self) -> Self::Value {
+        self.value.clone()
+    }
+
+    fn set_previous_value(&mut self, previous_value: Self::Value) {
+        self.previous_value = previous_value
+    }
+}
+
+impl StoredDeltaVersionedRow for ContractStorage {
+    type Value = Option<Bytes>;
+
+    fn get_value(&self) -> Self::Value {
+        self.value.clone()
+    }
+}
+
 #[derive(Insertable, Debug)]
 #[diesel(table_name = contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewSlot<'a> {
     pub slot: &'a Bytes,
-    pub value: Option<&'a Bytes>,
-    pub previous_value: Option<&'a Bytes>,
+    pub value: Option<Bytes>,
+    pub previous_value: Option<Bytes>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub ordinal: i64,
@@ -1287,14 +1341,14 @@ impl<'a> VersionedRow for NewSlot<'a> {
 }
 
 impl<'a> DeltaVersionedRow for NewSlot<'a> {
-    type Value = Option<&'a Bytes>;
+    type Value = Option<Bytes>;
 
     fn get_value(&self) -> Self::Value {
-        self.value
+        self.value.clone()
     }
 
     fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value
+        self.previous_value = previous_value;
     }
 }
 

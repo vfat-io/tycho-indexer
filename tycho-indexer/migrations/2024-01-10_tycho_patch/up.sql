@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS component_balance(
     "token_id" bigint REFERENCES "token"(id) NOT NULL,
     -- new balance of the token for this component
     "new_balance" bytea NOT NULL,
+    -- new balance of the token for this component
+    "previous_value" bytea NOT NULL,
     -- new balance as a floating point number
     "balance_float" float NOT NULL,
     -- the transaction that modified the tvl of this component
