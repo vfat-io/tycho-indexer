@@ -382,19 +382,19 @@ impl TransactionVMUpdates {
     pub fn merge(&mut self, other: &TransactionVMUpdates) -> Result<(), ExtractionError> {
         if self.tx.block_hash != other.tx.block_hash {
             return Err(ExtractionError::MergeError(format!(
-                "Can't merge TransactionUpdates from different blocks: 0x{:x} != 0x{:x}",
+                "Can't merge TransactionVMUpdates from different blocks: 0x{:x} != 0x{:x}",
                 self.tx.block_hash, other.tx.block_hash,
             )));
         }
         if self.tx.hash == other.tx.hash {
             return Err(ExtractionError::MergeError(format!(
-                "Can't merge TransactionUpdates from the same transaction: 0x{:x}",
+                "Can't merge TransactionVMUpdates from the same transaction: 0x{:x}",
                 self.tx.hash
             )));
         }
         if self.tx.index > other.tx.index {
             return Err(ExtractionError::MergeError(format!(
-                "Can't merge TransactionUpdates with lower transaction index: {} > {}",
+                "Can't merge TransactionVMUpdates with lower transaction index: {} > {}",
                 self.tx.index, other.tx.index
             )));
         }
@@ -1393,10 +1393,10 @@ mod test {
     use std::str::FromStr;
 
     use actix_web::body::MessageBody;
-    use diesel_async::RunQueryDsl;
+
     use rstest::rstest;
 
-    use crate::extractor::evm::fixtures::{pb_block_contract_changes, transaction01};
+    use crate::extractor::evm::fixtures::transaction01;
 
     use super::*;
 
@@ -1546,6 +1546,30 @@ mod test {
         assert_eq!(res, exp);
     }
 
+    fn create_protocol_component(tx_hash: H256) -> ProtocolComponent {
+        ProtocolComponent {
+            id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
+            protocol_system: "ambient".to_string(),
+            protocol_type_name: String::from("WeightedPool"),
+            chain: Chain::Ethereum,
+            tokens: vec![
+                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+            ],
+            contract_ids: vec![
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+            ],
+            static_attributes: HashMap::from([
+                ("key1".to_string(), Bytes::from(b"value1".to_vec())),
+                ("key2".to_string(), Bytes::from(b"value2".to_vec())),
+            ]),
+            change: ChangeType::Creation,
+            creation_tx: tx_hash,
+            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+        }
+    }
+
     fn block_state_changes() -> BlockContractChanges {
         let tx = Transaction {
             hash: H256::from_low_u64_be(
@@ -1567,27 +1591,7 @@ mod test {
             to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
             index: 5,
         };
-        let protocol_component = ProtocolComponent {
-            id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
-            protocol_system: "ambient".to_string(),
-            protocol_type_name: String::from("WeightedPool"),
-            chain: Chain::Ethereum,
-            tokens: vec![
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-            ],
-            contract_ids: vec![
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-            ],
-            static_attributes: HashMap::from([
-                ("key1".to_string(), Bytes::from(b"value1".to_vec())),
-                ("key2".to_string(), Bytes::from(b"value2".to_vec())),
-            ]),
-            change: ChangeType::Creation,
-            creation_tx: tx.hash,
-            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
-        };
+        let protocol_component = create_protocol_component(tx.hash);
         BlockContractChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
@@ -1664,6 +1668,7 @@ mod test {
             &HashMap::from([("WeightedPool".to_string(), ProtocolType::default())]),
         )
         .unwrap();
+
         assert_eq!(res, block_state_changes());
     }
 
@@ -2254,29 +2259,103 @@ mod test {
 
     #[rstest]
     fn test_merge() {
-        let block_changes = block_state_changes();
-        let mut tx_update = block_changes.tx_updates[0].clone();
+        let tx_first_update = fixtures::transaction01();
+        let tx_second_update = fixtures::transaction02(HASH_256_1, HASH_256_0, 15);
+        let protocol_component_first_tx = create_protocol_component(tx_first_update.hash);
+        let protocol_component_second_tx = create_protocol_component(tx_second_update.hash);
 
-        tx_update
-            .merge(block_changes.tx_updates.last().unwrap())
+        let first_update = TransactionVMUpdates {
+            account_updates: [(
+                H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                AccountUpdate::new(
+                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                    Chain::Ethereum,
+                    fixtures::evm_slots([(2711790500, 2981278644), (3250766788, 3520254932)]),
+                    Some(U256::from(1903326068)),
+                    Some(vec![129, 130, 131, 132].into()),
+                    ChangeType::Update,
+                ),
+            )]
+            .into_iter()
+            .collect(),
+            protocol_components: [(
+                protocol_component_first_tx.id.clone(),
+                protocol_component_first_tx.clone(),
+            )]
+            .into_iter()
+            .collect(),
+            component_balances: [(
+                protocol_component_first_tx.id.clone(),
+                [(
+                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                    ComponentBalance {
+                        token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666),
+                        new_balance: Bytes::from(0_i32.to_le_bytes()),
+                        modify_tx: Default::default(),
+                        component_id: protocol_component_first_tx.id.clone(),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            )]
+            .into_iter()
+            .collect(),
+            tx: tx_first_update,
+        };
+        let second_update = TransactionVMUpdates {
+            account_updates: [(
+                H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                AccountUpdate::new(
+                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                    Chain::Ethereum,
+                    fixtures::evm_slots([(2981278644, 3250766788), (2442302356, 2711790500)]),
+                    Some(U256::from(4059231220u64)),
+                    Some(vec![1, 2, 3, 4].into()),
+                    ChangeType::Update,
+                ),
+            )]
+            .into_iter()
+            .collect(),
+            protocol_components: [(
+                protocol_component_second_tx.id.clone(),
+                protocol_component_second_tx.clone(),
+            )]
+            .into_iter()
+            .collect(),
+            component_balances: [(
+                protocol_component_second_tx.id.clone(),
+                [(
+                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                    ComponentBalance {
+                        token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666),
+                        new_balance: Bytes::from(500000_i32.to_le_bytes()),
+                        modify_tx: Default::default(),
+                        component_id: protocol_component_first_tx.id.clone(),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            )]
+            .into_iter()
+            .collect(),
+            tx: tx_second_update,
+        };
+
+        let mut to_merge_on = first_update.clone();
+        to_merge_on
+            .merge(&second_update)
             .unwrap();
 
-        println!("{:?}", tx_update.account_updates);
+        let expected_protocol_components: HashMap<ComponentId, ProtocolComponent> = [
+            (protocol_component_first_tx.id.clone(), protocol_component_first_tx.clone()),
+            (protocol_component_second_tx.id.clone(), protocol_component_second_tx.clone()),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(to_merge_on.component_balances, second_update.component_balances);
+        assert_eq!(to_merge_on.protocol_components, expected_protocol_components);
 
-        assert_eq!(
-            tx_update.component_balances,
-            block_changes
-                .tx_updates
-                .last()
-                .unwrap()
-                .component_balances
-        );
-        assert_eq!(tx_update.protocol_components, block_changes.tx_updates[0].protocol_components);
-
-        let mut acc_update = block_changes
-            .tx_updates
-            .last()
-            .unwrap()
+        let mut acc_update = second_update
             .account_updates
             .clone()
             .into_values()
@@ -2295,6 +2374,6 @@ mod test {
             .cloned()
             .collect();
 
-        assert_eq!(tx_update.account_updates, acc_update);
+        assert_eq!(to_merge_on.account_updates, acc_update);
     }
 }
