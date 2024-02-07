@@ -454,7 +454,6 @@ impl RpcHandler {
         params: &dto::ProtocolComponentRequestParameters,
         db_connection: &mut AsyncPgConnection,
     ) -> Result<dto::ProtocolComponentRequestResponse, RpcError> {
-        #![allow(unused_variables)]
         let system = request.protocol_system.clone();
         let ids_strs: Option<Vec<&str>> = request
             .component_ids
@@ -464,7 +463,7 @@ impl RpcHandler {
         let ids_slice = ids_strs.as_deref();
         match self
             .db_gateway
-            .get_protocol_components(chain, system, ids_slice, None, db_connection)
+            .get_protocol_components(chain, system, ids_slice, params.tvl_gt, db_connection)
             .await
         {
             Ok(components) => Ok(dto::ProtocolComponentRequestResponse::new(
