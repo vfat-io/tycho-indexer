@@ -1,4 +1,5 @@
 #![allow(unused_variables)]
+
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
@@ -34,12 +35,12 @@ use super::WithTxHash;
 
 // Private methods
 impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
-where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    D: ContractDelta + From<A>,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
+    where
+        B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+        TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+        D: ContractDelta + From<A>,
+        A: StorableContract<orm::Contract, orm::NewContract, i64>,
+        T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     /// # Decoding ProtocolStates from database results.
     ///
@@ -139,12 +140,12 @@ where
 
 #[async_trait]
 impl<B, TX, A, D, T> ProtocolGateway for PostgresGateway<B, TX, A, D, T>
-where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    D: ContractDelta + From<A>,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
+    where
+        B: StorableBlock<orm::Block, orm::NewBlock, i64>,
+        TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
+        D: ContractDelta + From<A>,
+        A: StorableContract<orm::Contract, orm::NewContract, i64>,
+        T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     type DB = AsyncPgConnection;
     type Token = T;
@@ -274,9 +275,11 @@ where
                 let tokens_by_pc: &Vec<Address> = protocol_component_tokens
                     .get(&pc.id)
                     .expect("Could not find Tokens for Protocol Component."); // We expect all protocol components to have tokens.
+                // TODO: This is down for discussion - don't forget to remove this if not needed or deleting this comment.
+                let binding = Vec::new();
                 let contracts_by_pc: &Vec<Address> = protocol_component_contracts
                     .get(&pc.id)
-                    .expect("Could not find Contracts for Protocol Component."); // We expect all protocol components to have contracts.
+                    .unwrap_or(&binding); // We expect all protocol components to have contracts.
 
                 ProtocolComponent::from_storage(
                     pc.clone(),
@@ -373,8 +376,8 @@ where
                 let pc_id = protocol_db_id_map
                     .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
                     .expect("Could not find Protocol Component."); //Because we just inserted the protocol systems, there should not be any missing.
-                                                                   // However, trying to handle this via Results is needlessly difficult, because you
-                                                                   // can not use flat_map on a Result.
+                // However, trying to handle this via Results is needlessly difficult, because you
+                // can not use flat_map on a Result.
 
                 pc.get_byte_token_addresses()
                     .into_iter()
@@ -427,8 +430,8 @@ where
                 let pc_id = protocol_db_id_map
                     .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
                     .expect("Could not find Protocol Component."); //Because we just inserted the protocol systems, there should not be any missing.
-                                                                   // However, trying to handel this via Results is needlessly difficult, because you
-                                                                   // can not use flat_map on a Result.
+                // However, trying to handel this via Results is needlessly difficult, because you
+                // can not use flat_map on a Result.
 
                 pc.get_byte_contract_addresses()
                     .into_iter()
@@ -550,7 +553,7 @@ where
                     version_ts,
                     conn,
                 )
-                .await,
+                    .await,
                 system.to_string().as_str(),
             ),
             _ => self._decode_protocol_states(
@@ -579,10 +582,10 @@ where
                 .as_slice(),
             conn,
         )
-        .await?
-        .into_iter()
-        .map(|(id, hash, index, ts)| (hash, (id, index, ts)))
-        .collect();
+            .await?
+            .into_iter()
+            .map(|(id, hash, index, ts)| (hash, (id, index, ts)))
+            .collect();
 
         let components: HashMap<String, i64> = orm::ProtocolComponent::ids_by_external_ids(
             new.iter()
@@ -592,10 +595,10 @@ where
             chain_db_id,
             conn,
         )
-        .await?
-        .into_iter()
-        .map(|(id, external_id)| (external_id, id))
-        .collect();
+            .await?
+            .into_iter()
+            .map(|(id, external_id)| (external_id, id))
+            .collect();
 
         let mut state_data: Vec<(orm::NewProtocolState, i64)> = Vec::new();
 
@@ -1087,10 +1090,10 @@ where
                 end_ts,
                 conn,
             )
-            .await
-            .map_err(|err| {
-                StorageError::from_diesel(err, "ProtocolStates", chain.to_string().as_str(), None)
-            })?;
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolStates", chain.to_string().as_str(), None)
+                })?;
 
             // Decode final state deltas. We can assume both the deleted_attrs and state_updates
             // are sorted by component_id and transaction index. Therefore we can use slices to
@@ -1351,7 +1354,7 @@ mod test {
                 // ----- Block 02 LAST
             ],
         )
-        .await;
+            .await;
 
         let protocol_system_id_ambient =
             db_fixtures::insert_protocol_system(conn, "ambient".to_owned()).await;
@@ -1365,7 +1368,7 @@ mod test {
             None,
             Some(orm::ImplementationType::Custom),
         )
-        .await;
+            .await;
 
         // insert tokens
         let (account_id_weth, weth_id) =
@@ -1390,7 +1393,7 @@ mod test {
             txn[0],
             Bytes::from_str("C0C0C0").unwrap(),
         )
-        .await;
+            .await;
 
         // components and their balances
         // tvl will be 2.0
@@ -1404,7 +1407,7 @@ mod test {
             Some(vec![weth_id, usdc_id]),
             Some(vec![contract_code_id]),
         )
-        .await;
+            .await;
         db_fixtures::insert_component_balance(
             conn,
             Bytes::from(U256::exp10(18)),
@@ -1436,7 +1439,7 @@ mod test {
             Some(vec![weth_id, dai_id]),
             Some(vec![contract_code_id]),
         )
-        .await;
+            .await;
         db_fixtures::insert_component_balance(
             conn,
             Bytes::from(U256::exp10(18)),
@@ -1500,7 +1503,7 @@ mod test {
             Some(vec![weth_id, dai_id]),
             Some(vec![contract_code_id]),
         )
-        .await;
+            .await;
 
         // protocol state for state1-reserve1
         db_fixtures::insert_protocol_state(
@@ -1512,7 +1515,7 @@ mod test {
             None,
             Some(txn[2]),
         )
-        .await;
+            .await;
 
         // protocol state for state1-reserve2
         db_fixtures::insert_protocol_state(
@@ -1524,7 +1527,7 @@ mod test {
             None,
             None,
         )
-        .await;
+            .await;
 
         // protocol state update for state1-reserve1
         db_fixtures::insert_protocol_state(
@@ -1536,7 +1539,7 @@ mod test {
             Some(Bytes::from(U256::from(1100))),
             None,
         )
-        .await;
+            .await;
 
         db_fixtures::calculate_component_tvl(conn).await;
         tx_hashes.to_vec()
@@ -1547,8 +1550,8 @@ mod test {
             ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
             ("reserve2".to_owned(), Bytes::from(U256::from(500))),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         ProtocolState::new(
             "state1".to_owned(),
             attributes,
@@ -1563,7 +1566,6 @@ mod test {
     #[case::by_system(Some("ambient".to_string()), None)]
     #[case::by_ids(None, Some(vec ! ["state1"]))]
     #[tokio::test]
-
     async fn test_get_protocol_states(
         #[case] system: Option<String>,
         #[case] ids: Option<Vec<&str>>,
@@ -1584,7 +1586,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_get_protocol_states_at() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1596,8 +1597,8 @@ mod test {
             ("reserve1".to_owned(), Bytes::from(U256::from(1100))),
             ("reserve2".to_owned(), Bytes::from(U256::from(500))),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         protocol_state.attributes = attributes;
         protocol_state.modify_tx =
             "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
@@ -1628,7 +1629,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_update_protocol_states() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1648,9 +1648,9 @@ mod test {
                 schema::transaction::hash.eq(H256::from_str(
                     "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
                 )
-                .expect("valid txhash")
-                .as_bytes()
-                .to_owned()),
+                    .expect("valid txhash")
+                    .as_bytes()
+                    .to_owned()),
             )
             .select(schema::transaction::id)
             .first::<i64>(&mut conn)
@@ -1665,7 +1665,7 @@ mod test {
             None,
             None,
         )
-        .await;
+            .await;
 
         // update
         let mut new_state1 = protocol_state_delta();
@@ -1673,8 +1673,8 @@ mod test {
             ("reserve1".to_owned(), Bytes::from(U256::from(700))),
             ("reserve2".to_owned(), Bytes::from(U256::from(700))),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         new_state1.updated_attributes = attributes1.clone();
         new_state1.deleted_attributes = vec!["deletable".to_owned()]
             .into_iter()
@@ -1689,8 +1689,8 @@ mod test {
             ("reserve1".to_owned(), Bytes::from(U256::from(800))),
             ("reserve2".to_owned(), Bytes::from(U256::from(800))),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         new_state2.updated_attributes = attributes2.clone();
         let tx_2: H256 = "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
             .parse()
@@ -1804,7 +1804,7 @@ mod test {
             from_txn_id,
             protocol_component_id,
         )
-        .await;
+            .await;
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(2000)),
@@ -1814,7 +1814,7 @@ mod test {
             to_txn_id,
             protocol_component_id,
         )
-        .await;
+            .await;
 
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
@@ -1928,9 +1928,9 @@ mod test {
                 schema::transaction::hash.eq(H256::from_str(
                     "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
                 )
-                .expect("valid txhash")
-                .as_bytes()
-                .to_owned()),
+                    .expect("valid txhash")
+                    .as_bytes()
+                    .to_owned()),
             )
             .select(schema::transaction::id)
             .first::<i64>(&mut conn)
@@ -1941,9 +1941,9 @@ mod test {
                 schema::transaction::hash.eq(H256::from_str(
                     "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
                 )
-                .expect("valid txhash")
-                .as_bytes()
-                .to_owned()),
+                    .expect("valid txhash")
+                    .as_bytes()
+                    .to_owned()),
             )
             .select(schema::transaction::id)
             .first::<i64>(&mut conn)
@@ -1958,7 +1958,7 @@ mod test {
             None,
             Some(to_txn_id),
         )
-        .await;
+            .await;
 
         // set up deleted attribute different state (one that isn't also updated)
         let protocol_component_id2 = schema::protocol_component::table
@@ -1976,7 +1976,7 @@ mod test {
             None,
             Some(to_txn_id),
         )
-        .await;
+            .await;
 
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
@@ -2027,9 +2027,9 @@ mod test {
                 schema::transaction::hash.eq(H256::from_str(
                     "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
                 )
-                .expect("valid txhash")
-                .as_bytes()
-                .to_owned()),
+                    .expect("valid txhash")
+                    .as_bytes()
+                    .to_owned()),
             )
             .select(schema::transaction::id)
             .first::<i64>(&mut conn)
@@ -2044,7 +2044,7 @@ mod test {
             None,
             None,
         )
-        .await;
+            .await;
 
         // set up deleted attribute state (to be created on revert)
         let from_txn_id = schema::transaction::table
@@ -2052,9 +2052,9 @@ mod test {
                 schema::transaction::hash.eq(H256::from_str(
                     "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54",
                 )
-                .expect("valid txhash")
-                .as_bytes()
-                .to_owned()),
+                    .expect("valid txhash")
+                    .as_bytes()
+                    .to_owned()),
             )
             .select(schema::transaction::id)
             .first::<i64>(&mut conn)
@@ -2065,9 +2065,9 @@ mod test {
                 schema::transaction::hash.eq(H256::from_str(
                     "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388",
                 )
-                .expect("valid txhash")
-                .as_bytes()
-                .to_owned()),
+                    .expect("valid txhash")
+                    .as_bytes()
+                    .to_owned()),
             )
             .select(schema::transaction::id)
             .first::<i64>(&mut conn)
@@ -2082,7 +2082,7 @@ mod test {
             None,
             Some(to_txn_id),
         )
-        .await;
+            .await;
 
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
@@ -2091,8 +2091,8 @@ mod test {
             ("reserve1".to_owned(), Bytes::from(U256::from(1100))),
             ("deleted".to_owned(), Bytes::from(U256::from(1000))),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let state_delta = ProtocolStateDelta {
             component_id: "state1".to_owned(),
             updated_attributes: attributes,
@@ -2165,7 +2165,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_get_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2196,7 +2195,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_add_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2209,8 +2207,8 @@ mod test {
             &Bytes::from_str(WETH.trim_start_matches("0x")).expect("address ok"),
             &mut conn,
         )
-        .await
-        .unwrap()[0];
+            .await
+            .unwrap()[0];
 
         let usdt_symbol = "USDT".to_string();
         let tokens = [
@@ -2245,8 +2243,8 @@ mod test {
             &Bytes::from_str(USDT.trim_start_matches("0x")).expect("address ok"),
             &mut conn,
         )
-        .await
-        .unwrap()[0];
+            .await
+            .unwrap()[0];
         assert_eq!(inserted_account.id, inserted_token.account_id);
         assert_eq!(inserted_account.title, "Ethereum_USDT".to_string());
 
@@ -2257,8 +2255,8 @@ mod test {
             &Bytes::from_str(WETH.trim_start_matches("0x")).expect("address ok"),
             &mut conn,
         )
-        .await
-        .unwrap()[0];
+            .await
+            .unwrap()[0];
         assert_eq!(new_account, old_account);
         assert!(inserted_account.id > new_account.id);
     }
@@ -2379,7 +2377,7 @@ mod test {
             creation_tx: H256::from_str(
                 "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
             )
-            .unwrap(),
+                .unwrap(),
             created_at: Default::default(),
         };
 
@@ -2472,7 +2470,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_delete_protocol_components() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2511,11 +2508,11 @@ mod test {
             .into_iter()
             .for_each(|ts| assert!(ts.is_some(), "Found None in updated_ts"));
     }
+
     #[rstest]
     #[case::get_one(Some("zigzag".to_string()))]
     #[case::get_none(Some("ambient".to_string()))]
     #[tokio::test]
-
     async fn test_get_protocol_components_with_system_only(#[case] system: Option<String>) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -2552,7 +2549,6 @@ mod test {
     #[case::get_one("state1".to_string())]
     #[case::get_none("state2".to_string())]
     #[tokio::test]
-
     async fn test_get_protocol_components_with_external_id_only(#[case] external_id: String) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;

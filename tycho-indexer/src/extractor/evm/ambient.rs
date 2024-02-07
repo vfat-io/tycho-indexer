@@ -8,8 +8,7 @@ use std::{
 
 use async_trait::async_trait;
 use diesel_async::{
-    pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
-    AsyncPgConnection,
+    pooled_connection::deadpool::Pool, AsyncPgConnection,
 };
 use ethers::types::{H160, H256};
 use mockall::automock;
@@ -341,7 +340,8 @@ impl AmbientGateway for AmbientPgGateway {
         changes: &evm::BlockContractChanges,
         new_cursor: &str,
     ) -> Result<(), StorageError> {
-        self.forward(changes, new_cursor).await;
+        self.forward(changes, new_cursor)
+            .await?;
         Ok(())
     }
 

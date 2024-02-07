@@ -1,11 +1,8 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
-use diesel_async::{
-    pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
-    AsyncPgConnection,
-};
-use ethers::prelude::{H160, H256};
+use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
+use ethers::prelude::H256;
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
@@ -110,14 +107,16 @@ impl NativePgGateway {
             .upsert_block(&changes.block)
             .await?;
 
-        let mut txs: Vec<evm::Transaction> = vec![];
 
         let mut new_protocol_components: Vec<evm::ProtocolComponent> = vec![];
         let mut state_updates: Vec<(TxHash, evm::ProtocolStateDelta)> = vec![];
         let mut balance_changes: Vec<evm::ComponentBalance> = vec![];
 
         for tx in changes.state_updates.iter() {
-            txs.push(tx.tx.clone());
+            self.state_gateway
+                .upsert_tx(&changes.block, &tx.tx)
+                .await?;
+
             let hash: TxHash = tx.tx.hash.into();
 
             for (_component_id, new_protocol_component) in tx.new_protocol_components.iter() {
@@ -129,7 +128,7 @@ impl NativePgGateway {
             }
 
             for (_component_id, tokens) in tx.balance_changes.iter() {
-                for (_token, tvl_change) in tokens {
+                for tvl_change in tokens.values() {
                     balance_changes.push(tvl_change.clone());
                 }
             }
@@ -241,7 +240,8 @@ impl NativeGateway for NativePgGateway {
         changes: &evm::BlockEntityChanges,
         new_cursor: &str,
     ) -> Result<(), StorageError> {
-        self.forward(changes, new_cursor).await;
+        self.forward(changes, new_cursor)
+            .await?;
         Ok(())
     }
 
@@ -261,8 +261,8 @@ impl NativeGateway for NativePgGateway {
 }
 
 impl<G> NativeContractExtractor<G>
-where
-    G: NativeGateway,
+    where
+        G: NativeGateway,
 {
     pub async fn new(
         name: &str,
@@ -301,8 +301,8 @@ where
 
 #[async_trait]
 impl<G> Extractor for NativeContractExtractor<G>
-where
-    G: NativeGateway,
+    where
+        G: NativeGateway,
 {
     fn get_id(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.name)
@@ -417,29 +417,25 @@ where
         Ok((!changes.state_updates.is_empty()).then_some(Arc::new(changes)))
     }
 
-    async fn handle_progress(&self, inp: ModulesProgress) -> Result<(), ExtractionError> {
+    async fn handle_progress(&self, _inp: ModulesProgress) -> Result<(), ExtractionError> {
         todo!()
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        extractor::evm,
-        models::{FinancialType, ImplementationType},
-        pb::sf::substreams::v1::BlockRef,
-    };
-    use tycho_types::Bytes;
+    use crate::{extractor::evm, pb::sf::substreams::v1::BlockRef};
 
     use super::*;
 
     use std::collections::HashMap;
+    use tycho_types::Bytes;
 
     const EXTRACTOR_NAME: &str = "TestExtractor";
     const TEST_PROTOCOL: &str = "TestProtocol";
 
     async fn create_extractor(gw: MockNativeGateway) -> NativeContractExtractor<MockNativeGateway> {
-        let protocol_types = HashMap::new();
+        let protocol_types = HashMap::from([("WeightedPool".to_string(), ProtocolType::default())]);
 
         NativeContractExtractor::new(
             EXTRACTOR_NAME,
@@ -448,8 +444,8 @@ mod test {
             gw,
             protocol_types,
         )
-        .await
-        .expect("Failed to create extractor")
+            .await
+            .expect("Failed to create extractor")
     }
 
     #[tokio::test]
@@ -481,7 +477,6 @@ mod test {
             .times(1)
             .returning(|_, _| Ok(()));
 
-        let protocol_types = HashMap::from([("WeightedPool".to_string(), ProtocolType::default())]);
         let extractor = create_extractor(gw).await;
 
         let inp = evm::fixtures::pb_block_scoped_data(evm::fixtures::pb_block_entity_changes());
@@ -541,20 +536,20 @@ mod test {
                 c.clone().unwrap() ==
                     BlockIdentifier::Hash(
                         Bytes::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000031323334",
+                            "0x0000000000000000000000000000000000000000000000000000000000000000",
                         )
-                        .unwrap(),
+                            .unwrap(),
                     ) &&
                     v == &BlockIdentifier::Hash(evm::fixtures::HASH_256_0.into()) &&
                     cursor == "cursor@400"
             })
             .times(1)
-            .returning(|_, _, _| Ok(evm::BlockEntityChanges::default()));
+            .returning(|_, _, _| Ok(evm::BlockEntityChangesResult::default()));
         let extractor = create_extractor(gw).await;
         // Call handle_tick_scoped_data to initialize the last processed block.
         let inp = evm::fixtures::pb_block_scoped_data(evm::fixtures::pb_block_entity_changes());
 
-        let res = extractor
+        let _res = extractor
             .handle_tick_scoped_data(inp)
             .await
             .unwrap();
@@ -622,4 +617,338 @@ mod test {
     //     assert!(state.last_processed_block.is_some());
     //     assert_eq!(state.last_processed_block.unwrap(), new_block);
     // }
+}
+
+mod test_serial_db {
+    //! It is notoriously hard to mock postgres here, we would need to have traits and abstractions
+    //! for the connection pooling as well as for transaction handling so the easiest way
+    //! forward is to just run these tests against a real postgres instance.
+    //!
+    //! The challenge here is to leave the database empty. So we need to initiate a test transaction
+    //! and should avoid calling the trait methods which start a transaction of their own. So we do
+    //! that by moving the main logic of each trait method into a private method and test this
+    //! method instead.
+    //!
+    //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
+    //! between this component and the actual db interactions
+    use crate::storage::{
+        postgres,
+        postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
+        ChangeType, ContractId,
+    };
+    use ethers::types::U256;
+    use mpsc::channel;
+    use std::collections::{HashMap, HashSet};
+    use actix_web::web::post;
+    use ethers::prelude::H160;
+    use test_serial_db::evm::ProtocolChangesWithTx;
+    use tokio::sync::{
+        mpsc,
+        mpsc::{error::TryRecvError::Empty, Receiver},
+    };
+    use tycho_types::Bytes;
+    use crate::extractor::evm::ambient::AmbientPgGateway;
+    use crate::extractor::evm::{ProtocolComponent, ProtocolStateDelta};
+    use crate::storage::postgres::orm::{FinancialType, ImplementationType};
+    use crate::storage::postgres::schema::chain::dsl::chain;
+
+    use super::*;
+
+    const TX_HASH_0: &str = "0x2f6350a292c0fc918afe67cb893744a080dacb507b0cea4cc07437b8aff23cdb";
+    const TX_HASH_1: &str = "0x0d9e0da36cf9f305a189965b248fc79c923619801e8ab5ef158d4fd528a291ad";
+    const BLOCK_HASH_0: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
+    const CREATED_CONTRACT: &str = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc";
+
+    async fn setup_gw(
+        pool: Pool<AsyncPgConnection>,
+    ) -> (NativePgGateway, Receiver<StorageError>, Pool<AsyncPgConnection>) {
+        let mut conn = pool
+            .get()
+            .await
+            .expect("pool should get a connection");
+        let chain_id = postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        postgres::db_fixtures::insert_protocol_system(&mut conn, "test".to_owned()).await;
+        postgres::db_fixtures::insert_protocol_type(&mut conn, "Pool", Some(FinancialType::Swap), None, Some(ImplementationType::Custom)).await;
+
+        // TODO: Implement token insertion logic to prevent needing this.
+        postgres::db_fixtures::insert_token(&mut conn, chain_id, "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "USDC", 6).await;
+        postgres::db_fixtures::insert_token(&mut conn, chain_id, "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "WETH", 18).await;
+
+        let evm_gw = Arc::new(
+            PostgresGateway::<
+                evm::Block,
+                evm::Transaction,
+                evm::Account,
+                evm::AccountUpdate,
+                evm::ERC20Token,
+            >::from_connection(&mut conn)
+                .await,
+        );
+
+        let (tx, rx) = channel(10);
+        let (err_tx, err_rx) = channel(10);
+
+        let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
+            "ethereum".to_owned(),
+            Chain::Ethereum,
+            pool.clone(),
+            evm_gw.clone(),
+            rx,
+            err_tx,
+        );
+
+        let handle = write_executor.run();
+        let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
+
+        let gw = NativePgGateway::new("native:test", Chain::Ethereum, pool.clone(), cached_gw);
+        (gw, err_rx, pool)
+    }
+
+    #[tokio::test]
+    async fn test_get_cursor() {
+        run_against_db(|pool| async move {
+            let (gw, mut err_rx, pool) = setup_gw(pool).await;
+            let evm_gw = gw.state_gateway.clone();
+            let state = ExtractionState::new(
+                "native:test".to_string(),
+                Chain::Ethereum,
+                None,
+                "cursor@420".as_bytes(),
+            );
+            let mut conn = pool
+                .get()
+                .await
+                .expect("pool should get a connection");
+            evm_gw
+                .save_state(&state, &mut conn)
+                .await
+                .expect("extaction state insertion succeeded");
+
+            let maybe_err = err_rx
+                .try_recv()
+                .expect_err("Error channel should be empty");
+
+            let cursor = gw
+                .get_last_cursor(&mut conn)
+                .await
+                .expect("get cursor should succeed");
+
+            assert_eq!(cursor, "cursor@420".as_bytes());
+            // Assert no error happened
+            assert_eq!(maybe_err, Empty);
+        })
+            .await;
+    }
+
+    fn native_pool_creation() -> evm::BlockEntityChanges {
+        evm::BlockEntityChanges {
+            extractor: "native:test".to_owned(),
+            chain: Chain::Ethereum,
+            block: evm::Block::default(),
+            revert: false,
+            state_updates: vec![ProtocolChangesWithTx {
+                tx: evm::fixtures::transaction01(),
+                protocol_states: HashMap::new(),
+                balance_changes: HashMap::new(),
+                new_protocol_components: HashMap::from([(
+                    "Pool".to_string(),
+                    evm::ProtocolComponent {
+                        id: CREATED_CONTRACT.to_string(),
+                        protocol_system: "test".to_string(),
+                        protocol_type_name: "Pool".to_string(),
+                        chain: Chain::Ethereum,
+                        tokens: vec![
+                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                        ],
+                        contract_ids: vec![],
+                        creation_tx: Default::default(),
+                        static_attributes: Default::default(),
+                        created_at: Default::default(),
+                        change: Default::default(),
+                    },
+                )]),
+            }],
+            new_protocol_components: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_upsert_contract() {
+        run_against_db(|pool| async move {
+            let (gw, mut err_rx, pool) = setup_gw(pool).await;
+            let msg = native_pool_creation();
+
+            let exp = [ProtocolComponent {
+                id: CREATED_CONTRACT.to_string(),
+                protocol_system: "test".to_string(),
+                protocol_type_name: "Pool".to_string(),
+                chain: Chain::Ethereum,
+                tokens: vec![
+                    H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                ],
+                contract_ids: vec![],
+                creation_tx: Default::default(),
+                static_attributes: Default::default(),
+                created_at: Default::default(),
+                change: Default::default(),
+            }];
+
+            gw.forward(&msg, "cursor@500")
+                .await
+                .expect("upsert should succeed");
+
+            let cached_gw: CachedGateway = gw.state_gateway;
+            cached_gw
+                .flush()
+                .await
+                .expect("Received signal ok")
+                .expect("Flush ok");
+
+            let maybe_err = err_rx
+                .try_recv()
+                .expect_err("Error channel should be empty");
+
+            let mut conn = pool
+                .get()
+                .await
+                .expect("pool should get a connection");
+            let res = cached_gw
+                .get_protocol_components(
+                    &Chain::Ethereum,
+                    None,
+                    Some([CREATED_CONTRACT].as_slice()),
+                    &mut conn,
+                )
+                .await
+                .expect("test successfully inserted native contract");
+            println!("{:?}", res);
+            assert_eq!(res, exp);
+            // Assert no error happened
+            assert_eq!(maybe_err, Empty);
+        })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_revert() {
+        run_against_db(|pool| async move {
+            let mut conn = pool
+                .get()
+                .await
+                .expect("pool should get a connection");
+            postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
+            let evm_gw = Arc::new(
+                PostgresGateway::<
+                    evm::Block,
+                    evm::Transaction,
+                    evm::Account,
+                    evm::AccountUpdate,
+                    evm::ERC20Token,
+                >::from_connection(&mut conn)
+                    .await,
+            );
+
+            let (tx, rx) = channel(10);
+            let (err_tx, mut err_rx) = channel(10);
+
+            let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
+                "ethereum".to_owned(),
+                Chain::Ethereum,
+                pool.clone(),
+                evm_gw.clone(),
+                rx,
+                err_tx,
+            );
+
+            let handle = write_executor.run();
+            let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
+
+            let gw = NativePgGateway::new("native::test", Chain::Ethereum, pool.clone(), cached_gw);
+
+            let msg0 = native_pool_creation();
+
+            let res1_value = 1000_u64.to_be_bytes().to_vec();
+            let res2_value = 500_u64.to_be_bytes().to_vec();
+            let state = ProtocolStateDelta {
+                component_id: CREATED_CONTRACT.to_string(),
+                updated_attributes: vec![
+                    ("reserve1".to_owned(), Bytes::from(res1_value)),
+                    ("reserve2".to_owned(), Bytes::from(res2_value)),
+                ]
+                    .into_iter()
+                    .collect(),
+                deleted_attributes: HashSet::new(),
+            };
+
+            let msg1 = evm::BlockEntityChanges {
+                extractor: "native:test".to_owned(),
+                chain: Chain::Ethereum,
+                block: evm::Block {
+                    number: 1,
+                    chain: Chain::Ethereum,
+                    hash: BLOCK_HASH_0.parse().unwrap(),
+                    parent_hash: H256::zero(),
+                    ts: "2020-01-01T01:00:00".parse().unwrap(),
+                },
+                revert: false,
+                state_updates: vec![ProtocolChangesWithTx {
+                    tx: evm::fixtures::transaction01(),
+                    protocol_states: HashMap::from([(TX_HASH_0.to_owned(), state)]),
+                    balance_changes: HashMap::new(),
+                    new_protocol_components: HashMap::new(),
+                }],
+                new_protocol_components: HashMap::new(),
+            };
+
+            gw.forward(&msg0, "cursor@0")
+                .await
+                .expect("upsert should succeed");
+            gw.forward(&msg1, "cursor@1")
+                .await
+                .expect("upsert should succeed");
+
+
+            let del_attributes: HashSet<String> = vec!["reserve1".to_owned(), "reserve2".to_owned()]
+                .into_iter()
+                .collect();
+            let exp_change = evm::ProtocolStateDelta {
+                component_id: CREATED_CONTRACT.to_string(),
+                updated_attributes: HashMap::new(),
+                deleted_attributes: del_attributes,
+            };
+
+            let changes = gw
+                .backward(
+                    None,
+                    &BlockIdentifier::Number((Chain::Ethereum, 0)),
+                    "cursor@2",
+                    &mut conn,
+                )
+                .await
+                .expect("revert should succeed");
+
+            let maybe_err = err_rx
+                .try_recv()
+                .expect_err("Error channel should be empty");
+
+            assert_eq!(changes.state_updates.len(), 1);
+
+            assert_eq!(changes.state_updates[&CREATED_CONTRACT.to_string()], exp_change);
+            let cached_gw: CachedGateway = gw.state_gateway;
+            let res = cached_gw
+                .get_protocol_components(
+                    &Chain::Ethereum,
+                    None,
+                    Some([CREATED_CONTRACT].as_slice()),
+                    &mut conn,
+                )
+                .await
+                .expect("test successfully inserted native contract");
+            // Assert no error happened
+            assert_eq!(maybe_err, Empty);
+        })
+            .await;
+    }
 }

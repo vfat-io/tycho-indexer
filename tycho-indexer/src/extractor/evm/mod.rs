@@ -924,7 +924,7 @@ impl ProtocolChangesWithTx {
                 change.clone(),
                 block.chain,
                 &protocol_system,
-                &protocol_types,
+                protocol_types,
                 tx.hash,
                 block.ts,
             )?;
@@ -956,7 +956,7 @@ impl ProtocolChangesWithTx {
             // warning
             let token_balances = component_balances
                 .entry(component_balance.component_id.clone())
-                .or_insert_with(HashMap::new);
+                .or_default();
 
             if let Some(existing_balance) =
                 token_balances.insert(component_balance.token, component_balance)
@@ -1030,7 +1030,7 @@ impl ProtocolChangesWithTx {
             let token_balances = self
                 .balance_changes
                 .entry(component_id)
-                .or_insert_with(HashMap::new);
+                .or_default();
             for (token, balance) in balance_changes {
                 token_balances.insert(token, balance);
             }
@@ -1430,7 +1430,7 @@ pub mod fixtures {
             changes: vec![
                 TransactionEntityChanges {
                     tx: Some(Transaction {
-                        hash: vec![0x0, 0x0, 0x0, 0x0],
+                        hash: vec![0x0, 0x0, 0x0, 0x1],
                         from: vec![0x0, 0x0, 0x0, 0x0],
                         to: vec![0x0, 0x0, 0x0, 0x0],
                         index: 10,
