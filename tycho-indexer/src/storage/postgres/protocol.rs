@@ -502,7 +502,7 @@ where
         };
 
         match (ids, system) {
-            (Some(ids), Some(system)) => {
+            (Some(ids), Some(_)) => {
                 warn!("Both protocol IDs and system were provided. System will be ignored.");
                 self._decode_protocol_states(
                     orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
@@ -536,8 +536,6 @@ where
         new: &[(TxHash, &ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        let chain_db_id = self.get_chain_id(chain);
-
         let new = new
             .iter()
             .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_owned()) })
@@ -900,15 +898,17 @@ where
                     schema::protocol_component::external_id,
                     schema::account::address,
                     new_balance,
+                    balance_float,
                     schema::transaction::hash,
                 ))
-                .get_results::<(String, Address, Balance, TxHash)>(conn)
+                .get_results::<(String, Address, Balance, f64, TxHash)>(conn)
                 .await?
                 .into_iter()
-                .map(|(external_id, address, balance, tx)| ComponentBalance {
+                .map(|(external_id, address, balance, bal_f64, tx)| ComponentBalance {
                     component_id: external_id,
                     token: address.into(),
                     new_balance: balance,
+                    balance_float: bal_f64,
                     modify_tx: tx.into(),
                 })
                 .collect()
@@ -959,6 +959,7 @@ where
                     component_id: external_id,
                     token: address.into(),
                     new_balance: balance,
+                    balance_float: f64::NAN,
                     modify_tx: tx.into(),
                 })
                 .collect()
@@ -1121,7 +1122,7 @@ where
                 // sort through state updates and deletions
                 let mut updates = HashMap::new();
                 let mut deleted = HashSet::new();
-                for (component, attribute, prev_value) in states_slice {
+                for (_, attribute, prev_value) in states_slice {
                     if let Some(value) = prev_value {
                         // if prev_value is not null, then the attribute was updated and
                         // must be reverted via a reversed update
@@ -1181,7 +1182,7 @@ mod test {
         extractor::evm::{self, ERC20Token},
         storage::{BlockIdentifier, ChangeType},
     };
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Utc};
+    use chrono::{NaiveDateTime, Utc};
     use diesel_async::AsyncConnection;
     use ethers::{prelude::H160, types::U256};
     use rstest::rstest;
@@ -1267,9 +1268,8 @@ mod test {
         let (account_id_weth, weth_id) =
             db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
                 .await;
-        let (account_id_usdc, usdc_id) =
-            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
-                .await;
+
+        db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6).await;
 
         let contract_code_id = db_fixtures::insert_contract_code(
             conn,
@@ -1290,7 +1290,7 @@ mod test {
             Some(vec![contract_code_id]),
         )
         .await;
-        let protocol_component_id2 = db_fixtures::insert_protocol_component(
+        db_fixtures::insert_protocol_component(
             conn,
             "state3",
             chain_id,
@@ -1453,9 +1453,6 @@ mod test {
             .first::<i64>(&mut conn)
             .await
             .expect("Failed to fetch protocol component id");
-        let tx_hash: Bytes = "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
-            .as_bytes()
-            .into();
         let txn_id = schema::transaction::table
             .filter(
                 schema::transaction::hash.eq(H256::from_str(
@@ -1610,6 +1607,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(1000)),
+            1000.0,
             token_id,
             from_txn_id,
             protocol_component_id,
@@ -1618,6 +1616,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(2000)),
+            2000.0,
             token_id,
             to_txn_id,
             protocol_component_id,
@@ -1630,6 +1629,7 @@ mod test {
             component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
             new_balance: Balance::from(U256::from(2000)),
+            balance_float: 2000.0,
             modify_tx: to_tx_hash,
         }];
 
@@ -1649,11 +1649,12 @@ mod test {
             component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
             new_balance: Balance::from(U256::from(1000)),
+            balance_float: 0.0,
             modify_tx: from_tx_hash,
         }];
 
         // test backward case
-        let result = gateway
+        let mut result = gateway
             .get_balance_deltas(
                 &Chain::Ethereum,
                 Some(&BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2)))),
@@ -1662,6 +1663,9 @@ mod test {
             )
             .await
             .unwrap();
+        // workaround for nan type
+        assert!(result[0].balance_float.is_nan());
+        result[0].balance_float = 0.0;
         assert_eq!(result, expected_backward_deltas);
     }
 
@@ -1894,10 +1898,6 @@ mod test {
         let mut conn = setup_db().await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
-        let d = NaiveDate::from_ymd_opt(2015, 6, 3).unwrap();
-        let t = NaiveTime::from_hms_milli_opt(12, 34, 56, 789).unwrap();
-        let dt = NaiveDateTime::new(d, t);
-
         let protocol_type = models::ProtocolType {
             name: "Protocol".to_string(),
             financial_type: FinancialType::Debt,
@@ -2033,6 +2033,7 @@ mod test {
         let component_balance = ComponentBalance {
             token: base_token,
             new_balance: Bytes::from(&[0u8]),
+            balance_float: 0.0,
             modify_tx: tx_hash,
             component_id: protocol_component_id,
         };
@@ -2080,8 +2081,7 @@ mod test {
         let protocol_type_id_1 =
             db_fixtures::insert_protocol_type(&mut conn, &protocol_type_name_1, None, None, None)
                 .await;
-        let protocol_type_id_2 =
-            db_fixtures::insert_protocol_type(&mut conn, "Test_Type_2", None, None, None).await;
+        db_fixtures::insert_protocol_type(&mut conn, "Test_Type_2", None, None, None).await;
         let protocol_system = "ambient".to_string();
         let chain = Chain::Ethereum;
         let original_component = ProtocolComponent {
