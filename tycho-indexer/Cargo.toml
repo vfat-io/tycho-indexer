@@ -54,6 +54,7 @@ typetag = "0.2"
 utoipa = { version = "4.2.0", features = ["chrono"] }
 utoipa-swagger-ui = { version = "6.0.0", features = ["actix-web"] }
 lru = "0.12.1"
+itertools = "0.12.1"
 
 [dev-dependencies]
 actix-rt = "2.9.0"

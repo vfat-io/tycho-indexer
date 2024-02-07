@@ -1,13 +1,13 @@
 #![allow(unused_variables)]
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
+use diesel::prelude::*;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use itertools::Itertools;
 use std::{
     cmp::Ordering,
     collections::{BTreeSet, HashMap, HashSet},
 };
-
-use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use tracing::{instrument, warn};
 
 use crate::{
@@ -995,6 +995,56 @@ where
         Ok(res)
     }
 
+    async fn get_balances(
+        &self,
+        chain: &Chain,
+        ids: Option<&[&str]>,
+        at: Option<&BlockOrTimestamp>,
+        conn: &mut Self::DB,
+    ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
+        let version_ts = match &at {
+            Some(version) => Some(version.to_ts(conn).await?),
+            None => None,
+        };
+
+        let mut q = schema::component_balance::table
+            .inner_join(schema::protocol_component::table)
+            .inner_join(schema::token::table.inner_join(schema::account::table))
+            .select((
+                schema::protocol_component::external_id,
+                schema::account::address,
+                schema::component_balance::balance_float,
+            ))
+            .filter(
+                schema::component_balance::valid_to
+                    .gt(version_ts) // if version_ts is None, diesel equates this expression to "False"
+                    .or(schema::component_balance::valid_to.is_null()),
+            )
+            .into_boxed();
+
+        if let Some(external_ids) = ids {
+            q = q.filter(schema::protocol_component::external_id.eq_any(external_ids))
+        }
+
+        let balances: HashMap<_, _> = q
+            .get_results::<(String, Bytes, f64)>(conn)
+            .await?
+            .into_iter()
+            .group_by(|e| e.0.clone())
+            .into_iter()
+            .map(|(cid, group)| {
+                (
+                    cid,
+                    group
+                        .map(|(_, addr, bal)| (addr, bal))
+                        .collect::<HashMap<_, _>>(),
+                )
+            })
+            .collect();
+
+        Ok(balances)
+    }
+
     async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
@@ -1259,6 +1309,8 @@ mod test {
     const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
     const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
+    const LUSD: &str = "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0";
+    const DAI: &str = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -1319,8 +1371,18 @@ mod test {
         let (account_id_weth, weth_id) =
             db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
                 .await;
+        let (account_id_usdc, usdc_id) =
+            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
+                .await;
+        let (account_id_dai, dai_id) =
+            db_fixtures::insert_token(conn, chain_id, DAI.trim_start_matches("0x"), "DAI", 18)
+                .await;
+        let (account_id_lusd, lusd_id) =
+            db_fixtures::insert_token(conn, chain_id, LUSD.trim_start_matches("0x"), "LUSD", 18)
+                .await;
 
-        db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6).await;
+        // insert token prices
+        db_fixtures::insert_token_prices(&[(weth_id, 1.0), (usdc_id, 0.005)], conn).await;
 
         let contract_code_id = db_fixtures::insert_contract_code(
             conn,
@@ -1330,6 +1392,7 @@ mod test {
         )
         .await;
 
+        // components and their balances
         let protocol_component_id = db_fixtures::insert_protocol_component(
             conn,
             "state1",
@@ -1337,30 +1400,84 @@ mod test {
             protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
-            Some(vec![weth_id]),
+            Some(vec![weth_id, usdc_id]),
             Some(vec![contract_code_id]),
         )
         .await;
-        db_fixtures::insert_protocol_component(
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::exp10(18)),
+            1e18,
+            weth_id,
+            txn[0],
+            protocol_component_id,
+        )
+        .await;
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::from(2000) * U256::exp10(6)),
+            2000.0 * 1e6,
+            usdc_id,
+            txn[0],
+            protocol_component_id,
+        )
+        .await;
+        let protocol_component_id2 = db_fixtures::insert_protocol_component(
             conn,
             "state3",
             chain_id,
             protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
-            Some(vec![weth_id]),
+            Some(vec![weth_id, dai_id]),
             Some(vec![contract_code_id]),
         )
         .await;
-        db_fixtures::insert_protocol_component(
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::exp10(18)),
+            1e18,
+            weth_id,
+            txn[0],
+            protocol_component_id2,
+        )
+        .await;
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::from(2000) * U256::exp10(18)),
+            2000.0 * 1e18,
+            dai_id,
+            txn[0],
+            protocol_component_id2,
+        )
+        .await;
+        let protocol_component_id3 = db_fixtures::insert_protocol_component(
             conn,
             "state2",
             chain_id_sn,
             protocol_system_id_zz,
             protocol_type_id,
             txn[1],
-            Some(vec![weth_id]),
+            Some(vec![lusd_id, usdc_id]),
             Some(vec![contract_code_id]),
+        )
+        .await;
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::from(2000) * U256::exp10(18)),
+            1e18,
+            lusd_id,
+            txn[0],
+            protocol_component_id3,
+        )
+        .await;
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::from(2000) * U256::exp10(6)),
+            2000.0 * 1e6,
+            usdc_id,
+            txn[0],
+            protocol_component_id3,
         )
         .await;
 
@@ -1633,6 +1750,7 @@ mod test {
             .first::<Address>(&mut conn)
             .await
             .expect("Failed to fetch token address");
+
         let from_tx_hash =
             H256::from_str("0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54")
                 .expect("valid txhash");
@@ -1698,13 +1816,59 @@ mod test {
             .unwrap();
         assert_eq!(result, expected_forward_deltas);
 
-        let expected_backward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
-            component_id: protocol_external_id.clone(),
-            token: token_address.clone().into(),
-            balance: Balance::from(U256::from(0)),
-            balance_float: 0.0,
-            modify_tx: from_tx_hash,
-        }];
+        let expected_txh: H256 = "bb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+            .parse()
+            .unwrap();
+        let expected_backward_deltas: Vec<ComponentBalance> = vec![
+            ComponentBalance {
+                token: DAI
+                    .trim_start_matches("0x")
+                    .parse()
+                    .unwrap(),
+                new_balance: Bytes::from(
+                    "0x00000000000000000000000000000000000000000000006c6b935b8bbd400000",
+                ),
+                balance_float: 0.0,
+                modify_tx: expected_txh.clone(),
+                component_id: "state3".to_owned(),
+            },
+            ComponentBalance {
+                token: USDC
+                    .trim_start_matches("0x")
+                    .parse()
+                    .unwrap(),
+                new_balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000000000077359400",
+                ),
+                balance_float: 0.0,
+                modify_tx: expected_txh.clone(),
+                component_id: "state1".to_owned(),
+            },
+            ComponentBalance {
+                token: WETH
+                    .trim_start_matches("0x")
+                    .parse()
+                    .unwrap(),
+                new_balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
+                ),
+                balance_float: 0.0,
+                modify_tx: expected_txh.clone(),
+                component_id: "state1".to_owned(),
+            },
+            ComponentBalance {
+                token: WETH
+                    .trim_start_matches("0x")
+                    .parse()
+                    .unwrap(),
+                new_balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
+                ),
+                balance_float: 0.0,
+                modify_tx: expected_txh.clone(),
+                component_id: "state3".to_owned(),
+            },
+        ];
 
         // test backward case
         let mut result = gateway
@@ -1716,9 +1880,12 @@ mod test {
             )
             .await
             .unwrap();
-        // workaround for nan type
-        assert!(result[0].balance_float.is_nan());
-        result[0].balance_float = 0.0;
+        result.sort_unstable_by_key(|e| (e.token, e.component_id.clone()));
+        // fix NaN comparison
+        result.iter_mut().for_each(|r| {
+            assert!(r.balance_float.is_nan());
+            r.balance_float = 0.0;
+        });
         assert_eq!(result, expected_backward_deltas);
     }
 
@@ -1987,7 +2154,7 @@ mod test {
             .get_tokens(Chain::Ethereum, None, &mut conn)
             .await
             .unwrap();
-        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens.len(), 4);
 
         // get weth and usdc
         let tokens = gw
@@ -2076,56 +2243,53 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-
         let tx_hash =
             H256::from_str("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")
                 .unwrap();
-
-        let protocol_component_id: String = String::from("state2");
+        let component_external_id = "state2".to_owned();
         let base_token = H160::from_str(WETH.trim_start_matches("0x")).unwrap();
-
         // Test the case where a previous balance doesn't exist
         let component_balance = ComponentBalance {
             token: base_token,
-            balance: Balance::from(U256::from(1000)),
-            balance_float: 0.0,
+            new_balance: Bytes::from(&[12u8]),
+            balance_float: 12.0,
             modify_tx: tx_hash,
-            component_id: protocol_component_id.clone(),
+            component_id: component_external_id,
         };
-
-        let component_balances = vec![&component_balance];
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
-        gw.add_component_balances(&component_balances, &Chain::Starknet, block_ts, &mut conn)
+        gw.add_component_balances(&[&component_balance], &Chain::Starknet, block_ts, &mut conn)
             .await
             .unwrap();
 
         let inserted_data = schema::component_balance::table
             .select(orm::ComponentBalance::as_select())
+            .filter(schema::component_balance::new_balance.eq(Bytes::from(&[12u8])))
             .first::<orm::ComponentBalance>(&mut conn)
-            .await;
+            .await
+            .expect("retrieving inserted balance failed!");
 
         assert!(inserted_data.is_ok());
         let inserted_data: orm::ComponentBalance = inserted_data.unwrap();
 
-        assert_eq!(inserted_data.new_balance, Balance::from(U256::from(1000)));
+        assert_eq!(inserted_data.new_balance, Balance::from(U256::from(12)));
         assert_eq!(inserted_data.previous_value, Balance::from(U256::from(0)),);
 
         let referenced_token = schema::token::table
             .filter(schema::token::id.eq(inserted_data.token_id))
             .select(orm::Token::as_select())
             .first::<orm::Token>(&mut conn)
-            .await;
-        let referenced_token: orm::Token = referenced_token.unwrap();
-        assert_eq!(referenced_token.symbol, String::from("WETH"));
+            .await
+            .expect("failed to get associated token");
+        assert_eq!(referenced_token.symbol, "WETH");
 
         let referenced_component = schema::protocol_component::table
             .filter(schema::protocol_component::id.eq(inserted_data.protocol_component_id))
             .select(orm::ProtocolComponent::as_select())
             .first::<orm::ProtocolComponent>(&mut conn)
-            .await;
-        let referenced_component: orm::ProtocolComponent = referenced_component.unwrap();
-        assert_eq!(referenced_component.external_id, String::from("state2"));
+            .await
+            .expect("failed to get associated component");
+        assert_eq!(referenced_component.external_id, "state2");
 
         // Test the case where there was a previous balance
         let new_tx_hash =
@@ -2430,31 +2594,34 @@ mod test {
         let tx_hashes = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
-        let result = gw
+        let mut components = gw
             .get_protocol_components(&chain, None, None, None, &mut conn)
-            .await;
-
-        let mut components = result.unwrap();
+            .await
+            .expect("failed retrieving components");
         components.sort_by(|a, b| a.id.cmp(&b.id));
 
-        let assert_message = format!(
-            "Found {} ProtocolComponents for chain {:?}, expecting >= 1, because there are two eth and one stark component. Two eth components are needed for the ProtocolStates",
-            components.len(),
-            chain
-        );
-        assert!(!components.is_empty(), "{}", assert_message.to_string());
-
+        // there are two eth and one stark component.
+        assert!(!components.is_empty());
         let pc = &components[0];
         assert_eq!(pc.id, format!("state{}", i + 1).to_string());
         assert_eq!(pc.chain, chain);
         let i_usize: usize = i as usize;
         assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
-
-        assert!(
-            pc.tokens
-                .contains(&H160::from_str(WETH).unwrap()),
-            "ProtocolComponent is missing WETH token. Check the tests' data setup"
-        );
+        match chain {
+            Chain::Ethereum => {
+                assert_eq!(
+                    pc.tokens,
+                    vec![H160::from_str(WETH).unwrap(), H160::from_str(USDC).unwrap()]
+                )
+            }
+            Chain::Starknet => {
+                assert_eq!(
+                    pc.tokens,
+                    vec![H160::from_str(USDC).unwrap(), H160::from_str(LUSD).unwrap()]
+                )
+            }
+            _ => panic!("Unexpected chain returned"),
+        };
         assert!(
             pc.contract_ids
                 .contains(&H160::from_str(WETH).unwrap()),
