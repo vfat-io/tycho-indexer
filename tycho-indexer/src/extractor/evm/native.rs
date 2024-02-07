@@ -1,17 +1,17 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap},
     str::FromStr,
     sync::Arc,
 };
 
 use async_trait::async_trait;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-use ethers::types::{H160, H256};
+use ethers::types::{H256};
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, instrument};
-use tycho_types::Bytes;
+
 
 use crate::{
     extractor::{evm, evm::Block, ExtractionError, Extractor, ExtractorMsg},
@@ -631,6 +631,7 @@ mod test {
     // }
 }
 
+#[cfg(test)]
 mod test_serial_db {
     //! It is notoriously hard to mock postgres here, we would need to have traits and abstractions
     //! for the connection pooling as well as for transaction handling so the easiest way
@@ -734,7 +735,7 @@ mod test_serial_db {
             err_tx,
         );
 
-        let _ = write_executor.run();
+        write_executor.run();
         let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
 
         let gw = NativePgGateway::new("test", Chain::Ethereum, pool.clone(), cached_gw);
@@ -828,7 +829,7 @@ mod test_serial_db {
             let (gw, mut err_rx, pool) = setup_gw(pool).await;
             let msg = native_pool_creation();
 
-            let exp = [ProtocolComponent {
+            let _exp = [ProtocolComponent {
                 id: CREATED_CONTRACT.to_string(),
                 protocol_system: "test".to_string(),
                 protocol_type_name: "Pool".to_string(),
@@ -839,8 +840,7 @@ mod test_serial_db {
                 ],
                 contract_ids: vec![],
                 creation_tx: evm::fixtures::transaction01()
-                    .hash
-                    .into(),
+                    .hash,
                 static_attributes: Default::default(),
                 created_at: Default::default(),
                 change: Default::default(),
