@@ -1059,7 +1059,6 @@ impl BlockEntityChanges {
 
 #[cfg(test)]
 pub mod fixtures {
-    use ethers::abi::AbiEncode;
     use prost::Message;
     use std::str::FromStr;
 
@@ -1424,6 +1423,7 @@ mod test {
     use std::str::FromStr;
 
     use actix_web::body::MessageBody;
+    use prost::Message;
 
     use rstest::rstest;
 
@@ -1659,7 +1659,24 @@ mod test {
                     protocol_components: [(protocol_component.id.clone(), protocol_component)]
                         .into_iter()
                         .collect(),
-                    component_balances: HashMap::new(),
+                    component_balances: [(
+                        "WETH-CAI".to_string(),
+                        [(
+                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                            ComponentBalance {
+                                token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                                new_balance: Bytes::from(50000000.encode_to_vec()),
+                                balance_float: 36522027799.0,
+                                modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000011121314),
+                                component_id: "WETH-CAI".to_string(),
+                            },
+                        )]
+                        .into_iter()
+                        .collect(),
+                    )]
+                    .into_iter()
+                    .collect(),
+
                     tx,
                 },
                 TransactionVMUpdates {
@@ -1680,7 +1697,23 @@ mod test {
                     .into_iter()
                     .collect(),
                     protocol_components: HashMap::new(),
-                    component_balances: HashMap::new(),
+                    component_balances: [(
+                        "WETH-CAI".to_string(),
+                        [(
+                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                            ComponentBalance {
+                                token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                                new_balance: Bytes::from(10.encode_to_vec()),
+                                balance_float: 2058.0,
+                                modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000000000001),
+                                component_id: "WETH-CAI".to_string(),
+                            },
+                        )]
+                            .into_iter()
+                            .collect(),
+                    )]
+                        .into_iter()
+                        .collect(),
                     tx: tx_5,
                 },
             ],
@@ -1732,6 +1765,26 @@ mod test {
             .unwrap(),
             created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         };
+        let component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>> = [(
+            String::from("WETH-CAI"),
+            [(
+                H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                ComponentBalance {
+                    token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                    new_balance: Bytes::from(10.encode_to_vec()),
+                    balance_float: 2058.0,
+                    modify_tx: H256::from_low_u64_be(
+                        0x0000000000000000000000000000000000000000000000000000000000000001,
+                    ),
+                    component_id: "WETH-CAI".to_string(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        )]
+        .into_iter()
+        .collect();
+
         BlockAccountChanges::new(
             "test",
             Chain::Ethereum,
@@ -1769,7 +1822,7 @@ mod test {
                 .into_iter()
                 .collect(),
             HashMap::new(),
-            HashMap::new(),
+            component_balances,
         )
     }
 
