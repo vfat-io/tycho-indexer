@@ -7,6 +7,7 @@ use ethers::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
+use tracing::log::warn;
 
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
@@ -193,15 +194,22 @@ impl AccountUpdate {
     // Converting AccountUpdate into Account with references saves us from cloning the whole
     // struct of BlockContractChanges in the forward function in ambient.rs.
     pub fn ref_into_account(&self, tx: &Transaction) -> Account {
-        let code = &self.code.clone().unwrap_or_default();
+        let empty_hash = H256::from(keccak256(Vec::new()));
+        if self.change != ChangeType::Creation {
+            warn!("Creating an account from a partial change!")
+        }
+
         Account::new(
             self.chain,
             self.address,
             format!("{:#020x}", self.address),
             self.slots.clone(),
             self.balance.unwrap_or_default(),
-            code.clone(),
-            H256::from(keccak256(code)),
+            self.code.clone().unwrap_or_default(),
+            self.code
+                .as_ref()
+                .map(|v| H256::from(keccak256(v)))
+                .unwrap_or(empty_hash),
             tx.hash,
             tx.hash,
             Some(tx.hash),
