@@ -1390,7 +1390,6 @@ pub struct NewProtocolComponentHoldsToken {
 pub struct TokenPrice {
     id: i64,
     token_id: i64,
-    price: f64,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
@@ -1402,7 +1401,6 @@ pub struct TokenPrice {
 pub struct ComponentTVL {
     id: i64,
     protocol_component_id: i64,
-    tvl: f64,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }

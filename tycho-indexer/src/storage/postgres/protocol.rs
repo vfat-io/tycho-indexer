@@ -121,7 +121,7 @@ where
             .await;
 
         if let Ok(entry) = existing_entry {
-            return Ok(entry.id);
+            Ok(entry.id)
         } else {
             let new_entry = orm::NewProtocolSystem { name: new.to_string() };
 
@@ -1230,7 +1230,7 @@ where
         conn: &mut Self::DB,
     ) -> Result<HashMap<Bytes, f64>, StorageError> {
         use schema::token_price::dsl::*;
-        let chain_id = self.get_chain_id(&chain);
+        let chain_id = self.get_chain_id(chain);
         Ok(token_price
             .inner_join(schema::token::table.inner_join(schema::account::table))
             .select((schema::account::address, price))
@@ -1845,7 +1845,7 @@ mod test {
                     "0x00000000000000000000000000000000000000000000006c6b935b8bbd400000",
                 ),
                 balance_float: 0.0,
-                modify_tx: expected_txh.clone(),
+                modify_tx: expected_txh,
                 component_id: "state3".to_owned(),
             },
             ComponentBalance {
@@ -1857,7 +1857,7 @@ mod test {
                     "0x0000000000000000000000000000000000000000000000000000000077359400",
                 ),
                 balance_float: 0.0,
-                modify_tx: expected_txh.clone(),
+                modify_tx: expected_txh,
                 component_id: "state1".to_owned(),
             },
             ComponentBalance {
@@ -1869,7 +1869,7 @@ mod test {
                     "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
                 ),
                 balance_float: 0.0,
-                modify_tx: expected_txh.clone(),
+                modify_tx: expected_txh,
                 component_id: "state1".to_owned(),
             },
             ComponentBalance {
@@ -1881,7 +1881,7 @@ mod test {
                     "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
                 ),
                 balance_float: 0.0,
-                modify_tx: expected_txh.clone(),
+                modify_tx: expected_txh,
                 component_id: "state3".to_owned(),
             },
         ];
@@ -2613,7 +2613,7 @@ mod test {
         let tx_hashes = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
         let exp = exp_ids
-            .into_iter()
+            .iter()
             .map(|&s| s.to_owned())
             .collect::<HashSet<_>>();
 
@@ -2641,7 +2641,7 @@ mod test {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
         let exp = exp_ids
-            .into_iter()
+            .iter()
             .map(|&s| s.to_owned())
             .collect::<HashSet<_>>();
         let gw = EVMGateway::from_connection(&mut conn).await;
