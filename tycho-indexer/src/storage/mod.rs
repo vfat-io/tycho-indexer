@@ -727,6 +727,8 @@ pub trait ProtocolGateway {
     ///
     /// # Parameters
     /// - `component_balances` The component balances to insert.
+    /// - `chain` The chain of the component balances to be inserted.
+    /// - `block_ts` The timestamp of the block that the balances are associated with.
     ///
     /// # Return
     /// Ok if all component balances could be inserted, Err if at least one token failed to
@@ -734,6 +736,7 @@ pub trait ProtocolGateway {
     async fn add_component_balances(
         &self,
         component_balances: &[&Self::ComponentBalance],
+        chain: &Chain,
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
