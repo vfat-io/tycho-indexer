@@ -275,6 +275,20 @@ impl AmbientPgGateway {
             .into_iter()
             .filter_map(|u| if u.address == address { Some((u.address, u)) } else { None })
             .collect();
+
+        let mut component_balances_map: HashMap<
+            evm::ComponentId,
+            HashMap<H160, evm::ComponentBalance>,
+        > = HashMap::new();
+        for balance in component_balances {
+            let component_id = balance.component_id.clone();
+            let h160 = balance.token;
+            let inner_map = component_balances_map
+                .entry(component_id)
+                .or_insert_with(HashMap::new);
+            inner_map.insert(h160, balance);
+        }
+
         self.state_gateway
             .revert_state(to)
             .await?;
@@ -288,10 +302,9 @@ impl AmbientPgGateway {
             block,
             true,
             account_updates,
-            // TODO: get protocol components from gateway (in ENG-2049)
             HashMap::new(),
             HashMap::new(),
-            component_balances,
+            component_balances_map,
         );
         Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
     }
