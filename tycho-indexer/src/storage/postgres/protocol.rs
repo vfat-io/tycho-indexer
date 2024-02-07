@@ -329,11 +329,7 @@ where
         let inserted_protocol_components: Vec<(i64, String, i64, i64)> =
             diesel::insert_into(protocol_component)
                 .values(&values)
-                .on_conflict((
-                    schema::protocol_component::chain_id,
-                    protocol_system_id,
-                    external_id,
-                ))
+                .on_conflict((schema::protocol_component::chain_id, external_id))
                 .do_nothing()
                 .returning((
                     schema::protocol_component::id,
@@ -1006,6 +1002,7 @@ where
             Some(version) => Some(version.to_ts(conn).await?),
             None => None,
         };
+        let chain_id = self.get_chain_id(chain);
 
         let mut q = schema::component_balance::table
             .inner_join(schema::protocol_component::table)
@@ -1015,6 +1012,7 @@ where
                 schema::account::address,
                 schema::component_balance::balance_float,
             ))
+            .filter(schema::protocol_component::chain_id.eq(chain_id))
             .filter(
                 schema::component_balance::valid_to
                     .gt(version_ts) // if version_ts is None, diesel equates this expression to "False"
@@ -1248,15 +1246,17 @@ where
         tvl_values: &HashMap<String, f64>,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
-        use schema::protocol_component::dsl::*;
-
-        let external_db_id_map: HashMap<String, i64> = protocol_component
-            .select((external_id, id))
-            .filter(external_id.eq_any(tvl_values.keys()))
-            .get_results::<(String, i64)>(conn)
-            .await?
-            .into_iter()
-            .collect::<HashMap<_, _>>();
+        let chain_id = self.get_chain_id(chain);
+        let external_ids = tvl_values
+            .keys()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>();
+        let external_db_id_map =
+            orm::ProtocolComponent::ids_by_external_ids(&external_ids, chain_id, conn)
+                .await?
+                .into_iter()
+                .map(|(a, b)| (b, a))
+                .collect::<HashMap<_, _>>();
 
         let upsert_map: HashMap<_, _> = tvl_values
             .iter()
@@ -1264,7 +1264,7 @@ where
                 if let Some(db_id) = external_db_id_map.get(component_id) {
                     Some((*db_id, *v))
                 } else {
-                    warn!(?component_id, "Tried to upsert tvl for unknown compoent!");
+                    warn!(?component_id, "Tried to upsert tvl for unknown component!");
                     None
                 }
             })
@@ -2381,20 +2381,17 @@ mod test {
             created_at: Default::default(),
         };
 
-        let result = gw
-            .add_protocol_components(&[&original_component.clone()], &mut conn)
-            .await;
-
-        assert!(result.is_ok());
+        gw.add_protocol_components(&[&original_component.clone()], &mut conn)
+            .await
+            .expect("adding components failed");
 
         let inserted_data = schema::protocol_component::table
             .filter(schema::protocol_component::external_id.eq("test_contract_id".to_string()))
             .select(orm::ProtocolComponent::as_select())
             .first::<orm::ProtocolComponent>(&mut conn)
-            .await;
+            .await
+            .expect("failed to get inserted data");
 
-        assert!(inserted_data.is_ok());
-        let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
         assert_eq!(inserted_data.protocol_type_id, protocol_type_id_1);
         assert_eq!(
             gw.get_protocol_system_id(

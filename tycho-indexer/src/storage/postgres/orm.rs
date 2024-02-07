@@ -26,7 +26,7 @@ use super::{
         account, account_balance, block, chain, component_balance, component_tvl, contract_code,
         contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
         protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
-        token_price, transaction,
+        transaction,
     },
     versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
 };
@@ -1381,17 +1381,6 @@ pub struct ProtocolHoldsToken {
 pub struct NewProtocolComponentHoldsToken {
     pub protocol_component_id: i64,
     pub token_id: i64,
-}
-
-#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
-#[diesel(belongs_to(Token))]
-#[diesel(table_name = token_price)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct TokenPrice {
-    id: i64,
-    token_id: i64,
-    pub inserted_ts: NaiveDateTime,
-    pub modified_ts: NaiveDateTime,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]

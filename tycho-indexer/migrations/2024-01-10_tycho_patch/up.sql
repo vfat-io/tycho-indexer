@@ -2,6 +2,14 @@
 ALTER TABLE protocol_type
     ADD CONSTRAINT unique_name_constraint UNIQUE (name);
 
+ALTER TABLE protocol_component
+    DROP CONSTRAINT protocol_component_chain_id_protocol_system_id_external_id_key;
+
+ALTER TABLE protocol_component
+    ADD CONSTRAINT protocol_component_chain_id_external_id_key UNIQUE (chain_id, external_id);
+
+DROP INDEX IF EXISTS idx_protocol_identity;
+
 -- Change the name of the financial and implementation type enums
 CREATE TYPE financial_type AS ENUM(
     'swap',
@@ -147,6 +155,8 @@ CREATE TABLE IF NOT EXISTS component_tvl(
     -- Timestamp this entry was last modified in this table.
     "modified_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_component_tvl_tvl ON component_tvl(tvl);
 
 CREATE TRIGGER update_modtime_component_tvl
     BEFORE UPDATE ON component_tvl
