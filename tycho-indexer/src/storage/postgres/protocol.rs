@@ -536,6 +536,7 @@ where
         new: &[(TxHash, &ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
+        let chain_db_id = self.get_chain_id(chain);
         let new = new
             .iter()
             .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_owned()) })
@@ -558,6 +559,7 @@ where
                 .map(|state| state.component_id.as_str())
                 .collect::<Vec<&str>>()
                 .as_slice(),
+            chain_db_id,
             conn,
         )
         .await?
@@ -778,11 +780,13 @@ where
     async fn add_component_balances(
         &self,
         component_balances: &[&Self::ComponentBalance],
+        chain: &Chain,
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
 
+        let chain_db_id = self.get_chain_id(chain);
         let mut new_component_balances = Vec::new();
         let token_addresses: Vec<Address> = component_balances
             .iter()
@@ -810,7 +814,7 @@ where
             .collect();
 
         let protocol_component_ids: HashMap<String, i64> =
-            orm::ProtocolComponent::ids_by_external_ids(&external_ids, conn)
+            orm::ProtocolComponent::ids_by_external_ids(&external_ids, chain_db_id, conn)
                 .await?
                 .into_iter()
                 .map(|(component_id, external_id)| (external_id, component_id))
@@ -2035,7 +2039,7 @@ mod test {
         let component_balances = vec![&component_balance];
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
-        gw.add_component_balances(&component_balances, block_ts, &mut conn)
+        gw.add_component_balances(&component_balances, &Chain::Starknet, block_ts, &mut conn)
             .await
             .unwrap();
 
@@ -2081,9 +2085,14 @@ mod test {
         let updated_component_balances = vec![&updated_component_balance];
         let new_block_ts = NaiveDateTime::from_timestamp_opt(2000, 0).unwrap();
 
-        gw.add_component_balances(&updated_component_balances, new_block_ts, &mut conn)
-            .await
-            .unwrap();
+        gw.add_component_balances(
+            &updated_component_balances,
+            &Chain::Starknet,
+            new_block_ts,
+            &mut conn,
+        )
+        .await
+        .unwrap();
 
         // Obtain newest inserted value
         let new_inserted_data = schema::component_balance::table

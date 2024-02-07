@@ -509,10 +509,12 @@ pub struct NewProtocolComponent {
 impl ProtocolComponent {
     pub async fn ids_by_external_ids(
         external_ids: &[&str],
+        chain_db_id: i64,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(i64, String)>> {
         protocol_component::table
             .filter(protocol_component::external_id.eq_any(external_ids))
+            .filter(protocol_component::chain_id.eq(chain_db_id))
             .select((protocol_component::id, protocol_component::external_id))
             .get_results::<(i64, String)>(conn)
             .await
