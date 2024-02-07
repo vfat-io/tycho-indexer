@@ -18,7 +18,7 @@ use crate::{
             orm,
             orm::{Account, NewAccount},
             schema,
-            versioning::apply_versioning,
+            versioning::apply_delta_versioning,
             PostgresGateway,
         },
         Address, Balance, BlockOrTimestamp, ComponentId, ContractDelta, ContractId,
@@ -536,6 +536,7 @@ where
         new: &[(TxHash, &ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
+        let chain_db_id = self.get_chain_id(chain);
         let new = new
             .iter()
             .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_owned()) })
@@ -558,6 +559,7 @@ where
                 .map(|state| state.component_id.as_str())
                 .collect::<Vec<&str>>()
                 .as_slice(),
+            chain_db_id,
             conn,
         )
         .await?
@@ -778,11 +780,13 @@ where
     async fn add_component_balances(
         &self,
         component_balances: &[&Self::ComponentBalance],
+        chain: &Chain,
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
 
+        let chain_db_id = self.get_chain_id(chain);
         let mut new_component_balances = Vec::new();
         let token_addresses: Vec<Address> = component_balances
             .iter()
@@ -810,7 +814,7 @@ where
             .collect();
 
         let protocol_component_ids: HashMap<String, i64> =
-            orm::ProtocolComponent::ids_by_external_ids(&external_ids, conn)
+            orm::ProtocolComponent::ids_by_external_ids(&external_ids, chain_db_id, conn)
                 .await?
                 .into_iter()
                 .map(|(component_id, external_id)| (external_id, component_id))
@@ -833,7 +837,8 @@ where
         }
 
         if !component_balances.is_empty() {
-            apply_versioning::<_, orm::ComponentBalance>(&mut new_component_balances, conn).await?;
+            apply_delta_versioning::<_, orm::ComponentBalance>(&mut new_component_balances, conn)
+                .await?;
             diesel::insert_into(schema::component_balance::table)
                 .values(&new_component_balances)
                 .execute(conn)
@@ -866,25 +871,20 @@ where
             // -----------------|--------------------------|
             //                start                     target
             // We query for balance updates between start and target version.
-            let changed_component_balances = component_balance
-                .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
+            component_balance
+                .inner_join(schema::protocol_component::table)
+                .inner_join(schema::transaction::table)
+                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .filter(
-                    schema::chain::id
+                    schema::protocol_component::chain_id
                         .eq(chain_id)
                         .and(valid_from.gt(start_ts))
-                        .and(valid_from.le(target_ts)),
-                )
-                .select((protocol_component_id, token_id))
-                .distinct();
-
-            changed_component_balances
-                .inner_join(schema::transaction::table)
-                .filter(
-                    valid_from.le(target_ts).and(
-                        valid_to
-                            .gt(target_ts)
-                            .or(valid_to.is_null()),
-                    ),
+                        .and(valid_from.le(target_ts))
+                        .and(
+                            valid_to
+                                .gt(target_ts)
+                                .or(valid_to.is_null()),
+                        ),
                 )
                 .order_by((
                     protocol_component_id,
@@ -893,7 +893,6 @@ where
                     schema::transaction::index.desc(),
                 ))
                 .distinct_on((protocol_component_id, token_id))
-                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .select((
                     schema::protocol_component::external_id,
                     schema::account::address,
@@ -907,7 +906,7 @@ where
                 .map(|(external_id, address, balance, bal_f64, tx)| ComponentBalance {
                     component_id: external_id,
                     token: address.into(),
-                    new_balance: balance,
+                    balance,
                     balance_float: bal_f64,
                     modify_tx: tx.into(),
                 })
@@ -919,24 +918,20 @@ where
             //                target                     start
             // We query for the previous values of all (protocol_component, token) pairs updated
             // between start and target version.
-            let changed_component_balances = component_balance
-                .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
+            component_balance
+                .inner_join(schema::protocol_component::table)
+                .inner_join(schema::transaction::table)
+                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .filter(
-                    schema::chain::id
+                    schema::protocol_component::chain_id
                         .eq(chain_id)
                         .and(valid_from.ge(target_ts))
-                        .and(valid_from.lt(start_ts)),
-                )
-                .select((protocol_component_id, token_id))
-                .distinct();
-
-            changed_component_balances
-                .inner_join(schema::transaction::table)
-                .filter(valid_from.le(target_ts))
-                .filter(
-                    valid_to
-                        .gt(target_ts)
-                        .or(valid_to.is_null()),
+                        .and(valid_from.lt(start_ts))
+                        .and(
+                            valid_to
+                                .gt(target_ts)
+                                .or(valid_to.is_null()),
+                        ),
                 )
                 .order_by((
                     protocol_component_id,
@@ -945,11 +940,10 @@ where
                     schema::transaction::index.asc(),
                 ))
                 .distinct_on((protocol_component_id, token_id))
-                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .select((
                     schema::protocol_component::external_id,
                     schema::account::address,
-                    new_balance,
+                    previous_value,
                     schema::transaction::hash,
                 ))
                 .get_results::<(String, Address, Balance, TxHash)>(conn)
@@ -958,7 +952,7 @@ where
                 .map(|(external_id, address, balance, tx)| ComponentBalance {
                     component_id: external_id,
                     token: address.into(),
-                    new_balance: balance,
+                    balance,
                     balance_float: f64::NAN,
                     modify_tx: tx.into(),
                 })
@@ -1607,6 +1601,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(1000)),
+            Balance::from(U256::from(0)),
             1000.0,
             token_id,
             from_txn_id,
@@ -1616,6 +1611,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(2000)),
+            Balance::from(U256::from(1000)),
             2000.0,
             token_id,
             to_txn_id,
@@ -1628,7 +1624,7 @@ mod test {
         let expected_forward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
             component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
-            new_balance: Balance::from(U256::from(2000)),
+            balance: Balance::from(U256::from(2000)),
             balance_float: 2000.0,
             modify_tx: to_tx_hash,
         }];
@@ -1648,7 +1644,7 @@ mod test {
         let expected_backward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
             component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
-            new_balance: Balance::from(U256::from(1000)),
+            balance: Balance::from(U256::from(0)),
             balance_float: 0.0,
             modify_tx: from_tx_hash,
         }];
@@ -2027,21 +2023,23 @@ mod test {
         let tx_hash =
             H256::from_str("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")
                 .unwrap();
+
         let protocol_component_id: String = String::from("state2");
         let base_token = H160::from_str(WETH.trim_start_matches("0x")).unwrap();
 
+        // Test the case where a previous balance doesn't exist
         let component_balance = ComponentBalance {
             token: base_token,
-            new_balance: Bytes::from(&[0u8]),
+            balance: Balance::from(U256::from(1000)),
             balance_float: 0.0,
             modify_tx: tx_hash,
-            component_id: protocol_component_id,
+            component_id: protocol_component_id.clone(),
         };
 
         let component_balances = vec![&component_balance];
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
-        gw.add_component_balances(&component_balances, block_ts, &mut conn)
+        gw.add_component_balances(&component_balances, &Chain::Starknet, block_ts, &mut conn)
             .await
             .unwrap();
 
@@ -2053,7 +2051,8 @@ mod test {
         assert!(inserted_data.is_ok());
         let inserted_data: orm::ComponentBalance = inserted_data.unwrap();
 
-        assert_eq!(inserted_data.new_balance, Bytes::from(&[0u8]));
+        assert_eq!(inserted_data.new_balance, Balance::from(U256::from(1000)));
+        assert_eq!(inserted_data.previous_value, Balance::from(U256::from(0)),);
 
         let referenced_token = schema::token::table
             .filter(schema::token::id.eq(inserted_data.token_id))
@@ -2070,6 +2069,43 @@ mod test {
             .await;
         let referenced_component: orm::ProtocolComponent = referenced_component.unwrap();
         assert_eq!(referenced_component.external_id, String::from("state2"));
+
+        // Test the case where there was a previous balance
+        let new_tx_hash =
+            H256::from_str("0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7")
+                .unwrap();
+        let updated_component_balance = ComponentBalance {
+            token: base_token,
+            balance: Balance::from(U256::from(2000)),
+            balance_float: 2000.0,
+            modify_tx: new_tx_hash,
+            component_id: protocol_component_id.clone(),
+        };
+
+        let updated_component_balances = vec![&updated_component_balance];
+        let new_block_ts = NaiveDateTime::from_timestamp_opt(2000, 0).unwrap();
+
+        gw.add_component_balances(
+            &updated_component_balances,
+            &Chain::Starknet,
+            new_block_ts,
+            &mut conn,
+        )
+        .await
+        .unwrap();
+
+        // Obtain newest inserted value
+        let new_inserted_data = schema::component_balance::table
+            .select(orm::ComponentBalance::as_select())
+            .order_by(schema::component_balance::id.desc())
+            .first::<orm::ComponentBalance>(&mut conn)
+            .await;
+
+        assert!(new_inserted_data.is_ok());
+        let new_inserted_data: orm::ComponentBalance = new_inserted_data.unwrap();
+
+        assert_eq!(new_inserted_data.new_balance, Balance::from(U256::from(2000)));
+        assert_eq!(new_inserted_data.previous_value, Balance::from(U256::from(1000)));
     }
 
     #[tokio::test]
