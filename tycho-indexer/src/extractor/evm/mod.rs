@@ -1196,7 +1196,7 @@ pub mod fixtures {
                         )
                         .unwrap(),
                         balance: 50000000.encode_to_vec(),
-                        component_id: "WETH-CAI".encode(),
+                        component_id: "WETH-CAI".as_bytes().to_vec(),
                     }],
                 },
                 TransactionContractChanges {
@@ -1233,7 +1233,7 @@ pub mod fixtures {
                         )
                         .unwrap(),
                         balance: 10.encode_to_vec(),
-                        component_id: "WETH-CAI".encode(),
+                        component_id: "WETH-CAI".as_bytes().to_vec(),
                     }],
                 },
             ],
