@@ -1408,6 +1408,7 @@ mod test {
         db_fixtures::insert_component_balance(
             conn,
             Bytes::from(U256::exp10(18)),
+            Bytes::from(U256::zero()),
             1e18,
             weth_id,
             txn[0],
@@ -1417,6 +1418,7 @@ mod test {
         db_fixtures::insert_component_balance(
             conn,
             Bytes::from(U256::from(2000) * U256::exp10(6)),
+            Bytes::from(U256::zero()),
             2000.0 * 1e6,
             usdc_id,
             txn[0],
@@ -1438,6 +1440,7 @@ mod test {
         db_fixtures::insert_component_balance(
             conn,
             Bytes::from(U256::exp10(18)),
+            Bytes::from(U256::zero()),
             1e18,
             weth_id,
             txn[0],
@@ -1447,6 +1450,7 @@ mod test {
         db_fixtures::insert_component_balance(
             conn,
             Bytes::from(U256::from(2000) * U256::exp10(18)),
+            Bytes::from(U256::zero()),
             2000.0 * 1e18,
             dai_id,
             txn[0],
@@ -1468,6 +1472,7 @@ mod test {
         db_fixtures::insert_component_balance(
             conn,
             Bytes::from(U256::from(2000) * U256::exp10(18)),
+            Bytes::from(U256::zero()),
             1e18,
             lusd_id,
             txn[0],
@@ -1477,6 +1482,7 @@ mod test {
         db_fixtures::insert_component_balance(
             conn,
             Bytes::from(U256::from(2000) * U256::exp10(6)),
+            Bytes::from(U256::zero()),
             2000.0 * 1e6,
             usdc_id,
             txn[0],
@@ -1841,8 +1847,8 @@ mod test {
                     .trim_start_matches("0x")
                     .parse()
                     .unwrap(),
-                new_balance: Bytes::from(
-                    "0x00000000000000000000000000000000000000000000006c6b935b8bbd400000",
+                balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
                 ),
                 balance_float: 0.0,
                 modify_tx: expected_txh,
@@ -1853,8 +1859,8 @@ mod test {
                     .trim_start_matches("0x")
                     .parse()
                     .unwrap(),
-                new_balance: Bytes::from(
-                    "0x0000000000000000000000000000000000000000000000000000000077359400",
+                balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
                 ),
                 balance_float: 0.0,
                 modify_tx: expected_txh,
@@ -1865,8 +1871,8 @@ mod test {
                     .trim_start_matches("0x")
                     .parse()
                     .unwrap(),
-                new_balance: Bytes::from(
-                    "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
+                balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
                 ),
                 balance_float: 0.0,
                 modify_tx: expected_txh,
@@ -1877,8 +1883,8 @@ mod test {
                     .trim_start_matches("0x")
                     .parse()
                     .unwrap(),
-                new_balance: Bytes::from(
-                    "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
+                balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
                 ),
                 balance_float: 0.0,
                 modify_tx: expected_txh,
@@ -2254,6 +2260,7 @@ mod test {
         assert_eq!(new_account, old_account);
         assert!(inserted_account.id > new_account.id);
     }
+
     #[tokio::test]
     async fn test_add_component_balances() {
         let mut conn = setup_db().await;
@@ -2267,10 +2274,12 @@ mod test {
         // Test the case where a previous balance doesn't exist
         let component_balance = ComponentBalance {
             token: base_token,
-            new_balance: Bytes::from(&[12u8]),
+            balance: Bytes::from(
+                "0x000000000000000000000000000000000000000000000000000000000000000c",
+            ),
             balance_float: 12.0,
             modify_tx: tx_hash,
-            component_id: component_external_id,
+            component_id: component_external_id.clone(),
         };
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
@@ -2280,13 +2289,12 @@ mod test {
 
         let inserted_data = schema::component_balance::table
             .select(orm::ComponentBalance::as_select())
-            .filter(schema::component_balance::new_balance.eq(Bytes::from(&[12u8])))
+            .filter(schema::component_balance::new_balance.eq(Bytes::from(
+                "0x000000000000000000000000000000000000000000000000000000000000000c",
+            )))
             .first::<orm::ComponentBalance>(&mut conn)
             .await
             .expect("retrieving inserted balance failed!");
-
-        assert!(inserted_data.is_ok());
-        let inserted_data: orm::ComponentBalance = inserted_data.unwrap();
 
         assert_eq!(inserted_data.new_balance, Balance::from(U256::from(12)));
         assert_eq!(inserted_data.previous_value, Balance::from(U256::from(0)),);
@@ -2316,7 +2324,7 @@ mod test {
             balance: Balance::from(U256::from(2000)),
             balance_float: 2000.0,
             modify_tx: new_tx_hash,
-            component_id: protocol_component_id.clone(),
+            component_id: component_external_id,
         };
 
         let updated_component_balances = vec![&updated_component_balance];
@@ -2342,7 +2350,7 @@ mod test {
         let new_inserted_data: orm::ComponentBalance = new_inserted_data.unwrap();
 
         assert_eq!(new_inserted_data.new_balance, Balance::from(U256::from(2000)));
-        assert_eq!(new_inserted_data.previous_value, Balance::from(U256::from(1000)));
+        assert_eq!(new_inserted_data.previous_value, Balance::from(U256::from(12)));
     }
 
     #[tokio::test]
