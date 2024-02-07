@@ -19,7 +19,12 @@ pub fn map_balance_changes(
     let mut balances_deltas = Vec::new();
     for trx in block.transactions() {
         let mut tx_deltas = Vec::new();
-        for (log, _) in trx.logs_with_calls() {
+        for log in trx
+            .calls
+            .iter()
+            .filter(|call| !call.state_reverted)
+            .flat_map(|call| &call.logs)
+        {
             // Skip if the log is not from a known uniswapV3 pool.
             if let Some(pool) =
                 pools_store.get_last(format!("{}:{}", "Pool", &log.address.to_hex()))

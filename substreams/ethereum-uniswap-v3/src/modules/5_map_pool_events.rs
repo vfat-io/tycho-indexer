@@ -100,7 +100,7 @@ pub fn map_pool_events(
     let tycho_block: Block = block.into();
 
     let block_entity_changes =
-        BlockEntityChanges { block: Option::from(tycho_block), changes: tx_entity_changes };
+        BlockEntityChanges { block: Some(tycho_block), changes: tx_entity_changes };
 
     Ok(block_entity_changes)
 }

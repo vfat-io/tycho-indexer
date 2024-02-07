@@ -66,33 +66,23 @@ pub fn read_bytes(buf: &[u8], offset: usize, number_of_bytes: usize) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use crate::storage::utils::{left_pad, read_bytes};
+    use hex_literal::hex;
     use std::{fmt::Write, num::ParseIntError};
 
     #[test]
     fn left_pad_lt_32_bytes() {
-        let input = vec![221u8, 98u8, 237u8, 62u8];
+        let input = hex!("dd62ed3e");
         assert_eq!(
-            [
-                0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
-                0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 221u8, 98u8, 237u8,
-                62u8
-            ],
+            hex!("00000000000000000000000000000000000000000000000000000000dd62ed3e"),
             left_pad(&input, 0)
         )
     }
 
     #[test]
     fn left_pad_eq_32_bytes() {
-        let input = vec![
-            0u8, 0u8, 0u8, 0u8, 10u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 93u8, 0u8, 0u8, 0u8, 0u8, 0u8,
-            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 221u8, 98u8, 237u8, 62u8,
-        ];
+        let input = hex!("00000a0000000000005d000000000000000000000000000000000000dd62ed3e");
         assert_eq!(
-            [
-                0u8, 0u8, 0u8, 0u8, 10u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 93u8, 0u8, 0u8, 0u8, 0u8,
-                0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 221u8, 98u8, 237u8,
-                62u8
-            ],
+            hex!("00000a0000000000005d000000000000000000000000000000000000dd62ed3e"),
             left_pad(&input, 0)
         )
     }
@@ -100,10 +90,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn left_pad_gt_32_bytes() {
-        let input = vec![
-            7u8, 0u8, 0u8, 0u8, 0u8, 10u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 93u8, 0u8, 0u8, 0u8, 0u8,
-            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 221u8, 98u8, 237u8, 62u8,
-        ];
+        let input = hex!("070000000a0000000000005d000000000000000000000000000000000000dd62ed3e");
         let _ = left_pad(&input, 0);
     }
 
@@ -121,7 +108,7 @@ mod tests {
         let buf = decode_hex("aabb").unwrap();
         let offset = 0;
         let number_of_bytes = 1;
-        assert_eq!(read_bytes(&buf, offset, number_of_bytes), [187u8]);
+        assert_eq!(read_bytes(&buf, offset, number_of_bytes), hex!("bb"));
     }
 
     #[test]
@@ -129,7 +116,7 @@ mod tests {
         let buf = decode_hex("aabb").unwrap();
         let offset = 1;
         let number_of_bytes = 1;
-        assert_eq!(read_bytes(&buf, offset, number_of_bytes), vec![170u8]);
+        assert_eq!(read_bytes(&buf, offset, number_of_bytes), hex!("aa"));
     }
 
     #[test]
