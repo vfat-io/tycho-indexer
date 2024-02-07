@@ -204,13 +204,24 @@ impl AmbientPgGateway {
                 }
             }
             if !update.protocol_components.is_empty() {
+                let protocol_components: Vec<evm::ProtocolComponent> = update
+                    .protocol_components
+                    .values()
+                    .cloned()
+                    .collect();
                 self.state_gateway
-                    .add_protocol_components(&changes.block, &update.protocol_components)
+                    .add_protocol_components(&changes.block, &protocol_components)
                     .await?;
             }
             if !update.component_balances.is_empty() {
+                let mut component_balances_vec: Vec<evm::ComponentBalance> = Vec::new();
+                for inner_map in update.component_balances.values() {
+                    for balance in inner_map.values() {
+                        component_balances_vec.push(balance.clone());
+                    }
+                }
                 self.state_gateway
-                    .add_component_balances(&changes.block, &update.component_balances)
+                    .add_component_balances(&changes.block, &component_balances_vec)
                     .await?;
             }
         }
@@ -841,24 +852,34 @@ mod test_serial_db {
                     )]
                     .into_iter()
                     .collect(),
-                    vec![ProtocolComponent {
-                        id: component_id.clone(),
-                        protocol_system: "ambient".to_string(),
-                        protocol_type_name: "vm:pool".to_string(),
-                        chain: Chain::Ethereum,
-                        tokens: vec![base_token, quote_token],
-                        contract_ids: vec![H160(AMBIENT_CONTRACT)],
-                        static_attributes: Default::default(),
-                        change: Default::default(),
-                        creation_tx: TX_HASH_0.parse().unwrap(),
-                        created_at: Default::default(),
-                    }],
-                    vec![ComponentBalance {
-                        token: base_token,
-                        new_balance: Bytes::from(&[0u8]),
-                        modify_tx: TX_HASH_0.parse().unwrap(),
-                        component_id: component_id.clone(),
-                    }],
+                    HashMap::from([(
+                        component_id.clone(),
+                        ProtocolComponent {
+                            id: component_id.clone(),
+                            protocol_system: "ambient".to_string(),
+                            protocol_type_name: "vm:pool".to_string(),
+                            chain: Chain::Ethereum,
+                            tokens: vec![base_token, quote_token],
+                            contract_ids: vec![H160(AMBIENT_CONTRACT)],
+                            static_attributes: Default::default(),
+                            change: Default::default(),
+                            creation_tx: TX_HASH_0.parse().unwrap(),
+                            created_at: Default::default(),
+                        },
+                    )]),
+                    HashMap::from([(
+                        component_id.clone(),
+                        HashMap::from([(
+                            base_token,
+                            ComponentBalance {
+                                token: base_token,
+                                new_balance: Bytes::from(&[0u8]),
+                                balance_float: 10.0,
+                                modify_tx: TX_HASH_0.parse().unwrap(),
+                                component_id: component_id.clone(),
+                            },
+                        )]),
+                    )]),
                     evm::fixtures::transaction02(TX_HASH_0, evm::fixtures::HASH_256_0, 1),
                 ),
                 evm::TransactionVMUpdates::new(
@@ -875,13 +896,20 @@ mod test_serial_db {
                     )]
                     .into_iter()
                     .collect(),
-                    vec![],
-                    vec![ComponentBalance {
-                        token: base_token,
-                        new_balance: Bytes::from(&[0u8]),
-                        modify_tx: TX_HASH_1.parse().unwrap(),
-                        component_id,
-                    }],
+                    HashMap::new(),
+                    HashMap::from([(
+                        component_id.clone(),
+                        HashMap::from([(
+                            base_token,
+                            ComponentBalance {
+                                token: base_token,
+                                new_balance: Bytes::from(&[0u8]),
+                                balance_float: 10.0,
+                                modify_tx: TX_HASH_1.parse().unwrap(),
+                                component_id: component_id.clone(),
+                            },
+                        )]),
+                    )]),
                     evm::fixtures::transaction02(TX_HASH_1, evm::fixtures::HASH_256_0, 2),
                 ),
             ],
