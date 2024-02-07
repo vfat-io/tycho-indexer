@@ -13,22 +13,25 @@ use crate::{
     },
 };
 
-// TODO: Parametrize Factory Address
-const UNISWAP_V3_FACTORY_ADDRESS: &str = "0x1F98431c8aD98523631AE4a59f267346ea31F984";
-
 #[substreams::handlers::map]
 pub fn map_pools_created(
+    params: String,
     block: eth::Block,
 ) -> Result<BlockEntityChanges, substreams::errors::Error> {
     let mut new_pools: Vec<TransactionEntityChanges> = vec![];
+    let factory_address = params.as_str();
 
-    get_new_pools(&block, &mut new_pools);
+    get_new_pools(&block, &mut new_pools, factory_address);
 
     Ok(BlockEntityChanges { block: Some(block.into()), changes: new_pools })
 }
 
 // Extract new pools from PoolCreated events
-fn get_new_pools(block: &eth::Block, new_pools: &mut Vec<TransactionEntityChanges>) {
+fn get_new_pools(
+    block: &eth::Block,
+    new_pools: &mut Vec<TransactionEntityChanges>,
+    factory_address: &str,
+) {
     // Extract new pools from PoolCreated events
     let mut on_pair_created = |event: PoolCreated, _tx: &eth::TransactionTrace, _log: &eth::Log| {
         let tycho_tx: Transaction = _tx.into();
@@ -66,7 +69,7 @@ fn get_new_pools(block: &eth::Block, new_pools: &mut Vec<TransactionEntityChange
 
     let mut eh = EventHandler::new(block);
 
-    eh.filter_by_address(vec![Address::from_str(UNISWAP_V3_FACTORY_ADDRESS).unwrap()]);
+    eh.filter_by_address(vec![Address::from_str(factory_address).unwrap()]);
 
     eh.on::<PoolCreated, _>(&mut on_pair_created);
     eh.handle_events();

@@ -22,6 +22,7 @@ modules:
     kind: map
     initialBlock: 12369621
     inputs:
+      - params: string
       - source: sf.ethereum.type.v2.Block
     output:
       type: proto:tycho.evm.v1.BlockEntityChanges
@@ -61,3 +62,6 @@ modules:
       - store: store_pools_balances
     output:
       type: proto:tycho.evm.v1.BlockEntityChanges
+
+params:
+  map_pools_created: "1F98431c8aD98523631AE4a59f267346ea31F984"
