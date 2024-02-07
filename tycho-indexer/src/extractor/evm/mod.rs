@@ -5,9 +5,10 @@ use ethers::{
     types::{H160, H256, U256},
     utils::keccak256,
 };
+#[allow(unused_imports)]
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
-use itertools::Itertools;
 use tracing::log::warn;
 
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};

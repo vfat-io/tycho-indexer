@@ -123,7 +123,9 @@ impl NativePgGateway {
             );
 
             state_updates.extend(
-                tx.protocol_states.values().map(|state_change| (hash.clone(), state_change.clone())),
+                tx.protocol_states
+                    .values()
+                    .map(|state_change| (hash.clone(), state_change.clone())),
             );
 
             balance_changes.extend(
