@@ -7,9 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use diesel_async::{
-    pooled_connection::deadpool::Pool, AsyncPgConnection,
-};
+use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
