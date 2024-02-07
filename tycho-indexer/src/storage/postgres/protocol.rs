@@ -2085,9 +2085,14 @@ mod test {
         let updated_component_balances = vec![&updated_component_balance];
         let new_block_ts = NaiveDateTime::from_timestamp_opt(2000, 0).unwrap();
 
-        gw.add_component_balances(&updated_component_balances, new_block_ts, &mut conn)
-            .await
-            .unwrap();
+        gw.add_component_balances(
+            &updated_component_balances,
+            &Chain::Starknet,
+            new_block_ts,
+            &mut conn,
+        )
+        .await
+        .unwrap();
 
         // Obtain newest inserted value
         let new_inserted_data = schema::component_balance::table
