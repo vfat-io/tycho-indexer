@@ -285,7 +285,7 @@ impl AmbientPgGateway {
             let h160 = balance.token;
             let inner_map = component_balances_map
                 .entry(component_id)
-                .or_insert_with(HashMap::new);
+                .or_default();
             inner_map.insert(h160, balance);
         }
 
