@@ -15,7 +15,7 @@ impl<M: Middleware> TokenPreProcessor<M> {
     pub async fn get_tokens(
         &self,
         addresses: Vec<H160>,
-    ) -> Vec<Result<ERC20Token, Box<dyn std::error::Error>>> {
+    ) -> Result<Vec<ERC20Token>, Box<dyn std::error::Error>> {
         let mut tokens_info = Vec::new();
 
         let abi_str = fs::read_to_string("src/extractor/evm/abi/erc20.json")
@@ -25,7 +25,7 @@ impl<M: Middleware> TokenPreProcessor<M> {
         for address in addresses {
             let contract = Contract::new(address, abi.clone(), self.client.clone());
 
-            let symbol: Result<String, _> = contract
+            let symbol = contract
                 .method("symbol", ())
                 .expect("Error preparing request")
                 .call()
@@ -38,19 +38,19 @@ impl<M: Middleware> TokenPreProcessor<M> {
                 .await;
 
             match (symbol, decimals) {
-                (Ok(symbol), Ok(decimals)) => tokens_info.push(Ok(ERC20Token {
+                (Ok(symbol), Ok(decimals)) => tokens_info.push(ERC20Token {
                     address,
                     symbol,
                     decimals: decimals.into(),
                     tax: 0,
                     gas: vec![],
                     chain: Chain::Ethereum,
-                })),
+                }),
                 (Err(e), _) | (_, Err(e)) => println!("Error fetching token data: {:?}", e),
             }
         }
 
-        tokens_info
+        Ok(tokens_info)
     }
 }
 
@@ -95,12 +95,15 @@ mod tests {
         let addresses =
             vec![H160::from_str(weth_address).unwrap(), H160::from_str(usdc_address).unwrap()];
 
-        let results = processor.get_tokens(addresses).await;
+        let results = processor
+            .get_tokens(addresses)
+            .await
+            .unwrap();
 
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].as_ref().unwrap().symbol, "WETH");
-        assert_eq!(results[0].as_ref().unwrap().decimals, 18);
-        assert_eq!(results[1].as_ref().unwrap().symbol, "USDC");
-        assert_eq!(results[1].as_ref().unwrap().decimals, 6);
+        assert_eq!(results[0].symbol, "WETH");
+        assert_eq!(results[0].decimals, 18);
+        assert_eq!(results[1].symbol, "USDC");
+        assert_eq!(results[1].decimals, 6);
     }
 }
