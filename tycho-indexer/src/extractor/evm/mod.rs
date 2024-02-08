@@ -22,6 +22,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 pub mod chain_state;
 mod convert;
 pub mod native;
+pub mod protocol_cache;
 pub mod token_analysis_cron;
 pub mod token_pre_processor;
 mod utils;
@@ -314,7 +315,7 @@ pub struct BlockAccountChanges {
     pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
     pub component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-    pub component_tvl: HashMap<String, f64>,
+    pub component_tvl: HashMap<ComponentId, f64>,
 }
 
 impl BlockAccountChanges {
