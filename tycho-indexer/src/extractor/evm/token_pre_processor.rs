@@ -5,11 +5,15 @@ use std::{fs, sync::Arc};
 
 pub struct TokenPreProcessor<M: Middleware> {
     pub client: Arc<M>,
+    erc20_abi: Abi,
 }
 
 impl<M: Middleware> TokenPreProcessor<M> {
     pub fn new(client: M) -> Self {
-        TokenPreProcessor { client: Arc::new(client) }
+        let abi_str = fs::read_to_string("src/extractor/evm/abi/erc20.json")
+            .expect("Unable to read ABI file");
+        let abi = from_str::<Abi>(&abi_str).expect("Unable to parse ABI");
+        TokenPreProcessor { client: Arc::new(client), erc20_abi: abi }
     }
 
     pub async fn get_tokens(
@@ -18,12 +22,8 @@ impl<M: Middleware> TokenPreProcessor<M> {
     ) -> Result<Vec<ERC20Token>, Box<dyn std::error::Error>> {
         let mut tokens_info = Vec::new();
 
-        let abi_str = fs::read_to_string("src/extractor/evm/abi/erc20.json")
-            .expect("Unable to read ABI file");
-        let abi = from_str::<Abi>(&abi_str).expect("Unable to parse ABI");
-
         for address in addresses {
-            let contract = Contract::new(address, abi.clone(), self.client.clone());
+            let contract = Contract::new(address, self.erc20_abi.clone(), self.client.clone());
 
             let symbol = contract
                 .method("symbol", ())
