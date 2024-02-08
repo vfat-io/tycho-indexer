@@ -7,10 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use diesel_async::{
-    pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
-    AsyncPgConnection,
-};
+use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
@@ -341,11 +338,8 @@ impl AmbientGateway for AmbientPgGateway {
         changes: &evm::BlockContractChanges,
         new_cursor: &str,
     ) -> Result<(), StorageError> {
-        let mut conn = self.pool.get().await.unwrap();
-        conn.transaction(|_conn| {
-            async move { self.forward(changes, new_cursor).await }.scope_boxed()
-        })
-        .await?;
+        self.forward(changes, new_cursor)
+            .await?;
         Ok(())
     }
 
@@ -357,14 +351,8 @@ impl AmbientGateway for AmbientPgGateway {
         new_cursor: &str,
     ) -> Result<evm::BlockAccountChanges, StorageError> {
         let mut conn = self.pool.get().await.unwrap();
-        let res = conn
-            .transaction(|conn| {
-                async move {
-                    self.backward(current, to, new_cursor, conn)
-                        .await
-                }
-                .scope_boxed()
-            })
+        let res = self
+            .backward(current, to, new_cursor, &mut conn)
             .await?;
         Ok(res)
     }
@@ -638,12 +626,16 @@ mod test {
         .expect("extractor init ok");
         let inp = evm::fixtures::pb_block_scoped_data(());
 
-        let _res = extractor
+        let res = extractor
             .handle_tick_scoped_data(inp)
             .await;
 
-        // TODO: fix this assert
-        // assert_eq!(res, Ok(None));
+        match res {
+            Ok(Some(_)) => panic!("Expected Ok(None) but got Ok(Some(..))"),
+            Ok(None) => (), // This is the expected case
+            Err(_) => panic!("Expected Ok(None) but got Err(..)"),
+        }
+
         assert_eq!(extractor.get_cursor().await, "cursor@420");
     }
 
