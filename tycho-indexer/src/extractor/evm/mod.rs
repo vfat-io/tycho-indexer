@@ -1085,10 +1085,8 @@ pub struct BlockEntityChanges {
     pub block: Block,
     pub revert: bool,
     pub txs_with_update: Vec<ProtocolChangesWithTx>,
-    pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
-// TODO: remove dead code check skip once extractor is implemented
 impl BlockEntityChanges {
     /// Parse from tychos protobuf message
     pub fn try_from_message(
@@ -1100,49 +1098,38 @@ impl BlockEntityChanges {
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
-            let mut txs_with_update: Vec<ProtocolChangesWithTx> = Vec::new();
-            let mut new_protocol_components = HashMap::new();
 
-            for change in msg.changes.into_iter() {
-                if let Some(tx) = change.tx.clone() {
-                    let tycho_tx = Transaction::try_from_message(tx, &block.hash)?;
-
-                    let tx_update = ProtocolChangesWithTx::try_from_message(
-                        change.clone(),
-                        &block,
-                        protocol_system,
-                        protocol_types,
-                    )?;
-
-                    txs_with_update.push(tx_update);
-                    for component in change.component_changes {
-                        let pool = ProtocolComponent::try_from_message(
-                            component,
-                            chain,
+            let mut txs_with_update: Vec<ProtocolChangesWithTx> = msg
+                .changes
+                .into_iter()
+                .filter_map(|change| {
+                    change.tx.as_ref()?;
+                    Some(
+                        ProtocolChangesWithTx::try_from_message(
+                            change,
+                            &block,
                             protocol_system,
                             protocol_types,
-                            tycho_tx.hash,
-                            block.ts,
-                        )?;
-                        new_protocol_components.insert(pool.id.clone(), pool);
-                    }
-                }
-            }
+                        )
+                        .ok(),
+                    )
+                })
+                .collect::<Option<Vec<_>>>()
+                .expect("Failed to parse changes");
 
-            // Sort updates by transaction by index
+            // Sort updates by transaction index
             txs_with_update.sort_unstable_by_key(|update| update.tx.index);
 
-            return Ok(Self {
-                extractor: extractor.to_owned(),
+            Ok(Self {
+                extractor: extractor.to_string(),
                 chain,
                 block,
                 revert: false,
                 txs_with_update,
-                new_protocol_components,
-            });
+            })
+        } else {
+            Err(ExtractionError::Empty)
         }
-
-        Err(ExtractionError::Empty)
     }
 
     /// Aggregates state updates.
@@ -1177,7 +1164,7 @@ impl BlockEntityChanges {
             block: self.block,
             revert: self.revert,
             state_updates: aggregated_changes.protocol_states,
-            new_protocol_components: self.new_protocol_components,
+            new_protocol_components: aggregated_changes.new_protocol_components,
         })
     }
 }
@@ -1779,8 +1766,8 @@ mod test {
                             ChangeType::Update,
                         ),
                     )]
-                    .into_iter()
-                    .collect(),
+                        .into_iter()
+                        .collect(),
                     protocol_components: [(protocol_component.id.clone(), protocol_component)]
                         .into_iter()
                         .collect(),
@@ -1796,11 +1783,11 @@ mod test {
                                 component_id: "WETH-CAI".to_string(),
                             },
                         )]
+                            .into_iter()
+                            .collect(),
+                    )]
                         .into_iter()
                         .collect(),
-                    )]
-                    .into_iter()
-                    .collect(),
 
                     tx,
                 },
@@ -1819,8 +1806,8 @@ mod test {
                             ChangeType::Update,
                         ),
                     )]
-                    .into_iter()
-                    .collect(),
+                        .into_iter()
+                        .collect(),
                     protocol_components: HashMap::new(),
                     component_balances: [(
                         "WETH-CAI".to_string(),
@@ -2248,7 +2235,6 @@ mod test {
                     ..Default::default()
                 },
             ],
-            new_protocol_components,
         }
     }
 

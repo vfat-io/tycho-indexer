@@ -765,7 +765,6 @@ mod test_serial_db {
                     },
                 )]),
             }],
-            new_protocol_components: HashMap::new(),
         }
     }
 
@@ -874,7 +873,6 @@ mod test_serial_db {
                     balance_changes: HashMap::new(),
                     new_protocol_components: HashMap::new(),
                 }],
-                new_protocol_components: HashMap::new(),
             };
 
             gw.forward(&msg0, "cursor@0")
