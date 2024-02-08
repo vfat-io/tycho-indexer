@@ -343,10 +343,6 @@ impl StoredVersionedRow for ComponentBalance {
         self.id
     }
 
-    fn get_valid_to(&self) -> Self::Version {
-        self.valid_to.expect("valid to set")
-    }
-
     fn get_entity_id(&self) -> Self::EntityId {
         (self.protocol_component_id, self.token_id)
     }
@@ -994,10 +990,6 @@ impl StoredVersionedRow for AccountBalance {
         self.id
     }
 
-    fn get_valid_to(&self) -> Self::Version {
-        self.valid_to.expect("valid to set")
-    }
-
     fn get_entity_id(&self) -> Self::EntityId {
         self.account_id
     }
@@ -1097,10 +1089,6 @@ impl StoredVersionedRow for ContractCode {
 
     fn get_pk(&self) -> Self::PrimaryKey {
         self.id
-    }
-
-    fn get_valid_to(&self) -> Self::Version {
-        self.valid_to.expect("valid to set")
     }
 
     fn get_entity_id(&self) -> Self::EntityId {
@@ -1248,10 +1236,6 @@ impl StoredVersionedRow for ContractStorage {
 
     fn get_pk(&self) -> Self::PrimaryKey {
         self.id
-    }
-
-    fn get_valid_to(&self) -> Self::Version {
-        self.valid_to.expect("valid_to is set")
     }
 
     fn get_entity_id(&self) -> Self::EntityId {
