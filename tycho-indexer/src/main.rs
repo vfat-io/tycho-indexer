@@ -2,15 +2,20 @@
 
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use futures03::future::select_all;
+use std::env;
 
 use extractor::{
-    evm::ambient::{AmbientContractExtractor, AmbientPgGateway},
+    evm::{
+        ambient::{AmbientContractExtractor, AmbientPgGateway},
+        token_pre_processor::TokenPreProcessor,
+    },
     runner::{ExtractorHandle, ExtractorRunnerBuilder},
 };
 use models::Chain;
 
 use actix_web::dev::ServerHandle;
 use clap::Parser;
+use ethers::prelude::{Http, Provider};
 use std::sync::Arc;
 use tokio::{sync::mpsc, task, task::JoinHandle};
 use tracing::info;
@@ -165,8 +170,13 @@ async fn start_ambient_extractor(
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
+    let rpc_url = env::var("ETH_RPC_URL").expect("ETH_RPC_URL is not set");
+    let client: Provider<Http> =
+        Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
+    let token_processor = TokenPreProcessor::new(client);
     let ambient_name = "vm:ambient";
-    let ambient_gw = AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, cached_gw);
+    let ambient_gw =
+        AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, cached_gw, token_processor);
     let ambient_protocol_types = [(
         "ambient_pool".to_string(),
         ProtocolType::new(
