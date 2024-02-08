@@ -229,10 +229,12 @@ cargo install diesel_cli --no-default-features --features postgres
 docker-compose up -d db
 ```
 
-4. Set the env var for the DB connection:
+4. Set the env var for the DB connection and RPC url
 
 ```
 export DATABASE_URL=postgres://postgres:mypassword@localhost:5432/tycho_indexer_0
+export ETH_RPC_URL="url-here"
+
 ```
 
 5. Setup/update the database:

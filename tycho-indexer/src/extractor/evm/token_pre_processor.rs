@@ -18,7 +18,7 @@ pub trait TokenPreProcessorTrait: Send + Sync {
 
 impl TokenPreProcessor {
     pub fn new(client: Provider<Http>) -> Self {
-        let abi_str = fs::read_to_string("src/extractor/evm/abi/erc20.json")
+        let abi_str = fs::read_to_string("tycho-indexer/src/extractor/evm/abi/erc20.json")
             .expect("Unable to read ABI file");
         let abi = from_str::<Abi>(&abi_str).expect("Unable to parse ABI");
         TokenPreProcessor { client: Arc::new(client), erc20_abi: abi }
@@ -77,10 +77,10 @@ mod tests {
     use std::str::FromStr;
 
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     // This test requires a real RPC URL
     async fn test_get_tokens() {
-        let rpc_url = "your-rpc-url-here";
+        let rpc_url = "https://eth-mainnet.g.alchemy.com/v2/OTD5W7gdTPrzpVot41Lx9tJD9LUiAhbs";
         let client: Provider<Http> =
             Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
         let processor = TokenPreProcessor::new(client);
