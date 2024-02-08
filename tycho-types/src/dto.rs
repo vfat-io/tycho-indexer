@@ -647,16 +647,6 @@ impl ProtocolDeltaRequestResponse {
     }
 }
 
-impl ResponseProtocolComponent {
-    pub fn get_id(&self) -> ProtocolComponentId {
-        ProtocolComponentId {
-            chain: self.chain,
-            system: self.protocol_system.clone(),
-            id: self.id.clone(),
-        }
-    }
-}
-
 #[derive(Clone, PartialEq, Hash, Eq)]
 pub struct ProtocolComponentId {
     pub chain: Chain,
@@ -672,13 +662,6 @@ impl ProtocolComponent {
             id: self.id.clone(),
         }
     }
-}
-
-#[derive(Clone, PartialEq, Hash, Eq)]
-pub struct ProtocolComponentId {
-    pub chain: Chain,
-    pub system: String,
-    pub id: String,
 }
 
 #[cfg(test)]
