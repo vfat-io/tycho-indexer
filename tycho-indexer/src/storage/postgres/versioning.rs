@@ -110,6 +110,7 @@ pub trait StoredVersionedRow {
     fn get_pk(&self) -> Self::PrimaryKey;
 
     /// Exposes the end version.
+    #[allow(dead_code)] //TODO: Remove when in use.
     fn get_valid_to(&self) -> Self::Version;
 
     /// Exposes the entity id.
