@@ -1159,12 +1159,13 @@ impl BlockEntityChanges {
     /// This returns an error if there was a problem during merge. The error
     /// type is `ExtractionError`.
     pub fn aggregate_updates(self) -> Result<BlockEntityChangesResult, ExtractionError> {
-        let base = ProtocolChangesWithTx::default();
+        let mut iter = self.state_updates.into_iter();
 
-        let aggregated_changes = self
-            .state_updates
-            .iter()
-            .try_fold(base, |mut acc_state, new_state| {
+        // Use unwrap_or_else to provide a default state if iter.next() is None
+        let first_state = iter.next().unwrap_or_default();
+
+        let aggregated_changes = iter
+            .try_fold(first_state, |mut acc_state, new_state| {
                 acc_state.merge(new_state.clone())?;
                 Ok::<_, ExtractionError>(acc_state.clone())
             })
@@ -1396,7 +1397,7 @@ pub mod fixtures {
             changes: vec![
                 TransactionEntityChanges {
                     tx: Some(Transaction {
-                        hash: vec![0x0, 0x0, 0x0, 0x1],
+                        hash: vec![0x0, 0x0, 0x0, 0x0],
                         from: vec![0x0, 0x0, 0x0, 0x0],
                         to: vec![0x0, 0x0, 0x0, 0x0],
                         index: 10,
@@ -2240,7 +2241,12 @@ mod test {
             revert: false,
             state_updates: vec![
                 protocol_state_with_tx(),
-                ProtocolChangesWithTx { protocol_states: state_updates, tx, ..Default::default() },
+                ProtocolChangesWithTx {
+                    protocol_states: state_updates,
+                    tx,
+                    new_protocol_components: new_protocol_components.clone(),
+                    ..Default::default()
+                },
             ],
             new_protocol_components,
         }

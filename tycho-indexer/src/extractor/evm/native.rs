@@ -836,7 +836,10 @@ mod test_serial_db {
                     H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
                 ],
                 contract_ids: vec![],
-                creation_tx: evm::fixtures::transaction01().hash,
+                creation_tx: H256::from_str(
+                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                )
+                .unwrap(),
                 static_attributes: Default::default(),
                 created_at: Default::default(),
                 change: Default::default(),
