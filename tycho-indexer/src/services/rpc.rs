@@ -1339,7 +1339,7 @@ mod tests {
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
 
-        let state = req_handler
+        let res = req_handler
             .get_protocol_state_inner(
                 &Chain::Ethereum,
                 &request,
@@ -1349,8 +1349,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(state.accounts.len(), 1);
-        assert_eq!(state.accounts[0], expected.into());
+        assert_eq!(res.states.len(), 1);
+        assert_eq!(res.states[0], expected.into());
     }
 
     #[tokio::test]

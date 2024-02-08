@@ -569,17 +569,19 @@ pub struct ProtocolId {
     pub id: String,
     pub chain: Chain,
 }
-/// Protocol Component struct for the response from Tycho server for a protocol state request.
+/// Protocol State struct for the response from Tycho server for a protocol state request.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize, ToSchema)]
 pub struct ResponseProtocolState {
     pub component_id: String,
     #[schema(value_type=HashMap<String, String>)]
+    #[serde(with = "hex_hashmap_value")]
     pub attributes: HashMap<String, Bytes>,
     #[schema(value_type=String)]
+    #[serde(with = "hex_bytes")]
     pub modify_tx: Bytes,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema, Default)]
 pub struct ProtocolStateRequestBody {
     #[serde(rename = "protocolIds")]
     pub protocol_ids: Option<Vec<ProtocolId>>,
@@ -591,11 +593,12 @@ pub struct ProtocolStateRequestBody {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct ProtocolStateRequestResponse {
-    pub accounts: Vec<ResponseProtocolState>,
+    pub states: Vec<ResponseProtocolState>,
 }
+
 impl ProtocolStateRequestResponse {
-    pub fn new(accounts: Vec<ResponseProtocolState>) -> Self {
-        Self { accounts }
+    pub fn new(states: Vec<ResponseProtocolState>) -> Self {
+        Self { states }
     }
 }
 
