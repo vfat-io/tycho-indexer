@@ -174,22 +174,40 @@ where
     E: Eq + Hash + Clone + FromStr + std::fmt::Debug,
     <E as FromStr>::Err: std::fmt::Debug,
 {
-    pub async fn from_pool(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
+    pub async fn from_pool(
+        pool: Pool<AsyncPgConnection>,
+        table_name: String,
+    ) -> Result<Self, StorageError> {
         let mut conn = pool
             .get()
             .await
             .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
 
-        let results: Vec<(i64, String)> = async {
-            use schema::chain::dsl::*;
-            chain
-                .select((id, name))
-                .load(&mut conn)
-                .await
-                .expect("Failed to load chain ids!")
+        if table_name == "chain" {
+            let results = async {
+                use schema::chain::dsl::*;
+                chain
+                    .select((id, name))
+                    .load(&mut conn)
+                    .await
+                    .expect("Failed to load chain ids!")
+            }
+            .await;
+            Ok(Self::from_tuples(results))
+        } else if table_name == "protocol_system" {
+            let results = async {
+                use schema::protocol_system::dsl::*;
+                protocol_system
+                    .select((id, name))
+                    .load(&mut conn)
+                    .await
+                    .expect("Failed to load protocol system ids!")
+            }
+            .await;
+            Ok(Self::from_tuples(results))
+        } else {
+            Err(StorageError::Unsupported(format!("table name {:} not supported", table_name)))
         }
-        .await;
-        Ok(Self::from_tuples(results))
     }
 
     /// Creates a new cache from a slice of tuples.
@@ -416,9 +434,12 @@ where
     }
 
     pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
-        let cache = ValueIdTableCache::<Chain>::from_pool(pool.clone()).await?;
+        println!("is it in new???");
+        let cache =
+            ValueIdTableCache::<Chain>::from_pool(pool.clone(), "chain".to_string()).await?;
         let protocol_system_cache: ValueIdTableCache<String> =
-            ValueIdTableCache::<String>::from_pool(pool.clone()).await?;
+            ValueIdTableCache::<String>::from_pool(pool.clone(), "protocol_system".to_string())
+                .await?;
         let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(
             Arc::new(cache),
             Arc::new(protocol_system_cache),
