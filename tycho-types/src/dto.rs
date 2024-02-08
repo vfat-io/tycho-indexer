@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::{
     serde_primitives::{
         hex_bytes, hex_bytes_option, hex_bytes_vec, hex_hashmap_key, hex_hashmap_key_value,
+        hex_hashmap_value,
     },
     Bytes,
 };
@@ -221,6 +222,7 @@ pub struct ProtocolComponent {
     #[serde(with = "hex_bytes_vec")]
     #[schema(value_type=Vec<String>)]
     pub contract_ids: Vec<Bytes>,
+    #[serde(with = "hex_hashmap_value")]
     #[schema(value_type=HashMap<String, String>)]
     pub static_attributes: HashMap<String, Bytes>,
     pub change: ChangeType,
@@ -508,15 +510,24 @@ pub struct ProtocolComponentsRequestBody {
     pub component_ids: Option<Vec<String>>,
 }
 
+impl ProtocolComponentsRequestBody {
+    pub fn new(protocol_system: Option<String>, component_ids: Option<Vec<String>>) -> Self {
+        Self { protocol_system, component_ids }
+    }
+}
+
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct ProtocolComponentRequestParameters {
     #[param(default = 0)]
     pub tvl_gt: Option<f64>,
 }
 
-impl ProtocolComponentsRequestBody {
-    pub fn new(protocol_system: Option<String>, component_ids: Option<Vec<String>>) -> Self {
-        Self { protocol_system, component_ids }
+impl ProtocolComponentRequestParameters {
+    pub fn to_query_string(&self) -> String {
+        if let Some(tvl_gt) = self.tvl_gt {
+            return format!("?tvl_gt={}", tvl_gt);
+        }
+        String::new()
     }
 }
 

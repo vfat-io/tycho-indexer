@@ -47,6 +47,7 @@ pub trait RPCClient {
 
     async fn get_protocol_components(
         &self,
+        chain: Chain,
         filters: &ProtocolComponentRequestParameters,
         request: &ProtocolComponentsRequestBody,
     ) -> Result<ProtocolComponentRequestResponse, RPCError>;
@@ -130,10 +131,48 @@ impl RPCClient for HttpRPCClient {
 
     async fn get_protocol_components(
         &self,
+        chain: Chain,
         filters: &ProtocolComponentRequestParameters,
         request: &ProtocolComponentsRequestBody,
     ) -> Result<ProtocolComponentRequestResponse, RPCError> {
-        todo!()
+        let uri = format!(
+            "{}/{}/{}/protocol_components{}",
+            self.uri
+                .to_string()
+                .trim_end_matches('/'),
+            TYCHO_SERVER_VERSION,
+            chain,
+            filters.to_query_string()
+        );
+
+        debug!(%uri, "Sending protocol_components request to Tycho server");
+
+        let body =
+            serde_json::to_string(&request).map_err(|e| RPCError::FormatRequest(e.to_string()))?;
+        let header = hyper::header::HeaderValue::from_str("application/json")
+            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
+
+        let req = Request::post(uri)
+            .header(hyper::header::CONTENT_TYPE, header)
+            .body(Body::from(body))
+            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
+        debug!(?req, "Sending request to Tycho server");
+
+        let response = self
+            .http_client
+            .request(req)
+            .await
+            .map_err(|e| RPCError::HttpClient(e.to_string()))?;
+        debug!(?response, "Received response from Tycho server");
+
+        let body = hyper::body::to_bytes(response.into_body())
+            .await
+            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        let components: ProtocolComponentRequestResponse =
+            serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        info!(?components, "Received protocol_components response from Tycho server");
+
+        Ok(components)
     }
 }
 
@@ -196,5 +235,65 @@ mod tests {
             hex::decode("5c06b7c5b3d910fd33bc2229846f9ddaf91d584d9b196e16636901ac3a77077e")
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_components() {
+        let mut server = Server::new_async().await;
+        let server_resp = r#"
+        {
+            "protocol_components": [
+                {
+                    "id": "State1",
+                    "protocol_system": "ambient",
+                    "protocol_type_name": "Pool",
+                    "chain": "ethereum",
+                    "tokens": [
+                        "0x0000000000000000000000000000000000000000",
+                        "0x0000000000000000000000000000000000000001"
+                    ],
+                    "contract_ids": [
+                        "0x0000000000000000000000000000000000000000"
+                    ],
+                    "static_attributes": {
+                        "attribute_1": "0xe803000000000000"
+                    },
+                    "change": "Creation",
+                    "creation_tx": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    "created_at": "2022-01-01T00:00:00"
+                }
+            ]
+        }
+        "#;
+        // test that the response is deserialized correctly
+        serde_json::from_str::<ProtocolComponentRequestResponse>(server_resp).expect("deserialize");
+
+        let mocked_server = server
+            .mock("POST", "/v1/ethereum/protocol_components")
+            .expect(1)
+            .with_body(server_resp)
+            .create_async()
+            .await;
+
+        let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
+
+        let response = client
+            .get_protocol_components(Chain::Ethereum, &Default::default(), &Default::default())
+            .await
+            .expect("get state");
+        let components = response.protocol_components;
+
+        mocked_server.assert();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].id, "State1");
+        assert_eq!(components[0].protocol_system, "ambient");
+        assert_eq!(components[0].protocol_type_name, "Pool");
+        assert_eq!(components[0].tokens.len(), 2);
+        let expected_attributes =
+            [("attribute_1".to_string(), Bytes::from(1000_u64.to_le_bytes()))]
+                .iter()
+                .cloned()
+                .collect::<HashMap<String, Bytes>>();
+        assert_eq!(components[0].static_attributes, expected_attributes);
     }
 }
