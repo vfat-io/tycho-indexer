@@ -553,8 +553,11 @@ impl ComponentBalance {
             balance: Bytes::from(msg.balance),
             balance_float,
             modify_tx: tx.hash,
-            component_id: String::from_utf8(msg.component_id)
-                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
+            component_id: msg
+                .component_id
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>(),
         })
     }
 }
@@ -726,9 +729,11 @@ impl BlockContractChanges {
                     }
 
                     for balance_change in change.balance_changes.into_iter() {
-                        let component_id =
-                            String::from_utf8(balance_change.component_id.clone())
-                                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
+                        let component_id = balance_change
+                            .component_id
+                            .iter()
+                            .map(|b| format!("{:02x}", b))
+                            .collect::<String>();
                         let token_address = H160::from_slice(balance_change.token.as_slice());
                         let balance = ComponentBalance::try_from_message(balance_change, &tx)?;
 
@@ -1269,7 +1274,8 @@ pub mod fixtures {
                         change: ChangeType::Update.into(),
                     }],
                     component_changes: vec![ProtocolComponent {
-                        id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
+                        id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
+                            .to_owned(),
                         tokens: vec![
                             H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                 .unwrap()
@@ -1316,7 +1322,10 @@ pub mod fixtures {
                         )
                         .unwrap(),
                         balance: 50000000.encode_to_vec(),
-                        component_id: "WETH-CAI".as_bytes().to_vec(),
+                        component_id: hex::decode(
+                            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902",
+                        )
+                        .unwrap(),
                     }],
                 },
                 TransactionContractChanges {
@@ -1353,7 +1362,10 @@ pub mod fixtures {
                         )
                         .unwrap(),
                         balance: 10.encode_to_vec(),
-                        component_id: "WETH-CAI".as_bytes().to_vec(),
+                        component_id: hex::decode(
+                            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902",
+                        )
+                        .unwrap(),
                     }],
                 },
             ],
@@ -1495,7 +1507,7 @@ pub mod fixtures {
     pub fn pb_protocol_component() -> crate::pb::tycho::evm::v1::ProtocolComponent {
         use crate::pb::tycho::evm::v1::*;
         ProtocolComponent {
-            id: "component_id".to_owned(),
+            id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_owned(),
             tokens: vec![
                 H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                     .unwrap()
@@ -1700,7 +1712,7 @@ mod test {
 
     fn create_protocol_component(tx_hash: H256) -> ProtocolComponent {
         ProtocolComponent {
-            id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
+            id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_owned(),
             protocol_system: "ambient".to_string(),
             protocol_type_name: String::from("WeightedPool"),
             chain: Chain::Ethereum,
@@ -1781,7 +1793,7 @@ mod test {
                         .into_iter()
                         .collect(),
                     component_balances: [(
-                        "WETH-CAI".to_string(),
+                        "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                         [(
                             H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                             ComponentBalance {
@@ -1789,7 +1801,7 @@ mod test {
                                 balance: Bytes::from(50000000.encode_to_vec()),
                                 balance_float: 36522027799.0,
                                 modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000011121314),
-                                component_id: "WETH-CAI".to_string(),
+                                component_id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                             },
                         )]
                             .into_iter()
@@ -1819,7 +1831,7 @@ mod test {
                         .collect(),
                     protocol_components: HashMap::new(),
                     component_balances: [(
-                        "WETH-CAI".to_string(),
+                        "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                         [(
                             H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                             ComponentBalance {
@@ -1827,7 +1839,7 @@ mod test {
                                 balance: Bytes::from(10.encode_to_vec()),
                                 balance_float: 2058.0,
                                 modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000000000001),
-                                component_id: "WETH-CAI".to_string(),
+                                component_id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                             },
                         )]
                             .into_iter()
@@ -1859,7 +1871,7 @@ mod test {
     fn block_account_changes() -> BlockAccountChanges {
         let address = H160::from_low_u64_be(0x0000000000000000000000000000000061626364);
         let protocol_component = ProtocolComponent {
-            id: "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
+            id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_owned(),
             protocol_system: "ambient".to_string(),
             protocol_type_name: String::from("WeightedPool"),
             chain: Chain::Ethereum,
@@ -1886,7 +1898,7 @@ mod test {
             created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         };
         let component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>> = [(
-            String::from("WETH-CAI"),
+            String::from("d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"),
             [(
                 H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                 ComponentBalance {
@@ -1896,7 +1908,9 @@ mod test {
                     modify_tx: H256::from_low_u64_be(
                         0x0000000000000000000000000000000000000000000000000000000000000001,
                     ),
-                    component_id: "WETH-CAI".to_string(),
+                    component_id:
+                        "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
+                            .to_string(),
                 },
             )]
             .into_iter()
@@ -2419,7 +2433,10 @@ mod test {
         let protocol_component = result.unwrap();
 
         // Assert specific properties of the protocol component
-        assert_eq!(protocol_component.id, "component_id".to_string());
+        assert_eq!(
+            protocol_component.id,
+            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string()
+        );
         assert_eq!(protocol_component.protocol_system, expected_protocol_system);
         assert_eq!(protocol_component.protocol_type_name, protocol_type_id);
         assert_eq!(protocol_component.chain, expected_chain);
@@ -2448,11 +2465,9 @@ mod test {
 
         let expected_token = H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
         let msg_token = expected_token.0.to_vec();
-        let expected_component_id = "DIANA-THALES";
-        let msg_component_id = expected_component_id
-            .try_into_bytes()
-            .unwrap()
-            .to_vec();
+        let expected_component_id =
+            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902";
+        let msg_component_id = hex::decode(expected_component_id).unwrap();
         let msg = substreams::BalanceChange {
             balance: msg_balance.to_vec(),
             token: msg_token,
