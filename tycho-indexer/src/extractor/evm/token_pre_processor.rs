@@ -2,7 +2,9 @@ use crate::{extractor::evm::ERC20Token, models::Chain};
 use ethers::{abi::Abi, contract::Contract, prelude::Middleware, types::H160};
 use serde_json::from_str;
 use std::{fs, sync::Arc};
+use tracing::instrument;
 
+#[derive(Debug)]
 pub struct TokenPreProcessor<M: Middleware> {
     client: Arc<M>,
     erc20_abi: Abi,
@@ -16,6 +18,7 @@ impl<M: Middleware> TokenPreProcessor<M> {
         TokenPreProcessor { client: Arc::new(client), erc20_abi: abi }
     }
 
+    #[instrument]
     pub async fn get_tokens(&self, addresses: Vec<H160>) -> Vec<ERC20Token> {
         let mut tokens_info = Vec::new();
 
