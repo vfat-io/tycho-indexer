@@ -4,7 +4,7 @@ use serde_json::from_str;
 use std::{fs, sync::Arc};
 
 pub struct TokenPreProcessor<M: Middleware> {
-    pub client: Arc<M>,
+    client: Arc<M>,
     erc20_abi: Abi,
 }
 
@@ -81,13 +81,36 @@ mod tests {
         ];
 
         let results = processor.get_tokens(addresses).await;
-
+        let expected_weth = ERC20Token {
+            address: H160::from_str(weth_address).unwrap(),
+            symbol: "WETH".to_string(),
+            decimals: 18,
+            tax: 0,
+            gas: vec![],
+            chain: Chain::Ethereum,
+            quality: 100,
+        };
+        let expected_usdc = ERC20Token {
+            address: H160::from_str(usdc_address).unwrap(),
+            symbol: "USDC".to_string(),
+            decimals: 6,
+            tax: 0,
+            gas: vec![],
+            chain: Chain::Ethereum,
+            quality: 100,
+        };
+        let expected_fake = ERC20Token {
+            address: H160::from_str(fake_address).unwrap(),
+            symbol: "0xa0b8…eb48".to_string(),
+            decimals: 18,
+            tax: 0,
+            gas: vec![],
+            chain: Chain::Ethereum,
+            quality: 0,
+        };
         assert_eq!(results.len(), 3);
-        assert_eq!(results[0].symbol, "WETH");
-        assert_eq!(results[0].decimals, 18);
-        assert_eq!(results[1].symbol, "USDC");
-        assert_eq!(results[1].decimals, 6);
-        assert_eq!(results[2].symbol, "0xa0b8…eb48");
-        assert_eq!(results[2].decimals, 18);
+        assert_eq!(results[0], expected_weth);
+        assert_eq!(results[1], expected_usdc);
+        assert_eq!(results[2], expected_fake);
     }
 }
