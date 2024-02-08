@@ -1,4 +1,5 @@
 #![allow(unused_variables)]
+
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
@@ -274,9 +275,10 @@ where
                 let tokens_by_pc: &Vec<Address> = protocol_component_tokens
                     .get(&pc.id)
                     .expect("Could not find Tokens for Protocol Component."); // We expect all protocol components to have tokens.
+                let binding = Vec::new();
                 let contracts_by_pc: &Vec<Address> = protocol_component_contracts
                     .get(&pc.id)
-                    .expect("Could not find Contracts for Protocol Component."); // We expect all protocol components to have contracts.
+                    .unwrap_or(&binding); // We expect all protocol components to have contracts.
 
                 ProtocolComponent::from_storage(
                     pc.clone(),
@@ -1563,7 +1565,6 @@ mod test {
     #[case::by_system(Some("ambient".to_string()), None)]
     #[case::by_ids(None, Some(vec ! ["state1"]))]
     #[tokio::test]
-
     async fn test_get_protocol_states(
         #[case] system: Option<String>,
         #[case] ids: Option<Vec<&str>>,
@@ -1584,7 +1585,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_get_protocol_states_at() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1628,7 +1628,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_update_protocol_states() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2165,7 +2164,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_get_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2196,7 +2194,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_add_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2472,7 +2469,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_delete_protocol_components() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2511,11 +2507,11 @@ mod test {
             .into_iter()
             .for_each(|ts| assert!(ts.is_some(), "Found None in updated_ts"));
     }
+
     #[rstest]
     #[case::get_one(Some("zigzag".to_string()))]
     #[case::get_none(Some("ambient".to_string()))]
     #[tokio::test]
-
     async fn test_get_protocol_components_with_system_only(#[case] system: Option<String>) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -2552,7 +2548,6 @@ mod test {
     #[case::get_one("state1".to_string())]
     #[case::get_none("state2".to_string())]
     #[tokio::test]
-
     async fn test_get_protocol_components_with_external_id_only(#[case] external_id: String) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
@@ -2609,8 +2604,8 @@ mod test {
     }
 
     #[rstest]
-    #[case::ethereum(Chain::Ethereum, &["state1", "state3", "no_tvl"])]
-    #[case::starknet(Chain::Starknet, &["state2"])]
+    #[case::ethereum(Chain::Ethereum, & ["state1", "state3", "no_tvl"])]
+    #[case::starknet(Chain::Starknet, & ["state2"])]
     #[tokio::test]
     async fn test_get_protocol_components_with_chain_filter(
         #[case] chain: Chain,
@@ -2636,10 +2631,10 @@ mod test {
     }
 
     #[rstest]
-    #[case::empty(Some(10.0), &[])]
-    #[case::all(None, &["state1", "state3", "no_tvl"])]
-    #[case::with_tvl(Some(0.0), &["state1", "state3"])]
-    #[case::with_tvl(Some(1.0), &["state1"])]
+    #[case::empty(Some(10.0), & [])]
+    #[case::all(None, & ["state1", "state3", "no_tvl"])]
+    #[case::with_tvl(Some(0.0), & ["state1", "state3"])]
+    #[case::with_tvl(Some(1.0), & ["state1"])]
     #[tokio::test]
     async fn test_get_protocol_components_with_min_tvl(
         #[case] min_tvl: Option<f64>,

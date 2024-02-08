@@ -5,6 +5,8 @@ use ethers::{
     types::{H160, H256, U256},
     utils::keccak256,
 };
+#[allow(unused_imports)]
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use tracing::log::warn;
@@ -23,7 +25,9 @@ use self::utils::TryDecode;
 use super::{u256_num::bytes_to_f64, ExtractionError};
 
 pub mod ambient;
+pub mod native;
 pub mod storage;
+mod token_pre_processor;
 mod utils;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -350,6 +354,19 @@ impl std::fmt::Display for BlockAccountChanges {
 
 #[typetag::serde]
 impl NormalisedMessage for BlockAccountChanges {
+    fn source(&self) -> ExtractorIdentity {
+        ExtractorIdentity::new(self.chain, &self.extractor)
+    }
+}
+
+impl std::fmt::Display for BlockEntityChangesResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "block_number: {}, extractor: {}", self.block.number, self.extractor)
+    }
+}
+
+#[typetag::serde]
+impl NormalisedMessage for BlockEntityChangesResult {
     fn source(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.extractor)
     }
@@ -687,6 +704,9 @@ impl BlockContractChanges {
             for change in msg.changes.into_iter() {
                 let mut account_updates = HashMap::new();
                 let mut protocol_components = HashMap::new();
+                let mut balances_changes: HashMap<ComponentId, HashMap<H160, ComponentBalance>> =
+                    HashMap::new();
+
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message(tx, &block.hash)?;
                     for el in change.contract_changes.into_iter() {
@@ -704,10 +724,24 @@ impl BlockContractChanges {
                         )?;
                         protocol_components.insert(component.id.clone(), component);
                     }
+
+                    for balance_change in change.balance_changes.into_iter() {
+                        let component_id =
+                            String::from_utf8(balance_change.component_id.clone())
+                                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
+                        let token_address = H160::from_slice(balance_change.token.as_slice());
+                        let balance = ComponentBalance::try_from_message(balance_change, &tx)?;
+
+                        balances_changes
+                            .entry(component_id)
+                            .or_default()
+                            .insert(token_address, balance);
+                    }
+
                     tx_updates.push(TransactionVMUpdates::new(
                         account_updates,
                         protocol_components,
-                        HashMap::new(),
+                        balances_changes,
                         tx,
                     ));
                 }
@@ -866,23 +900,88 @@ impl ProtocolStateDelta {
 
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct ProtocolStateDeltasWithTx {
+pub struct ProtocolChangesWithTx {
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
     pub protocol_states: HashMap<String, ProtocolStateDelta>,
+    pub balance_changes: HashMap<String, HashMap<H160, ComponentBalance>>,
     pub tx: Transaction,
 }
 
-impl ProtocolStateDeltasWithTx {
+impl ProtocolChangesWithTx {
     /// Parses protocol state from tychos protobuf EntityChanges message
     pub fn try_from_message(
-        msg: Vec<substreams::EntityChanges>,
-        tx: Transaction,
+        msg: substreams::TransactionEntityChanges,
+        block: &Block,
+        protocol_system: &str,
+        protocol_types: &HashMap<String, ProtocolType>,
     ) -> Result<Self, ExtractionError> {
-        let mut protocol_states = HashMap::new();
-        for state_msg in msg {
-            let state = ProtocolStateDelta::try_from_message(state_msg)?;
-            protocol_states.insert(state.clone().component_id, state);
+        let tx = Transaction::try_from_message(
+            msg.tx
+                .expect("TransactionEntityChanges should have a transaction"),
+            &block.hash,
+        )?;
+
+        let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
+        let mut state_updates: HashMap<String, ProtocolStateDelta> = HashMap::new();
+        let mut component_balances: HashMap<String, HashMap<H160, ComponentBalance>> =
+            HashMap::new();
+
+        // First, parse the new protocol components
+        for change in msg.component_changes.into_iter() {
+            let component = ProtocolComponent::try_from_message(
+                change.clone(),
+                block.chain,
+                protocol_system,
+                protocol_types,
+                tx.hash,
+                block.ts,
+            )?;
+            new_protocol_components.insert(change.id, component);
         }
-        Ok(Self { protocol_states, tx })
+
+        // Then, parse the state updates
+        for state_msg in msg.entity_changes.into_iter() {
+            let state = ProtocolStateDelta::try_from_message(state_msg)?;
+            // Check if a state update for the same component already exists
+            // If it exists, overwrite the existing state update with the new one and log a warning
+            match state_updates.entry(state.component_id.clone()) {
+                Entry::Vacant(e) => {
+                    e.insert(state);
+                }
+                Entry::Occupied(mut e) => {
+                    warn!("Received two state updates for the same component. Overwriting state for component {}", e.key());
+                    e.insert(state);
+                }
+            }
+        }
+
+        // Finally, parse the balance changes
+        for balance_change in msg.balance_changes.into_iter() {
+            let component_balance = ComponentBalance::try_from_message(balance_change, &tx)?;
+
+            // Check if a balance change for the same token and component already exists
+            // If it exists, overwrite the existing balance change with the new one and log a
+            // warning
+            let token_balances = component_balances
+                .entry(component_balance.component_id.clone())
+                .or_default();
+
+            if let Some(existing_balance) =
+                token_balances.insert(component_balance.token, component_balance)
+            {
+                warn!(
+                    "Received two balance updates for the same component id: {} and token {}. Overwriting balance change",
+                    existing_balance.component_id, existing_balance.token
+                );
+            }
+        }
+
+        Ok(Self {
+            new_protocol_components,
+            protocol_states: state_updates,
+            balance_changes: component_balances,
+            tx,
+        })
     }
 
     /// Merges this update with another one.
@@ -902,7 +1001,7 @@ impl ProtocolStateDeltasWithTx {
     /// # Errors
     /// This method will return `ExtractionError::MergeError` if any of the above
     /// conditions is violated.
-    pub fn merge(&mut self, other: ProtocolStateDeltasWithTx) -> Result<(), ExtractionError> {
+    pub fn merge(&mut self, other: ProtocolChangesWithTx) -> Result<(), ExtractionError> {
         if self.tx.block_hash != other.tx.block_hash {
             return Err(ExtractionError::MergeError(format!(
                 "Can't merge ProtocolStates from different blocks: 0x{:x} != 0x{:x}",
@@ -922,6 +1021,7 @@ impl ProtocolStateDeltasWithTx {
             )));
         }
         self.tx = other.tx;
+        // Merge protocol states
         for (key, value) in other.protocol_states {
             match self.protocol_states.entry(key) {
                 Entry::Occupied(mut entry) => {
@@ -932,6 +1032,36 @@ impl ProtocolStateDeltasWithTx {
                 }
             }
         }
+
+        // Merge token balances
+        for (component_id, balance_changes) in other.balance_changes {
+            let token_balances = self
+                .balance_changes
+                .entry(component_id)
+                .or_default();
+            for (token, balance) in balance_changes {
+                token_balances.insert(token, balance);
+            }
+        }
+
+        // Merge new protocol components
+        // Log a warning if a new protocol component for the same id already exists, because this
+        // should never happen.
+        for (key, value) in other.new_protocol_components {
+            match self.new_protocol_components.entry(key) {
+                Entry::Occupied(mut entry) => {
+                    warn!(
+                        "Overwriting new protocol component for id {} with a new one. This should never happen! Please check logic",
+                        entry.get().id
+                    );
+                    entry.insert(value);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(value);
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -954,63 +1084,58 @@ pub struct BlockEntityChangesResult {
 ///
 /// Hold the detailed state changes for a block alongside with protocol
 /// component changes.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub struct BlockEntityChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
     pub revert: bool,
-    pub state_updates: Vec<ProtocolStateDeltasWithTx>,
-    pub new_protocol_components: HashMap<String, ProtocolComponent>,
+    pub txs_with_update: Vec<ProtocolChangesWithTx>,
 }
 
-// TODO: remove dead code check skip once extractor is implemented
 impl BlockEntityChanges {
     /// Parse from tychos protobuf message
     pub fn try_from_message(
         msg: substreams::BlockEntityChanges,
         extractor: &str,
         chain: Chain,
-        protocol_system: String,
+        protocol_system: &str,
         protocol_types: &HashMap<String, ProtocolType>,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
-            let mut state_updates = Vec::new();
-            let mut new_protocol_components = HashMap::new();
 
-            for change in msg.changes.into_iter() {
-                if let Some(tx) = change.tx {
-                    let tx = Transaction::try_from_message(tx, &block.hash)?;
-                    let tx_update =
-                        ProtocolStateDeltasWithTx::try_from_message(change.entity_changes, tx)?;
-
-                    state_updates.push(tx_update);
-                    for component in change.component_changes {
-                        let pool = ProtocolComponent::try_from_message(
-                            component,
-                            chain,
-                            &protocol_system,
+            let mut txs_with_update: Vec<ProtocolChangesWithTx> = msg
+                .changes
+                .into_iter()
+                .filter_map(|change| {
+                    change.tx.as_ref()?;
+                    Some(
+                        ProtocolChangesWithTx::try_from_message(
+                            change,
+                            &block,
+                            protocol_system,
                             protocol_types,
-                            tx.hash,
-                            block.ts,
-                        )?;
-                        new_protocol_components.insert(pool.id.clone(), pool);
-                    }
-                }
-            }
+                        )
+                        .ok(),
+                    )
+                })
+                .collect::<Option<Vec<_>>>()
+                .expect("Failed to parse changes");
 
-            state_updates.sort_unstable_by_key(|update| update.tx.index);
-            return Ok(Self {
-                extractor: extractor.to_owned(),
+            // Sort updates by transaction index
+            txs_with_update.sort_unstable_by_key(|update| update.tx.index);
+
+            Ok(Self {
+                extractor: extractor.to_string(),
                 chain,
                 block,
                 revert: false,
-                state_updates,
-                new_protocol_components,
-            });
+                txs_with_update,
+            })
+        } else {
+            Err(ExtractionError::Empty)
         }
-        Err(ExtractionError::Empty)
     }
 
     /// Aggregates state updates.
@@ -1027,12 +1152,13 @@ impl BlockEntityChanges {
     /// This returns an error if there was a problem during merge. The error
     /// type is `ExtractionError`.
     pub fn aggregate_updates(self) -> Result<BlockEntityChangesResult, ExtractionError> {
-        let base = ProtocolStateDeltasWithTx::default();
+        let mut iter = self.txs_with_update.into_iter();
 
-        let aggregated_states = self
-            .state_updates
-            .iter()
-            .try_fold(base, |mut acc_state, new_state| {
+        // Use unwrap_or_else to provide a default state if iter.next() is None
+        let first_state = iter.next().unwrap_or_default();
+
+        let aggregated_changes = iter
+            .try_fold(first_state, |mut acc_state, new_state| {
                 acc_state.merge(new_state.clone())?;
                 Ok::<_, ExtractionError>(acc_state.clone())
             })
@@ -1043,15 +1169,14 @@ impl BlockEntityChanges {
             chain: self.chain,
             block: self.block,
             revert: self.revert,
-            state_updates: aggregated_states.protocol_states,
-            new_protocol_components: self.new_protocol_components,
+            state_updates: aggregated_changes.protocol_states,
+            new_protocol_components: aggregated_changes.new_protocol_components,
         })
     }
 }
 
 #[cfg(test)]
 pub mod fixtures {
-    use ethers::abi::AbiEncode;
     use prost::Message;
     use std::str::FromStr;
 
@@ -1188,7 +1313,7 @@ pub mod fixtures {
                         )
                         .unwrap(),
                         balance: 50000000.encode_to_vec(),
-                        component_id: "WETH-CAI".encode(),
+                        component_id: "WETH-CAI".as_bytes().to_vec(),
                     }],
                 },
                 TransactionContractChanges {
@@ -1225,7 +1350,7 @@ pub mod fixtures {
                         )
                         .unwrap(),
                         balance: 10.encode_to_vec(),
-                        component_id: "WETH-CAI".encode(),
+                        component_id: "WETH-CAI".as_bytes().to_vec(),
                     }],
                 },
             ],
@@ -1416,6 +1541,7 @@ mod test {
     use std::str::FromStr;
 
     use actix_web::body::MessageBody;
+    use prost::Message;
 
     use rstest::rstest;
 
@@ -1646,12 +1772,29 @@ mod test {
                             ChangeType::Update,
                         ),
                     )]
-                    .into_iter()
-                    .collect(),
+                        .into_iter()
+                        .collect(),
                     protocol_components: [(protocol_component.id.clone(), protocol_component)]
                         .into_iter()
                         .collect(),
-                    component_balances: HashMap::new(),
+                    component_balances: [(
+                        "WETH-CAI".to_string(),
+                        [(
+                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                            ComponentBalance {
+                                token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                                balance: Bytes::from(50000000.encode_to_vec()),
+                                balance_float: 36522027799.0,
+                                modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000011121314),
+                                component_id: "WETH-CAI".to_string(),
+                            },
+                        )]
+                            .into_iter()
+                            .collect(),
+                    )]
+                        .into_iter()
+                        .collect(),
+
                     tx,
                 },
                 TransactionVMUpdates {
@@ -1669,10 +1812,26 @@ mod test {
                             ChangeType::Update,
                         ),
                     )]
-                    .into_iter()
-                    .collect(),
+                        .into_iter()
+                        .collect(),
                     protocol_components: HashMap::new(),
-                    component_balances: HashMap::new(),
+                    component_balances: [(
+                        "WETH-CAI".to_string(),
+                        [(
+                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                            ComponentBalance {
+                                token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                                balance: Bytes::from(10.encode_to_vec()),
+                                balance_float: 2058.0,
+                                modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000000000001),
+                                component_id: "WETH-CAI".to_string(),
+                            },
+                        )]
+                            .into_iter()
+                            .collect(),
+                    )]
+                        .into_iter()
+                        .collect(),
                     tx: tx_5,
                 },
             ],
@@ -1691,7 +1850,6 @@ mod test {
             &HashMap::from([("WeightedPool".to_string(), ProtocolType::default())]),
         )
         .unwrap();
-
         assert_eq!(res, block_state_changes());
     }
 
@@ -1724,6 +1882,26 @@ mod test {
             .unwrap(),
             created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         };
+        let component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>> = [(
+            String::from("WETH-CAI"),
+            [(
+                H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                ComponentBalance {
+                    token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                    balance: Bytes::from(10.encode_to_vec()),
+                    balance_float: 2058.0,
+                    modify_tx: H256::from_low_u64_be(
+                        0x0000000000000000000000000000000000000000000000000000000000000001,
+                    ),
+                    component_id: "WETH-CAI".to_string(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        )]
+        .into_iter()
+        .collect();
+
         BlockAccountChanges::new(
             "test",
             Chain::Ethereum,
@@ -1761,7 +1939,7 @@ mod test {
                 .into_iter()
                 .collect(),
             HashMap::new(),
-            HashMap::new(),
+            component_balances,
         )
     }
 
@@ -1833,7 +2011,7 @@ mod test {
         assert_eq!(state1.deleted_attributes, expected_del_attributes);
     }
 
-    fn protocol_state_with_tx() -> ProtocolStateDeltasWithTx {
+    fn protocol_state_with_tx() -> ProtocolChangesWithTx {
         let attributes: HashMap<String, Bytes> = vec![
             ("reserve".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
             ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
@@ -1860,7 +2038,7 @@ mod test {
         ]
         .into_iter()
         .collect();
-        ProtocolStateDeltasWithTx { protocol_states: states, tx: transaction01() }
+        ProtocolChangesWithTx { protocol_states: states, tx: transaction01(), ..Default::default() }
     }
 
     #[test]
@@ -1885,7 +2063,8 @@ mod test {
         .into_iter()
         .collect();
 
-        let tx_update = ProtocolStateDeltasWithTx { protocol_states: new_states, tx: new_tx };
+        let tx_update =
+            ProtocolChangesWithTx { protocol_states: new_states, tx: new_tx, ..Default::default() };
 
         let res = base_state.merge(tx_update);
 
@@ -2053,11 +2232,15 @@ mod test {
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
             revert: false,
-            state_updates: vec![
+            txs_with_update: vec![
                 protocol_state_with_tx(),
-                ProtocolStateDeltasWithTx { protocol_states: state_updates, tx },
+                ProtocolChangesWithTx {
+                    protocol_states: state_updates,
+                    tx,
+                    new_protocol_components: new_protocol_components.clone(),
+                    ..Default::default()
+                },
             ],
-            new_protocol_components,
         }
     }
 
@@ -2069,7 +2252,7 @@ mod test {
             msg,
             "test",
             Chain::Ethereum,
-            "ambient".to_string(),
+            "ambient",
             &HashMap::from([
                 ("Pool".to_string(), ProtocolType::default()),
                 ("WeightedPool".to_string(), ProtocolType::default()),
@@ -2174,7 +2357,7 @@ mod test {
         let block_hash = "0x0000000000000000000000000000000000000000000000000000000000000000";
         // use a different tx so merge works
         let new_tx = fixtures::transaction02(HASH_256_1, block_hash, 5);
-        block_changes.state_updates[0].tx = new_tx;
+        block_changes.txs_with_update[0].tx = new_tx;
 
         let res = block_changes
             .aggregate_updates()
@@ -2248,7 +2431,7 @@ mod test {
             protocol_component.contract_ids,
             vec![
                 H160::from_str("0x31fF2589Ee5275a2038beB855F44b9Be993aA804").unwrap(),
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
             ]
         );
         assert_eq!(protocol_component.static_attributes, expected_attribute_map);

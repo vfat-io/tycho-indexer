@@ -22,6 +22,7 @@ use utoipa::ToSchema;
 #[strum(serialize_all = "lowercase")]
 pub enum Chain {
     #[default]
+    /*  */
     Ethereum,
     Starknet,
     ZkSync,
