@@ -16,10 +16,7 @@ impl<M: Middleware> TokenPreProcessor<M> {
         TokenPreProcessor { client: Arc::new(client), erc20_abi: abi }
     }
 
-    pub async fn get_tokens(
-        &self,
-        addresses: Vec<H160>,
-    ) -> Result<Vec<ERC20Token>, Box<dyn std::error::Error>> {
+    pub async fn get_tokens(&self, addresses: Vec<H160>) -> Vec<ERC20Token> {
         let mut tokens_info = Vec::new();
 
         for address in addresses {
@@ -37,17 +34,21 @@ impl<M: Middleware> TokenPreProcessor<M> {
                 .call()
                 .await;
 
-            match (symbol, decimals) {
-                (Ok(symbol), Ok(decimals)) => tokens_info.push(ERC20Token {
-                    address,
-                    symbol,
-                    decimals: decimals.into(),
-                    tax: 0,
-                    gas: vec![],
-                    chain: Chain::Ethereum,
-                }),
-                (Err(e), _) | (_, Err(e)) => println!("Error fetching token data: {:?}", e),
-            }
+            let (symbol, decimals, quality) = match (symbol, decimals) {
+                (Ok(symbol), Ok(decimals)) => (symbol, decimals, 100),
+                (Ok(symbol), Err(_)) => (symbol, 18, 0),
+                (Err(_), Ok(decimals)) => (address.to_string(), decimals, 0),
+                (Err(_), Err(_)) => (address.to_string(), 18, 0),
+            };
+            tokens_info.push(ERC20Token {
+                address,
+                symbol,
+                decimals: decimals.into(),
+                tax: 0,
+                gas: vec![],
+                chain: Chain::Ethereum,
+                quality,
+            });
         }
 
         Ok(tokens_info)
@@ -92,8 +93,12 @@ mod tests {
 
         let weth_address: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
         let usdc_address: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
-        let addresses =
-            vec![H160::from_str(weth_address).unwrap(), H160::from_str(usdc_address).unwrap()];
+        let fake_address: &str = "0xA0b86991c7456b36c1d19D4a2e9Eb0cE3606eB48";
+        let addresses = vec![
+            H160::from_str(weth_address).unwrap(),
+            H160::from_str(usdc_address).unwrap(),
+            H160::from_str(fake_address).unwrap(),
+        ];
 
         let results = processor
             .get_tokens(addresses)
@@ -105,5 +110,7 @@ mod tests {
         assert_eq!(results[0].decimals, 18);
         assert_eq!(results[1].symbol, "USDC");
         assert_eq!(results[1].decimals, 6);
+        assert_eq!(results[2].symbol, "0xa0b8…eb48");
+        assert_eq!(results[2].decimals, 18);
     }
 }
