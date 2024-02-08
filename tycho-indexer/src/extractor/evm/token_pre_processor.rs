@@ -1,25 +1,34 @@
 use crate::{extractor::evm::ERC20Token, models::Chain};
-use ethers::{abi::Abi, contract::Contract, prelude::Middleware, types::H160};
+use async_trait::async_trait;
+use ethers::{abi::Abi, contract::Contract, prelude::Provider, providers::Http, types::H160};
 use serde_json::from_str;
 use std::{fs, sync::Arc};
 use tracing::instrument;
 
 #[derive(Debug)]
-pub struct TokenPreProcessor<M: Middleware> {
-    client: Arc<M>,
+pub struct TokenPreProcessor {
+    client: Arc<Provider<Http>>,
     erc20_abi: Abi,
 }
+#[cfg_attr(test, mockall::automock)]
+#[async_trait]
+pub trait TokenPreProcessorTrait: Send + Sync {
+    async fn get_tokens(&self, addresses: Vec<H160>) -> Vec<ERC20Token>;
+}
 
-impl<M: Middleware> TokenPreProcessor<M> {
-    pub fn new(client: M) -> Self {
+impl TokenPreProcessor {
+    pub fn new(client: Provider<Http>) -> Self {
         let abi_str = fs::read_to_string("src/extractor/evm/abi/erc20.json")
             .expect("Unable to read ABI file");
         let abi = from_str::<Abi>(&abi_str).expect("Unable to parse ABI");
         TokenPreProcessor { client: Arc::new(client), erc20_abi: abi }
     }
+}
 
+#[async_trait]
+impl TokenPreProcessorTrait for TokenPreProcessor {
     #[instrument]
-    pub async fn get_tokens(&self, addresses: Vec<H160>) -> Vec<ERC20Token> {
+    async fn get_tokens(&self, addresses: Vec<H160>) -> Vec<ERC20Token> {
         let mut tokens_info = Vec::new();
 
         for address in addresses {
