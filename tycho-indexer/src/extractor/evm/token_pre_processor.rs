@@ -65,8 +65,10 @@ mod tests {
     use std::str::FromStr;
 
     #[tokio::test]
+    #[ignore]
+    // This test requires a real RPC URL
     async fn test_get_tokens() {
-        let rpc_url = "https://eth-mainnet.g.alchemy.com/v2/OTD5W7gdTPrzpVot41Lx9tJD9LUiAhbs";
+        let rpc_url = "your-rpc-url-here";
         let client: Provider<Http> =
             Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
         let processor = TokenPreProcessor::new(client);
