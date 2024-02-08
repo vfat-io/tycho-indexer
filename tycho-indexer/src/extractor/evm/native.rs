@@ -109,7 +109,7 @@ impl NativePgGateway {
         let mut state_updates: Vec<(TxHash, evm::ProtocolStateDelta)> = vec![];
         let mut balance_changes: Vec<evm::ComponentBalance> = vec![];
 
-        for tx in changes.state_updates.iter() {
+        for tx in changes.txs_with_update.iter() {
             self.state_gateway
                 .upsert_tx(&changes.block, &tx.tx)
                 .await?;
@@ -787,7 +787,7 @@ mod test_serial_db {
                 ts: "2020-01-01T01:00:00".parse().unwrap(),
             },
             revert: false,
-            state_updates: vec![ProtocolChangesWithTx {
+            txs_with_update: vec![ProtocolChangesWithTx {
                 tx: Transaction::new(
                     H256::zero(),
                     BLOCK_HASH_0.parse().unwrap(),
@@ -913,7 +913,7 @@ mod test_serial_db {
                     ts: "2020-01-02T01:00:00".parse().unwrap(),
                 },
                 revert: false,
-                state_updates: vec![ProtocolChangesWithTx {
+                txs_with_update: vec![ProtocolChangesWithTx {
                     tx: Transaction::new(
                         TX_HASH_1.parse().unwrap(),
                         BLOCK_HASH_1.parse().unwrap(),

@@ -1084,7 +1084,7 @@ pub struct BlockEntityChanges {
     chain: Chain,
     pub block: Block,
     pub revert: bool,
-    pub state_updates: Vec<ProtocolChangesWithTx>,
+    pub txs_with_update: Vec<ProtocolChangesWithTx>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
 }
 
@@ -1100,7 +1100,7 @@ impl BlockEntityChanges {
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
-            let mut update_txs: Vec<ProtocolChangesWithTx> = Vec::new();
+            let mut txs_with_update: Vec<ProtocolChangesWithTx> = Vec::new();
             let mut new_protocol_components = HashMap::new();
 
             for change in msg.changes.into_iter() {
@@ -1114,7 +1114,7 @@ impl BlockEntityChanges {
                         protocol_types,
                     )?;
 
-                    update_txs.push(tx_update);
+                    txs_with_update.push(tx_update);
                     for component in change.component_changes {
                         let pool = ProtocolComponent::try_from_message(
                             component,
@@ -1130,14 +1130,14 @@ impl BlockEntityChanges {
             }
 
             // Sort updates by transaction by index
-            update_txs.sort_unstable_by_key(|update| update.tx.index);
+            txs_with_update.sort_unstable_by_key(|update| update.tx.index);
 
             return Ok(Self {
                 extractor: extractor.to_owned(),
                 chain,
                 block,
                 revert: false,
-                state_updates: update_txs,
+                txs_with_update,
                 new_protocol_components,
             });
         }
@@ -1159,7 +1159,7 @@ impl BlockEntityChanges {
     /// This returns an error if there was a problem during merge. The error
     /// type is `ExtractionError`.
     pub fn aggregate_updates(self) -> Result<BlockEntityChangesResult, ExtractionError> {
-        let mut iter = self.state_updates.into_iter();
+        let mut iter = self.txs_with_update.into_iter();
 
         // Use unwrap_or_else to provide a default state if iter.next() is None
         let first_state = iter.next().unwrap_or_default();
@@ -2239,7 +2239,7 @@ mod test {
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
             revert: false,
-            state_updates: vec![
+            txs_with_update: vec![
                 protocol_state_with_tx(),
                 ProtocolChangesWithTx {
                     protocol_states: state_updates,
@@ -2365,7 +2365,7 @@ mod test {
         let block_hash = "0x0000000000000000000000000000000000000000000000000000000000000000";
         // use a different tx so merge works
         let new_tx = fixtures::transaction02(HASH_256_1, block_hash, 5);
-        block_changes.state_updates[0].tx = new_tx;
+        block_changes.txs_with_update[0].tx = new_tx;
 
         let res = block_changes
             .aggregate_updates()
