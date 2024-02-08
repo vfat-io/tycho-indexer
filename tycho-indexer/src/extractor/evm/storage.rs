@@ -169,7 +169,8 @@ pub mod pg {
         ) -> orm::NewComponentBalance {
             orm::NewComponentBalance {
                 token_id,
-                new_balance: self.new_balance.clone(),
+                new_balance: self.balance.clone(),
+                previous_value: Balance::from(U256::from(0)),
                 balance_float: self.balance_float,
                 modify_tx,
                 protocol_component_id,
@@ -335,6 +336,7 @@ pub mod pg {
                     .map(|item| item.map(|i| i as u64))
                     .collect(),
                 contract.chain,
+                val.quality as u32,
             ))
         }
 
@@ -350,6 +352,7 @@ pub mod pg {
                     .into_iter()
                     .map(|item| item.map(|i| i as i64))
                     .collect(),
+                quality: self.quality as i32,
             }
         }
 
@@ -543,6 +546,7 @@ mod test {
             gas: vec![Some(64), None],
             inserted_ts: Default::default(),
             modified_ts: Default::default(),
+            quality: 100,
         };
         let contract_id = ContractId::new(Chain::Ethereum, token_address.clone());
         let result = ERC20Token::from_storage(orm_token, contract_id);
@@ -564,6 +568,7 @@ mod test {
             tax: 0,
             gas: vec![Some(64), None],
             chain: Chain::Ethereum,
+            quality: 100,
         };
 
         let new_token = erc_token.to_storage(22);

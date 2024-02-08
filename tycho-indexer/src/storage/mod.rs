@@ -631,6 +631,7 @@ pub trait ProtocolGateway {
         chain: &Chain,
         system: Option<String>,
         ids: Option<&[&str]>,
+        min_tvl: Option<f64>,
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
 
@@ -727,6 +728,8 @@ pub trait ProtocolGateway {
     ///
     /// # Parameters
     /// - `component_balances` The component balances to insert.
+    /// - `chain` The chain of the component balances to be inserted.
+    /// - `block_ts` The timestamp of the block that the balances are associated with.
     ///
     /// # Return
     /// Ok if all component balances could be inserted, Err if at least one token failed to
@@ -734,6 +737,7 @@ pub trait ProtocolGateway {
     async fn add_component_balances(
         &self,
         component_balances: &[&Self::ComponentBalance],
+        chain: &Chain,
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
@@ -751,7 +755,6 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_tokens(
         &self,
-
         tokens: &[&Self::Token],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
@@ -794,11 +797,26 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<Vec<ComponentBalance>, StorageError>;
 
-    async fn _get_or_create_protocol_system_id(
+    async fn get_balances(
         &self,
-        protocol_system: String,
+        chain: &Chain,
+        ids: Option<&[&str]>,
+        at: Option<&BlockOrTimestamp>,
         conn: &mut Self::DB,
-    ) -> Result<i64, StorageError>;
+    ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError>;
+
+    async fn get_token_prices(
+        &self,
+        chain: &Chain,
+        conn: &mut Self::DB,
+    ) -> Result<HashMap<Bytes, f64>, StorageError>;
+
+    async fn upsert_component_tvl(
+        &self,
+        chain: &Chain,
+        tvl_values: &HashMap<String, f64>,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError>;
 }
 
 /// Lays out the necessary interface needed to store and retrieve contracts from

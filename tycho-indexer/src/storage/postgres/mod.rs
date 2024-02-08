@@ -673,7 +673,7 @@ pub mod db_fixtures {
 
     use crate::storage::{Balance, Code};
     use chrono::NaiveDateTime;
-    use diesel::prelude::*;
+    use diesel::{prelude::*, sql_query};
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
@@ -971,6 +971,7 @@ pub mod db_fixtures {
     pub async fn insert_component_balance(
         conn: &mut AsyncPgConnection,
         balance: Balance,
+        previous_balance: Balance,
         balance_float: f64,
         token_id: i64,
         tx_id: i64,
@@ -990,6 +991,7 @@ pub mod db_fixtures {
                 schema::component_balance::modify_tx.eq(tx_id),
                 schema::component_balance::new_balance.eq(balance),
                 schema::component_balance::balance_float.eq(balance_float),
+                schema::component_balance::previous_value.eq(previous_balance),
                 schema::component_balance::valid_from.eq(ts),
             ))
             .execute(conn)
@@ -1184,5 +1186,49 @@ pub mod db_fixtures {
             .first::<orm::Token>(conn)
             .await
             .unwrap()
+    }
+
+    pub async fn insert_token_prices(data: &[(i64, f64)], conn: &mut AsyncPgConnection) {
+        diesel::insert_into(schema::token_price::table)
+            .values(
+                data.iter()
+                    .map(|(tid, price)| {
+                        (
+                            schema::token_price::token_id.eq(tid),
+                            schema::token_price::price.eq(price),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .execute(conn)
+            .await
+            .expect("Inserting token prices fixture failed");
+    }
+
+    pub async fn calculate_component_tvl(conn: &mut AsyncPgConnection) {
+        sql_query(
+            r#"
+        INSERT INTO component_tvl (protocol_component_id, tvl)
+        SELECT 
+            bal.protocol_component_id as protocol_component_id,
+            SUM(bal.balance_float * token_price.price / POWER(10.0, token.decimals)) as tvl
+        FROM 
+            component_balance AS bal 
+        INNER JOIN 
+            token_price ON bal.token_id = token_price.token_id 
+        INNER JOIN
+            token ON bal.token_id = token.id
+        WHERE 
+            bal.valid_to IS NULL 
+        GROUP BY 
+            bal.protocol_component_id
+        ON CONFLICT (protocol_component_id) 
+        DO UPDATE SET 
+            tvl = EXCLUDED.tvl;
+        "#,
+        )
+        .execute(conn)
+        .await
+        .expect("calculating fixture component tvl failed");
     }
 }

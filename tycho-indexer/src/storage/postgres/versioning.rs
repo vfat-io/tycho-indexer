@@ -110,6 +110,7 @@ pub trait StoredVersionedRow {
     fn get_pk(&self) -> Self::PrimaryKey;
 
     /// Exposes the end version.
+    #[allow(dead_code)] //TODO: Remove when in use.
     fn get_valid_to(&self) -> Self::Version;
 
     /// Exposes the entity id.
@@ -253,6 +254,13 @@ where
     Ok(())
 }
 
+#[async_trait]
+pub trait StoredDeltaVersionedRow: StoredVersionedRow {
+    type Value: Clone + Debug;
+
+    fn get_value(&self) -> Self::Value;
+}
+
 /// Applies and executes delta versioning logic for a set of new entries.
 ///
 /// Same as `apply_versioning` but also takes care of previous value columns.
@@ -262,7 +270,7 @@ pub async fn apply_delta_versioning<'a, N, S>(
 ) -> Result<(), StorageError>
 where
     N: VersionedRow + DeltaVersionedRow + Debug,
-    S: StoredVersionedRow<EntityId = N::EntityId, Version = N::Version>,
+    S: StoredDeltaVersionedRow<EntityId = N::EntityId, Version = N::Version, Value = N::Value>,
     <N as VersionedRow>::EntityId: Clone,
 {
     if new_data.is_empty() {
@@ -270,6 +278,21 @@ where
     }
     let end_versions = set_delta_versioning_attributes(new_data);
     let db_rows = S::latest_versions_by_ids(end_versions.keys().cloned(), conn).await?;
+
+    // Not terribly efficient but works (using find is very inefficient especially if new data is
+    // big)
+    for r in db_rows.iter() {
+        let current_id = r.get_entity_id();
+        // find the first new entry with this id, we assume new_data is correctly sorted.
+        if let Some(new_entry) = new_data
+            .iter_mut()
+            .find(|new| new.get_entity_id() == current_id)
+        {
+            // set this new entries previous value
+            new_entry.set_previous_value(r.get_value());
+        }
+    }
+
     if !db_rows.is_empty() {
         build_batch_update_query(&db_rows, S::table_name(), &end_versions)
             .execute(conn)

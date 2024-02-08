@@ -2,8 +2,11 @@ use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
     dsl::sql,
+    pg::Pg,
     prelude::*,
-    sql_types::{self, Bool},
+    query_builder::{BoxedSqlQuery, SqlQuery},
+    sql_query,
+    sql_types::{self, BigInt, Bool, Double},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
@@ -12,16 +15,16 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     models,
     storage::{
-        Address, AttrStoreKey, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ComponentId,
-        ContractId, StorageError, StoreVal, TxHash,
+        postgres::versioning::StoredDeltaVersionedRow, Address, AttrStoreKey, Balance, BlockHash,
+        BlockIdentifier, Code, CodeHash, ComponentId, ContractId, StorageError, StoreVal, TxHash,
     },
 };
 use tycho_types::Bytes;
 
 use super::{
     schema::{
-        account, account_balance, block, chain, component_balance, contract_code, contract_storage,
-        extraction_state, protocol_component, protocol_component_holds_contract,
+        account, account_balance, block, chain, component_balance, component_tvl, contract_code,
+        contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
         protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
         transaction,
     },
@@ -322,6 +325,7 @@ pub struct ComponentBalance {
     pub token_id: i64,
     pub new_balance: Balance,
     pub balance_float: f64,
+    pub previous_value: Balance,
     pub modify_tx: i64,
     pub protocol_component_id: i64,
     pub inserted_ts: NaiveDateTime,
@@ -382,12 +386,13 @@ impl StoredVersionedRow for ComponentBalance {
     }
 }
 
-#[derive(AsChangeset, Insertable)]
+#[derive(AsChangeset, Insertable, Debug)]
 #[diesel(table_name = component_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewComponentBalance {
     pub token_id: i64,
     pub new_balance: Balance,
+    pub previous_value: Balance,
     pub balance_float: f64,
     pub modify_tx: i64,
     pub protocol_component_id: i64,
@@ -414,6 +419,38 @@ impl VersionedRow for NewComponentBalance {
 
     fn get_valid_from(&self) -> Self::Version {
         self.valid_from
+    }
+}
+
+impl DeltaVersionedRow for NewComponentBalance {
+    type Value = Balance;
+
+    fn get_value(&self) -> Self::Value {
+        self.new_balance.clone()
+    }
+
+    fn set_previous_value(&mut self, previous_value: Self::Value) {
+        self.previous_value = previous_value
+    }
+}
+
+impl DeltaVersionedRow for ComponentBalance {
+    type Value = Balance;
+
+    fn get_value(&self) -> Self::Value {
+        self.new_balance.clone()
+    }
+
+    fn set_previous_value(&mut self, previous_value: Self::Value) {
+        self.previous_value = previous_value
+    }
+}
+
+impl StoredDeltaVersionedRow for ComponentBalance {
+    type Value = Balance;
+
+    fn get_value(&self) -> Self::Value {
+        self.new_balance.clone()
     }
 }
 
@@ -475,10 +512,12 @@ pub struct NewProtocolComponent {
 impl ProtocolComponent {
     pub async fn ids_by_external_ids(
         external_ids: &[&str],
+        chain_db_id: i64,
         conn: &mut AsyncPgConnection,
     ) -> QueryResult<Vec<(i64, String)>> {
         protocol_component::table
             .filter(protocol_component::external_id.eq_any(external_ids))
+            .filter(protocol_component::chain_id.eq(chain_db_id))
             .select((protocol_component::id, protocol_component::external_id))
             .get_results::<(i64, String)>(conn)
             .await
@@ -900,6 +939,7 @@ pub struct Token {
     pub gas: Vec<Option<i64>>,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
+    pub quality: i32,
 }
 
 #[derive(AsChangeset, Insertable, Debug)]
@@ -911,6 +951,7 @@ pub struct NewToken {
     pub decimals: i32,
     pub tax: i64,
     pub gas: Vec<Option<i64>>,
+    pub quality: i32,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
@@ -1250,13 +1291,33 @@ impl StoredVersionedRow for ContractStorage {
     }
 }
 
+impl DeltaVersionedRow for ContractStorage {
+    type Value = Option<Bytes>;
+
+    fn get_value(&self) -> Self::Value {
+        self.value.clone()
+    }
+
+    fn set_previous_value(&mut self, previous_value: Self::Value) {
+        self.previous_value = previous_value
+    }
+}
+
+impl StoredDeltaVersionedRow for ContractStorage {
+    type Value = Option<Bytes>;
+
+    fn get_value(&self) -> Self::Value {
+        self.value.clone()
+    }
+}
+
 #[derive(Insertable, Debug)]
 #[diesel(table_name = contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewSlot<'a> {
     pub slot: &'a Bytes,
-    pub value: Option<&'a Bytes>,
-    pub previous_value: Option<&'a Bytes>,
+    pub value: Option<Bytes>,
+    pub previous_value: Option<Bytes>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub ordinal: i64,
@@ -1287,14 +1348,14 @@ impl<'a> VersionedRow for NewSlot<'a> {
 }
 
 impl<'a> DeltaVersionedRow for NewSlot<'a> {
-    type Value = Option<&'a Bytes>;
+    type Value = Option<Bytes>;
 
     fn get_value(&self) -> Self::Value {
-        self.value
+        self.value.clone()
     }
 
     fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value
+        self.previous_value = previous_value;
     }
 }
 
@@ -1323,40 +1384,43 @@ pub struct NewProtocolComponentHoldsToken {
     pub protocol_component_id: i64,
     pub token_id: i64,
 }
-/*
-pub fn get_tokens(protocol: &ProtocolComponent, conn: &mut PgConnection) -> Vec<Token> {
-    let token_ids = ProtocolHoldsToken::belonging_to(protocol)
-        .select(protocol_component_holds_token::token_id)
-        .distinct();
-    token::table
-        .filter(token::id.eq_any(token_ids))
-        .load::<Token>(conn)
-        .expect("Could not load tokens")
+
+#[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
+#[diesel(belongs_to(ProtocolComponent))]
+#[diesel(table_name = component_tvl)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ComponentTVL {
+    id: i64,
+    protocol_component_id: i64,
+    pub inserted_ts: NaiveDateTime,
+    pub modified_ts: NaiveDateTime,
 }
 
-pub struct ProtocolComponentWithToken {
-    pub protocol: ProtocolComponent,
-    pub tokens: Vec<Token>,
+impl ComponentTVL {
+    pub fn upsert_many(new_tvl_values: &HashMap<i64, f64>) -> BoxedSqlQuery<'static, Pg, SqlQuery> {
+        // Generate bind parameter 2-tuples the result will look like '($1, $2), ($3, $4), ...'
+        // These are later subsituted with the primary key and valid to values.
+        let bind_params = (1..=new_tvl_values.len() * 2)
+            .map(|i| if i % 2 == 0 { format!("${}", i) } else { format!("(${}", i) })
+            .collect::<Vec<String>>()
+            .chunks(2)
+            .map(|chunk| chunk.join(", ") + ")")
+            .collect::<Vec<String>>()
+            .join(", ");
+        let query_tmpl = format!(
+            r#"
+            INSERT INTO component_tvl (protocol_component_id, tvl)
+            VALUES {}
+            ON CONFLICT (protocol_component_id) 
+            DO UPDATE SET tvl = EXCLUDED.tvl;
+            "#,
+            bind_params
+        );
+        let mut q = sql_query(query_tmpl).into_boxed();
+        for (k, v) in new_tvl_values.iter() {
+            q = q.bind::<BigInt, _>(*k);
+            q = q.bind::<Double, _>(*v);
+        }
+        q
+    }
 }
-
-pub fn add_tokens(
-    protocols: Vec<ProtocolComponent>,
-    conn: &mut PgConnection,
-) -> Result<Vec<ProtocolComponentWithToken>, Box<dyn Error + Send + Sync>> {
-    let tokens: Vec<(ProtocolHoldsToken, Token)> = ProtocolHoldsToken::belonging_to(&protocols)
-        .inner_join(token::table)
-        .select((ProtocolHoldsToken::as_select(), Token::as_select()))
-        .load(conn)?;
-
-    let res = tokens
-        .grouped_by(&protocols)
-        .into_iter()
-        .zip(protocols)
-        .map(|(t, p)| ProtocolComponentWithToken {
-            protocol: p,
-            tokens: t.into_iter().map(|(_, tok)| tok).collect(),
-        })
-        .collect();
-    Ok(res)
-}
- */

@@ -1,13 +1,13 @@
 #![allow(unused_variables)]
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
+use diesel::prelude::*;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use itertools::Itertools;
 use std::{
     cmp::Ordering,
     collections::{BTreeSet, HashMap, HashSet},
 };
-
-use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use tracing::{instrument, warn};
 
 use crate::{
@@ -16,9 +16,9 @@ use crate::{
     storage::{
         postgres::{
             orm,
-            orm::{Account, NewAccount},
+            orm::{Account, ComponentTVL, NewAccount},
             schema,
-            versioning::apply_versioning,
+            versioning::apply_delta_versioning,
             PostgresGateway,
         },
         Address, Balance, BlockOrTimestamp, ComponentId, ContractDelta, ContractId,
@@ -107,6 +107,34 @@ where
             Err(err) => Err(StorageError::from_diesel(err, "ProtocolStates", context, None)),
         }
     }
+
+    async fn _get_or_create_protocol_system_id(
+        &self,
+        new: String,
+        conn: &mut <PostgresGateway<B, TX, A, D, T> as ProtocolGateway>::DB,
+    ) -> Result<i64, StorageError> {
+        use super::schema::protocol_system::dsl::*;
+
+        let existing_entry = protocol_system
+            .filter(name.eq(new.to_string().clone()))
+            .first::<orm::ProtocolSystem>(conn)
+            .await;
+
+        if let Ok(entry) = existing_entry {
+            Ok(entry.id)
+        } else {
+            let new_entry = orm::NewProtocolSystem { name: new.to_string() };
+
+            let inserted_protocol_system = diesel::insert_into(protocol_system)
+                .values(&new_entry)
+                .get_result::<orm::ProtocolSystem>(conn)
+                .await
+                .map_err(|err| {
+                    StorageError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
+                })?;
+            Ok(inserted_protocol_system.id)
+        }
+    }
 }
 
 #[async_trait]
@@ -131,6 +159,7 @@ where
         chain: &Chain,
         system: Option<String>,
         ids: Option<&[&str]>,
+        min_tvl: Option<f64>,
         conn: &mut Self::DB,
     ) -> Result<Vec<ProtocolComponent>, StorageError> {
         use super::schema::{protocol_component::dsl::*, transaction::dsl::*};
@@ -138,6 +167,7 @@ where
 
         let mut query = protocol_component
             .inner_join(transaction.on(creation_tx.eq(schema::transaction::id)))
+            .left_join(schema::component_tvl::table)
             .select((orm::ProtocolComponent::as_select(), hash))
             .into_boxed();
 
@@ -170,6 +200,10 @@ where
             (_, _) => {
                 query = query.filter(chain_id.eq(chain_id_value));
             }
+        }
+
+        if let Some(thr) = min_tvl {
+            query = query.filter(schema::component_tvl::tvl.gt(thr));
         }
 
         let orm_protocol_components = query
@@ -295,11 +329,7 @@ where
         let inserted_protocol_components: Vec<(i64, String, i64, i64)> =
             diesel::insert_into(protocol_component)
                 .values(&values)
-                .on_conflict((
-                    schema::protocol_component::chain_id,
-                    protocol_system_id,
-                    external_id,
-                ))
+                .on_conflict((schema::protocol_component::chain_id, external_id))
                 .do_nothing()
                 .returning((
                     schema::protocol_component::id,
@@ -536,6 +566,7 @@ where
         new: &[(TxHash, &ProtocolStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
+        let chain_db_id = self.get_chain_id(chain);
         let new = new
             .iter()
             .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_owned()) })
@@ -558,6 +589,7 @@ where
                 .map(|state| state.component_id.as_str())
                 .collect::<Vec<&str>>()
                 .as_slice(),
+            chain_db_id,
             conn,
         )
         .await?
@@ -778,11 +810,13 @@ where
     async fn add_component_balances(
         &self,
         component_balances: &[&Self::ComponentBalance],
+        chain: &Chain,
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
 
+        let chain_db_id = self.get_chain_id(chain);
         let mut new_component_balances = Vec::new();
         let token_addresses: Vec<Address> = component_balances
             .iter()
@@ -810,7 +844,7 @@ where
             .collect();
 
         let protocol_component_ids: HashMap<String, i64> =
-            orm::ProtocolComponent::ids_by_external_ids(&external_ids, conn)
+            orm::ProtocolComponent::ids_by_external_ids(&external_ids, chain_db_id, conn)
                 .await?
                 .into_iter()
                 .map(|(component_id, external_id)| (external_id, component_id))
@@ -833,7 +867,8 @@ where
         }
 
         if !component_balances.is_empty() {
-            apply_versioning::<_, orm::ComponentBalance>(&mut new_component_balances, conn).await?;
+            apply_delta_versioning::<_, orm::ComponentBalance>(&mut new_component_balances, conn)
+                .await?;
             diesel::insert_into(schema::component_balance::table)
                 .values(&new_component_balances)
                 .execute(conn)
@@ -866,25 +901,20 @@ where
             // -----------------|--------------------------|
             //                start                     target
             // We query for balance updates between start and target version.
-            let changed_component_balances = component_balance
-                .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
+            component_balance
+                .inner_join(schema::protocol_component::table)
+                .inner_join(schema::transaction::table)
+                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .filter(
-                    schema::chain::id
+                    schema::protocol_component::chain_id
                         .eq(chain_id)
                         .and(valid_from.gt(start_ts))
-                        .and(valid_from.le(target_ts)),
-                )
-                .select((protocol_component_id, token_id))
-                .distinct();
-
-            changed_component_balances
-                .inner_join(schema::transaction::table)
-                .filter(
-                    valid_from.le(target_ts).and(
-                        valid_to
-                            .gt(target_ts)
-                            .or(valid_to.is_null()),
-                    ),
+                        .and(valid_from.le(target_ts))
+                        .and(
+                            valid_to
+                                .gt(target_ts)
+                                .or(valid_to.is_null()),
+                        ),
                 )
                 .order_by((
                     protocol_component_id,
@@ -893,7 +923,6 @@ where
                     schema::transaction::index.desc(),
                 ))
                 .distinct_on((protocol_component_id, token_id))
-                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .select((
                     schema::protocol_component::external_id,
                     schema::account::address,
@@ -907,7 +936,7 @@ where
                 .map(|(external_id, address, balance, bal_f64, tx)| ComponentBalance {
                     component_id: external_id,
                     token: address.into(),
-                    new_balance: balance,
+                    balance,
                     balance_float: bal_f64,
                     modify_tx: tx.into(),
                 })
@@ -919,24 +948,20 @@ where
             //                target                     start
             // We query for the previous values of all (protocol_component, token) pairs updated
             // between start and target version.
-            let changed_component_balances = component_balance
-                .inner_join(schema::protocol_component::table.inner_join(schema::chain::table))
+            component_balance
+                .inner_join(schema::protocol_component::table)
+                .inner_join(schema::transaction::table)
+                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .filter(
-                    schema::chain::id
+                    schema::protocol_component::chain_id
                         .eq(chain_id)
                         .and(valid_from.ge(target_ts))
-                        .and(valid_from.lt(start_ts)),
-                )
-                .select((protocol_component_id, token_id))
-                .distinct();
-
-            changed_component_balances
-                .inner_join(schema::transaction::table)
-                .filter(valid_from.le(target_ts))
-                .filter(
-                    valid_to
-                        .gt(target_ts)
-                        .or(valid_to.is_null()),
+                        .and(valid_from.lt(start_ts))
+                        .and(
+                            valid_to
+                                .gt(target_ts)
+                                .or(valid_to.is_null()),
+                        ),
                 )
                 .order_by((
                     protocol_component_id,
@@ -945,11 +970,10 @@ where
                     schema::transaction::index.asc(),
                 ))
                 .distinct_on((protocol_component_id, token_id))
-                .inner_join(schema::token::table.inner_join(schema::account::table))
                 .select((
                     schema::protocol_component::external_id,
                     schema::account::address,
-                    new_balance,
+                    previous_value,
                     schema::transaction::hash,
                 ))
                 .get_results::<(String, Address, Balance, TxHash)>(conn)
@@ -958,13 +982,65 @@ where
                 .map(|(external_id, address, balance, tx)| ComponentBalance {
                     component_id: external_id,
                     token: address.into(),
-                    new_balance: balance,
+                    balance,
                     balance_float: f64::NAN,
                     modify_tx: tx.into(),
                 })
                 .collect()
         };
         Ok(res)
+    }
+
+    async fn get_balances(
+        &self,
+        chain: &Chain,
+        ids: Option<&[&str]>,
+        at: Option<&BlockOrTimestamp>,
+        conn: &mut Self::DB,
+    ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
+        let version_ts = match &at {
+            Some(version) => Some(version.to_ts(conn).await?),
+            None => None,
+        };
+        let chain_id = self.get_chain_id(chain);
+
+        let mut q = schema::component_balance::table
+            .inner_join(schema::protocol_component::table)
+            .inner_join(schema::token::table.inner_join(schema::account::table))
+            .select((
+                schema::protocol_component::external_id,
+                schema::account::address,
+                schema::component_balance::balance_float,
+            ))
+            .filter(schema::protocol_component::chain_id.eq(chain_id))
+            .filter(
+                schema::component_balance::valid_to
+                    .gt(version_ts) // if version_ts is None, diesel equates this expression to "False"
+                    .or(schema::component_balance::valid_to.is_null()),
+            )
+            .into_boxed();
+
+        if let Some(external_ids) = ids {
+            q = q.filter(schema::protocol_component::external_id.eq_any(external_ids))
+        }
+
+        let balances: HashMap<_, _> = q
+            .get_results::<(String, Bytes, f64)>(conn)
+            .await?
+            .into_iter()
+            .group_by(|e| e.0.clone())
+            .into_iter()
+            .map(|(cid, group)| {
+                (
+                    cid,
+                    group
+                        .map(|(_, addr, bal)| (addr, bal))
+                        .collect::<HashMap<_, _>>(),
+                )
+            })
+            .collect();
+
+        Ok(balances)
     }
 
     async fn get_protocol_states_delta(
@@ -1146,32 +1222,57 @@ where
         }
     }
 
-    async fn _get_or_create_protocol_system_id(
+    async fn get_token_prices(
         &self,
-        new: String,
+        chain: &Chain,
         conn: &mut Self::DB,
-    ) -> Result<i64, StorageError> {
-        use super::schema::protocol_system::dsl::*;
+    ) -> Result<HashMap<Bytes, f64>, StorageError> {
+        use schema::token_price::dsl::*;
+        let chain_id = self.get_chain_id(chain);
+        Ok(token_price
+            .inner_join(schema::token::table.inner_join(schema::account::table))
+            .select((schema::account::address, price))
+            .filter(schema::account::chain_id.eq(chain_id))
+            .get_results::<(Bytes, f64)>(conn)
+            .await
+            .map_err(|err| StorageError::from_diesel(err, "TokenPrice", &chain.to_string(), None))?
+            .into_iter()
+            .collect::<HashMap<_, _>>())
+    }
 
-        let existing_entry = protocol_system
-            .filter(name.eq(new.to_string().clone()))
-            .first::<orm::ProtocolSystem>(conn)
-            .await;
+    async fn upsert_component_tvl(
+        &self,
+        chain: &Chain,
+        tvl_values: &HashMap<String, f64>,
+        conn: &mut Self::DB,
+    ) -> Result<(), StorageError> {
+        let chain_id = self.get_chain_id(chain);
+        let external_ids = tvl_values
+            .keys()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>();
+        let external_db_id_map =
+            orm::ProtocolComponent::ids_by_external_ids(&external_ids, chain_id, conn)
+                .await?
+                .into_iter()
+                .map(|(a, b)| (b, a))
+                .collect::<HashMap<_, _>>();
 
-        if let Ok(entry) = existing_entry {
-            return Ok(entry.id);
-        } else {
-            let new_entry = orm::NewProtocolSystem { name: new.to_string() };
-
-            let inserted_protocol_system = diesel::insert_into(protocol_system)
-                .values(&new_entry)
-                .get_result::<orm::ProtocolSystem>(conn)
-                .await
-                .map_err(|err| {
-                    StorageError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
-                })?;
-            Ok(inserted_protocol_system.id)
-        }
+        let upsert_map: HashMap<_, _> = tvl_values
+            .iter()
+            .filter_map(|(component_id, v)| {
+                if let Some(db_id) = external_db_id_map.get(component_id) {
+                    Some((*db_id, *v))
+                } else {
+                    warn!(?component_id, "Tried to upsert tvl for unknown component!");
+                    None
+                }
+            })
+            .collect();
+        ComponentTVL::upsert_many(&upsert_map)
+            .execute(conn)
+            .await?;
+        Ok(())
     }
 }
 
@@ -1208,6 +1309,8 @@ mod test {
     const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
     const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
+    const LUSD: &str = "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0";
+    const DAI: &str = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -1268,8 +1371,18 @@ mod test {
         let (account_id_weth, weth_id) =
             db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
                 .await;
+        let (account_id_usdc, usdc_id) =
+            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
+                .await;
+        let (account_id_dai, dai_id) =
+            db_fixtures::insert_token(conn, chain_id, DAI.trim_start_matches("0x"), "DAI", 18)
+                .await;
+        let (account_id_lusd, lusd_id) =
+            db_fixtures::insert_token(conn, chain_id, LUSD.trim_start_matches("0x"), "LUSD", 18)
+                .await;
 
-        db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6).await;
+        // insert token prices
+        db_fixtures::insert_token_prices(&[(weth_id, 1.0), (usdc_id, 0.0005)], conn).await;
 
         let contract_code_id = db_fixtures::insert_contract_code(
             conn,
@@ -1279,6 +1392,8 @@ mod test {
         )
         .await;
 
+        // components and their balances
+        // tvl will be 2.0
         let protocol_component_id = db_fixtures::insert_protocol_component(
             conn,
             "state1",
@@ -1286,29 +1401,103 @@ mod test {
             protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
-            Some(vec![weth_id]),
+            Some(vec![weth_id, usdc_id]),
             Some(vec![contract_code_id]),
         )
         .await;
-        db_fixtures::insert_protocol_component(
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::exp10(18)),
+            Bytes::from(U256::zero()),
+            1e18,
+            weth_id,
+            txn[0],
+            protocol_component_id,
+        )
+        .await;
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::from(2000) * U256::exp10(6)),
+            Bytes::from(U256::zero()),
+            2000.0 * 1e6,
+            usdc_id,
+            txn[0],
+            protocol_component_id,
+        )
+        .await;
+        // tvl will be 1.0 cause we miss dai price
+        let protocol_component_id2 = db_fixtures::insert_protocol_component(
             conn,
             "state3",
             chain_id,
             protocol_system_id_ambient,
             protocol_type_id,
             txn[0],
-            Some(vec![weth_id]),
+            Some(vec![weth_id, dai_id]),
             Some(vec![contract_code_id]),
         )
         .await;
-        db_fixtures::insert_protocol_component(
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::exp10(18)),
+            Bytes::from(U256::zero()),
+            1e18,
+            weth_id,
+            txn[0],
+            protocol_component_id2,
+        )
+        .await;
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::from(2000) * U256::exp10(18)),
+            Bytes::from(U256::zero()),
+            2000.0 * 1e18,
+            dai_id,
+            txn[0],
+            protocol_component_id2,
+        )
+        .await;
+        // tvl will be 1.0 cause we miss lusd price
+        let protocol_component_id3 = db_fixtures::insert_protocol_component(
             conn,
             "state2",
             chain_id_sn,
             protocol_system_id_zz,
             protocol_type_id,
             txn[1],
-            Some(vec![weth_id]),
+            Some(vec![lusd_id, usdc_id]),
+            Some(vec![contract_code_id]),
+        )
+        .await;
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::from(2000) * U256::exp10(18)),
+            Bytes::from(U256::zero()),
+            1e18,
+            lusd_id,
+            txn[0],
+            protocol_component_id3,
+        )
+        .await;
+        db_fixtures::insert_component_balance(
+            conn,
+            Bytes::from(U256::from(2000) * U256::exp10(6)),
+            Bytes::from(U256::zero()),
+            2000.0 * 1e6,
+            usdc_id,
+            txn[0],
+            protocol_component_id3,
+        )
+        .await;
+        // component without balances and thus without tvl
+        let protocol_component_id2 = db_fixtures::insert_protocol_component(
+            conn,
+            "no_tvl",
+            chain_id,
+            protocol_system_id_ambient,
+            protocol_type_id,
+            txn[0],
+            Some(vec![weth_id, dai_id]),
             Some(vec![contract_code_id]),
         )
         .await;
@@ -1349,6 +1538,7 @@ mod test {
         )
         .await;
 
+        db_fixtures::calculate_component_tvl(conn).await;
         tx_hashes.to_vec()
     }
 
@@ -1582,6 +1772,7 @@ mod test {
             .first::<Address>(&mut conn)
             .await
             .expect("Failed to fetch token address");
+
         let from_tx_hash =
             H256::from_str("0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54")
                 .expect("valid txhash");
@@ -1607,6 +1798,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(1000)),
+            Balance::from(U256::from(0)),
             1000.0,
             token_id,
             from_txn_id,
@@ -1616,6 +1808,7 @@ mod test {
         db_fixtures::insert_component_balance(
             &mut conn,
             Balance::from(U256::from(2000)),
+            Balance::from(U256::from(1000)),
             2000.0,
             token_id,
             to_txn_id,
@@ -1628,7 +1821,7 @@ mod test {
         let expected_forward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
             component_id: protocol_external_id.clone(),
             token: token_address.clone().into(),
-            new_balance: Balance::from(U256::from(2000)),
+            balance: Balance::from(U256::from(2000)),
             balance_float: 2000.0,
             modify_tx: to_tx_hash,
         }];
@@ -1645,13 +1838,59 @@ mod test {
             .unwrap();
         assert_eq!(result, expected_forward_deltas);
 
-        let expected_backward_deltas: Vec<ComponentBalance> = vec![ComponentBalance {
-            component_id: protocol_external_id.clone(),
-            token: token_address.clone().into(),
-            new_balance: Balance::from(U256::from(1000)),
-            balance_float: 0.0,
-            modify_tx: from_tx_hash,
-        }];
+        let expected_txh: H256 = "bb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
+            .parse()
+            .unwrap();
+        let expected_backward_deltas: Vec<ComponentBalance> = vec![
+            ComponentBalance {
+                token: DAI
+                    .trim_start_matches("0x")
+                    .parse()
+                    .unwrap(),
+                balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
+                ),
+                balance_float: 0.0,
+                modify_tx: expected_txh,
+                component_id: "state3".to_owned(),
+            },
+            ComponentBalance {
+                token: USDC
+                    .trim_start_matches("0x")
+                    .parse()
+                    .unwrap(),
+                balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
+                ),
+                balance_float: 0.0,
+                modify_tx: expected_txh,
+                component_id: "state1".to_owned(),
+            },
+            ComponentBalance {
+                token: WETH
+                    .trim_start_matches("0x")
+                    .parse()
+                    .unwrap(),
+                balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
+                ),
+                balance_float: 0.0,
+                modify_tx: expected_txh,
+                component_id: "state1".to_owned(),
+            },
+            ComponentBalance {
+                token: WETH
+                    .trim_start_matches("0x")
+                    .parse()
+                    .unwrap(),
+                balance: Bytes::from(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
+                ),
+                balance_float: 0.0,
+                modify_tx: expected_txh,
+                component_id: "state3".to_owned(),
+            },
+        ];
 
         // test backward case
         let mut result = gateway
@@ -1663,9 +1902,12 @@ mod test {
             )
             .await
             .unwrap();
-        // workaround for nan type
-        assert!(result[0].balance_float.is_nan());
-        result[0].balance_float = 0.0;
+        result.sort_unstable_by_key(|e| (e.token, e.component_id.clone()));
+        // fix NaN comparison
+        result.iter_mut().for_each(|r| {
+            assert!(r.balance_float.is_nan());
+            r.balance_float = 0.0;
+        });
         assert_eq!(result, expected_backward_deltas);
     }
 
@@ -1934,7 +2176,7 @@ mod test {
             .get_tokens(Chain::Ethereum, None, &mut conn)
             .await
             .unwrap();
-        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens.len(), 4);
 
         // get weth and usdc
         let tokens = gw
@@ -1979,6 +2221,7 @@ mod test {
                 tax: 0,
                 gas: vec![Some(64), None],
                 chain: Chain::Ethereum,
+                quality: 100,
             },
             &ERC20Token {
                 address: H160::from_str(WETH).unwrap(),
@@ -1987,6 +2230,7 @@ mod test {
                 tax: 0,
                 gas: vec![Some(100), None],
                 chain: Chain::Ethereum,
+                quality: 100,
             },
         ];
 
@@ -2018,58 +2262,97 @@ mod test {
         assert_eq!(new_account, old_account);
         assert!(inserted_account.id > new_account.id);
     }
+
     #[tokio::test]
     async fn test_add_component_balances() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-
         let tx_hash =
             H256::from_str("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945")
                 .unwrap();
-        let protocol_component_id: String = String::from("state2");
+        let component_external_id = "state2".to_owned();
         let base_token = H160::from_str(WETH.trim_start_matches("0x")).unwrap();
-
+        // Test the case where a previous balance doesn't exist
         let component_balance = ComponentBalance {
             token: base_token,
-            new_balance: Bytes::from(&[0u8]),
-            balance_float: 0.0,
+            balance: Bytes::from(
+                "0x000000000000000000000000000000000000000000000000000000000000000c",
+            ),
+            balance_float: 12.0,
             modify_tx: tx_hash,
-            component_id: protocol_component_id,
+            component_id: component_external_id.clone(),
         };
-
-        let component_balances = vec![&component_balance];
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
-        gw.add_component_balances(&component_balances, block_ts, &mut conn)
+        gw.add_component_balances(&[&component_balance], &Chain::Starknet, block_ts, &mut conn)
             .await
             .unwrap();
 
         let inserted_data = schema::component_balance::table
             .select(orm::ComponentBalance::as_select())
+            .filter(schema::component_balance::new_balance.eq(Bytes::from(
+                "0x000000000000000000000000000000000000000000000000000000000000000c",
+            )))
             .first::<orm::ComponentBalance>(&mut conn)
-            .await;
+            .await
+            .expect("retrieving inserted balance failed!");
 
-        assert!(inserted_data.is_ok());
-        let inserted_data: orm::ComponentBalance = inserted_data.unwrap();
-
-        assert_eq!(inserted_data.new_balance, Bytes::from(&[0u8]));
+        assert_eq!(inserted_data.new_balance, Balance::from(U256::from(12)));
+        assert_eq!(inserted_data.previous_value, Balance::from(U256::from(0)),);
 
         let referenced_token = schema::token::table
             .filter(schema::token::id.eq(inserted_data.token_id))
             .select(orm::Token::as_select())
             .first::<orm::Token>(&mut conn)
-            .await;
-        let referenced_token: orm::Token = referenced_token.unwrap();
-        assert_eq!(referenced_token.symbol, String::from("WETH"));
+            .await
+            .expect("failed to get associated token");
+        assert_eq!(referenced_token.symbol, "WETH");
 
         let referenced_component = schema::protocol_component::table
             .filter(schema::protocol_component::id.eq(inserted_data.protocol_component_id))
             .select(orm::ProtocolComponent::as_select())
             .first::<orm::ProtocolComponent>(&mut conn)
+            .await
+            .expect("failed to get associated component");
+        assert_eq!(referenced_component.external_id, "state2");
+
+        // Test the case where there was a previous balance
+        let new_tx_hash =
+            H256::from_str("0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7")
+                .unwrap();
+        let updated_component_balance = ComponentBalance {
+            token: base_token,
+            balance: Balance::from(U256::from(2000)),
+            balance_float: 2000.0,
+            modify_tx: new_tx_hash,
+            component_id: component_external_id,
+        };
+
+        let updated_component_balances = vec![&updated_component_balance];
+        let new_block_ts = NaiveDateTime::from_timestamp_opt(2000, 0).unwrap();
+
+        gw.add_component_balances(
+            &updated_component_balances,
+            &Chain::Starknet,
+            new_block_ts,
+            &mut conn,
+        )
+        .await
+        .unwrap();
+
+        // Obtain newest inserted value
+        let new_inserted_data = schema::component_balance::table
+            .select(orm::ComponentBalance::as_select())
+            .order_by(schema::component_balance::id.desc())
+            .first::<orm::ComponentBalance>(&mut conn)
             .await;
-        let referenced_component: orm::ProtocolComponent = referenced_component.unwrap();
-        assert_eq!(referenced_component.external_id, String::from("state2"));
+
+        assert!(new_inserted_data.is_ok());
+        let new_inserted_data: orm::ComponentBalance = new_inserted_data.unwrap();
+
+        assert_eq!(new_inserted_data.new_balance, Balance::from(U256::from(2000)));
+        assert_eq!(new_inserted_data.previous_value, Balance::from(U256::from(12)));
     }
 
     #[tokio::test]
@@ -2100,20 +2383,17 @@ mod test {
             created_at: Default::default(),
         };
 
-        let result = gw
-            .add_protocol_components(&[&original_component.clone()], &mut conn)
-            .await;
-
-        assert!(result.is_ok());
+        gw.add_protocol_components(&[&original_component.clone()], &mut conn)
+            .await
+            .expect("adding components failed");
 
         let inserted_data = schema::protocol_component::table
             .filter(schema::protocol_component::external_id.eq("test_contract_id".to_string()))
             .select(orm::ProtocolComponent::as_select())
             .first::<orm::ProtocolComponent>(&mut conn)
-            .await;
+            .await
+            .expect("failed to get inserted data");
 
-        assert!(inserted_data.is_ok());
-        let inserted_data: orm::ProtocolComponent = inserted_data.unwrap();
         assert_eq!(inserted_data.protocol_type_id, protocol_type_id_1);
         assert_eq!(
             gw.get_protocol_system_id(
@@ -2244,7 +2524,7 @@ mod test {
         let chain = Chain::Starknet;
 
         let result = gw
-            .get_protocol_components(&chain, system.clone(), None, &mut conn)
+            .get_protocol_components(&chain, system.clone(), None, None, &mut conn)
             .await;
 
         assert!(result.is_ok());
@@ -2283,7 +2563,7 @@ mod test {
         let chain = Chain::Ethereum;
 
         let result = gw
-            .get_protocol_components(&chain, None, ids, &mut conn)
+            .get_protocol_components(&chain, None, ids, None, &mut conn)
             .await;
 
         match external_id.as_str() {
@@ -2315,7 +2595,7 @@ mod test {
         let ids = Some(["state1", "state2"].as_slice());
         let chain = Chain::Ethereum;
         let result = gw
-            .get_protocol_components(&chain, Some(system), ids, &mut conn)
+            .get_protocol_components(&chain, Some(system), ids, None, &mut conn)
             .await;
 
         let components = result.unwrap();
@@ -2329,43 +2609,132 @@ mod test {
     }
 
     #[rstest]
-    #[case::get_one(Chain::Ethereum, 0)]
-    #[case::get_none(Chain::Starknet, 1)]
+    #[case::ethereum(Chain::Ethereum, &["state1", "state3", "no_tvl"])]
+    #[case::starknet(Chain::Starknet, &["state2"])]
     #[tokio::test]
-    async fn test_get_protocol_components_with_chain_filter(#[case] chain: Chain, #[case] i: i64) {
+    async fn test_get_protocol_components_with_chain_filter(
+        #[case] chain: Chain,
+        #[case] exp_ids: &[&str],
+    ) {
         let mut conn = setup_db().await;
         let tx_hashes = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp = exp_ids
+            .iter()
+            .map(|&s| s.to_owned())
+            .collect::<HashSet<_>>();
 
-        let result = gw
-            .get_protocol_components(&chain, None, None, &mut conn)
-            .await;
+        let components = gw
+            .get_protocol_components(&chain, None, None, None, &mut conn)
+            .await
+            .expect("failed retrieving components")
+            .into_iter()
+            .map(|c| c.id)
+            .collect::<HashSet<_>>();
 
-        let mut components = result.unwrap();
-        components.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(components, exp);
+    }
 
-        let assert_message = format!(
-            "Found {} ProtocolComponents for chain {:?}, expecting >= 1, because there are two eth and one stark component. Two eth components are needed for the ProtocolStates",
-            components.len(),
-            chain
-        );
-        assert!(!components.is_empty(), "{}", assert_message.to_string());
+    #[rstest]
+    #[case::empty(Some(10.0), &[])]
+    #[case::all(None, &["state1", "state3", "no_tvl"])]
+    #[case::with_tvl(Some(0.0), &["state1", "state3"])]
+    #[case::with_tvl(Some(1.0), &["state1"])]
+    #[tokio::test]
+    async fn test_get_protocol_components_with_min_tvl(
+        #[case] min_tvl: Option<f64>,
+        #[case] exp_ids: &[&str],
+    ) {
+        let mut conn = setup_db().await;
+        let tx_hashes = setup_data(&mut conn).await;
+        let exp = exp_ids
+            .iter()
+            .map(|&s| s.to_owned())
+            .collect::<HashSet<_>>();
+        let gw = EVMGateway::from_connection(&mut conn).await;
 
-        let pc = &components[0];
-        assert_eq!(pc.id, format!("state{}", i + 1).to_string());
-        assert_eq!(pc.chain, chain);
-        let i_usize: usize = i as usize;
-        assert_eq!(pc.creation_tx, H256::from_str(&tx_hashes[i_usize].to_string()).unwrap());
+        let res = gw
+            .get_protocol_components(&Chain::Ethereum, None, None, min_tvl, &mut conn)
+            .await
+            .expect("failed retrieving components")
+            .into_iter()
+            .map(|comp| comp.id)
+            .collect::<HashSet<_>>();
 
-        assert!(
-            pc.tokens
-                .contains(&H160::from_str(WETH).unwrap()),
-            "ProtocolComponent is missing WETH token. Check the tests' data setup"
-        );
-        assert!(
-            pc.contract_ids
-                .contains(&H160::from_str(WETH).unwrap()),
-            "ProtocolComponent is missing WETH contract. Check the tests' data setup"
-        );
+        assert_eq!(res, exp);
+    }
+
+    #[tokio::test]
+    async fn test_get_token_prices() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp = [(Bytes::from(WETH), 1.0), (Bytes::from(USDC), 0.0005)]
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+
+        let prices = gw
+            .get_token_prices(&Chain::Ethereum, &mut conn)
+            .await
+            .expect("retrieving token prices failed!");
+
+        assert_eq!(prices, exp);
+    }
+
+    #[tokio::test]
+    async fn test_get_balances() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp: HashMap<_, _> =
+            [("state1", Bytes::from(WETH), 1e18), ("state1", Bytes::from(USDC), 2000.0 * 1e6)]
+                .into_iter()
+                .group_by(|e| e.0)
+                .into_iter()
+                .map(|(cid, group)| {
+                    (
+                        cid.to_owned(),
+                        group
+                            .map(|(_, addr, bal)| (addr, bal))
+                            .collect::<HashMap<_, _>>(),
+                    )
+                })
+                .collect();
+
+        let res = gw
+            .get_balances(&Chain::Ethereum, Some(&["state1"]), None, &mut conn)
+            .await
+            .expect("retrieving balances failed!");
+
+        assert_eq!(res, exp);
+    }
+
+    #[tokio::test]
+    async fn test_upsert_component_tvl() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let chain_id = gw.get_chain_id(&Chain::Ethereum);
+        let exp = [("state1", 100.0), ("no_tvl", 1.0), ("state3", 1.0)]
+            .into_iter()
+            .map(|(id, tvl)| (id.to_owned(), tvl))
+            .collect::<HashMap<_, _>>();
+
+        let new_tvl = [("state1".to_owned(), 100.0), ("no_tvl".to_owned(), 1.0)]
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+        gw.upsert_component_tvl(&Chain::Ethereum, &new_tvl, &mut conn)
+            .await
+            .expect("upsert failed!");
+
+        let tvl_values = schema::component_tvl::table
+            .inner_join(schema::protocol_component::table)
+            .select((schema::protocol_component::external_id, schema::component_tvl::tvl))
+            .filter(schema::protocol_component::chain_id.eq(chain_id))
+            .get_results::<(String, f64)>(&mut conn)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect::<HashMap<_, _>>();
     }
 }

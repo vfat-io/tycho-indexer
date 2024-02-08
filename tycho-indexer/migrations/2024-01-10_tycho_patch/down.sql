@@ -166,3 +166,16 @@ CREATE TRIGGER audit_table_protocol_holds_token
     FOR EACH ROW
     EXECUTE PROCEDURE audit_trigger();
 
+-- add back index to protocol component
+CREATE INDEX IF NOT EXISTS idx_protocol_identity ON protocol_component(external_id, protocol_system_id, chain_id);
+
+-- add back old unique constraint
+ALTER TABLE protocol_component
+    ADD CONSTRAINT protocol_component_chain_id_protocol_system_id_external_id_key UNIQUE (chain_id, protocol_system_id, external_id);
+
+ALTER TABLE protocol_component
+    DROP CONSTRAINT protocol_component_chain_id_external_id_key;
+
+ALTER TABLE token
+    DROP COLUMN quality;
+

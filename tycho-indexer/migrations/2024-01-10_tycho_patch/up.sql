@@ -2,6 +2,14 @@
 ALTER TABLE protocol_type
     ADD CONSTRAINT unique_name_constraint UNIQUE (name);
 
+ALTER TABLE protocol_component
+    DROP CONSTRAINT protocol_component_chain_id_protocol_system_id_external_id_key;
+
+ALTER TABLE protocol_component
+    ADD CONSTRAINT protocol_component_chain_id_external_id_key UNIQUE (chain_id, external_id);
+
+DROP INDEX IF EXISTS idx_protocol_identity;
+
 -- Change the name of the financial and implementation type enums
 CREATE TYPE financial_type AS ENUM(
     'swap',
@@ -76,10 +84,12 @@ CREATE INDEX IF NOT EXISTS idx_protocol_component_holds_contract_contract_code_i
 --  Saves the component balance of a protocol component.
 CREATE TABLE IF NOT EXISTS component_balance(
     "id" bigserial PRIMARY KEY,
-    -- id of the token whose tvl changed
+    -- id of the token whose balance changed
     "token_id" bigint REFERENCES "token"(id) NOT NULL,
     -- new balance of the token for this component
     "new_balance" bytea NOT NULL,
+    -- new balance of the token for this component
+    "previous_value" bytea NOT NULL,
     -- new balance as a floating point number
     "balance_float" float NOT NULL,
     -- the transaction that modified the tvl of this component
@@ -111,4 +121,53 @@ CREATE TRIGGER audit_table_protocol_component_holds_token
     BEFORE UPDATE ON protocol_component_holds_token
     FOR EACH ROW
     EXECUTE PROCEDURE audit_trigger();
+
+CREATE TABLE IF NOT EXISTS token_price(
+    "id" bigserial PRIMARY KEY,
+    -- Id of the token whose price we record here.
+    "token_id" bigint REFERENCES "token"(id) NOT NULL UNIQUE,
+    -- Price in native token denomination.
+    "price" double precision NOT NULL,
+    -- Timestamp this entry was inserted into this table.
+    "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Timestamp this entry was last modified in this table.
+    "modified_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TRIGGER update_modtime_token_price
+    BEFORE UPDATE ON token_price
+    FOR EACH ROW
+    EXECUTE PROCEDURE update_modified_column();
+
+CREATE TRIGGER audit_table_token_price
+    BEFORE UPDATE ON protocol_component_holds_token
+    FOR EACH ROW
+    EXECUTE PROCEDURE audit_trigger();
+
+CREATE TABLE IF NOT EXISTS component_tvl(
+    "id" bigserial PRIMARY KEY,
+    -- Id of the component whose tvl we record here.
+    "protocol_component_id" bigint REFERENCES protocol_component(id) NOT NULL UNIQUE,
+    -- Tvl in native token denomination.
+    "tvl" double precision NOT NULL,
+    -- Timestamp this entry was inserted into this table.
+    "inserted_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Timestamp this entry was last modified in this table.
+    "modified_ts" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_component_tvl_tvl ON component_tvl(tvl);
+
+CREATE TRIGGER update_modtime_component_tvl
+    BEFORE UPDATE ON component_tvl
+    FOR EACH ROW
+    EXECUTE PROCEDURE update_modified_column();
+
+CREATE TRIGGER audit_table_component_tvl
+    BEFORE UPDATE ON component_tvl
+    FOR EACH ROW
+    EXECUTE PROCEDURE audit_trigger();
+
+ALTER TABLE token
+    ADD COLUMN quality int NOT NULL DEFAULT 0;
 

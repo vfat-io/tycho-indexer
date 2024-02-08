@@ -1,7 +1,11 @@
 [workspace]
 members = [
     "tycho-indexer",
-    "substreams/common", "substreams/substreams-helper", "substreams/ethereum-ambient", "substreams/ethereum-uniswap-v2",
+    "substreams/common",
+    "substreams/substreams-helper",
+    "substreams/ethereum-ambient",
+    "substreams/ethereum-uniswap-v2",
+    "substreams/ethereum-uniswap-v3",
     "tycho-client",
     "tycho-types",
 ]
