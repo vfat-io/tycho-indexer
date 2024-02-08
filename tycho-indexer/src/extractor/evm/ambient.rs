@@ -626,12 +626,16 @@ mod test {
         .expect("extractor init ok");
         let inp = evm::fixtures::pb_block_scoped_data(());
 
-        let _res = extractor
+        let res = extractor
             .handle_tick_scoped_data(inp)
             .await;
 
-        // TODO: fix this assert
-        // assert_eq!(res, Ok(None));
+        match res {
+            Ok(Some(_)) => panic!("Expected Ok(None) but got Ok(Some(..))"),
+            Ok(None) => (), // This is the expected case
+            Err(_) => panic!("Expected Ok(None) but got Err(..)"),
+        }
+
         assert_eq!(extractor.get_cursor().await, "cursor@420");
     }
 

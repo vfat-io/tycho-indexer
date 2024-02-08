@@ -500,31 +500,33 @@ mod test {
         assert_eq!(extractor.get_cursor().await, "cursor@420");
     }
 
-    // TODO: What is this testing?
-    // #[tokio::test]
-    // async fn test_handle_tick_scoped_data_skip() {
-    //     let mut gw = MockNativeGateway::new();
-    //     gw.expect_ensure_protocol_types()
-    //         .times(1)
-    //         .returning(|_| ());
-    //     gw.expect_get_cursor()
-    //         .times(1)
-    //         .returning(|| Ok("cursor".into()));
-    //     gw.expect_advance()
-    //         .times(0)
-    //         .returning(|_, _| Ok(()));
+    #[tokio::test]
+    async fn test_handle_tick_scoped_data_skip() {
+        let mut gw = MockNativeGateway::new();
+        gw.expect_ensure_protocol_types()
+            .times(1)
+            .returning(|_| ());
+        gw.expect_get_cursor()
+            .times(1)
+            .returning(|| Ok("cursor".into()));
+        gw.expect_advance()
+            .times(0)
+            .returning(|_, _| Ok(()));
 
-    //     let protocol_types = HashMap::from([("WeightedPool".to_string(),
-    // ProtocolType::default())]);     let extractor = create_extractor(gw).await;
+        let extractor = create_extractor(gw).await;
 
-    //     let inp = evm::fixtures::pb_block_scoped_data(());
-    //     let res = extractor
-    //         .handle_tick_scoped_data(inp)
-    //         .await;
+        let inp = evm::fixtures::pb_block_scoped_data(());
+        let res = extractor
+            .handle_tick_scoped_data(inp)
+            .await;
 
-    //     assert_eq!(res, Ok(None));
-    //     assert_eq!(extractor.get_cursor().await, "cursor@420");
-    // }
+        match res {
+            Ok(Some(_)) => panic!("Expected Ok(None) but got Ok(Some(..))"),
+            Ok(None) => (), // This is the expected case
+            Err(_) => panic!("Expected Ok(None) but got Err(..)"),
+        }
+        assert_eq!(extractor.get_cursor().await, "cursor@420");
+    }
 
     #[tokio::test]
     async fn test_handle_revert() {
@@ -573,59 +575,6 @@ mod test {
         assert!(matches!(res, Ok(None)));
         assert_eq!(extractor.get_cursor().await, "cursor@400");
     }
-
-    // THALES TESTS
-
-    // #[tokio::test]
-    // async fn test_update_cursor() {
-    //     let extractor = create_extractor();
-    //     let new_cursor = "new_cursor".to_string();
-
-    //     // Update the cursor.
-    //     extractor
-    //         .update_cursor(new_cursor.clone())
-    //         .await;
-
-    //     // Lock the state to retrieve the cursor.
-    //     let state = extractor.inner.lock().await;
-
-    //     // Check if the cursor has been updated correctly.
-    //     assert_eq!(state.cursor, new_cursor.into_bytes());
-    // }
-
-    // #[tokio::test]
-    // async fn test_update_last_processed_block() {
-    //     let extractor = create_extractor();
-    //     // pub struct Block {
-    //     //     pub number: u64,
-    //     //     pub hash: H256,
-    //     //     pub parent_hash: H256,
-    //     //     pub chain: Chain,
-    //     //     pub ts: NaiveDateTime,
-    //     // }
-
-    //     let new_block = Block {
-    //         number: 1,
-    //         hash: H256::zero(),
-    //         parent_hash: H256::zero(),
-    //         chain: Chain::Ethereum,
-    //         ts: "2020-01-01T01:00:00"
-    //             .parse()
-    //             .expect("Invalid timestamp"),
-    //     };
-
-    //     // Update the last processed block.
-    //     extractor
-    //         .update_last_processed_block(new_block.clone())
-    //         .await;
-
-    //     // Lock the state to retrieve the last processed block.
-    //     let state = extractor.inner.lock().await;
-
-    //     // Check if the last processed block has been updated correctly.
-    //     assert!(state.last_processed_block.is_some());
-    //     assert_eq!(state.last_processed_block.unwrap(), new_block);
-    // }
 }
 
 #[cfg(test)]
