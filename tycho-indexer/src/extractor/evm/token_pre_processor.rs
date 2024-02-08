@@ -1,24 +1,15 @@
 use crate::{extractor::evm::ERC20Token, models::Chain};
-use ethers::{
-    abi::Abi,
-    contract::Contract,
-    providers::{Http, Provider},
-    types::H160,
-};
+use ethers::{abi::Abi, contract::Contract, prelude::Middleware, types::H160};
 use serde_json::from_str;
 use std::{fs, sync::Arc};
 
-pub struct TokenPreProcessor {
-    client: Arc<Provider<Http>>,
+pub struct TokenPreProcessor<M: Middleware> {
+    pub client: Arc<M>,
 }
 
-impl TokenPreProcessor {
-    pub fn new(rpc_url: &str) -> Self {
-        let client = Provider::<Http>::try_from(rpc_url)
-            .expect("Error creating HTTP provider")
-            .into();
-
-        TokenPreProcessor { client }
+impl<M: Middleware> TokenPreProcessor<M> {
+    pub fn new(client: M) -> Self {
+        TokenPreProcessor { client: Arc::new(client) }
     }
 
     pub async fn get_tokens(
@@ -66,13 +57,38 @@ impl TokenPreProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers::types::H160;
+    use ethers::{
+        prelude::{MockProvider, Provider},
+        types::H160,
+    };
     use std::str::FromStr;
 
     #[tokio::test]
     async fn test_get_tokens() {
-        let rpc_url = "https://eth-mainnet.g.alchemy.com/v2/OTD5W7gdTPrzpVot41Lx9tJD9LUiAhbs";
-        let processor = TokenPreProcessor::new(rpc_url);
+        let (provider, mock) = Provider::mocked();
+        mock.push::<u8, _>(6);
+        mock.push::<String, _>("USDC".to_string());
+        mock.push::<u8, _>(18);
+        mock.push::<String, _>("WETH".to_string());
+
+        /*mock.push_response(MockResponse::Value(serde_json::json!({
+                         "jsonrpc": "2.0",
+                         "id": 1,
+                         "result": 6})));
+        mock.push_response(MockResponse::Value(serde_json::json!({
+                         "jsonrpc": "2.0",
+                         "id": 1,
+                         "result": "USDC"})));
+        mock.push_response(MockResponse::Value(serde_json::json!({
+                         "jsonrpc": "2.0",
+                         "id": 1,
+                         "result": 18})));
+        mock.push_response(MockResponse::Value(serde_json::json!({
+                 "jsonrpc": "2.0",
+                 "id": 1,
+                 "result": "WETH"})));*/
+
+        let processor = TokenPreProcessor::<Provider<MockProvider>>::new(provider);
 
         let weth_address: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
         let usdc_address: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
