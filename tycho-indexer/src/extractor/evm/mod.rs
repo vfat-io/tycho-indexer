@@ -777,26 +777,34 @@ impl BlockContractChanges {
     /// This returns an error if there was a problem during merge. The error
     /// type is `ExtractionError`.
     pub fn aggregate_updates(self) -> Result<BlockAccountChanges, ExtractionError> {
-        let mut sorted_tx_updates = self.tx_updates.clone();
-        sorted_tx_updates.sort_unstable_by_key(|update| update.tx.index);
+        let (account_updates, protocol_components, component_balances) = if !self
+            .tx_updates
+            .is_empty()
+        {
+            let mut sorted_tx_updates = self.tx_updates.clone();
+            sorted_tx_updates.sort_unstable_by_key(|update| update.tx.index);
+            let mut tx_update = sorted_tx_updates
+                .first()
+                .cloned()
+                .ok_or(ExtractionError::Empty)?;
 
-        let mut tx_update = sorted_tx_updates
-            .first()
-            .cloned()
-            .ok_or(ExtractionError::Empty)?;
+            for update in sorted_tx_updates.into_iter().skip(1) {
+                tx_update.merge(&update.clone())?;
+            }
+            (tx_update.account_updates, tx_update.protocol_components, tx_update.component_balances)
+        } else {
+            (HashMap::new(), HashMap::new(), HashMap::new())
+        };
 
-        for update in sorted_tx_updates.into_iter().skip(1) {
-            tx_update.merge(&update.clone())?;
-        }
         Ok(BlockAccountChanges::new(
             &self.extractor,
             self.chain,
             self.block,
             self.revert,
-            tx_update.account_updates.clone(),
-            tx_update.protocol_components.clone(),
+            account_updates,
+            protocol_components,
             HashMap::new(),
-            tx_update.component_balances,
+            component_balances,
         ))
     }
 }
