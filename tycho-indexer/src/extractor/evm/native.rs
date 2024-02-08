@@ -1,15 +1,23 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-use ethers::types::H256;
+use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, instrument};
+use tycho_types::Bytes;
 
 use crate::{
-    extractor::{evm, evm::Block, ExtractionError, Extractor, ExtractorMsg},
+    extractor::{
+        evm::{self, Block},
+        ExtractionError, Extractor, ExtractorMsg,
+    },
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
@@ -19,6 +27,8 @@ use crate::{
         postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError, TxHash,
     },
 };
+
+use super::token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait};
 
 pub struct Inner {
     cursor: Vec<u8>,
@@ -46,11 +56,15 @@ impl<DB> NativeContractExtractor<DB> {
     }
 }
 
-pub struct NativePgGateway {
+pub struct NativePgGateway<T>
+where
+    T: TokenPreProcessorTrait,
+{
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
     state_gateway: CachedGateway,
+    token_pre_processor: T,
 }
 
 #[automock]
@@ -74,14 +88,18 @@ pub trait NativeGateway: Send + Sync {
     ) -> Result<evm::BlockEntityChangesResult, StorageError>;
 }
 
-impl NativePgGateway {
+impl<T> NativePgGateway<T>
+where
+    T: TokenPreProcessorTrait,
+{
     pub fn new(
         name: &str,
         chain: Chain,
         pool: Pool<AsyncPgConnection>,
         state_gateway: CachedGateway,
+        token_pre_processor: T,
     ) -> Self {
-        Self { name: name.to_owned(), chain, pool, state_gateway }
+        Self { name: name.to_owned(), chain, pool, state_gateway, token_pre_processor }
     }
 
     #[instrument(skip_all)]
@@ -92,6 +110,39 @@ impl NativePgGateway {
             .save_state(block, &state)
             .await?;
         Ok(())
+    }
+
+    /// Get tokens that are not in the database
+    async fn get_new_tokens(&self, tokens: HashSet<H160>) -> Result<Vec<H160>, StorageError> {
+        let mut conn = self
+            .pool
+            .get()
+            .await
+            .expect("pool should be connected");
+
+        let addresses: Vec<Bytes> = tokens
+            .iter()
+            .map(|a| Bytes::from(a.as_bytes().to_vec()))
+            .collect();
+        let address_refs: Vec<&Bytes> = addresses.iter().collect();
+
+        let addresses_option = Some(address_refs.as_slice());
+
+        let db_tokens = self
+            .state_gateway
+            .get_tokens(self.chain, addresses_option, &mut conn)
+            .await?;
+
+        let db_token_addresses: HashSet<_> = db_tokens
+            .iter()
+            .map(|token| token.address)
+            .collect();
+        let filtered_tokens = tokens
+            .into_iter()
+            .filter(|token| !db_token_addresses.contains(token))
+            .collect();
+
+        Ok(filtered_tokens)
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
@@ -109,6 +160,8 @@ impl NativePgGateway {
         let mut state_updates: Vec<(TxHash, evm::ProtocolStateDelta)> = vec![];
         let mut balance_changes: Vec<evm::ComponentBalance> = vec![];
 
+        let mut protocol_tokens: HashSet<H160> = HashSet::new();
+
         for tx in changes.txs_with_update.iter() {
             self.state_gateway
                 .upsert_tx(&changes.block, &tx.tx)
@@ -116,11 +169,10 @@ impl NativePgGateway {
 
             let hash: TxHash = tx.tx.hash.into();
 
-            new_protocol_components.extend(
-                tx.new_protocol_components
-                    .values()
-                    .cloned(),
-            );
+            for (_component_id, new_protocol_component) in tx.new_protocol_components.iter() {
+                new_protocol_components.push(new_protocol_component.clone());
+                protocol_tokens.extend(new_protocol_component.tokens.iter());
+            }
 
             state_updates.extend(
                 tx.protocol_states
@@ -136,6 +188,19 @@ impl NativePgGateway {
         }
 
         let block = &changes.block;
+
+        let new_tokens_addresses = self
+            .get_new_tokens(protocol_tokens)
+            .await?;
+        if !new_tokens_addresses.is_empty() {
+            let new_tokens = self
+                .token_pre_processor
+                .get_tokens(new_tokens_addresses)
+                .await;
+            self.state_gateway
+                .add_tokens(block, &new_tokens)
+                .await?;
+        }
 
         if !new_protocol_components.is_empty() {
             self.state_gateway
@@ -228,7 +293,7 @@ impl NativePgGateway {
 }
 
 #[async_trait]
-impl NativeGateway for NativePgGateway {
+impl NativeGateway for NativePgGateway<TokenPreProcessor> {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
         let mut conn = self.pool.get().await.unwrap();
         self.get_last_cursor(&mut conn).await
@@ -603,7 +668,10 @@ mod test_serial_db {
     use tycho_types::Bytes;
 
     use crate::{
-        extractor::evm::{ProtocolComponent, ProtocolStateDelta, Transaction},
+        extractor::evm::{
+            token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, ProtocolStateDelta,
+            Transaction,
+        },
         storage::{
             postgres,
             postgres::{
@@ -622,9 +690,45 @@ mod test_serial_db {
     const BLOCK_HASH_1: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
     const CREATED_CONTRACT: &str = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc";
 
+    fn get_mocked_token_pre_processor() -> MockTokenPreProcessorTrait {
+        let mut mock_processor = MockTokenPreProcessorTrait::new();
+        let new_tokens = vec![
+            evm::ERC20Token::new(
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .expect("Invalid H160 address"),
+                "WETH".to_string(),
+                18,
+                0,
+                vec![],
+                Default::default(),
+                100,
+            ),
+            evm::ERC20Token::new(
+                H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                    .expect("Invalid H160 address"),
+                "USDC".to_string(),
+                6,
+                0,
+                vec![],
+                Default::default(),
+                100,
+            ),
+        ];
+        mock_processor
+            .expect_get_tokens()
+            .returning(move |_| new_tokens.clone());
+
+        mock_processor
+    }
+
     async fn setup_gw(
         pool: Pool<AsyncPgConnection>,
-    ) -> (NativePgGateway, Receiver<StorageError>, Pool<AsyncPgConnection>) {
+    ) -> (
+        NativePgGateway<MockTokenPreProcessorTrait>,
+        Receiver<StorageError>,
+        Pool<AsyncPgConnection>,
+        i64,
+    ) {
         let mut conn = pool
             .get()
             .await
@@ -637,24 +741,6 @@ mod test_serial_db {
             Some(FinancialType::Swap),
             None,
             Some(ImplementationType::Custom),
-        )
-        .await;
-
-        // TODO: Implement token insertion logic to prevent needing this.
-        postgres::db_fixtures::insert_token(
-            &mut conn,
-            chain_id,
-            "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-            "USDC",
-            6,
-        )
-        .await;
-        postgres::db_fixtures::insert_token(
-            &mut conn,
-            chain_id,
-            "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-            "WETH",
-            18,
         )
         .await;
 
@@ -684,14 +770,20 @@ mod test_serial_db {
         write_executor.run();
         let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
 
-        let gw = NativePgGateway::new("test", Chain::Ethereum, pool.clone(), cached_gw);
-        (gw, err_rx, pool)
+        let gw = NativePgGateway::new(
+            "test",
+            Chain::Ethereum,
+            pool.clone(),
+            cached_gw,
+            get_mocked_token_pre_processor(),
+        );
+        (gw, err_rx, pool, chain_id)
     }
 
     #[tokio::test]
     async fn test_get_cursor() {
         run_against_db(|pool| async move {
-            let (gw, mut err_rx, pool) = setup_gw(pool).await;
+            let (gw, mut err_rx, pool, _) = setup_gw(pool).await;
             let evm_gw = gw.state_gateway.clone();
             let state = ExtractionState::new(
                 "test".to_string(),
@@ -771,7 +863,7 @@ mod test_serial_db {
     #[tokio::test]
     async fn test_forward() {
         run_against_db(|pool| async move {
-            let (gw, mut err_rx, pool) = setup_gw(pool).await;
+            let (gw, mut err_rx, pool, _) = setup_gw(pool).await;
             let msg = native_pool_creation();
 
             let _exp = [ProtocolComponent {
@@ -834,7 +926,7 @@ mod test_serial_db {
     #[tokio::test]
     async fn test_revert() {
         run_against_db(|pool| async move {
-            let (gw, mut err_rx, pool) = setup_gw(pool).await;
+            let (gw, mut err_rx, pool, _) = setup_gw(pool).await;
             let msg0 = native_pool_creation();
 
             let res1_value = 1000_u64.to_be_bytes().to_vec();
@@ -927,6 +1019,43 @@ mod test_serial_db {
                 .expect("test successfully inserted native contract");
             // Assert no error happened
             assert_eq!(maybe_err, Empty);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_get_new_tokens() {
+        run_against_db(|pool| async move {
+            let mut conn = pool
+                .get()
+                .await
+                .expect("pool should get a connection");
+
+            let (gw, mut err_rx, _, chain_id) = setup_gw(pool).await;
+
+            let weth_addr = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+            let usdc_addr = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+            let usdt_addr = "dAC17F958D2ee523a2206206994597C13D831ec7";
+
+            postgres::db_fixtures::insert_token(&mut conn, chain_id, weth_addr, "WETH", 18).await;
+            postgres::db_fixtures::insert_token(&mut conn, chain_id, usdc_addr, "USDC", 6).await;
+
+            let tokens = HashSet::from([
+                H160::from_str(weth_addr).unwrap(), // WETH
+                H160::from_str(usdc_addr).unwrap(), // USDC
+                H160::from_str(usdt_addr).unwrap(), // USDT
+            ]);
+            let res = gw
+                .get_new_tokens(tokens.iter().cloned().collect())
+                .await
+                .expect("get new tokens should succeed");
+
+            // Assert len of res == 1
+            assert_eq!(res.len(), 1);
+            // Assert res contains USDT
+            assert_eq!(res[0], H160::from_str(usdt_addr).unwrap());
+            // Assert no error happened
+            assert_eq!(err_rx.try_recv(), Err(Empty));
         })
         .await;
     }
