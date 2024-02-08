@@ -16,7 +16,7 @@ use tycho_types::{
         Block, BlockAccountChanges, BlockEntityChangesResult, BlockParam, ContractId, Deltas,
         ExtractorIdentity, ProtocolComponent, ProtocolComponentId,
         ProtocolComponentRequestParameters, ProtocolComponentsRequestBody, ResponseAccount,
-        ResponseProtocolComponent, StateRequestBody, StateRequestParameters, VersionParam,
+        StateRequestBody, StateRequestParameters, VersionParam,
     },
     Bytes,
 };
@@ -29,12 +29,15 @@ type SyncResult<T> = anyhow::Result<T>;
 #[derive(Clone)]
 pub struct StateSynchronizer {
     extractor_id: ExtractorIdentity,
+    protocol_system: String,
+    is_native: bool,
     rpc_client: HttpRPCClient,
     deltas_client: WsDeltasClient,
     // We will need to request a snapshot for components/Contracts that we did not emit a
     // snapshot for yet but are relevant now, e.g. because min tvl threshold exceeded.
-    tracked_components: Arc<Mutex<HashMap<ProtocolComponentId, ResponseProtocolComponent>>>,
-    // derived from tracked components
+    tracked_components: Arc<Mutex<HashMap<ProtocolComponentId, ProtocolComponent>>>,
+    // derived from tracked components, we need this if subscribed to a vm extractor cause updates
+    // are emitted on a contract level instead of on a component level.
     tracked_contracts: Arc<Mutex<HashSet<Bytes>>>,
 
     last_served_block_hash: Arc<Mutex<Option<Bytes>>>,
@@ -50,7 +53,7 @@ pub struct StateSynchronizer {
 #[derive(Clone)]
 pub struct VMSnapshot {
     state: Vec<ResponseAccount>,
-    component: ResponseProtocolComponent,
+    component: ProtocolComponent,
 }
 
 #[derive(Clone)]
@@ -65,8 +68,8 @@ pub enum SnapOrDelta {
 pub struct StateMessage {
     header: Header,
     state_updates: Vec<SnapOrDelta>,
-    removed_components: HashSet<String>,
-    removed_contracts: HashSet<Bytes>,
+    // This should cover both contracts and native components
+    removed_components: HashMap<String, ProtocolComponent>,
 }
 
 impl StateMessage {
@@ -143,12 +146,13 @@ impl StateSynchronizer {
         Ok((jh, block_rx))
     }
 
-    /// Retrieve all components that currently match our min tvl filter
+    /// Retrieve all components that belong to the system we are extracing and have sufficient tvl.
     async fn initialise_components(&mut self) {
-        let filters =
-            // TODO: min_tvl_threshold should be f64
-            ProtocolComponentRequestParameters { tvl_gt: Some(self.min_tvl_threshold as u64) };
-        let request = ProtocolComponentsRequestBody { protocol_system: None, component_ids: None };
+        let filters = ProtocolComponentRequestParameters { tvl_gt: Some(self.min_tvl_threshold) };
+        let request = ProtocolComponentsRequestBody {
+            protocol_system: Some(self.protocol_system.clone()),
+            component_ids: None,
+        };
         let mut tracked_components = self.tracked_components.lock().await;
         *tracked_components = self
             .rpc_client
@@ -193,33 +197,26 @@ impl StateSynchronizer {
         });
     }
 
-    /// Retrieves state snapshots of the passed components
+    /// Retrieves state snapshots of the requested components
     async fn get_snapshots<'a, I: IntoIterator<Item = &'a ProtocolComponentId>>(
         &self,
         ids: I,
         header: Header,
     ) -> SyncResult<StateMessage> {
-        // TODO: it is either contracts or components
-        let mut contract_ids = Vec::new();
-        let mut component_ids = Vec::new();
-        let tracked_components = self.tracked_components.lock().await;
-
-        ids.into_iter().for_each(|cid| {
-            let comp = tracked_components
-                .get(cid)
-                .expect("requested component that is not present");
-            if comp.contract_ids.is_empty() {
-                component_ids.push(comp.id.clone());
-            } else {
-                contract_ids.extend(comp.contract_ids.iter().cloned());
-            }
-        });
-
         let version = VersionParam::new(
             None,
             Some(BlockParam { chain: None, hash: Some(header.hash.clone()), number: None }),
         );
-        if !contract_ids.is_empty() {
+        let tracked_components = self.tracked_components.lock().await;
+        if self.is_native {
+            let mut contract_ids = Vec::new();
+            ids.into_iter().for_each(|cid| {
+                let comp = tracked_components
+                    .get(cid)
+                    .expect("requested component that is not present");
+                contract_ids.extend(comp.contract_ids.iter().cloned());
+            });
+
             let filters = Default::default();
             let body = StateRequestBody::new(Some(contract_ids), version);
             let mut snap = self
@@ -251,11 +248,17 @@ impl StateSynchronizer {
                         }))
                     })
                     .collect(),
-                removed_components: HashSet::new(),
-                removed_contracts: HashSet::new(),
+                removed_components: HashMap::new(),
             })
         } else {
-            // TODO: handle native protocols
+            let mut component_ids = Vec::new();
+            ids.into_iter().for_each(|cid| {
+                let comp = tracked_components
+                    .get(cid)
+                    .expect("requested component that is not present");
+                component_ids.push(comp.id.clone());
+            });
+
             todo!()
         }
     }
@@ -306,8 +309,7 @@ impl StateSynchronizer {
                     StateMessage {
                         header: header.clone(),
                         state_updates: vec![SnapOrDelta::Deltas(deltas)],
-                        removed_components: HashSet::new(),
-                        removed_contracts: HashSet::new(),
+                        removed_components: HashMap::new(),
                     },
                 );
                 *self.last_synced_block.lock().await = Some(header.clone());
