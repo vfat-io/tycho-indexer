@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    hash::Hash,
     sync::Arc,
 };
 
@@ -14,11 +13,10 @@ use tokio::{
 use tracing::error;
 use tycho_types::{
     dto::{
-        Block, BlockAccountChanges, BlockEntityChangesResult, BlockParam, ContractId, Deltas,
-        ExtractorIdentity, ProtocolComponent, ProtocolComponentId,
+        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent,
         ProtocolComponentRequestParameters, ProtocolComponentsRequestBody, ProtocolId,
         ProtocolStateRequestBody, ResponseAccount, ResponseProtocolState, StateRequestBody,
-        StateRequestParameters, VersionParam,
+        VersionParam,
     },
     Bytes,
 };
@@ -37,7 +35,7 @@ pub struct StateSynchronizer {
     deltas_client: WsDeltasClient,
     // We will need to request a snapshot for components/Contracts that we did not emit a
     // snapshot for yet but are relevant now, e.g. because min tvl threshold exceeded.
-    tracked_components: Arc<Mutex<HashMap<ProtocolComponentId, ProtocolComponent>>>,
+    tracked_components: Arc<Mutex<HashMap<String, ProtocolComponent>>>,
     // derived from tracked components, we need this if subscribed to a vm extractor cause updates
     // are emitted on a contract level instead of on a component level.
     tracked_contracts: Arc<Mutex<HashSet<Bytes>>>,
@@ -164,17 +162,17 @@ impl StateSynchronizer {
             .expect("could not init protocol components")
             .protocol_components
             .into_iter()
-            .map(|pc| (pc.get_id(), pc))
+            .map(|pc| (pc.id.clone(), pc))
             .collect::<HashMap<_, _>>();
     }
 
     /// Add a new component to be tracked
-    async fn start_tracking(&self, new_components: &[ProtocolComponentId]) {
+    async fn start_tracking(&self, new_components: &[&String]) {
         let filters = ProtocolComponentRequestParameters::default();
         let request = ProtocolComponentsRequestBody::id_filtered(
             new_components
                 .iter()
-                .map(|pc_id| pc_id.id.clone())
+                .map(|pc_id| pc_id.to_string())
                 .collect(),
         );
         let mut tracked_components = self.tracked_components.lock().await;
@@ -185,20 +183,33 @@ impl StateSynchronizer {
                 .expect("could not get new protocol components")
                 .protocol_components
                 .into_iter()
-                .map(|pc| (pc.get_id(), pc)),
+                .map(|pc| (pc.id.clone(), pc)),
         );
     }
 
-    /// Stop tracking a component
-    async fn stop_tracking(&self, components: &[ProtocolComponentId]) {
+    /// Stop tracking components
+    async fn stop_tracking<'a, I: IntoIterator<Item = &'a String>>(
+        &self,
+        components: I,
+    ) -> HashMap<String, ProtocolComponent> {
         let mut tracked_components = self.tracked_components.lock().await;
-        components.iter().for_each(|k| {
-            tracked_components.remove(k);
-        });
+        let mut tracked_contracts = self.tracked_contracts.lock().await;
+        components
+            .into_iter()
+            .filter_map(|k| {
+                let comp = tracked_components.remove(k);
+                if let Some(component) = &comp {
+                    for contract in component.contract_ids.iter() {
+                        tracked_contracts.remove(contract);
+                    }
+                }
+                comp.map(|c| (k.clone(), c))
+            })
+            .collect()
     }
 
     /// Retrieves state snapshots of the requested components
-    async fn get_snapshots<'a, I: IntoIterator<Item = &'a ProtocolComponentId>>(
+    async fn get_snapshots<'a, I: IntoIterator<Item = &'a str>>(
         &self,
         ids: I,
         header: Header,
@@ -331,9 +342,14 @@ impl StateSynchronizer {
         let header = Header::from_block(first_msg.get_block(), first_msg.is_revert());
         let snapshot = async {
             let tracked_components = self.tracked_components.lock().await;
-            self.get_snapshots(tracked_components.keys(), Header::from_block(&block, false))
-                .await
-                .expect("failed to get initial snapshot")
+            self.get_snapshots(
+                tracked_components
+                    .keys()
+                    .map(String::as_str),
+                Header::from_block(&block, false),
+            )
+            .await
+            .expect("failed to get initial snapshot")
         }
         .await;
         self.pending_deltas
@@ -343,19 +359,63 @@ impl StateSynchronizer {
         *self.last_synced_block.lock().await = Some(header.clone());
         block_tx.send(header.clone()).await?;
         loop {
-            if let Some(deltas) = msg_rx.recv().await {
+            if let Some(mut deltas) = msg_rx.recv().await {
                 let header = Header::from_block(deltas.get_block(), deltas.is_revert());
-                // TODO:
-                // 1. Remove components based on tvl changes (not available yet)
-                // 2. Add components based on tvl changes, query those for snapshots
+                let (mut state_updates, removed_components) = {
+                    // 1. Remove components based on tvl changes (not available yet)
+                    // 2. Add components based on tvl changes, query those for snapshots
+                    let (to_add, to_remove): (Vec<_>, Vec<_>) = deltas
+                        .component_tvl()
+                        .iter()
+                        .partition(|(_, &tvl)| tvl > self.min_tvl_threshold);
+
+                    // only components we don't track yet need a snapshot,
+                    // TODO: additional indentation required to tracked_components gets dropped
+                    // later on. Most likely we don't need this if we simply own tracked_components
+                    // and contracts.
+                    let requiring_snapshot = {
+                        let tracked_components = self.tracked_components.lock().await;
+                        to_add
+                            .iter()
+                            .filter_map(|(k, _)| {
+                                if !tracked_components.contains_key(*k) {
+                                    None
+                                } else {
+                                    Some(*k)
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    };
+                    self.start_tracking(&requiring_snapshot)
+                        .await;
+                    let state_updates = self
+                        .get_snapshots(
+                            requiring_snapshot
+                                .into_iter()
+                                .map(String::as_str),
+                            header.clone(),
+                        )
+                        .await?
+                        .state_updates;
+
+                    let removed_components = self
+                        .stop_tracking(to_remove.iter().map(|(id, _)| *id))
+                        .await;
+                    (state_updates, removed_components)
+                };
                 // 3. Filter deltas by tracked components / contracts
+                if self.is_native {
+                    let tracked_components = self.tracked_components.lock().await;
+                    deltas.filter_by_component(|id| tracked_components.contains_key(id));
+                } else {
+                    let tracked_contracts = self.tracked_contracts.lock().await;
+                    deltas.filter_by_contract(|id| tracked_contracts.contains(id));
+                }
+
+                state_updates.push(SnapOrDelta::Deltas(deltas));
                 self.pending_deltas.lock().await.insert(
                     block.hash.clone(),
-                    StateMessage {
-                        header: header.clone(),
-                        state_updates: vec![SnapOrDelta::Deltas(deltas)],
-                        removed_components: HashMap::new(),
-                    },
+                    StateMessage { header: header.clone(), state_updates, removed_components },
                 );
                 *self.last_synced_block.lock().await = Some(header.clone());
                 block_tx.send(header).await?;

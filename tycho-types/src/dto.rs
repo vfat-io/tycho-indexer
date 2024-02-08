@@ -97,6 +97,33 @@ impl Deltas {
             Deltas::Native(data) => data.revert,
         }
     }
+
+    pub fn component_tvl(&self) -> &HashMap<String, f64> {
+        match self {
+            Deltas::VM(data) => &data.component_tvl,
+            Deltas::Native(data) => &data.component_tvl,
+        }
+    }
+
+    pub fn filter_by_component<F: Fn(&str) -> bool>(&mut self, keep: F) {
+        match self {
+            Deltas::Native(data) => {
+                data.state_updates
+                    .retain(|k, v| keep(k));
+            }
+            Deltas::VM(data) => panic!("Can't filter vm deltas by component!"),
+        }
+    }
+
+    pub fn filter_by_contract<F: Fn(&Bytes) -> bool>(&mut self, keep: F) {
+        match self {
+            Deltas::VM(data) => {
+                data.account_updates
+                    .retain(|k, v| keep(k));
+            }
+            Deltas::Native(data) => panic!("Can't filter native deltas by contract!"),
+        }
+    }
 }
 
 /// A message sent from the server to the client
@@ -169,9 +196,10 @@ pub struct BlockAccountChanges {
     pub revert: bool,
     #[serde(with = "hex_hashmap_key")]
     pub account_updates: HashMap<Bytes, AccountUpdate>,
-    pub new_protocol_components: Vec<ProtocolComponent>,
-    pub deleted_protocol_components: Vec<ProtocolComponent>,
-    pub component_balances: Vec<ComponentBalance>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
+    pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
+    pub component_balances: HashMap<String, HashMap<Bytes, ComponentBalance>>,
+    pub component_tvl: HashMap<String, f64>,
 }
 
 impl BlockAccountChanges {
@@ -182,9 +210,9 @@ impl BlockAccountChanges {
         block: Block,
         revert: bool,
         account_updates: HashMap<Bytes, AccountUpdate>,
-        new_protocol_components: Vec<ProtocolComponent>,
-        deleted_protocol_components: Vec<ProtocolComponent>,
-        component_balances: Vec<ComponentBalance>,
+        new_protocol_components: HashMap<String, ProtocolComponent>,
+        deleted_protocol_components: HashMap<String, ProtocolComponent>,
+        component_balances: HashMap<String, HashMap<Bytes, ComponentBalance>>,
     ) -> Self {
         BlockAccountChanges {
             extractor: extractor.to_owned(),
@@ -195,6 +223,7 @@ impl BlockAccountChanges {
             new_protocol_components,
             deleted_protocol_components,
             component_balances,
+            component_tvl: HashMap::new(),
         }
     }
 }
@@ -278,6 +307,9 @@ pub struct BlockEntityChangesResult {
     pub revert: bool,
     pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
+    pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
+    pub component_balances: HashMap<String, HashMap<Bytes, ComponentBalance>>,
+    pub component_tvl: HashMap<String, f64>,
 }
 
 #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -533,6 +565,16 @@ pub struct ProtocolComponentsRequestBody {
 }
 
 impl ProtocolComponentsRequestBody {
+    pub fn system_filtered(system: &str) -> Self {
+        Self { protocol_system: Some(system.to_string()), component_ids: None }
+    }
+
+    pub fn id_filtered(ids: Vec<String>) -> Self {
+        Self { protocol_system: None, component_ids: Some(ids) }
+    }
+}
+
+impl ProtocolComponentsRequestBody {
     pub fn new(protocol_system: Option<String>, component_ids: Option<Vec<String>>) -> Self {
         Self { protocol_system, component_ids }
     }
@@ -540,8 +582,13 @@ impl ProtocolComponentsRequestBody {
 
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct ProtocolComponentRequestParameters {
-    #[param(default = 0)]
     pub tvl_gt: Option<f64>,
+}
+
+impl ProtocolComponentRequestParameters {
+    pub fn tvl_filtered(min_tvl: f64) -> Self {
+        Self { tvl_gt: Some(min_tvl) }
+    }
 }
 
 impl ProtocolComponentRequestParameters {
@@ -615,6 +662,12 @@ pub struct ProtocolStateRequestBody {
     pub version: VersionParam,
 }
 
+impl ProtocolStateRequestBody {
+    pub fn id_filtered(ids: Vec<ProtocolId>) -> Self {
+        Self { protocol_ids: Some(ids), ..Default::default() }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct ProtocolStateRequestResponse {
     pub states: Vec<ResponseProtocolState>,
@@ -652,16 +705,6 @@ pub struct ProtocolComponentId {
     pub chain: Chain,
     pub system: String,
     pub id: String,
-}
-
-impl ProtocolComponent {
-    pub fn get_id(&self) -> ProtocolComponentId {
-        ProtocolComponentId {
-            chain: self.chain,
-            system: self.protocol_system.clone(),
-            id: self.id.clone(),
-        }
-    }
 }
 
 #[cfg(test)]
