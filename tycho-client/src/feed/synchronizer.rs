@@ -11,12 +11,14 @@ use tokio::{
     },
     task::JoinHandle,
 };
+use tracing::error;
 use tycho_types::{
     dto::{
         Block, BlockAccountChanges, BlockEntityChangesResult, BlockParam, ContractId, Deltas,
         ExtractorIdentity, ProtocolComponent, ProtocolComponentId,
-        ProtocolComponentRequestParameters, ProtocolComponentsRequestBody, ResponseAccount,
-        StateRequestBody, StateRequestParameters, VersionParam,
+        ProtocolComponentRequestParameters, ProtocolComponentsRequestBody, ProtocolId,
+        ProtocolStateRequestBody, ResponseAccount, ResponseProtocolState, StateRequestBody,
+        StateRequestParameters, VersionParam,
     },
     Bytes,
 };
@@ -57,10 +59,15 @@ pub struct VMSnapshot {
 }
 
 #[derive(Clone)]
+pub struct NativeSnapshot {
+    state: ResponseProtocolState,
+    component: ProtocolComponent,
+}
+
+#[derive(Clone)]
 pub enum SnapOrDelta {
     VMSnapshot(VMSnapshot),
-    // TODO: type missing
-    NativeSnapshot,
+    NativeSnapshot(NativeSnapshot),
     Deltas(Deltas),
 }
 
@@ -68,7 +75,6 @@ pub enum SnapOrDelta {
 pub struct StateMessage {
     header: Header,
     state_updates: Vec<SnapOrDelta>,
-    // This should cover both contracts and native components
     removed_components: HashMap<String, ProtocolComponent>,
 }
 
@@ -148,15 +154,12 @@ impl StateSynchronizer {
 
     /// Retrieve all components that belong to the system we are extracing and have sufficient tvl.
     async fn initialise_components(&mut self) {
-        let filters = ProtocolComponentRequestParameters { tvl_gt: Some(self.min_tvl_threshold) };
-        let request = ProtocolComponentsRequestBody {
-            protocol_system: Some(self.protocol_system.clone()),
-            component_ids: None,
-        };
+        let filters = ProtocolComponentRequestParameters::tvl_filtered(self.min_tvl_threshold);
+        let request = ProtocolComponentsRequestBody::system_filtered(&self.protocol_system);
         let mut tracked_components = self.tracked_components.lock().await;
         *tracked_components = self
             .rpc_client
-            .get_protocol_components(&filters, &request)
+            .get_protocol_components(self.extractor_id.chain, &filters, &request)
             .await
             .expect("could not init protocol components")
             .protocol_components
@@ -167,20 +170,17 @@ impl StateSynchronizer {
 
     /// Add a new component to be tracked
     async fn start_tracking(&self, new_components: &[ProtocolComponentId]) {
-        let filters = ProtocolComponentRequestParameters { tvl_gt: None };
-        let request = ProtocolComponentsRequestBody {
-            protocol_system: None,
-            component_ids: Some(
-                new_components
-                    .iter()
-                    .map(|pc_id| pc_id.id.clone())
-                    .collect(),
-            ),
-        };
+        let filters = ProtocolComponentRequestParameters::default();
+        let request = ProtocolComponentsRequestBody::id_filtered(
+            new_components
+                .iter()
+                .map(|pc_id| pc_id.id.clone())
+                .collect(),
+        );
         let mut tracked_components = self.tracked_components.lock().await;
         tracked_components.extend(
             self.rpc_client
-                .get_protocol_components(&filters, &request)
+                .get_protocol_components(self.extractor_id.chain, &filters, &request)
                 .await
                 .expect("could not get new protocol components")
                 .protocol_components
@@ -217,11 +217,13 @@ impl StateSynchronizer {
                 contract_ids.extend(comp.contract_ids.iter().cloned());
             });
 
-            let filters = Default::default();
-            let body = StateRequestBody::new(Some(contract_ids), version);
-            let mut snap = self
+            let mut contract_state = self
                 .rpc_client
-                .get_contract_state(self.extractor_id.chain, &filters, &body)
+                .get_contract_state(
+                    self.extractor_id.chain,
+                    &Default::default(),
+                    &StateRequestBody::new(Some(contract_ids), version),
+                )
                 .await?
                 .accounts
                 .into_iter()
@@ -233,19 +235,30 @@ impl StateSynchronizer {
                 state_updates: tracked_components
                     .values()
                     .into_iter()
-                    .filter_map(|comp| {
-                        if comp.contract_ids.is_empty() {
-                            return None;
-                        }
+                    .map(|comp| {
+                        let component_id = &comp.id;
                         let account_snapshots: Vec<_> = comp
                             .contract_ids
                             .iter()
-                            .map(|cid| snap.remove(cid).unwrap())
+                            .filter_map(|contract_address| {
+                                if let Some(state) = contract_state.remove(contract_address) {
+                                    Some(state)
+                                } else {
+                                    // TODO: remove the entire component in this case, warn and then
+                                    // continue
+                                    error!(
+                                        ?contract_address,
+                                        ?component_id,
+                                        "Component without state encountered!"
+                                    );
+                                    None
+                                }
+                            })
                             .collect();
-                        Some(SnapOrDelta::VMSnapshot(VMSnapshot {
+                        SnapOrDelta::VMSnapshot(VMSnapshot {
                             component: comp.clone(),
                             state: account_snapshots,
-                        }))
+                        })
                     })
                     .collect(),
                 removed_components: HashMap::new(),
@@ -256,10 +269,42 @@ impl StateSynchronizer {
                 let comp = tracked_components
                     .get(cid)
                     .expect("requested component that is not present");
-                component_ids.push(comp.id.clone());
+                component_ids
+                    .push(ProtocolId { chain: self.extractor_id.chain, id: comp.id.clone() });
             });
 
-            todo!()
+            let mut protocol_states = self
+                .rpc_client
+                .get_protocol_states(
+                    self.extractor_id.chain,
+                    &Default::default(),
+                    &ProtocolStateRequestBody::id_filtered(component_ids),
+                )
+                .await?
+                .states
+                .into_iter()
+                .map(|state| (state.component_id.clone(), state))
+                .collect::<HashMap<_, _>>();
+
+            Ok(StateMessage {
+                header,
+                state_updates: tracked_components
+                    .values()
+                    .filter_map(|component| {
+                        if let Some(state) = protocol_states.remove(&component.id) {
+                            Some(SnapOrDelta::NativeSnapshot(NativeSnapshot {
+                                state,
+                                component: component.clone(),
+                            }))
+                        } else {
+                            let component_id = &component.id;
+                            error!(?component_id, "Missing state for native component!");
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                removed_components: HashMap::new(),
+            })
         }
     }
 
