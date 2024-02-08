@@ -16,7 +16,11 @@ use tracing::{debug, info, instrument};
 
 use super::{AccountUpdate, Block};
 use crate::{
-    extractor::{evm, ExtractionError, Extractor, ExtractorMsg},
+    extractor::{
+        evm,
+        evm::token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait},
+        ExtractionError, Extractor, ExtractorMsg,
+    },
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
@@ -57,11 +61,15 @@ impl<DB> AmbientContractExtractor<DB> {
     }
 }
 
-pub struct AmbientPgGateway {
+pub struct AmbientPgGateway<T>
+where
+    T: TokenPreProcessorTrait,
+{
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
     state_gateway: CachedGateway,
+    token_pre_processor: T,
 }
 
 #[automock]
@@ -85,9 +93,24 @@ pub trait AmbientGateway: Send + Sync {
     ) -> Result<evm::BlockAccountChanges, StorageError>;
 }
 
-impl AmbientPgGateway {
-    pub fn new(name: &str, chain: Chain, pool: Pool<AsyncPgConnection>, gw: CachedGateway) -> Self {
-        AmbientPgGateway { name: name.to_owned(), chain, pool, state_gateway: gw }
+impl<T> AmbientPgGateway<T>
+where
+    T: TokenPreProcessorTrait,
+{
+    pub fn new(
+        name: &str,
+        chain: Chain,
+        pool: Pool<AsyncPgConnection>,
+        gw: CachedGateway,
+        token_pre_processor: T,
+    ) -> Self {
+        AmbientPgGateway {
+            name: name.to_owned(),
+            chain,
+            pool,
+            state_gateway: gw,
+            token_pre_processor,
+        }
     }
 
     #[instrument(skip_all)]
@@ -151,35 +174,13 @@ impl AmbientPgGateway {
                     .cloned()
             })
             .collect();
-        let new_tokens = self
+        let new_tokens_addresses = self
             .get_new_tokens(protocol_components)
             .await?;
-
-        // TODO: call TokenPreProcessor to get the token metadata
-        // This is temporary and these values should be used to mock the TokenPreProcessor in the
-        // tests
-        let new_tokens = vec![
-            evm::ERC20Token::new(
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                    .expect("Invalid H160 address"),
-                "WETH".to_string(),
-                18,
-                0,
-                vec![],
-                Default::default(),
-                100,
-            ),
-            evm::ERC20Token::new(
-                H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                    .expect("Invalid H160 address"),
-                "USDC".to_string(),
-                6,
-                0,
-                vec![],
-                Default::default(),
-                100,
-            ),
-        ];
+        let new_tokens = self
+            .token_pre_processor
+            .get_tokens(new_tokens_addresses)
+            .await;
 
         self.state_gateway
             .add_tokens(&changes.block, &new_tokens)
@@ -318,7 +319,7 @@ impl AmbientPgGateway {
 }
 
 #[async_trait]
-impl AmbientGateway for AmbientPgGateway {
+impl AmbientGateway for AmbientPgGateway<TokenPreProcessor> {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
         let mut conn = self.pool.get().await.unwrap();
         self.get_last_cursor(&mut conn).await
@@ -714,7 +715,9 @@ mod test_serial_db {
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
     use crate::{
-        extractor::evm::{ComponentBalance, ProtocolComponent},
+        extractor::evm::{
+            token_pre_processor::MockTokenPreProcessorTrait, ComponentBalance, ProtocolComponent,
+        },
         storage::{
             postgres,
             postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
@@ -735,9 +738,44 @@ mod test_serial_db {
     const TX_HASH_2: &str = "0xcf574444be25450fe26d16b85102b241e964a6e01d75dd962203d4888269be3d";
     const BLOCK_HASH_0: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
 
+    fn get_mocked_token_pre_processor() -> MockTokenPreProcessorTrait {
+        let mut mock_processor = MockTokenPreProcessorTrait::new();
+        let new_tokens = vec![
+            evm::ERC20Token::new(
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .expect("Invalid H160 address"),
+                "WETH".to_string(),
+                18,
+                0,
+                vec![],
+                Default::default(),
+                100,
+            ),
+            evm::ERC20Token::new(
+                H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                    .expect("Invalid H160 address"),
+                "USDC".to_string(),
+                6,
+                0,
+                vec![],
+                Default::default(),
+                100,
+            ),
+        ];
+        mock_processor
+            .expect_get_tokens()
+            .returning(move |_| new_tokens.clone());
+
+        mock_processor
+    }
+
     async fn setup_gw(
         pool: Pool<AsyncPgConnection>,
-    ) -> (AmbientPgGateway, Receiver<StorageError>, Pool<AsyncPgConnection>) {
+    ) -> (
+        AmbientPgGateway<MockTokenPreProcessorTrait>,
+        Receiver<StorageError>,
+        Pool<AsyncPgConnection>,
+    ) {
         let mut conn = pool
             .get()
             .await
@@ -771,7 +809,13 @@ mod test_serial_db {
         let handle = write_executor.run();
         let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
 
-        let gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool.clone(), cached_gw);
+        let gw = AmbientPgGateway::new(
+            "vm:ambient",
+            Chain::Ethereum,
+            pool.clone(),
+            cached_gw,
+            get_mocked_token_pre_processor(),
+        );
         (gw, err_rx, pool)
     }
 
@@ -1067,7 +1111,13 @@ mod test_serial_db {
             let handle = write_executor.run();
             let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
 
-            let gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool.clone(), cached_gw);
+            let gw = AmbientPgGateway::new(
+                "vm:ambient",
+                Chain::Ethereum,
+                pool.clone(),
+                cached_gw,
+                get_mocked_token_pre_processor(),
+            );
 
             let msg0 = ambient_creation_and_update();
             let msg1 = ambient_update02();
@@ -1142,7 +1192,13 @@ mod test_serial_db {
             );
             let (tx, rx) = channel(10);
             let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
-            let gw = AmbientPgGateway::new("vm:ambient", Chain::Ethereum, pool.clone(), cached_gw);
+            let gw = AmbientPgGateway::new(
+                "vm:ambient",
+                Chain::Ethereum,
+                pool.clone(),
+                cached_gw,
+                get_mocked_token_pre_processor(),
+            );
 
             let weth_address: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
             let usdc_address: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
