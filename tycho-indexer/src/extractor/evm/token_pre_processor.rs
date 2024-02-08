@@ -51,7 +51,7 @@ impl<M: Middleware> TokenPreProcessor<M> {
             });
         }
 
-        Ok(tokens_info)
+        tokens_info
     }
 }
 
@@ -59,37 +59,17 @@ impl<M: Middleware> TokenPreProcessor<M> {
 mod tests {
     use super::*;
     use ethers::{
-        prelude::{MockProvider, Provider},
+        providers::{Http, Provider},
         types::H160,
     };
     use std::str::FromStr;
 
     #[tokio::test]
     async fn test_get_tokens() {
-        let (provider, mock) = Provider::mocked();
-        mock.push::<u8, _>(6);
-        mock.push::<String, _>("USDC".to_string());
-        mock.push::<u8, _>(18);
-        mock.push::<String, _>("WETH".to_string());
-
-        /*mock.push_response(MockResponse::Value(serde_json::json!({
-                         "jsonrpc": "2.0",
-                         "id": 1,
-                         "result": 6})));
-        mock.push_response(MockResponse::Value(serde_json::json!({
-                         "jsonrpc": "2.0",
-                         "id": 1,
-                         "result": "USDC"})));
-        mock.push_response(MockResponse::Value(serde_json::json!({
-                         "jsonrpc": "2.0",
-                         "id": 1,
-                         "result": 18})));
-        mock.push_response(MockResponse::Value(serde_json::json!({
-                 "jsonrpc": "2.0",
-                 "id": 1,
-                 "result": "WETH"})));*/
-
-        let processor = TokenPreProcessor::<Provider<MockProvider>>::new(provider);
+        let rpc_url = "https://eth-mainnet.g.alchemy.com/v2/OTD5W7gdTPrzpVot41Lx9tJD9LUiAhbs";
+        let client: Provider<Http> =
+            Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
+        let processor = TokenPreProcessor::new(client);
 
         let weth_address: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
         let usdc_address: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -100,12 +80,9 @@ mod tests {
             H160::from_str(fake_address).unwrap(),
         ];
 
-        let results = processor
-            .get_tokens(addresses)
-            .await
-            .unwrap();
+        let results = processor.get_tokens(addresses).await;
 
-        assert_eq!(results.len(), 2);
+        assert_eq!(results.len(), 3);
         assert_eq!(results[0].symbol, "WETH");
         assert_eq!(results[0].decimals, 18);
         assert_eq!(results[1].symbol, "USDC");
