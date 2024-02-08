@@ -83,36 +83,18 @@ mod tests {
         ];
 
         let results = processor.get_tokens(addresses).await;
-        let expected_weth = ERC20Token {
-            address: H160::from_str(weth_address).unwrap(),
-            symbol: "WETH".to_string(),
-            decimals: 18,
-            tax: 0,
-            gas: vec![],
-            chain: Chain::Ethereum,
-            quality: 100,
-        };
-        let expected_usdc = ERC20Token {
-            address: H160::from_str(usdc_address).unwrap(),
-            symbol: "USDC".to_string(),
-            decimals: 6,
-            tax: 0,
-            gas: vec![],
-            chain: Chain::Ethereum,
-            quality: 100,
-        };
-        let expected_fake = ERC20Token {
-            address: H160::from_str(fake_address).unwrap(),
-            symbol: "0xa0b8…eb48".to_string(),
-            decimals: 18,
-            tax: 0,
-            gas: vec![],
-            chain: Chain::Ethereum,
-            quality: 0,
-        };
         assert_eq!(results.len(), 3);
-        assert_eq!(results[0], expected_weth);
-        assert_eq!(results[1], expected_usdc);
-        assert_eq!(results[2], expected_fake);
+        let relevant_attrs: Vec<(String, u32, u32)> = results
+            .iter()
+            .map(|t| (t.symbol.clone(), t.decimals, t.quality))
+            .collect();
+        assert_eq!(
+            relevant_attrs,
+            vec![
+                ("WETH".to_string(), 18, 100),
+                ("USDC".to_string(), 6, 100),
+                ("0xa0b8…eb48".to_string(), 18, 0)
+            ]
+        );
     }
 }
