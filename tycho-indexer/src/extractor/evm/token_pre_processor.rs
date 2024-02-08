@@ -74,7 +74,7 @@ mod tests {
         providers::{Http, Provider},
         types::H160,
     };
-    use std::str::FromStr;
+    use std::{env, str::FromStr};
 
     #[tokio::test]
     #[ignore]
