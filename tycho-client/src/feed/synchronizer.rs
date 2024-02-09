@@ -39,8 +39,8 @@ pub struct StateSynchronizer {
 struct SharedState {
     last_served_block_hash: Option<Bytes>,
     last_synced_block: Option<Header>,
-    pending_deltas: HashMap<Bytes, StateMessage>,
-    pending: Option<StateMessage>,
+    pending_deltas: HashMap<Bytes, StateSyncMessage>,
+    pending: Option<StateSyncMessage>,
 }
 
 #[derive(Clone)]
@@ -62,7 +62,7 @@ pub enum Snapshot {
 }
 
 #[derive(Clone)]
-pub struct StateMessage {
+pub struct StateSyncMessage {
     /// The block number for this update.
     header: Header,
     /// Snapshot for new components.
@@ -75,11 +75,7 @@ pub struct StateMessage {
     removed_components: HashMap<String, ProtocolComponent>,
 }
 
-impl StateMessage {
-    fn is_all_snapshots(&self) -> bool {
-        self.deltas.is_none() & !self.snapshots.is_empty()
-    }
-
+impl StateSyncMessage {
     pub fn merge(self, other: Self) -> Self {
         todo!()
     }
@@ -179,7 +175,7 @@ impl StateSynchronizer {
         todo!();
     }
 
-    pub async fn get_pending(&self, block_hash: Bytes) -> Option<StateMessage> {
+    pub async fn get_pending(&self, block_hash: Bytes) -> Option<StateSyncMessage> {
         // Batch collect all changes up to the requested block
         // Must either hit a snapshot, or the last served block hash if it does not it errors
         let mut shared = self.shared.lock().await;
@@ -213,7 +209,7 @@ impl StateSynchronizer {
         ids: I,
         header: Header,
         tracked_components: &HashMap<String, ProtocolComponent>,
-    ) -> SyncResult<StateMessage> {
+    ) -> SyncResult<StateSyncMessage> {
         let version = VersionParam::new(
             None,
             Some(BlockParam { chain: None, hash: Some(header.hash.clone()), number: None }),
@@ -240,7 +236,7 @@ impl StateSynchronizer {
                 .map(|acc| (acc.address.clone(), acc))
                 .collect::<HashMap<_, _>>();
 
-            Ok(StateMessage {
+            Ok(StateSyncMessage {
                 header,
                 snapshots: tracked_components
                     .values()
@@ -300,7 +296,7 @@ impl StateSynchronizer {
                 .map(|state| (state.component_id.clone(), state))
                 .collect::<HashMap<_, _>>();
 
-            Ok(StateMessage {
+            Ok(StateSyncMessage {
                 header,
                 snapshots: tracked_components
                     .values()
@@ -431,7 +427,7 @@ impl StateSynchronizer {
 
                 {
                     let mut shared = self.shared.lock().await;
-                    let next = StateMessage {
+                    let next = StateSyncMessage {
                         header: header.clone(),
                         snapshots,
                         deltas: Some(deltas),

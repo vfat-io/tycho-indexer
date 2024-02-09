@@ -18,7 +18,7 @@ use tycho_types::{
 
 use self::{
     block_history::{BlockHistory, BlockPosition},
-    synchronizer::{StateMessage, StateSynchronizer},
+    synchronizer::{StateSyncMessage, StateSynchronizer},
 };
 
 mod block_history;
@@ -218,13 +218,13 @@ impl SynchronizerHandle {
 }
 
 pub struct FeedMessage {
-    state_msgs: HashMap<String, StateMessage>,
+    state_msgs: HashMap<String, StateSyncMessage>,
     sync_states: HashMap<String, SynchronizerState>,
 }
 
 impl FeedMessage {
     fn new(
-        state_msgs: HashMap<String, StateMessage>,
+        state_msgs: HashMap<String, StateSyncMessage>,
         sync_states: HashMap<String, SynchronizerState>,
     ) -> Self {
         Self { state_msgs, sync_states }
