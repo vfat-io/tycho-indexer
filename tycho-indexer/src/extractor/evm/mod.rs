@@ -1547,7 +1547,6 @@ pub mod fixtures {
 mod test {
     use std::str::FromStr;
 
-    use actix_web::body::MessageBody;
     use prost::Message;
 
     use rstest::rstest;
