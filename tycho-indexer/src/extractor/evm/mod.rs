@@ -27,7 +27,7 @@ use super::{u256_num::bytes_to_f64, ExtractionError};
 pub mod ambient;
 pub mod native;
 pub mod storage;
-mod token_pre_processor;
+pub mod token_pre_processor;
 mod utils;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
