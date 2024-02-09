@@ -1,4 +1,5 @@
 use std::{
+    borrow::BorrowMut,
     collections::{HashMap, HashSet},
     sync::Arc,
 };
@@ -10,10 +11,10 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::error;
+use tracing::{error, info};
 use tycho_types::{
     dto::{
-        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent,
+        BlockParam, Chain, Deltas, ExtractorIdentity, ProtocolComponent,
         ProtocolComponentRequestParameters, ProtocolComponentsRequestBody, ProtocolId,
         ProtocolStateRequestBody, ResponseAccount, ResponseProtocolState, StateRequestBody,
         VersionParam,
@@ -29,25 +30,17 @@ type SyncResult<T> = anyhow::Result<T>;
 #[derive(Clone)]
 pub struct StateSynchronizer {
     extractor_id: ExtractorIdentity,
-    protocol_system: String,
     is_native: bool,
     rpc_client: HttpRPCClient,
     deltas_client: WsDeltasClient,
-    // We will need to request a snapshot for components/Contracts that we did not emit a
-    // snapshot for yet but are relevant now, e.g. because min tvl threshold exceeded.
-    tracked_components: Arc<Mutex<HashMap<String, ProtocolComponent>>>,
-    // derived from tracked components, we need this if subscribed to a vm extractor cause updates
-    // are emitted on a contract level instead of on a component level.
-    tracked_contracts: Arc<Mutex<HashSet<Bytes>>>,
-
-    last_served_block_hash: Arc<Mutex<Option<Bytes>>>,
-    last_synced_block: Arc<Mutex<Option<Header>>>,
-    // Since we may return a mix of snapshots and deltas (e.g. if a new component crossed the tvl
-    // threshold) the value type is a vector.
-    pending_deltas: Arc<Mutex<HashMap<Bytes, StateMessage>>>,
-    // Waiting for the rpc endpoints to support tvl.
-    #[allow(dead_code)]
     min_tvl_threshold: f64,
+    shared: Arc<Mutex<SharedState>>,
+}
+
+struct SharedState {
+    last_served_block_hash: Option<Bytes>,
+    last_synced_block: Option<Header>,
+    pending_deltas: HashMap<Bytes, StateMessage>,
 }
 
 #[derive(Clone)]
@@ -72,6 +65,8 @@ pub enum SnapOrDelta {
 #[derive(Clone)]
 pub struct StateMessage {
     header: Header,
+    /// Usually a single delta, but may contain additional snapshots
+    // TODO: consider moving snapshots to their own attributes, to avoid a the nested delta enum
     state_updates: Vec<SnapOrDelta>,
     removed_components: HashMap<String, ProtocolComponent>,
 }
@@ -94,6 +89,91 @@ impl StateMessage {
     }
 }
 
+/// Helper struct to store which components are being tracked atm.
+struct ComponentTracker {
+    chain: Chain,
+    protocol_system: String,
+    min_tvl_threshold: f64,
+    // We will need to request a snapshot for components/Contracts that we did not emit as
+    // snapshot for yet but are relevant now, e.g. because min tvl threshold exceeded.
+    components: HashMap<String, ProtocolComponent>,
+    /// derived from tracked components, we need this if subscribed to a vm extractor cause updates
+    /// are emitted on a contract level instead of on a component level.
+    contracts: HashSet<Bytes>,
+    /// Client to retrieve necessary protocol components from the rpc.
+    rpc_client: HttpRPCClient,
+}
+
+impl ComponentTracker {
+    fn new() -> Self {
+        todo!();
+    }
+    /// Retrieve all components that belong to the system we are extracing and have sufficient tvl.
+    async fn initialise_components(&mut self) {
+        let filters = ProtocolComponentRequestParameters::tvl_filtered(self.min_tvl_threshold);
+        let request = ProtocolComponentsRequestBody::system_filtered(&self.protocol_system);
+        self.components = self
+            .rpc_client
+            .get_protocol_components(self.chain, &filters, &request)
+            .await
+            .expect("could not init protocol components")
+            .protocol_components
+            .into_iter()
+            .map(|pc| (pc.id.clone(), pc))
+            .collect::<HashMap<_, _>>();
+        self.update_contracts();
+    }
+
+    fn update_contracts(&mut self) {
+        self.contracts.extend(
+            self.components
+                .values()
+                .flat_map(|comp| comp.contract_ids.iter().cloned()),
+        );
+    }
+
+    /// Add a new component to be tracked
+    async fn start_tracking(&mut self, new_components: &[&String]) {
+        let filters = ProtocolComponentRequestParameters::default();
+        let request = ProtocolComponentsRequestBody::id_filtered(
+            new_components
+                .iter()
+                .map(|pc_id| pc_id.to_string())
+                .collect(),
+        );
+
+        self.components.extend(
+            self.rpc_client
+                .get_protocol_components(self.chain, &filters, &request)
+                .await
+                .expect("could not get new protocol components")
+                .protocol_components
+                .into_iter()
+                .map(|pc| (pc.id.clone(), pc)),
+        );
+        self.update_contracts();
+    }
+
+    /// Stop tracking components
+    async fn stop_tracking<'a, I: IntoIterator<Item = &'a String>>(
+        &mut self,
+        to_remove: I,
+    ) -> HashMap<String, ProtocolComponent> {
+        to_remove
+            .into_iter()
+            .filter_map(|k| {
+                let comp = self.components.remove(k);
+                if let Some(component) = &comp {
+                    for contract in component.contract_ids.iter() {
+                        self.contracts.remove(contract);
+                    }
+                }
+                comp.map(|c| (k.clone(), c))
+            })
+            .collect()
+    }
+}
+
 impl StateSynchronizer {
     pub fn new(
         extracor_id: ExtractorIdentity,
@@ -106,13 +186,14 @@ impl StateSynchronizer {
     pub async fn get_pending(&self, block_hash: Bytes) -> SyncResult<StateMessage> {
         // Batch collect all changes up to the requested block
         // Must either hit a snapshot, or the last served block hash if it does not it errors
-        let mut state = self.pending_deltas.lock().await;
-        let mut target_hash = self.last_served_block_hash.lock().await;
+        let mut shared = self.shared.lock().await;
+        let target_hash = shared.last_served_block_hash.clone();
 
         let mut current_hash = block_hash.clone();
         let mut to_serve: Option<StateMessage> = None;
 
         // If this is the first request, we have to hit a snapshot else this will error!
+        let state = shared.pending_deltas.borrow_mut();
         while Some(&current_hash) != target_hash.as_ref() {
             if let Some(data) = state.remove(&current_hash) {
                 current_hash = data.header.hash.clone();
@@ -127,7 +208,7 @@ impl StateSynchronizer {
                 anyhow::bail!("hash not found");
             }
         }
-        *target_hash = Some(block_hash);
+        shared.last_served_block_hash = Some(block_hash);
         Ok(to_serve.unwrap())
     }
 
@@ -150,75 +231,17 @@ impl StateSynchronizer {
         Ok((jh, block_rx))
     }
 
-    /// Retrieve all components that belong to the system we are extracing and have sufficient tvl.
-    async fn initialise_components(&mut self) {
-        let filters = ProtocolComponentRequestParameters::tvl_filtered(self.min_tvl_threshold);
-        let request = ProtocolComponentsRequestBody::system_filtered(&self.protocol_system);
-        let mut tracked_components = self.tracked_components.lock().await;
-        *tracked_components = self
-            .rpc_client
-            .get_protocol_components(self.extractor_id.chain, &filters, &request)
-            .await
-            .expect("could not init protocol components")
-            .protocol_components
-            .into_iter()
-            .map(|pc| (pc.id.clone(), pc))
-            .collect::<HashMap<_, _>>();
-    }
-
-    /// Add a new component to be tracked
-    async fn start_tracking(&self, new_components: &[&String]) {
-        let filters = ProtocolComponentRequestParameters::default();
-        let request = ProtocolComponentsRequestBody::id_filtered(
-            new_components
-                .iter()
-                .map(|pc_id| pc_id.to_string())
-                .collect(),
-        );
-        let mut tracked_components = self.tracked_components.lock().await;
-        tracked_components.extend(
-            self.rpc_client
-                .get_protocol_components(self.extractor_id.chain, &filters, &request)
-                .await
-                .expect("could not get new protocol components")
-                .protocol_components
-                .into_iter()
-                .map(|pc| (pc.id.clone(), pc)),
-        );
-    }
-
-    /// Stop tracking components
-    async fn stop_tracking<'a, I: IntoIterator<Item = &'a String>>(
-        &self,
-        components: I,
-    ) -> HashMap<String, ProtocolComponent> {
-        let mut tracked_components = self.tracked_components.lock().await;
-        let mut tracked_contracts = self.tracked_contracts.lock().await;
-        components
-            .into_iter()
-            .filter_map(|k| {
-                let comp = tracked_components.remove(k);
-                if let Some(component) = &comp {
-                    for contract in component.contract_ids.iter() {
-                        tracked_contracts.remove(contract);
-                    }
-                }
-                comp.map(|c| (k.clone(), c))
-            })
-            .collect()
-    }
-
     /// Retrieves state snapshots of the requested components
     async fn get_snapshots<'a, I: IntoIterator<Item = &'a str>>(
         &self,
         ids: I,
         header: Header,
+        tracked_components: &HashMap<String, ProtocolComponent>,
     ) -> SyncResult<StateMessage> {
         let version = VersionParam::new(
             None,
             Some(BlockParam { chain: None, hash: Some(header.hash.clone()), number: None }),
         );
-        let tracked_components = self.tracked_components.lock().await;
         if self.is_native {
             let mut contract_ids = Vec::new();
             ids.into_iter().for_each(|cid| {
@@ -321,7 +344,9 @@ impl StateSynchronizer {
 
     async fn state_sync(mut self, block_tx: &mut Sender<Header>) -> SyncResult<()> {
         // initialisation
-        self.initialise_components().await;
+        let mut tracker = ComponentTracker::new();
+        tracker.initialise_components().await;
+
         let (_, mut msg_rx) = self
             .deltas_client
             .subscribe(self.extractor_id.clone())
@@ -340,23 +365,33 @@ impl StateSynchronizer {
         // initial snapshot
         let block = first_msg.get_block().clone();
         let header = Header::from_block(first_msg.get_block(), first_msg.is_revert());
-        let snapshot = async {
-            let tracked_components = self.tracked_components.lock().await;
-            self.get_snapshots(
-                tracked_components
+        let snapshot = self
+            .get_snapshots(
+                tracker
+                    .components
                     .keys()
                     .map(String::as_str),
                 Header::from_block(&block, false),
+                &tracker.components,
             )
             .await
-            .expect("failed to get initial snapshot")
+            .expect("failed to get initial snapshot");
+
+        let n_components = tracker.components.len();
+        let extractor_id = &self.extractor_id;
+        info!(
+            ?n_components,
+            ?extractor_id,
+            "Initial snapshot retrieved, starting delta message feed"
+        );
+
+        {
+            let mut shared = self.shared.lock().await;
+            shared
+                .pending_deltas
+                .insert(header.hash.clone(), snapshot);
+            shared.last_synced_block = Some(header.clone());
         }
-        .await;
-        self.pending_deltas
-            .lock()
-            .await
-            .insert(header.hash.clone(), snapshot);
-        *self.last_synced_block.lock().await = Some(header.clone());
         block_tx.send(header.clone()).await?;
         loop {
             if let Some(mut deltas) = msg_rx.recv().await {
@@ -373,20 +408,18 @@ impl StateSynchronizer {
                     // TODO: additional indentation required to tracked_components gets dropped
                     // later on. Most likely we don't need this if we simply own tracked_components
                     // and contracts.
-                    let requiring_snapshot = {
-                        let tracked_components = self.tracked_components.lock().await;
-                        to_add
-                            .iter()
-                            .filter_map(|(k, _)| {
-                                if !tracked_components.contains_key(*k) {
-                                    None
-                                } else {
-                                    Some(*k)
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                    };
-                    self.start_tracking(&requiring_snapshot)
+                    let requiring_snapshot = to_add
+                        .iter()
+                        .filter_map(|(k, _)| {
+                            if !tracker.components.contains_key(*k) {
+                                None
+                            } else {
+                                Some(*k)
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    tracker
+                        .start_tracking(&requiring_snapshot)
                         .await;
                     let state_updates = self
                         .get_snapshots(
@@ -394,35 +427,42 @@ impl StateSynchronizer {
                                 .into_iter()
                                 .map(String::as_str),
                             header.clone(),
+                            &tracker.components,
                         )
                         .await?
                         .state_updates;
 
-                    let removed_components = self
+                    let removed_components = tracker
                         .stop_tracking(to_remove.iter().map(|(id, _)| *id))
                         .await;
                     (state_updates, removed_components)
                 };
-                // 3. Filter deltas by tracked components / contracts
+
+                // 3. Filter deltas by currently tracked components / contracts
                 if self.is_native {
-                    let tracked_components = self.tracked_components.lock().await;
-                    deltas.filter_by_component(|id| tracked_components.contains_key(id));
+                    deltas.filter_by_component(|id| tracker.components.contains_key(id));
                 } else {
-                    let tracked_contracts = self.tracked_contracts.lock().await;
-                    deltas.filter_by_contract(|id| tracked_contracts.contains(id));
+                    deltas.filter_by_contract(|id| tracker.contracts.contains(id));
                 }
 
                 state_updates.push(SnapOrDelta::Deltas(deltas));
-                self.pending_deltas.lock().await.insert(
-                    block.hash.clone(),
-                    StateMessage { header: header.clone(), state_updates, removed_components },
-                );
-                *self.last_synced_block.lock().await = Some(header.clone());
+
+                {
+                    let mut shared = self.shared.lock().await;
+                    shared.pending_deltas.insert(
+                        block.hash.clone(),
+                        StateMessage { header: header.clone(), state_updates, removed_components },
+                    );
+                    shared.last_synced_block = Some(header.clone());
+                }
+
                 block_tx.send(header).await?;
             } else {
-                self.pending_deltas.lock().await.clear();
-                *self.last_synced_block.lock().await = None;
-                *self.last_served_block_hash.lock().await = None;
+                let mut shared = self.shared.lock().await;
+                shared.pending_deltas.clear();
+                shared.last_synced_block = None;
+                shared.last_served_block_hash = None;
+
                 return Ok(());
             }
         }
