@@ -322,7 +322,7 @@ impl StateSynchronizer {
         }
     }
 
-    async fn state_sync(mut self, block_tx: &mut Sender<Header>) -> SyncResult<()> {
+    async fn state_sync(self, block_tx: &mut Sender<Header>) -> SyncResult<()> {
         // initialisation
         let mut tracker = ComponentTracker::new();
         tracker.initialise_components().await;
@@ -376,18 +376,15 @@ impl StateSynchronizer {
         loop {
             if let Some(mut deltas) = msg_rx.recv().await {
                 let header = Header::from_block(deltas.get_block(), deltas.is_revert());
-                let (mut snapshots, removed_components) = {
-                    // 1. Remove components based on tvl changes (not available yet)
+                let (snapshots, removed_components) = {
+                    // 1. Remove components based on tvl changes
                     // 2. Add components based on tvl changes, query those for snapshots
                     let (to_add, to_remove): (Vec<_>, Vec<_>) = deltas
                         .component_tvl()
                         .iter()
                         .partition(|(_, &tvl)| tvl > self.min_tvl_threshold);
 
-                    // only components we don't track yet need a snapshot,
-                    // TODO: additional indentation required to tracked_components gets dropped
-                    // later on. Most likely we don't need this if we simply own tracked_components
-                    // and contracts.
+                    // Only components we don't track yet need a snapshot,
                     let requiring_snapshot = to_add
                         .iter()
                         .filter_map(|(k, _)| {

@@ -109,9 +109,9 @@ impl Deltas {
         match self {
             Deltas::Native(data) => {
                 data.state_updates
-                    .retain(|k, v| keep(k));
+                    .retain(|k, _| keep(k));
             }
-            Deltas::VM(data) => panic!("Can't filter vm deltas by component!"),
+            Deltas::VM(_) => panic!("Can't filter vm deltas by component!"),
         }
     }
 
@@ -119,9 +119,17 @@ impl Deltas {
         match self {
             Deltas::VM(data) => {
                 data.account_updates
-                    .retain(|k, v| keep(k));
+                    .retain(|k, _| keep(k));
             }
-            Deltas::Native(data) => panic!("Can't filter native deltas by contract!"),
+            Deltas::Native(_) => panic!("Can't filter native deltas by contract!"),
+        }
+    }
+
+    pub fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Deltas::VM(left), Deltas::VM(right)) => Deltas::VM(left.merge(right)),
+            (Deltas::Native(left), Deltas::Native(right)) => Deltas::Native(left.merge(right)),
+            _ => panic!("Not allowed to merge deltas of different types"),
         }
     }
 }
@@ -158,7 +166,8 @@ pub struct BlockParam {
 
 impl From<&Block> for BlockParam {
     fn from(value: &Block) -> Self {
-        todo!()
+        // The hash should uniquely identify a block across chains
+        BlockParam { hash: Some(value.hash.clone()), chain: None, number: None }
     }
 }
 
@@ -202,6 +211,9 @@ pub struct BlockAccountChanges {
     pub component_tvl: HashMap<String, f64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+struct TokenBalances(#[serde(with = "hex_hashmap_key")] HashMap<Bytes, ComponentBalance>);
+
 impl BlockAccountChanges {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -225,6 +237,39 @@ impl BlockAccountChanges {
             component_balances,
             component_tvl: HashMap::new(),
         }
+    }
+
+    pub fn merge(mut self, other: Self) -> Self {
+        other
+            .account_updates
+            .into_iter()
+            .for_each(|(k, v)| {
+                self.account_updates
+                    .entry(k)
+                    .and_modify(|e| {
+                        e.merge(&v);
+                    })
+                    .or_insert(v);
+            });
+
+        other
+            .component_balances
+            .into_iter()
+            .for_each(|(k, v)| {
+                self.component_balances
+                    .entry(k)
+                    .and_modify(|e| e.extend(v.clone()))
+                    .or_insert_with(|| v);
+            });
+
+        self.new_protocol_components
+            .extend(other.new_protocol_components);
+        self.deleted_protocol_components
+            .extend(other.deleted_protocol_components);
+        self.revert = other.revert;
+        self.block = other.block;
+
+        self
     }
 }
 
@@ -257,6 +302,18 @@ impl AccountUpdate {
         change: ChangeType,
     ) -> Self {
         Self { address, chain, slots, balance, code, change }
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        self.slots.extend(
+            other
+                .slots
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+        self.balance = other.balance.clone();
+        self.code = other.code.clone();
+        self.change = other.change;
     }
 }
 
@@ -312,6 +369,41 @@ pub struct BlockEntityChangesResult {
     pub component_tvl: HashMap<String, f64>,
 }
 
+impl BlockEntityChangesResult {
+    pub fn merge(mut self, other: Self) -> Self {
+        other
+            .state_updates
+            .into_iter()
+            .for_each(|(k, v)| {
+                self.state_updates
+                    .entry(k)
+                    .and_modify(|e| {
+                        e.merge(&v);
+                    })
+                    .or_insert(v);
+            });
+
+        other
+            .component_balances
+            .into_iter()
+            .for_each(|(k, v)| {
+                self.component_balances
+                    .entry(k)
+                    .and_modify(|e| e.extend(v.clone()))
+                    .or_insert_with(|| v);
+            });
+
+        self.new_protocol_components
+            .extend(other.new_protocol_components);
+        self.deleted_protocol_components
+            .extend(other.deleted_protocol_components);
+        self.revert = other.revert;
+        self.block = other.block;
+
+        self
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize, ToSchema)]
 /// Represents a change in protocol state.
 pub struct ProtocolStateDelta {
@@ -319,6 +411,46 @@ pub struct ProtocolStateDelta {
     #[schema(value_type=HashMap<String, String>)]
     pub updated_attributes: HashMap<String, Bytes>,
     pub deleted_attributes: HashSet<String>,
+}
+
+impl ProtocolStateDelta {
+    /// Merges 'other' into 'self'.
+    ///
+    ///
+    /// During merge of these deltas a special situation can arrise when an attribute is present in
+    /// `self.deleted_attributes` and `other.update_attributes``. If we would just merge the sets
+    /// of deleted attribtues, it would be ambiguous and potential lead to a deletion of an
+    /// attribute that should actually be present.
+    ///
+    /// Thus the merge operation handles potential conflicts between deletions and updates in the
+    /// following way: before extending `deleted_attributes` with new deletions, we remove any
+    /// keys from `deleted_attributes` that are also present in updated_attributes. Then, while
+    /// extending deleted_attributes, we filter out those keys which are present in
+    /// updated_attributes.
+    ///
+    /// This ensures that any attribute that is updated in a later state does not get removed due
+    /// to a previous deletion.
+    pub fn merge(&mut self, other: &Self) {
+        self.updated_attributes.extend(
+            other
+                .updated_attributes
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+
+        // Filter out attributes that are both updated and deleted.
+        for k in other.updated_attributes.keys() {
+            self.deleted_attributes.remove(k);
+        }
+
+        self.deleted_attributes.extend(
+            other
+                .deleted_attributes
+                .iter()
+                .cloned()
+                .filter(|k| !self.updated_attributes.contains_key(k)),
+        );
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
