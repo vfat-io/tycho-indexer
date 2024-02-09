@@ -833,7 +833,62 @@ impl ProtocolState {
     }
 }
 
-#[derive(Insertable, Clone)]
+#[async_trait]
+impl StoredVersionedRow for ProtocolState {
+    type EntityId = (i64, String);
+    type PrimaryKey = i64;
+    type Version = NaiveDateTime;
+
+    fn get_pk(&self) -> Self::PrimaryKey {
+        self.id
+    }
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        (self.protocol_component_id, self.attribute_name.clone())
+    }
+
+    // Clippy false positive
+    #[allow(clippy::mutable_key_type)]
+    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Box<Self>>, StorageError> {
+        let (pc_id, attr_name): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
+        let tuple_ids = pc_id
+            .iter()
+            .zip(attr_name.iter())
+            .collect::<HashSet<_>>();
+        Ok(protocol_state::table
+            .select(ProtocolState::as_select())
+            .into_boxed()
+            .filter(
+                protocol_state::protocol_component_id
+                    .eq_any(&pc_id)
+                    .and(protocol_state::attribute_name.eq_any(&attr_name))
+                    .and(protocol_state::valid_to.is_null()),
+            )
+            .get_results(conn)
+            .await?
+            .into_iter()
+            .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.attribute_name)))
+            .map(Box::new)
+            .collect())
+    }
+
+    fn table_name() -> &'static str {
+        "protocol_state"
+    }
+}
+
+impl StoredDeltaVersionedRow for ProtocolState {
+    type Value = Bytes;
+
+    fn get_value(&self) -> Self::Value {
+        self.attribute_value.clone()
+    }
+}
+
+#[derive(Insertable, Clone, Debug)]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolState {
@@ -844,6 +899,52 @@ pub struct NewProtocolState {
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
+}
+
+impl VersionedRow for NewProtocolState {
+    type SortKey = (i64, String, NaiveDateTime, i64);
+    type EntityId = (i64, String);
+    type Version = NaiveDateTime;
+
+    fn get_entity_id(&self) -> Self::EntityId {
+        (
+            self.protocol_component_id,
+            self.attribute_name
+                .clone()
+                .expect("should have attribute name"),
+        )
+    }
+
+    fn get_sort_key(&self) -> Self::SortKey {
+        (
+            self.protocol_component_id,
+            self.attribute_name.clone().unwrap(),
+            self.valid_from,
+            self.modify_tx,
+        )
+    }
+
+    fn set_valid_to(&mut self, end_version: Self::Version) {
+        self.valid_to = Some(end_version);
+    }
+
+    fn get_valid_from(&self) -> Self::Version {
+        self.valid_from
+    }
+}
+
+impl DeltaVersionedRow for NewProtocolState {
+    type Value = Bytes;
+
+    fn get_value(&self) -> Self::Value {
+        self.attribute_value
+            .clone()
+            .expect("should have attribute value")
+    }
+
+    fn set_previous_value(&mut self, previous_value: Self::Value) {
+        self.previous_value = Some(previous_value)
+    }
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug, PartialEq)]

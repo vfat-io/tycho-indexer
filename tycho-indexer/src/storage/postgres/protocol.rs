@@ -31,7 +31,7 @@ use crate::{
 };
 use tycho_types::Bytes;
 
-use super::WithTxHash;
+use super::{versioning::apply_versioning, WithTxHash};
 
 // Private methods
 impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
@@ -678,15 +678,15 @@ where
             i += 1;
         }
 
-        let state_data: Vec<orm::NewProtocolState> = state_data
+        let mut state_data: Vec<orm::NewProtocolState> = state_data
             .into_iter()
             .map(|(state, _index)| state)
             .collect();
 
-        // TODO: invalidate newly outdated protocol states already in the db (ENG-2682)
-
         // insert the prepared protocol state deltas
         if !state_data.is_empty() {
+            apply_delta_versioning::<_, orm::ProtocolState>(&mut state_data, conn).await?;
+            apply_versioning::<_, orm::ProtocolState>(&mut state_data, conn).await?;
             diesel::insert_into(schema::protocol_state::table)
                 .values(&state_data)
                 .execute(conn)
