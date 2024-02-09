@@ -1,5 +1,4 @@
 use std::{
-    borrow::BorrowMut,
     collections::{HashMap, HashSet},
     sync::Arc,
 };
@@ -41,11 +40,12 @@ struct SharedState {
     last_served_block_hash: Option<Bytes>,
     last_synced_block: Option<Header>,
     pending_deltas: HashMap<Bytes, StateMessage>,
+    pending: Option<StateMessage>,
 }
 
 #[derive(Clone)]
 pub struct VMSnapshot {
-    state: Vec<ResponseAccount>,
+    state: HashMap<Bytes, ResponseAccount>,
     component: ProtocolComponent,
 }
 
@@ -56,32 +56,28 @@ pub struct NativeSnapshot {
 }
 
 #[derive(Clone)]
-pub enum SnapOrDelta {
+pub enum Snapshot {
     VMSnapshot(VMSnapshot),
     NativeSnapshot(NativeSnapshot),
-    Deltas(Deltas),
 }
 
 #[derive(Clone)]
 pub struct StateMessage {
+    /// The block number for this update.
     header: Header,
-    /// Usually a single delta, but may contain additional snapshots
-    // TODO: consider moving snapshots to their own attributes, to avoid a the nested delta enum
-    state_updates: Vec<SnapOrDelta>,
+    /// Snapshot for new components.
+    snapshots: HashMap<String, Snapshot>,
+    /// A single delta contains state updates for all tracked components, as well as additional
+    /// information about the system components e.g. newly added components (even below tvl), tvl
+    /// updates, balance updates.
+    deltas: Option<Deltas>,
+    /// Components that stopped being tracked.
     removed_components: HashMap<String, ProtocolComponent>,
 }
 
 impl StateMessage {
     fn is_all_snapshots(&self) -> bool {
-        let mut is_all_snapshots = true;
-        for msg in &self.state_updates {
-            if let SnapOrDelta::Deltas(_) = &msg {
-                return false;
-            } else {
-                is_all_snapshots &= true;
-            }
-        }
-        is_all_snapshots
+        self.deltas.is_none() & !self.snapshots.is_empty()
     }
 
     pub fn merge(self, other: Self) -> Self {
@@ -183,33 +179,13 @@ impl StateSynchronizer {
         todo!();
     }
 
-    pub async fn get_pending(&self, block_hash: Bytes) -> SyncResult<StateMessage> {
+    pub async fn get_pending(&self, block_hash: Bytes) -> Option<StateMessage> {
         // Batch collect all changes up to the requested block
         // Must either hit a snapshot, or the last served block hash if it does not it errors
         let mut shared = self.shared.lock().await;
-        let target_hash = shared.last_served_block_hash.clone();
-
-        let mut current_hash = block_hash.clone();
-        let mut to_serve: Option<StateMessage> = None;
-
-        // If this is the first request, we have to hit a snapshot else this will error!
-        let state = shared.pending_deltas.borrow_mut();
-        while Some(&current_hash) != target_hash.as_ref() {
-            if let Some(data) = state.remove(&current_hash) {
-                current_hash = data.header.hash.clone();
-                let is_all_snapshots = data.is_all_snapshots();
-                to_serve = Some(to_serve.map_or(data.clone(), |current| current.merge(data)));
-
-                if is_all_snapshots {
-                    break;
-                }
-            } else {
-                // TODO inform if we were looking for a snapshot or not
-                anyhow::bail!("hash not found");
-            }
-        }
+        let to_serve = shared.pending.take();
         shared.last_served_block_hash = Some(block_hash);
-        Ok(to_serve.unwrap())
+        to_serve
     }
 
     pub fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)> {
@@ -266,17 +242,17 @@ impl StateSynchronizer {
 
             Ok(StateMessage {
                 header,
-                state_updates: tracked_components
+                snapshots: tracked_components
                     .values()
                     .into_iter()
                     .map(|comp| {
                         let component_id = &comp.id;
-                        let account_snapshots: Vec<_> = comp
+                        let account_snapshots: HashMap<_, _> = comp
                             .contract_ids
                             .iter()
                             .filter_map(|contract_address| {
                                 if let Some(state) = contract_state.remove(contract_address) {
-                                    Some(state)
+                                    Some((contract_address.clone(), state))
                                 } else {
                                     // TODO: remove the entire component in this case, warn and then
                                     // continue
@@ -289,12 +265,16 @@ impl StateSynchronizer {
                                 }
                             })
                             .collect();
-                        SnapOrDelta::VMSnapshot(VMSnapshot {
-                            component: comp.clone(),
-                            state: account_snapshots,
-                        })
+                        (
+                            component_id.clone(),
+                            Snapshot::VMSnapshot(VMSnapshot {
+                                component: comp.clone(),
+                                state: account_snapshots,
+                            }),
+                        )
                     })
                     .collect(),
+                deltas: None,
                 removed_components: HashMap::new(),
             })
         } else {
@@ -322,21 +302,25 @@ impl StateSynchronizer {
 
             Ok(StateMessage {
                 header,
-                state_updates: tracked_components
+                snapshots: tracked_components
                     .values()
                     .filter_map(|component| {
                         if let Some(state) = protocol_states.remove(&component.id) {
-                            Some(SnapOrDelta::NativeSnapshot(NativeSnapshot {
-                                state,
-                                component: component.clone(),
-                            }))
+                            Some((
+                                component.id.clone(),
+                                Snapshot::NativeSnapshot(NativeSnapshot {
+                                    state,
+                                    component: component.clone(),
+                                }),
+                            ))
                         } else {
                             let component_id = &component.id;
                             error!(?component_id, "Missing state for native component!");
                             None
                         }
                     })
-                    .collect::<Vec<_>>(),
+                    .collect(),
+                deltas: None,
                 removed_components: HashMap::new(),
             })
         }
@@ -396,7 +380,7 @@ impl StateSynchronizer {
         loop {
             if let Some(mut deltas) = msg_rx.recv().await {
                 let header = Header::from_block(deltas.get_block(), deltas.is_revert());
-                let (mut state_updates, removed_components) = {
+                let (mut snapshots, removed_components) = {
                     // 1. Remove components based on tvl changes (not available yet)
                     // 2. Add components based on tvl changes, query those for snapshots
                     let (to_add, to_remove): (Vec<_>, Vec<_>) = deltas
@@ -421,7 +405,7 @@ impl StateSynchronizer {
                     tracker
                         .start_tracking(&requiring_snapshot)
                         .await;
-                    let state_updates = self
+                    let snapshots = self
                         .get_snapshots(
                             requiring_snapshot
                                 .into_iter()
@@ -430,12 +414,12 @@ impl StateSynchronizer {
                             &tracker.components,
                         )
                         .await?
-                        .state_updates;
+                        .snapshots;
 
                     let removed_components = tracker
                         .stop_tracking(to_remove.iter().map(|(id, _)| *id))
                         .await;
-                    (state_updates, removed_components)
+                    (snapshots, removed_components)
                 };
 
                 // 3. Filter deltas by currently tracked components / contracts
@@ -445,14 +429,19 @@ impl StateSynchronizer {
                     deltas.filter_by_contract(|id| tracker.contracts.contains(id));
                 }
 
-                state_updates.push(SnapOrDelta::Deltas(deltas));
-
                 {
                     let mut shared = self.shared.lock().await;
-                    shared.pending_deltas.insert(
-                        block.hash.clone(),
-                        StateMessage { header: header.clone(), state_updates, removed_components },
-                    );
+                    let next = StateMessage {
+                        header: header.clone(),
+                        snapshots,
+                        deltas: Some(deltas),
+                        removed_components,
+                    };
+                    shared.pending = if let Some(prev) = shared.pending.take() {
+                        Some(prev.merge(next))
+                    } else {
+                        Some(next)
+                    };
                     shared.last_synced_block = Some(header.clone());
                 }
 
