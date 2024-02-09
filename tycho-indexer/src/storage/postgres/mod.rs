@@ -169,7 +169,7 @@ pub struct ValueIdTableCache<E> {
 /// Provides caching for enum and its database ID relationships.
 ///
 /// Uses a double sided hash map to provide quick lookups in both directions.
-impl<'a, E> ValueIdTableCache<E>
+impl<E> ValueIdTableCache<E>
 where
     E: Eq + Hash + Clone + FromStr + std::fmt::Debug,
     <E as FromStr>::Err: std::fmt::Debug,

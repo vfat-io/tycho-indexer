@@ -553,11 +553,7 @@ impl ComponentBalance {
             balance: Bytes::from(msg.balance),
             balance_float,
             modify_tx: tx.hash,
-            component_id: msg
-                .component_id
-                .iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<String>(),
+            component_id: hex::encode(msg.component_id),
         })
     }
 }
@@ -729,11 +725,7 @@ impl BlockContractChanges {
                     }
 
                     for balance_change in change.balance_changes.into_iter() {
-                        let component_id = balance_change
-                            .component_id
-                            .iter()
-                            .map(|b| format!("{:02x}", b))
-                            .collect::<String>();
+                        let component_id = hex::encode(balance_change.component_id.clone());
                         let token_address = H160::from_slice(balance_change.token.as_slice());
                         let balance = ComponentBalance::try_from_message(balance_change, &tx)?;
 
