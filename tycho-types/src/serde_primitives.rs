@@ -156,6 +156,45 @@ pub mod hex_hashmap_key {
     }
 }
 
+/// serde functions for handling HashMap with bytes value
+pub mod hex_hashmap_value {
+    use crate::Bytes;
+
+    use super::decode_hex_with_prefix;
+    use std::collections::HashMap;
+
+    use serde::{de, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
+
+    #[allow(clippy::mutable_key_type)]
+    pub fn serialize<S, K>(x: &HashMap<K, Bytes>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        K: Serialize,
+    {
+        let mut map = s.serialize_map(Some(x.len()))?;
+        for (k, v) in x.iter() {
+            map.serialize_entry(k, &format!("{v:#x}"))?;
+        }
+        map.end()
+    }
+
+    pub fn deserialize<'de, K, D>(d: D) -> Result<HashMap<K, Bytes>, D::Error>
+    where
+        D: Deserializer<'de>,
+        K: Deserialize<'de> + Eq + std::hash::Hash, // HashMap key trait bounds
+    {
+        let interim = HashMap::<K, String>::deserialize(d)?;
+
+        interim
+            .into_iter()
+            .map(|(k, v)| {
+                let v = decode_hex_with_prefix(&v).map_err(|e| de::Error::custom(e.to_string()))?;
+                Ok((k, Bytes::from(v)))
+            })
+            .collect::<Result<HashMap<_, _>, _>>()
+    }
+}
+
 /// serde functions for handling HashMap with a bytes key and value
 pub mod hex_hashmap_key_value {
     use std::collections::HashMap;

@@ -177,14 +177,16 @@ where
         let new_tokens_addresses = self
             .get_new_tokens(protocol_components)
             .await?;
-        let new_tokens = self
-            .token_pre_processor
-            .get_tokens(new_tokens_addresses)
-            .await;
+        if !new_tokens_addresses.is_empty() {
+            let new_tokens = self
+                .token_pre_processor
+                .get_tokens(new_tokens_addresses)
+                .await;
 
-        self.state_gateway
-            .add_tokens(&changes.block, &new_tokens)
-            .await?;
+            self.state_gateway
+                .add_tokens(&changes.block, &new_tokens)
+                .await?;
+        }
 
         self.state_gateway
             .upsert_block(&changes.block)
