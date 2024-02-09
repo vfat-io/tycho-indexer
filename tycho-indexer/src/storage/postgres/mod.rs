@@ -174,42 +174,6 @@ where
     E: Eq + Hash + Clone + FromStr + std::fmt::Debug,
     <E as FromStr>::Err: std::fmt::Debug,
 {
-    pub async fn from_pool(
-        pool: Pool<AsyncPgConnection>,
-        table_name: String,
-    ) -> Result<Self, StorageError> {
-        let mut conn = pool
-            .get()
-            .await
-            .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
-
-        if table_name == "chain" {
-            let results = async {
-                use schema::chain::dsl::*;
-                chain
-                    .select((id, name))
-                    .load(&mut conn)
-                    .await
-                    .expect("Failed to load chain ids!")
-            }
-            .await;
-            Ok(Self::from_tuples(results))
-        } else if table_name == "protocol_system" {
-            let results = async {
-                use schema::protocol_system::dsl::*;
-                protocol_system
-                    .select((id, name))
-                    .load(&mut conn)
-                    .await
-                    .expect("Failed to load protocol system ids!")
-            }
-            .await;
-            Ok(Self::from_tuples(results))
-        } else {
-            Err(StorageError::Unsupported(format!("table name {:} not supported", table_name)))
-        }
-    }
-
     /// Creates a new cache from a slice of tuples.
     ///
     /// # Arguments
@@ -258,6 +222,52 @@ type ChainEnumCache = ValueIdTableCache<Chain>;
 /// application every time we want to add another System. Hence, to diverge from the implementation
 /// of the Chain enum was a conscious decision.
 type ProtocolSystemEnumCache = ValueIdTableCache<String>;
+
+trait FromPool<T> {
+    async fn from_pool(pool: Pool<AsyncPgConnection>) -> Result<T, StorageError>;
+}
+
+impl FromPool<ChainEnumCache> for ChainEnumCache {
+    async fn from_pool(pool: Pool<AsyncPgConnection>) -> Result<ChainEnumCache, StorageError> {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
+
+        let results = async {
+            use schema::chain::dsl::*;
+            chain
+                .select((id, name))
+                .load(&mut conn)
+                .await
+                .expect("Failed to load chain ids!")
+        }
+        .await;
+        Ok(Self::from_tuples(results))
+    }
+}
+
+impl FromPool<ProtocolSystemEnumCache> for ProtocolSystemEnumCache {
+    async fn from_pool(
+        pool: Pool<AsyncPgConnection>,
+    ) -> Result<ProtocolSystemEnumCache, StorageError> {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|err| StorageError::Unexpected(format!("{}", err)))?;
+
+        let results = async {
+            use schema::protocol_system::dsl::*;
+            protocol_system
+                .select((id, name))
+                .load(&mut conn)
+                .await
+                .expect("Failed to load protocol system ids!")
+        }
+        .await;
+        Ok(Self::from_tuples(results))
+    }
+}
 
 // Helper type to retrieve entities with their associated tx hashes.
 #[derive(Debug)]
@@ -434,12 +444,9 @@ where
     }
 
     pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
-        println!("is it in new???");
-        let cache =
-            ValueIdTableCache::<Chain>::from_pool(pool.clone(), "chain".to_string()).await?;
+        let cache = ChainEnumCache::from_pool(pool.clone()).await?;
         let protocol_system_cache: ValueIdTableCache<String> =
-            ValueIdTableCache::<String>::from_pool(pool.clone(), "protocol_system".to_string())
-                .await?;
+            ProtocolSystemEnumCache::from_pool(pool.clone()).await?;
         let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(
             Arc::new(cache),
             Arc::new(protocol_system_cache),
