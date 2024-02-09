@@ -1105,23 +1105,24 @@ impl BlockEntityChanges {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
 
-            let mut txs_with_update: Vec<ProtocolChangesWithTx> = msg
+            let mut txs_with_update = msg
                 .changes
                 .into_iter()
-                .filter_map(|change| {
-                    change.tx.as_ref()?;
-                    Some(
-                        ProtocolChangesWithTx::try_from_message(
-                            change,
-                            &block,
-                            protocol_system,
-                            protocol_types,
+                .map(|change| {
+                    change.tx.as_ref().ok_or_else(|| {
+                        ExtractionError::DecodeError(
+                            "TransactionEntityChanges misses a transaction".to_owned(),
                         )
-                        .ok(),
+                    })?;
+
+                    ProtocolChangesWithTx::try_from_message(
+                        change,
+                        &block,
+                        protocol_system,
+                        protocol_types,
                     )
                 })
-                .collect::<Option<Vec<_>>>()
-                .expect("Failed to parse changes");
+                .collect::<Result<Vec<ProtocolChangesWithTx>, ExtractionError>>()?;
 
             // Sort updates by transaction index
             txs_with_update.sort_unstable_by_key(|update| update.tx.index);
