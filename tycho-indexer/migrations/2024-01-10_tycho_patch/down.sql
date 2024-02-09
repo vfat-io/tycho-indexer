@@ -147,6 +147,13 @@ CREATE TRIGGER invalidate_previous_contract_code
 
 DROP TABLE component_balance;
 
+-- remove token_price table
+DROP TRIGGER IF EXISTS update_modtime_token_price ON token_price;
+
+DROP TRIGGER IF EXISTS audit_table_token_price ON protocol_component_holds_token;
+
+DROP TABLE IF EXISTS token_price;
+
 -- Drop the triggers from the renamed table
 DROP TRIGGER IF EXISTS update_modtime_protocol_component_holds_token ON protocol_component_holds_token;
 
@@ -175,6 +182,15 @@ ALTER TABLE protocol_component
 
 ALTER TABLE protocol_component
     DROP CONSTRAINT protocol_component_chain_id_external_id_key;
+
+-- remove component_tvl table
+DROP TRIGGER IF EXISTS update_modtime_component_tvl ON component_tvl;
+
+DROP TRIGGER IF EXISTS audit_table_component_tvl ON component_tvl;
+
+DROP INDEX IF EXISTS idx_component_tvl_tvl;
+
+DROP TABLE IF EXISTS component_tvl;
 
 ALTER TABLE token
     DROP COLUMN quality;
