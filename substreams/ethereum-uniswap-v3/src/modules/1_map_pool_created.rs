@@ -33,7 +33,7 @@ fn get_new_pools(
     factory_address: &str,
 ) {
     // Extract new pools from PoolCreated events
-    let mut on_pair_created = |event: PoolCreated, _tx: &eth::TransactionTrace, _log: &eth::Log| {
+    let mut on_pool_created = |event: PoolCreated, _tx: &eth::TransactionTrace, _log: &eth::Log| {
         let tycho_tx: Transaction = _tx.into();
 
         new_pools.push(TransactionEntityChanges {
@@ -42,7 +42,7 @@ fn get_new_pools(
             component_changes: vec![ProtocolComponent {
                 id: event.pool.to_hex(),
                 tokens: vec![event.token0, event.token1],
-                contracts: vec![event.pool],
+                contracts: vec![],
                 static_att: vec![
                     Attribute {
                         name: "fee".to_string(),
@@ -54,10 +54,15 @@ fn get_new_pools(
                         value: event.tick_spacing.to_signed_bytes_le(),
                         change: ChangeType::Creation.into(),
                     },
+                    Attribute {
+                        name: "pool_address".to_string(),
+                        value: event.pool,
+                        change: ChangeType::Creation.into(),
+                    },
                 ],
                 change: i32::from(ChangeType::Creation),
                 protocol_type: Option::from(ProtocolType {
-                    name: "UniswapV3".to_string(),
+                    name: "uniswap_v3_pool".to_string(),
                     financial_type: FinancialType::Swap.into(),
                     attribute_schema: vec![],
                     implementation_type: ImplementationType::Custom.into(),
@@ -71,6 +76,6 @@ fn get_new_pools(
 
     eh.filter_by_address(vec![Address::from_str(factory_address).unwrap()]);
 
-    eh.on::<PoolCreated, _>(&mut on_pair_created);
+    eh.on::<PoolCreated, _>(&mut on_pool_created);
     eh.handle_events();
 }

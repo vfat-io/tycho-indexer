@@ -23,7 +23,7 @@ pub fn map_pool_events(
 ) -> Result<BlockEntityChanges, substreams::errors::Error> {
     let mut tx_changes_map: HashMap<Vec<u8>, TransactionEntityChanges> = HashMap::new();
 
-    // Add created pairs to the tx_changes_map
+    // Add created pools to the tx_changes_map
     for change in &created_pools.changes {
         let transaction = change.tx.as_ref().unwrap();
         tx_changes_map.insert(transaction.hash.clone(), change.clone());

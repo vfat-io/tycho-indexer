@@ -38,7 +38,7 @@ fn get_pools(block: &eth::Block, new_pools: &mut Vec<TransactionEntityChanges>) 
             component_changes: vec![ProtocolComponent {
                 id: event.pair.to_hex(),
                 tokens: vec![event.token0, event.token1],
-                contracts: vec![event.pair],
+                contracts: vec![],
                 static_att: vec![
                     // Trading Fee is hardcoded to 0.3%, saved as int in bps (basis points)
                     Attribute {
@@ -46,10 +46,15 @@ fn get_pools(block: &eth::Block, new_pools: &mut Vec<TransactionEntityChanges>) 
                         value: BigInt::from(30).to_signed_bytes_le(),
                         change: ChangeType::Creation.into(),
                     },
+                    Attribute {
+                        name: "pool_address".to_string(),
+                        value: event.pair,
+                        change: ChangeType::Creation.into(),
+                    },
                 ],
                 change: i32::from(ChangeType::Creation),
                 protocol_type: Some(ProtocolType {
-                    name: "UniswapV2".to_string(),
+                    name: "uniswap_v2_pool".to_string(),
                     financial_type: FinancialType::Swap.into(),
                     attribute_schema: vec![],
                     implementation_type: ImplementationType::Custom.into(),

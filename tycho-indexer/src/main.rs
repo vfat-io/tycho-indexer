@@ -229,9 +229,9 @@ async fn start_uniswap_v2_extractor(
     let name = "native:uniswap_v2";
     let gw = NativePgGateway::new(name, Chain::Ethereum, pool, cached_gw, token_processor);
     let protocol_types = [(
-        "uniswap_v2_pair".to_string(),
+        "uniswap_v2_pool".to_string(),
         ProtocolType::new(
-            "uniswap_v2_pair".to_string(),
+            "uniswap_v2_pool".to_string(),
             FinancialType::Swap,
             None,
             ImplementationType::Custom,
