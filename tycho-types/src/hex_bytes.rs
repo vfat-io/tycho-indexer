@@ -298,9 +298,6 @@ impl From<Bytes> for i32 {
 
 #[cfg(test)]
 mod tests {
-    use diesel::{insert_into, table, Insertable, Queryable};
-    use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl, SimpleAsyncConnection};
-
     use super::*;
 
     #[test]
@@ -378,6 +375,43 @@ mod tests {
         assert_ne!(wrong_b, b);
     }
 
+    #[test]
+    fn test_u128_from_bytes() {
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let result: u128 = u128::from(data.clone());
+        assert_eq!(result, u128::from_str("67305985").unwrap());
+    }
+
+    #[test]
+    fn test_i128_from_bytes() {
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let result: i128 = i128::from(data.clone());
+        assert_eq!(result, i128::from_str("67305985").unwrap());
+    }
+
+    #[test]
+    fn test_u256_from_bytes() {
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let result: U256 = U256::from(data);
+        assert_eq!(result, U256::from_dec_str("67305985").unwrap());
+    }
+
+    #[test]
+    fn test_i32_from_bytes() {
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let result: i32 = i32::from(data);
+        assert_eq!(result, i32::from_str("67305985").unwrap());
+    }
+}
+
+#[cfg(feature = "diesel")]
+#[cfg(test)]
+mod diesel_tests {
+    use diesel::{insert_into, table, Insertable, Queryable};
+    use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl, SimpleAsyncConnection};
+
+    use super::*;
+
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
         let mut conn = AsyncPgConnection::establish(&db_url)
@@ -433,33 +467,5 @@ mod tests {
             .unwrap();
 
         assert_eq!(inserted[0].data, example_bytes);
-    }
-
-    #[test]
-    fn test_u128_from_bytes() {
-        let data = Bytes::from(vec![1, 2, 3, 4]);
-        let result: u128 = u128::from(data.clone());
-        assert_eq!(result, u128::from_str("67305985").unwrap());
-    }
-
-    #[test]
-    fn test_i128_from_bytes() {
-        let data = Bytes::from(vec![1, 2, 3, 4]);
-        let result: i128 = i128::from(data.clone());
-        assert_eq!(result, i128::from_str("67305985").unwrap());
-    }
-
-    #[test]
-    fn test_u256_from_bytes() {
-        let data = Bytes::from(vec![1, 2, 3, 4]);
-        let result: U256 = U256::from(data);
-        assert_eq!(result, U256::from_dec_str("67305985").unwrap());
-    }
-
-    #[test]
-    fn test_i32_from_bytes() {
-        let data = Bytes::from(vec![1, 2, 3, 4]);
-        let result: i32 = i32::from(data);
-        assert_eq!(result, i32::from_str("67305985").unwrap());
     }
 }

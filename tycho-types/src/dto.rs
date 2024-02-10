@@ -207,12 +207,18 @@ pub struct BlockAccountChanges {
     pub account_updates: HashMap<Bytes, AccountUpdate>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
-    pub component_balances: HashMap<String, HashMap<Bytes, ComponentBalance>>,
+    pub component_balances: HashMap<String, TokenBalances>,
     pub component_tvl: HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
-struct TokenBalances(#[serde(with = "hex_hashmap_key")] HashMap<Bytes, ComponentBalance>);
+pub struct TokenBalances(#[serde(with = "hex_hashmap_key")] HashMap<Bytes, ComponentBalance>);
+
+impl From<HashMap<Bytes, ComponentBalance>> for TokenBalances {
+    fn from(value: HashMap<Bytes, ComponentBalance>) -> Self {
+        TokenBalances(value)
+    }
+}
 
 impl BlockAccountChanges {
     #[allow(clippy::too_many_arguments)]
@@ -234,7 +240,10 @@ impl BlockAccountChanges {
             account_updates,
             new_protocol_components,
             deleted_protocol_components,
-            component_balances,
+            component_balances: component_balances
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
             component_tvl: HashMap::new(),
         }
     }
@@ -258,7 +267,7 @@ impl BlockAccountChanges {
             .for_each(|(k, v)| {
                 self.component_balances
                     .entry(k)
-                    .and_modify(|e| e.extend(v.clone()))
+                    .and_modify(|e| e.0.extend(v.0.clone()))
                     .or_insert_with(|| v);
             });
 
@@ -365,7 +374,7 @@ pub struct BlockEntityChangesResult {
     pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
-    pub component_balances: HashMap<String, HashMap<Bytes, ComponentBalance>>,
+    pub component_balances: HashMap<String, TokenBalances>,
     pub component_tvl: HashMap<String, f64>,
 }
 
@@ -389,7 +398,7 @@ impl BlockEntityChangesResult {
             .for_each(|(k, v)| {
                 self.component_balances
                     .entry(k)
-                    .and_modify(|e| e.extend(v.clone()))
+                    .and_modify(|e| e.0.extend(v.0.clone()))
                     .or_insert_with(|| v);
             });
 
@@ -929,5 +938,119 @@ mod test {
         };
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_block_account_changes() {
+        let json_data = r#"
+        {
+            "extractor": "vm:ambient",
+            "chain": "ethereum",
+            "block": {
+                "number": 123,
+                "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "chain": "ethereum",             
+                "ts": "2023-09-14T00:00:00"
+            },
+            "revert": false,
+            "account_updates": {
+                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                    "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                    "chain": "ethereum",
+                    "slots": {},
+                    "balance": "0x01f4",
+                    "code": "",
+                    "change": "Update"
+                }
+            },
+            "new_protocol_components": 
+                { "protocol_1": {
+                        "id": "protocol_1",
+                        "protocol_system": "system_1",
+                        "protocol_type_name": "type_1",
+                        "chain": "ethereum",
+                        "tokens": ["0x01", "0x02"],
+                        "contract_ids": ["0x01", "0x02"],
+                        "static_attributes": {"attr1": "0x01f4"},
+                        "change": "Update",
+                        "creation_tx": "0x01",
+                        "created_at": "2023-09-14T00:00:00"
+                    }
+                },
+            "deleted_protocol_components": {},
+            "component_balances": {
+                "protocol_1":
+                    {
+                        "0x01": {
+                            "token": "0x01",
+                            "new_balance": "0x01f4",
+                            "modify_tx": "0x01",
+                            "component_id": "protocol_1"
+                        }
+                    }
+            },
+            "component_tvl": {
+                "protocol_1": 1000.0
+            }
+        }
+        "#;
+
+        serde_json::from_str::<BlockAccountChanges>(&json_data).expect("parsing failed");
+    }
+
+    #[test]
+    fn test_parse_block_entity_changes() {
+        let json_data = r#"
+        {
+            "extractor": "vm:ambient",
+            "chain": "ethereum",
+            "block": {
+                "number": 123,
+                "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "chain": "ethereum",             
+                "ts": "2023-09-14T00:00:00"
+            },
+            "revert": false,
+            "state_updates": {
+                "component_1": {
+                    "component_id": "component_1",
+                    "updated_attributes": {"attr1": "0x01"},
+                    "deleted_attributes": ["attr2"]
+                }
+            },
+            "new_protocol_components": {
+                "protocol_1": {
+                    "id": "protocol_1",
+                    "protocol_system": "system_1",
+                    "protocol_type_name": "type_1",
+                    "chain": "ethereum",
+                    "tokens": ["0x01", "0x02"],
+                    "contract_ids": ["0x01", "0x02"],
+                    "static_attributes": {"attr1": "0x01f4"},
+                    "change": "Update",
+                    "creation_tx": "0x01",
+                    "created_at": "2023-09-14T00:00:00"
+                }
+            },
+            "deleted_protocol_components": {},
+            "component_balances": {
+                "protocol_1": {
+                    "0x01": {
+                        "token": "0x01",
+                        "new_balance": "0x01f4",
+                        "modify_tx": "0x01",
+                        "component_id": "protocol_1"
+                    }
+                }
+            },
+            "component_tvl": {
+                "protocol_1": 1000.0
+            }
+        }
+        "#;
+
+        serde_json::from_str::<BlockEntityChangesResult>(&json_data).expect("parsing failed");
     }
 }

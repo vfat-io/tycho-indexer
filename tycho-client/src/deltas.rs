@@ -694,8 +694,8 @@ mod tests {
                                 "change": "Update"
                             }
                         },
-                        "new_protocol_components": [
-                                {
+                        "new_protocol_components": 
+                            { "protocol_1": {
                                     "id": "protocol_1",
                                     "protocol_system": "system_1",
                                     "protocol_type_name": "type_1",
@@ -707,16 +707,22 @@ mod tests {
                                     "creation_tx": "0x01",
                                     "created_at": "2023-09-14T00:00:00"
                                 }
-                            ],
-                            "deleted_protocol_components": [],
-                            "component_balances": [
+                            },
+                        "deleted_protocol_components": {},
+                        "component_balances": {
+                            "protocol_1":
                                 {
-                                    "token": "0x01",
-                                    "new_balance": "0x01f4",
-                                    "modify_tx": "0x01",
-                                    "component_id": "protocol_1"
+                                    "0x01": {
+                                        "token": "0x01",
+                                        "new_balance": "0x01f4",
+                                        "modify_tx": "0x01",
+                                        "component_id": "protocol_1"
+                                    }
                                 }
-                            ]
+                        },
+                        "component_tvl": {
+                            "protocol_1": 1000.0
+                        }
                     }
                 }
                 "#.to_owned()
@@ -756,6 +762,20 @@ mod tests {
                                 "creation_tx": "0x01",
                                 "created_at": "2023-09-14T00:00:00"
                             }
+                        },
+                        "deleted_protocol_components": {},
+                        "component_balances": {
+                            "protocol_1": {
+                                "0x01": {
+                                    "token": "0x01",
+                                    "new_balance": "0x01f4",
+                                    "modify_tx": "0x01",
+                                    "component_id": "protocol_1"
+                                }
+                            }
+                        },
+                        "component_tvl": {
+                            "protocol_1": 1000.0
                         }
                     }
                 }
@@ -1003,7 +1023,8 @@ mod tests {
                                 "change": "Update"
                             }
                         },
-                        "new_protocol_components": [
+                        "new_protocol_components": {
+                            "protocol_1":
                                 {
                                     "id": "protocol_1",
                                     "protocol_system": "system_1",
@@ -1016,16 +1037,21 @@ mod tests {
                                     "creation_tx": "0x01",
                                     "created_at": "2023-09-14T00:00:00"
                                 }
-                            ],
-                            "deleted_protocol_components": [],
-                            "component_balances": [
-                                {
+                            },
+                        "deleted_protocol_components": {},
+                        "component_balances": {
+                            "protocol_1": {
+                                "0x01": {
                                     "token": "0x01",
                                     "new_balance": "0x01f4",
                                     "modify_tx": "0x01",
                                     "component_id": "protocol_1"
                                 }
-                            ]
+                            }
+                        },
+                        "component_tvl": {
+                            "protocol_1": 1000.0
+                        }
                     }
                 }
                 "#.to_owned()
