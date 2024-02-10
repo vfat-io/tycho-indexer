@@ -241,7 +241,6 @@ impl ExtractorRunnerBuilder {
         self
     }
 
-    #[allow(dead_code)]
     pub fn module_name(mut self, val: &str) -> Self {
         self.module_name = val.to_owned();
         self
