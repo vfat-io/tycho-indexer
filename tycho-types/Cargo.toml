@@ -25,6 +25,7 @@ serde_json.workspace = true
 tokio.workspace = true
 diesel-async.workspace = true
 pretty_assertions = "1.4.0"
+maplit = "1.0.2"
 
 [features]
 diesel = ["dep:diesel"]

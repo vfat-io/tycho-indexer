@@ -42,6 +42,16 @@ pub enum ChangeType {
     Unspecified,
 }
 
+impl ChangeType {
+    pub fn merge(&self, other: &Self) -> Self {
+        if matches!(self, Self::Creation) {
+            return Self::Creation
+        } else {
+            *other
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct ExtractorIdentity {
     pub chain: Chain,
@@ -322,7 +332,7 @@ impl AccountUpdate {
         );
         self.balance = other.balance.clone();
         self.code = other.code.clone();
-        self.change = other.change;
+        self.change = self.change.merge(&other.change);
     }
 }
 
@@ -349,7 +359,7 @@ pub struct ProtocolComponent {
     pub created_at: NaiveDateTime,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct ComponentBalance {
     #[serde(with = "hex_bytes")]
     pub token: Bytes,
@@ -428,18 +438,32 @@ impl ProtocolStateDelta {
     ///
     /// During merge of these deltas a special situation can arrise when an attribute is present in
     /// `self.deleted_attributes` and `other.update_attributes``. If we would just merge the sets
-    /// of deleted attribtues, it would be ambiguous and potential lead to a deletion of an
-    /// attribute that should actually be present.
+    /// of deleted attribtues or vice versa, it would be ambiguous and potential lead to a
+    /// deletion of an attribute that should actually be present, or retention of an actually
+    /// deleted attribute.
     ///
-    /// Thus the merge operation handles potential conflicts between deletions and updates in the
-    /// following way: before extending `deleted_attributes` with new deletions, we remove any
-    /// keys from `deleted_attributes` that are also present in updated_attributes. Then, while
-    /// extending deleted_attributes, we filter out those keys which are present in
-    /// updated_attributes.
+    /// This situation is handled the following way:
     ///
-    /// This ensures that any attribute that is updated in a later state does not get removed due
-    /// to a previous deletion.
+    ///     - If an attribute is deleted and in the next message recreated, it is removed from the
+    ///       set of deleted attrbutes and kept in updated_attributes. This way it's temporary
+    ///       deletion is never communicated to the client.
+    ///     - If an attribute was updated and is deleted in the next message, it is removed from
+    ///       updated attributes and kept in deleted. This way the attributes temporary update (or
+    ///       potentially short lived existence) before its deletion is never communicated to the
+    ///       client.
     pub fn merge(&mut self, other: &Self) {
+        // either updated and then deleted -> keep in deleted, remove from updated
+        self.updated_attributes
+            .retain(|k, _| !other.deleted_attributes.contains(k));
+
+        // or deleted and then updated/recreated -> remove from deleted an keep in updated
+        self.deleted_attributes.retain(|attr| {
+            !other
+                .updated_attributes
+                .contains_key(attr)
+        });
+
+        // simply merge updates
         self.updated_attributes.extend(
             other
                 .updated_attributes
@@ -447,18 +471,9 @@ impl ProtocolStateDelta {
                 .map(|(k, v)| (k.clone(), v.clone())),
         );
 
-        // Filter out attributes that are both updated and deleted.
-        for k in other.updated_attributes.keys() {
-            self.deleted_attributes.remove(k);
-        }
-
-        self.deleted_attributes.extend(
-            other
-                .deleted_attributes
-                .iter()
-                .cloned()
-                .filter(|k| !self.updated_attributes.contains_key(k)),
-        );
+        // simply merge deletions
+        self.deleted_attributes
+            .extend(other.deleted_attributes.iter().cloned());
     }
 }
 
@@ -850,6 +865,8 @@ pub struct ProtocolComponentId {
 
 #[cfg(test)]
 mod test {
+    use maplit::hashmap;
+
     use super::*;
 
     #[test]
@@ -1052,5 +1069,304 @@ mod test {
         "#;
 
         serde_json::from_str::<BlockEntityChangesResult>(&json_data).expect("parsing failed");
+    }
+
+    #[test]
+    fn test_protocol_state_delta_merge_update_delete() {
+        // Initialize ProtocolStateDelta instances
+        let mut delta1 = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: [("Attribute1".to_string(), Bytes::from("0xbadbabe420"))]
+                .iter()
+                .cloned()
+                .collect(),
+            deleted_attributes: HashSet::new(),
+        };
+        let delta2 = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: [("Attribute2".to_string(), Bytes::from("0x0badbabe"))]
+                .iter()
+                .cloned()
+                .collect(),
+            deleted_attributes: ["Attribute1".to_string()]
+                .iter()
+                .cloned()
+                .collect(),
+        };
+        let exp = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: [("Attribute2".to_string(), Bytes::from("0x0badbabe"))]
+                .iter()
+                .cloned()
+                .collect(),
+            deleted_attributes: ["Attribute1".to_string()]
+                .iter()
+                .cloned()
+                .collect(),
+        };
+
+        delta1.merge(&delta2);
+
+        assert_eq!(delta1, exp);
+    }
+
+    #[test]
+    fn test_protocol_state_delta_merge_delete_update() {
+        // Initialize ProtocolStateDelta instances
+        let mut delta1 = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: HashMap::new(),
+            deleted_attributes: ["Attribute1".to_string()]
+                .iter()
+                .cloned()
+                .collect(),
+        };
+        let delta2 = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: [("Attribute1".to_string(), Bytes::from("0x0badbabe"))]
+                .iter()
+                .cloned()
+                .collect(),
+            deleted_attributes: HashSet::new(),
+        };
+        let exp = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: [("Attribute1".to_string(), Bytes::from("0x0badbabe"))]
+                .iter()
+                .cloned()
+                .collect(),
+            deleted_attributes: HashSet::new(),
+        };
+
+        delta1.merge(&delta2);
+
+        assert_eq!(delta1, exp);
+    }
+
+    #[test]
+    fn test_account_update_merge() {
+        // Initialize AccountUpdate instances with same address and valid hex strings for Bytes
+        let mut account1 = AccountUpdate::new(
+            Bytes::from(b"0x1234"),
+            Chain::Ethereum,
+            [(Bytes::from("0xaabb"), Bytes::from("0xccdd"))]
+                .iter()
+                .cloned()
+                .collect(),
+            Some(Bytes::from("0x1000")),
+            Some(Bytes::from("0xdeadbeaf")),
+            ChangeType::Creation,
+        );
+
+        let account2 = AccountUpdate::new(
+            Bytes::from(b"0x1234"), // Same id as account1
+            Chain::Ethereum,
+            [(Bytes::from("0xeeff"), Bytes::from("0x11223344"))]
+                .iter()
+                .cloned()
+                .collect(),
+            Some(Bytes::from("0x2000")),
+            Some(Bytes::from("0xcafebabe")),
+            ChangeType::Update,
+        );
+
+        // Merge account2 into account1
+        account1.merge(&account2);
+
+        // Define the expected state after merge
+        let expected = AccountUpdate::new(
+            Bytes::from(b"0x1234"), // Same id as before the merge
+            Chain::Ethereum,
+            [
+                (Bytes::from("0xaabb"), Bytes::from("0xccdd")), // Original slot from account1
+                (Bytes::from("0xeeff"), Bytes::from("0x11223344")), // New slot from account2
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+            Some(Bytes::from("0x2000")),     // Updated balance
+            Some(Bytes::from("0xcafebabe")), // Updated code
+            ChangeType::Creation,            // Updated change type
+        );
+
+        // Assert the new account1 equals to the expected state
+        assert_eq!(account1, expected);
+    }
+
+    #[test]
+    fn test_block_account_changes_merge() {
+        // Prepare account updates
+        let old_account_updates: HashMap<Bytes, AccountUpdate> = [(
+            Bytes::from("0x0011"),
+            AccountUpdate {
+                address: Bytes::from("0x00"),
+                chain: Chain::Ethereum,
+                slots: [(Bytes::from("0x0022"), Bytes::from("0x0033"))]
+                    .into_iter()
+                    .collect(),
+                balance: Some(Bytes::from("0x01")),
+                code: Some(Bytes::from("0x02")),
+                change: ChangeType::Creation,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let new_account_updates: HashMap<Bytes, AccountUpdate> = [(
+            Bytes::from("0x0011"),
+            AccountUpdate {
+                address: Bytes::from("0x00"),
+                chain: Chain::Ethereum,
+                slots: [(Bytes::from("0x0044"), Bytes::from("0x0055"))]
+                    .into_iter()
+                    .collect(),
+                balance: Some(Bytes::from("0x03")),
+                code: Some(Bytes::from("0x04")),
+                change: ChangeType::Update,
+            },
+        )]
+        .into_iter()
+        .collect();
+        // Create initial and new BlockAccountChanges instances
+        let block_account_changes_initial = BlockAccountChanges::new(
+            "extractor1",
+            Chain::Ethereum,
+            Block::default(),
+            false,
+            old_account_updates,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+
+        let block_account_changes_new = BlockAccountChanges::new(
+            "extractor2",
+            Chain::Ethereum,
+            Block::default(),
+            true,
+            new_account_updates,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+
+        // Merge the new BlockAccountChanges into the initial one
+        let res = block_account_changes_initial.merge(block_account_changes_new);
+
+        // Create the expected result of the merge operation
+        let expected_account_updates: HashMap<Bytes, AccountUpdate> = [(
+            Bytes::from("0x0011"),
+            AccountUpdate {
+                address: Bytes::from("0x00"),
+                chain: Chain::Ethereum,
+                slots: [
+                    (Bytes::from("0x0044"), Bytes::from("0x0055")),
+                    (Bytes::from("0x0022"), Bytes::from("0x0033")),
+                ]
+                .into_iter()
+                .collect(),
+                balance: Some(Bytes::from("0x03")),
+                code: Some(Bytes::from("0x04")),
+                change: ChangeType::Creation,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let block_account_changes_expected = BlockAccountChanges::new(
+            "extractor1",
+            Chain::Ethereum,
+            Block::default(),
+            true,
+            expected_account_updates,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+        assert_eq!(res, block_account_changes_expected);
+    }
+
+    #[test]
+    fn test_block_entity_changes_merge() {
+        // Initialize two BlockEntityChangesResult instances with different details
+        let block_entity_changes_result1 = BlockEntityChangesResult {
+            extractor: String::from("extractor1"),
+            chain: Chain::Ethereum,
+            block: Block::default(),
+            revert: false,
+            state_updates: hashmap! { "state1".to_string() => ProtocolStateDelta::default() },
+            new_protocol_components: hashmap! { "component1".to_string() => ProtocolComponent::default() },
+            deleted_protocol_components: HashMap::new(),
+            component_balances: hashmap! {
+                "component1".to_string() => TokenBalances(hashmap! {
+                    Bytes::from("0x01") => ComponentBalance {
+                            token: Bytes::from("0x01"),
+                            new_balance: Bytes::from("0x01"),
+                            modify_tx: Bytes::from("0x00"),
+                            component_id: "component1".to_string()
+                        },
+                    Bytes::from("0x02") => ComponentBalance {
+                        token: Bytes::from("0x02"),
+                        new_balance: Bytes::from("0x02"),
+                        modify_tx: Bytes::from("0x00"),
+                        component_id: "component1".to_string()
+                    },
+                })
+
+            },
+            component_tvl: hashmap! { "tvl1".to_string() => 1000.0 },
+        };
+        let block_entity_changes_result2 = BlockEntityChangesResult {
+            extractor: String::from("extractor2"),
+            chain: Chain::Ethereum,
+            block: Block::default(),
+            revert: true,
+            state_updates: hashmap! { "state2".to_string() => ProtocolStateDelta::default() },
+            new_protocol_components: hashmap! { "component2".to_string() => ProtocolComponent::default() },
+            deleted_protocol_components: hashmap! { "component3".to_string() => ProtocolComponent::default() },
+            component_balances: hashmap! {
+                "component1".to_string() => TokenBalances::default(),
+                "component2".to_string() => TokenBalances::default()
+            },
+            component_tvl: hashmap! { "tvl2".to_string() => 2000.0 },
+        };
+
+        let res = block_entity_changes_result1.merge(block_entity_changes_result2);
+
+        let expected_block_entity_changes_result = BlockEntityChangesResult {
+            extractor: String::from("extractor1"),
+            chain: Chain::Ethereum,
+            block: Block::default(),
+            revert: true,
+            state_updates: hashmap! {
+                "state1".to_string() => ProtocolStateDelta::default(),
+                "state2".to_string() => ProtocolStateDelta::default(),
+            },
+            new_protocol_components: hashmap! {
+                "component1".to_string() => ProtocolComponent::default(),
+                "component2".to_string() => ProtocolComponent::default(),
+            },
+            deleted_protocol_components: hashmap! {
+                "component3".to_string() => ProtocolComponent::default(),
+            },
+            component_balances: hashmap! {
+                "component1".to_string() => TokenBalances(hashmap! {
+                    Bytes::from("0x01") => ComponentBalance {
+                            token: Bytes::from("0x01"),
+                            new_balance: Bytes::from("0x01"),
+                            modify_tx: Bytes::from("0x00"),
+                            component_id: "component1".to_string()
+                        },
+                    Bytes::from("0x02") => ComponentBalance {
+                        token: Bytes::from("0x02"),
+                        new_balance: Bytes::from("0x02"),
+                        modify_tx: Bytes::from("0x00"),
+                        component_id: "component1".to_string()
+                        },
+                    }),
+                "component2".to_string() => TokenBalances::default(),
+            },
+            component_tvl: hashmap! { "tvl1".to_string() => 1000.0 },
+        };
+
+        assert_eq!(res, expected_block_entity_changes_result);
     }
 }

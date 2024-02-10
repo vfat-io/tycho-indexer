@@ -176,8 +176,6 @@ impl StateSynchronizer {
     }
 
     pub async fn get_pending(&self, block_hash: Bytes) -> Option<StateSyncMessage> {
-        // Batch collect all changes up to the requested block
-        // Must either hit a snapshot, or the last served block hash if it does not it errors
         let mut shared = self.shared.lock().await;
         let to_serve = shared.pending.take();
         shared.last_served_block_hash = Some(block_hash);
