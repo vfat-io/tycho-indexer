@@ -59,8 +59,15 @@ pub fn map_pool_events(
                         hex::encode(&pool.token1)
                     ));
 
+                    let pool_address_utf8 = pool
+                        .address
+                        .clone()
+                        .to_hex()
+                        .as_bytes()
+                        .to_vec();
+
                     let token_0_balance_change = BalanceChange {
-                        component_id: pool.address.clone(),
+                        component_id: pool_address_utf8.clone(),
                         token: pool.token0.clone(),
                         balance: token_0_balance
                             .clone()
@@ -69,7 +76,7 @@ pub fn map_pool_events(
                             .1,
                     };
                     let token_1_balance_change = BalanceChange {
-                        component_id: pool.address.clone(),
+                        component_id: pool_address_utf8.clone(),
                         token: pool.token1.clone(),
                         balance: token_1_balance
                             .clone()

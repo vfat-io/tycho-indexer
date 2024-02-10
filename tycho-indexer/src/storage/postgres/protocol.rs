@@ -855,9 +855,7 @@ where
         for component_balance in component_balances.iter() {
             let token_id = token_ids[&component_balance.token()];
             let transaction_id = transaction_ids[&component_balance.modify_tx()];
-            let protocol_component_id = protocol_component_ids[&component_balance
-                .component_id
-                .to_string()];
+            let protocol_component_id = protocol_component_ids[&component_balance.component_id];
 
             let new_component_balance = component_balance.to_storage(
                 token_id,

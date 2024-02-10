@@ -553,7 +553,8 @@ impl ComponentBalance {
             balance: Bytes::from(msg.balance),
             balance_float,
             modify_tx: tx.hash,
-            component_id: hex::encode(msg.component_id),
+            component_id: String::from_utf8(msg.component_id)
+                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
         })
     }
 }

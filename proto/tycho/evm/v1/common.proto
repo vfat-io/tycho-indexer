@@ -87,7 +87,7 @@ message ProtocolComponent {
 // A struct for following the changes of Total Value Locked (TVL) of a protocol component.
 // Note that if the ProtocolComponent contains multiple contracts, the TVL is tracked for the component as a whole.
 message BalanceChange {
-  // The address of the ERC20 token whose balance changed.
+  // The address of the ERC20 token whose balance changed. Note: This MUST be utf8 encoded.
   bytes token = 1;
   // The new balance of the token.
   bytes balance = 2;
