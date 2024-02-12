@@ -22,6 +22,8 @@
 use async_trait::async_trait;
 use futures03::{stream::SplitSink, SinkExt, StreamExt};
 use hyper::Uri;
+#[cfg(test)]
+use mockall::automock;
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::Arc,
@@ -77,6 +79,7 @@ pub enum DeltasError {
     Fatal(String),
 }
 
+#[cfg_attr(test, automock)]
 #[async_trait]
 pub trait DeltasClient {
     /// Subscribe to an extractor and receive realtime messages

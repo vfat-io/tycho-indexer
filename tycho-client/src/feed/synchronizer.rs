@@ -10,10 +10,9 @@ use tokio::{
 use tracing::{error, info};
 use tycho_types::{
     dto::{
-        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent,
-        ProtocolComponentRequestParameters, ProtocolComponentsRequestBody, ProtocolId,
-        ProtocolStateRequestBody, ResponseAccount, ResponseProtocolState, StateRequestBody,
-        VersionParam,
+        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolComponentsRequestBody,
+        ProtocolId, ProtocolStateRequestBody, ResponseAccount, ResponseProtocolState,
+        StateRequestBody, VersionParam,
     },
     Bytes,
 };
@@ -27,11 +26,11 @@ use crate::{
 type SyncResult<T> = anyhow::Result<T>;
 
 #[derive(Clone)]
-pub struct StateSynchronizer<R: RPCClient> {
+pub struct StateSynchronizer<R: RPCClient, D: DeltasClient> {
     extractor_id: ExtractorIdentity,
     is_native: bool,
     rpc_client: R,
-    deltas_client: WsDeltasClient,
+    deltas_client: D,
     min_tvl_threshold: f64,
     shared: Arc<Mutex<SharedState>>,
 }
@@ -39,7 +38,6 @@ pub struct StateSynchronizer<R: RPCClient> {
 struct SharedState {
     last_served_block_hash: Option<Bytes>,
     last_synced_block: Option<Header>,
-    pending_deltas: HashMap<Bytes, StateSyncMessage>,
     pending: Option<StateSyncMessage>,
 }
 
@@ -81,16 +79,30 @@ impl StateSyncMessage {
     }
 }
 
-impl<R> StateSynchronizer<R>
+impl<R, D> StateSynchronizer<R, D>
 where
     R: RPCClient + Clone + Send + Sync + 'static,
+    D: DeltasClient + Clone + Send + Sync + 'static,
 {
     pub fn new(
-        extracor_id: ExtractorIdentity,
-        rpc_client: HttpRPCClient,
-        deltas_client: WsDeltasClient,
+        extractor_id: ExtractorIdentity,
+        native: bool,
+        min_tvl: f64,
+        rpc_client: R,
+        deltas_client: D,
     ) -> Self {
-        todo!();
+        Self {
+            extractor_id,
+            is_native: native,
+            rpc_client,
+            deltas_client,
+            min_tvl_threshold: min_tvl,
+            shared: Arc::new(Mutex::new(SharedState {
+                last_served_block_hash: None,
+                last_synced_block: None,
+                pending: None,
+            })),
+        }
     }
 
     pub async fn get_pending(&self, block_hash: Bytes) -> Option<StateSyncMessage> {

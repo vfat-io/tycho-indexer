@@ -43,7 +43,8 @@ type BlockSyncResult<T> = anyhow::Result<T>;
 
 pub struct BlockSynchronizer {
     deltas_client: WsDeltasClient,
-    synchronizers: Option<HashMap<ExtractorIdentity, StateSynchronizer<HttpRPCClient>>>,
+    synchronizers:
+        Option<HashMap<ExtractorIdentity, StateSynchronizer<HttpRPCClient, WsDeltasClient>>>,
     block_time: std::time::Duration,
     max_wait: std::time::Duration,
 }
@@ -66,7 +67,7 @@ enum SynchronizerState {
 pub struct SynchronizerHandle {
     extractor_id: ExtractorIdentity,
     state: SynchronizerState,
-    sync: StateSynchronizer<HttpRPCClient>,
+    sync: StateSynchronizer<HttpRPCClient, WsDeltasClient>,
     modify_ts: NaiveDateTime,
     rx: Receiver<Header>,
 }
