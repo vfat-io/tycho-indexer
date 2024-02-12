@@ -314,7 +314,7 @@ where
                         .collect::<Vec<_>>();
                     tracker
                         .start_tracking(&requiring_snapshot)
-                        .await;
+                        .await?;
                     let snapshots = self
                         .get_snapshots(
                             header.clone(),
@@ -328,9 +328,8 @@ where
                         .await?
                         .snapshots;
 
-                    let removed_components = tracker
-                        .stop_tracking(to_remove.iter().map(|(id, _)| *id))
-                        .await;
+                    let removed_components =
+                        tracker.stop_tracking(to_remove.iter().map(|(id, _)| *id));
                     (snapshots, removed_components)
                 };
 
