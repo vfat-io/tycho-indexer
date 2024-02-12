@@ -22,6 +22,7 @@ use self::{
 };
 
 mod block_history;
+mod component_tracker;
 mod synchronizer;
 
 #[derive(Debug, Clone, PartialEq)]

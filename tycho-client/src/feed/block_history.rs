@@ -20,14 +20,14 @@ pub enum BlockPosition {
     Latest,
     // A previously seen block
     Delayed,
-    // A unkown block with a height above latest
+    // An unknown block with a height above latest
     Advanced,
 }
 
 /// BlockHistory
 ///
-/// Provides lightweight validation and relative positioning of received block headers emitted by
-/// state synchronizers.
+/// Provides lightweight validation and relative positioning of received block headers
+/// emitted by StateSynchronizer structs.
 impl BlockHistory {
     pub fn new(history: Vec<Header>, size: usize) -> Self {
         Self {
@@ -42,8 +42,9 @@ impl BlockHistory {
         let pos = self.determine_block_position(&block);
         match pos {
             Ok(BlockPosition::NextExpected) => {
-                // if the block is NextExpected, but does not fit on top of the latest block (via
-                // parent hash) -> we are dealing with a revert.
+                // if the block is NextExpected, but does not fit on top of the latest
+                // block (via parent hash) -> we are dealing with a
+                // revert.
                 if block.revert {
                     // keep removing the head until the new block fits
                     loop {
@@ -88,8 +89,9 @@ impl BlockHistory {
 
     /// Determines the blocks position relative to current history.
     ///
-    /// If there is no history we'll return an error here. This will also error if we have a single
-    /// block and we encounter a revert as it will be impossible to find the fork block.
+    /// If there is no history we'll return an error here. This will also error if we
+    /// have a single block and we encounter a revert as it will be impossible to
+    /// find the fork block.
     pub fn determine_block_position(&self, block: &Header) -> anyhow::Result<BlockPosition> {
         let latest = self
             .latest()
@@ -135,7 +137,6 @@ impl BlockHistory {
 
 #[cfg(test)]
 mod test {
-
     use rand::{random, Rng};
     use rstest::rstest;
     use tycho_types::Bytes;
