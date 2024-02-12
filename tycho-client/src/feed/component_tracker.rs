@@ -105,7 +105,7 @@ where
             .collect()
     }
 
-    pub fn get_contracts_by_component<'a, I: IntoIterator<Item = &'a str>>(
+    pub fn get_contracts_by_component<'a, I: IntoIterator<Item = &'a String>>(
         &self,
         ids: I,
     ) -> HashSet<Bytes> {
@@ -234,9 +234,9 @@ mod test {
         tracker
             .components
             .insert("Component1".to_string(), component);
-        let components_arg = ["Component1"];
+        let components_arg = ["Component1".to_string()];
 
-        let res = tracker.get_contracts_by_component(components_arg);
+        let res = tracker.get_contracts_by_component(&components_arg);
 
         assert_eq!(res, exp_contracts.into_iter().collect());
     }

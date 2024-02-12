@@ -7,7 +7,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{error, info};
+use tracing::{error, info, trace};
 use tycho_types::{
     dto::{
         BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolComponentsRequestBody,
@@ -41,25 +41,25 @@ struct SharedState {
     pending: Option<StateSyncMessage>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct VMSnapshot {
     state: HashMap<Bytes, ResponseAccount>,
     component: ProtocolComponent,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct NativeSnapshot {
     state: ResponseProtocolState,
     component: ProtocolComponent,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Snapshot {
     VMSnapshot(VMSnapshot),
     NativeSnapshot(NativeSnapshot),
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct StateSyncMessage {
     /// The block number for this update.
     header: Header,
@@ -147,7 +147,7 @@ where
     }
 
     /// Retrieves state snapshots of the requested components
-    async fn get_snapshots<'a, I: IntoIterator<Item = &'a str>>(
+    async fn get_snapshots<'a, I: IntoIterator<Item = &'a String>>(
         &self,
         header: Header,
         tracked_components: &ComponentTracker<R>,
@@ -165,11 +165,9 @@ where
                     .components
                     .keys()
                     .into_iter()
-                    .map(String::as_str)
                     .collect::<Vec<_>>()
             });
-
-        if self.is_native {
+        if !self.is_native {
             let contract_ids = tracked_components.get_contracts_by_component(ids);
 
             let contract_state = self
@@ -185,6 +183,7 @@ where
                 .map(|acc| (acc.address.clone(), acc))
                 .collect::<HashMap<_, _>>();
 
+            trace!(states=?&contract_state, "Retrieved ContractState");
             Ok(StateSyncMessage {
                 header,
                 snapshots: tracked_components
@@ -240,6 +239,7 @@ where
                 .map(|state| (state.component_id.clone(), state))
                 .collect::<HashMap<_, _>>();
 
+            trace!(states=?&protocol_states, "Retrieved ProtocolStates");
             Ok(StateSyncMessage {
                 header,
                 snapshots: tracked_components
@@ -297,7 +297,7 @@ where
         let block = first_msg.get_block().clone();
         let header = Header::from_block(first_msg.get_block(), first_msg.is_revert());
         let snapshot = self
-            .get_snapshots::<Vec<&str>>(Header::from_block(&block, false), &tracker, None)
+            .get_snapshots::<Vec<&String>>(Header::from_block(&block, false), &tracker, None)
             .await
             .expect("failed to get initial snapshot");
 
@@ -311,9 +311,7 @@ where
 
         {
             let mut shared = self.shared.lock().await;
-            shared
-                .pending_deltas
-                .insert(header.hash.clone(), snapshot);
+            shared.pending = Some(snapshot);
             shared.last_synced_block = Some(header.clone());
         }
         block_tx.send(header.clone()).await?;
@@ -343,15 +341,7 @@ where
                         .start_tracking(&requiring_snapshot)
                         .await?;
                     let snapshots = self
-                        .get_snapshots(
-                            header.clone(),
-                            &tracker,
-                            Some(
-                                requiring_snapshot
-                                    .into_iter()
-                                    .map(String::as_str),
-                            ),
-                        )
+                        .get_snapshots(header.clone(), &tracker, Some(requiring_snapshot))
                         .await?
                         .snapshots;
 
@@ -386,12 +376,209 @@ where
                 block_tx.send(header).await?;
             } else {
                 let mut shared = self.shared.lock().await;
-                shared.pending_deltas.clear();
+                shared.pending = None;
                 shared.last_synced_block = None;
                 shared.last_served_block_hash = None;
 
                 return Ok(());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        deltas::{DeltasClient, MockDeltasClient},
+        feed::{
+            component_tracker::ComponentTracker,
+            synchronizer::{NativeSnapshot, Snapshot, StateSyncMessage, StateSynchronizer},
+            Header,
+        },
+        rpc::{MockRPCClient, RPCClient},
+        DeltasError, RPCError,
+    };
+    use async_trait::async_trait;
+    use std::sync::Arc;
+    use test_log::test;
+    use tokio::{sync::mpsc::Receiver, task::JoinHandle};
+    use tracing::info;
+    use tycho_types::dto::{
+        BlockAccountChanges, Chain, Deltas, ExtractorIdentity, ProtocolComponent,
+        ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
+        ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
+        ResponseProtocolState, StateRequestBody, StateRequestParameters, StateRequestResponse,
+    };
+    use uuid::Uuid;
+
+    // Required for mock client to implement clone
+    struct ArcRPCClient<T>(Arc<T>);
+
+    // Default derive(Clone) does require T to be Clone as well.
+    impl<T> Clone for ArcRPCClient<T> {
+        fn clone(&self) -> Self {
+            ArcRPCClient(self.0.clone())
+        }
+    }
+
+    #[async_trait]
+    impl<T> RPCClient for ArcRPCClient<T>
+    where
+        T: RPCClient + Sync + Send + 'static,
+    {
+        async fn get_contract_state(
+            &self,
+            chain: Chain,
+            filters: &StateRequestParameters,
+            request: &StateRequestBody,
+        ) -> Result<StateRequestResponse, RPCError> {
+            self.0
+                .get_contract_state(chain, filters, request)
+                .await
+        }
+
+        async fn get_protocol_components(
+            &self,
+            chain: Chain,
+            filters: &ProtocolComponentRequestParameters,
+            request: &ProtocolComponentsRequestBody,
+        ) -> Result<ProtocolComponentRequestResponse, RPCError> {
+            self.0
+                .get_protocol_components(chain, filters, request)
+                .await
+        }
+
+        async fn get_protocol_states(
+            &self,
+            chain: Chain,
+            filters: &StateRequestParameters,
+            request: &ProtocolStateRequestBody,
+        ) -> Result<ProtocolStateRequestResponse, RPCError> {
+            self.0
+                .get_protocol_states(chain, filters, request)
+                .await
+        }
+    }
+
+    // Required for mock client to implement clone
+    struct ArcDeltasClient<T>(Arc<T>);
+
+    // Default derive(Clone) does require T to be Clone as well.
+    impl<T> Clone for ArcDeltasClient<T> {
+        fn clone(&self) -> Self {
+            ArcDeltasClient(self.0.clone())
+        }
+    }
+
+    #[async_trait]
+    impl<T> DeltasClient for ArcDeltasClient<T>
+    where
+        T: DeltasClient + Sync + Send + 'static,
+    {
+        async fn subscribe(
+            &self,
+            extractor_id: ExtractorIdentity,
+        ) -> Result<(Uuid, Receiver<Deltas>), DeltasError> {
+            self.0.subscribe(extractor_id).await
+        }
+
+        async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), DeltasError> {
+            self.0
+                .unsubscribe(subscription_id)
+                .await
+        }
+
+        async fn connect(&self) -> Result<JoinHandle<Result<(), DeltasError>>, DeltasError> {
+            self.0.connect().await
+        }
+
+        async fn close(&self) -> Result<(), DeltasError> {
+            self.0.close().await
+        }
+    }
+
+    fn with_mocked_clients(
+        native: bool,
+        rpc_client: Option<MockRPCClient>,
+        deltas_client: Option<MockDeltasClient>,
+    ) -> StateSynchronizer<ArcRPCClient<MockRPCClient>, ArcDeltasClient<MockDeltasClient>> {
+        let rpc_client = ArcRPCClient(Arc::new(rpc_client.unwrap_or_else(|| MockRPCClient::new())));
+        let deltas_client =
+            ArcDeltasClient(Arc::new(deltas_client.unwrap_or_else(|| MockDeltasClient::new())));
+
+        StateSynchronizer::new(
+            ExtractorIdentity::new(Chain::Ethereum, "uniswap-v2"),
+            native,
+            0.0,
+            rpc_client,
+            deltas_client,
+        )
+    }
+
+    fn state_snapshot_native() -> ProtocolStateRequestResponse {
+        ProtocolStateRequestResponse {
+            states: vec![ResponseProtocolState {
+                component_id: "Component1".to_string(),
+                ..Default::default()
+            }],
+        }
+    }
+
+    fn state_snapshot_vm() -> StateRequestResponse {
+        todo!();
+    }
+
+    // test cases:
+    // some components
+    // none components
+    // native
+    // vm
+    #[test(tokio::test)]
+    async fn test_get_snapshots() {
+        let header = Header::default();
+        let mut rpc = MockRPCClient::new();
+        rpc.expect_get_protocol_states()
+            .returning(|_, _, _| Ok(state_snapshot_native()));
+        let mut state_sync = with_mocked_clients(true, Some(rpc), None);
+        let mut tracker = ComponentTracker::new(
+            Chain::Ethereum,
+            "uniswap-v2",
+            0.0,
+            state_sync.rpc_client.clone(),
+        );
+        tracker.components.insert(
+            "Component1".to_string(),
+            ProtocolComponent { id: "Component1".to_string(), ..Default::default() },
+        );
+        dbg!(&tracker.components);
+        let components_arg = ["Component1".to_string()];
+        let exp = StateSyncMessage {
+            header: header.clone(),
+            snapshots: state_snapshot_native()
+                .states
+                .into_iter()
+                .map(|state| {
+                    (
+                        state.component_id.clone(),
+                        Snapshot::NativeSnapshot(NativeSnapshot {
+                            state,
+                            component: ProtocolComponent {
+                                id: "Component1".to_string(),
+                                ..Default::default()
+                            },
+                        }),
+                    )
+                })
+                .collect(),
+            deltas: None,
+            removed_components: Default::default(),
+        };
+
+        let snap = state_sync
+            .get_snapshots(header, &tracker, Some(&components_arg))
+            .await
+            .expect("Retrieving snapshot failed");
+
+        assert_eq!(snap, exp);
     }
 }

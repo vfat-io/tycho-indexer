@@ -25,7 +25,7 @@ mod block_history;
 mod component_tracker;
 mod synchronizer;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Header {
     pub hash: Bytes,
     pub number: u64,
