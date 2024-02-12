@@ -137,7 +137,7 @@ impl BlockHistory {
 
 #[cfg(test)]
 mod test {
-    use rand::{random, Rng};
+    use rand::Rng;
     use rstest::rstest;
     use tycho_types::Bytes;
 

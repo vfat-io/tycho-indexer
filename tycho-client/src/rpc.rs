@@ -6,6 +6,9 @@
 //!
 //! Currently we provide only a HTTP implementation.
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
+#[cfg(test)]
+use mockall::automock;
+use std::string::ToString;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -35,6 +38,7 @@ pub enum RPCError {
     ParseResponse(String),
 }
 
+#[cfg_attr(test, automock)]
 #[async_trait]
 pub trait RPCClient {
     /// Retrieves a snapshot of contract state.

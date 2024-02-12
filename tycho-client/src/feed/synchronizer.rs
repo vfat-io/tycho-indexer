@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use tokio::{
     sync::{
@@ -13,7 +10,7 @@ use tokio::{
 use tracing::{error, info};
 use tycho_types::{
     dto::{
-        BlockParam, Chain, Deltas, ExtractorIdentity, ProtocolComponent,
+        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent,
         ProtocolComponentRequestParameters, ProtocolComponentsRequestBody, ProtocolId,
         ProtocolStateRequestBody, ResponseAccount, ResponseProtocolState, StateRequestBody,
         VersionParam,
@@ -30,10 +27,10 @@ use crate::{
 type SyncResult<T> = anyhow::Result<T>;
 
 #[derive(Clone)]
-pub struct StateSynchronizer {
+pub struct StateSynchronizer<R: RPCClient> {
     extractor_id: ExtractorIdentity,
     is_native: bool,
-    rpc_client: HttpRPCClient,
+    rpc_client: R,
     deltas_client: WsDeltasClient,
     min_tvl_threshold: f64,
     shared: Arc<Mutex<SharedState>>,
@@ -84,7 +81,10 @@ impl StateSyncMessage {
     }
 }
 
-impl StateSynchronizer {
+impl<R> StateSynchronizer<R>
+where
+    R: RPCClient + Clone + Send + Sync + 'static,
+{
     pub fn new(
         extracor_id: ExtractorIdentity,
         rpc_client: HttpRPCClient,
@@ -123,7 +123,7 @@ impl StateSynchronizer {
     async fn get_snapshots<'a, I: IntoIterator<Item = &'a str>>(
         &self,
         header: Header,
-        tracked_components: &ComponentTracker,
+        tracked_components: &ComponentTracker<R>,
         ids: Option<I>,
     ) -> SyncResult<StateSyncMessage> {
         let version = VersionParam::new(
@@ -243,8 +243,13 @@ impl StateSynchronizer {
     /// Main method that does all the work.
     async fn state_sync(self, block_tx: &mut Sender<Header>) -> SyncResult<()> {
         // initialisation
-        let mut tracker = ComponentTracker::new();
-        tracker.initialise_components().await;
+        let mut tracker = ComponentTracker::new(
+            self.extractor_id.chain,
+            self.extractor_id.name.as_str(),
+            self.min_tvl_threshold,
+            self.rpc_client.clone(),
+        );
+        tracker.initialise_components().await?;
 
         let (_, mut msg_rx) = self
             .deltas_client

@@ -22,8 +22,10 @@ hex.workspace = true
 anyhow.workspace = true
 lru = "0.12.2"
 
+
 [dev-dependencies]
 mockito = "1.1.1"
 rand = "0.8"
 rstest = "0.18.2"
 pretty_assertions = "1.4.0"
+mockall = "0.11.4"

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::{Local, NaiveDateTime};
 use futures03::{future::join_all, stream::FuturesUnordered, StreamExt};
 
-use crate::{deltas::DeltasClient, WsDeltasClient};
+use crate::{deltas::DeltasClient, HttpRPCClient, WsDeltasClient};
 use tokio::{
     select,
     sync::mpsc::{self, Receiver},
@@ -43,7 +43,7 @@ type BlockSyncResult<T> = anyhow::Result<T>;
 
 pub struct BlockSynchronizer {
     deltas_client: WsDeltasClient,
-    synchronizers: Option<HashMap<ExtractorIdentity, StateSynchronizer>>,
+    synchronizers: Option<HashMap<ExtractorIdentity, StateSynchronizer<HttpRPCClient>>>,
     block_time: std::time::Duration,
     max_wait: std::time::Duration,
 }
@@ -66,7 +66,7 @@ enum SynchronizerState {
 pub struct SynchronizerHandle {
     extractor_id: ExtractorIdentity,
     state: SynchronizerState,
-    sync: StateSynchronizer,
+    sync: StateSynchronizer<HttpRPCClient>,
     modify_ts: NaiveDateTime,
     rx: Receiver<Header>,
 }
