@@ -1318,10 +1318,10 @@ pub mod fixtures {
                         )
                         .unwrap(),
                         balance: 50000000.encode_to_vec(),
-                        component_id: hex::decode(
-                            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902",
-                        )
-                        .unwrap(),
+                        component_id:
+                            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
+                                .as_bytes()
+                                .to_vec(),
                     }],
                 },
                 TransactionContractChanges {
@@ -1358,10 +1358,11 @@ pub mod fixtures {
                         )
                         .unwrap(),
                         balance: 10.encode_to_vec(),
-                        component_id: hex::decode(
-                            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902",
-                        )
-                        .unwrap(),
+                        component_id:
+                            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
+                                .to_string()
+                                .as_bytes()
+                                .to_vec(),
                     }],
                 },
             ],
@@ -2462,7 +2463,9 @@ mod test {
         let msg_token = expected_token.0.to_vec();
         let expected_component_id =
             "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902";
-        let msg_component_id = hex::decode(expected_component_id).unwrap();
+        let msg_component_id = expected_component_id
+            .as_bytes()
+            .to_vec();
         let msg = substreams::BalanceChange {
             balance: msg_balance.to_vec(),
             token: msg_token,

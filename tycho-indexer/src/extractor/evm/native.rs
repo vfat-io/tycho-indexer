@@ -796,9 +796,10 @@ mod test_serial_db {
                 .await
                 .expect("pool should get a connection");
             evm_gw
-                .save_state(&state, &mut conn)
+                .save_state(&evm::Block::default(), &state)
                 .await
                 .expect("extaction state insertion succeeded");
+            let _ = evm_gw.flush().await;
 
             let maybe_err = err_rx
                 .try_recv()

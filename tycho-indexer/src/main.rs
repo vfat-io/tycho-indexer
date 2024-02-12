@@ -83,6 +83,7 @@ struct CliArgs {
 }
 
 impl CliArgs {
+    #[allow(dead_code)]
     fn stop_block(&self) -> Option<i64> {
         if let Some(s) = &self.stop_block {
             if s.starts_with('+') {
@@ -187,7 +188,7 @@ async fn main() -> Result<(), ExtractionError> {
 }
 
 async fn start_ambient_extractor(
-    args: &CliArgs,
+    _args: &CliArgs,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
@@ -233,7 +234,7 @@ async fn start_ambient_extractor(
 }
 
 async fn start_uniswap_v2_extractor(
-    args: &CliArgs,
+    _args: &CliArgs,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
@@ -279,7 +280,7 @@ async fn start_uniswap_v2_extractor(
 }
 
 async fn start_uniswap_v3_extractor(
-    args: &CliArgs,
+    _args: &CliArgs,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
