@@ -74,8 +74,23 @@ pub struct StateSyncMessage {
 }
 
 impl StateSyncMessage {
-    pub fn merge(self, other: Self) -> Self {
-        todo!()
+    pub fn merge(mut self, other: Self) -> Self {
+        self.snapshots
+            .extend(other.snapshots.into_iter());
+        let deltas = match (self.deltas, other.deltas) {
+            (Some(l), Some(r)) => Some(l.merge(r)),
+            (None, Some(r)) => Some(r),
+            (Some(l), None) => Some(l),
+            (None, None) => None,
+        };
+        self.removed_components
+            .extend(other.removed_components.into_iter());
+        Self {
+            header: other.header,
+            snapshots: self.snapshots,
+            deltas,
+            removed_components: self.removed_components,
+        }
     }
 }
 
