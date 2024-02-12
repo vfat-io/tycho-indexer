@@ -1,6 +1,7 @@
 use std::{
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
 
 use diesel_async::{
@@ -186,6 +187,7 @@ impl DBCacheWriteExecutor {
                         .append(&mut new_db_tx.operations);
                     let _ = new_db_tx.tx.send(Ok(()));
                 } else if new_db_tx.block.number < pending.number {
+                    tracing::info!("Received an old block number {:?}", new_db_tx.block.number);
                     // New database transaction for an old block are directly sent to the database
                     let mut conn = self
                         .pool
@@ -199,25 +201,21 @@ impl DBCacheWriteExecutor {
                         .run(|conn| {
                             async {
                                 for op in new_db_tx.operations {
-                                    if let WriteOp::UpsertBlock(_) = op {
-                                        // Ignore block upserts, we expect it to already be stored
-                                        continue;
-                                    } else {
-                                        match self.execute_write_op(&op, conn).await {
-                                            Err(StorageError::DuplicateEntry(entity, id)) => {
-                                                // As this db transaction is old. It can contain
-                                                // already stored txs, we log the duplicate entry
-                                                // error and continue
-                                                debug!(
-                                                    "Ignoring duplicate entry for {} with id {}",
-                                                    entity, id
-                                                );
-                                            }
-                                            Err(e) => {
-                                                return Err(e);
-                                            }
-                                            _ => {}
+                                    match self.execute_write_op(&op, conn).await {
+                                        Err(StorageError::DuplicateEntry(entity, id)) => {
+                                            // As this db transaction is old. It can contain
+                                            // already stored txs, we log the duplicate entry
+                                            // error and continue
+                                            tracing::debug!(
+                                                "Ignoring duplicate entry for {} with id {}",
+                                                entity,
+                                                id
+                                            );
                                         }
+                                        Err(e) => {
+                                            return Err(e);
+                                        }
+                                        _ => {}
                                     }
                                 }
                                 Result::<(), StorageError>::Ok(())
@@ -228,8 +226,10 @@ impl DBCacheWriteExecutor {
 
                     // Forward the result to the sender
                     let _ = new_db_tx.tx.send(res);
-                } else if new_db_tx.block.parent_hash == pending.hash {
-                    debug!("New block received {} !", new_db_tx.block.parent_hash);
+                } else if new_db_tx.block.parent_hash == pending.hash ||
+                    new_db_tx.block.number > pending.number
+                {
+                    tracing::debug!("New block received {} !", new_db_tx.block.parent_hash);
                     // New database transaction for the next block, we flush and cache it
                     self.flush()
                         .await
@@ -263,6 +263,7 @@ impl DBCacheWriteExecutor {
     /// Extracts write operations from `pending_db_txs`, remove duplicates, executes them,
     /// updates `persisted_block` with `pending_block`, and sets `pending_block` to `None`.
     async fn flush(&mut self) -> Result<(), StorageError> {
+        tracing::info!("Flushing cached actions...");
         let mut conn = self
             .pool
             .get()
@@ -411,11 +412,12 @@ type DeltasCache = LruCache<
     (Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
 >;
 
+#[derive(Clone)]
 pub struct CachedGateway {
     tx: mpsc::Sender<DBCacheMessage>,
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
-    lru_cache: Mutex<DeltasCache>,
+    lru_cache: Arc<Mutex<DeltasCache>>,
 }
 
 impl CachedGateway {
@@ -429,7 +431,7 @@ impl CachedGateway {
             tx,
             pool,
             state_gateway,
-            lru_cache: Mutex::new(LruCache::new(NonZeroUsize::new(5).unwrap())),
+            lru_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(5).unwrap()))),
         }
     }
     pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {

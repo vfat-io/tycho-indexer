@@ -148,10 +148,21 @@ async fn main() -> Result<(), ExtractionError> {
 
     let handle = write_executor.run();
     let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
+
     let (ambient_task, ambient_handle) =
-        start_ambient_extractor(&args, pool.clone(), cached_gw).await?;
+        start_ambient_extractor(&args, pool.clone(), cached_gw.clone()).await?;
     extractor_handles.push(ambient_handle.clone());
     info!("Extractor {} started!", ambient_handle.get_id());
+
+    let (uniswap_v3_task, uniswap_v3_handle) =
+        start_uniswap_v3_extractor(&args, pool.clone(), cached_gw.clone()).await?;
+    extractor_handles.push(uniswap_v3_handle.clone());
+    info!("Extractor {} started!", uniswap_v3_handle.get_id());
+
+    let (uniswap_v2_task, uniswap_v2_handle) =
+        start_uniswap_v2_extractor(&args, pool.clone(), cached_gw.clone()).await?;
+    extractor_handles.push(uniswap_v2_handle.clone());
+    info!("Extractor {} started!", uniswap_v2_handle.get_id());
 
     // TODO: read from env variable
     let server_addr = "0.0.0.0";
@@ -163,11 +174,15 @@ async fn main() -> Result<(), ExtractionError> {
         .bind(server_addr)
         .port(server_port)
         .register_extractor(ambient_handle)
+        .register_extractor(uniswap_v2_handle)
+        .register_extractor(uniswap_v3_handle)
         .run()?;
     info!(server_url, "Http and Ws server started");
 
     let shutdown_task = tokio::spawn(shutdown_handler(server_handle, extractor_handles, handle));
-    let (res, _, _) = select_all([ambient_task, server_task, shutdown_task]).await;
+    let (res, _, _) =
+        select_all([ambient_task, uniswap_v2_task, uniswap_v3_task, server_task, shutdown_task])
+            .await;
     res.expect("Extractor- nor ServiceTasks should panic!")
 }
 
