@@ -16,10 +16,6 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{
-    log::{debug, info},
-    warn,
-};
 
 use crate::{
     extractor::evm::{
@@ -142,7 +138,7 @@ impl DBCacheWriteExecutor {
 
     /// Spawns a task to process incoming database messages (write requests or flush commands).
     pub fn run(mut self) -> JoinHandle<()> {
-        info!("DBCacheWriteExecutor {} started!", self.name);
+        tracing::info!("DBCacheWriteExecutor {} started!", self.name);
         tokio::spawn(async move {
             while let Some(message) = self.msg_receiver.recv().await {
                 match message {
@@ -538,7 +534,7 @@ impl CachedGateway {
         let mut lru_cache = self.lru_cache.lock().await;
 
         if start_version.is_none() {
-            warn!("Get delta called with start_version = None, this might be a bug in one of the extractors")
+            tracing::warn!("Get delta called with start_version = None, this might be a bug in one of the extractors")
         }
 
         // Construct a key for the LRU cache
