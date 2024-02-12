@@ -392,7 +392,9 @@ mod test {
         deltas::{DeltasClient, MockDeltasClient},
         feed::{
             component_tracker::ComponentTracker,
-            synchronizer::{NativeSnapshot, Snapshot, StateSyncMessage, StateSynchronizer},
+            synchronizer::{
+                NativeSnapshot, Snapshot, StateSyncMessage, StateSynchronizer, VMSnapshot,
+            },
             Header,
         },
         rpc::{MockRPCClient, RPCClient},
@@ -402,12 +404,15 @@ mod test {
     use std::sync::Arc;
     use test_log::test;
     use tokio::{sync::mpsc::Receiver, task::JoinHandle};
-    use tracing::info;
-    use tycho_types::dto::{
-        BlockAccountChanges, Chain, Deltas, ExtractorIdentity, ProtocolComponent,
-        ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
-        ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
-        ResponseProtocolState, StateRequestBody, StateRequestParameters, StateRequestResponse,
+    use tycho_types::{
+        dto::{
+            Chain, Deltas, ExtractorIdentity, ProtocolComponent,
+            ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
+            ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
+            ResponseAccount, ResponseProtocolState, StateRequestBody, StateRequestParameters,
+            StateRequestResponse,
+        },
+        Bytes,
     };
     use uuid::Uuid;
 
@@ -524,33 +529,23 @@ mod test {
         }
     }
 
-    fn state_snapshot_vm() -> StateRequestResponse {
-        todo!();
-    }
-
-    // test cases:
-    // some components
-    // none components
-    // native
-    // vm
     #[test(tokio::test)]
-    async fn test_get_snapshots() {
+    async fn test_get_snapshots_native() {
         let header = Header::default();
         let mut rpc = MockRPCClient::new();
         rpc.expect_get_protocol_states()
             .returning(|_, _, _| Ok(state_snapshot_native()));
-        let mut state_sync = with_mocked_clients(true, Some(rpc), None);
+        let state_sync = with_mocked_clients(true, Some(rpc), None);
         let mut tracker = ComponentTracker::new(
             Chain::Ethereum,
             "uniswap-v2",
             0.0,
             state_sync.rpc_client.clone(),
         );
-        tracker.components.insert(
-            "Component1".to_string(),
-            ProtocolComponent { id: "Component1".to_string(), ..Default::default() },
-        );
-        dbg!(&tracker.components);
+        let component = ProtocolComponent { id: "Component1".to_string(), ..Default::default() };
+        tracker
+            .components
+            .insert("Component1".to_string(), component.clone());
         let components_arg = ["Component1".to_string()];
         let exp = StateSyncMessage {
             header: header.clone(),
@@ -562,14 +557,69 @@ mod test {
                         state.component_id.clone(),
                         Snapshot::NativeSnapshot(NativeSnapshot {
                             state,
-                            component: ProtocolComponent {
-                                id: "Component1".to_string(),
-                                ..Default::default()
-                            },
+                            component: component.clone(),
                         }),
                     )
                 })
                 .collect(),
+            deltas: None,
+            removed_components: Default::default(),
+        };
+
+        let snap = state_sync
+            .get_snapshots(header, &tracker, Some(&components_arg))
+            .await
+            .expect("Retrieving snapshot failed");
+
+        assert_eq!(snap, exp);
+    }
+
+    fn state_snapshot_vm() -> StateRequestResponse {
+        StateRequestResponse {
+            accounts: vec![
+                ResponseAccount { address: Bytes::from("0x0badc0ffee"), ..Default::default() },
+                ResponseAccount { address: Bytes::from("0xbabe42"), ..Default::default() },
+            ],
+        }
+    }
+
+    #[test(tokio::test)]
+    async fn test_get_snapshots_vm() {
+        let header = Header::default();
+        let mut rpc = MockRPCClient::new();
+        rpc.expect_get_contract_state()
+            .returning(|_, _, _| Ok(state_snapshot_vm()));
+        let state_sync = with_mocked_clients(false, Some(rpc), None);
+        let mut tracker = ComponentTracker::new(
+            Chain::Ethereum,
+            "uniswap-v2",
+            0.0,
+            state_sync.rpc_client.clone(),
+        );
+        let component = ProtocolComponent {
+            id: "Component1".to_string(),
+            contract_ids: vec![Bytes::from("0x0badc0ffee"), Bytes::from("0xbabe42")],
+            ..Default::default()
+        };
+        tracker
+            .components
+            .insert("Component1".to_string(), component.clone());
+        let components_arg = ["Component1".to_string()];
+        let exp = StateSyncMessage {
+            header: header.clone(),
+            snapshots: [(
+                component.id.clone(),
+                Snapshot::VMSnapshot(VMSnapshot {
+                    state: state_snapshot_vm()
+                        .accounts
+                        .into_iter()
+                        .map(|state| (state.address.clone(), state))
+                        .collect(),
+                    component: component.clone(),
+                }),
+            )]
+            .into_iter()
+            .collect(),
             deltas: None,
             removed_components: Default::default(),
         };
