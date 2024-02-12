@@ -726,7 +726,9 @@ impl BlockContractChanges {
                     }
 
                     for balance_change in change.balance_changes.into_iter() {
-                        let component_id = hex::encode(balance_change.component_id.clone());
+                        let component_id =
+                            String::from_utf8(balance_change.component_id.clone())
+                                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
                         let token_address = H160::from_slice(balance_change.token.as_slice());
                         let balance = ComponentBalance::try_from_message(balance_change, &tx)?;
 
