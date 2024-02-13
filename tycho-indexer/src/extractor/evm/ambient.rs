@@ -806,7 +806,9 @@ mod test_serial_db {
             evm_gw.clone(),
             rx,
             err_tx,
-        );
+            0,
+        )
+        .await;
 
         let handle = write_executor.run();
         let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
@@ -1109,7 +1111,9 @@ mod test_serial_db {
                 evm_gw.clone(),
                 rx,
                 err_tx,
-            );
+                0,
+            )
+            .await;
 
             let handle = write_executor.run();
             let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());

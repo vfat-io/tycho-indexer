@@ -325,10 +325,12 @@ impl NativeGateway for NativePgGateway<TokenPreProcessor> {
         to: &BlockIdentifier,
         new_cursor: &str,
     ) -> Result<evm::BlockEntityChangesResult, StorageError> {
+        tracing::debug!("Reverting to block {}", to);
         let mut conn = self.pool.get().await.unwrap();
         let res = self
             .backward(current, to, new_cursor, &mut conn)
             .await?;
+        tracing::debug!("Revert delta {:?}", res);
         Ok(res)
     }
 }
@@ -765,7 +767,9 @@ mod test_serial_db {
             evm_gw.clone(),
             rx,
             err_tx,
-        );
+            0,
+        )
+        .await;
 
         write_executor.run();
         let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());

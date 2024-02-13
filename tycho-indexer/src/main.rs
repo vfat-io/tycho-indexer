@@ -15,7 +15,10 @@ use models::Chain;
 
 use actix_web::dev::ServerHandle;
 use clap::Parser;
-use ethers::prelude::{Http, Provider};
+use ethers::{
+    prelude::{Http, Provider},
+    providers::Middleware,
+};
 use std::sync::Arc;
 use tokio::{sync::mpsc, task, task::JoinHandle};
 use tracing::info;
@@ -138,6 +141,10 @@ async fn main() -> Result<(), ExtractionError> {
         }
     });
 
+    let rpc_url = env::var("ETH_RPC_URL").expect("ETH_RPC_URL is not set");
+    let rpc_client: Provider<Http> =
+        Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
+
     let write_executor = postgres::cache::DBCacheWriteExecutor::new(
         "ethereum".to_owned(),
         Chain::Ethereum,
@@ -145,23 +152,34 @@ async fn main() -> Result<(), ExtractionError> {
         evm_gw.clone(),
         rx,
         err_tx,
-    );
+        rpc_client
+            .get_block_number()
+            .await
+            .expect("Error getting block number")
+            .as_u64(),
+    )
+    .await;
 
     let handle = write_executor.run();
     let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
 
+    let token_processor = TokenPreProcessor::new(rpc_client);
+
     let (ambient_task, ambient_handle) =
-        start_ambient_extractor(&args, pool.clone(), cached_gw.clone()).await?;
+        start_ambient_extractor(&args, pool.clone(), cached_gw.clone(), token_processor.clone())
+            .await?;
     extractor_handles.push(ambient_handle.clone());
     info!("Extractor {} started!", ambient_handle.get_id());
 
     let (uniswap_v3_task, uniswap_v3_handle) =
-        start_uniswap_v3_extractor(&args, pool.clone(), cached_gw.clone()).await?;
+        start_uniswap_v3_extractor(&args, pool.clone(), cached_gw.clone(), token_processor.clone())
+            .await?;
     extractor_handles.push(uniswap_v3_handle.clone());
     info!("Extractor {} started!", uniswap_v3_handle.get_id());
 
     let (uniswap_v2_task, uniswap_v2_handle) =
-        start_uniswap_v2_extractor(&args, pool.clone(), cached_gw.clone()).await?;
+        start_uniswap_v2_extractor(&args, pool.clone(), cached_gw.clone(), token_processor.clone())
+            .await?;
     extractor_handles.push(uniswap_v2_handle.clone());
     info!("Extractor {} started!", uniswap_v2_handle.get_id());
 
@@ -191,14 +209,11 @@ async fn start_ambient_extractor(
     _args: &CliArgs,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
+    token_pre_processor: TokenPreProcessor,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
-    let rpc_url = env::var("ETH_RPC_URL").expect("ETH_RPC_URL is not set");
-    let client: Provider<Http> =
-        Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
-    let token_processor = TokenPreProcessor::new(client);
     let ambient_name = "vm:ambient";
     let ambient_gw =
-        AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, cached_gw, token_processor);
+        AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, cached_gw, token_pre_processor);
     let ambient_protocol_types = [(
         "ambient_pool".to_string(),
         ProtocolType::new(
@@ -237,13 +252,10 @@ async fn start_uniswap_v2_extractor(
     _args: &CliArgs,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
+    token_pre_processor: TokenPreProcessor,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
-    let rpc_url = env::var("ETH_RPC_URL").expect("ETH_RPC_URL is not set");
-    let client: Provider<Http> =
-        Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
-    let token_processor = TokenPreProcessor::new(client);
-    let name = "native:uniswap_v2";
-    let gw = NativePgGateway::new(name, Chain::Ethereum, pool, cached_gw, token_processor);
+    let name = "uniswap_v2";
+    let gw = NativePgGateway::new(name, Chain::Ethereum, pool, cached_gw, token_pre_processor);
     let protocol_types = [(
         "uniswap_v2_pool".to_string(),
         ProtocolType::new(
@@ -283,13 +295,10 @@ async fn start_uniswap_v3_extractor(
     _args: &CliArgs,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
+    token_pre_processor: TokenPreProcessor,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
-    let rpc_url = env::var("ETH_RPC_URL").expect("ETH_RPC_URL is not set");
-    let client: Provider<Http> =
-        Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
-    let token_processor = TokenPreProcessor::new(client);
-    let name = "native:uniswap_v3";
-    let gw = NativePgGateway::new(name, Chain::Ethereum, pool, cached_gw, token_processor);
+    let name = "uniswap_v3";
+    let gw = NativePgGateway::new(name, Chain::Ethereum, pool, cached_gw, token_pre_processor);
     let protocol_types = [(
         "uniswap_v3_pool".to_string(),
         ProtocolType::new(
