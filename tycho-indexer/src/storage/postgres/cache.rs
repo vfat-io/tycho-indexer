@@ -244,7 +244,7 @@ impl DBCacheWriteExecutor {
                 }
             }
             None => {
-                // if self.pending_block == None, this case can happen when we start Tycho or after
+                // if self.pending_block == None, this case happens when we start Tycho or after
                 // a call to flush().
                 self.pending_block = Some(new_db_tx.block);
 
@@ -259,6 +259,15 @@ impl DBCacheWriteExecutor {
     /// Extracts write operations from `pending_db_txs`, remove duplicates, executes them,
     /// updates `persisted_block` with `pending_block`, and sets `pending_block` to `None`.
     async fn flush(&mut self) -> Result<(), StorageError> {
+        let db_txs = std::mem::take(&mut self.pending_db_txs);
+
+        // Early return if there are no transactions to flush
+        if db_txs.is_empty() {
+            self.persisted_block = self.pending_block;
+            self.pending_block = None;
+            return Ok(());
+        }
+
         tracing::info!("Flushing cached actions...");
         let mut conn = self
             .pool
@@ -266,7 +275,6 @@ impl DBCacheWriteExecutor {
             .await
             .expect("pool should be connected");
 
-        let db_txs = std::mem::take(&mut self.pending_db_txs);
         let mut seen_operations: Vec<WriteOp> = Vec::new();
 
         conn.build_transaction()
