@@ -34,8 +34,13 @@ pub struct Header {
 }
 
 impl Header {
-    fn from_block(_: &Block, _: bool) -> Self {
-        todo!()
+    fn from_block(block: &Block, revert: bool) -> Self {
+        Self {
+            hash: block.hash.clone(),
+            number: block.number,
+            parent_hash: block.parent_hash.clone(),
+            revert,
+        }
     }
 }
 

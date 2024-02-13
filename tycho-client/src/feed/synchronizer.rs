@@ -7,21 +7,17 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_types::{
     dto::{
-        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolComponentsRequestBody,
-        ProtocolId, ProtocolStateRequestBody, ResponseAccount, ResponseProtocolState,
-        StateRequestBody, VersionParam,
+        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolStateRequestBody,
+        ResponseAccount, ResponseProtocolState, StateRequestBody, VersionParam,
     },
     Bytes,
 };
 
 use super::Header;
-use crate::{
-    deltas::DeltasClient, feed::component_tracker::ComponentTracker, rpc::RPCClient, HttpRPCClient,
-    WsDeltasClient,
-};
+use crate::{deltas::DeltasClient, feed::component_tracker::ComponentTracker, rpc::RPCClient};
 
 type SyncResult<T> = anyhow::Result<T>;
 
@@ -31,10 +27,12 @@ pub struct StateSynchronizer<R: RPCClient, D: DeltasClient> {
     is_native: bool,
     rpc_client: R,
     deltas_client: D,
+    max_retries: u64,
     min_tvl_threshold: f64,
     shared: Arc<Mutex<SharedState>>,
 }
 
+#[derive(Debug)]
 struct SharedState {
     last_served_block_hash: Option<Bytes>,
     last_synced_block: Option<Header>,
@@ -75,6 +73,12 @@ pub struct StateSyncMessage {
 
 impl StateSyncMessage {
     pub fn merge(mut self, other: Self) -> Self {
+        // be careful with removed and snapshots attributes here, these can be ambiguous.
+        self.removed_components
+            .retain(|k, _| !other.snapshots.contains_key(k));
+        self.snapshots
+            .retain(|k, _| !other.removed_components.contains_key(k));
+
         self.snapshots
             .extend(other.snapshots.into_iter());
         let deltas = match (self.deltas, other.deltas) {
@@ -103,6 +107,7 @@ where
         extractor_id: ExtractorIdentity,
         native: bool,
         min_tvl: f64,
+        max_retries: u64,
         rpc_client: R,
         deltas_client: D,
     ) -> Self {
@@ -112,6 +117,7 @@ where
             rpc_client,
             deltas_client,
             min_tvl_threshold: min_tvl,
+            max_retries,
             shared: Arc::new(Mutex::new(SharedState {
                 last_served_block_hash: None,
                 last_synced_block: None,
@@ -133,14 +139,25 @@ where
         let this = self.clone();
         let jh = tokio::spawn(async move {
             let mut retry_count = 0;
-            while retry_count < 5 {
-                this.clone()
+            while retry_count < this.max_retries {
+                info!(extractor_id=%&this.extractor_id, retry_count, "(Re)starting synchronization loop");
+                match this
+                    .clone()
                     .state_sync(&mut block_tx)
-                    .await?;
+                    .await
+                {
+                    Err(e) => {
+                        error!(extractor_id=%&this.extractor_id, retry_count, error=%e, "State synchronization errored!");
+                    }
+                    Ok(_) => {
+                        info!(extractor_id=%&this.extractor_id, retry_count, "State synchronization ended");
+                        return Ok(())
+                    }
+                }
                 // reset state and prepare for retry
                 retry_count += 1;
             }
-            Ok(())
+            Err(anyhow::format_err!("Max retries exceeded giving up"))
         });
 
         Ok((jh, block_rx))
@@ -175,7 +192,15 @@ where
                 .get_contract_state(
                     self.extractor_id.chain,
                     &Default::default(),
-                    &StateRequestBody::new(Some(contract_ids.into_iter().collect()), version),
+                    &StateRequestBody::new(
+                        Some(
+                            contract_ids
+                                .clone()
+                                .into_iter()
+                                .collect(),
+                        ),
+                        version,
+                    ),
                 )
                 .await?
                 .accounts
@@ -186,6 +211,11 @@ where
             trace!(states=?&contract_state, "Retrieved ContractState");
             Ok(StateSyncMessage {
                 header,
+                // iteration over all component is not ideal for performance but reduces the
+                // required state and state updating. Since we e.g. have no mapping from
+                // contract_address to corresponding protocol component. Snapshots should not be
+                // retrieved too frequently, so we are ok for now this can be optimised should it be
+                // required.
                 snapshots: tracked_components
                     .components
                     .values()
@@ -201,12 +231,16 @@ where
                                 // contracts and components.
                                 if let Some(state) = contract_state.get(contract_address) {
                                     Some((contract_address.clone(), state.clone()))
-                                } else {
+                                } else if contract_ids.contains(contract_address) {
+                                    // only emit error even if we did actually request this
+                                    // address.
                                     error!(
                                         ?contract_address,
                                         ?component_id,
                                         "Component with lacking state encountered!"
                                     );
+                                    None
+                                } else {
                                     None
                                 }
                             })
@@ -242,6 +276,8 @@ where
             trace!(states=?&protocol_states, "Retrieved ProtocolStates");
             Ok(StateSyncMessage {
                 header,
+                // actually this may be improved by iterating over the requested ids, it is kept
+                // similar to the contract state only for consistency reasons.
                 snapshots: tracked_components
                     .components
                     .values()
@@ -254,9 +290,12 @@ where
                                     component: component.clone(),
                                 }),
                             ))
-                        } else {
+                        } else if ids.contains(&&component.id) {
+                            // only emit error event if we requested this component
                             let component_id = &component.id;
                             error!(?component_id, "Missing state for native component!");
+                            None
+                        } else {
                             None
                         }
                     })
@@ -268,6 +307,7 @@ where
     }
 
     /// Main method that does all the work.
+    #[instrument(skip(self, block_tx),fields(extractor_id = %self.extractor_id))]
     async fn state_sync(self, block_tx: &mut Sender<Header>) -> SyncResult<()> {
         // initialisation
         let mut tracker = ComponentTracker::new(
@@ -302,12 +342,7 @@ where
             .expect("failed to get initial snapshot");
 
         let n_components = tracker.components.len();
-        let extractor_id = &self.extractor_id;
-        info!(
-            ?n_components,
-            ?extractor_id,
-            "Initial snapshot retrieved, starting delta message feed"
-        );
+        info!(n_components, "Initial snapshot retrieved, starting delta message feed");
 
         {
             let mut shared = self.shared.lock().await;
@@ -318,6 +353,7 @@ where
         loop {
             if let Some(mut deltas) = msg_rx.recv().await {
                 let header = Header::from_block(deltas.get_block(), deltas.is_revert());
+                debug!(block_number=?header.number, "Received delta message");
                 let (snapshots, removed_components) = {
                     // 1. Remove components based on tvl changes
                     // 2. Add components based on tvl changes, query those for snapshots
@@ -330,7 +366,7 @@ where
                     let requiring_snapshot = to_add
                         .iter()
                         .filter_map(|(k, _)| {
-                            if !tracker.components.contains_key(*k) {
+                            if tracker.components.contains_key(*k) {
                                 None
                             } else {
                                 Some(*k)
@@ -356,6 +392,7 @@ where
                 } else {
                     deltas.filter_by_contract(|id| tracker.contracts.contains(id));
                 }
+                let n_changes = deltas.n_changes();
 
                 {
                     let mut shared = self.shared.lock().await;
@@ -372,15 +409,16 @@ where
                     };
                     shared.last_synced_block = Some(header.clone());
                 }
-
+                debug!(block_number=?header.number, n_changes, "Finished processing delta message");
                 block_tx.send(header).await?;
             } else {
                 let mut shared = self.shared.lock().await;
+                warn!(shared = ?&shared, "Deltas channel closed, resetting shared state.");
                 shared.pending = None;
                 shared.last_synced_block = None;
                 shared.last_served_block_hash = None;
 
-                return Ok(());
+                return Err(anyhow::format_err!("Deltas channel closed!"));
             }
         }
     }
@@ -401,16 +439,21 @@ mod test {
         DeltasError, RPCError,
     };
     use async_trait::async_trait;
-    use std::sync::Arc;
+    use mockall::predicate::always;
+    use std::{sync::Arc, time::Duration};
     use test_log::test;
-    use tokio::{sync::mpsc::Receiver, task::JoinHandle};
+    use tokio::{
+        sync::mpsc::{channel, Receiver, Sender},
+        task::JoinHandle,
+        time::timeout,
+    };
     use tycho_types::{
         dto::{
-            Chain, Deltas, ExtractorIdentity, ProtocolComponent,
+            Block, BlockEntityChangesResult, Chain, Deltas, ExtractorIdentity, ProtocolComponent,
             ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
-            ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
-            ResponseAccount, ResponseProtocolState, StateRequestBody, StateRequestParameters,
-            StateRequestResponse,
+            ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
+            ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState, StateRequestBody,
+            StateRequestParameters, StateRequestResponse,
         },
         Bytes,
     };
@@ -514,7 +557,8 @@ mod test {
         StateSynchronizer::new(
             ExtractorIdentity::new(Chain::Ethereum, "uniswap-v2"),
             native,
-            0.0,
+            50.0,
+            1,
             rpc_client,
             deltas_client,
         )
@@ -630,5 +674,268 @@ mod test {
             .expect("Retrieving snapshot failed");
 
         assert_eq!(snap, exp);
+    }
+
+    #[test(tokio::test)]
+    async fn test_get_pending() {
+        let state_sync = with_mocked_clients(true, None, None);
+        let state_msg = StateSyncMessage {
+            header: Default::default(),
+            snapshots: Default::default(),
+            deltas: None,
+            removed_components: Default::default(),
+        };
+        {
+            let mut guard = state_sync.shared.lock().await;
+            guard.pending = Some(state_msg.clone());
+        }
+
+        let res = state_sync
+            .get_pending(Bytes::default())
+            .await
+            .expect("Could not get pending state!");
+
+        assert_eq!(res, state_msg);
+        {
+            let guard = state_sync.shared.lock().await;
+            assert!(guard.pending.is_none());
+        }
+    }
+
+    fn mock_clients_for_state_sync() -> (MockRPCClient, MockDeltasClient, Sender<Deltas>) {
+        let mut rpc_client = MockRPCClient::new();
+        // Mocks for the start_tracking call, these need to come first because they are more
+        // specific, see: https://docs.rs/mockall/latest/mockall/#matching-multiple-calls
+        rpc_client
+            .expect_get_protocol_components()
+            .with(
+                always(),
+                always(),
+                mockall::predicate::function(
+                    move |request_params: &ProtocolComponentsRequestBody| {
+                        if let Some(ids) = request_params.component_ids.as_ref() {
+                            ids.contains(&"Component3".to_string())
+                        } else {
+                            false
+                        }
+                    },
+                ),
+            )
+            .returning(|_, _, _| {
+                // return Component3
+                Ok(ProtocolComponentRequestResponse {
+                    protocol_components: vec![
+                        // this component shall have a tvl update above threshold
+                        ProtocolComponent { id: "Component3".to_string(), ..Default::default() },
+                    ],
+                })
+            });
+        rpc_client
+            .expect_get_protocol_states()
+            .with(
+                always(),
+                always(),
+                mockall::predicate::function(move |request_params: &ProtocolStateRequestBody| {
+                    let expected_id =
+                        ProtocolId { chain: Chain::Ethereum, id: "Component3".to_string() };
+                    if let Some(ids) = request_params.protocol_ids.as_ref() {
+                        ids.contains(&expected_id)
+                    } else {
+                        false
+                    }
+                }),
+            )
+            .returning(|_, _, _| {
+                // return Component3 state
+                Ok((ProtocolStateRequestResponse {
+                    states: vec![ResponseProtocolState {
+                        component_id: "Component3".to_string(),
+                        ..Default::default()
+                    }],
+                }))
+            });
+
+        // mock calls for the initial state snapshots
+        rpc_client
+            .expect_get_protocol_components()
+            .returning(|_, _, _| {
+                // Initial sync of components
+                Ok(ProtocolComponentRequestResponse {
+                    protocol_components: vec![
+                        // this component shall have a tvl update above threshold
+                        ProtocolComponent { id: "Component1".to_string(), ..Default::default() },
+                        // this component shall have a tvl update below threshold.
+                        ProtocolComponent { id: "Component2".to_string(), ..Default::default() },
+                        // a third component will have a tvl update above threshold
+                    ],
+                })
+            });
+        rpc_client
+            .expect_get_protocol_states()
+            .returning(|_, _, _| {
+                // Initial state snapshot
+                Ok((ProtocolStateRequestResponse {
+                    states: vec![
+                        ResponseProtocolState {
+                            component_id: "Component1".to_string(),
+                            ..Default::default()
+                        },
+                        ResponseProtocolState {
+                            component_id: "Component2".to_string(),
+                            ..Default::default()
+                        },
+                    ],
+                }))
+            });
+        // Mock deltas client and messages
+        let mut deltas_client = MockDeltasClient::new();
+        let (tx, rx) = channel(1);
+        deltas_client
+            .expect_subscribe()
+            .return_once(move |_| {
+                // Return subscriber id and a channel
+                Ok((Uuid::default(), rx))
+            });
+        (rpc_client, deltas_client, tx)
+    }
+
+    /// Test strategy
+    ///
+    /// - initial snapshot returns a two component
+    /// - send 2 dummy messages, containing only blocks
+    /// - third message contains a new component with some significant tvl, one initial component
+    ///   slips below tvl threshold, another one is above tvl but does not get re-requested.
+    #[test(tokio::test)]
+    async fn test_state_sync() {
+        let (rpc_client, deltas_client, tx) = mock_clients_for_state_sync();
+        let deltas = [
+            Deltas::Native(BlockEntityChangesResult {
+                extractor: "uniswap-v2".to_string(),
+                chain: Chain::Ethereum,
+                block: Block {
+                    number: 1,
+                    hash: Bytes::from("0x01"),
+                    parent_hash: Bytes::from("0x00"),
+                    chain: Chain::Ethereum,
+                    ts: Default::default(),
+                },
+                revert: false,
+                ..Default::default()
+            }),
+            Deltas::Native(BlockEntityChangesResult {
+                extractor: "uniswap-v2".to_string(),
+                chain: Chain::Ethereum,
+                block: Block {
+                    number: 2,
+                    hash: Bytes::from("0x02"),
+                    parent_hash: Bytes::from("0x01"),
+                    chain: Chain::Ethereum,
+                    ts: Default::default(),
+                },
+                revert: false,
+                ..Default::default()
+            }),
+            Deltas::Native(BlockEntityChangesResult {
+                extractor: "uniswap-v2".to_string(),
+                chain: Chain::Ethereum,
+                block: Block {
+                    number: 3,
+                    hash: Bytes::from("0x03"),
+                    parent_hash: Bytes::from("0x02"),
+                    chain: Chain::Ethereum,
+                    ts: Default::default(),
+                },
+                revert: false,
+                component_tvl: [
+                    ("Component1".to_string(), 100.0),
+                    ("Component2".to_string(), 0.0),
+                    ("Component3".to_string(), 1000.0),
+                ]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            }),
+        ];
+        let state_sync = with_mocked_clients(true, Some(rpc_client), Some(deltas_client));
+
+        // Test starts here
+        let (jh, mut block_rx) = state_sync
+            .start()
+            .expect("Failed to start state synchronizer");
+        tx.send(deltas[0].clone())
+            .await
+            .expect("deltas channel msg 0 closed!");
+        tx.send(deltas[1].clone())
+            .await
+            .expect("deltas channel msg 1 closed!");
+        timeout(Duration::from_millis(100), block_rx.recv())
+            .await
+            .expect("waiting for first state msg timed out!")
+            .expect("state sync block sender closed!");
+        tx.send(deltas[2].clone())
+            .await
+            .expect("deltas channel msg 2 closed!");
+        let header = timeout(Duration::from_millis(100), block_rx.recv())
+            .await
+            .expect("waiting for second state msg timed out!")
+            .expect("state sync block sender closed!");
+        drop(tx);
+        let res = state_sync
+            .get_pending(header.hash.clone())
+            .await
+            .expect("Failed to get pending state");
+        let exit = jh
+            .await
+            .expect("state sync task panicked!");
+
+        // assertions
+        let exp = StateSyncMessage {
+            header,
+            snapshots: [
+                // since we did not retrieve the first message the snapshot first,
+                // "Component1" should be included.
+                (
+                    "Component1".to_string(),
+                    Snapshot::NativeSnapshot(NativeSnapshot {
+                        state: ResponseProtocolState {
+                            component_id: "Component1".to_string(),
+                            ..Default::default()
+                        },
+                        component: ProtocolComponent {
+                            id: "Component1".to_string(),
+                            ..Default::default()
+                        },
+                    }),
+                ),
+                // This is the new component we queried once it passed the tvl threshold.
+                (
+                    "Component3".to_string(),
+                    Snapshot::NativeSnapshot(NativeSnapshot {
+                        state: ResponseProtocolState {
+                            component_id: "Component3".to_string(),
+                            ..Default::default()
+                        },
+                        component: ProtocolComponent {
+                            id: "Component3".to_string(),
+                            ..Default::default()
+                        },
+                    }),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            // Our deltas are empty and since merge methods are
+            // tested in tycho-types we don't have much to do here.
+            deltas: Some(deltas[2].clone()),
+            // "Component2" was removed, because it's tvl changed to 0.
+            removed_components: [(
+                "Component2".to_string(),
+                ProtocolComponent { id: "Component2".to_string(), ..Default::default() },
+            )]
+            .into_iter()
+            .collect(),
+        };
+        assert_eq!(res, exp);
+        assert!(exit.is_err());
     }
 }

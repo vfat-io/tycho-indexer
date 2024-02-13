@@ -142,6 +142,13 @@ impl Deltas {
             _ => panic!("Not allowed to merge deltas of different types"),
         }
     }
+
+    pub fn n_changes(&self) -> usize {
+        match self {
+            Deltas::VM(deltas) => deltas.account_updates.len(),
+            Deltas::Native(deltas) => deltas.state_updates.len(),
+        }
+    }
 }
 
 /// A message sent from the server to the client
@@ -377,8 +384,8 @@ pub struct ComponentBalance {
 /// TODO - update once new structure is merged
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct BlockEntityChangesResult {
-    extractor: String,
-    chain: Chain,
+    pub extractor: String,
+    pub chain: Chain,
     pub block: Block,
     pub revert: bool,
     pub state_updates: HashMap<String, ProtocolStateDelta>,

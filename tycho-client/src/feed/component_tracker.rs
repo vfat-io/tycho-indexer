@@ -1,6 +1,6 @@
 use crate::{rpc::RPCClient, RPCError};
 use std::collections::{HashMap, HashSet};
-use tracing::warn;
+use tracing::{debug, instrument, warn};
 use tycho_types::{
     dto::{
         Chain, ProtocolComponent, ProtocolComponentRequestParameters,
@@ -63,6 +63,7 @@ where
     }
 
     /// Add a new component to be tracked
+    #[instrument(skip(self))]
     pub async fn start_tracking(&mut self, new_components: &[&String]) -> Result<(), RPCError> {
         let filters = ProtocolComponentRequestParameters::default();
         let request = ProtocolComponentsRequestBody::id_filtered(
@@ -81,15 +82,17 @@ where
                 .map(|pc| (pc.id.clone(), pc)),
         );
         self.update_contracts();
+        debug!("Sucessfully started tracking new components");
         Ok(())
     }
 
     /// Stop tracking components
-    pub fn stop_tracking<'a, I: IntoIterator<Item = &'a String>>(
+    #[instrument(skip(self))]
+    pub fn stop_tracking<'a, I: IntoIterator<Item = &'a String> + std::fmt::Debug>(
         &mut self,
         to_remove: I,
     ) -> HashMap<String, ProtocolComponent> {
-        to_remove
+        let res = to_remove
             .into_iter()
             .filter_map(|k| {
                 let comp = self.components.remove(k);
@@ -102,7 +105,9 @@ where
                 }
                 comp.map(|c| (k.clone(), c))
             })
-            .collect()
+            .collect();
+        debug!("Sucessfully stopped tracking components");
+        res
     }
 
     pub fn get_contracts_by_component<'a, I: IntoIterator<Item = &'a String>>(
