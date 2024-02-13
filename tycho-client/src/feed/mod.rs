@@ -249,8 +249,7 @@ impl BlockSynchronizer {
         let mut sync_handles = HashMap::with_capacity(synchronizers.len());
 
         for (extractor_id, synchronizer) in synchronizers.drain() {
-            // No await in here so all synchronizers start immediately!!
-            let (jh, rx) = synchronizer.start()?;
+            let (jh, rx) = synchronizer.start().await?;
             state_sync_tasks.push(jh);
             sync_handles.insert(
                 extractor_id.clone(),

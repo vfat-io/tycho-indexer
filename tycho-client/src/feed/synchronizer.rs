@@ -1,9 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::{
+    select,
     sync::{
         mpsc::{channel, Receiver, Sender},
-        Mutex,
+        oneshot, Mutex,
     },
     task::JoinHandle,
 };
@@ -30,6 +31,7 @@ pub struct StateSynchronizer<R: RPCClient, D: DeltasClient> {
     max_retries: u64,
     min_tvl_threshold: f64,
     shared: Arc<Mutex<SharedState>>,
+    end_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
 #[derive(Debug)]
@@ -123,6 +125,7 @@ where
                 last_synced_block: None,
                 pending: None,
             })),
+            end_tx: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -133,7 +136,7 @@ where
         to_serve
     }
 
-    pub fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)> {
+    pub async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)> {
         let (mut block_tx, block_rx) = channel(15);
 
         let this = self.clone();
@@ -141,26 +144,58 @@ where
             let mut retry_count = 0;
             while retry_count < this.max_retries {
                 info!(extractor_id=%&this.extractor_id, retry_count, "(Re)starting synchronization loop");
-                match this
-                    .clone()
-                    .state_sync(&mut block_tx)
-                    .await
+                let (end_tx, end_rx) = oneshot::channel::<()>();
                 {
-                    Err(e) => {
-                        error!(extractor_id=%&this.extractor_id, retry_count, error=%e, "State synchronization errored!");
-                    }
-                    Ok(_) => {
-                        info!(extractor_id=%&this.extractor_id, retry_count, "State synchronization ended");
+                    let mut end_tx_guard = this.end_tx.lock().await;
+                    *end_tx_guard = Some(end_tx);
+                }
+
+                select! {
+                    res = this.clone().state_sync(&mut block_tx) => {
+                        match  res
+                        {
+                            Err(e) => {
+                                error!(
+                                    extractor_id=%&this.extractor_id,
+                                    retry_count,
+                                    error=%e,
+                                    "State synchronization errored!"
+                                );
+                            }
+                            _ => {
+                                warn!(
+                                    extractor_id=%&this.extractor_id,
+                                    retry_count,
+                                    "State sync exited with Ok(())"
+                                );
+                            }
+                        }
+                    },
+                    _ = end_rx => {
+                        info!(
+                            extractor_id=%&this.extractor_id,
+                            retry_count,
+                            "StateSynchronizer received close signal. Stopping"
+                        );
                         return Ok(())
                     }
                 }
-                // reset state and prepare for retry
                 retry_count += 1;
             }
             Err(anyhow::format_err!("Max retries exceeded giving up"))
         });
 
         Ok((jh, block_rx))
+    }
+
+    pub async fn close(&mut self) -> SyncResult<()> {
+        let mut end_tx = self.end_tx.lock().await;
+        if let Some(tx) = end_tx.take() {
+            let _ = tx.send(());
+            Ok(())
+        } else {
+            Err(anyhow::format_err!("Not started"))
+        }
     }
 
     /// Retrieves state snapshots of the requested components
@@ -856,11 +891,12 @@ mod test {
                 ..Default::default()
             }),
         ];
-        let state_sync = with_mocked_clients(true, Some(rpc_client), Some(deltas_client));
+        let mut state_sync = with_mocked_clients(true, Some(rpc_client), Some(deltas_client));
 
         // Test starts here
         let (jh, mut block_rx) = state_sync
             .start()
+            .await
             .expect("Failed to start state synchronizer");
         tx.send(deltas[0].clone())
             .await
@@ -879,7 +915,7 @@ mod test {
             .await
             .expect("waiting for second state msg timed out!")
             .expect("state sync block sender closed!");
-        drop(tx);
+        state_sync.close().await;
         let res = state_sync
             .get_pending(header.hash.clone())
             .await
@@ -936,6 +972,6 @@ mod test {
             .collect(),
         };
         assert_eq!(res, exp);
-        assert!(exit.is_err());
+        assert!(exit.is_ok());
     }
 }
