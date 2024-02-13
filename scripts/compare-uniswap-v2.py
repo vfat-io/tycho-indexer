@@ -40,7 +40,7 @@ def convert_little_to_big_endian(hex_str, signed=False):
 def compare_pool_data(pool, target_block_number):
     component_id = Web3.toChecksumAddress(pool['component_id'])
     contract = web3.eth.contract(address=component_id, abi=pool_abi)
-    current_reserves = contract.functions.getReserves().call(block_identifier=target_block_number)
+    reserves = contract.functions.getReserves().call(block_identifier=target_block_number)
 
     local_reserve0_big_endian = convert_little_to_big_endian(pool['attributes']['reserve0'])
     local_reserve1_big_endian = convert_little_to_big_endian(pool['attributes']['reserve1'])
@@ -50,13 +50,13 @@ def compare_pool_data(pool, target_block_number):
     diff_messages = []
 
     # Check for differences in reserve0
-    if local_reserve0_big_endian != current_reserves[0]:
-        diff_messages.append(f"Local reserve0 (big endian): {local_reserve0_big_endian}, Historical reserve0: {current_reserves[0]}")
+    if local_reserve0_big_endian != reserves[0]:
+        diff_messages.append(f"Local reserve0 (big endian): {local_reserve0_big_endian}, Historical reserve0: {reserves[0]}")
         has_diff = True
 
     # Check for differences in reserve1
-    if local_reserve1_big_endian != current_reserves[1]:
-        diff_messages.append(f"Local reserve1 (big endian): {local_reserve1_big_endian}, Historical reserve1: {current_reserves[1]}")
+    if local_reserve1_big_endian != reserves[1]:
+        diff_messages.append(f"Local reserve1 (big endian): {local_reserve1_big_endian}, Historical reserve1: {reserves[1]}")
         has_diff = True
 
     if has_diff:
