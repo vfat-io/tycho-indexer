@@ -27,6 +27,7 @@ pub struct StorageLocation<'a> {
     pub slot: [u8; 32],
     pub offset: usize,
     pub number_of_bytes: usize,
+    pub signed: bool,
 }
 
 pub struct UniswapPoolStorage<'a> {
@@ -72,9 +73,13 @@ impl<'a> UniswapPoolStorage<'a> {
 
                     // Check if there is a change in the data
                     if old_data != new_data {
+                        let value = match storage_location.signed {
+                            true => BigInt::from_signed_bytes_be(new_data),
+                            false => BigInt::from_unsigned_bytes_be(new_data),
+                        };
                         attributes.push(Attribute {
                             name: storage_location.name.to_string(),
-                            value: BigInt::from_signed_bytes_be(new_data).to_signed_bytes_le(),
+                            value: value.to_signed_bytes_le(),
                             change: ChangeType::Update.into(),
                         });
                     }
@@ -118,6 +123,7 @@ impl<'a> UniswapPoolStorage<'a> {
                 slot: tick_slot,
                 offset: 16,
                 number_of_bytes: 16,
+                signed: true,
             });
         }
 
