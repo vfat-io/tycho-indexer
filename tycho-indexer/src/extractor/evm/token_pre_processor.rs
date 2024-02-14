@@ -2,7 +2,7 @@ use crate::{extractor::evm::ERC20Token, models::Chain};
 use async_trait::async_trait;
 use ethers::{abi::Abi, contract::Contract, prelude::Provider, providers::Http, types::H160};
 use serde_json::from_str;
-use std::{fs, sync::Arc};
+use std::sync::Arc;
 use tracing::instrument;
 
 #[derive(Debug, Clone)]
@@ -16,11 +16,11 @@ pub trait TokenPreProcessorTrait: Send + Sync {
     async fn get_tokens(&self, addresses: Vec<H160>) -> Vec<ERC20Token>;
 }
 
+const ABI_STR: &str = include_str!("./abi/erc20.json");
+
 impl TokenPreProcessor {
     pub fn new(client: Provider<Http>) -> Self {
-        let abi_str = fs::read_to_string("tycho-indexer/src/extractor/evm/abi/erc20.json")
-            .expect("Unable to read ABI file");
-        let abi = from_str::<Abi>(&abi_str).expect("Unable to parse ABI");
+        let abi = from_str::<Abi>(ABI_STR).expect("Unable to parse ABI");
         TokenPreProcessor { client: Arc::new(client), erc20_abi: abi }
     }
 }
