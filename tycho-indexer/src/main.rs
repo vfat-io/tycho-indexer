@@ -235,7 +235,7 @@ async fn start_ambient_extractor(
 
     let start_block = 17361664;
     let stop_block = None;
-    let spkg = &"substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg";
+    let spkg = &"/opt/tycho-indexer/substreams/substreams-ethereum-ambient-v0.3.0.spkg";
     let module_name = &"map_changes";
     let block_span = stop_block.map(|stop| stop - start_block);
     info!(%ambient_name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Ambient extractor");
@@ -278,7 +278,7 @@ async fn start_uniswap_v2_extractor(
 
     let start_block = 10008300;
     let stop_block = None;
-    let spkg = &"substreams/ethereum-uniswap-v2/substreams-ethereum-uniswap-v2-v0.1.0.spkg";
+    let spkg = &"/opt/tycho-indexer/substreams/substreams-ethereum-uniswap-v2-v0.1.0.spkg";
     let module_name = &"map_pool_events";
     let block_span = stop_block.map(|stop| stop - start_block);
     info!(%name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Uniswap V2 extractor");
@@ -321,7 +321,7 @@ async fn start_uniswap_v3_extractor(
 
     let start_block = 12369621;
     let stop_block = None;
-    let spkg = &"substreams/ethereum-uniswap-v3/substreams-ethereum-uniswap-v3-v0.1.0.spkg";
+    let spkg = &"/opt/tycho-indexer/substreams/substreams-ethereum-uniswap-v3-v0.1.0.spkg";
     let module_name = &"map_pool_events";
     let block_span = stop_block.map(|stop| stop - start_block);
     info!(%name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Uniswap V3 extractor");
