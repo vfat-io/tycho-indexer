@@ -54,11 +54,10 @@ pub struct BlockSynchronizer {
     max_wait: std::time::Duration,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum SynchronizerState {
     Started,
     Ready(Header),
-    // TODO: looks like stale and delayed are the same, if a delayed synchronizer makes basically
     // no progress, we consider it stale at that point we should purge it.
     Stale(Header),
     Delayed(Header),
@@ -83,7 +82,7 @@ impl SynchronizerHandle {
         let latest_block = block_history.latest();
         match &self.state {
             SynchronizerState::Started | SynchronizerState::Ended => {
-                // TODO: warn, should not happen, ignore
+                warn!(state=?&self.state, "Advancing Synchronizer in this state not supported!");
             }
             SynchronizerState::Advanced(b) => {
                 let future_block = b.clone();
@@ -92,7 +91,7 @@ impl SynchronizerHandle {
             }
             SynchronizerState::Ready(previous_block) => {
                 // Try to recv the next expected block, update state accordingly.
-                self.handle_ready_state(max_wait, block_history, previous_block.clone())
+                self.try_recv_next_expected(max_wait, block_history, previous_block.clone())
                     .await;
             }
             SynchronizerState::Delayed(old_block) => {
@@ -100,7 +99,7 @@ impl SynchronizerHandle {
                 debug!(
                     ?old_block,
                     ?latest_block,
-                    ?extractor_id,
+                    %extractor_id,
                     "Trying to catch up to latest block"
                 );
                 self.try_catch_up(block_history, max_wait)
@@ -110,7 +109,7 @@ impl SynchronizerHandle {
                 debug!(
                     ?old_block,
                     ?latest_block,
-                    ?extractor_id,
+                    %extractor_id,
                     "Trying to catch up to latest block"
                 );
                 self.try_catch_up(block_history, max_wait)
@@ -119,7 +118,11 @@ impl SynchronizerHandle {
         }
     }
 
-    async fn handle_ready_state(
+    /// Standard way to advance a well-behaved state synchronizer.
+    ///
+    /// Will wait for a new block on the synchronizer within a timeout. And modify it's state based
+    /// on the outcome.
+    async fn try_recv_next_expected(
         &mut self,
         max_wait: std::time::Duration,
         block_history: &BlockHistory,
@@ -130,7 +133,7 @@ impl SynchronizerHandle {
             Ok(Some(b)) => self.transition(b, block_history),
             Ok(None) => {
                 error!(
-                    ?extractor_id,
+                    %extractor_id,
                     ?previous_block,
                     "Extractor terminated: closed header channel!"
                 );
@@ -139,12 +142,17 @@ impl SynchronizerHandle {
             }
             Err(_) => {
                 // trying to advance a block timed out
-                debug!(?extractor_id, ?previous_block, "Extractor did not check in within time.");
+                debug!(%extractor_id, ?previous_block, "Extractor did not check in within time.");
                 self.state = SynchronizerState::Delayed(previous_block.clone());
             }
         }
     }
 
+    /// Tries to catch up a delayed state synchronizer.
+    ///
+    /// If a synchronizer is delayed, this method will try to remove any as many waiting values in
+    /// it's queue until it caught up to the latest block, then it will try to wait for the next
+    /// expected block within a timeout. Finally the state is updated based on the outcome.
     async fn try_catch_up(&mut self, block_history: &BlockHistory, max_wait: std::time::Duration) {
         let mut results = Vec::new();
         let extractor_id = &self.extractor_id;
@@ -175,6 +183,10 @@ impl SynchronizerHandle {
         }
     }
 
+    /// Logic for transition a state synchronizer.
+    ///
+    /// Given a newly received block from a state synchronizer, this method transitions it's state
+    /// accordingly.
     fn transition(&mut self, latest_retrieved: Header, block_history: &BlockHistory) {
         let extractor_id = &self.extractor_id;
         let last_message_at = self.modify_ts;
@@ -445,6 +457,7 @@ impl BlockSynchronizer {
                     error!(?error, "websocket task exited");
                 }
                 error = state_sync_tasks.select_next_some() => {
+                    // TODO: close all synchronizers
                     error!(?error, "state synchronizer exited");
                 },
                 error = main_loop_jh => {

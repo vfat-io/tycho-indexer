@@ -374,7 +374,9 @@ where
         let snapshot = self
             .get_snapshots::<Vec<&String>>(Header::from_block(&block, false), &tracker, None)
             .await
-            .expect("failed to get initial snapshot");
+            .map_err(|rpc_err| {
+                anyhow::format_err!("failed to get initial snapshot: {}", rpc_err)
+            })?;
 
         let n_components = tracker.components.len();
         info!(n_components, "Initial snapshot retrieved, starting delta message feed");
