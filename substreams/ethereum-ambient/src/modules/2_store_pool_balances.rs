@@ -1,5 +1,4 @@
 use crate::pb::tycho::evm::v1::BlockPoolChanges;
-use num_bigint::Sign;
 use substreams::{
     scalar::BigInt,
     store::{StoreAdd, StoreAddBigInt, StoreNew},
