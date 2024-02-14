@@ -1,6 +1,7 @@
 use std::{
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
 
 use diesel_async::{
@@ -14,10 +15,6 @@ use tokio::{
         Mutex,
     },
     task::JoinHandle,
-};
-use tracing::{
-    log::{debug, info},
-    warn,
 };
 
 use crate::{
@@ -107,6 +104,7 @@ pub struct DBCacheWriteExecutor {
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
     persisted_block: Option<evm::Block>,
+    latest_rpc_block_number: u64,
     /// The `pending_block` field denotes the most recent block that is pending processing in this
     /// cache context. It's important to note that this is distinct from the blockchain's
     /// concept of a pending block. Typically, this block corresponds to the latest block that
@@ -118,20 +116,38 @@ pub struct DBCacheWriteExecutor {
 }
 
 impl DBCacheWriteExecutor {
-    pub fn new(
+    pub async fn new(
         name: String,
         chain: Chain,
         pool: Pool<AsyncPgConnection>,
         state_gateway: EVMStateGateway<AsyncPgConnection>,
         msg_receiver: mpsc::Receiver<DBCacheMessage>,
         error_transmitter: mpsc::Sender<StorageError>,
+        latest_rpc_block_number: u64,
     ) -> Self {
+        let mut conn = pool
+            .get()
+            .await
+            .expect("pool should be connected");
+
+        let persisted_block = match state_gateway
+            .get_block(&BlockIdentifier::Latest(chain), &mut conn)
+            .await
+        {
+            Ok(block) => Some(block),
+            Err(_) => None,
+        };
+
+        tracing::debug!("Persisted block: {:?}", persisted_block);
+        tracing::debug!("Latest_rpc_block_number: {:?}", latest_rpc_block_number);
+
         Self {
             name,
             chain,
             pool,
             state_gateway,
-            persisted_block: None,
+            persisted_block,
+            latest_rpc_block_number,
             pending_block: None,
             pending_db_txs: Vec::<WriteOp>::new(),
             msg_receiver,
@@ -141,7 +157,7 @@ impl DBCacheWriteExecutor {
 
     /// Spawns a task to process incoming database messages (write requests or flush commands).
     pub fn run(mut self) -> JoinHandle<()> {
-        info!("DBCacheWriteExecutor {} started!", self.name);
+        tracing::info!("DBCacheWriteExecutor {} started!", self.name);
         tokio::spawn(async move {
             while let Some(message) = self.msg_receiver.recv().await {
                 match message {
@@ -178,6 +194,54 @@ impl DBCacheWriteExecutor {
     /// does not connect with the last persisted block or if we fail to send a transaction to
     /// the database.
     async fn write(&mut self, mut new_db_tx: DBTransaction) {
+        // If the extractor is late or syncing, we send the transaction directly to the database
+        if self
+            .persisted_block
+            .map_or(false, |persisted| new_db_tx.block.number <= persisted.number) ||
+            new_db_tx.block.number < self.latest_rpc_block_number
+        {
+            tracing::info!("Received an old block number {:?}", new_db_tx.block.number);
+            // New database transaction for an old block are directly sent to the database
+            let mut conn = self
+                .pool
+                .get()
+                .await
+                .expect("pool should be connected");
+
+            let res = conn
+                .build_transaction()
+                .repeatable_read()
+                .run(|conn| {
+                    async {
+                        for op in new_db_tx.operations {
+                            match self.execute_write_op(&op, conn).await {
+                                Err(StorageError::DuplicateEntry(entity, id)) => {
+                                    // As this db transaction is old. It can contain
+                                    // already stored txs, we log the duplicate entry
+                                    // error and continue
+                                    tracing::debug!(
+                                        "Ignoring duplicate entry for {} with id {}",
+                                        entity,
+                                        id
+                                    );
+                                }
+                                Err(e) => {
+                                    return Err(e);
+                                }
+                                _ => {}
+                            }
+                        }
+                        Result::<(), StorageError>::Ok(())
+                    }
+                    .scope_boxed()
+                })
+                .await;
+
+            // Forward the result to the sender
+            let _ = new_db_tx.tx.send(res);
+            return;
+        }
+
         match self.pending_block {
             Some(pending) => {
                 if pending.hash == new_db_tx.block.hash {
@@ -185,51 +249,8 @@ impl DBCacheWriteExecutor {
                     self.pending_db_txs
                         .append(&mut new_db_tx.operations);
                     let _ = new_db_tx.tx.send(Ok(()));
-                } else if new_db_tx.block.number < pending.number {
-                    // New database transaction for an old block are directly sent to the database
-                    let mut conn = self
-                        .pool
-                        .get()
-                        .await
-                        .expect("pool should be connected");
-
-                    let res = conn
-                        .build_transaction()
-                        .repeatable_read()
-                        .run(|conn| {
-                            async {
-                                for op in new_db_tx.operations {
-                                    if let WriteOp::UpsertBlock(_) = op {
-                                        // Ignore block upserts, we expect it to already be stored
-                                        continue;
-                                    } else {
-                                        match self.execute_write_op(&op, conn).await {
-                                            Err(StorageError::DuplicateEntry(entity, id)) => {
-                                                // As this db transaction is old. It can contain
-                                                // already stored txs, we log the duplicate entry
-                                                // error and continue
-                                                debug!(
-                                                    "Ignoring duplicate entry for {} with id {}",
-                                                    entity, id
-                                                );
-                                            }
-                                            Err(e) => {
-                                                return Err(e);
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                                Result::<(), StorageError>::Ok(())
-                            }
-                            .scope_boxed()
-                        })
-                        .await;
-
-                    // Forward the result to the sender
-                    let _ = new_db_tx.tx.send(res);
                 } else if new_db_tx.block.parent_hash == pending.hash {
-                    debug!("New block received {} !", new_db_tx.block.parent_hash);
+                    tracing::debug!("New block received {} !", new_db_tx.block.parent_hash);
                     // New database transaction for the next block, we flush and cache it
                     self.flush()
                         .await
@@ -248,7 +269,7 @@ impl DBCacheWriteExecutor {
                 }
             }
             None => {
-                // if self.pending_block == None, this case can happen when we start Tycho or after
+                // if self.pending_block == None, this case happens when we start Tycho or after
                 // a call to flush().
                 self.pending_block = Some(new_db_tx.block);
 
@@ -263,13 +284,24 @@ impl DBCacheWriteExecutor {
     /// Extracts write operations from `pending_db_txs`, remove duplicates, executes them,
     /// updates `persisted_block` with `pending_block`, and sets `pending_block` to `None`.
     async fn flush(&mut self) -> Result<(), StorageError> {
+        let db_txs = std::mem::take(&mut self.pending_db_txs);
+
+        // Early return if there are no transactions to flush
+        if db_txs.is_empty() {
+            if self.pending_block.is_some() {
+                self.persisted_block = self.pending_block;
+                self.pending_block = None;
+            }
+            return Ok(());
+        }
+
+        tracing::info!("Flushing cached actions...");
         let mut conn = self
             .pool
             .get()
             .await
             .expect("pool should be connected");
 
-        let db_txs = std::mem::take(&mut self.pending_db_txs);
         let mut seen_operations: Vec<WriteOp> = Vec::new();
 
         conn.build_transaction()
@@ -296,8 +328,10 @@ impl DBCacheWriteExecutor {
             })
             .await?;
 
-        self.persisted_block = self.pending_block;
-        self.pending_block = None;
+        if self.pending_block.is_some() {
+            self.persisted_block = self.pending_block;
+            self.pending_block = None;
+        }
         Ok(())
     }
 
@@ -400,7 +434,7 @@ impl DBCacheWriteExecutor {
     }
 }
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Hash, Eq, PartialEq, Debug)]
 struct RevertParameters {
     start_version: Option<BlockOrTimestamp>,
     end_version: BlockOrTimestamp,
@@ -411,11 +445,12 @@ type DeltasCache = LruCache<
     (Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
 >;
 
+#[derive(Clone)]
 pub struct CachedGateway {
     tx: mpsc::Sender<DBCacheMessage>,
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
-    lru_cache: Mutex<DeltasCache>,
+    lru_cache: Arc<Mutex<DeltasCache>>,
 }
 
 impl CachedGateway {
@@ -429,7 +464,7 @@ impl CachedGateway {
             tx,
             pool,
             state_gateway,
-            lru_cache: Mutex::new(LruCache::new(NonZeroUsize::new(5).unwrap())),
+            lru_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(5).unwrap()))),
         }
     }
     pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
@@ -536,7 +571,7 @@ impl CachedGateway {
         let mut lru_cache = self.lru_cache.lock().await;
 
         if start_version.is_none() {
-            warn!("Get delta called with start_version = None, this might be a bug in one of the extractors")
+            tracing::warn!("Get delta called with start_version = None, this might be a bug in one of the extractors")
         }
 
         // Construct a key for the LRU cache
@@ -547,8 +582,11 @@ impl CachedGateway {
 
         // Check if the delta is already in the LRU cache
         if let Some(delta) = lru_cache.get(&key) {
+            tracing::debug!("Cached delta hit for {:?}", key);
             return Ok(delta.clone());
         }
+
+        tracing::debug!("Cache didn't hit delta. Getting delta for {:?}", key);
 
         // Flush the current state and wait for the flush to complete
         let (tx, rx) = oneshot::channel();
@@ -728,7 +766,9 @@ mod test_serial_db {
                 gateway.clone(),
                 rx,
                 err_tx,
-            );
+                0,
+            )
+            .await;
 
             let handle = write_executor.run();
 
@@ -802,7 +842,9 @@ mod test_serial_db {
                 gateway.clone(),
                 rx,
                 err_tx,
-            );
+                0,
+            )
+            .await;
 
             let handle = write_executor.run();
 
@@ -976,7 +1018,9 @@ mod test_serial_db {
                 gateway.clone(),
                 rx,
                 err_tx,
-            );
+                0,
+            )
+            .await;
 
             let handle = write_executor.run();
 
@@ -1075,7 +1119,9 @@ mod test_serial_db {
                 gateway.clone(),
                 rx,
                 err_tx,
-            );
+                0,
+            )
+            .await;
 
             let handle = write_executor.run();
             let cached_gw = CachedGateway::new(tx, connection_pool.clone(), gateway);
@@ -1181,7 +1227,9 @@ mod test_serial_db {
                 gateway.clone(),
                 rx,
                 err_tx,
-            );
+                0,
+            )
+            .await;
 
             let handle = write_executor.run();
             let cached_gw = CachedGateway::new(tx, connection_pool.clone(), gateway);

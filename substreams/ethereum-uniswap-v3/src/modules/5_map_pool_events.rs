@@ -23,7 +23,7 @@ pub fn map_pool_events(
 ) -> Result<BlockEntityChanges, substreams::errors::Error> {
     let mut tx_changes_map: HashMap<Vec<u8>, TransactionEntityChanges> = HashMap::new();
 
-    // Add created pairs to the tx_changes_map
+    // Add created pools to the tx_changes_map
     for change in &created_pools.changes {
         let transaction = change.tx.as_ref().unwrap();
         tx_changes_map.insert(transaction.hash.clone(), change.clone());
@@ -59,8 +59,15 @@ pub fn map_pool_events(
                         hex::encode(&pool.token1)
                     ));
 
+                    let pool_address_utf8 = pool
+                        .address
+                        .clone()
+                        .to_hex()
+                        .as_bytes()
+                        .to_vec();
+
                     let token_0_balance_change = BalanceChange {
-                        component_id: pool.address.clone(),
+                        component_id: pool_address_utf8.clone(),
                         token: pool.token0.clone(),
                         balance: token_0_balance
                             .clone()
@@ -69,7 +76,7 @@ pub fn map_pool_events(
                             .1,
                     };
                     let token_1_balance_change = BalanceChange {
-                        component_id: pool.address.clone(),
+                        component_id: pool_address_utf8.clone(),
                         token: pool.token1.clone(),
                         balance: token_1_balance
                             .clone()

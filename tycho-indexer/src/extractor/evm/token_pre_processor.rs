@@ -5,7 +5,7 @@ use serde_json::from_str;
 use std::{fs, sync::Arc};
 use tracing::instrument;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TokenPreProcessor {
     client: Arc<Provider<Http>>,
     erc20_abi: Abi,

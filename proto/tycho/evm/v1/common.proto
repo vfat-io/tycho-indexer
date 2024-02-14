@@ -91,6 +91,6 @@ message BalanceChange {
   bytes token = 1;
   // The new balance of the token.
   bytes balance = 2;
-  // The id of the component whose TVL is tracked.
+  // The id of the component whose TVL is tracked. Note: This MUST be utf8 encoded.
   bytes component_id = 3;
 }

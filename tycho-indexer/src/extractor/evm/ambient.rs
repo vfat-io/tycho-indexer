@@ -806,7 +806,9 @@ mod test_serial_db {
             evm_gw.clone(),
             rx,
             err_tx,
-        );
+            0,
+        )
+        .await;
 
         let handle = write_executor.run();
         let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
@@ -837,9 +839,10 @@ mod test_serial_db {
                 .await
                 .expect("pool should get a connection");
             evm_gw
-                .save_state(&state, &mut conn)
+                .save_state(&evm::Block::default(), &state)
                 .await
                 .expect("extaction state insertion succeeded");
+            let _ = evm_gw.flush().await;
 
             let maybe_err = err_rx
                 .try_recv()
@@ -1108,7 +1111,9 @@ mod test_serial_db {
                 evm_gw.clone(),
                 rx,
                 err_tx,
-            );
+                0,
+            )
+            .await;
 
             let handle = write_executor.run();
             let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());

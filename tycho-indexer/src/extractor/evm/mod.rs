@@ -553,7 +553,8 @@ impl ComponentBalance {
             balance: Bytes::from(msg.balance),
             balance_float,
             modify_tx: tx.hash,
-            component_id: hex::encode(msg.component_id),
+            component_id: String::from_utf8(msg.component_id)
+                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
         })
     }
 }
@@ -725,7 +726,9 @@ impl BlockContractChanges {
                     }
 
                     for balance_change in change.balance_changes.into_iter() {
-                        let component_id = hex::encode(balance_change.component_id.clone());
+                        let component_id =
+                            String::from_utf8(balance_change.component_id.clone())
+                                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
                         let token_address = H160::from_slice(balance_change.token.as_slice());
                         let balance = ComponentBalance::try_from_message(balance_change, &tx)?;
 
@@ -1105,23 +1108,24 @@ impl BlockEntityChanges {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
 
-            let mut txs_with_update: Vec<ProtocolChangesWithTx> = msg
+            let mut txs_with_update = msg
                 .changes
                 .into_iter()
-                .filter_map(|change| {
-                    change.tx.as_ref()?;
-                    Some(
-                        ProtocolChangesWithTx::try_from_message(
-                            change,
-                            &block,
-                            protocol_system,
-                            protocol_types,
+                .map(|change| {
+                    change.tx.as_ref().ok_or_else(|| {
+                        ExtractionError::DecodeError(
+                            "TransactionEntityChanges misses a transaction".to_owned(),
                         )
-                        .ok(),
+                    })?;
+
+                    ProtocolChangesWithTx::try_from_message(
+                        change,
+                        &block,
+                        protocol_system,
+                        protocol_types,
                     )
                 })
-                .collect::<Option<Vec<_>>>()
-                .expect("Failed to parse changes");
+                .collect::<Result<Vec<ProtocolChangesWithTx>, ExtractionError>>()?;
 
             // Sort updates by transaction index
             txs_with_update.sort_unstable_by_key(|update| update.tx.index);
@@ -1314,10 +1318,10 @@ pub mod fixtures {
                         )
                         .unwrap(),
                         balance: 50000000.encode_to_vec(),
-                        component_id: hex::decode(
-                            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902",
-                        )
-                        .unwrap(),
+                        component_id:
+                            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
+                                .as_bytes()
+                                .to_vec(),
                     }],
                 },
                 TransactionContractChanges {
@@ -1354,10 +1358,11 @@ pub mod fixtures {
                         )
                         .unwrap(),
                         balance: 10.encode_to_vec(),
-                        component_id: hex::decode(
-                            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902",
-                        )
-                        .unwrap(),
+                        component_id:
+                            "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
+                                .to_string()
+                                .as_bytes()
+                                .to_vec(),
                     }],
                 },
             ],
@@ -2458,7 +2463,9 @@ mod test {
         let msg_token = expected_token.0.to_vec();
         let expected_component_id =
             "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902";
-        let msg_component_id = hex::decode(expected_component_id).unwrap();
+        let msg_component_id = expected_component_id
+            .as_bytes()
+            .to_vec();
         let msg = substreams::BalanceChange {
             balance: msg_balance.to_vec(),
             token: msg_token,

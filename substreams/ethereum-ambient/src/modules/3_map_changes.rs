@@ -262,7 +262,10 @@ fn map_changes(
             let quote_balance = balance_store.get_last(format!("{}{}", pool_hash_hex, "quote"));
 
             let base_balance_change = BalanceChange {
-                component_id: balance_delta.pool_hash.clone(),
+                component_id: pool_hash_hex
+                    .clone()
+                    .as_bytes()
+                    .to_vec(),
                 token: pool.tokens[0].clone(),
                 balance: base_balance
                     .clone()
@@ -271,7 +274,10 @@ fn map_changes(
                     .1,
             };
             let quote_balance_change = BalanceChange {
-                component_id: balance_delta.pool_hash.clone(),
+                component_id: pool_hash_hex
+                    .clone()
+                    .as_bytes()
+                    .to_vec(),
                 token: pool.tokens[1].clone(),
                 balance: quote_balance
                     .expect("Couldn't get quote balance from store")
