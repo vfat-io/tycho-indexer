@@ -45,6 +45,51 @@ impl Header {
 
 type BlockSyncResult<T> = anyhow::Result<T>;
 
+/// Synchronizes multiple StgteSynchronizers on the time dimension.
+///
+/// ## Initialisation
+/// Queries all registered synchronizers for the first header. It expects all synchronizers to
+/// return the same header. If this is not the case the run method will error.
+///
+/// ## Main loop
+/// Once started, the synchronizers are queried for new blocks in lock step: the main loop queries
+/// all ready synchronizers for the last emitted data, builds the `FeedMessage` and sends it through
+/// the channel, then it schedule the wait procedure for the next block.
+///
+/// ### Synchronization Logic
+/// We know the next block number we expect - this helps us detect gaps (and reverts, but
+/// they don't require special handling)
+/// So the wait procedure consists in waiting for any of the receivers to emit a new block
+/// we check if that block corresponds with what we expected - if that is the case we deem
+/// the respective synchronizer as ready.
+/// At this point a timeout starts for the remaining channels, as soon as they reply, we
+/// again check against the expected block number and if they all reply with the expected
+/// next block within the timeout they are all considered as ready.
+///
+/// #### Note
+/// The described process above is the goal. It is currently not implemented like that. Instead we
+/// simply wait `block_time` + `wait_time`. Synchronizers are expected to respond within that
+/// timeout. This is simpler but only works on chains with fixed block times.
+///
+/// ### Synchronization State
+/// Now when either all receivers emitted a block or the timeout passed, we are ready for the
+/// next step. At this point each synchronizer can be in one of the following states:
+/// 1. Ready, it emitted the expected block, or a block of same height within the timeout
+/// 2. Advanced, it emitted a future block within the timeout: likely a reconnect happened and there
+///    is some significant back pressure on our channels. This basically means we are too slow to
+///    process messages.
+/// 3. Delayed, it did not emit anything within the timeout, or an older block than expected:
+///    Extractor syncing, connection issue, or firehose too slow.
+///
+/// We will only query synchronizer for state if they are in the ready state or if they are
+/// advanced in which case we simply take the advanced state. For others, we will inform
+/// clients about their current sync state but not actually emit old or advanced data.
+///
+/// Any extractors that have been stale or delayed for too long we will stop waiting for - so
+/// we will end their synchronizers thread and drop the handle.
+///
+/// Any advanced extractors, we will not wait for in the future, they will be assumed ready
+/// until we reach their height and from then on are handles is they were ready.
 pub struct BlockSynchronizer<S> {
     synchronizers: Option<HashMap<ExtractorIdentity, S>>,
     block_time: std::time::Duration,
@@ -59,8 +104,8 @@ pub enum SynchronizerState {
     Stale(Header),
     Delayed(Header),
     // For this to happen we must have a gap, and a gap usually means a new snapshot from the
-    // StateSynchroniser. This can only happen if we are processing too slow and the one of the
-    // synchronisers restarts e.g. because tycho ended the subscription.
+    // StateSynchronizer. This can only happen if we are processing too slow and the one of the
+    // synchronizers restarts e.g. because Tycho ended the subscription.
     Advanced(Header),
     Ended,
 }
@@ -342,37 +387,6 @@ where
             anyhow::bail!("Not a single synchronizer healthy!")
         }
 
-        // Enter the main loop: query the synchronizer for the last emitted data, then schedule the
-        // wait procedure for the next block.
-        //
-        // We know the next block number we expect - this helps us detect gaps (and reverts, but
-        // they don't require special handling)
-        // So the wait procedure consists in waiting for any of the receivers to emit a new block
-        // we check if that block corresponds with what we expected - if that is the case we deem
-        // the respective synchronizer as ready.
-        // At this point a timeout starts for the remaining channels, as soon as they reply, we
-        // again check against the expected block number and if they all reply with the expected
-        // next block within the timeout they are all considered as ready. (Currently not
-        // implemented)
-        //
-        // Now when either all receivers emitted a block or the timeout passed, we are ready for the
-        // next step. At this point each synchronizer can be at one of the following states.
-        // 1. Ready, it emitted the expected block, or a block of same height within the timeout
-        // 2. Advanced, it emitted a future block within the timeout: likely a reconnect happened
-        //    and there is some significant back pressure on our channels. This basically means we
-        //    are too slow to process messages.
-        // 3. Delayed, it did not emit anything within the timeout, or an older block than expected:
-        //    Extractor syncing, connection issue, or firehose too slow.
-        //
-        // We will only query synchronizer for state if they are in the ready state or if they are
-        // advanced in which case we simply take the advanced state. For others we will inform
-        // clients about their current sync state but not actually emit old data.
-        //
-        // Any extractors that have been stale or delayed for too long we will stop waiting for - so
-        // we will end their synchronizers.
-        //
-        // Any advanced extractors, we will not wait for in the future, they will be assumed ready
-        // until we reach their height.
         let mut block_history = BlockHistory::new(vec![blocks[0].clone()], 15);
         let (sync_tx, sync_rx) = mpsc::channel(30);
         let main_loop_jh: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
@@ -400,8 +414,8 @@ where
                 let synced_msgs = join_all(pulled_data_fut)
                     .await
                     .into_iter()
-                    // justification to ignore missing data here? IMO indicates a bug if a
-                    // ready extractor has not data available.
+                    // TODO: justification to ignore missing data here? IMO indicates a bug if a
+                    //  ready extractor has not data available.
                     .filter_map(|x| x)
                     .collect::<HashMap<_, _>>();
 
@@ -417,14 +431,14 @@ where
                     .await?;
 
                 // Here we simply wait block_time + max_wait. This will not work for chains with
-                // unkown block times but is simple enough for now.
-                // If we would like to support unkown block times we could: Instruct all handles to
+                // unknown block times but is simple enough for now.
+                // If we would like to support unknown block times we could: Instruct all handles to
                 // await the max block time, if a header arrives within that time transition as
                 // usual, but via a select statement get notified (using e.g. Notify) if any other
                 // handle finishes before the timeout. Then await again but this time only for
                 // max_wait and then proceed as usual. So basically each try_advance task would have
-                // a select statement that allows it to exit the first timeout
-                // preemtpively if any other try_advance task finished earlier.
+                // a select statement that allows it to exit the first timeout preemptively if any
+                // other try_advance task finished earlier.
                 let mut recv_futures = Vec::new();
                 for sh in sync_handles.values_mut() {
                     recv_futures
@@ -432,7 +446,8 @@ where
                 }
                 join_all(recv_futures).await;
 
-                // Purge any bad synchronizers, respective warnings are issues at transition time.
+                // Purge any bad synchronizers, respective warnings have already been issued at
+                // transition time.
                 sync_handles.retain(|_, v| match v.state {
                     SynchronizerState::Started | SynchronizerState::Ended => false,
                     SynchronizerState::Stale(_) => false,
