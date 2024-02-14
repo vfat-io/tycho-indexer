@@ -19,12 +19,12 @@ pub fn store_pool_balances(changes: BlockPoolChanges, balance_store: StoreAddBig
         balance_store.add(
             balance_delta.ordinal + 1,
             format!("{}{}", pool_hash_hex, "base"),
-            BigInt::from_bytes_le(Sign::Plus, &balance_delta.base_token_delta),
+            BigInt::from_unsigned_bytes_be(&balance_delta.base_token_delta),
         );
         balance_store.add(
             balance_delta.ordinal + 1,
             format!("{}{}", pool_hash_hex, "quote"),
-            BigInt::from_bytes_le(Sign::Plus, &balance_delta.quote_token_delta),
+            BigInt::from_unsigned_bytes_be(&balance_delta.quote_token_delta),
         );
     }
 }
