@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use chrono::{Local, NaiveDateTime};
 use futures03::{future::join_all, stream::FuturesUnordered, StreamExt};
 
-use crate::{deltas::DeltasClient, HttpRPCClient, WsDeltasClient};
 use tokio::{
     select,
     sync::mpsc::{self, Receiver},
@@ -46,16 +45,14 @@ impl Header {
 
 type BlockSyncResult<T> = anyhow::Result<T>;
 
-pub struct BlockSynchronizer {
-    deltas_client: WsDeltasClient,
-    synchronizers:
-        Option<HashMap<ExtractorIdentity, StateSynchronizer<HttpRPCClient, WsDeltasClient>>>,
+pub struct BlockSynchronizer<S> {
+    synchronizers: Option<HashMap<ExtractorIdentity, S>>,
     block_time: std::time::Duration,
     max_wait: std::time::Duration,
 }
 
-#[derive(Clone, Debug)]
-enum SynchronizerState {
+#[derive(Clone, Debug, PartialEq)]
+pub enum SynchronizerState {
     Started,
     Ready(Header),
     // no progress, we consider it stale at that point we should purge it.
@@ -68,15 +65,15 @@ enum SynchronizerState {
     Ended,
 }
 
-pub struct SynchronizerHandle {
+pub struct SynchronizerHandle<S> {
     extractor_id: ExtractorIdentity,
     state: SynchronizerState,
-    sync: StateSynchronizer<HttpRPCClient, WsDeltasClient>,
+    sync: S,
     modify_ts: NaiveDateTime,
     rx: Receiver<Header>,
 }
 
-impl SynchronizerHandle {
+impl<S> SynchronizerHandle<S> {
     async fn try_advance(&mut self, block_history: &BlockHistory, max_wait: std::time::Duration) {
         let extractor_id = &self.extractor_id;
         let latest_block = block_history.latest();
@@ -236,9 +233,10 @@ impl SynchronizerHandle {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct FeedMessage {
-    state_msgs: HashMap<String, StateSyncMessage>,
-    sync_states: HashMap<String, SynchronizerState>,
+    pub state_msgs: HashMap<String, StateSyncMessage>,
+    pub sync_states: HashMap<String, SynchronizerState>,
 }
 
 impl FeedMessage {
@@ -250,14 +248,26 @@ impl FeedMessage {
     }
 }
 
-impl BlockSynchronizer {
+impl<S> BlockSynchronizer<S>
+where
+    S: StateSynchronizer,
+{
+    pub fn new(block_time: std::time::Duration, max_wait: std::time::Duration) -> Self {
+        Self { synchronizers: None, block_time, max_wait }
+    }
+
+    pub fn register_synchronizer(mut self, id: ExtractorIdentity, synchronizer: S) -> Self {
+        let mut registered = self.synchronizers.unwrap_or_default();
+        registered.insert(id, synchronizer);
+        self.synchronizers = Some(registered);
+        self
+    }
     pub async fn run(mut self) -> BlockSyncResult<(JoinHandle<()>, Receiver<FeedMessage>)> {
-        let ws_task = self.deltas_client.connect().await?;
         let mut state_sync_tasks = FuturesUnordered::new();
         let mut synchronizers = self
             .synchronizers
             .take()
-            .expect("No synchronisers set!");
+            .expect("No synchronizers set!");
         let mut sync_handles = HashMap::with_capacity(synchronizers.len());
 
         for (extractor_id, synchronizer) in synchronizers.drain() {
@@ -276,7 +286,7 @@ impl BlockSynchronizer {
         }
 
         // startup, schedule first set of futures and wait for them to return to initialise
-        // synchronisers.
+        // synchronizers.
         let mut startup_futures = Vec::new();
         for (id, sh) in sync_handles.iter_mut() {
             let fut = async {
@@ -307,7 +317,7 @@ impl BlockSynchronizer {
                 }
             });
 
-        // Purge any stale synchronisers, require rest to be ready on the same block, else fail.
+        // Purge any stale synchronizers, require rest to be ready on the same block, else fail.
         // It's probably worth doing more complex things here if this is problematic e.g. setting
         // some as delayed and waiting for those to catch up, but I want to go with the simplest
         // solution first.
@@ -332,12 +342,12 @@ impl BlockSynchronizer {
             anyhow::bail!("Not a single synchronizer healthy!")
         }
 
-        // Enter the main loop: query the synchronizer for the last emitted block, then schedule the
-        // wait procedure for a next block.
+        // Enter the main loop: query the synchronizer for the last emitted data, then schedule the
+        // wait procedure for the next block.
         //
-        // We know the next block number we expect - this helps us detect gaps (and reverts but they
-        // don't require special handling)
-        // So the wait procdure consists in waiting for any of the receivers to emit a new block
+        // We know the next block number we expect - this helps us detect gaps (and reverts, but
+        // they don't require special handling)
+        // So the wait procedure consists in waiting for any of the receivers to emit a new block
         // we check if that block corresponds with what we expected - if that is the case we deem
         // the respective synchronizer as ready.
         // At this point a timeout starts for the remaining channels, as soon as they reply, we
@@ -359,7 +369,7 @@ impl BlockSynchronizer {
         // clients about their current sync state but not actually emit old data.
         //
         // Any extractors that have been stale or delayed for too long we will stop waiting for - so
-        // we will end their syncronizers.
+        // we will end their synchronizers.
         //
         // Any advanced extractors, we will not wait for in the future, they will be assumed ready
         // until we reach their height.
@@ -367,7 +377,7 @@ impl BlockSynchronizer {
         let (sync_tx, sync_rx) = mpsc::channel(30);
         let main_loop_jh: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             loop {
-                // Pull data from ready synchronisers
+                // Pull data from ready synchronizers
                 let mut pulled_data_fut = Vec::new();
                 let latest_block_hash = &block_history
                     .latest()
@@ -453,9 +463,6 @@ impl BlockSynchronizer {
 
         let nanny_jh = tokio::spawn(async move {
             select! {
-                error = ws_task => {
-                    error!(?error, "websocket task exited");
-                }
                 error = state_sync_tasks.select_next_some() => {
                     // TODO: close all synchronizers
                     error!(?error, "state synchronizer exited");
@@ -466,5 +473,156 @@ impl BlockSynchronizer {
             }
         });
         Ok((nanny_jh, sync_rx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::feed::synchronizer::SyncResult;
+    use async_trait::async_trait;
+    use std::sync::Arc;
+    use test_log::test;
+    use tokio::sync::{oneshot, Mutex};
+    use tycho_types::dto::Chain;
+
+    #[derive(Clone)]
+    struct MockStateSync {
+        header_tx: mpsc::Sender<Header>,
+        header_rx: Arc<Mutex<Option<Receiver<Header>>>>,
+        end_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+        pending: Arc<Mutex<Option<StateSyncMessage>>>,
+    }
+
+    impl MockStateSync {
+        fn new() -> Self {
+            let (tx, rx) = mpsc::channel(1);
+            Self {
+                header_tx: tx,
+                header_rx: Arc::new(Mutex::new(Some(rx))),
+                end_tx: Arc::new(Mutex::new(None)),
+                pending: Arc::new(Mutex::new(None)),
+            }
+        }
+        async fn send_header(&self, header: Header) {
+            self.header_tx
+                .send(header)
+                .await
+                .expect("sending header failed");
+        }
+
+        #[allow(dead_code)]
+        async fn set_pending(&self, state_msg: Option<StateSyncMessage>) {
+            let mut guard = self.pending.lock().await;
+            *guard = state_msg;
+        }
+    }
+
+    #[async_trait]
+    impl StateSynchronizer for MockStateSync {
+        async fn get_pending(&self, _: Bytes) -> Option<StateSyncMessage> {
+            let guard = self.pending.lock().await;
+            guard.clone()
+        }
+
+        async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)> {
+            let block_rx = {
+                let mut guard = self.header_rx.lock().await;
+                guard
+                    .take()
+                    .expect("Block receiver was not set!")
+            };
+
+            let end_rx = {
+                let (end_tx, end_rx) = oneshot::channel();
+                let mut guard = self.end_tx.lock().await;
+                *guard = Some(end_tx);
+                end_rx
+            };
+
+            let jh = tokio::spawn(async move {
+                _ = end_rx.await;
+                SyncResult::Ok(())
+            });
+
+            Ok((jh, block_rx))
+        }
+
+        async fn close(&mut self) -> SyncResult<()> {
+            let mut guard = self.end_tx.lock().await;
+            if let Some(tx) = guard.take() {
+                tx.send(())
+                    .expect("end channel closed!");
+                Ok(())
+            } else {
+                Err(anyhow::format_err!("Not connected"))
+            }
+        }
+    }
+
+    #[test(tokio::test)]
+    async fn test_two_ready_synchronizers() {
+        let v2_sync = MockStateSync::new();
+        let v3_sync = MockStateSync::new();
+        let block_sync = BlockSynchronizer::new(
+            std::time::Duration::from_millis(500),
+            std::time::Duration::from_millis(50),
+        )
+        .register_synchronizer(
+            ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap-v2".to_string() },
+            v2_sync.clone(),
+        )
+        .register_synchronizer(
+            ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap-v3".to_string() },
+            v3_sync.clone(),
+        );
+        let start_header = Header { number: 1, ..Default::default() };
+        v2_sync
+            .send_header(start_header.clone())
+            .await;
+        v3_sync
+            .send_header(start_header.clone())
+            .await;
+
+        let (_jh, mut rx) = block_sync
+            .run()
+            .await
+            .expect("BlockSynchronizer failed to start.");
+        let first_feed_msg = rx
+            .recv()
+            .await
+            .expect("header channel was closed");
+        let second_header = Header { number: 2, ..Default::default() };
+        v2_sync
+            .send_header(second_header.clone())
+            .await;
+        v3_sync
+            .send_header(second_header.clone())
+            .await;
+        let second_feed_msg = rx
+            .recv()
+            .await
+            .expect("header channel was closed!");
+
+        let exp1 = FeedMessage {
+            state_msgs: HashMap::new(),
+            sync_states: [
+                ("uniswap-v3".to_string(), SynchronizerState::Ready(start_header.clone())),
+                ("uniswap-v2".to_string(), SynchronizerState::Ready(start_header.clone())),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let exp2 = FeedMessage {
+            state_msgs: HashMap::new(),
+            sync_states: [
+                ("uniswap-v3".to_string(), SynchronizerState::Ready(second_header.clone())),
+                ("uniswap-v2".to_string(), SynchronizerState::Ready(second_header.clone())),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        assert_eq!(first_feed_msg, exp1);
+        assert_eq!(second_feed_msg, exp2);
     }
 }

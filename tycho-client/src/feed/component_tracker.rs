@@ -249,7 +249,7 @@ mod test {
     #[test]
     fn test_get_tracked_component_ids() {
         let mut tracker = with_mocked_rpc();
-        let (exp_contracts, component) = components_response();
+        let (_, component) = components_response();
         tracker
             .components
             .insert("Component1".to_string(), component);

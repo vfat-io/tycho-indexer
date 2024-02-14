@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::{
@@ -20,10 +21,10 @@ use tycho_types::{
 use super::Header;
 use crate::{deltas::DeltasClient, feed::component_tracker::ComponentTracker, rpc::RPCClient};
 
-type SyncResult<T> = anyhow::Result<T>;
+pub type SyncResult<T> = anyhow::Result<T>;
 
 #[derive(Clone)]
-pub struct StateSynchronizer<R: RPCClient, D: DeltasClient> {
+pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
     extractor_id: ExtractorIdentity,
     is_native: bool,
     rpc_client: R,
@@ -62,15 +63,15 @@ pub enum Snapshot {
 #[derive(Clone, PartialEq, Debug)]
 pub struct StateSyncMessage {
     /// The block number for this update.
-    header: Header,
+    pub header: Header,
     /// Snapshot for new components.
-    snapshots: HashMap<String, Snapshot>,
+    pub snapshots: HashMap<String, Snapshot>,
     /// A single delta contains state updates for all tracked components, as well as additional
     /// information about the system components e.g. newly added components (even below tvl), tvl
     /// updates, balance updates.
-    deltas: Option<Deltas>,
+    pub deltas: Option<Deltas>,
     /// Components that stopped being tracked.
-    removed_components: HashMap<String, ProtocolComponent>,
+    pub removed_components: HashMap<String, ProtocolComponent>,
 }
 
 impl StateSyncMessage {
@@ -100,8 +101,17 @@ impl StateSyncMessage {
     }
 }
 
-impl<R, D> StateSynchronizer<R, D>
+#[async_trait]
+pub trait StateSynchronizer: Send + Sync + 'static {
+    async fn get_pending(&self, block_hash: Bytes) -> Option<StateSyncMessage>;
+    async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)>;
+    async fn close(&mut self) -> SyncResult<()>;
+}
+
+impl<R, D> ProtocolStateSynchronizer<R, D>
 where
+    // TODO: Consider moving these contraints directly to the
+    // client...
     R: RPCClient + Clone + Send + Sync + 'static,
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
@@ -126,75 +136,6 @@ where
                 pending: None,
             })),
             end_tx: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    pub async fn get_pending(&self, block_hash: Bytes) -> Option<StateSyncMessage> {
-        let mut shared = self.shared.lock().await;
-        let to_serve = shared.pending.take();
-        shared.last_served_block_hash = Some(block_hash);
-        to_serve
-    }
-
-    pub async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)> {
-        let (mut block_tx, block_rx) = channel(15);
-
-        let this = self.clone();
-        let jh = tokio::spawn(async move {
-            let mut retry_count = 0;
-            while retry_count < this.max_retries {
-                info!(extractor_id=%&this.extractor_id, retry_count, "(Re)starting synchronization loop");
-                let (end_tx, end_rx) = oneshot::channel::<()>();
-                {
-                    let mut end_tx_guard = this.end_tx.lock().await;
-                    *end_tx_guard = Some(end_tx);
-                }
-
-                select! {
-                    res = this.clone().state_sync(&mut block_tx) => {
-                        match  res
-                        {
-                            Err(e) => {
-                                error!(
-                                    extractor_id=%&this.extractor_id,
-                                    retry_count,
-                                    error=%e,
-                                    "State synchronization errored!"
-                                );
-                            }
-                            _ => {
-                                warn!(
-                                    extractor_id=%&this.extractor_id,
-                                    retry_count,
-                                    "State sync exited with Ok(())"
-                                );
-                            }
-                        }
-                    },
-                    _ = end_rx => {
-                        info!(
-                            extractor_id=%&this.extractor_id,
-                            retry_count,
-                            "StateSynchronizer received close signal. Stopping"
-                        );
-                        return Ok(())
-                    }
-                }
-                retry_count += 1;
-            }
-            Err(anyhow::format_err!("Max retries exceeded giving up"))
-        });
-
-        Ok((jh, block_rx))
-    }
-
-    pub async fn close(&mut self) -> SyncResult<()> {
-        let mut end_tx = self.end_tx.lock().await;
-        if let Some(tx) = end_tx.take() {
-            let _ = tx.send(());
-            Ok(())
-        } else {
-            Err(anyhow::format_err!("Not started"))
         }
     }
 
@@ -461,6 +402,82 @@ where
     }
 }
 
+#[async_trait]
+impl<R, D> StateSynchronizer for ProtocolStateSynchronizer<R, D>
+where
+    R: RPCClient + Clone + Send + Sync + 'static,
+    D: DeltasClient + Clone + Send + Sync + 'static,
+{
+    async fn get_pending(&self, block_hash: Bytes) -> Option<StateSyncMessage> {
+        let mut shared = self.shared.lock().await;
+        let to_serve = shared.pending.take();
+        shared.last_served_block_hash = Some(block_hash);
+        to_serve
+    }
+
+    async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)> {
+        let (mut block_tx, block_rx) = channel(15);
+
+        let this = self.clone();
+        let jh = tokio::spawn(async move {
+            let mut retry_count = 0;
+            while retry_count < this.max_retries {
+                info!(extractor_id=%&this.extractor_id, retry_count, "(Re)starting synchronization loop");
+                let (end_tx, end_rx) = oneshot::channel::<()>();
+                {
+                    let mut end_tx_guard = this.end_tx.lock().await;
+                    *end_tx_guard = Some(end_tx);
+                }
+
+                select! {
+                    res = this.clone().state_sync(&mut block_tx) => {
+                        match  res
+                        {
+                            Err(e) => {
+                                error!(
+                                    extractor_id=%&this.extractor_id,
+                                    retry_count,
+                                    error=%e,
+                                    "State synchronization errored!"
+                                );
+                            }
+                            _ => {
+                                warn!(
+                                    extractor_id=%&this.extractor_id,
+                                    retry_count,
+                                    "State sync exited with Ok(())"
+                                );
+                            }
+                        }
+                    },
+                    _ = end_rx => {
+                        info!(
+                            extractor_id=%&this.extractor_id,
+                            retry_count,
+                            "StateSynchronizer received close signal. Stopping"
+                        );
+                        return Ok(())
+                    }
+                }
+                retry_count += 1;
+            }
+            Err(anyhow::format_err!("Max retries exceeded giving up"))
+        });
+
+        Ok((jh, block_rx))
+    }
+
+    async fn close(&mut self) -> SyncResult<()> {
+        let mut end_tx = self.end_tx.lock().await;
+        if let Some(tx) = end_tx.take() {
+            let _ = tx.send(());
+            Ok(())
+        } else {
+            Err(anyhow::format_err!("Not started"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{
@@ -468,7 +485,8 @@ mod test {
         feed::{
             component_tracker::ComponentTracker,
             synchronizer::{
-                NativeSnapshot, Snapshot, StateSyncMessage, StateSynchronizer, VMSnapshot,
+                NativeSnapshot, ProtocolStateSynchronizer, Snapshot, StateSyncMessage,
+                StateSynchronizer, VMSnapshot,
             },
             Header,
         },
@@ -586,12 +604,13 @@ mod test {
         native: bool,
         rpc_client: Option<MockRPCClient>,
         deltas_client: Option<MockDeltasClient>,
-    ) -> StateSynchronizer<ArcRPCClient<MockRPCClient>, ArcDeltasClient<MockDeltasClient>> {
+    ) -> ProtocolStateSynchronizer<ArcRPCClient<MockRPCClient>, ArcDeltasClient<MockDeltasClient>>
+    {
         let rpc_client = ArcRPCClient(Arc::new(rpc_client.unwrap_or_else(|| MockRPCClient::new())));
         let deltas_client =
             ArcDeltasClient(Arc::new(deltas_client.unwrap_or_else(|| MockDeltasClient::new())));
 
-        StateSynchronizer::new(
+        ProtocolStateSynchronizer::new(
             ExtractorIdentity::new(Chain::Ethereum, "uniswap-v2"),
             native,
             50.0,
@@ -784,12 +803,12 @@ mod test {
             )
             .returning(|_, _, _| {
                 // return Component3 state
-                Ok((ProtocolStateRequestResponse {
+                Ok(ProtocolStateRequestResponse {
                     states: vec![ResponseProtocolState {
                         component_id: "Component3".to_string(),
                         ..Default::default()
                     }],
-                }))
+                })
             });
 
         // mock calls for the initial state snapshots
@@ -811,7 +830,7 @@ mod test {
             .expect_get_protocol_states()
             .returning(|_, _, _| {
                 // Initial state snapshot
-                Ok((ProtocolStateRequestResponse {
+                Ok(ProtocolStateRequestResponse {
                     states: vec![
                         ResponseProtocolState {
                             component_id: "Component1".to_string(),
@@ -822,7 +841,7 @@ mod test {
                             ..Default::default()
                         },
                     ],
-                }))
+                })
             });
         // Mock deltas client and messages
         let mut deltas_client = MockDeltasClient::new();
@@ -917,7 +936,7 @@ mod test {
             .await
             .expect("waiting for second state msg timed out!")
             .expect("state sync block sender closed!");
-        state_sync.close().await;
+        let _ = state_sync.close().await;
         let res = state_sync
             .get_pending(header.hash.clone())
             .await
