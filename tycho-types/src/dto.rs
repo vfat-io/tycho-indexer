@@ -45,7 +45,7 @@ pub enum ChangeType {
 impl ChangeType {
     pub fn merge(&self, other: &Self) -> Self {
         if matches!(self, Self::Creation) {
-            return Self::Creation
+            Self::Creation
         } else {
             *other
         }
@@ -1020,7 +1020,7 @@ mod test {
         }
         "#;
 
-        serde_json::from_str::<BlockAccountChanges>(&json_data).expect("parsing failed");
+        serde_json::from_str::<BlockAccountChanges>(json_data).expect("parsing failed");
     }
 
     #[test]
@@ -1075,7 +1075,7 @@ mod test {
         }
         "#;
 
-        serde_json::from_str::<BlockEntityChangesResult>(&json_data).expect("parsing failed");
+        serde_json::from_str::<BlockEntityChangesResult>(json_data).expect("parsing failed");
     }
 
     #[test]

@@ -82,8 +82,7 @@ impl StateSyncMessage {
         self.snapshots
             .retain(|k, _| !other.removed_components.contains_key(k));
 
-        self.snapshots
-            .extend(other.snapshots.into_iter());
+        self.snapshots.extend(other.snapshots);
         let deltas = match (self.deltas, other.deltas) {
             (Some(l), Some(r)) => Some(l.merge(r)),
             (None, Some(r)) => Some(r),
@@ -91,7 +90,7 @@ impl StateSyncMessage {
             (None, None) => None,
         };
         self.removed_components
-            .extend(other.removed_components.into_iter());
+            .extend(other.removed_components);
         Self {
             header: other.header,
             snapshots: self.snapshots,
@@ -115,6 +114,7 @@ where
     R: RPCClient + Clone + Send + Sync + 'static,
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
+    #[allow(dead_code)]
     pub fn new(
         extractor_id: ExtractorIdentity,
         native: bool,
@@ -157,7 +157,6 @@ where
                 tracked_components
                     .components
                     .keys()
-                    .into_iter()
                     .collect::<Vec<_>>()
             });
         if !self.is_native {
@@ -195,7 +194,6 @@ where
                 snapshots: tracked_components
                     .components
                     .values()
-                    .into_iter()
                     .map(|comp| {
                         let component_id = &comp.id;
                         let account_snapshots: HashMap<_, _> = comp
@@ -606,9 +604,8 @@ mod test {
         deltas_client: Option<MockDeltasClient>,
     ) -> ProtocolStateSynchronizer<ArcRPCClient<MockRPCClient>, ArcDeltasClient<MockDeltasClient>>
     {
-        let rpc_client = ArcRPCClient(Arc::new(rpc_client.unwrap_or_else(|| MockRPCClient::new())));
-        let deltas_client =
-            ArcDeltasClient(Arc::new(deltas_client.unwrap_or_else(|| MockDeltasClient::new())));
+        let rpc_client = ArcRPCClient(Arc::new(rpc_client.unwrap_or_default()));
+        let deltas_client = ArcDeltasClient(Arc::new(deltas_client.unwrap_or_default()));
 
         ProtocolStateSynchronizer::new(
             ExtractorIdentity::new(Chain::Ethereum, "uniswap-v2"),

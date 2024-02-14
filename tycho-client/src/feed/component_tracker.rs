@@ -128,7 +128,6 @@ where
     pub fn get_tracked_component_ids(&self) -> Vec<ProtocolId> {
         self.components
             .keys()
-            .into_iter()
             .map(|k| ProtocolId { chain: self.chain, id: k.clone() })
             .collect()
     }

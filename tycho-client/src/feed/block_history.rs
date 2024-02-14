@@ -82,8 +82,8 @@ impl BlockHistory {
                 }
                 Ok(())
             }
-            Err(e) => return Err(e),
-            _ => return Ok(()),
+            Err(e) => Err(e),
+            _ => Ok(()),
         }
     }
 
@@ -126,8 +126,7 @@ impl BlockHistory {
     fn hash_in_history(&self, h: &Bytes) -> bool {
         self.history
             .iter()
-            .find(|b| &b.hash == h)
-            .is_some()
+            .any(|b| &b.hash == h)
     }
 
     pub fn latest(&self) -> Option<&Header> {
@@ -151,7 +150,7 @@ mod test {
         let mut bytes = [0u8; 32];
         rng.fill(&mut bytes[..]);
 
-        return Bytes::from(bytes);
+        Bytes::from(bytes)
     }
 
     fn int_hash(no: u64) -> Bytes {
@@ -160,7 +159,7 @@ mod test {
 
     fn generate_blocks(n: usize, parent: Option<Bytes>) -> Vec<Header> {
         let mut blocks = Vec::with_capacity(n);
-        let mut parent_hash = parent.unwrap_or_else(|| random_hash());
+        let mut parent_hash = parent.unwrap_or_else(random_hash);
         for i in 0..n {
             let hash = int_hash(i as u64);
             blocks.push(Header {

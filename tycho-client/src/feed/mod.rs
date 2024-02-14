@@ -335,7 +335,7 @@ where
         let mut startup_futures = Vec::new();
         for (id, sh) in sync_handles.iter_mut() {
             let fut = async {
-                let res = timeout(self.block_time.into(), sh.rx.recv()).await;
+                let res = timeout(self.block_time, sh.rx.recv()).await;
                 (id.clone(), res)
             };
             startup_futures.push(fut);
@@ -369,7 +369,6 @@ where
         sync_handles.retain(|_, v| matches!(v.state, SynchronizerState::Ready(_)));
         let blocks: Vec<_> = sync_handles
             .values()
-            .into_iter()
             .map(|v| match v.state {
                 SynchronizerState::Ready(ref b) => b,
                 _ => panic!("Unreachable"),
@@ -416,7 +415,7 @@ where
                     .into_iter()
                     // TODO: justification to ignore missing data here? IMO indicates a bug if a
                     //  ready extractor has not data available.
-                    .filter_map(|x| x)
+                    .flatten()
                     .collect::<HashMap<_, _>>();
 
                 // Send retrieved data to receivers.
@@ -460,7 +459,6 @@ where
                     .push(
                         sync_handles
                             .values()
-                            .into_iter()
                             .filter_map(|v| match &v.state {
                                 SynchronizerState::Ready(b) => Some(b),
                                 _ => None,
