@@ -289,6 +289,7 @@ fn map_changes(
         if let Some(tx_change) = block_changes
             .changes
             .iter_mut()
+            // TODO: be better than this (quadratic complexity)
             .find(|tx_change| {
                 tx_change
                     .tx
@@ -312,7 +313,8 @@ fn map_changes(
                 Some(pool) => pool,
                 None => panic!("Pool not found in store for given hash: {}", pool_hash_hex),
             };
-            let token_index = if balance_delta.token_type == "quote" { 1 } else { 0 };
+            let token_type = substreams::key::segment_at(&store_delta.key, 1);
+            let token_index = if token_type == "quote" { 1 } else { 0 };
 
             let balance_change = BalanceChange {
                 component_id: pool_hash_hex.as_bytes().to_vec(),
@@ -333,6 +335,7 @@ fn map_changes(
         if let Some(tx_change) = block_changes
             .changes
             .iter_mut()
+            // TODO: be better than this (quadratic complexity)
             .find(|tx_change| {
                 tx_change
                     .tx

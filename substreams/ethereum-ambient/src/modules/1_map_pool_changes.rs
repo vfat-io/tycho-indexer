@@ -118,6 +118,7 @@ fn map_pool_changes(block: eth::v2::Block) -> Result<BlockPoolChanges, substream
             balance_deltas.extend([base_balance_delta.clone(), quote_balance_delta.clone()]);
         }
     }
+    balance_deltas.sort_by_key(|delta| (delta.ordinal, delta.token_type.clone()));
     let pool_changes = BlockPoolChanges { protocol_components, balance_deltas };
     Ok(pool_changes)
 }

@@ -6,8 +6,7 @@ use substreams::{
 
 #[substreams::handlers::store]
 pub fn store_pool_balances(changes: BlockPoolChanges, balance_store: StoreAddBigInt) {
-    let mut deltas = changes.balance_deltas.clone();
-    deltas.sort_by_key(|delta| delta.ordinal);
+    let deltas = changes.balance_deltas.clone();
     for balance_delta in deltas {
         let pool_hash_hex = hex::encode(&balance_delta.pool_hash);
         balance_store.add(
