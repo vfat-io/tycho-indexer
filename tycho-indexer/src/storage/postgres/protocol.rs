@@ -21,10 +21,9 @@ use crate::{
             PostgresGateway,
         },
         Address, Balance, BlockOrTimestamp, ComponentId, ContractDelta, ContractId,
-        ProtocolGateway, StorableBlock, StorableComponentBalance, StorableContract,
-        StorableProtocolComponent, StorableProtocolState, StorableProtocolStateDelta,
-        StorableProtocolType, StorableToken, StorableTransaction, StorageError, StoreVal, TxHash,
-        Version,
+        ProtocolGateway, StorableComponentBalance, StorableContract, StorableProtocolComponent,
+        StorableProtocolState, StorableProtocolStateDelta, StorableProtocolType, StorableToken,
+        StorageError, StoreVal, TxHash, Version,
     },
 };
 use tycho_types::Bytes;
@@ -32,10 +31,8 @@ use tycho_types::Bytes;
 use super::WithTxHash;
 
 // Private methods
-impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
+impl<A, D, T> PostgresGateway<A, D, T>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
@@ -110,7 +107,7 @@ where
     async fn _get_or_create_protocol_system_id(
         &self,
         new: String,
-        conn: &mut <PostgresGateway<B, TX, A, D, T> as ProtocolGateway>::DB,
+        conn: &mut <PostgresGateway<A, D, T> as ProtocolGateway>::DB,
     ) -> Result<i64, StorageError> {
         use super::schema::protocol_system::dsl::*;
 
@@ -137,10 +134,8 @@ where
 }
 
 #[async_trait]
-impl<B, TX, A, D, T> ProtocolGateway for PostgresGateway<B, TX, A, D, T>
+impl<A, D, T> ProtocolGateway for PostgresGateway<A, D, T>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
@@ -1268,13 +1263,7 @@ mod test {
     use ethers::prelude::H256;
     use std::str::FromStr;
 
-    type EVMGateway = PostgresGateway<
-        evm::Block,
-        evm::Transaction,
-        evm::Account,
-        evm::AccountUpdate,
-        evm::ERC20Token,
-    >;
+    type EVMGateway = PostgresGateway<evm::Account, evm::AccountUpdate, evm::ERC20Token>;
 
     const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";

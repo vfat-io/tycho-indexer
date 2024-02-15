@@ -6,8 +6,9 @@ use ethers::utils::keccak256;
 use tracing::instrument;
 
 use crate::storage::{
-    AccountToContractStore, Address, Balance, ChangeType, Code, ContractId, ContractStateGateway,
-    ContractStore, StoreKey, StoreVal,
+    AccountToContractStore, Address, Balance, BlockOrTimestamp, ChangeType, Code, ContractDelta,
+    ContractId, ContractStateGateway, ContractStore, StorableContract, StorableToken, StoreKey,
+    StoreVal, TxHash, Version,
 };
 use tycho_types::Bytes;
 
@@ -23,10 +24,8 @@ struct CreatedOrDeleted<T> {
 }
 
 // Private methods
-impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
+impl<A, D, T> PostgresGateway<A, D, T>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
@@ -631,10 +630,8 @@ where
 }
 
 #[async_trait]
-impl<B, TX, A, D, T> ContractStateGateway for PostgresGateway<B, TX, A, D, T>
+impl<A, D, T> ContractStateGateway for PostgresGateway<A, D, T>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
@@ -1255,13 +1252,7 @@ mod test {
 
     use super::*;
 
-    type EvmGateway = PostgresGateway<
-        evm::Block,
-        evm::Transaction,
-        evm::Account,
-        evm::AccountUpdate,
-        evm::ERC20Token,
-    >;
+    type EvmGateway = PostgresGateway<evm::Account, evm::AccountUpdate, evm::ERC20Token>;
     type MaybeTS = Option<NaiveDateTime>;
 
     async fn setup_db() -> AsyncPgConnection {

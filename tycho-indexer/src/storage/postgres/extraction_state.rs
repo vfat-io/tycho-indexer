@@ -3,17 +3,14 @@ use diesel::ExpressionMethods;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use crate::storage::{
-    ContractDelta, ExtractionState, ExtractionStateGateway, StorableBlock, StorableContract,
-    StorableToken, StorableTransaction,
+    ContractDelta, ExtractionState, ExtractionStateGateway, StorableContract, StorableToken,
 };
 
 use super::{orm, schema, Chain, PostgresGateway, StorageError};
 
 #[async_trait]
-impl<B, TX, A, D, T> ExtractionStateGateway for PostgresGateway<B, TX, A, D, T>
+impl<A, D, T> ExtractionStateGateway for PostgresGateway<A, D, T>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
@@ -144,21 +141,9 @@ mod test {
 
     async fn get_dgw(
         conn: &mut AsyncPgConnection,
-    ) -> PostgresGateway<
-        evm::Block,
-        evm::Transaction,
-        evm::Account,
-        evm::AccountUpdate,
-        evm::ERC20Token,
-    > {
-        PostgresGateway::<
-            evm::Block,
-            evm::Transaction,
-            evm::Account,
-            evm::AccountUpdate,
-            evm::ERC20Token,
-        >::from_connection(conn)
-        .await
+    ) -> PostgresGateway<evm::Account, evm::AccountUpdate, evm::ERC20Token> {
+        PostgresGateway::<evm::Account, evm::AccountUpdate, evm::ERC20Token>::from_connection(conn)
+            .await
     }
 
     #[tokio::test]

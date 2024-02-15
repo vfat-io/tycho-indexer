@@ -7,17 +7,15 @@ use tracing::{instrument, warn};
 use tycho_types::Bytes;
 
 use crate::storage::{
-    BlockHash, BlockIdentifier, ContractDelta, StorableBlock, StorableContract, StorableToken,
-    StorableTransaction, StorageError, TxHash,
+    BlockHash, BlockIdentifier, ContractDelta, StorableContract, StorableToken, StorageError,
+    TxHash,
 };
 
 use super::{orm, schema, PostgresGateway};
 use crate::models::blockchain::*;
 
-impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
+impl<A, D, T> PostgresGateway<A, D, T>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
@@ -281,13 +279,7 @@ mod test {
 
     use super::*;
 
-    type EVMGateway = PostgresGateway<
-        evm::Block,
-        evm::Transaction,
-        evm::Account,
-        evm::AccountUpdate,
-        evm::ERC20Token,
-    >;
+    type EVMGateway = PostgresGateway<evm::Account, evm::AccountUpdate, evm::ERC20Token>;
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();

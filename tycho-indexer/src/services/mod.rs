@@ -27,8 +27,6 @@ mod rpc;
 mod ws;
 
 pub type EvmPostgresGateway = PostgresGateway<
-    evm::Block,         //B
-    evm::Transaction,   //TX
     evm::Account,       //A
     evm::AccountUpdate, //D
     evm::ERC20Token,    //T

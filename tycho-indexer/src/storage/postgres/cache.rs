@@ -186,13 +186,7 @@ pub enum DBCacheMessage {
 /// - If the block is pending, we group the transaction with other transactions that finish before
 ///   we observe the next block.
 
-type EVMGateway = PostgresGateway<
-    evm::Block,
-    evm::Transaction,
-    evm::Account,
-    evm::AccountUpdate,
-    evm::ERC20Token,
->;
+type EVMGateway = PostgresGateway<evm::Account, evm::AccountUpdate, evm::ERC20Token>;
 
 /// # Write Cache
 ///

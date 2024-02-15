@@ -145,9 +145,8 @@ use tracing::{debug, info};
 use crate::models::Chain;
 
 use super::{
-    BlockIdentifier, BlockOrTimestamp, ContractDelta, StateGateway, StorableBlock,
-    StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
-    VersionKind,
+    BlockIdentifier, BlockOrTimestamp, ContractDelta, StateGateway, StorableContract,
+    StorableToken, StorageError, TxHash, Version, VersionKind,
 };
 
 pub mod cache;
@@ -364,20 +363,16 @@ impl Version {
 }
 
 #[derive(Clone)]
-pub struct PostgresGateway<B, TX, A, D, T> {
+pub struct PostgresGateway<A, D, T> {
     protocol_system_id_cache: Arc<ProtocolSystemEnumCache>,
     chain_id_cache: Arc<ChainEnumCache>,
-    _phantom_block: PhantomData<B>,
-    _phantom_tx: PhantomData<TX>,
     _phantom_acc: PhantomData<A>,
     _phantom_delta: PhantomData<D>,
     _phantom_token: PhantomData<T>,
 }
 
-impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
+impl<A, D, T> PostgresGateway<A, D, T>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
@@ -389,8 +384,6 @@ where
         Self {
             protocol_system_id_cache: protocol_system_cache,
             chain_id_cache: cache,
-            _phantom_block: PhantomData,
-            _phantom_tx: PhantomData,
             _phantom_acc: PhantomData,
             _phantom_delta: PhantomData,
             _phantom_token: PhantomData,
@@ -449,7 +442,7 @@ where
         let cache = ChainEnumCache::from_pool(pool.clone()).await?;
         let protocol_system_cache: ValueIdTableCache<String> =
             ProtocolSystemEnumCache::from_pool(pool.clone()).await?;
-        let gw = PostgresGateway::<B, TX, A, D, T>::with_cache(
+        let gw = PostgresGateway::<A, D, T>::with_cache(
             Arc::new(cache),
             Arc::new(protocol_system_cache),
         );
@@ -458,10 +451,8 @@ where
     }
 }
 
-impl<B, TX, A, D, T> StateGateway<AsyncPgConnection> for PostgresGateway<B, TX, A, D, T>
+impl<A, D, T> StateGateway<AsyncPgConnection> for PostgresGateway<A, D, T>
 where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
     D: ContractDelta + From<A>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,

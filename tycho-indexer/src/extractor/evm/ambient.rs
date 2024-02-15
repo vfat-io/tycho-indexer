@@ -880,14 +880,11 @@ mod test_serial_db {
         postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
         postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
         postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None).await;
-        let evm_gw = PostgresGateway::<
-            evm::Block,
-            evm::Transaction,
-            evm::Account,
-            evm::AccountUpdate,
-            evm::ERC20Token,
-        >::from_connection(&mut conn)
-        .await;
+        let evm_gw =
+            PostgresGateway::<evm::Account, evm::AccountUpdate, evm::ERC20Token>::from_connection(
+                &mut conn,
+            )
+            .await;
 
         let (tx, rx) = channel(10);
 
@@ -1172,8 +1169,6 @@ mod test_serial_db {
             postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None)
                 .await;
             let evm_gw = PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
                 evm::Account,
                 evm::AccountUpdate,
                 evm::ERC20Token,
@@ -1258,8 +1253,6 @@ mod test_serial_db {
             let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
 
             let evm_gw = PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
                 evm::Account,
                 evm::AccountUpdate,
                 evm::ERC20Token,
