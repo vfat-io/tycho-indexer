@@ -374,9 +374,14 @@ where
             .flat_map(|pc| {
                 let pc_id = protocol_db_id_map
                     .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
-                    .expect("Could not find Protocol Component."); //Because we just inserted the protocol systems, there should not be any missing.
-                                                                   // However, trying to handle this via Results is needlessly difficult, because you
-                                                                   // can not use flat_map on a Result.
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Could not find Protocol Component with ID: {}, Protocol System: {}, Chain: {}",
+                            pc.id, pc.protocol_system, pc.chain
+                        )
+                    }); //Because we just inserted the protocol systems, there should not be any missing.
+                                                                     // However, trying to handle this via Results is needlessly difficult, because you
+                                                                     // can not use flat_map on a Result.
 
                 pc.get_byte_token_addresses()
                     .into_iter()
@@ -428,7 +433,12 @@ where
             .flat_map(|pc| {
                 let pc_id = protocol_db_id_map
                     .get(&(pc.id.clone(), pc.protocol_system.clone(), pc.chain))
-                    .expect("Could not find Protocol Component."); //Because we just inserted the protocol systems, there should not be any missing.
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Could not find Protocol Component with ID: {}, Protocol System: {}, Chain: {}",
+                            pc.id, pc.protocol_system, pc.chain
+                        )
+                    }); //Because we just inserted the protocol systems, there should not be any missing.
                                                                    // However, trying to handel this via Results is needlessly difficult, because you
                                                                    // can not use flat_map on a Result.
 
