@@ -1,8 +1,12 @@
-use crate::{extractor::evm, storage::ComponentId};
-use crate::{models::Chain, storage::ChangeType}; // TODO: Move change type
+use crate::models::Chain; // TODO: Move change type
+use crate::{
+    extractor::evm,
+    models::protocol::{ComponentBalance, ProtocolComponent},
+    storage::ComponentId,
+};
 use chrono::NaiveDateTime;
 use ethers::types::{H160, H256};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use tycho_types::Bytes;
 
 #[derive(Clone, Default, PartialEq, Debug)]
@@ -73,75 +77,6 @@ impl From<&evm::Transaction> for Transaction {
             index: value.index,
         }
     }
-}
-
-pub struct ComponentBalance {
-    pub token: Bytes,
-    pub new_balance: Bytes,
-    pub balance_float: f64,
-    pub modify_tx: Bytes,
-    pub component_id: String,
-}
-
-pub struct Contract {
-    chain: Chain,
-    address: Bytes,
-    title: String,
-    slots: HashMap<Bytes, Bytes>,
-    balance: Bytes,
-    code_hash: Bytes,
-    balance_modify_tx: Bytes,
-    code_modify_tx: Bytes,
-    creation_tx: Option<Bytes>,
-}
-
-pub struct ContractDelta {
-    chain: Chain,
-    address: Bytes,
-    slots: HashMap<Bytes, Bytes>,
-    balance: Option<Bytes>,
-    code: Option<Bytes>,
-    change: ChangeType,
-}
-
-pub struct CurrencyToken {
-    pub address: Bytes,
-    pub symbol: String,
-    pub decimals: u32,
-    pub tax: u64,
-    pub gas: Vec<Option<u64>>,
-    pub chain: Chain,
-    /// Quality is between 0-100, where:
-    ///  - 100: Normal token
-    ///  - 75: Rebase token
-    ///  - 50: Fee token
-    ///  - 0: Scam token that we shouldn't use
-    pub quality: u32,
-}
-
-pub struct ProtocolComponent {
-    pub id: String,
-    pub protocol_system: String,
-    pub protocol_type_name: String,
-    pub chain: Chain,
-    pub tokens: Vec<Bytes>,
-    pub contract_ids: Vec<Bytes>,
-    pub static_attributes: HashMap<String, Bytes>,
-    pub change: ChangeType,
-    pub creation_tx: Bytes,
-    pub created_at: NaiveDateTime,
-}
-
-pub struct ProtocolComponentState {
-    pub component_id: String,
-    pub attributes: HashMap<String, Bytes>,
-    pub modify_tx: Bytes,
-}
-
-pub struct ProtocolComponentStateDelta {
-    pub component_id: String,
-    pub updated_attributes: HashMap<String, Bytes>,
-    pub removed_attributes: HashSet<String>,
 }
 
 pub struct BlockTransactionDeltas<T> {

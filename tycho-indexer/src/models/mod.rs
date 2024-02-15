@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
 pub mod blockchain;
+mod contract;
+mod protocol;
+mod token;
 
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
