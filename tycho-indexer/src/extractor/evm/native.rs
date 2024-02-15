@@ -19,6 +19,7 @@ use crate::{
         evm::{self, chain_state::ChainState, Block},
         ExtractionError, Extractor, ExtractorMsg,
     },
+    models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
@@ -212,7 +213,7 @@ where
             .start_transaction(&changes.block)
             .await;
         self.state_gateway
-            .upsert_block(&changes.block)
+            .upsert_block(&(&changes.block).into())
             .await?;
 
         let mut new_protocol_components: Vec<evm::ProtocolComponent> = vec![];
@@ -774,16 +775,14 @@ mod test_serial_db {
         )
         .await;
 
-        let evm_gw = Arc::new(
-            PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut conn)
-            .await,
-        );
+        let evm_gw = PostgresGateway::<
+            evm::Block,
+            evm::Transaction,
+            evm::Account,
+            evm::AccountUpdate,
+            evm::ERC20Token,
+        >::from_connection(&mut conn)
+        .await;
 
         let (tx, rx) = channel(10);
 

@@ -363,6 +363,7 @@ impl Version {
     }
 }
 
+#[derive(Clone)]
 pub struct PostgresGateway<B, TX, A, D, T> {
     protocol_system_id_cache: Arc<ProtocolSystemEnumCache>,
     chain_id_cache: Arc<ChainEnumCache>,
@@ -444,14 +445,14 @@ where
             .get_value(id)
     }
 
-    pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
+    pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
         let cache = ChainEnumCache::from_pool(pool.clone()).await?;
         let protocol_system_cache: ValueIdTableCache<String> =
             ProtocolSystemEnumCache::from_pool(pool.clone()).await?;
-        let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(
+        let gw = PostgresGateway::<B, TX, A, D, T>::with_cache(
             Arc::new(cache),
             Arc::new(protocol_system_cache),
-        ));
+        );
 
         Ok(gw)
     }

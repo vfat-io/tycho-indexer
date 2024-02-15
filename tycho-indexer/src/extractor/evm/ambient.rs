@@ -26,12 +26,16 @@ use crate::{
         },
         ExtractionError, Extractor, ExtractorMsg,
     },
+    models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
     },
-    storage::{postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError},
+    storage::{
+        postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, ExtractionStateGateway,
+        ProtocolGateway, StorageError,
+    },
 };
 use tycho_types::Bytes;
 
@@ -244,7 +248,7 @@ where
         }
 
         self.state_gateway
-            .upsert_block(&changes.block)
+            .upsert_block(&(&changes.block).into())
             .await?;
         for update in changes.tx_updates.iter() {
             debug!(tx_hash = ?update.tx.hash, "Processing transaction");
@@ -365,7 +369,7 @@ where
         let changes = evm::BlockAccountChanges::new(
             &self.name,
             self.chain,
-            block,
+            block.into(),
             true,
             account_updates,
             // TODO: consider adding components that were deleted back
@@ -820,7 +824,7 @@ mod test_serial_db {
         storage::{
             postgres,
             postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
-            ChangeType, ContractId,
+            ChangeType, ContractId, ContractStateGateway,
         },
     };
     use ethers::types::U256;
@@ -876,16 +880,14 @@ mod test_serial_db {
         postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
         postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
         postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None).await;
-        let evm_gw = Arc::new(
-            PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut conn)
-            .await,
-        );
+        let evm_gw = PostgresGateway::<
+            evm::Block,
+            evm::Transaction,
+            evm::Account,
+            evm::AccountUpdate,
+            evm::ERC20Token,
+        >::from_connection(&mut conn)
+        .await;
 
         let (tx, rx) = channel(10);
 
@@ -1169,16 +1171,14 @@ mod test_serial_db {
             postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
             postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None)
                 .await;
-            let evm_gw = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut conn)
-                .await,
-            );
+            let evm_gw = PostgresGateway::<
+                evm::Block,
+                evm::Transaction,
+                evm::Account,
+                evm::AccountUpdate,
+                evm::ERC20Token,
+            >::from_connection(&mut conn)
+            .await;
 
             let (tx, rx) = channel(10);
             let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
@@ -1257,16 +1257,14 @@ mod test_serial_db {
                 .expect("pool should get a connection");
             let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
 
-            let evm_gw = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut conn)
-                .await,
-            );
+            let evm_gw = PostgresGateway::<
+                evm::Block,
+                evm::Transaction,
+                evm::Account,
+                evm::AccountUpdate,
+                evm::ERC20Token,
+            >::from_connection(&mut conn)
+            .await;
             let (tx, rx) = channel(10);
             let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
             let gw = AmbientPgGateway::new(

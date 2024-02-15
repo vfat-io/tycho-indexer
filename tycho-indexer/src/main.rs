@@ -210,7 +210,7 @@ async fn main() -> Result<(), ExtractionError> {
     let server_port = 4242;
     let server_version_prefix = "v1";
     let server_url = format!("http://{}:{}", server_addr, server_port);
-    let (server_handle, server_task) = ServicesBuilder::new(evm_gw, pool)
+    let (server_handle, server_task) = ServicesBuilder::new(Arc::new(evm_gw), pool)
         .prefix(server_version_prefix)
         .bind(server_addr)
         .port(server_port)

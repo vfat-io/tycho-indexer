@@ -1148,7 +1148,6 @@ pub trait ContractStateGateway {
 
 pub trait StateGateway<DB>:
     ExtractionStateGateway<DB = DB>
-    + ChainGateway<DB = DB>
     + ProtocolGateway<DB = DB>
     + ContractStateGateway<DB = DB>
     + Send
@@ -1156,11 +1155,9 @@ pub trait StateGateway<DB>:
 {
 }
 
-pub type StateGatewayType<DB, B, TX, C, D, T> = Arc<
+pub type StateGatewayType<DB, C, D, T> = Arc<
     dyn StateGateway<
         DB,
-        Transaction = TX,
-        Block = B,
         ContractState = C,
         Delta = D,
         Token = T,

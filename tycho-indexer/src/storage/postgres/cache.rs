@@ -20,11 +20,14 @@ use tracing::{debug, error, info, trace};
 
 use crate::{
     extractor::evm::{
-        self, AccountUpdate, ComponentBalance, ERC20Token, EVMStateGateway, ProtocolComponent,
-        ProtocolStateDelta,
+        self, AccountUpdate, ComponentBalance, ERC20Token, ProtocolComponent, ProtocolStateDelta,
     },
+    models,
     models::{Chain, ExtractionState},
-    storage::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
+    storage::{
+        postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractStateGateway,
+        ExtractionStateGateway, ProtocolGateway, StorageError, TxHash,
+    },
 };
 
 /// Represents different types of database write operations.
@@ -82,13 +85,13 @@ impl WriteOp {
 
 #[derive(Debug)]
 struct BlockRange {
-    start: evm::Block,
-    end: evm::Block,
+    start: models::blockchain::Block,
+    end: models::blockchain::Block,
 }
 
 impl BlockRange {
-    fn new(start: &evm::Block, end: &evm::Block) -> Self {
-        Self { start: *start, end: *end }
+    fn new(start: &models::blockchain::Block, end: &models::blockchain::Block) -> Self {
+        Self { start: start.clone(), end: end.clone() }
     }
 
     fn is_single_block(&self) -> bool {
@@ -183,6 +186,14 @@ pub enum DBCacheMessage {
 /// - If the block is pending, we group the transaction with other transactions that finish before
 ///   we observe the next block.
 
+type EVMGateway = PostgresGateway<
+    evm::Block,
+    evm::Transaction,
+    evm::Account,
+    evm::AccountUpdate,
+    evm::ERC20Token,
+>;
+
 /// # Write Cache
 ///
 /// This struct handles writes in a centralised and sequential manner. It
@@ -220,8 +231,8 @@ pub struct DBCacheWriteExecutor {
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
-    state_gateway: EVMStateGateway<AsyncPgConnection>,
-    persisted_block: Option<evm::Block>,
+    state_gateway: EVMGateway,
+    persisted_block: Option<models::blockchain::Block>,
     msg_receiver: mpsc::Receiver<DBCacheMessage>,
 }
 
@@ -230,7 +241,7 @@ impl DBCacheWriteExecutor {
         name: String,
         chain: Chain,
         pool: Pool<AsyncPgConnection>,
-        state_gateway: EVMStateGateway<AsyncPgConnection>,
+        state_gateway: EVMGateway,
         msg_receiver: mpsc::Receiver<DBCacheMessage>,
     ) -> Self {
         let mut conn = pool
@@ -425,7 +436,7 @@ pub struct CachedGateway {
     open_tx: Arc<Mutex<Option<OpenTx>>>,
     tx: mpsc::Sender<DBCacheMessage>,
     pool: Pool<AsyncPgConnection>,
-    state_gateway: EVMStateGateway<AsyncPgConnection>,
+    state_gateway: EVMGateway,
     lru_cache: Arc<Mutex<DeltasCache>>,
 }
 
@@ -444,7 +455,7 @@ impl Clone for CachedGateway {
 
 impl CachedGateway {
     // Accumulating transactions does not drop previous data nor are transactions nested.
-    pub async fn start_transaction(&self, block: &evm::Block) {
+    pub async fn start_transaction(&self, block: &models::blockchain::Block) {
         let mut open_tx = self.open_tx.lock().await;
 
         if let Some(tx) = open_tx.as_mut() {
@@ -515,7 +526,7 @@ impl CachedGateway {
     pub fn new(
         tx: mpsc::Sender<DBCacheMessage>,
         pool: Pool<AsyncPgConnection>,
-        state_gateway: EVMStateGateway<AsyncPgConnection>,
+        state_gateway: EVMGateway,
     ) -> Self {
         CachedGateway {
             tx,
@@ -645,7 +656,7 @@ impl CachedGateway {
 // implement the called method and EVMStateGateway does, then the call will be forwarded to
 // EVMStateGateway.
 impl Deref for CachedGateway {
-    type Target = EVMStateGateway<AsyncPgConnection>;
+    type Target = EVMGateway;
 
     fn deref(&self) -> &Self::Target {
         &self.state_gateway
@@ -680,17 +691,7 @@ mod test_serial_db {
                 .await
                 .expect("Failed to get a connection from the pool");
             db_fixtures::insert_chain(&mut connection, "ethereum").await;
-            let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut connection)
-                .await,
-            );
-
+            let gateway: EVMGateway = EVMGateway::from_connection(&mut connection).await;
             let (tx, rx) = mpsc::channel(10);
             let write_executor = DBCacheWriteExecutor::new(
                 "ethereum".to_owned(),
@@ -736,17 +737,7 @@ mod test_serial_db {
             db_fixtures::insert_protocol_system(&mut connection, "ambient".to_owned()).await;
             db_fixtures::insert_protocol_type(&mut connection, "ambient_pool", None, None, None)
                 .await;
-            let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut connection)
-                .await,
-            );
-
+            let gateway: EVMGateway = EVMGateway::from_connection(&mut connection).await;
             let (tx, rx) = mpsc::channel(10);
 
             let write_executor = DBCacheWriteExecutor::new(
@@ -784,7 +775,7 @@ mod test_serial_db {
                 tokens: vec![usdc_address],
                 contract_ids: vec![],
                 change: ChangeType::Creation.into(),
-                creation_tx: tx_1.hash,
+                creation_tx: H256::from_slice(&tx_1.hash),
                 static_attributes: Default::default(),
                 created_at: Default::default(),
             };
@@ -792,12 +783,12 @@ mod test_serial_db {
                 token: usdc_address,
                 balance_float: 0.0,
                 balance: Bytes::from(&[0u8]),
-                modify_tx: tx_1.hash,
+                modify_tx: H256::from_slice(&tx_1.hash),
                 component_id: protocol_component_id.clone(),
             };
             let os_rx_1 = send_write_message(
                 &tx,
-                block_1,
+                block_1.clone(),
                 vec![
                     WriteOp::UpsertBlock(vec![block_1]),
                     WriteOp::UpsertTx(vec![tx_1]),
@@ -822,7 +813,7 @@ mod test_serial_db {
             let protocol_state_delta = ProtocolStateDelta::new(protocol_component_id, attributes);
             let os_rx_2 = send_write_message(
                 &tx,
-                block_2,
+                block_2.clone(),
                 vec![
                     WriteOp::UpsertBlock(vec![block_2]),
                     WriteOp::UpsertProtocolState(vec![(
@@ -856,7 +847,7 @@ mod test_serial_db {
                 .expect("Failed to fetch block");
 
             let fetched_tx = gateway
-                .get_tx(&tx_1.hash.as_bytes().into(), &mut connection)
+                .get_tx(&tx_1.hash.clone(), &mut connection)
                 .await
                 .expect("Failed to fetch tx");
 
@@ -899,16 +890,7 @@ mod test_serial_db {
                 .await
                 .expect("Failed to get a connection from the pool");
             db_fixtures::insert_chain(&mut connection, "ethereum").await;
-            let gateway = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut connection)
-                .await,
-            );
+            let gateway: EVMGateway = EVMGateway::from_connection(&mut connection).await;
             let (tx, rx) = mpsc::channel(10);
 
             let write_executor = DBCacheWriteExecutor::new(
@@ -980,7 +962,7 @@ mod test_serial_db {
                 .expect("Failed to fetch block");
 
             let fetched_tx = cached_gw
-                .get_tx(&tx_1.hash.as_bytes().into(), &mut connection)
+                .get_tx(&tx_1.hash.clone(), &mut connection)
                 .await
                 .expect("Failed to fetch tx");
 
@@ -1007,20 +989,20 @@ mod test_serial_db {
         .await;
     }
 
-    fn get_sample_block(version: usize) -> evm::Block {
+    fn get_sample_block(version: usize) -> models::blockchain::Block {
         match version {
-            1 => evm::Block {
+            1 => models::blockchain::Block {
                 number: 1,
                 chain: Chain::Ethereum,
                 hash: "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
                     .parse()
                     .expect("Invalid hash"),
-                parent_hash: H256::zero(),
+                parent_hash: Bytes::default(),
                 ts: "2020-01-01T01:00:00"
                     .parse()
                     .expect("Invalid timestamp"),
             },
-            2 => evm::Block {
+            2 => models::blockchain::Block {
                 number: 2,
                 chain: Chain::Ethereum,
                 hash: "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
@@ -1033,7 +1015,7 @@ mod test_serial_db {
                     .parse()
                     .expect("Invalid timestamp"),
             },
-            3 => evm::Block {
+            3 => models::blockchain::Block {
                 number: 3,
                 chain: Chain::Ethereum,
                 hash: "0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741"
@@ -1050,22 +1032,17 @@ mod test_serial_db {
         }
     }
 
-    fn get_sample_transaction(version: usize) -> evm::Transaction {
+    fn get_sample_transaction(version: usize) -> models::blockchain::Transaction {
         match version {
-            1 => evm::Transaction {
-                hash: H256::from_str(
+            1 => models::blockchain::Transaction {
+                hash: Bytes::from(
                     "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-                )
-                .expect("tx hash ok"),
-                block_hash: H256::from_str(
-                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-                )
-                .expect("block hash ok"),
-                from: H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980")
-                    .expect("from ok"),
-                to: Some(
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").expect("to ok"),
                 ),
+                block_hash: Bytes::from(
+                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                ),
+                from: Bytes::from("0x4648451b5F87FF8F0F7D622bD40574bb97E25980"),
+                to: Some(Bytes::from("0x6B175474E89094C44Da98b954EedeAC495271d0F")),
                 index: 1,
             },
             _ => panic!("Block version not found"),
@@ -1086,7 +1063,7 @@ mod test_serial_db {
 
     async fn send_write_message(
         tx: &mpsc::Sender<DBCacheMessage>,
-        block: evm::Block,
+        block: models::blockchain::Block,
         operations: Vec<WriteOp>,
     ) -> oneshot::Receiver<Result<(), StorageError>> {
         let (os_tx, os_rx) = oneshot::channel();

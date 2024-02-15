@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod blockchain;
+
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 use utoipa::ToSchema;
