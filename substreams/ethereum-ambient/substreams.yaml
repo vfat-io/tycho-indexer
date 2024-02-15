@@ -45,6 +45,7 @@ modules:
       - source: sf.ethereum.type.v2.Block
       - map: map_pool_changes
       - store: store_pool_balances
+        mode: deltas
       - store: store_pools
     output:
       type: proto:tycho.evm.state.v1.BlockContractChanges

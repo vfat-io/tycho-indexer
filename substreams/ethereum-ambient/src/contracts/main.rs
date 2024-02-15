@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail};
 
 use crate::{
-    pb::tycho::evm::v1::ProtocolComponent,
+    pb::tycho::evm::v1::{ProtocolComponent, Transaction},
     utils::{decode_flows_from_output, encode_pool_hash},
 };
 use ethabi::{decode, ParamType};
@@ -90,7 +90,10 @@ pub fn decode_direct_swap_call(
         bail!("Failed to decode swap call inputs.".to_string());
     }
 }
-pub fn decode_pool_init(call: &Call) -> Result<Option<ProtocolComponent>, anyhow::Error> {
+pub fn decode_pool_init(
+    call: &Call,
+    tx: Transaction,
+) -> Result<Option<ProtocolComponent>, anyhow::Error> {
     // Decode external call to UserCmd
     if let Ok(external_params) = decode(USER_CMD_EXTERNAL_ABI, &call.input[4..]) {
         let cmd_bytes = external_params[1]
@@ -151,6 +154,7 @@ pub fn decode_pool_init(call: &Call) -> Result<Option<ProtocolComponent>, anyhow
                         financial_type: 0,
                         implementation_type: 0,
                     }),
+                    tx: Some(tx.clone()),
                 };
                 Ok(Some(new_component))
             } else {
