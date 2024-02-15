@@ -16,18 +16,25 @@ use crate::{
 
 #[substreams::handlers::map]
 pub fn map_pools_created(
+    params: String,
     block: eth::Block,
 ) -> Result<BlockEntityChanges, substreams::errors::Error> {
     let mut new_pools: Vec<TransactionEntityChanges> = vec![];
 
-    get_pools(&block, &mut new_pools);
+    let factory_address = params.as_str();
+
+    get_pools(&block, &mut new_pools, factory_address);
 
     let tycho_block: Block = block.into();
 
     Ok(BlockEntityChanges { block: Some(tycho_block), changes: new_pools })
 }
 
-fn get_pools(block: &eth::Block, new_pools: &mut Vec<TransactionEntityChanges>) {
+fn get_pools(
+    block: &eth::Block,
+    new_pools: &mut Vec<TransactionEntityChanges>,
+    factory_address: &str,
+) {
     // Extract new pools from PairCreated events
     let mut on_pair_created = |event: PairCreated, _tx: &eth::TransactionTrace, _log: &eth::Log| {
         let tycho_tx: Transaction = _tx.into();
@@ -67,9 +74,7 @@ fn get_pools(block: &eth::Block, new_pools: &mut Vec<TransactionEntityChanges>) 
     let mut eh = EventHandler::new(block);
 
     // TODO: Parametrize Factory Address
-    eh.filter_by_address(vec![
-        Address::from_str("0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f").unwrap()
-    ]);
+    eh.filter_by_address(vec![Address::from_str(factory_address).unwrap()]);
 
     eh.on::<PairCreated, _>(&mut on_pair_created);
     eh.handle_events();
