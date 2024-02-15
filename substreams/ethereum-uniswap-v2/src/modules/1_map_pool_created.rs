@@ -73,7 +73,6 @@ fn get_pools(
 
     let mut eh = EventHandler::new(block);
 
-    // TODO: Parametrize Factory Address
     eh.filter_by_address(vec![Address::from_str(factory_address).unwrap()]);
 
     eh.on::<PairCreated, _>(&mut on_pair_created);
