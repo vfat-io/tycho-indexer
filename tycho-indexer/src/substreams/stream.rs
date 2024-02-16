@@ -62,6 +62,13 @@ fn stream_blocks(
     start_block_num: i64,
     stop_block_num: u64,
 ) -> impl Stream<Item = Result<BlockResponse, Error>> {
+    // When restarting a Tycho stream, we want to skip the first message we receive from
+    // substreams. This is because the first message is the last message we processed before the
+    // restart.
+    // For example, if before the restart we received block 100, 101 and crashed,
+    // block 100 and its cursor was sent to the db. After the restart substreams will send
+    // us block 100 again, and we want to skip it to avoid conflicts.
+    let mut skip_first_msg = cursor.as_deref() != Some("");
     let mut latest_cursor = cursor.unwrap_or_default();
     let mut retry_count = 0;
     let mut backoff = DEFAULT_BACKOFF.clone();
@@ -97,6 +104,10 @@ fn stream_blocks(
                     for await response in stream {
                         match process_substreams_response(response).await {
                             BlockProcessedResult::BlockScopedData(block_scoped_data) => {
+                                if skip_first_msg {
+                                    update_cursor_and_skip_first_message(&mut latest_cursor, &mut skip_first_msg, block_scoped_data.cursor.clone());
+                                    continue;
+                                }
                                 // Reset backoff because we got a good value from the stream
                                 backoff = DEFAULT_BACKOFF.clone();
 
@@ -106,6 +117,10 @@ fn stream_blocks(
                                 latest_cursor = cursor;
                             },
                             BlockProcessedResult::BlockUndoSignal(block_undo_signal) => {
+                                if skip_first_msg {
+                                    update_cursor_and_skip_first_message(&mut latest_cursor, &mut skip_first_msg, block_undo_signal.last_valid_cursor.clone());
+                                    continue;
+                                }
                                 // Reset backoff because we got a good value from the stream
                                 backoff = DEFAULT_BACKOFF.clone();
 
@@ -158,6 +173,16 @@ enum BlockProcessedResult {
     BlockScopedData(BlockScopedData),
     BlockUndoSignal(BlockUndoSignal),
     TonicError(tonic::Status),
+}
+
+// Function to update cursor and handle skip_first_msg logic
+fn update_cursor_and_skip_first_message(
+    latest_cursor: &mut String,
+    skip_first_msg: &mut bool,
+    cursor: String,
+) {
+    *latest_cursor = cursor;
+    *skip_first_msg = false;
 }
 
 async fn process_substreams_response(
