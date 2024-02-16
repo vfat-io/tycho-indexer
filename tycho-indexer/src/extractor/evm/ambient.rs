@@ -286,11 +286,11 @@ where
                     .await?;
             }
         }
-        let collected_changes: Vec<(Bytes, AccountUpdate)> = changes
+        let collected_changes: Vec<(Bytes, models::contract::ContractDelta)> = changes
             .tx_updates
             .iter()
             .flat_map(|u| {
-                let a: Vec<(Bytes, AccountUpdate)> = u
+                let a: Vec<(Bytes, models::contract::ContractDelta)> = u
                     .account_updates
                     .clone()
                     .into_iter()
@@ -301,7 +301,8 @@ where
             })
             .collect();
 
-        let changes_slice: &[(Bytes, AccountUpdate)] = collected_changes.as_slice();
+        let changes_slice: &[(Bytes, models::contract::ContractDelta)] =
+            collected_changes.as_slice();
 
         self.state_gateway
             .update_contracts(changes_slice)
@@ -886,11 +887,7 @@ mod test_serial_db {
         postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
         postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
         postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None).await;
-        let evm_gw =
-            PostgresGateway::<evm::Account, evm::AccountUpdate, evm::ERC20Token>::from_connection(
-                &mut conn,
-            )
-            .await;
+        let evm_gw = PostgresGateway::<evm::ERC20Token>::from_connection(&mut conn).await;
 
         let (tx, rx) = channel(10);
 
@@ -1174,12 +1171,7 @@ mod test_serial_db {
             postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
             postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None)
                 .await;
-            let evm_gw = PostgresGateway::<
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut conn)
-            .await;
+            let evm_gw = PostgresGateway::<evm::ERC20Token>::from_connection(&mut conn).await;
 
             let (tx, rx) = channel(10);
             let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
@@ -1258,12 +1250,7 @@ mod test_serial_db {
                 .expect("pool should get a connection");
             let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
 
-            let evm_gw = PostgresGateway::<
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut conn)
-            .await;
+            let evm_gw = PostgresGateway::<evm::ERC20Token>::from_connection(&mut conn).await;
             let (tx, rx) = channel(10);
             let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
             let gw = AmbientPgGateway::new(

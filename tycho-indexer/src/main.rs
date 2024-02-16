@@ -134,9 +134,7 @@ async fn main() -> Result<(), ExtractionError> {
         pool.clone(),
     )
     .await;
-    let evm_gw =
-        PostgresGateway::<evm::Account, evm::AccountUpdate, evm::ERC20Token>::new(pool.clone())
-            .await?;
+    let evm_gw = PostgresGateway::<evm::ERC20Token>::new(pool.clone()).await?;
 
     info!("Starting Tycho");
     let mut extractor_handles = Vec::new();

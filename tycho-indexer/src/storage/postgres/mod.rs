@@ -145,8 +145,8 @@ use tracing::{debug, info};
 use crate::models::Chain;
 
 use super::{
-    BlockIdentifier, BlockOrTimestamp, ContractDelta, StateGateway, StorableContract,
-    StorableToken, StorageError, TxHash, Version, VersionKind,
+    BlockIdentifier, BlockOrTimestamp, StateGateway, StorableToken, StorageError, TxHash, Version,
+    VersionKind,
 };
 
 pub mod cache;
@@ -363,18 +363,14 @@ impl Version {
 }
 
 #[derive(Clone)]
-pub struct PostgresGateway<A, D, T> {
+pub struct PostgresGateway<T> {
     protocol_system_id_cache: Arc<ProtocolSystemEnumCache>,
     chain_id_cache: Arc<ChainEnumCache>,
-    _phantom_acc: PhantomData<A>,
-    _phantom_delta: PhantomData<D>,
     _phantom_token: PhantomData<T>,
 }
 
-impl<A, D, T> PostgresGateway<A, D, T>
+impl<T> PostgresGateway<T>
 where
-    D: ContractDelta,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     pub fn with_cache(
@@ -384,8 +380,6 @@ where
         Self {
             protocol_system_id_cache: protocol_system_cache,
             chain_id_cache: cache,
-            _phantom_acc: PhantomData,
-            _phantom_delta: PhantomData,
             _phantom_token: PhantomData,
         }
     }
@@ -442,19 +436,14 @@ where
         let cache = ChainEnumCache::from_pool(pool.clone()).await?;
         let protocol_system_cache: ValueIdTableCache<String> =
             ProtocolSystemEnumCache::from_pool(pool.clone()).await?;
-        let gw = PostgresGateway::<A, D, T>::with_cache(
-            Arc::new(cache),
-            Arc::new(protocol_system_cache),
-        );
+        let gw = PostgresGateway::<T>::with_cache(Arc::new(cache), Arc::new(protocol_system_cache));
 
         Ok(gw)
     }
 }
 
-impl<A, D, T> StateGateway<AsyncPgConnection> for PostgresGateway<A, D, T>
+impl<T> StateGateway<AsyncPgConnection> for PostgresGateway<T>
 where
-    D: ContractDelta + From<A>,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     // No methods in here - this just ties everything together

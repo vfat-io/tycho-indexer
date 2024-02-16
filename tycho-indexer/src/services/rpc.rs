@@ -19,7 +19,10 @@ use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
-use crate::{models::contract::Contract, storage::ProtocolGateway};
+use crate::{
+    models::contract::{Contract, ContractDelta},
+    storage::ProtocolGateway,
+};
 use tycho_types::{
     dto,
     dto::{ResponseToken, StateRequestParameters},
@@ -206,6 +209,12 @@ impl From<models::contract::Contract> for dto::ResponseAccount {
     }
 }
 
+impl From<models::contract::ContractDelta> for dto::AccountUpdate {
+    fn from(value: ContractDelta) -> Self {
+        todo!()
+    }
+}
+
 impl RpcHandler {
     pub fn new(
         db_gateway: Arc<EvmPostgresGateway>,
@@ -317,10 +326,7 @@ impl RpcHandler {
                 // Filter by contract addresses if specified in the request
                 // PERF: This is not efficient, we should filter in the query
                 if let Some(contract_addrs) = addresses {
-                    accounts.retain(|acc| {
-                        let address = Address::from(acc.address);
-                        contract_addrs.contains(&address)
-                    });
+                    accounts.retain(|acc| contract_addrs.contains(&acc.address));
                 }
                 Ok(dto::ContractDeltaRequestResponse::new(
                     accounts

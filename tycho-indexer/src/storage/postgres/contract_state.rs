@@ -28,10 +28,8 @@ struct CreatedOrDeleted<T> {
 }
 
 // Private methods
-impl<A, D, T> PostgresGateway<A, D, T>
+impl<T> PostgresGateway<T>
 where
-    D: ContractDelta + From<models::contract::Contract>,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
     /// Retrieves the changes in balance for all accounts of a chain.
@@ -1241,7 +1239,7 @@ mod test {
 
     use super::*;
 
-    type EvmGateway = PostgresGateway<evm::Account, evm::AccountUpdate, evm::ERC20Token>;
+    type EvmGateway = PostgresGateway<evm::ERC20Token>;
     type MaybeTS = Option<NaiveDateTime>;
 
     async fn setup_db() -> AsyncPgConnection {
@@ -1380,7 +1378,7 @@ mod test {
         db_fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
     }
 
-    fn account_c0(version: u64) -> evm::Account {
+    fn account_c0(version: u64) -> models::contract::Contract {
         match version {
             1 => evm::Account {
                 chain: Chain::Ethereum,
@@ -1407,7 +1405,8 @@ mod test {
                         .parse()
                         .unwrap(),
                 ),
-            },
+            }
+            .into(),
             2 => evm::Account {
                 chain: Chain::Ethereum,
                 address: "0x6b175474e89094c44da98b954eedeac495271d0f"
@@ -1433,7 +1432,8 @@ mod test {
                         .parse()
                         .unwrap(),
                 ),
-            },
+            }
+            .into(),
             _ => panic!("No version found"),
         }
     }
@@ -1477,7 +1477,7 @@ mod test {
         }
     }
 
-    fn account_c2(version: u64) -> evm::Account {
+    fn account_c2(version: u64) -> models::contract::Contract {
         match version {
             1 => evm::Account {
                 chain: Chain::Ethereum,
@@ -1504,7 +1504,8 @@ mod test {
                         .parse()
                         .unwrap(),
                 ),
-            },
+            }
+            .into(),
             _ => panic!("No version found"),
         }
     }
@@ -1572,7 +1573,7 @@ mod test {
     async fn test_get_contracts(
         #[case] ids: Option<Vec<Bytes>>,
         #[case] version: Option<Version>,
-        #[case] exp: Vec<evm::Account>,
+        #[case] exp: Vec<models::contract::Contract>,
     ) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1680,7 +1681,7 @@ mod test {
             .expect("block found");
         db_fixtures::insert_txns(&mut conn, &[(block.id, 100, modify_txhash)]).await;
         let mut account = account_c1(2);
-        account.set_balance(U256::from(10000), modify_txhash.parse().unwrap());
+        account.set_balance(&Bytes::from("0x2710"), &modify_txhash.parse().unwrap());
         let update = models::contract::ContractDelta::new();
         /*
         account.address,
@@ -1691,7 +1692,7 @@ mod test {
             ChangeType::Update,
         */
 
-        let contract_id = ContractId::new(Chain::Ethereum, account.address().to_owned());
+        let contract_id = ContractId::new(Chain::Ethereum, account.address.clone());
 
         gw.update_contracts(&Chain::Ethereum, &[(tx_hash_bytes, &update)], &mut conn)
             .await
@@ -2090,7 +2091,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn get_slots_delta_forward() {
         let mut conn = setup_db().await;
         setup_slots_delta(&mut conn).await;
@@ -2181,7 +2181,8 @@ mod test {
                 Some(U256::from(100)),
                 None,
                 ChangeType::Update,
-            ),
+            )
+            .into(),
             // c1 which was deployed on block 2 is deleted
             evm::AccountUpdate::new(
                 "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
@@ -2192,7 +2193,8 @@ mod test {
                 None,
                 None,
                 ChangeType::Deletion,
-            ),
+            )
+            .into(),
             // c2 is recreated
             evm::AccountUpdate::new(
                 "0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
@@ -2203,7 +2205,8 @@ mod test {
                 Some(U256::from(25)),
                 Some(Bytes::from_str("C2C2C2").expect("code ok")),
                 ChangeType::Creation,
-            ),
+            )
+            .into(),
         ];
 
         let mut changes = gw
@@ -2215,13 +2218,12 @@ mod test {
             )
             .await
             .unwrap();
-        changes.sort_unstable_by_key(|u| u.address);
+        changes.sort_unstable_by_key(|u| u.address.clone());
 
         assert_eq!(changes, exp);
     }
 
     #[tokio::test]
-
     async fn get_accounts_delta_forward() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2237,7 +2239,8 @@ mod test {
                 Some(U256::from(101)),
                 None,
                 ChangeType::Update,
-            ),
+            )
+            .into(),
             // c1 was deployed
             evm::AccountUpdate::new(
                 "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
@@ -2248,7 +2251,8 @@ mod test {
                 Some(U256::from(50)),
                 Some(Bytes::from_str("C1C1C1").expect("code ok")),
                 ChangeType::Creation,
-            ),
+            )
+            .into(),
             // c2 is deleted
             evm::AccountUpdate::new(
                 "0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
@@ -2259,7 +2263,8 @@ mod test {
                 None,
                 None,
                 ChangeType::Deletion,
-            ),
+            )
+            .into(),
         ];
 
         let mut changes = gw
@@ -2271,7 +2276,7 @@ mod test {
             )
             .await
             .unwrap();
-        changes.sort_unstable_by_key(|u| u.address);
+        changes.sort_unstable_by_key(|u| u.address.clone());
 
         assert_eq!(changes, exp);
     }

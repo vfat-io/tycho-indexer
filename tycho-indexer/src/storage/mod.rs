@@ -1146,20 +1146,11 @@ pub trait ContractStateGateway {
     ) -> Result<Vec<Self::Delta>, StorageError>;
 }
 
-pub trait StateGateway<DB>:
-    ExtractionStateGateway<DB = DB>
-    + ProtocolGateway<DB = DB>
-    + ContractStateGateway<DB = DB>
-    + Send
-    + Sync
-{
-}
+pub trait StateGateway<DB>: ProtocolGateway<DB = DB> + Send + Sync {}
 
-pub type StateGatewayType<DB, C, D, T> = Arc<
+pub type StateGatewayType<DB, T> = Arc<
     dyn StateGateway<
         DB,
-        ContractState = C,
-        Delta = D,
         Token = T,
         ProtocolState = ProtocolState,
         ProtocolStateDelta = ProtocolStateDelta,

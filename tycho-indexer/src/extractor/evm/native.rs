@@ -775,11 +775,7 @@ mod test_serial_db {
         )
         .await;
 
-        let evm_gw =
-            PostgresGateway::<evm::Account, evm::AccountUpdate, evm::ERC20Token>::from_connection(
-                &mut conn,
-            )
-            .await;
+        let evm_gw = PostgresGateway::<evm::ERC20Token>::from_connection(&mut conn).await;
 
         let (tx, rx) = channel(10);
 

@@ -7,10 +7,11 @@ use crate::{
     storage,
     storage::ChangeType,
 };
+use ethers::prelude::{H256, U256};
 use std::collections::HashMap;
 use tycho_types::Bytes;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Contract {
     pub chain: Chain,
     pub address: Bytes,
@@ -28,6 +29,12 @@ impl Contract {
     pub fn new() -> Self {
         todo!();
     }
+
+    #[cfg(test)]
+    pub fn set_balance(&mut self, new_balance: &Bytes, modified_at: &Bytes) {
+        self.balance = new_balance.clone();
+        self.balance_modify_tx = modified_at.clone();
+    }
 }
 
 impl From<evm::Account> for Contract {
@@ -36,7 +43,7 @@ impl From<evm::Account> for Contract {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ContractDelta {
     pub chain: Chain,
     pub address: Bytes,
@@ -51,7 +58,7 @@ impl ContractDelta {
         todo!();
     }
     pub fn contract_id(&self) -> storage::ContractId {
-        storage::ContractId::new(self.chain, self.address.into())
+        storage::ContractId::new(self.chain, self.address.clone())
     }
 }
 
@@ -61,6 +68,13 @@ impl From<evm::AccountUpdate> for ContractDelta {
     }
 }
 
+impl From<ContractDelta> for evm::AccountUpdate {
+    fn from(value: ContractDelta) -> Self {
+        todo!()
+    }
+}
+
+// Keep this one, it is useful
 impl From<Contract> for ContractDelta {
     fn from(value: Contract) -> Self {
         todo!()

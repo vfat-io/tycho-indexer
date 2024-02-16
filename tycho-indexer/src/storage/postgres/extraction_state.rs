@@ -8,20 +8,15 @@ use crate::storage::{
 
 use super::{orm, schema, Chain, PostgresGateway, StorageError};
 
-#[async_trait]
-impl<A, D, T> ExtractionStateGateway for PostgresGateway<A, D, T>
+impl<T> PostgresGateway<T>
 where
-    D: ContractDelta,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
-    type DB = AsyncPgConnection;
-
-    async fn get_state(
+    pub async fn get_state(
         &self,
         name: &str,
         chain: &Chain,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<ExtractionState, StorageError> {
         let block_chain_id = self.get_chain_id(chain);
 
@@ -40,10 +35,10 @@ where
         }
     }
 
-    async fn save_state(
+    pub async fn save_state(
         &self,
         state: &ExtractionState,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let block_chain_id = self.get_chain_id(&state.chain);
         match orm::ExtractionState::by_name(&state.name, block_chain_id, conn).await {
@@ -139,11 +134,8 @@ mod test {
         conn
     }
 
-    async fn get_dgw(
-        conn: &mut AsyncPgConnection,
-    ) -> PostgresGateway<evm::Account, evm::AccountUpdate, evm::ERC20Token> {
-        PostgresGateway::<evm::Account, evm::AccountUpdate, evm::ERC20Token>::from_connection(conn)
-            .await
+    async fn get_dgw(conn: &mut AsyncPgConnection) -> PostgresGateway<evm::ERC20Token> {
+        PostgresGateway::<evm::ERC20Token>::from_connection(conn).await
     }
 
     #[tokio::test]

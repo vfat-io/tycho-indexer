@@ -27,9 +27,7 @@ mod rpc;
 mod ws;
 
 pub type EvmPostgresGateway = PostgresGateway<
-    evm::Account,       //A
-    evm::AccountUpdate, //D
-    evm::ERC20Token,    //T
+    evm::ERC20Token, //T
 >;
 
 pub struct ServicesBuilder {
