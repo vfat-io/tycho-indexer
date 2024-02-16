@@ -179,7 +179,7 @@ impl ExtractorRunner {
     // TODO: add message tracing_id to the log
     #[instrument(skip_all)]
     async fn propagate_msg(subscribers: &Arc<Mutex<SubscriptionsMap>>, message: ExtractorMsg) {
-        info!(msg = %message, "Propagating message to subscribers.");
+        debug!(msg = %message, "Propagating message to subscribers.");
         // TODO: rename variable here instead
         let arced_message = message;
 
