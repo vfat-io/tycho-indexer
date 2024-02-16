@@ -295,7 +295,7 @@ where
                     .clone()
                     .into_iter()
                     .filter(|(_, acc_u)| acc_u.is_update())
-                    .map(|(_, acc_u)| (tycho_types::Bytes::from(u.tx.hash), acc_u))
+                    .map(|(_, acc_u)| (tycho_types::Bytes::from(u.tx.hash), acc_u.into()))
                     .collect();
                 a
             })
@@ -329,14 +329,20 @@ where
         let start = current.map(BlockOrTimestamp::Block);
 
         let target = BlockOrTimestamp::Block(to.clone());
-        let address = H160(AMBIENT_CONTRACT);
+        let address = Bytes::from(AMBIENT_CONTRACT);
         let (account_updates, _, component_balances) = self
             .state_gateway
             .get_delta(&self.chain, start.as_ref(), &target)
             .await?;
-        let account_updates = account_updates
+        let account_updates: HashMap<H160, AccountUpdate> = account_updates
             .into_iter()
-            .filter_map(|u| if u.address == address { Some((u.address, u)) } else { None })
+            .filter_map(|u| {
+                if &u.address == &address {
+                    Some((H160::from_slice(&u.address), u.into()))
+                } else {
+                    None
+                }
+            })
             .collect();
 
         let mut component_balances_map: HashMap<

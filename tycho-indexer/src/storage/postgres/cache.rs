@@ -19,9 +19,7 @@ use tokio::{
 use tracing::{debug, error, info, trace};
 
 use crate::{
-    extractor::evm::{
-        self, AccountUpdate, ComponentBalance, ERC20Token, ProtocolComponent, ProtocolStateDelta,
-    },
+    extractor::evm::{self, ComponentBalance, ERC20Token, ProtocolComponent, ProtocolStateDelta},
     models,
     models::{Chain, ExtractionState},
     storage::{
@@ -34,15 +32,15 @@ use crate::{
 #[derive(PartialEq, Clone, Debug)]
 pub(crate) enum WriteOp {
     // Simply merge
-    UpsertBlock(Vec<evm::Block>),
+    UpsertBlock(Vec<models::blockchain::Block>),
     // Simply merge
-    UpsertTx(Vec<evm::Transaction>),
+    UpsertTx(Vec<models::blockchain::Transaction>),
     // Simply keep last
     SaveExtractionState(ExtractionState),
     // Support saving a batch
-    InsertContract(Vec<evm::Account>),
+    InsertContract(Vec<models::contract::Contract>),
     // Simply merge
-    UpdateContracts(Vec<(TxHash, AccountUpdate)>),
+    UpdateContracts(Vec<(TxHash, models::contract::ContractDelta)>),
     // Simply merge
     InsertProtocolComponents(Vec<evm::ProtocolComponent>),
     // Simply merge
@@ -368,7 +366,7 @@ impl DBCacheWriteExecutor {
                 Ok(())
             }
             WriteOp::UpdateContracts(contracts) => {
-                let collected_changes: Vec<(TxHash, &AccountUpdate)> = contracts
+                let collected_changes: Vec<(TxHash, &models::contract::ContractDelta)> = contracts
                     .iter()
                     .map(|(tx, update)| (tx.clone(), update))
                     .collect();
@@ -417,7 +415,7 @@ struct RevertParameters {
 
 type DeltasCache = LruCache<
     RevertParameters,
-    (Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
+    (Vec<models::contract::ContractDelta>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
 >;
 
 type OpenTx = (DBTransaction, oneshot::Receiver<Result<(), StorageError>>);
@@ -556,7 +554,8 @@ impl CachedGateway {
 
     pub async fn update_contracts(
         &self,
-        new: &[(TxHash, AccountUpdate)],
+        block: &models::blockchain::Block,
+        new: &[(TxHash, models::contract::ContractDelta)],
     ) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpdateContracts(new.to_owned()))
             .await?;
@@ -568,8 +567,10 @@ impl CachedGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<(Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>), StorageError>
-    {
+    ) -> Result<
+        (Vec<models::contract::ContractDelta>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
+        StorageError,
+    > {
         let mut lru_cache = self.lru_cache.lock().await;
 
         if start_version.is_none() {

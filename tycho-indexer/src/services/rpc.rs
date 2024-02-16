@@ -2,6 +2,7 @@
 
 use crate::{
     extractor::evm,
+    models,
     models::Chain,
     storage::{
         self, Address, BlockIdentifier, BlockOrTimestamp, ContractStateGateway, StorageError,
@@ -18,7 +19,7 @@ use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
-use crate::storage::ProtocolGateway;
+use crate::{models::contract::Contract, storage::ProtocolGateway};
 use tycho_types::{
     dto,
     dto::{ResponseToken, StateRequestParameters},
@@ -197,6 +198,12 @@ impl TryFrom<&dto::VersionParam> for BlockOrTimestamp {
 pub struct RpcHandler {
     db_gateway: Arc<EvmPostgresGateway>,
     db_connection_pool: Pool<AsyncPgConnection>,
+}
+
+impl From<models::contract::Contract> for dto::ResponseAccount {
+    fn from(value: Contract) -> Self {
+        todo!()
+    }
 }
 
 impl RpcHandler {

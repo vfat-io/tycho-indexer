@@ -1,14 +1,18 @@
 use std::collections::{hash_map::Entry, HashSet};
 
+use chrono::{NaiveDateTime, Utc};
+use diesel_async::RunQueryDsl;
 use async_trait::async_trait;
-use chrono::Utc;
 use ethers::utils::keccak256;
 use tracing::instrument;
 
-use crate::storage::{
-    AccountToContractStore, Address, Balance, BlockOrTimestamp, ChangeType, Code, ContractDelta,
-    ContractId, ContractStateGateway, ContractStore, StorableContract, StorableToken, StoreKey,
-    StoreVal, TxHash, Version,
+use crate::{
+    models,
+    storage::{
+        AccountToContractStore, Address, Balance, BlockOrTimestamp, ChangeType, Code,
+        ContractDelta, ContractId, ContractStateGateway, ContractStore, StorableContract,
+        StorableToken, StoreKey, StoreVal, TxHash, Version,
+    },
 };
 use tycho_types::Bytes;
 
@@ -26,7 +30,7 @@ struct CreatedOrDeleted<T> {
 // Private methods
 impl<A, D, T> PostgresGateway<A, D, T>
 where
-    D: ContractDelta + From<A>,
+    D: ContractDelta + From<models::contract::Contract>,
     A: StorableContract<orm::Contract, orm::NewContract, i64>,
     T: StorableToken<orm::Token, orm::NewToken, i64>,
 {
@@ -306,7 +310,7 @@ where
         start_version_ts: &NaiveDateTime,
         target_version_ts: &NaiveDateTime,
         conn: &mut AsyncPgConnection,
-    ) -> Result<CreatedOrDeleted<D>, StorageError> {
+    ) -> Result<CreatedOrDeleted<models::contract::ContractDelta>, StorageError> {
         // Find created or deleted Accounts
         let cod_accounts: Vec<orm::Account> = {
             use schema::account::dsl::*;
@@ -387,12 +391,12 @@ where
 
             // Restore full state delta at from target version for accounts that were deleted
             let version = Some(Version::from_ts(*target_version_ts));
-            let restored: HashMap<Address, D> = self
+            let restored: HashMap<Address, models::contract::ContractDelta> = self
                 .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, conn)
                 .await?
                 .into_iter()
-                .map(|acc| (acc.address().clone(), acc.into()))
-                .collect::<HashMap<Address, D>>();
+                .map(|acc| (acc.address.clone(), acc.into()))
+                .collect();
 
             let deltas = cod_accounts
                 .iter()
@@ -401,14 +405,7 @@ where
                         // assuming these have ChangeType created
                         update.clone()
                     } else {
-                        D::from_storage(
-                            chain,
-                            &acc.address,
-                            None,
-                            None,
-                            None,
-                            ChangeType::Deletion,
-                        )?
+                        models::contract::ContractDelta::new()
                     };
                     Ok((acc.address.clone(), update))
                 })
@@ -441,14 +438,7 @@ where
             let deltas = deleted
                 .iter()
                 .map(|acc| {
-                    let update = D::from_storage(
-                        chain,
-                        &acc.address,
-                        None,
-                        None,
-                        None,
-                        ChangeType::Deletion,
-                    )?;
+                    let update = models::contract::ContractDelta::new();
                     Ok((acc.address.clone(), update))
                 })
                 .collect::<Result<HashMap<_, _>, StorageError>>()?;
@@ -627,26 +617,14 @@ where
         }
         Ok(result)
     }
-}
 
-#[async_trait]
-impl<A, D, T> ContractStateGateway for PostgresGateway<A, D, T>
-where
-    D: ContractDelta + From<A>,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
-    type DB = AsyncPgConnection;
-    type ContractState = A;
-    type Delta = D;
-
-    async fn get_contract(
+    pub async fn get_contract(
         &self,
         id: &ContractId,
         version: Option<&Version>,
         include_slots: bool,
-        db: &mut Self::DB,
-    ) -> Result<Self::ContractState, StorageError> {
+        db: &mut AsyncPgConnection,
+    ) -> Result<models::contract::Contract, StorageError> {
         let account_orm: orm::Account = orm::Account::by_id(id, db)
             .await
             .map_err(|err| {
@@ -718,34 +696,30 @@ where
                 .ok(),
             None => None,
         };
-        let mut account = Self::ContractState::from_storage(
-            orm::Contract { account: account_orm, balance: balance_orm, code: code_orm },
-            id.chain,
-            &balance_tx,
-            &code_tx,
-            creation_tx.as_ref(),
-        )?;
+        let mut account = models::contract::Contract::new();
 
         if include_slots {
-            let slots = self
-                .get_contract_slots(&id.chain, Some(&[account.address().clone()]), version, db)
+            account.slots = self
+                .get_contract_slots(&id.chain, Some(&[account.address.clone()]), version, db)
                 .await?
                 .remove(&id.address)
-                .unwrap_or_default();
-            account.set_store(&slots)?;
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(k, v)| (k, v.unwrap_or_default()))
+                .collect();
         }
 
         Ok(account)
     }
 
-    async fn get_contracts(
+    pub async fn get_contracts(
         &self,
         chain: &Chain,
         ids: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
-        conn: &mut Self::DB,
-    ) -> Result<Vec<Self::ContractState>, StorageError> {
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<models::contract::Contract>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
         let version_ts = match &version {
             Some(version) => version.to_ts(conn).await?,
@@ -850,7 +824,7 @@ where
         accounts
             .into_iter()
             .zip(balances.into_iter().zip(codes))
-            .map(|(account, (balance, code))| -> Result<Self::ContractState, StorageError> {
+            .map(|(account, (balance, code))| -> Result<models::contract::Contract, StorageError> {
                 if !(account.id == balance.account_id && balance.account_id == code.account_id) {
                     return Err(StorageError::Unexpected(format!(
                         "Identity mismatch - while retrieving entries for account id: {} \
@@ -870,17 +844,15 @@ where
                     code: code.entity,
                 };
 
-                let mut contract = Self::ContractState::from_storage(
-                    contract_orm,
-                    *chain,
-                    &balance_tx,
-                    &code_tx,
-                    creation_tx.as_ref(),
-                )?;
+                let mut contract = models::contract::Contract::new();
 
                 if let Some(storage) = &slots {
-                    if let Some(contract_slots) = storage.get(&contract.address()) {
-                        contract.set_store(contract_slots)?;
+                    if let Some(contract_slots) = storage.get(&contract.address) {
+                        contract.slots = contract_slots
+                            .clone()
+                            .into_iter()
+                            .map(|(k, v)| (k, v.unwrap_or_default()))
+                            .collect();
                     }
                 }
 
@@ -889,12 +861,12 @@ where
             .collect()
     }
 
-    async fn insert_contract(
+    pub async fn insert_contract(
         &self,
-        new: &Self::ContractState,
-        db: &mut Self::DB,
+        new: &models::contract::Contract,
+        db: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
-        let (creation_tx_id, created_ts) = if let Some(h) = new.creation_tx() {
+        let (creation_tx_id, created_ts) = if let Some(h) = &new.creation_tx {
             let (tx_id, ts) = schema::transaction::table
                 .inner_join(schema::block::table)
                 .filter(schema::transaction::hash.eq(h.clone()))
@@ -915,9 +887,19 @@ where
             (None, chrono::Utc::now().naive_utc())
         };
 
-        let chain_id = self.get_chain_id(new.chain());
-        let new_contract = new.to_storage(chain_id, created_ts, creation_tx_id);
-        let hex_addr = hex::encode(new.address());
+        let chain_id = self.get_chain_id(&new.chain);
+        let new_contract = orm::NewContract {
+            title: new.title.clone(),
+            address: new.address.clone(),
+            chain_id,
+            creation_tx: creation_tx_id,
+            created_at: Some(created_ts),
+            deleted_at: None,
+            balance: new.balance.clone(),
+            code: new.code.clone(),
+            code_hash: new.code_hash.clone(),
+        };
+        let hex_addr = hex::encode(&new.address);
 
         let account_id = diesel::insert_into(schema::account::table)
             .values(new_contract.new_account())
@@ -941,9 +923,15 @@ where
             self.upsert_slots(
                 [(
                     tx_id,
-                    [(new.address().clone(), new.store())]
-                        .into_iter()
-                        .collect(),
+                    [(
+                        new.address.clone(),
+                        new.slots
+                            .iter()
+                            .map(|(k, v)| (k.clone(), Some(v.clone())))
+                            .collect(),
+                    )]
+                    .into_iter()
+                    .collect(),
                 )]
                 .into_iter()
                 .collect(),
@@ -954,11 +942,11 @@ where
         Ok(())
     }
 
-    async fn update_contracts(
+    pub async fn update_contracts(
         &self,
         chain: &Chain,
-        new: &[(Address, &Self::Delta)],
-        conn: &mut Self::DB,
+        new: &[(Address, &models::contract::ContractDelta)],
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let chain_id = self.get_chain_id(chain);
         let new = new
@@ -1020,7 +1008,7 @@ where
                 )
             })?;
 
-            if let Some(new_balance) = delta.dirty_balance() {
+            if let Some(new_balance) = delta.balance.clone() {
                 let new = orm::NewAccountBalance {
                     balance: new_balance,
                     account_id,
@@ -1031,7 +1019,7 @@ where
                 balance_data.push(new);
             }
 
-            if let Some(new_code) = delta.dirty_code() {
+            if let Some(new_code) = delta.code.as_ref() {
                 let hash = keccak256(new_code.clone());
                 let new = orm::NewContractCode {
                     code: new_code,
@@ -1044,7 +1032,12 @@ where
                 code_data.push(new);
             }
 
-            let slots = delta.dirty_slots();
+            let slots = delta
+                .slots
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k, Some(v)))
+                .collect::<HashMap<_, _>>();
             if !slots.is_empty() {
                 match slot_data.entry(tx_id) {
                     Entry::Occupied(mut e) => {
@@ -1087,7 +1080,7 @@ where
         Ok(())
     }
 
-    async fn delete_contract(
+    pub async fn delete_contract(
         &self,
         id: &ContractId,
         at_tx: &TxHash,
@@ -1151,13 +1144,13 @@ where
         Ok(())
     }
 
-    async fn get_accounts_delta(
+    pub async fn get_accounts_delta(
         &self,
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<Self::Delta>, StorageError> {
+    ) -> Result<Vec<models::contract::ContractDelta>, StorageError> {
         let chain_id = self.get_chain_id(chain);
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
@@ -1217,14 +1210,7 @@ where
                 } else {
                     ChangeType::Update
                 };
-                let update = Self::Delta::from_storage(
-                    chain,
-                    &address,
-                    slots,
-                    balance_deltas.get(&id),
-                    code_deltas.get(&id),
-                    state,
-                )?;
+                let update = models::contract::ContractDelta::new();
                 Ok((address, update))
             })
             .chain(
@@ -1244,8 +1230,11 @@ mod test {
     //!
     //! The tests below test the functionality using the concrete EVM types.
 
-    use crate::extractor::evm::{self, Account};
-    use diesel_async::AsyncConnection;
+    uuse crate::{
+        extractor::evm::{self, Account},
+        storage::postgres::db_fixtures,
+    };
+    use diesel_async::{AsyncConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
     use rstest::rstest;
     use tycho_types::Bytes;
@@ -1455,7 +1444,7 @@ mod test {
             .collect()
     }
 
-    fn account_c1(version: u64) -> evm::Account {
+    fn account_c1(version: u64) -> models::contract::Contract {
         match version {
             2 => evm::Account {
                 chain: Chain::Ethereum,
@@ -1482,7 +1471,8 @@ mod test {
                         .parse()
                         .unwrap(),
                 ),
-            },
+            }
+            .into(),
             _ => panic!("No version found"),
         }
     }
@@ -1640,8 +1630,9 @@ mod test {
         .await;
         let code = Bytes::from_str("1234").unwrap();
         let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
-        let expected = Account::new(
-            Chain::Ethereum,
+        let expected = models::contract::Contract::new();
+        /*
+        Chain::Ethereum,
             H160::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
             "NewAccount".to_owned(),
             HashMap::new(),
@@ -1660,8 +1651,7 @@ mod test {
                 )
                 .unwrap(),
             ),
-        );
-
+         */
         gateway
             .insert_contract(&expected, &mut conn)
             .await
@@ -1691,14 +1681,16 @@ mod test {
         db_fixtures::insert_txns(&mut conn, &[(block.id, 100, modify_txhash)]).await;
         let mut account = account_c1(2);
         account.set_balance(U256::from(10000), modify_txhash.parse().unwrap());
-        let update = evm::AccountUpdate::new(
-            account.address,
+        let update = models::contract::ContractDelta::new();
+        /*
+        account.address,
             account.chain,
             HashMap::new(),
             Some(U256::from(10_000)),
             None,
             ChangeType::Update,
-        );
+        */
+
         let contract_id = ContractId::new(Chain::Ethereum, account.address().to_owned());
 
         gw.update_contracts(&Chain::Ethereum, &[(tx_hash_bytes, &update)], &mut conn)
