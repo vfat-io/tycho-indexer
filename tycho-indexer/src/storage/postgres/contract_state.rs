@@ -694,7 +694,18 @@ where
                 .ok(),
             None => None,
         };
-        let mut account = models::contract::Contract::new();
+        let mut account = models::contract::Contract::new(
+            id.chain,
+            account_orm.address,
+            account_orm.title,
+            HashMap::new(),
+            balance_orm.balance,
+            code_orm.code,
+            code_orm.hash,
+            balance_tx,
+            code_tx,
+            creation_tx,
+        );
 
         if include_slots {
             account.slots = self
@@ -823,7 +834,8 @@ where
             .into_iter()
             .zip(balances.into_iter().zip(codes))
             .map(|(account, (balance, code))| -> Result<models::contract::Contract, StorageError> {
-                if !(account.id == balance.account_id && balance.account_id == code.account_id) {
+                if !(&account.id == &balance.account_id && &balance.account_id == &code.account_id)
+                {
                     return Err(StorageError::Unexpected(format!(
                         "Identity mismatch - while retrieving entries for account id: {} \
                             encountered balance for id {} and code for id {}",
@@ -836,13 +848,19 @@ where
                 let balance_tx = balance.tx.unwrap();
                 let code_tx = code.tx.unwrap();
                 let creation_tx = account.tx;
-                let contract_orm = orm::Contract {
-                    account: account.entity,
-                    balance: balance.entity,
-                    code: code.entity,
-                };
 
-                let mut contract = models::contract::Contract::new();
+                let mut contract = models::contract::Contract::new(
+                    *chain,
+                    account.entity.address.clone(),
+                    account.entity.title.clone(),
+                    HashMap::new(),
+                    balance.entity.balance.clone(),
+                    code.entity.code.clone(),
+                    code.entity.hash.clone(),
+                    balance_tx,
+                    code_tx,
+                    creation_tx,
+                );
 
                 if let Some(storage) = &slots {
                     if let Some(contract_slots) = storage.get(&contract.address) {
@@ -1630,14 +1648,15 @@ mod test {
         )
         .await;
         let code = Bytes::from_str("1234").unwrap();
-        let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
-        let expected = models::contract::Contract::new();
-        /*
-        Chain::Ethereum,
-            H160::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+        let code_hash = Bytes::from(&ethers::utils::keccak256(&code));
+        let expected = models::contract::Contract::new(
+            Chain::Ethereum,
+            "6B175474E89094C44Da98b954EedeAC495271d0F"
+                .parse()
+                .expect("address ok"),
             "NewAccount".to_owned(),
             HashMap::new(),
-            U256::from(100),
+            Bytes::from("0x64"),
             code,
             code_hash,
             "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
@@ -1647,12 +1666,11 @@ mod test {
                 .parse()
                 .expect("txhash ok"),
             Some(
-                H256::from_str(
-                    "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7",
-                )
-                .unwrap(),
+                "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
+                    .parse()
+                    .unwrap(),
             ),
-         */
+        );
         gateway
             .insert_contract(&expected, &mut conn)
             .await
@@ -2125,7 +2143,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn get_slots_delta_backward() {
         let mut conn = setup_db().await;
         setup_slots_delta(&mut conn).await;
@@ -2165,7 +2182,6 @@ mod test {
     )]
     #[case::no_start_version(None)]
     #[tokio::test]
-
     async fn get_accounts_delta_backward(#[case] start_version: Option<BlockOrTimestamp>) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
