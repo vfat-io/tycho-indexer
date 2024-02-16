@@ -447,7 +447,6 @@ type DeltasCache = LruCache<
 
 type OpenTx = (DBTransaction, oneshot::Receiver<Result<(), StorageError>>);
 
-#[derive(Clone)]
 pub struct CachedGateway {
     // TODO: Remove Mutex. It is not needed but avoids changing the Extractor trait.
     open_tx: Arc<Mutex<Option<OpenTx>>>,
@@ -455,6 +454,19 @@ pub struct CachedGateway {
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
     lru_cache: Arc<Mutex<DeltasCache>>,
+}
+
+impl Clone for CachedGateway {
+    fn clone(&self) -> Self {
+        Self {
+            // create a separate open tx state for new instances
+            open_tx: Arc::new(Mutex::new(None)),
+            tx: self.tx.clone(),
+            pool: self.pool.clone(),
+            state_gateway: self.state_gateway.clone(),
+            lru_cache: self.lru_cache.clone(),
+        }
+    }
 }
 
 impl CachedGateway {
