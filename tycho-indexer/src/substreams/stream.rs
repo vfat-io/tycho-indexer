@@ -68,7 +68,7 @@ fn stream_blocks(
     // For example, if before the restart we received block 100, 101 and crashed,
     // block 100 and its cursor was sent to the db. After the restart substreams will send
     // us block 100 again, and we want to skip it to avoid conflicts.
-    let mut skip_first_msg = cursor != Some("".to_string());
+    let mut skip_first_msg = cursor.as_deref() != Some("");
     let mut latest_cursor = cursor.unwrap_or_default();
     let mut retry_count = 0;
     let mut backoff = DEFAULT_BACKOFF.clone();
