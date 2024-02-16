@@ -103,11 +103,11 @@ where
     }
 
     #[instrument(skip_all)]
-    async fn save_cursor(&self, block: &Block, new_cursor: &str) -> Result<(), StorageError> {
+    async fn save_cursor(&self, new_cursor: &str) -> Result<(), StorageError> {
         let state =
             ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
         self.state_gateway
-            .save_state(block, &state)
+            .save_state(&state)
             .await?;
         Ok(())
     }
@@ -153,6 +153,9 @@ where
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
         self.state_gateway
+            .start_transaction(&changes.block)
+            .await;
+        self.state_gateway
             .upsert_block(&changes.block)
             .await?;
 
@@ -164,7 +167,7 @@ where
 
         for tx in changes.txs_with_update.iter() {
             self.state_gateway
-                .upsert_tx(&changes.block, &tx.tx)
+                .upsert_tx(&tx.tx)
                 .await?;
 
             let hash: TxHash = tx.tx.hash.into();
@@ -187,8 +190,6 @@ where
             );
         }
 
-        let block = &changes.block;
-
         let new_tokens_addresses = self
             .get_new_tokens(protocol_tokens)
             .await?;
@@ -198,32 +199,33 @@ where
                 .get_tokens(new_tokens_addresses)
                 .await;
             self.state_gateway
-                .add_tokens(block, &new_tokens)
+                .add_tokens(&new_tokens)
                 .await?;
         }
 
         if !new_protocol_components.is_empty() {
             self.state_gateway
-                .add_protocol_components(block, new_protocol_components.as_slice())
+                .add_protocol_components(new_protocol_components.as_slice())
                 .await?;
         }
 
         if !state_updates.is_empty() {
             self.state_gateway
-                .update_protocol_states(block, state_updates.as_slice())
+                .update_protocol_states(state_updates.as_slice())
                 .await?;
         }
 
         if !balance_changes.is_empty() {
             self.state_gateway
-                .add_component_balances(block, balance_changes.as_slice())
+                .add_component_balances(balance_changes.as_slice())
                 .await?;
         }
 
-        self.save_cursor(&changes.block, new_cursor)
-            .await?;
+        self.save_cursor(new_cursor).await?;
 
-        Result::<(), StorageError>::Ok(())
+        self.state_gateway
+            .commit_transaction()
+            .await
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? to))]
@@ -270,7 +272,12 @@ where
             .revert_state(to)
             .await?;
 
-        self.save_cursor(&block, new_cursor)
+        self.state_gateway
+            .start_transaction(&block)
+            .await;
+        self.save_cursor(new_cursor).await?;
+        self.state_gateway
+            .commit_transaction()
             .await?;
 
         Ok(evm::BlockEntityChangesResult {
@@ -800,9 +807,16 @@ mod test_serial_db {
                 .await
                 .expect("pool should get a connection");
             evm_gw
-                .save_state(&evm::Block::default(), &state)
+                .start_transaction(&evm::Block::default())
+                .await;
+            evm_gw
+                .save_state(&state)
                 .await
                 .expect("extaction state insertion succeeded");
+            evm_gw
+                .commit_transaction()
+                .await
+                .expect("gw transaction failed");
             let _ = evm_gw.flush().await;
 
             let maybe_err = err_rx
