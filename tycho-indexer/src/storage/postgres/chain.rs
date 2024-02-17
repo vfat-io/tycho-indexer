@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use tracing::instrument;
+use itertools::Itertools;
+use std::collections::HashMap;
+use tracing::{instrument, warn};
+use tycho_types::Bytes;
 
 use crate::storage::{
     BlockHash, BlockIdentifier, ChainGateway, ContractDelta, StorableBlock, StorableContract,
@@ -27,21 +30,33 @@ where
     #[instrument(skip_all)]
     async fn upsert_block(
         &self,
-        new: &Self::Block,
+        new: &[Self::Block],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::block::dsl::*;
-        let block_chain_id = self.get_chain_id(new.chain());
-        let new_block = new.to_storage(block_chain_id);
+        if new.is_empty() {
+            warn!("Upsert blocks called with empty blocks!");
+            return Ok(())
+        }
+        let block_chain_id = self.get_chain_id(new[0].chain());
+        let new_blocks = new
+            .iter()
+            .map(|n| n.to_storage(block_chain_id))
+            .collect_vec();
 
         // assumes that block with the same hash will not appear with different values
         diesel::insert_into(block)
-            .values(&new_block)
+            .values(&new_blocks)
             .on_conflict_do_nothing()
             .execute(conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(err, "Block", &hex::encode(new_block.hash), None)
+                StorageError::from_diesel(
+                    err,
+                    "Block",
+                    &format!("Batch: {} and {} more", &new_blocks[0].hash, new_blocks.len() - 1),
+                    None,
+                )
             })?;
         Ok(())
     }
@@ -71,36 +86,65 @@ where
     #[instrument(skip_all)]
     async fn upsert_tx(
         &self,
-        new: &Self::Transaction,
+        new: &[Self::Transaction],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::transaction::dsl::*;
+        if new.is_empty() {
+            warn!("Upsert tx called with empty transactions!");
+            return Ok(())
+        }
 
-        let block_hash = new.block_hash();
-        let parent_block = schema::block::table
-            .filter(schema::block::hash.eq(&block_hash))
-            .select(schema::block::id)
-            .first::<i64>(conn)
+        let block_hashes = new
+            .iter()
+            .map(|n| n.block_hash())
+            .collect_vec();
+        let parent_blocks = schema::block::table
+            .filter(schema::block::hash.eq_any(&block_hashes))
+            .select((schema::block::hash, schema::block::id))
+            .get_results::<(Bytes, i64)>(conn)
             .await
             .map_err(|err| {
                 StorageError::from_diesel(
                     err,
                     "Transaction",
-                    &hex::encode(block_hash),
+                    &format!("Batch: {:x} and {} more", &block_hashes[0], block_hashes.len() - 1),
                     Some("Block".to_owned()),
                 )
-            })?;
+            })?
+            .into_iter()
+            .collect::<HashMap<_, _>>();
 
-        let orm_new: orm::NewTransaction = new.to_storage(parent_block);
+        let orm_txns = new
+            .iter()
+            .map(|n| {
+                let block_h = n.block_hash();
+                let bid = *parent_blocks
+                    .get(&block_h)
+                    .ok_or_else(|| {
+                        StorageError::NoRelatedEntity(
+                            "Block".to_string(),
+                            "Transaction".to_string(),
+                            format!("{}", block_h),
+                        )
+                    })?;
+                Ok(n.to_storage(bid))
+            })
+            .collect::<Result<Vec<orm::NewTransaction>, StorageError>>()?;
 
         // assumes that tx with the same hash will not appear with different values
         diesel::insert_into(transaction)
-            .values(&orm_new)
+            .values(&orm_txns)
             .on_conflict_do_nothing()
             .execute(conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(err, "Transaction", &hex::encode(orm_new.hash), None)
+                StorageError::from_diesel(
+                    err,
+                    "Transaction",
+                    &format!("Batch {:x} and {} more", &orm_txns[0].hash, orm_txns.len() - 1),
+                    None,
+                )
             })?;
         Ok(())
     }
@@ -302,7 +346,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
         let block = block("0xbadbabe000000000000000000000000000000000000000000000000000000000");
 
-        gw.upsert_block(&block, &mut conn)
+        gw.upsert_block(&[block], &mut conn)
             .await
             .unwrap();
         let retrieved_block = gw
@@ -332,7 +376,7 @@ mod test {
             ts: "2020-01-01T00:00:00".parse().unwrap(),
         };
 
-        gw.upsert_block(&block, &mut conn)
+        gw.upsert_block(&[block], &mut conn)
             .await
             .unwrap();
         let retrieved_block = gw
@@ -382,7 +426,7 @@ mod test {
             H256::from_str("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9")
                 .unwrap();
 
-        gw.upsert_tx(&tx, &mut conn)
+        gw.upsert_tx(&[tx], &mut conn)
             .await
             .unwrap();
         let retrieved_tx = gw
@@ -412,7 +456,7 @@ mod test {
             index: 1,
         };
 
-        gw.upsert_tx(&tx, &mut conn)
+        gw.upsert_tx(&[tx], &mut conn)
             .await
             .unwrap();
         let retrieved_tx = gw

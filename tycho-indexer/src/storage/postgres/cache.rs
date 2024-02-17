@@ -16,7 +16,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::{
     extractor::evm::{
@@ -30,14 +30,23 @@ use crate::{
 /// Represents different types of database write operations.
 #[derive(PartialEq, Clone, Debug)]
 pub(crate) enum WriteOp {
-    UpsertBlock(evm::Block),
-    UpsertTx(evm::Transaction),
+    // Simply merge
+    UpsertBlock(Vec<evm::Block>),
+    // Simply merge
+    UpsertTx(Vec<evm::Transaction>),
+    // Simply keep last
     SaveExtractionState(ExtractionState),
-    InsertContract(evm::Account),
+    // Support saving a batch
+    InsertContract(Vec<evm::Account>),
+    // Simply merge
     UpdateContracts(Vec<(TxHash, AccountUpdate)>),
+    // Simply merge
     InsertProtocolComponents(Vec<evm::ProtocolComponent>),
+    // Simply merge
     InsertTokens(Vec<evm::ERC20Token>),
+    // Simply merge
     InsertComponentBalances(Vec<evm::ComponentBalance>),
+    // Simply merge
     UpsertProtocolState(Vec<(TxHash, ProtocolStateDelta)>),
 }
 
@@ -45,8 +54,76 @@ pub(crate) enum WriteOp {
 /// a list of operations to be performed, and a channel to send the result.
 pub struct DBTransaction {
     block: evm::Block,
+    size: usize,
     operations: Vec<WriteOp>,
     tx: oneshot::Sender<Result<(), StorageError>>,
+}
+
+impl DBTransaction {
+    /// Add changes while maintaining the original insertion order.
+    ///
+    /// This method will batch an new WriteOp with it's existing equivalent one in the vector of
+    /// currently present operations. This means if transaction consists of upsert_block, upsert_tx
+    /// and a new upsert_tx is added, the newly added upsert is executed only after all block.
+    /// upserts completed.
+    ///
+    /// This allows to construct transaction with a dynamic order of insertions as long as the
+    /// insertion order would remain the same even if more data was to be stored.
+    fn add_operation(&mut self, op: WriteOp) -> Result<(), StorageError> {
+        for existing_op in self.operations.iter_mut() {
+            match (existing_op, &op) {
+                (WriteOp::UpsertBlock(l), WriteOp::UpsertBlock(r)) => {
+                    self.size += r.len();
+                    l.extend(r);
+                    return Ok(());
+                }
+                (WriteOp::UpsertTx(l), WriteOp::UpsertTx(r)) => {
+                    self.size += r.len();
+                    l.extend(r);
+                    return Ok(());
+                }
+                (WriteOp::SaveExtractionState(l), WriteOp::SaveExtractionState(r)) => {
+                    l.clone_from(r);
+                    return Ok(());
+                }
+                (WriteOp::InsertContract(l), WriteOp::InsertContract(r)) => {
+                    self.size += r.len();
+                    l.extend(r.iter().cloned());
+                    return Ok(());
+                }
+                (WriteOp::UpdateContracts(l), WriteOp::UpdateContracts(r)) => {
+                    self.size += r.len();
+                    l.extend(r.iter().cloned());
+                    return Ok(());
+                }
+                (WriteOp::InsertProtocolComponents(l), WriteOp::InsertProtocolComponents(r)) => {
+                    self.size += r.len();
+                    l.extend(r.iter().cloned());
+                    return Ok(());
+                }
+                (WriteOp::InsertTokens(l), WriteOp::InsertTokens(r)) => {
+                    self.size += r.len();
+                    l.extend(r.iter().cloned());
+                    return Ok(());
+                }
+                (WriteOp::InsertComponentBalances(l), WriteOp::InsertComponentBalances(r)) => {
+                    self.size += r.len();
+                    l.extend(r.iter().cloned());
+                    return Ok(());
+                }
+                (WriteOp::UpsertProtocolState(l), WriteOp::UpsertProtocolState(r)) => {
+                    self.size += r.len();
+                    l.extend(r.iter().cloned());
+                    return Ok(());
+                }
+                _ => continue,
+            }
+        }
+        // not quite accurate but currently all WriteOps are created with a single entry.
+        self.size += 1;
+        self.operations.push(op);
+        Ok(())
+    }
 }
 
 /// Represents different types of messages that can be sent to the DBCacheWriteExecutor.
@@ -200,7 +277,7 @@ impl DBCacheWriteExecutor {
             .map_or(false, |persisted| new_db_tx.block.number <= persisted.number) ||
             new_db_tx.block.number < self.latest_rpc_block_number
         {
-            tracing::info!("Received an old block number {:?}", new_db_tx.block.number);
+            debug!("Received an old block number {:?}", new_db_tx.block.number);
             // New database transaction for an old block are directly sent to the database
             let mut conn = self
                 .pool
@@ -219,10 +296,9 @@ impl DBCacheWriteExecutor {
                                     // As this db transaction is old. It can contain
                                     // already stored txs, we log the duplicate entry
                                     // error and continue
-                                    tracing::debug!(
+                                    debug!(
                                         "Ignoring duplicate entry for {} with id {}",
-                                        entity,
-                                        id
+                                        entity, id
                                     );
                                 }
                                 Err(e) => {
@@ -383,10 +459,13 @@ impl DBCacheWriteExecutor {
                     .save_state(state, conn)
                     .await
             }
-            WriteOp::InsertContract(contract) => {
-                self.state_gateway
-                    .insert_contract(contract, conn)
-                    .await
+            WriteOp::InsertContract(contracts) => {
+                for contract in contracts.iter() {
+                    self.state_gateway
+                        .insert_contract(contract, conn)
+                        .await?
+                }
+                Ok(())
             }
             WriteOp::UpdateContracts(contracts) => {
                 let collected_changes: Vec<(TxHash, &AccountUpdate)> = contracts
@@ -481,7 +560,7 @@ impl CachedGateway {
             tx.0.block = *block;
         } else {
             let (tx, rx) = oneshot::channel();
-            *open_tx = Some((DBTransaction { block: *block, operations: vec![], tx }, rx));
+            *open_tx = Some((DBTransaction { block: *block, size: 0, operations: vec![], tx }, rx));
         }
     }
 
@@ -492,7 +571,7 @@ impl CachedGateway {
                 Err(StorageError::Unexpected("Usage error: No transaction started".to_string()))
             }
             Some((tx, _)) => {
-                tx.operations.push(op);
+                tx.add_operation(op)?;
                 Ok(())
             }
         }
@@ -505,8 +584,8 @@ impl CachedGateway {
                 Err(StorageError::Unexpected("Usage error: Commit without transaction".to_string()))
             }
             Some((db_txn, rx)) => {
-                if db_txn.operations.len() > min_ops_batch_size {
-                    info!(size = db_txn.operations.len(), "Submitting db operation batch!");
+                if db_txn.size > min_ops_batch_size {
+                    debug!(size = db_txn.operations.len(), "Submitting db operation batch!");
                     self.tx
                         .send(DBCacheMessage::Write(db_txn))
                         .await
@@ -514,7 +593,7 @@ impl CachedGateway {
                     rx.await
                         .map_err(|_| StorageError::WriteCacheGoneAway())??;
                 } else {
-                    // if we are not ready to commit, reset the open tx back to it's previous state.
+                    // if we are not ready to commit, give the OpenTx struct back.
                     *open_tx = Some((db_txn, rx));
                 }
                 Ok(())
@@ -537,13 +616,13 @@ impl CachedGateway {
         }
     }
     pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpsertBlock(*new))
+        self.add_op(WriteOp::UpsertBlock(vec![*new]))
             .await?;
         Ok(())
     }
 
     pub async fn upsert_tx(&self, new: &evm::Transaction) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpsertTx(*new))
+        self.add_op(WriteOp::UpsertTx(vec![*new]))
             .await?;
         Ok(())
     }
@@ -555,7 +634,7 @@ impl CachedGateway {
     }
 
     pub async fn insert_contract(&self, new: &evm::Account) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertContract(new.clone()))
+        self.add_op(WriteOp::InsertContract(vec![new.clone()]))
             .await?;
         Ok(())
     }
@@ -756,7 +835,8 @@ mod test_serial_db {
 
             // Send write block message
             let block = get_sample_block(1);
-            let os_rx = send_write_message(&tx, block, vec![WriteOp::UpsertBlock(block)]).await;
+            let os_rx =
+                send_write_message(&tx, block, vec![WriteOp::UpsertBlock(vec![block])]).await;
             os_rx
                 .await
                 .expect("Response from channel ok")
@@ -869,8 +949,8 @@ mod test_serial_db {
                 &tx,
                 block_1,
                 vec![
-                    WriteOp::UpsertBlock(block_1),
-                    WriteOp::UpsertTx(tx_1),
+                    WriteOp::UpsertBlock(vec![block_1]),
+                    WriteOp::UpsertTx(vec![tx_1]),
                     WriteOp::SaveExtractionState(extraction_state_1.clone()),
                     WriteOp::InsertTokens(vec![token]),
                     WriteOp::InsertProtocolComponents(vec![protocol_component]),
@@ -894,7 +974,7 @@ mod test_serial_db {
                 &tx,
                 block_2,
                 vec![
-                    WriteOp::UpsertBlock(block_2),
+                    WriteOp::UpsertBlock(vec![block_2]),
                     WriteOp::UpsertProtocolState(vec![(
                         tx_1.hash.as_bytes().into(),
                         protocol_state_delta,
@@ -910,7 +990,7 @@ mod test_serial_db {
             // Send third block messages
             let block_3 = get_sample_block(3);
             let os_rx_3 =
-                send_write_message(&tx, block_3, vec![WriteOp::UpsertBlock(block_3)]).await;
+                send_write_message(&tx, block_3, vec![WriteOp::UpsertBlock(vec![block_3])]).await;
             os_rx_3
                 .await
                 .expect("Response from channel ok")
@@ -1484,7 +1564,7 @@ mod test_serial_db {
         operations: Vec<WriteOp>,
     ) -> oneshot::Receiver<Result<(), StorageError>> {
         let (os_tx, os_rx) = oneshot::channel();
-        let db_transaction = DBTransaction { block, operations, tx: os_tx };
+        let db_transaction = DBTransaction { block, size: operations.len(), operations, tx: os_tx };
 
         tx.send(DBCacheMessage::Write(db_transaction))
             .await

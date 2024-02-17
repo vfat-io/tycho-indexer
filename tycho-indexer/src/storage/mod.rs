@@ -336,7 +336,11 @@ pub trait ChainGateway {
     ///
     /// # Returns
     /// - Empty ok result indicates success. Failure might occur if the block is already present.
-    async fn upsert_block(&self, new: &Self::Block, db: &mut Self::DB) -> Result<(), StorageError>;
+    async fn upsert_block(
+        &self,
+        new: &[Self::Block],
+        db: &mut Self::DB,
+    ) -> Result<(), StorageError>;
     /// Retrieves a block from storage.
     ///
     /// # Parameters
@@ -363,7 +367,7 @@ pub trait ChainGateway {
     /// exists.
     async fn upsert_tx(
         &self,
-        new: &Self::Transaction,
+        new: &[Self::Transaction],
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
