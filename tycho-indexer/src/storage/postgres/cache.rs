@@ -16,7 +16,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::warn;
+use tracing::debug;
 
 use crate::{
     extractor::evm::{
@@ -448,6 +448,9 @@ type DeltasCache = LruCache<
 type OpenTx = (DBTransaction, oneshot::Receiver<Result<(), StorageError>>);
 
 pub struct CachedGateway {
+    // Can we batch multiple block in here without breaking things?
+    // Assuming we are still syncing?
+
     // TODO: Remove Mutex. It is not needed but avoids changing the Extractor trait.
     open_tx: Arc<Mutex<Option<OpenTx>>>,
     tx: mpsc::Sender<DBCacheMessage>,
@@ -470,14 +473,16 @@ impl Clone for CachedGateway {
 }
 
 impl CachedGateway {
+    // Accumulating transactions does not drop previous data not are transactions nested.
     pub async fn start_transaction(&self, block: &evm::Block) {
         let mut open_tx = self.open_tx.lock().await;
 
-        if open_tx.is_some() {
-            warn!("Starting a new transaction with uncommitted changes!");
+        if let Some(tx) = open_tx.as_mut() {
+            tx.0.block = *block;
+        } else {
+            let (tx, rx) = oneshot::channel();
+            *open_tx = Some((DBTransaction { block: *block, operations: vec![], tx }, rx));
         }
-        let (tx, rx) = oneshot::channel();
-        *open_tx = Some((DBTransaction { block: *block, operations: vec![], tx }, rx));
     }
 
     async fn add_op(&self, op: WriteOp) -> Result<(), StorageError> {
@@ -493,19 +498,22 @@ impl CachedGateway {
         }
     }
 
-    pub async fn commit_transaction(&self) -> Result<(), StorageError> {
+    pub async fn commit_transaction(&self, min_ops_batch_size: usize) -> Result<(), StorageError> {
         let mut open_tx = self.open_tx.lock().await;
         match open_tx.take() {
             None => {
                 Err(StorageError::Unexpected("Usage error: Commit without transaction".to_string()))
             }
             Some((db_txn, rx)) => {
-                self.tx
-                    .send(DBCacheMessage::Write(db_txn))
-                    .await
-                    .expect("Send message to receiver ok");
-                rx.await
-                    .map_err(|_| StorageError::WriteCacheGoneAway())??;
+                if db_txn.operations.len() > min_ops_batch_size {
+                    debug!(size = db_txn.operations.len(), "Submitting db operation batch!");
+                    self.tx
+                        .send(DBCacheMessage::Write(db_txn))
+                        .await
+                        .expect("Send message to receiver ok");
+                    rx.await
+                        .map_err(|_| StorageError::WriteCacheGoneAway())??;
+                }
                 Ok(())
             }
         }
@@ -1112,7 +1120,7 @@ mod test_serial_db {
                 .await
                 .expect("Upsert tx 1 ok");
             cached_gw
-                .commit_transaction()
+                .commit_transaction(0)
                 .await
                 .expect("committing tx failed");
 
@@ -1126,7 +1134,7 @@ mod test_serial_db {
                 .await
                 .expect("Upsert block 2 ok");
             cached_gw
-                .commit_transaction()
+                .commit_transaction(0)
                 .await
                 .expect("committing tx failed");
 
@@ -1140,7 +1148,7 @@ mod test_serial_db {
                 .await
                 .expect("Upsert block 3 ok");
             cached_gw
-                .commit_transaction()
+                .commit_transaction(0)
                 .await
                 .expect("committing tx failed");
 
@@ -1259,7 +1267,7 @@ mod test_serial_db {
                 ))
                 .await;
             cached_gw
-                .commit_transaction()
+                .commit_transaction(0)
                 .await
                 .expect("committing tx failed");
 
@@ -1285,7 +1293,7 @@ mod test_serial_db {
                 .await
                 .expect("Upsert block 2 ok");
             cached_gw
-                .commit_transaction()
+                .commit_transaction(0)
                 .await
                 .expect("committing tx failed");
 
@@ -1299,7 +1307,7 @@ mod test_serial_db {
                 .await
                 .expect("Upsert block 3 ok");
             cached_gw
-                .commit_transaction()
+                .commit_transaction(0)
                 .await
                 .expect("committing tx failed");
 
@@ -1333,7 +1341,7 @@ mod test_serial_db {
                 ))
                 .await;
             cached_gw
-                .commit_transaction()
+                .commit_transaction(0)
                 .await
                 .expect("committing tx failed");
 

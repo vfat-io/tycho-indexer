@@ -28,7 +28,7 @@ use tycho_indexer::{
         self,
         evm::{
             self,
-            native::{NativeContractExtractor, NativePgGateway},
+            native::{ChainState, NativeContractExtractor, NativePgGateway},
         },
         ExtractionError,
     },
@@ -144,6 +144,13 @@ async fn main() -> Result<(), ExtractionError> {
     let rpc_url = env::var("ETH_RPC_URL").expect("ETH_RPC_URL is not set");
     let rpc_client: Provider<Http> =
         Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
+    let block_number = rpc_client
+        .get_block_number()
+        .await
+        .expect("Error getting block number")
+        .as_u64();
+
+    let chain_state = ChainState::new(chrono::Local::now().naive_utc(), block_number);
 
     let write_executor = postgres::cache::DBCacheWriteExecutor::new(
         "ethereum".to_owned(),
@@ -152,11 +159,7 @@ async fn main() -> Result<(), ExtractionError> {
         evm_gw.clone(),
         rx,
         err_tx,
-        rpc_client
-            .get_block_number()
-            .await
-            .expect("Error getting block number")
-            .as_u64(),
+        block_number,
     )
     .await;
 
@@ -173,15 +176,25 @@ async fn main() -> Result<(), ExtractionError> {
     // extractor_handles.push(ambient_handle.clone());
     // info!("Extractor {} started!", ambient_handle.get_id());
 
-    let (uniswap_v3_task, uniswap_v3_handle) =
-        start_uniswap_v3_extractor(&args, pool.clone(), cached_gw.clone(), token_processor.clone())
-            .await?;
+    let (uniswap_v3_task, uniswap_v3_handle) = start_uniswap_v3_extractor(
+        &args,
+        chain_state,
+        pool.clone(),
+        cached_gw.clone(),
+        token_processor.clone(),
+    )
+    .await?;
     extractor_handles.push(uniswap_v3_handle.clone());
     info!("Extractor {} started!", uniswap_v3_handle.get_id());
 
-    let (uniswap_v2_task, uniswap_v2_handle) =
-        start_uniswap_v2_extractor(&args, pool.clone(), cached_gw.clone(), token_processor.clone())
-            .await?;
+    let (uniswap_v2_task, uniswap_v2_handle) = start_uniswap_v2_extractor(
+        &args,
+        chain_state,
+        pool.clone(),
+        cached_gw.clone(),
+        token_processor.clone(),
+    )
+    .await?;
     extractor_handles.push(uniswap_v2_handle.clone());
     info!("Extractor {} started!", uniswap_v2_handle.get_id());
 
@@ -252,6 +265,7 @@ async fn start_ambient_extractor(
 
 async fn start_uniswap_v2_extractor(
     _args: &CliArgs,
+    chain_state: ChainState,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
     token_pre_processor: TokenPreProcessor,
@@ -272,6 +286,7 @@ async fn start_uniswap_v2_extractor(
     let extractor = NativeContractExtractor::new(
         name,
         Chain::Ethereum,
+        chain_state,
         "uniswap_v2".to_owned(),
         gw,
         protocol_types,
@@ -295,6 +310,7 @@ async fn start_uniswap_v2_extractor(
 
 async fn start_uniswap_v3_extractor(
     _args: &CliArgs,
+    chain_state: ChainState,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
     token_pre_processor: TokenPreProcessor,
@@ -315,6 +331,7 @@ async fn start_uniswap_v3_extractor(
     let extractor = NativeContractExtractor::new(
         name,
         Chain::Ethereum,
+        chain_state,
         "uniswap_v3".to_owned(),
         gw,
         protocol_types,

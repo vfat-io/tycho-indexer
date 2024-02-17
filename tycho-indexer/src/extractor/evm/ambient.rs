@@ -252,7 +252,7 @@ where
         self.save_cursor(new_cursor).await?;
 
         self.state_gateway
-            .commit_transaction()
+            .commit_transaction(0)
             .await
     }
 
@@ -303,7 +303,7 @@ where
             .await;
         self.save_cursor(new_cursor).await?;
         self.state_gateway
-            .commit_transaction()
+            .commit_transaction(0)
             .await?;
 
         let changes = evm::BlockAccountChanges::new(
@@ -854,7 +854,7 @@ mod test_serial_db {
                 .await
                 .expect("extaction state insertion succeeded");
             evm_gw
-                .commit_transaction()
+                .commit_transaction(0)
                 .await
                 .expect("gw transaction failed");
             let _ = evm_gw.flush().await;
