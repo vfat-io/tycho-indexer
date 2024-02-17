@@ -80,23 +80,30 @@ impl<DB> NativeContractExtractor<DB> {
     }
 
     async fn report_progress(&self, block: Block) {
-        let state = self.inner.lock().await;
+        let mut state = self.inner.lock().await;
         let now = chrono::Local::now().naive_utc();
-        let time_passed = now.signed_duration_since(state.last_report_ts);
+        let time_passed = now
+            .signed_duration_since(state.last_report_ts)
+            .num_seconds();
         let is_syncing = self.is_syncing(block.number).await;
-        if is_syncing && time_passed.num_seconds() > 300 {
-            let distance_to_current = self.chain_state.current_block().await - block.number;
+        if is_syncing && time_passed > 60 {
+            let current_block = self.chain_state.current_block().await;
+            let distance_to_current = current_block - block.number;
             let blocks_processed = block.number - state.last_report_block_number;
-            let blocks_per_minute = blocks_processed as f64 / 5.0;
+            let blocks_per_minute = blocks_processed as f64 * 60.0 / time_passed as f64;
             let time_remaining =
                 chrono::Duration::minutes((distance_to_current as f64 / blocks_per_minute) as i64);
             info!(
                 extractor_id = self.name,
                 blocks_per_minute,
+                blocks_processed,
                 height = block.number,
-                %time_remaining,
-                name="SyncProgress"
+                current = current_block,
+                time_remaining = format_duration(&time_remaining),
+                name = "SyncProgress"
             );
+            state.last_report_ts = now;
+            state.last_report_block_number = block.number;
         }
     }
 
@@ -108,6 +115,12 @@ impl<DB> NativeContractExtractor<DB> {
             false
         }
     }
+}
+
+fn format_duration(duration: &chrono::Duration) -> String {
+    let hours = duration.num_hours();
+    let minutes = (duration.num_minutes()) % 60;
+    format!("{:02}h{:02}m", hours, minutes)
 }
 
 pub struct NativePgGateway<T>
