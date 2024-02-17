@@ -12,7 +12,7 @@ use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, trace};
 
 use super::{AccountUpdate, Block};
 use crate::{
@@ -455,7 +455,7 @@ where
 
         let raw_msg = BlockContractChanges::decode(_data.value.as_slice())?;
 
-        debug!(?raw_msg, "Received message");
+        trace!(?raw_msg, "Received message");
 
         let msg = match evm::BlockContractChanges::try_from_message(
             raw_msg,

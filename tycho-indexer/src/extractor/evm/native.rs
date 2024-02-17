@@ -11,7 +11,7 @@ use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, trace};
 use tycho_types::Bytes;
 
 use crate::{
@@ -95,7 +95,7 @@ impl<DB> NativeContractExtractor<DB> {
                 chrono::Duration::minutes((distance_to_current as f64 / blocks_per_minute) as i64);
             info!(
                 extractor_id = self.name,
-                blocks_per_minute,
+                blocks_per_minute = format!("{blocks_per_minute:.2}"),
                 blocks_processed,
                 height = block.number,
                 current = current_block,
@@ -434,7 +434,7 @@ where
                 inner: Arc::new(Mutex::new(Inner {
                     cursor: Vec::new(),
                     last_processed_block: None,
-                    last_report_ts: Default::default(),
+                    last_report_ts: chrono::Local::now().naive_utc(),
                     last_report_block_number: 0,
                 })),
                 protocol_system,
@@ -448,7 +448,7 @@ where
                 inner: Arc::new(Mutex::new(Inner {
                     cursor,
                     last_processed_block: None,
-                    last_report_ts: Default::default(),
+                    last_report_ts: chrono::Local::now().naive_utc(),
                     last_report_block_number: 0,
                 })),
                 protocol_system,
@@ -508,7 +508,7 @@ where
 
         let raw_msg = BlockEntityChanges::decode(data.value.as_slice())?;
 
-        debug!(?raw_msg, "Received message");
+        trace!(?raw_msg, "Received message");
 
         // Validate protocol_type_id
         let msg = match evm::BlockEntityChanges::try_from_message(
