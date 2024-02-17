@@ -50,6 +50,36 @@ pub(crate) enum WriteOp {
     UpsertProtocolState(Vec<(TxHash, ProtocolStateDelta)>),
 }
 
+impl WriteOp {
+    fn variant_name(&self) -> &'static str {
+        match self {
+            WriteOp::UpsertBlock(_) => "UpsertBlock",
+            WriteOp::UpsertTx(_) => "UpsertTx",
+            WriteOp::SaveExtractionState(_) => "SaveExtractionState",
+            WriteOp::InsertContract(_) => "InsertContract",
+            WriteOp::UpdateContracts(_) => "UpdateContracts",
+            WriteOp::InsertProtocolComponents(_) => "InsertProtocolComponents",
+            WriteOp::InsertTokens(_) => "InsertTokens",
+            WriteOp::InsertComponentBalances(_) => "InsertComponentBalances",
+            WriteOp::UpsertProtocolState(_) => "UpsertProtocolState",
+        }
+    }
+
+    fn order_key(&self) -> usize {
+        match self {
+            WriteOp::UpsertBlock(_) => 0,
+            WriteOp::UpsertTx(_) => 1,
+            WriteOp::InsertContract(_) => 2,
+            WriteOp::UpdateContracts(_) => 3,
+            WriteOp::InsertTokens(_) => 4,
+            WriteOp::InsertProtocolComponents(_) => 5,
+            WriteOp::InsertComponentBalances(_) => 6,
+            WriteOp::UpsertProtocolState(_) => 7,
+            WriteOp::SaveExtractionState(_) => 8,
+        }
+    }
+}
+
 /// Represents a transaction in the database, including the block information,
 /// a list of operations to be performed, and a channel to send the result.
 pub struct DBTransaction {
@@ -60,15 +90,12 @@ pub struct DBTransaction {
 }
 
 impl DBTransaction {
-    /// Add changes while maintaining the original insertion order.
+    /// Batch changes of the same kind.
     ///
-    /// This method will batch an new WriteOp with it's existing equivalent one in the vector of
-    /// currently present operations. This means if transaction consists of upsert_block, upsert_tx
-    /// and a new upsert_tx is added, the newly added upsert is executed only after all block.
-    /// upserts completed.
+    /// The final insertion order is determined via `WriteOp::order_key` and is fixed for all
+    /// transaction.
     ///
-    /// This allows to construct transaction with a dynamic order of insertions as long as the
-    /// insertion order would remain the same even if more data was to be stored.
+    /// PERF: Use an array instead of a vec since the order is static.
     fn add_operation(&mut self, op: WriteOp) -> Result<(), StorageError> {
         for existing_op in self.operations.iter_mut() {
             match (existing_op, &op) {
@@ -583,9 +610,20 @@ impl CachedGateway {
             None => {
                 Err(StorageError::Unexpected("Usage error: Commit without transaction".to_string()))
             }
-            Some((db_txn, rx)) => {
+            Some((mut db_txn, rx)) => {
                 if db_txn.size > min_ops_batch_size {
-                    debug!(size = db_txn.operations.len(), "Submitting db operation batch!");
+                    db_txn
+                        .operations
+                        .sort_by_key(|e| e.order_key());
+                    debug!(
+                        size = db_txn.size,
+                        ops = ?db_txn
+                            .operations
+                            .iter()
+                            .map(WriteOp::variant_name)
+                            .collect::<Vec<_>>(),
+                        "Submitting db operation batch!"
+                    );
                     self.tx
                         .send(DBCacheMessage::Write(db_txn))
                         .await

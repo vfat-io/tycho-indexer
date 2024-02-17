@@ -86,7 +86,7 @@ impl<DB> NativeContractExtractor<DB> {
             .signed_duration_since(state.last_report_ts)
             .num_seconds();
         let is_syncing = self.is_syncing(block.number).await;
-        if is_syncing && time_passed > 60 {
+        if is_syncing && time_passed >= 60 {
             let current_block = self.chain_state.current_block().await;
             let distance_to_current = current_block - block.number;
             let blocks_processed = block.number - state.last_report_block_number;
