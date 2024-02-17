@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - patch/*
+      - ah/sync-performance
 
 permissions:
   id-token: write
