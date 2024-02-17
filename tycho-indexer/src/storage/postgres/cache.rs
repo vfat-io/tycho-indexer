@@ -16,7 +16,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{
     extractor::evm::{
@@ -506,13 +506,16 @@ impl CachedGateway {
             }
             Some((db_txn, rx)) => {
                 if db_txn.operations.len() > min_ops_batch_size {
-                    debug!(size = db_txn.operations.len(), "Submitting db operation batch!");
+                    info!(size = db_txn.operations.len(), "Submitting db operation batch!");
                     self.tx
                         .send(DBCacheMessage::Write(db_txn))
                         .await
                         .expect("Send message to receiver ok");
                     rx.await
                         .map_err(|_| StorageError::WriteCacheGoneAway())??;
+                } else {
+                    // if we are not ready to commit, reset the open tx back to it's previous state.
+                    *open_tx = Some((db_txn, rx));
                 }
                 Ok(())
             }
