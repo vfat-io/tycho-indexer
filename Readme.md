@@ -281,6 +281,23 @@ and use the following VSCode user settings:
 }
 ```
 
+
+#### Setup pgFormatter with RustRover
+
+1. First make sure you have pgFormatter installed: `brew install pgformatter`
+2. Search RustRover configuration for external tools and add one using the "+" button.
+3. Check where the path of pgformatter installation: `which pg_format`
+4. The path should go under "Program", usually sth like: ``
+5. The arguments should be: `--no-space-function -i $FilePath$`
+6. Leave working directory empty. 
+7. Save the tool under pgFormat and add a shortcut to it if you'd like.
+
+In case this works, but you get warning about your LOCALE settings, you can use 
+`/usr/bin/env` to set the locale and then invoke pgformat as an argument to env:
+
+Program: `/usr/bin/env`
+Arguments: `LC_CTYPE=UTF-8 /opt/homebrew/bin/pg_format --no-space-function -i $FilePath$`
+
 ### Tests
 
 Currently Tycho exposes a single special [test-group](https://nexte.st/book/test-groups.html) via nextest:
