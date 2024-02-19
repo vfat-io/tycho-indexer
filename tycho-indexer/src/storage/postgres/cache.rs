@@ -16,6 +16,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
+use tracing::warn;
 
 use crate::{
     extractor::evm::{
@@ -48,22 +49,21 @@ pub struct DBTransaction {
     tx: oneshot::Sender<Result<(), StorageError>>,
 }
 
-impl DBTransaction {
-    pub(crate) fn new(
-        block: evm::Block,
-        operations: Vec<WriteOp>,
-        tx: oneshot::Sender<Result<(), StorageError>>,
-    ) -> Self {
-        Self { block, operations, tx }
-    }
-}
-
 /// Represents different types of messages that can be sent to the DBCacheWriteExecutor.
 pub enum DBCacheMessage {
     Write(DBTransaction),
     Flush(oneshot::Sender<Result<(), StorageError>>),
     Revert(BlockIdentifier, oneshot::Sender<Result<(), StorageError>>),
 }
+
+/// Extractors can start transaction.
+/// This will guarantee that a group of changes they provide is executed atomically.
+///
+/// The gateway keeps track of the blockchains progress.
+/// A new transaction group finishes. This group has a block attached to it.
+/// - If the block is old, we execute the transaction immediately.
+/// - If the block is pending, we group the transaction with other transactions that finish before
+///   we observe the next block.
 
 /// # Write Cache
 ///
@@ -445,15 +445,72 @@ type DeltasCache = LruCache<
     (Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
 >;
 
-#[derive(Clone)]
+type OpenTx = (DBTransaction, oneshot::Receiver<Result<(), StorageError>>);
+
 pub struct CachedGateway {
+    // TODO: Remove Mutex. It is not needed but avoids changing the Extractor trait.
+    open_tx: Arc<Mutex<Option<OpenTx>>>,
     tx: mpsc::Sender<DBCacheMessage>,
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
     lru_cache: Arc<Mutex<DeltasCache>>,
 }
 
+impl Clone for CachedGateway {
+    fn clone(&self) -> Self {
+        Self {
+            // create a separate open tx state for new instances
+            open_tx: Arc::new(Mutex::new(None)),
+            tx: self.tx.clone(),
+            pool: self.pool.clone(),
+            state_gateway: self.state_gateway.clone(),
+            lru_cache: self.lru_cache.clone(),
+        }
+    }
+}
+
 impl CachedGateway {
+    pub async fn start_transaction(&self, block: &evm::Block) {
+        let mut open_tx = self.open_tx.lock().await;
+
+        if open_tx.is_some() {
+            warn!("Starting a new transaction with uncommitted changes!");
+        }
+        let (tx, rx) = oneshot::channel();
+        *open_tx = Some((DBTransaction { block: *block, operations: vec![], tx }, rx));
+    }
+
+    async fn add_op(&self, op: WriteOp) -> Result<(), StorageError> {
+        let mut open_tx = self.open_tx.lock().await;
+        match open_tx.as_mut() {
+            None => {
+                Err(StorageError::Unexpected("Usage error: No transaction started".to_string()))
+            }
+            Some((tx, _)) => {
+                tx.operations.push(op);
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn commit_transaction(&self) -> Result<(), StorageError> {
+        let mut open_tx = self.open_tx.lock().await;
+        match open_tx.take() {
+            None => {
+                Err(StorageError::Unexpected("Usage error: Commit without transaction".to_string()))
+            }
+            Some((db_txn, rx)) => {
+                self.tx
+                    .send(DBCacheMessage::Write(db_txn))
+                    .await
+                    .expect("Send message to receiver ok");
+                rx.await
+                    .map_err(|_| StorageError::WriteCacheGoneAway())??;
+                Ok(())
+            }
+        }
+    }
+
     #[allow(private_interfaces)]
     pub fn new(
         tx: mpsc::Sender<DBCacheMessage>,
@@ -462,91 +519,43 @@ impl CachedGateway {
     ) -> Self {
         CachedGateway {
             tx,
+            open_tx: Arc::new(Mutex::new(None)),
             pool,
             state_gateway,
             lru_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(5).unwrap()))),
         }
     }
     pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
-        let (tx, rx) = oneshot::channel();
-        let db_tx = DBTransaction::new(*new, vec![WriteOp::UpsertBlock(*new)], tx);
-        self.tx
-            .send(DBCacheMessage::Write(db_tx))
-            .await
-            .expect("Send message to receiver ok");
-
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::WriteCacheGoneAway()),
-        }
+        self.add_op(WriteOp::UpsertBlock(*new))
+            .await?;
+        Ok(())
     }
 
-    pub async fn upsert_tx(
-        &self,
-        block: &evm::Block,
-        new: &evm::Transaction,
-    ) -> Result<(), StorageError> {
-        let (tx, rx) = oneshot::channel();
-        let db_tx = DBTransaction::new(*block, vec![WriteOp::UpsertTx(*new)], tx);
-        self.tx
-            .send(DBCacheMessage::Write(db_tx))
-            .await
-            .expect("Send message to receiver ok");
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::WriteCacheGoneAway()),
-        }
+    pub async fn upsert_tx(&self, new: &evm::Transaction) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertTx(*new))
+            .await?;
+        Ok(())
     }
 
-    pub async fn save_state(
-        &self,
-        block: &evm::Block,
-        new: &ExtractionState,
-    ) -> Result<(), StorageError> {
-        let (tx, rx) = oneshot::channel();
-        let db_tx = DBTransaction::new(*block, vec![WriteOp::SaveExtractionState(new.clone())], tx);
-        self.tx
-            .send(DBCacheMessage::Write(db_tx))
-            .await
-            .expect("Send message to receiver ok");
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::WriteCacheGoneAway()),
-        }
+    pub async fn save_state(&self, new: &ExtractionState) -> Result<(), StorageError> {
+        self.add_op(WriteOp::SaveExtractionState(new.clone()))
+            .await?;
+        Ok(())
     }
 
-    pub async fn insert_contract(
-        &self,
-        block: &evm::Block,
-        new: &evm::Account,
-    ) -> Result<(), StorageError> {
-        let (tx, rx) = oneshot::channel();
-        let db_tx = DBTransaction::new(*block, vec![WriteOp::InsertContract(new.clone())], tx);
-        self.tx
-            .send(DBCacheMessage::Write(db_tx))
-            .await
-            .expect("Send message to receiver ok");
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::WriteCacheGoneAway()),
-        }
+    pub async fn insert_contract(&self, new: &evm::Account) -> Result<(), StorageError> {
+        self.add_op(WriteOp::InsertContract(new.clone()))
+            .await?;
+        Ok(())
     }
 
     pub async fn update_contracts(
         &self,
-        block: &evm::Block,
         new: &[(TxHash, AccountUpdate)],
     ) -> Result<(), StorageError> {
-        let (tx, rx) = oneshot::channel();
-        let db_tx = DBTransaction::new(*block, vec![WriteOp::UpdateContracts(new.to_owned())], tx);
-        self.tx
-            .send(DBCacheMessage::Write(db_tx))
-            .await
-            .expect("Send message to receiver ok");
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::WriteCacheGoneAway()),
-        }
+        self.add_op(WriteOp::UpdateContracts(new.to_owned()))
+            .await?;
+        Ok(())
     }
 
     pub async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError> {
@@ -620,73 +629,35 @@ impl CachedGateway {
 
     pub async fn update_protocol_states(
         &self,
-        block: &evm::Block,
         new: &[(TxHash, ProtocolStateDelta)],
     ) -> Result<(), StorageError> {
-        let (tx, rx) = oneshot::channel();
-        let db_tx =
-            DBTransaction::new(*block, vec![WriteOp::UpsertProtocolState(new.to_owned())], tx);
-        self.tx
-            .send(DBCacheMessage::Write(db_tx))
-            .await
-            .expect("Send message to receiver ok");
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::WriteCacheGoneAway()),
-        }
+        self.add_op(WriteOp::UpsertProtocolState(new.to_owned()))
+            .await?;
+        Ok(())
     }
 
     pub async fn add_protocol_components(
         &self,
-        block: &evm::Block,
         new: &[evm::ProtocolComponent],
     ) -> Result<(), StorageError> {
-        let (tx, rx) = oneshot::channel();
-        let db_tx =
-            DBTransaction::new(*block, vec![WriteOp::InsertProtocolComponents(Vec::from(new))], tx);
-        self.tx
-            .send(DBCacheMessage::Write(db_tx))
-            .await
-            .expect("Send message to receiver ok");
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::WriteCacheGoneAway()),
-        }
+        self.add_op(WriteOp::InsertProtocolComponents(Vec::from(new)))
+            .await?;
+        Ok(())
     }
 
-    pub async fn add_tokens(
-        &self,
-        block: &evm::Block,
-        new: &[evm::ERC20Token],
-    ) -> Result<(), StorageError> {
-        let (tx, rx) = oneshot::channel();
-        let db_tx = DBTransaction::new(*block, vec![WriteOp::InsertTokens(Vec::from(new))], tx);
-        self.tx
-            .send(DBCacheMessage::Write(db_tx))
-            .await
-            .expect("Send message to receiver ok");
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::WriteCacheGoneAway()),
-        }
+    pub async fn add_tokens(&self, new: &[evm::ERC20Token]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::InsertTokens(Vec::from(new)))
+            .await?;
+        Ok(())
     }
 
     pub async fn add_component_balances(
         &self,
-        block: &evm::Block,
         new: &[evm::ComponentBalance],
     ) -> Result<(), StorageError> {
-        let (tx, rx) = oneshot::channel();
-        let db_tx =
-            DBTransaction::new(*block, vec![WriteOp::InsertComponentBalances(Vec::from(new))], tx);
-        self.tx
-            .send(DBCacheMessage::Write(db_tx))
-            .await
-            .expect("Send message to receiver ok");
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::WriteCacheGoneAway()),
-        }
+        self.add_op(WriteOp::InsertComponentBalances(Vec::from(new)))
+            .await?;
+        Ok(())
     }
 
     pub async fn flush(&self) -> Result<Result<(), StorageError>, RecvError> {
@@ -1130,27 +1101,48 @@ mod test_serial_db {
             let block_1 = get_sample_block(1);
             let tx_1 = get_sample_transaction(1);
             cached_gw
+                .start_transaction(&block_1)
+                .await;
+            cached_gw
                 .upsert_block(&block_1)
                 .await
                 .expect("Upsert block 1 ok");
             cached_gw
-                .upsert_tx(&block_1, &tx_1)
+                .upsert_tx(&tx_1)
                 .await
                 .expect("Upsert tx 1 ok");
+            cached_gw
+                .commit_transaction()
+                .await
+                .expect("committing tx failed");
 
             // Send second block messages
             let block_2 = get_sample_block(2);
             cached_gw
+                .start_transaction(&block_2)
+                .await;
+            cached_gw
                 .upsert_block(&block_2)
                 .await
                 .expect("Upsert block 2 ok");
+            cached_gw
+                .commit_transaction()
+                .await
+                .expect("committing tx failed");
 
             // Send third block messages
             let block_3 = get_sample_block(3);
             cached_gw
+                .start_transaction(&block_3)
+                .await;
+            cached_gw
                 .upsert_block(&block_3)
                 .await
                 .expect("Upsert block 3 ok");
+            cached_gw
+                .commit_transaction()
+                .await
+                .expect("committing tx failed");
 
             let maybe_err = err_rx
                 .try_recv()
@@ -1253,6 +1245,9 @@ mod test_serial_db {
             // Assert protocol state delta is correctly fetched
             assert_eq!(delta_0.1.len(), 1);
 
+            cached_gw
+                .start_transaction(&evm::Block::default())
+                .await;
             // Revert to block 1
             let _ = cached_gw
                 .revert_state(&BlockIdentifier::Hash(
@@ -1263,6 +1258,10 @@ mod test_serial_db {
                     .into(),
                 ))
                 .await;
+            cached_gw
+                .commit_transaction()
+                .await
+                .expect("committing tx failed");
 
             // Assert block 2 has been reverted
             let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
@@ -1279,16 +1278,30 @@ mod test_serial_db {
             // Send a new block 2 after the revert
             let block_2 = get_sample_block(2);
             cached_gw
+                .start_transaction(&block_2)
+                .await;
+            cached_gw
                 .upsert_block(&block_2)
                 .await
                 .expect("Upsert block 2 ok");
+            cached_gw
+                .commit_transaction()
+                .await
+                .expect("committing tx failed");
 
             // Send a new block 3 after the revert
             let block_3 = get_sample_block(3);
             cached_gw
+                .start_transaction(&block_3)
+                .await;
+            cached_gw
                 .upsert_block(&block_3)
                 .await
                 .expect("Upsert block 3 ok");
+            cached_gw
+                .commit_transaction()
+                .await
+                .expect("committing tx failed");
 
             // Get delta from current state (None) to block 2, stores it in the lru cache
             let delta_1 = cached_gw
@@ -1307,6 +1320,9 @@ mod test_serial_db {
                 .unwrap();
 
             // Revert to block 1
+            cached_gw
+                .start_transaction(&evm::Block::default())
+                .await;
             let _ = cached_gw
                 .revert_state(&BlockIdentifier::Hash(
                     H256::from_str(
@@ -1316,6 +1332,10 @@ mod test_serial_db {
                     .into(),
                 ))
                 .await;
+            cached_gw
+                .commit_transaction()
+                .await
+                .expect("committing tx failed");
 
             // Assert block 2 has been reverted
             let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));

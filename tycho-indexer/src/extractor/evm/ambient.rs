@@ -114,11 +114,11 @@ where
     }
 
     #[instrument(skip_all)]
-    async fn save_cursor(&self, block: &Block, new_cursor: &str) -> Result<(), StorageError> {
+    async fn save_cursor(&self, new_cursor: &str) -> Result<(), StorageError> {
         let state =
             ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
         self.state_gateway
-            .save_state(block, &state)
+            .save_state(&state)
             .await?;
         Ok(())
     }
@@ -164,7 +164,9 @@ where
         new_cursor: &str,
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
-
+        self.state_gateway
+            .start_transaction(&changes.block)
+            .await;
         let protocol_components = changes
             .tx_updates
             .iter()
@@ -184,7 +186,7 @@ where
                 .await;
 
             self.state_gateway
-                .add_tokens(&changes.block, &new_tokens)
+                .add_tokens(&new_tokens)
                 .await?;
         }
 
@@ -194,14 +196,14 @@ where
         for update in changes.tx_updates.iter() {
             debug!(tx_hash = ?update.tx.hash, "Processing transaction");
             self.state_gateway
-                .upsert_tx(&changes.block, &update.tx)
+                .upsert_tx(&update.tx)
                 .await?;
             for (_, acc_update) in update.account_updates.iter() {
                 if acc_update.is_creation() {
                     let new: evm::Account = acc_update.ref_into_account(&update.tx);
                     info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
                     self.state_gateway
-                        .insert_contract(&changes.block, &new)
+                        .insert_contract(&new)
                         .await?;
                 }
             }
@@ -212,7 +214,7 @@ where
                     .cloned()
                     .collect();
                 self.state_gateway
-                    .add_protocol_components(&changes.block, &protocol_components)
+                    .add_protocol_components(&protocol_components)
                     .await?;
             }
             if !update.component_balances.is_empty() {
@@ -223,7 +225,7 @@ where
                     }
                 }
                 self.state_gateway
-                    .add_component_balances(&changes.block, &component_balances_vec)
+                    .add_component_balances(&component_balances_vec)
                     .await?;
             }
         }
@@ -245,12 +247,13 @@ where
         let changes_slice: &[(Bytes, AccountUpdate)] = collected_changes.as_slice();
 
         self.state_gateway
-            .update_contracts(&changes.block, changes_slice)
+            .update_contracts(changes_slice)
             .await?;
-        self.save_cursor(&changes.block, new_cursor)
-            .await?;
+        self.save_cursor(new_cursor).await?;
 
-        Result::<(), StorageError>::Ok(())
+        self.state_gateway
+            .commit_transaction()
+            .await
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? to))]
@@ -295,7 +298,12 @@ where
             .revert_state(to)
             .await?;
 
-        self.save_cursor(&block, new_cursor)
+        self.state_gateway
+            .start_transaction(&block)
+            .await;
+        self.save_cursor(new_cursor).await?;
+        self.state_gateway
+            .commit_transaction()
             .await?;
 
         let changes = evm::BlockAccountChanges::new(
@@ -839,9 +847,16 @@ mod test_serial_db {
                 .await
                 .expect("pool should get a connection");
             evm_gw
-                .save_state(&evm::Block::default(), &state)
+                .start_transaction(&evm::Block::default())
+                .await;
+            evm_gw
+                .save_state(&state)
                 .await
                 .expect("extaction state insertion succeeded");
+            evm_gw
+                .commit_transaction()
+                .await
+                .expect("gw transaction failed");
             let _ = evm_gw.flush().await;
 
             let maybe_err = err_rx
