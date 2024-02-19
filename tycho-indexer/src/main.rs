@@ -176,6 +176,8 @@ async fn main() -> Result<(), ExtractionError> {
     // extractor_handles.push(ambient_handle.clone());
     // info!("Extractor {} started!", ambient_handle.get_id());
 
+    /* Unfortunately uniswap-v3 is bugged at block 18474075
+
     let (uniswap_v3_task, uniswap_v3_handle) = start_uniswap_v3_extractor(
         &args,
         chain_state,
@@ -186,6 +188,7 @@ async fn main() -> Result<(), ExtractionError> {
     .await?;
     extractor_handles.push(uniswap_v3_handle.clone());
     info!("Extractor {} started!", uniswap_v3_handle.get_id());
+    */
 
     let (uniswap_v2_task, uniswap_v2_handle) = start_uniswap_v2_extractor(
         &args,
@@ -209,13 +212,12 @@ async fn main() -> Result<(), ExtractionError> {
         .port(server_port)
         // .register_extractor(ambient_handle)
         .register_extractor(uniswap_v2_handle)
-        .register_extractor(uniswap_v3_handle)
+        // .register_extractor(uniswap_v3_handle)
         .run()?;
     info!(server_url, "Http and Ws server started");
 
     let shutdown_task = tokio::spawn(shutdown_handler(server_handle, extractor_handles, handle));
-    let (res, _, _) =
-        select_all([uniswap_v2_task, uniswap_v3_task, server_task, shutdown_task]).await;
+    let (res, _, _) = select_all([uniswap_v2_task, server_task, shutdown_task]).await;
     res.expect("Extractor- nor ServiceTasks should panic!")
 }
 
@@ -308,6 +310,7 @@ async fn start_uniswap_v2_extractor(
     builder.run().await
 }
 
+#[allow(dead_code)]
 async fn start_uniswap_v3_extractor(
     _args: &CliArgs,
     chain_state: ChainState,

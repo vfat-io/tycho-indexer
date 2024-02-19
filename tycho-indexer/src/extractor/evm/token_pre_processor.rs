@@ -54,7 +54,7 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
             };
             tokens_info.push(ERC20Token {
                 address,
-                symbol: symbol.replace("\0", ""),
+                symbol: symbol.replace('\0', ""),
                 decimals: decimals.into(),
                 tax: 0,
                 gas: vec![],
