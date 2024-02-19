@@ -327,8 +327,6 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsActor {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use crate::{extractor::runner::ControlMessage, models::Chain};
 
     use super::*;

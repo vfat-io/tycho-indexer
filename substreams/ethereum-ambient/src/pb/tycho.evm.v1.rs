@@ -85,6 +85,9 @@ pub struct ProtocolComponent {
     /// / Represents the functionality of the component.
     #[prost(message, optional, tag="6")]
     pub protocol_type: ::core::option::Option<ProtocolType>,
+    /// Transaction where this component was created
+    #[prost(message, optional, tag="7")]
+    pub tx: ::core::option::Option<Transaction>,
 }
 /// A struct for following the changes of Total Value Locked (TVL) of a protocol component.
 /// Note that if the ProtocolComponent contains multiple contracts, the TVL is tracked for the component as a whole.
@@ -97,7 +100,7 @@ pub struct BalanceChange {
     /// The new balance of the token.
     #[prost(bytes="vec", tag="2")]
     pub balance: ::prost::alloc::vec::Vec<u8>,
-    /// The id of the component whose TVL is tracked.
+    /// The id of the component whose TVL is tracked. Note: This MUST be utf8 encoded.
     #[prost(bytes="vec", tag="3")]
     pub component_id: ::prost::alloc::vec::Vec<u8>,
 }
@@ -260,15 +263,18 @@ pub struct BalanceDelta {
     /// The address of the ERC20 token whose balance changed.
     #[prost(bytes="vec", tag="1")]
     pub pool_hash: ::prost::alloc::vec::Vec<u8>,
-    /// The delta of the base token.
-    #[prost(bytes="vec", tag="2")]
-    pub base_token_delta: ::prost::alloc::vec::Vec<u8>,
-    /// The delta of the quote token.
+    /// The token type: it can be base or quote.
+    #[prost(string, tag="2")]
+    pub token_type: ::prost::alloc::string::String,
+    /// The delta of the token.
     #[prost(bytes="vec", tag="3")]
-    pub quote_token_delta: ::prost::alloc::vec::Vec<u8>,
+    pub token_delta: ::prost::alloc::vec::Vec<u8>,
     /// Used to determine the order of the balance changes. Necessary for the balance store.
     #[prost(uint64, tag="4")]
     pub ordinal: u64,
+    /// Transaction where the balance changed.
+    #[prost(message, optional, tag="5")]
+    pub tx: ::core::option::Option<Transaction>,
 }
 /// Ambient pool changes within a single block
 #[allow(clippy::derive_partial_eq_without_eq)]

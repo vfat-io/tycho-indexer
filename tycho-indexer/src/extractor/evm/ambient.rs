@@ -534,7 +534,6 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        extractor::evm,
         models::{FinancialType, ImplementationType},
         pb::sf::substreams::v1::BlockRef,
     };

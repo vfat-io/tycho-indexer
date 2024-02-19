@@ -697,13 +697,10 @@ mod test_serial_db {
         prelude::H256,
         types::{H160, U256},
     };
-    use std::{collections::HashMap, str::FromStr, sync::Arc};
+    use std::{collections::HashMap, str::FromStr};
     use tycho_types::Bytes;
 
-    use crate::{
-        extractor::evm::{ComponentBalance, ERC20Token, ProtocolComponent},
-        pb::tycho::evm::v1::ChangeType,
-    };
+    use crate::pb::tycho::evm::v1::ChangeType;
     use tokio::sync::mpsc::error::TryRecvError::Empty;
 
     use super::*;

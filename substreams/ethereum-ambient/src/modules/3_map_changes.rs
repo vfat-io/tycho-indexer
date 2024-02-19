@@ -1,4 +1,5 @@
 use std::collections::{hash_map::Entry, HashMap};
+use substreams::pb::substreams::StoreDeltas;
 
 use substreams_ethereum::pb::eth::{self};
 
@@ -9,7 +10,7 @@ use crate::{
         ProtocolComponent, Transaction, TransactionContractChanges,
     },
 };
-use substreams::store::{StoreGet, StoreGetBigInt, StoreGetProto};
+use substreams::store::{StoreGet, StoreGetProto};
 
 struct SlotValue {
     new_value: Vec<u8>,
@@ -75,7 +76,7 @@ impl From<InterimContractChange> for crate::pb::tycho::evm::v1::ContractChange {
 fn map_changes(
     block: eth::v2::Block,
     block_pool_changes: BlockPoolChanges,
-    balance_store: StoreGetBigInt,
+    balance_store: StoreDeltas,
     pool_store: StoreGetProto<ProtocolComponent>,
 ) -> Result<BlockContractChanges, substreams::errors::Error> {
     let mut block_changes = BlockContractChanges::default();
@@ -245,51 +246,6 @@ fn map_changes(
             }
         }
 
-        // Add new components or TVL changes to the tx_change
-        for component in &block_pool_changes.protocol_components {
-            tx_change
-                .component_changes
-                .push(component.clone());
-        }
-
-        for balance_delta in &block_pool_changes.balance_deltas {
-            let pool_hash_hex = hex::encode(&balance_delta.pool_hash);
-            let pool = match pool_store.get_last(pool_hash_hex.clone()) {
-                Some(pool) => pool,
-                None => panic!("Pool not found in store for given hash: {}", pool_hash_hex),
-            };
-            let base_balance = balance_store.get_last(format!("{}{}", pool_hash_hex, "base"));
-            let quote_balance = balance_store.get_last(format!("{}{}", pool_hash_hex, "quote"));
-
-            let base_balance_change = BalanceChange {
-                component_id: pool_hash_hex
-                    .clone()
-                    .as_bytes()
-                    .to_vec(),
-                token: pool.tokens[0].clone(),
-                balance: base_balance
-                    .clone()
-                    .expect("Couldn't get base balance from store")
-                    .to_bytes_be()
-                    .1,
-            };
-            let quote_balance_change = BalanceChange {
-                component_id: pool_hash_hex
-                    .clone()
-                    .as_bytes()
-                    .to_vec(),
-                token: pool.tokens[1].clone(),
-                balance: quote_balance
-                    .expect("Couldn't get quote balance from store")
-                    .to_bytes_be()
-                    .1,
-            };
-
-            tx_change
-                .balance_changes
-                .extend([base_balance_change, quote_balance_change]);
-        }
-
         // if there were any changes, add transaction and push the changes
         if !storage_changes.is_empty() || !balance_changes.is_empty() || !code_changes.is_empty() {
             tx_change.tx = Some(Transaction {
@@ -314,6 +270,82 @@ fn map_changes(
             // clear out the interim contract changes after we pushed those.
             tx_change.tx = None;
             tx_change.contract_changes.clear();
+        }
+    }
+    let mut grouped_components = HashMap::new();
+    for component in &block_pool_changes.protocol_components {
+        let tx_hash = component
+            .tx
+            .clone()
+            .expect("Transaction is missing")
+            .hash;
+        grouped_components
+            .entry(tx_hash)
+            .or_insert_with(Vec::new)
+            .push(component.clone());
+    }
+
+    for (tx_hash, components) in grouped_components {
+        if let Some(tx_change) = block_changes
+            .changes
+            .iter_mut()
+            // TODO: be better than this (quadratic complexity)
+            .find(|tx_change| {
+                tx_change
+                    .tx
+                    .as_ref()
+                    .map_or(false, |tx| tx.hash == tx_hash)
+            })
+        {
+            tx_change
+                .component_changes
+                .extend(components);
+        }
+    }
+    let mut balance_changes = HashMap::new();
+    balance_store
+        .deltas
+        .into_iter()
+        .zip(block_pool_changes.balance_deltas)
+        .for_each(|(store_delta, balance_delta)| {
+            let pool_hash_hex = hex::encode(balance_delta.pool_hash);
+            let pool = match pool_store.get_last(pool_hash_hex.clone()) {
+                Some(pool) => pool,
+                None => panic!("Pool not found in store for given hash: {}", pool_hash_hex),
+            };
+            let token_type = substreams::key::segment_at(&store_delta.key, 1);
+            let token_index = if token_type == "quote" { 1 } else { 0 };
+
+            let balance_change = BalanceChange {
+                component_id: pool_hash_hex.as_bytes().to_vec(),
+                token: pool.tokens[token_index].clone(),
+                balance: store_delta.new_value,
+            };
+            let tx_hash = balance_delta
+                .tx
+                .expect("Transaction is missing")
+                .hash;
+            balance_changes
+                .entry(tx_hash)
+                .or_insert_with(Vec::new)
+                .push(balance_change);
+        });
+
+    for (tx_hash, grouped_balance_changes) in balance_changes {
+        if let Some(tx_change) = block_changes
+            .changes
+            .iter_mut()
+            // TODO: be better than this (quadratic complexity)
+            .find(|tx_change| {
+                tx_change
+                    .tx
+                    .as_ref()
+                    .map_or(false, |tx| tx.hash == tx_hash)
+            })
+        {
+            tx_change
+                .balance_changes
+                .extend(grouped_balance_changes);
         }
     }
 
