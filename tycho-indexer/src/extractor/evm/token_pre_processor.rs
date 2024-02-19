@@ -4,6 +4,7 @@ use ethers::{abi::Abi, contract::Contract, prelude::Provider, providers::Http, t
 use serde_json::from_str;
 use std::sync::Arc;
 use tracing::instrument;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone)]
 pub struct TokenPreProcessor {
@@ -54,7 +55,12 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
             };
             tokens_info.push(ERC20Token {
                 address,
-                symbol: symbol.replace('\0', ""),
+                symbol: symbol
+                    .replace('\0', "")
+                    .graphemes(true)
+                    .take(230) // Limit to 230 graphemes because we need to prepend this by "{chain_name}_" and
+                    // stay below of the 255 chars limit
+                    .collect::<String>(),
                 decimals: decimals.into(),
                 tax: 0,
                 gas: vec![],

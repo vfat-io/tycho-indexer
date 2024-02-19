@@ -538,7 +538,7 @@ where
             Err(e) => return Err(e),
         };
 
-        debug!(?msg, "Processing message");
+        trace!(?msg, "Processing message");
 
         let is_syncing = self.is_syncing(msg.block.number).await;
 
