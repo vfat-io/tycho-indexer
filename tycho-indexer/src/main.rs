@@ -273,7 +273,18 @@ async fn start_uniswap_v2_extractor(
     token_pre_processor: TokenPreProcessor,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
     let name = "uniswap_v2";
-    let gw = NativePgGateway::new(name, Chain::Ethereum, pool, cached_gw, token_pre_processor);
+    let sync_batch_size = env::var("USV2_SYNC_BATCH_SIZE")
+        .unwrap_or("1000".to_string())
+        .parse::<usize>()
+        .expect("Failed to parse USV2_SYNC_BATCH_SIZE");
+    let gw = NativePgGateway::new(
+        name,
+        Chain::Ethereum,
+        sync_batch_size,
+        pool,
+        cached_gw,
+        token_pre_processor,
+    );
     let protocol_types = [(
         "uniswap_v2_pool".to_string(),
         ProtocolType::new(
@@ -300,7 +311,7 @@ async fn start_uniswap_v2_extractor(
     let spkg = &"/opt/tycho-indexer/substreams/substreams-ethereum-uniswap-v2-v0.1.0.spkg";
     let module_name = &"map_pool_events";
     let block_span = stop_block.map(|stop| stop - start_block);
-    info!(%name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Uniswap V2 extractor");
+    info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V2 extractor");
     let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(start_block)
         .module_name(module_name);
@@ -319,7 +330,18 @@ async fn start_uniswap_v3_extractor(
     token_pre_processor: TokenPreProcessor,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
     let name = "uniswap_v3";
-    let gw = NativePgGateway::new(name, Chain::Ethereum, pool, cached_gw, token_pre_processor);
+    let sync_batch_size = env::var("USV3_SYNC_BATCH_SIZE")
+        .unwrap_or("1000".to_string())
+        .parse::<usize>()
+        .expect("Failed to parse USV3_SYNC_BATCH_SIZE");
+    let gw = NativePgGateway::new(
+        name,
+        Chain::Ethereum,
+        sync_batch_size,
+        pool,
+        cached_gw,
+        token_pre_processor,
+    );
     let protocol_types = [(
         "uniswap_v3_pool".to_string(),
         ProtocolType::new(
@@ -346,7 +368,7 @@ async fn start_uniswap_v3_extractor(
     let spkg = &"/opt/tycho-indexer/substreams/substreams-ethereum-uniswap-v3-v0.1.0.spkg";
     let module_name = &"map_pool_events";
     let block_span = stop_block.map(|stop| stop - start_block);
-    info!(%name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Uniswap V3 extractor");
+    info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V3 extractor");
     let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(start_block)
         .module_name(module_name);

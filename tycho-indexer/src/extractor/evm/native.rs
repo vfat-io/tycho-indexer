@@ -129,6 +129,7 @@ where
 {
     name: String,
     chain: Chain,
+    sync_batch_size: usize,
     pool: Pool<AsyncPgConnection>,
     state_gateway: CachedGateway,
     token_pre_processor: T,
@@ -163,11 +164,19 @@ where
     pub fn new(
         name: &str,
         chain: Chain,
+        sync_batch_size: usize,
         pool: Pool<AsyncPgConnection>,
         state_gateway: CachedGateway,
         token_pre_processor: T,
     ) -> Self {
-        Self { name: name.to_owned(), chain, pool, state_gateway, token_pre_processor }
+        Self {
+            name: name.to_owned(),
+            chain,
+            sync_batch_size,
+            pool,
+            state_gateway,
+            token_pre_processor,
+        }
     }
 
     #[instrument(skip_all)]
@@ -292,7 +301,7 @@ where
 
         self.save_cursor(new_cursor).await?;
 
-        let batch_size: usize = if syncing { 1000 } else { 0 };
+        let batch_size: usize = if syncing { self.sync_batch_size } else { 0 };
         self.state_gateway
             .commit_transaction(batch_size)
             .await
@@ -869,6 +878,7 @@ mod test_serial_db {
         let gw = NativePgGateway::new(
             "test",
             Chain::Ethereum,
+            1000,
             pool.clone(),
             cached_gw,
             get_mocked_token_pre_processor(),
