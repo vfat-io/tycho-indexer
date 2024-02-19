@@ -6,7 +6,6 @@
 //!
 //! Currently we provide only a HTTP implementation.
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
-use std::string::ToString;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, warn};
 

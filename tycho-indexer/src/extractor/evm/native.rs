@@ -506,11 +506,8 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
 
-    use tycho_types::Bytes;
-
-    use crate::{extractor::evm, pb::sf::substreams::v1::BlockRef};
+    use crate::pb::sf::substreams::v1::BlockRef;
 
     use super::*;
 
@@ -664,9 +661,7 @@ mod test_serial_db {
     //!
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
-    use std::collections::{HashMap, HashSet};
 
-    use ethers::prelude::H160;
     use mpsc::channel;
     use tokio::sync::{
         mpsc,
@@ -674,7 +669,6 @@ mod test_serial_db {
     };
 
     use test_serial_db::evm::ProtocolChangesWithTx;
-    use tycho_types::Bytes;
 
     use crate::{
         extractor::evm::{

@@ -1293,7 +1293,7 @@ mod test {
         extractor::evm::{self, ERC20Token},
         storage::{BlockIdentifier, ChangeType},
     };
-    use chrono::{NaiveDateTime, Utc};
+
     use diesel_async::AsyncConnection;
     use ethers::{prelude::H160, types::U256};
     use rstest::rstest;
@@ -1302,11 +1302,10 @@ mod test {
     use crate::{
         models,
         models::{FinancialType, ImplementationType},
-        storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
+        storage::postgres::db_fixtures,
     };
     use ethers::prelude::H256;
-    use std::{collections::HashMap, str::FromStr};
-    use tycho_types::Bytes;
+    use std::str::FromStr;
 
     type EVMGateway = PostgresGateway<
         evm::Block,
