@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - patch/*
+      - ah/ENG-2647/synchronizer
 
 permissions:
   id-token: write
