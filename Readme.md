@@ -378,3 +378,12 @@ project:
 
 This ER diagram includes only the most significant attributes for each entity. Triggers support much of the versioning
 logic. For precise details, please ensure to look at the actual [create.sql](./migrations_/create.sql) file.
+
+
+# Other Chains
+
+Before moving to other chains the following things should be taken care of:
+
+- Correctly implement ChainState struct to return the latest block by querying the chains rpc.
+- Potentially fix assumption about fixed block times in the `tycho_client::feed`.
+- 

@@ -7,6 +7,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{instrument, warn};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
@@ -698,7 +699,12 @@ where
     ) -> Result<(), StorageError> {
         let titles: Vec<String> = tokens
             .iter()
-            .map(|token| format!("{:?}_{}", token.chain(), token.symbol()))
+            .map(|token| {
+                format!("{:?}_{}", token.chain(), token.symbol())
+                    .graphemes(true)
+                    .take(255)
+                    .collect::<String>()
+            })
             .collect();
 
         let addresses: Vec<_> = tokens
