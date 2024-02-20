@@ -365,6 +365,7 @@ impl DBCacheWriteExecutor {
                     let _ = new_db_tx.tx.send(Ok(()));
                 } else {
                     // Other cases send unexpected error
+                    tracing::error!(pending=?&pending, new=?&new_db_tx.block, "WriteCache received unexpected block!");
                     let _ = self
                         .error_transmitter
                         .send(StorageError::Unexpected("Invalid cache state!".into()))
