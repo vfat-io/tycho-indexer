@@ -22,7 +22,7 @@ use self::{
 
 mod block_history;
 mod component_tracker;
-mod synchronizer;
+pub mod synchronizer;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Header {
@@ -45,7 +45,7 @@ impl Header {
 
 type BlockSyncResult<T> = anyhow::Result<T>;
 
-/// Synchronizes multiple StgteSynchronizers on the time dimension.
+/// Synchronizes multiple StateSynchronizers on the time dimension.
 ///
 /// ## Initialisation
 /// Queries all registered synchronizers for the first header. It expects all synchronizers to
@@ -89,7 +89,7 @@ type BlockSyncResult<T> = anyhow::Result<T>;
 /// we will end their synchronizers thread and drop the handle.
 ///
 /// Any advanced extractors, we will not wait for in the future, they will be assumed ready
-/// until we reach their height and from then on are handles is they were ready.
+/// until we reach their height and from then on are handled as if they were ready.
 pub struct BlockSynchronizer<S> {
     synchronizers: Option<HashMap<ExtractorIdentity, S>>,
     block_time: std::time::Duration,
@@ -397,9 +397,11 @@ where
                     .ok_or_else(|| anyhow::format_err!("Block history was empty!"))?
                     .hash;
 
+                let mut future_names = Vec::new();
                 for (id, sh) in sync_handles.iter() {
                     match &sh.state {
                         SynchronizerState::Ready(_) => {
+                            future_names.push(id);
                             pulled_data_fut.push(async {
                                 sh.sync
                                     .get_pending(latest_block_hash.clone())
@@ -413,9 +415,16 @@ where
                 let synced_msgs = join_all(pulled_data_fut)
                     .await
                     .into_iter()
-                    // TODO: justification to ignore missing data here? IMO indicates a bug if a
-                    //  ready extractor has not data available.
-                    .flatten()
+                    .zip(future_names.iter())
+                    .filter_map(|(m, id)| {
+                        match m {
+                            Some(v) => Some(v),
+                            None => {
+                                warn!(extractor_id = %id, "Lacking data from state synchronizer. Received header pending state was empty.");
+                                None
+                            }
+                        }
+                    })
                     .collect::<HashMap<_, _>>();
 
                 // Send retrieved data to receivers.

@@ -419,6 +419,8 @@ impl BlockEntityChangesResult {
                     .or_insert_with(|| v);
             });
 
+        self.component_tvl
+            .extend(other.component_tvl);
         self.new_protocol_components
             .extend(other.new_protocol_components);
         self.deleted_protocol_components
@@ -443,27 +445,27 @@ impl ProtocolStateDelta {
     /// Merges 'other' into 'self'.
     ///
     ///
-    /// During merge of these deltas a special situation can arrise when an attribute is present in
+    /// During merge of these deltas a special situation can arise when an attribute is present in
     /// `self.deleted_attributes` and `other.update_attributes``. If we would just merge the sets
-    /// of deleted attribtues or vice versa, it would be ambiguous and potential lead to a
+    /// of deleted attributes or vice versa, it would be ambiguous and potential lead to a
     /// deletion of an attribute that should actually be present, or retention of an actually
     /// deleted attribute.
     ///
     /// This situation is handled the following way:
     ///
     ///     - If an attribute is deleted and in the next message recreated, it is removed from the
-    ///       set of deleted attrbutes and kept in updated_attributes. This way it's temporary
-    ///       deletion is never communicated to the client.
+    ///       set of deleted attributes and kept in updated_attributes. This way it's temporary
+    ///       deletion is never communicated to the final receiver.
     ///     - If an attribute was updated and is deleted in the next message, it is removed from
     ///       updated attributes and kept in deleted. This way the attributes temporary update (or
-    ///       potentially short lived existence) before its deletion is never communicated to the
-    ///       client.
+    ///       potentially short-lived existence) before its deletion is never communicated to the
+    ///       final receiver.
     pub fn merge(&mut self, other: &Self) {
         // either updated and then deleted -> keep in deleted, remove from updated
         self.updated_attributes
             .retain(|k, _| !other.deleted_attributes.contains(k));
 
-        // or deleted and then updated/recreated -> remove from deleted an keep in updated
+        // or deleted and then updated/recreated -> remove from deleted and keep in updated
         self.deleted_attributes.retain(|attr| {
             !other
                 .updated_attributes

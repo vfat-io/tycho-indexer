@@ -37,7 +37,10 @@ impl BlockHistory {
         }
     }
 
-    // How does this behave if empty?
+    /// Add the block as next block.
+    ///
+    /// May error if the block does not fit the tip of the chain, or if history is empty and the
+    /// block is a revert.
     pub fn push(&mut self, block: Header) -> anyhow::Result<()> {
         let pos = self.determine_block_position(&block);
         match pos {
@@ -68,7 +71,7 @@ impl BlockHistory {
                         }
                     }
                 }
-                // Final sanity check against things going awefully wrong.
+                // Final sanity check against things going awfully wrong.
                 if let Some(true) = self
                     .latest()
                     .map(|b| b.hash != block.parent_hash)

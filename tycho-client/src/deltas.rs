@@ -38,7 +38,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_types::dto::{Command, Deltas, ExtractorIdentity, Response, WebSocketMessage};
 use uuid::Uuid;
 
@@ -459,6 +459,7 @@ impl DeltasClient for WsDeltasClient {
         &self,
         extractor_id: ExtractorIdentity,
     ) -> Result<(Uuid, Receiver<Deltas>), DeltasError> {
+        trace!("Starting subscribe");
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         {
@@ -466,7 +467,7 @@ impl DeltasClient for WsDeltasClient {
             let inner = guard
                 .as_mut()
                 .expect("ws not connected");
-
+            trace!("Sending subscribe command");
             inner.new_subscription(&extractor_id, ready_tx)?;
             let cmd = Command::Subscribe { extractor_id };
             inner
@@ -475,10 +476,11 @@ impl DeltasClient for WsDeltasClient {
                 ))
                 .await?;
         }
+        trace!("Waiting for subscription response");
         let rx = ready_rx
             .await
             .expect("ready channel closed");
-
+        trace!("Subscription successfull");
         Ok(rx)
     }
 

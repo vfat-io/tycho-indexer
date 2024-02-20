@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::{
     select,
@@ -8,6 +8,7 @@ use tokio::{
         oneshot, Mutex,
     },
     task::JoinHandle,
+    time::timeout,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_types::{
@@ -35,7 +36,7 @@ pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
     end_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct SharedState {
     last_served_block_hash: Option<Bytes>,
     last_synced_block: Option<Header>,
@@ -117,7 +118,7 @@ where
     #[allow(dead_code)]
     pub fn new(
         extractor_id: ExtractorIdentity,
-        native: bool,
+        is_native: bool,
         min_tvl: f64,
         max_retries: u64,
         rpc_client: R,
@@ -125,16 +126,12 @@ where
     ) -> Self {
         Self {
             extractor_id,
-            is_native: native,
+            is_native,
             rpc_client,
             deltas_client,
             min_tvl_threshold: min_tvl,
             max_retries,
-            shared: Arc::new(Mutex::new(SharedState {
-                last_served_block_hash: None,
-                last_synced_block: None,
-                pending: None,
-            })),
+            shared: Arc::new(Mutex::new(SharedState::default())),
             end_tx: Arc::new(Mutex::new(None)),
         }
     }
@@ -162,7 +159,7 @@ where
         if !self.is_native {
             let contract_ids = tracked_components.get_contracts_by_component(ids);
 
-            let contract_state = self
+            let contract_states = self
                 .rpc_client
                 .get_contract_state(
                     self.extractor_id.chain,
@@ -183,14 +180,14 @@ where
                 .map(|acc| (acc.address.clone(), acc))
                 .collect::<HashMap<_, _>>();
 
-            trace!(states=?&contract_state, "Retrieved ContractState");
+            trace!(states=?&contract_states, "Retrieved ContractState");
             Ok(StateSyncMessage {
                 header,
                 // iteration over all component is not ideal for performance but reduces the
                 // required state and state updating. Since we e.g. have no mapping from
                 // contract_address to corresponding protocol component. Snapshots should not be
-                // retrieved too frequently, so we are ok for now this can be optimised should it be
-                // required.
+                // retrieved too frequently, so we are ok for now. This can be optimised should it
+                // be required.
                 snapshots: tracked_components
                     .components
                     .values()
@@ -203,11 +200,10 @@ where
                                 // Cloning is essential to prevent mistakenly assuming a component
                                 // lacks associated state due to the m2m relationship between
                                 // contracts and components.
-                                if let Some(state) = contract_state.get(contract_address) {
+                                if let Some(state) = contract_states.get(contract_address) {
                                     Some((contract_address.clone(), state.clone()))
                                 } else if contract_ids.contains(contract_address) {
-                                    // only emit error even if we did actually request this
-                                    // address.
+                                    // only emit error even if we did actually request this address
                                     error!(
                                         ?contract_address,
                                         ?component_id,
@@ -290,32 +286,39 @@ where
             self.min_tvl_threshold,
             self.rpc_client.clone(),
         );
+        info!("Retrieving relevant protocol components");
         tracker.initialise_components().await?;
 
+        info!(
+            n_components = tracker.components.len(),
+            n_contracts = tracker.contracts.len(),
+            "Finished retrieving components",
+        );
         let (_, mut msg_rx) = self
             .deltas_client
             .subscribe(self.extractor_id.clone())
             .await?;
 
+        info!("Waiting for deltas...");
         // we need to wait 2 messages because of cache gateways insertion delay.
-        let _ = msg_rx
-            .recv()
-            .await
+        let first_msg = timeout(Duration::from_secs(30), msg_rx.recv())
+            .await?
             .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
-        let first_msg = msg_rx
-            .recv()
-            .await
+        let second_msg = timeout(Duration::from_secs(30), msg_rx.recv())
+            .await?
             .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
 
         // initial snapshot
         let block = first_msg.get_block().clone();
+        info!(height = &block.number, "Deltas received. Retrieving snapshot");
         let header = Header::from_block(first_msg.get_block(), first_msg.is_revert());
-        let snapshot = self
+        let mut snapshot = self
             .get_snapshots::<Vec<&String>>(Header::from_block(&block, false), &tracker, None)
             .await
             .map_err(|rpc_err| {
                 anyhow::format_err!("failed to get initial snapshot: {}", rpc_err)
             })?;
+        snapshot.deltas = Some(second_msg);
 
         let n_components = tracker.components.len();
         info!(n_components, "Initial snapshot retrieved, starting delta message feed");
@@ -379,7 +382,8 @@ where
                         removed_components,
                     };
                     shared.pending = if let Some(prev) = shared.pending.take() {
-                        Some(prev.merge(next))
+                        let new = prev.merge(next);
+                        Some(new)
                     } else {
                         Some(next)
                     };
@@ -854,7 +858,7 @@ mod test {
 
     /// Test strategy
     ///
-    /// - initial snapshot returns a two component
+    /// - initial snapshot retrieval returns two component1 and component2 as snapshots
     /// - send 2 dummy messages, containing only blocks
     /// - third message contains a new component with some significant tvl, one initial component
     ///   slips below tvl threshold, another one is above tvl but does not get re-requested.
