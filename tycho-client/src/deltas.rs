@@ -24,7 +24,6 @@ use futures03::{stream::SplitSink, SinkExt, StreamExt};
 use hyper::Uri;
 use std::{
     collections::{hash_map::Entry, HashMap},
-    string::ToString,
     sync::Arc,
 };
 use thiserror::Error;
@@ -36,9 +35,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tokio_tungstenite::{
-    connect_async, tungstenite, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
-};
+use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, instrument, warn};
 use tycho_types::dto::{Command, Deltas, ExtractorIdentity, Response, WebSocketMessage};
 use uuid::Uuid;
@@ -115,7 +112,8 @@ pub struct WsDeltasClient {
     inner: Arc<Mutex<Option<Inner>>>,
 }
 
-type WebSocketSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+type WebSocketSink =
+    SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, tungstenite::protocol::Message>;
 
 /// Subscription State
 ///
@@ -284,7 +282,7 @@ impl Inner {
     }
 
     /// Sends a message through the websocket.
-    async fn ws_send(&mut self, msg: Message) -> Result<(), DeltasError> {
+    async fn ws_send(&mut self, msg: tungstenite::protocol::Message) -> Result<(), DeltasError> {
         self.sink.send(msg).await.map_err(|e| {
             DeltasError::TransportError(format!("Failed to send message to websocket: {e}"))
         })
@@ -346,12 +344,15 @@ impl WsDeltasClient {
     #[instrument(skip(self))]
     async fn handle_msg(
         &self,
-        msg: Result<Message, tokio_tungstenite::tungstenite::error::Error>,
+        msg: Result<tungstenite::protocol::Message, tokio_tungstenite::tungstenite::error::Error>,
     ) -> Result<(), DeltasError> {
         let mut guard = self.inner.lock().await;
 
         match msg {
-            Ok(Message::Text(text)) => match serde_json::from_str::<WebSocketMessage>(&text) {
+            Ok(tungstenite::protocol::Message::Text(text)) => match serde_json::from_str::<
+                WebSocketMessage,
+            >(&text)
+            {
                 Ok(WebSocketMessage::BlockChanges { subscription_id, delta }) => {
                     info!(?delta, "Received a block state change, sending to channel");
                     let inner = guard
@@ -389,22 +390,22 @@ impl WsDeltasClient {
                     error!(error = %e, message=text, "Failed to deserialize message");
                 }
             },
-            Ok(Message::Ping(_)) => {
+            Ok(tungstenite::protocol::Message::Ping(_)) => {
                 // Respond to pings with pongs.
                 let inner = guard
                     .as_mut()
                     .ok_or_else(|| DeltasError::NotConnected)?;
                 if let Err(error) = inner
-                    .ws_send(Message::Pong(Vec::new()))
+                    .ws_send(tungstenite::protocol::Message::Pong(Vec::new()))
                     .await
                 {
                     debug!(?error, "Failed to send pong!");
                 }
             }
-            Ok(Message::Pong(_)) => {
+            Ok(tungstenite::protocol::Message::Pong(_)) => {
                 // Do nothing.
             }
-            Ok(Message::Close(_)) => {
+            Ok(tungstenite::protocol::Message::Close(_)) => {
                 return Err(DeltasError::ConnectionClosed);
             }
             Ok(unknown_msg) => {
@@ -440,7 +441,7 @@ impl WsDeltasClient {
         inner.end_subscription(&subscription_id, ready_tx);
         let cmd = Command::Unsubscribe { subscription_id };
         inner
-            .ws_send(Message::Text(
+            .ws_send(tungstenite::protocol::Message::Text(
                 serde_json::to_string(&cmd).expect("serialize cmd encode error"),
             ))
             .await?;
@@ -466,7 +467,7 @@ impl DeltasClient for WsDeltasClient {
             inner.new_subscription(&extractor_id, ready_tx)?;
             let cmd = Command::Subscribe { extractor_id };
             inner
-                .ws_send(Message::Text(
+                .ws_send(tungstenite::protocol::Message::Text(
                     serde_json::to_string(&cmd).expect("serialize cmd encode error"),
                 ))
                 .await?;
@@ -598,8 +599,8 @@ mod tests {
 
     #[derive(Clone)]
     enum ExpectedComm {
-        Receive(u64, Message),
-        Send(Message),
+        Receive(u64, tungstenite::protocol::Message),
+        Send(tungstenite::protocol::Message),
     }
 
     async fn mock_tycho_ws(
@@ -649,7 +650,7 @@ mod tests {
     #[tokio::test]
     async fn test_subscribe_receive() {
         let exp_comm = [
-            ExpectedComm::Receive(100, Message::Text(r#"
+            ExpectedComm::Receive(100, tungstenite::protocol::Message::Text(r#"
                 {
                     "method":"subscribe",
                     "extractor_id":{
@@ -658,7 +659,7 @@ mod tests {
                     }
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
-            ExpectedComm::Send(Message::Text(r#"
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "method":"newsubscription",
                     "extractor_id":{
@@ -669,7 +670,7 @@ mod tests {
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
             // VM block message
-            ExpectedComm::Send(Message::Text(r#"
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
                     "delta": {
@@ -721,7 +722,7 @@ mod tests {
                 "#.to_owned()
             )),
             // Native protocol block message
-            ExpectedComm::Send(Message::Text(r#"
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
                     "delta": {
@@ -798,7 +799,7 @@ mod tests {
         let exp_comm = [
             ExpectedComm::Receive(
                 100,
-                Message::Text(
+                tungstenite::protocol::Message::Text(
                     r#"
                 {
                     "method": "subscribe",
@@ -811,7 +812,7 @@ mod tests {
                     .replace(|c: char| c.is_whitespace(), ""),
                 ),
             ),
-            ExpectedComm::Send(Message::Text(
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(
                 r#"
                 {
                     "method": "newsubscription",
@@ -826,7 +827,7 @@ mod tests {
             )),
             ExpectedComm::Receive(
                 100,
-                Message::Text(
+                tungstenite::protocol::Message::Text(
                     r#"
                 {
                     "method": "unsubscribe",
@@ -837,7 +838,7 @@ mod tests {
                     .replace(|c: char| c.is_whitespace(), ""),
                 ),
             ),
-            ExpectedComm::Send(Message::Text(
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(
                 r#"
                 {
                     "method": "subscriptionended",
@@ -889,7 +890,7 @@ mod tests {
         let exp_comm = [
             ExpectedComm::Receive(
                 100,
-                Message::Text(
+                tungstenite::protocol::Message::Text(
                     r#"
                 {
                     "method":"subscribe",
@@ -902,7 +903,7 @@ mod tests {
                     .replace(|c: char| c.is_whitespace(), ""),
                 ),
             ),
-            ExpectedComm::Send(Message::Text(
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(
                 r#"
                 {
                     "method":"newsubscription",
@@ -915,7 +916,7 @@ mod tests {
                 .to_owned()
                 .replace(|c: char| c.is_whitespace(), ""),
             )),
-            ExpectedComm::Send(Message::Text(
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(
                 r#"
                 {
                     "method": "subscriptionended",
@@ -959,7 +960,7 @@ mod tests {
     #[tokio::test]
     async fn test_reconnect() {
         let exp_comm = [
-            ExpectedComm::Receive(100, Message::Text(r#"
+            ExpectedComm::Receive(100, tungstenite::protocol::Message::Text(r#"
                 {
                     "method":"subscribe",
                     "extractor_id":{
@@ -968,7 +969,7 @@ mod tests {
                     }
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
-            ExpectedComm::Send(Message::Text(r#"
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "method":"newsubscription",
                     "extractor_id":{
@@ -978,7 +979,7 @@ mod tests {
                     "subscription_id":"30b740d1-cf09-4e0e-8cfe-b1434d447ece"
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
-            ExpectedComm::Send(Message::Text(r#"
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
                     "delta": {

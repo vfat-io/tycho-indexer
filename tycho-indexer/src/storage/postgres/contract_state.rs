@@ -1,15 +1,13 @@
 use std::collections::{hash_map::Entry, HashSet};
 
 use async_trait::async_trait;
-use chrono::{NaiveDateTime, Utc};
-use diesel_async::RunQueryDsl;
+use chrono::Utc;
 use ethers::utils::keccak256;
 use tracing::instrument;
 
 use crate::storage::{
-    AccountToContractStore, Address, Balance, BlockOrTimestamp, ChangeType, Code, ContractDelta,
-    ContractId, ContractStateGateway, ContractStore, StorableBlock, StorableContract,
-    StorableToken, StorableTransaction, StoreKey, StoreVal, TxHash, Version,
+    AccountToContractStore, Address, Balance, ChangeType, Code, ContractId, ContractStateGateway,
+    ContractStore, StoreKey, StoreVal,
 };
 use tycho_types::Bytes;
 
@@ -1248,13 +1246,9 @@ mod test {
     //! Tests for PostgresGateway's ContractStateGateway methods
     //!
     //! The tests below test the functionality using the concrete EVM types.
-    use std::str::FromStr;
 
-    use crate::{
-        extractor::evm::{self, Account},
-        storage::postgres::db_fixtures,
-    };
-    use diesel_async::{AsyncConnection, RunQueryDsl};
+    use crate::extractor::evm::{self, Account};
+    use diesel_async::AsyncConnection;
     use ethers::types::{H160, H256, U256};
     use rstest::rstest;
     use tycho_types::Bytes;

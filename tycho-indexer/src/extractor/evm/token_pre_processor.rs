@@ -70,10 +70,6 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers::{
-        providers::{Http, Provider},
-        types::H160,
-    };
     use std::{env, str::FromStr};
 
     #[tokio::test]
