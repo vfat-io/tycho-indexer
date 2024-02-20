@@ -12,7 +12,7 @@ use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, trace};
 
 use super::{AccountUpdate, Block};
 use crate::{
@@ -252,7 +252,7 @@ where
         self.save_cursor(new_cursor).await?;
 
         self.state_gateway
-            .commit_transaction()
+            .commit_transaction(0)
             .await
     }
 
@@ -303,7 +303,7 @@ where
             .await;
         self.save_cursor(new_cursor).await?;
         self.state_gateway
-            .commit_transaction()
+            .commit_transaction(0)
             .await?;
 
         let changes = evm::BlockAccountChanges::new(
@@ -455,7 +455,7 @@ where
 
         let raw_msg = BlockContractChanges::decode(_data.value.as_slice())?;
 
-        debug!(?raw_msg, "Received message");
+        trace!(?raw_msg, "Received message");
 
         let msg = match evm::BlockContractChanges::try_from_message(
             raw_msg,
@@ -853,7 +853,7 @@ mod test_serial_db {
                 .await
                 .expect("extaction state insertion succeeded");
             evm_gw
-                .commit_transaction()
+                .commit_transaction(0)
                 .await
                 .expect("gw transaction failed");
             let _ = evm_gw.flush().await;

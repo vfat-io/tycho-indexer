@@ -5,12 +5,13 @@ use std::{
 };
 
 use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument, trace};
 use tycho_types::Bytes;
 
 use crate::{
@@ -33,15 +34,38 @@ use super::token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait};
 pub struct Inner {
     cursor: Vec<u8>,
     last_processed_block: Option<Block>,
+    /// Used to give more informative logs
+    last_report_ts: NaiveDateTime,
+    last_report_block_number: u64,
 }
 
 pub struct NativeContractExtractor<G> {
     gateway: G,
     name: String,
     chain: Chain,
+    chain_state: ChainState,
     protocol_system: String,
     inner: Arc<Mutex<Inner>>,
     protocol_types: HashMap<String, ProtocolType>,
+}
+
+// hacky workaround to estimate current state
+#[derive(Default, Clone, Copy)]
+pub struct ChainState {
+    start: NaiveDateTime,
+    block_number: u64,
+}
+
+impl ChainState {
+    pub fn new(start: NaiveDateTime, block_number: u64) -> Self {
+        Self { start, block_number }
+    }
+    pub async fn current_block(&self) -> u64 {
+        let now = chrono::Local::now().naive_utc();
+        let diff = now.signed_duration_since(self.start);
+        let blocks_passed = (diff.num_seconds() / 12) as u64;
+        self.block_number + blocks_passed
+    }
 }
 
 impl<DB> NativeContractExtractor<DB> {
@@ -54,6 +78,49 @@ impl<DB> NativeContractExtractor<DB> {
         let mut state = self.inner.lock().await;
         state.last_processed_block = Some(block);
     }
+
+    async fn report_progress(&self, block: Block) {
+        let mut state = self.inner.lock().await;
+        let now = chrono::Local::now().naive_utc();
+        let time_passed = now
+            .signed_duration_since(state.last_report_ts)
+            .num_seconds();
+        let is_syncing = self.is_syncing(block.number).await;
+        if is_syncing && time_passed >= 60 {
+            let current_block = self.chain_state.current_block().await;
+            let distance_to_current = current_block - block.number;
+            let blocks_processed = block.number - state.last_report_block_number;
+            let blocks_per_minute = blocks_processed as f64 * 60.0 / time_passed as f64;
+            let time_remaining =
+                chrono::Duration::minutes((distance_to_current as f64 / blocks_per_minute) as i64);
+            info!(
+                extractor_id = self.name,
+                blocks_per_minute = format!("{blocks_per_minute:.2}"),
+                blocks_processed,
+                height = block.number,
+                current = current_block,
+                time_remaining = format_duration(&time_remaining),
+                name = "SyncProgress"
+            );
+            state.last_report_ts = now;
+            state.last_report_block_number = block.number;
+        }
+    }
+
+    async fn is_syncing(&self, block_number: u64) -> bool {
+        let current_block = self.chain_state.current_block().await;
+        if current_block > block_number {
+            (current_block - block_number) > 5
+        } else {
+            false
+        }
+    }
+}
+
+fn format_duration(duration: &chrono::Duration) -> String {
+    let hours = duration.num_hours();
+    let minutes = (duration.num_minutes()) % 60;
+    format!("{:02}h{:02}m", hours, minutes)
 }
 
 pub struct NativePgGateway<T>
@@ -62,6 +129,7 @@ where
 {
     name: String,
     chain: Chain,
+    sync_batch_size: usize,
     pool: Pool<AsyncPgConnection>,
     state_gateway: CachedGateway,
     token_pre_processor: T,
@@ -78,6 +146,7 @@ pub trait NativeGateway: Send + Sync {
         &self,
         changes: &evm::BlockEntityChanges,
         new_cursor: &str,
+        syncing: bool,
     ) -> Result<(), StorageError>;
 
     async fn revert(
@@ -95,11 +164,19 @@ where
     pub fn new(
         name: &str,
         chain: Chain,
+        sync_batch_size: usize,
         pool: Pool<AsyncPgConnection>,
         state_gateway: CachedGateway,
         token_pre_processor: T,
     ) -> Self {
-        Self { name: name.to_owned(), chain, pool, state_gateway, token_pre_processor }
+        Self {
+            name: name.to_owned(),
+            chain,
+            sync_batch_size,
+            pool,
+            state_gateway,
+            token_pre_processor,
+        }
     }
 
     #[instrument(skip_all)]
@@ -150,6 +227,7 @@ where
         &self,
         changes: &evm::BlockEntityChanges,
         new_cursor: &str,
+        syncing: bool,
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
         self.state_gateway
@@ -223,8 +301,9 @@ where
 
         self.save_cursor(new_cursor).await?;
 
+        let batch_size: usize = if syncing { self.sync_batch_size } else { 0 };
         self.state_gateway
-            .commit_transaction()
+            .commit_transaction(batch_size)
             .await
     }
 
@@ -277,7 +356,7 @@ where
             .await;
         self.save_cursor(new_cursor).await?;
         self.state_gateway
-            .commit_transaction()
+            .commit_transaction(0)
             .await?;
 
         Ok(evm::BlockEntityChangesResult {
@@ -319,8 +398,9 @@ impl NativeGateway for NativePgGateway<TokenPreProcessor> {
         &self,
         changes: &evm::BlockEntityChanges,
         new_cursor: &str,
+        syncing: bool,
     ) -> Result<(), StorageError> {
-        self.forward(changes, new_cursor)
+        self.forward(changes, new_cursor, syncing)
             .await?;
         Ok(())
     }
@@ -349,6 +429,7 @@ where
     pub async fn new(
         name: &str,
         chain: Chain,
+        chain_state: ChainState,
         protocol_system: String,
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
@@ -358,9 +439,12 @@ where
                 gateway,
                 name: name.to_string(),
                 chain,
+                chain_state,
                 inner: Arc::new(Mutex::new(Inner {
                     cursor: Vec::new(),
                     last_processed_block: None,
+                    last_report_ts: chrono::Local::now().naive_utc(),
+                    last_report_block_number: 0,
                 })),
                 protocol_system,
                 protocol_types,
@@ -369,7 +453,13 @@ where
                 gateway,
                 name: name.to_string(),
                 chain,
-                inner: Arc::new(Mutex::new(Inner { cursor, last_processed_block: None })),
+                chain_state,
+                inner: Arc::new(Mutex::new(Inner {
+                    cursor,
+                    last_processed_block: None,
+                    last_report_ts: chrono::Local::now().naive_utc(),
+                    last_report_block_number: 0,
+                })),
                 protocol_system,
                 protocol_types,
             },
@@ -427,7 +517,7 @@ where
 
         let raw_msg = BlockEntityChanges::decode(data.value.as_slice())?;
 
-        debug!(?raw_msg, "Received message");
+        trace!(?raw_msg, "Received message");
 
         // Validate protocol_type_id
         let msg = match evm::BlockEntityChanges::try_from_message(
@@ -439,10 +529,6 @@ where
         ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
-
-                self.update_last_processed_block(changes.block)
-                    .await;
-
                 changes
             }
             Err(ExtractionError::Empty) => {
@@ -452,9 +538,18 @@ where
             Err(e) => return Err(e),
         };
 
+        trace!(?msg, "Processing message");
+
+        let is_syncing = self.is_syncing(msg.block.number).await;
+
         self.gateway
-            .advance(&msg, inp.cursor.as_ref())
+            .advance(&msg, inp.cursor.as_ref(), is_syncing)
             .await?;
+
+        self.update_last_processed_block(msg.block)
+            .await;
+
+        self.report_progress(msg.block).await;
 
         self.update_cursor(inp.cursor).await;
         let msg = Arc::new(msg.aggregate_updates()?);
@@ -520,6 +615,7 @@ mod test {
         NativeContractExtractor::new(
             EXTRACTOR_NAME,
             Chain::Ethereum,
+            ChainState::default(),
             TEST_PROTOCOL.to_string(),
             gw,
             protocol_types,
@@ -555,7 +651,7 @@ mod test {
             .returning(|| Ok("cursor".into()));
         gw.expect_advance()
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
         let extractor = create_extractor(gw).await;
 
@@ -582,7 +678,7 @@ mod test {
             .returning(|| Ok("cursor".into()));
         gw.expect_advance()
             .times(0)
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
         let extractor = create_extractor(gw).await;
 
@@ -611,7 +707,7 @@ mod test {
 
         gw.expect_advance()
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
         gw.expect_revert()
             .withf(|c, v, cursor| {
@@ -778,6 +874,7 @@ mod test_serial_db {
         let gw = NativePgGateway::new(
             "test",
             Chain::Ethereum,
+            1000,
             pool.clone(),
             cached_gw,
             get_mocked_token_pre_processor(),
@@ -808,7 +905,7 @@ mod test_serial_db {
                 .await
                 .expect("extaction state insertion succeeded");
             evm_gw
-                .commit_transaction()
+                .commit_transaction(0)
                 .await
                 .expect("gw transaction failed");
             let _ = evm_gw.flush().await;
@@ -898,7 +995,7 @@ mod test_serial_db {
                 change: Default::default(),
             }];
 
-            gw.forward(&msg, "cursor@500")
+            gw.forward(&msg, "cursor@500", false)
                 .await
                 .expect("upsert should succeed");
 
@@ -980,10 +1077,10 @@ mod test_serial_db {
                 }],
             };
 
-            gw.forward(&msg0, "cursor@0")
+            gw.forward(&msg0, "cursor@0", false)
                 .await
                 .expect("upsert should succeed");
-            gw.forward(&msg1, "cursor@1")
+            gw.forward(&msg1, "cursor@1", false)
                 .await
                 .expect("upsert should succeed");
 

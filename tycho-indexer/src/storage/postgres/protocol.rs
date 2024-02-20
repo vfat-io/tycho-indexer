@@ -5,11 +5,9 @@ use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
-use std::{
-    cmp::Ordering,
-    collections::{BTreeSet, HashMap, HashSet},
-};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{instrument, warn};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
@@ -31,7 +29,7 @@ use crate::{
 };
 use tycho_types::Bytes;
 
-use super::{versioning::apply_versioning, WithTxHash};
+use super::WithTxHash;
 
 // Private methods
 impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
@@ -609,7 +607,7 @@ where
         .map(|(id, external_id)| (external_id, id))
         .collect();
 
-        let mut state_data: Vec<(orm::NewProtocolState, i64)> = Vec::new();
+        let mut state_data: Vec<orm::NewProtocolState> = Vec::new();
 
         for state in new {
             let tx = state
@@ -629,11 +627,10 @@ where
                     state.component_id.to_string(),
                 ))?;
 
-            let mut new_states: Vec<(orm::NewProtocolState, i64)> =
+            state_data.extend(
                 ProtocolStateDelta::to_storage(state.entity, component_db_id, tx_db.0, tx_db.2)
-                    .into_iter()
-                    .map(|state| (state, tx_db.1))
-                    .collect();
+                    .into_iter(),
+            );
 
             // invalidated db entities for deleted attributes
             for attr in &state.deleted_attributes {
@@ -646,57 +643,11 @@ where
                     .execute(conn)
                     .await?;
             }
-
-            state_data.append(&mut new_states);
         }
-
-        // Sort state_data by protocol_component_id, attribute_name, and transaction index
-        state_data.sort_by(|a, b| {
-            let order =
-                a.0.protocol_component_id
-                    .cmp(&b.0.protocol_component_id);
-            if order == Ordering::Equal {
-                let sub_order =
-                    a.0.attribute_name
-                        .cmp(&b.0.attribute_name);
-
-                if sub_order == Ordering::Equal {
-                    // Sort by block ts and tx_index as well
-                    a.1.cmp(&b.1)
-                } else {
-                    sub_order
-                }
-            } else {
-                order
-            }
-        });
-
-        // Invalidate older states within the new state data
-        let mut i = 0;
-        while i + 1 < state_data.len() {
-            let next_state = &state_data[i + 1].0.clone();
-            let (current_state, _) = &mut state_data[i];
-
-            // Check if next_state has same protocol_component_id and attribute_name
-            if current_state.protocol_component_id == next_state.protocol_component_id &&
-                current_state.attribute_name == next_state.attribute_name
-            {
-                // Invalidate the current state
-                current_state.valid_to = Some(next_state.valid_from);
-            }
-
-            i += 1;
-        }
-
-        let mut state_data: Vec<orm::NewProtocolState> = state_data
-            .into_iter()
-            .map(|(state, _index)| state)
-            .collect();
 
         // insert the prepared protocol state deltas
         if !state_data.is_empty() {
             apply_delta_versioning::<_, orm::ProtocolState>(&mut state_data, conn).await?;
-            apply_versioning::<_, orm::ProtocolState>(&mut state_data, conn).await?;
             diesel::insert_into(schema::protocol_state::table)
                 .values(&state_data)
                 .execute(conn)
@@ -748,7 +699,12 @@ where
     ) -> Result<(), StorageError> {
         let titles: Vec<String> = tokens
             .iter()
-            .map(|token| format!("{:?}_{}", token.chain(), token.symbol()))
+            .map(|token| {
+                format!("{:?}_{}", token.chain(), token.symbol())
+                    .graphemes(true)
+                    .take(255)
+                    .collect::<String>()
+            })
             .collect();
 
         let addresses: Vec<_> = tokens

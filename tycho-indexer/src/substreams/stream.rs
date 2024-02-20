@@ -10,7 +10,7 @@ use std::{
 };
 use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
-use tracing::{error, info, info_span, warn};
+use tracing::{error, info, info_span, trace, warn};
 
 use crate::pb::sf::substreams::{
     rpc::v2::{response::Message, BlockScopedData, BlockUndoSignal, Request, Response},
@@ -175,7 +175,7 @@ async fn process_substreams_response(
         Some(Message::BlockUndoSignal(block_undo_signal)) => {
             BlockProcessedResult::BlockUndoSignal(block_undo_signal)
         }
-        Some(Message::Progress(_progress)) => {
+        Some(Message::Progress(progress)) => {
             // The `ModulesProgress` messages goal is to report active parallel processing happening
             // either to fill up backward (relative to your request's start block) some missing
             // state or pre-process forward blocks (again relative).
@@ -208,7 +208,7 @@ async fn process_substreams_response(
             //     })
             //     .collect();
 
-            // info!("Progess {}", progresses.join(", "));
+            trace!("Progess {:?}", progress);
 
             BlockProcessedResult::Skip()
         }
