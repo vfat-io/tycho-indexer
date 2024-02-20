@@ -319,6 +319,7 @@ pub struct BlockAccountChanges {
     pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
     pub component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
+    pub component_tvl: HashMap<String, f64>,
 }
 
 impl BlockAccountChanges {
@@ -342,6 +343,7 @@ impl BlockAccountChanges {
             new_protocol_components,
             deleted_protocol_components,
             component_balances,
+            component_tvl: HashMap::new(),
         }
     }
 }
@@ -1081,6 +1083,9 @@ pub struct BlockEntityChangesResult {
     pub revert: bool,
     pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
+    pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
+    pub component_balances: HashMap<String, HashMap<H160, ComponentBalance>>,
+    pub component_tvl: HashMap<String, f64>,
 }
 
 /// A container for state updates grouped by transaction
@@ -1175,6 +1180,9 @@ impl BlockEntityChanges {
             revert: self.revert,
             state_updates: aggregated_changes.protocol_states,
             new_protocol_components: aggregated_changes.new_protocol_components,
+            deleted_protocol_components: HashMap::new(),
+            component_balances: aggregated_changes.balance_changes,
+            component_tvl: HashMap::new(),
         })
     }
 }
@@ -2361,6 +2369,9 @@ mod test {
             revert: false,
             state_updates,
             new_protocol_components,
+            deleted_protocol_components: HashMap::new(),
+            component_balances: HashMap::new(),
+            component_tvl: HashMap::new(),
         }
     }
 

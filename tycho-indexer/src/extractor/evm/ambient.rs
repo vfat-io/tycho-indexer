@@ -312,6 +312,8 @@ where
             block,
             true,
             account_updates,
+            // TODO: consider adding components that were deleted back
+            //  and remove components that were added.
             HashMap::new(),
             HashMap::new(),
             component_balances_map,

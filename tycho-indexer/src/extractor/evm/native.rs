@@ -366,6 +366,11 @@ where
             revert: true,
             state_updates,
             new_protocol_components: HashMap::new(),
+            // TODO: consider adding components that were deleted back
+            //  and remove components that were added.
+            deleted_protocol_components: HashMap::new(),
+            component_balances: HashMap::new(),
+            component_tvl: HashMap::new(),
         })
     }
 

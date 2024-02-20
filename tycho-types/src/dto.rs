@@ -1373,7 +1373,10 @@ mod test {
                     }),
                 "component2".to_string() => TokenBalances::default(),
             },
-            component_tvl: hashmap! { "tvl1".to_string() => 1000.0 },
+            component_tvl: hashmap! {
+                "tvl1".to_string() => 1000.0,
+                "tvl2".to_string() => 2000.0
+            },
         };
 
         assert_eq!(res, expected_block_entity_changes_result);
