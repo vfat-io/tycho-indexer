@@ -63,7 +63,9 @@ jobs:
           eu-central-1 || true)
 
           if [ -z "$CHECK_IMAGE" ]; then
-              docker buildx build --push -t $ECR_REGISTRY/$ECR_REPOSITORY:$CONTAINER_TAG .
+              docker buildx build --push -t $ECR_REGISTRY/$ECR_REPOSITORY:$CONTAINER_TAG \
+              --cache-to mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:build-cache \
+              --cache-from type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:build-cache .
           
           else
             echo "$ECR_REGISTRY/$ECR_REPOSITORY:$CONTAINER_TAG already present - build skipped"
