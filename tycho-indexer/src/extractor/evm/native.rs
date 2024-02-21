@@ -583,7 +583,12 @@ where
 
         // Make sure we have a current block, otherwise it's not safe to revert.
         // TODO: add last block to extraction state and get it when creating a new extractor.
-        // assert!(current.is_some(), "Revert without current block");
+        if current.is_none() {
+            // ignore for now if we don't have the current block, just ignore the revert.
+            // This behaviour is not correct and we will have to rollback the database
+            // to a good state once the revert issue has been fixed.
+            return Ok(None);
+        }
 
         let changes = self
             .gateway
