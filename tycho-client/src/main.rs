@@ -18,7 +18,7 @@ async fn main() {
         .await
         .expect("ws client connection error");
     let synchronizer = ProtocolStateSynchronizer::new(
-        ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap_v2".to_string() },
+        ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap_v3".to_string() },
         true,
         10.0,
         1, // TODO can it be 0?

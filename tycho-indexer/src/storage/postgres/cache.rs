@@ -2,6 +2,7 @@ use std::{
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
     sync::Arc,
+    time::Instant,
 };
 
 use diesel_async::{
@@ -399,7 +400,7 @@ impl DBCacheWriteExecutor {
             return Ok(());
         }
 
-        tracing::info!("Flushing cached actions...");
+        tracing::debug!("Flushing cached actions...");
         let mut conn = self
             .pool
             .get()
@@ -408,6 +409,7 @@ impl DBCacheWriteExecutor {
 
         let mut seen_operations: Vec<WriteOp> = Vec::new();
 
+        let start = Instant::now();
         conn.build_transaction()
             .repeatable_read()
             .run(|conn| {
@@ -431,6 +433,8 @@ impl DBCacheWriteExecutor {
                 .scope_boxed()
             })
             .await?;
+        let duration = Instant::now() - start;
+        tracing::info!(block=?&self.pending_block, name="FlushSucceeded", duration=duration.as_millis());
 
         if self.pending_block.is_some() {
             self.persisted_block = self.pending_block;
@@ -441,6 +445,7 @@ impl DBCacheWriteExecutor {
 
     /// Reverts the whole database state to `to`.
     async fn revert(&mut self, to: &BlockIdentifier) -> Result<(), StorageError> {
+        tracing::info!(?to, "Reverting database");
         self.flush()
             .await
             .expect("Flush should succeed");
@@ -450,16 +455,17 @@ impl DBCacheWriteExecutor {
             .await
             .expect("pool should be connected");
 
-        self.persisted_block = Some(
-            self.state_gateway
-                .get_block(to, &mut conn)
-                .await
-                .expect("get block ok"),
-        );
+        let valid_block = self
+            .state_gateway
+            .get_block(to, &mut conn)
+            .await
+            .expect("get block ok");
+        self.persisted_block = Some(valid_block);
         self.pending_block = None;
         self.state_gateway
             .revert_state(to, &mut conn)
             .await
+            .map(|_| tracing::info!(to=?valid_block, "Database reverted!"))
     }
 
     /// Executes an operation.

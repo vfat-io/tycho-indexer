@@ -8,7 +8,6 @@
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
 #[cfg(test)]
 use mockall::automock;
-use std::string::ToString;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, warn};
 

@@ -370,7 +370,8 @@ pub struct ProtocolComponent {
 pub struct ComponentBalance {
     #[serde(with = "hex_bytes")]
     pub token: Bytes,
-    pub new_balance: Bytes,
+    pub balance: Bytes,
+    pub balance_float: f64,
     #[serde(with = "hex_bytes")]
     pub modify_tx: Bytes,
     pub component_id: String,
@@ -1010,7 +1011,8 @@ mod test {
                     {
                         "0x01": {
                             "token": "0x01",
-                            "new_balance": "0x01f4",
+                            "balance": "0xb77831d23691653a01",
+                            "balance_float": 3.3844151001790677e21,
                             "modify_tx": "0x01",
                             "component_id": "protocol_1"
                         }
@@ -1065,7 +1067,8 @@ mod test {
                 "protocol_1": {
                     "0x01": {
                         "token": "0x01",
-                        "new_balance": "0x01f4",
+                        "balance": "0x01f4",
+                        "balance_float": 0.0,
                         "modify_tx": "0x01",
                         "component_id": "protocol_1"
                     }
@@ -1308,13 +1311,15 @@ mod test {
                 "component1".to_string() => TokenBalances(hashmap! {
                     Bytes::from("0x01") => ComponentBalance {
                             token: Bytes::from("0x01"),
-                            new_balance: Bytes::from("0x01"),
+                            balance: Bytes::from("0x01"),
+                            balance_float: 1.0,
                             modify_tx: Bytes::from("0x00"),
                             component_id: "component1".to_string()
                         },
                     Bytes::from("0x02") => ComponentBalance {
                         token: Bytes::from("0x02"),
-                        new_balance: Bytes::from("0x02"),
+                        balance: Bytes::from("0x02"),
+                        balance_float: 2.0,
                         modify_tx: Bytes::from("0x00"),
                         component_id: "component1".to_string()
                     },
@@ -1360,13 +1365,15 @@ mod test {
                 "component1".to_string() => TokenBalances(hashmap! {
                     Bytes::from("0x01") => ComponentBalance {
                             token: Bytes::from("0x01"),
-                            new_balance: Bytes::from("0x01"),
+                            balance: Bytes::from("0x01"),
+                            balance_float: 1.0,
                             modify_tx: Bytes::from("0x00"),
                             component_id: "component1".to_string()
                         },
                     Bytes::from("0x02") => ComponentBalance {
                         token: Bytes::from("0x02"),
-                        new_balance: Bytes::from("0x02"),
+                        balance: Bytes::from("0x02"),
+                        balance_float: 2.0,
                         modify_tx: Bytes::from("0x00"),
                         component_id: "component1".to_string()
                         },

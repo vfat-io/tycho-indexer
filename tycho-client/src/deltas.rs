@@ -719,7 +719,8 @@ mod tests {
                                 {
                                     "0x01": {
                                         "token": "0x01",
-                                        "new_balance": "0x01f4",
+                                        "balance": "0x01f4",
+                                        "balance_float": 0.0,
                                         "modify_tx": "0x01",
                                         "component_id": "protocol_1"
                                     }
@@ -773,7 +774,8 @@ mod tests {
                             "protocol_1": {
                                 "0x01": {
                                     "token": "0x01",
-                                    "new_balance": "0x01f4",
+                                    "balance": "0x01f4",
+                                    "balance_float": 1000.0,
                                     "modify_tx": "0x01",
                                     "component_id": "protocol_1"
                                 }
@@ -1048,7 +1050,8 @@ mod tests {
                             "protocol_1": {
                                 "0x01": {
                                     "token": "0x01",
-                                    "new_balance": "0x01f4",
+                                    "balance": "0x01f4",
+                                    "balance_float": 1000.0,
                                     "modify_tx": "0x01",
                                     "component_id": "protocol_1"
                                 }

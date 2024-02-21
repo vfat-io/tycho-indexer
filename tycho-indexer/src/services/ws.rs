@@ -153,7 +153,7 @@ impl WsActor {
                         // The `rx` variable is a `Result<String, String>`.
                         let stream = async_stream::stream! {
                             while let Some(item) = rx.recv().await {
-                                yield Ok(item);
+                                yield Ok((subscription_id, item));
                             }
                         };
 
@@ -250,15 +250,28 @@ pub enum Response {
     SubscriptionEnded { subscription_id: Uuid },
 }
 
+// Consider unifying with dto::BlockChanges message, certainly we'd need a more structured
+// output type from extractors first.
+#[derive(Serialize)]
+struct DeltasMessage {
+    subscription_id: Uuid,
+    deltas: ExtractorMsg,
+}
+
 /// Handle incoming messages from the extractor and forward them to the WS connection
-impl StreamHandler<Result<ExtractorMsg, ws::ProtocolError>> for WsActor {
+impl StreamHandler<Result<(Uuid, ExtractorMsg), ws::ProtocolError>> for WsActor {
     #[instrument(skip_all, fields(WsActor.id = %self.id))]
-    fn handle(&mut self, msg: Result<ExtractorMsg, ws::ProtocolError>, ctx: &mut Self::Context) {
+    fn handle(
+        &mut self,
+        msg: Result<(Uuid, ExtractorMsg), ws::ProtocolError>,
+        ctx: &mut Self::Context,
+    ) {
         debug!("Message received from extractor");
         match msg {
-            Ok(message) => {
+            Ok((subscription_id, deltas)) => {
                 debug!("Forwarding message to client");
-                ctx.text(serde_json::to_string(&message).unwrap());
+                let msg = DeltasMessage { subscription_id, deltas };
+                ctx.text(serde_json::to_string(&msg).unwrap());
             }
             Err(e) => {
                 error!(error = %e, "Failed to receive message from extractor");
@@ -492,14 +505,23 @@ mod tests {
         }
     }
 
+    #[derive(Deserialize)]
+    struct DummyDelta {
+        #[allow(dead_code)]
+        subscription_id: Uuid,
+        deltas: DummyMessage,
+    }
+
     async fn wait_for_dummy_message(
         connection: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
         extractor_id: ExtractorIdentity,
-    ) -> Result<DummyMessage, String> {
+    ) -> Result<DummyDelta, String> {
         let criteria = move |msg: &Message| {
             if let Message::Text(text) = msg {
-                if let Ok(message) = serde_json::from_str::<DummyMessage>(text) {
-                    return message.extractor_id == extractor_id;
+                if let Ok(DummyDelta { subscription_id: _, deltas }) =
+                    serde_json::from_str::<DummyDelta>(text)
+                {
+                    return deltas.extractor_id == extractor_id;
                 }
             }
             false
