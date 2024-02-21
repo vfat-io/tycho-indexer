@@ -332,6 +332,7 @@ where
 
         // startup, schedule first set of futures and wait for them to return to initialise
         // synchronizers.
+        debug!("Waiting for initial synchronizer messages...");
         let mut startup_futures = Vec::new();
         for (id, sh) in sync_handles.iter_mut() {
             let fut = async {
@@ -349,14 +350,15 @@ where
                     .unwrap();
                 match res {
                     Ok(Some(b)) => {
+                        debug!(%extractor_id, height=?&b.number, "Synchronizer started successfully!");
                         synchronizer.state = SynchronizerState::Ready(b);
                     }
                     Ok(None) => {
-                        warn!(?extractor_id, "Dead synchronizer at startup will be purged!");
+                        warn!(%extractor_id, "Dead synchronizer at startup will be purged!");
                         synchronizer.state = SynchronizerState::Ended;
                     }
                     Err(_) => {
-                        warn!(?extractor_id, "Stale synchronizer at startup will be purged!");
+                        warn!(%extractor_id, "Stale synchronizer at startup will be purged!");
                         synchronizer.state = SynchronizerState::Ended;
                     }
                 }

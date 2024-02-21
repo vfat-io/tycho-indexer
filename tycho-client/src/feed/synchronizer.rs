@@ -313,21 +313,26 @@ where
         let first_msg = timeout(Duration::from_secs(360), msg_rx.recv())
             .await?
             .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
-        let second_msg = timeout(Duration::from_secs(360), msg_rx.recv())
+        let mut second_msg = timeout(Duration::from_secs(360), msg_rx.recv())
             .await?
             .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
+
+        self.filter_deltas(&mut second_msg, &tracker);
 
         // initial snapshot
         let block = first_msg.get_block().clone();
         info!(height = &block.number, "Deltas received. Retrieving snapshot");
         let header = Header::from_block(first_msg.get_block(), first_msg.is_revert());
-        let mut snapshot = self
+        let snapshot = self
             .get_snapshots::<Vec<&String>>(Header::from_block(&block, false), &tracker, None)
             .await
-            .map_err(|rpc_err| {
-                anyhow::format_err!("failed to get initial snapshot: {}", rpc_err)
-            })?;
-        snapshot.deltas = Some(second_msg);
+            .map_err(|rpc_err| anyhow::format_err!("failed to get initial snapshot: {}", rpc_err))?
+            .merge(StateSyncMessage {
+                header: Header::from_block(second_msg.get_block(), second_msg.is_revert()),
+                snapshots: Default::default(),
+                deltas: Some(second_msg),
+                removed_components: Default::default(),
+            });
 
         let n_components = tracker.components.len();
         info!(n_components, "Initial snapshot retrieved, starting delta message feed");
@@ -383,12 +388,7 @@ where
                 };
 
                 // 3. Filter deltas by currently tracked components / contracts
-                if self.is_native {
-                    deltas.filter_by_component(|id| tracker.components.contains_key(id));
-                } else {
-                    deltas.filter_by_component(|id| tracker.components.contains_key(id));
-                    deltas.filter_by_contract(|id| tracker.contracts.contains(id));
-                }
+                self.filter_deltas(&mut deltas, &tracker);
                 let n_changes = deltas.n_changes();
 
                 {
@@ -403,6 +403,11 @@ where
                         removed_components,
                     };
                     shared.pending = if let Some(prev) = shared.pending.take() {
+                        debug!(
+                            from = &prev.header.number,
+                            to = &next.header.number,
+                            "StateSynchronizer pending state updated"
+                        );
                         let new = prev.merge(next);
                         Some(new)
                     } else {
@@ -420,6 +425,15 @@ where
 
                 return Err(anyhow::format_err!("Deltas channel closed!"));
             }
+        }
+    }
+
+    fn filter_deltas(&self, second_msg: &mut Deltas, tracker: &ComponentTracker<R>) {
+        if self.is_native {
+            second_msg.filter_by_component(|id| tracker.components.contains_key(id));
+        } else {
+            second_msg.filter_by_component(|id| tracker.components.contains_key(id));
+            second_msg.filter_by_contract(|id| tracker.contracts.contains(id));
         }
     }
 }
