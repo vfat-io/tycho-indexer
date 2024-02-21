@@ -9,11 +9,17 @@ use tycho_types::{
     Bytes,
 };
 
+#[derive(Clone, Debug)]
+pub enum ComponentFilter {
+    Ids(Vec<String>),
+    MinimumTVL(f64),
+}
+
 /// Helper struct to store which components are being tracked atm.
 pub struct ComponentTracker<R: RPCClient> {
     chain: Chain,
     protocol_system: String,
-    min_tvl_threshold: f64,
+    filter: ComponentFilter,
     // We will need to request a snapshot for components/Contracts that we did not emit as
     // snapshot for yet but are relevant now, e.g. because min tvl threshold exceeded.
     pub components: HashMap<String, ProtocolComponent>,
@@ -28,11 +34,11 @@ impl<R> ComponentTracker<R>
 where
     R: RPCClient,
 {
-    pub fn new(chain: Chain, protocol_system: &str, min_tvl_threshold: f64, rpc: R) -> Self {
+    pub fn new(chain: Chain, protocol_system: &str, filter: ComponentFilter, rpc: R) -> Self {
         Self {
             chain,
             protocol_system: protocol_system.to_string(),
-            min_tvl_threshold,
+            filter,
             components: Default::default(),
             contracts: Default::default(),
             rpc_client: rpc,
@@ -40,11 +46,19 @@ where
     }
     /// Retrieve all components that belong to the system we are extracing and have sufficient tvl.
     pub async fn initialise_components(&mut self) -> Result<(), RPCError> {
-        let filters = ProtocolComponentRequestParameters::tvl_filtered(self.min_tvl_threshold);
-        let request = ProtocolComponentsRequestBody::system_filtered(&self.protocol_system);
+        let (filters, body) = match &self.filter {
+            ComponentFilter::Ids(ids) => {
+                (Default::default(), ProtocolComponentsRequestBody::id_filtered(ids.clone()))
+            }
+            ComponentFilter::MinimumTVL(min_tvl_threshold) => (
+                ProtocolComponentRequestParameters::tvl_filtered(*min_tvl_threshold),
+                ProtocolComponentsRequestBody::system_filtered(&self.protocol_system),
+            ),
+        };
+
         self.components = self
             .rpc_client
-            .get_protocol_components(self.chain, &filters, &request)
+            .get_protocol_components(self.chain, &filters, &body)
             .await?
             .protocol_components
             .into_iter()
@@ -138,7 +152,10 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{feed::component_tracker::ComponentTracker, rpc::MockRPCClient};
+    use crate::{
+        feed::component_tracker::{ComponentFilter, ComponentTracker},
+        rpc::MockRPCClient,
+    };
     use tycho_types::{
         dto::{Chain, ProtocolComponent, ProtocolComponentRequestResponse, ProtocolId},
         Bytes,
@@ -146,7 +163,7 @@ mod test {
 
     fn with_mocked_rpc() -> ComponentTracker<MockRPCClient> {
         let rpc = MockRPCClient::new();
-        ComponentTracker::new(Chain::Ethereum, "uniswap-v2", 0.0, rpc)
+        ComponentTracker::new(Chain::Ethereum, "uniswap-v2", ComponentFilter::MinimumTVL(0.0), rpc)
     }
 
     fn components_response() -> (Vec<Bytes>, ProtocolComponent) {

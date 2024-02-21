@@ -442,7 +442,7 @@ impl RpcHandler {
     ) -> Result<dto::ProtocolComponentRequestResponse, RpcError> {
         let mut conn = self.db_connection_pool.get().await?;
 
-        info!(?chain, ?request, "Getting tokens.");
+        info!(?chain, ?request, "Getting protocol components.");
         self.get_protocol_components_inner(chain, request, params, &mut conn)
             .await
     }

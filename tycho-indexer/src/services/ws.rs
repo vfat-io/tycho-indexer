@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
 /// How often heartbeat pings are sent
@@ -286,16 +286,16 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsActor {
         debug!("Websocket message received");
         match msg {
             Ok(ws::Message::Ping(msg)) => {
-                debug!("Websocket ping message received");
+                trace!("Websocket ping message received");
                 self.heartbeat = Instant::now();
                 ctx.pong(&msg);
             }
             Ok(ws::Message::Pong(_)) => {
-                debug!("Websocket pong message received");
+                trace!("Websocket pong message received");
                 self.heartbeat = Instant::now();
             }
             Ok(ws::Message::Text(text)) => {
-                debug!(text = %text, "Websocket text message received");
+                trace!(text = %text, "Websocket text message received");
 
                 // Try to deserialize the message to a Message enum
                 match serde_json::from_str::<Command>(&text) {

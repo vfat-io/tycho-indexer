@@ -1,6 +1,10 @@
+use std::time::Duration;
 use tycho_client::{
     deltas::DeltasClient,
-    feed::synchronizer::{ProtocolStateSynchronizer, StateSynchronizer},
+    feed::{
+        component_tracker::ComponentFilter, synchronizer::ProtocolStateSynchronizer,
+        BlockSynchronizer,
+    },
     HttpRPCClient, WsDeltasClient,
 };
 use tycho_types::dto::{Chain, ExtractorIdentity};
@@ -17,27 +21,29 @@ async fn main() {
         .connect()
         .await
         .expect("ws client connection error");
+
+    let extractor_id = ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap_v3".to_string() };
     let synchronizer = ProtocolStateSynchronizer::new(
-        ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap_v3".to_string() },
+        extractor_id.clone(),
         true,
-        10.0,
+        ComponentFilter::Ids(vec!["0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640".to_string()]),
         1, // TODO can it be 0?
         HttpRPCClient::new(&tycho_rpc_url).unwrap(),
         ws_client.clone(),
     );
 
-    let (jh, mut rx) = synchronizer.start().await.unwrap();
+    let block_sync = BlockSynchronizer::new(Duration::from_secs(360), Duration::from_secs(1))
+        .register_synchronizer(extractor_id, synchronizer);
 
-    while let Some(header) = rx.recv().await {
-        dbg!(&header);
-        let msg = synchronizer
-            .get_pending(header.hash.clone())
-            .await
-            .expect("get pending error");
+    let (jh, mut rx) = block_sync
+        .run()
+        .await
+        .expect("block sync start error");
 
+    while let Some(msg) = rx.recv().await {
         dbg!(msg);
     }
 
     dbg!("RX closed");
-    jh.await.unwrap().unwrap();
+    jh.await.unwrap();
 }

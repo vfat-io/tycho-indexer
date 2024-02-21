@@ -20,7 +20,11 @@ use tycho_types::{
 };
 
 use super::Header;
-use crate::{deltas::DeltasClient, feed::component_tracker::ComponentTracker, rpc::RPCClient};
+use crate::{
+    deltas::DeltasClient,
+    feed::component_tracker::{ComponentFilter, ComponentTracker},
+    rpc::RPCClient,
+};
 
 pub type SyncResult<T> = anyhow::Result<T>;
 
@@ -31,7 +35,7 @@ pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
     rpc_client: R,
     deltas_client: D,
     max_retries: u64,
-    min_tvl_threshold: f64,
+    component_filter: ComponentFilter,
     shared: Arc<Mutex<SharedState>>,
     end_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
@@ -119,7 +123,7 @@ where
     pub fn new(
         extractor_id: ExtractorIdentity,
         is_native: bool,
-        min_tvl: f64,
+        component_filter: ComponentFilter,
         max_retries: u64,
         rpc_client: R,
         deltas_client: D,
@@ -129,7 +133,7 @@ where
             is_native,
             rpc_client,
             deltas_client,
-            min_tvl_threshold: min_tvl,
+            component_filter,
             max_retries,
             shared: Arc::new(Mutex::new(SharedState::default())),
             end_tx: Arc::new(Mutex::new(None)),
@@ -288,7 +292,7 @@ where
         let mut tracker = ComponentTracker::new(
             self.extractor_id.chain,
             self.extractor_id.name.as_str(),
-            self.min_tvl_threshold,
+            self.component_filter.clone(),
             self.rpc_client.clone(),
         );
         info!("Retrieving relevant protocol components");
@@ -339,50 +343,59 @@ where
                 let header = Header::from_block(deltas.get_block(), deltas.is_revert());
                 debug!(block_number=?header.number, "Received delta message");
                 let (snapshots, removed_components) = {
-                    // 1. Remove components based on tvl changes
-                    // 2. Add components based on tvl changes, query those for snapshots
-                    let (to_add, to_remove): (Vec<_>, Vec<_>) = deltas
-                        .component_tvl()
-                        .iter()
-                        .partition(|(_, &tvl)| tvl > self.min_tvl_threshold);
+                    match &self.component_filter {
+                        ComponentFilter::Ids(_) => (Default::default(), Default::default()),
+                        ComponentFilter::MinimumTVL(min_tvl) => {
+                            // 1. Remove components based on tvl changes
+                            // 2. Add components based on tvl changes, query those for snapshots
+                            let (to_add, to_remove): (Vec<_>, Vec<_>) = deltas
+                                .component_tvl()
+                                .iter()
+                                .partition(|(_, &tvl)| tvl > *min_tvl);
 
-                    // Only components we don't track yet need a snapshot,
-                    let requiring_snapshot = to_add
-                        .iter()
-                        .filter_map(|(k, _)| {
-                            if tracker.components.contains_key(*k) {
-                                None
+                            // Only components we don't track yet need a snapshot,
+                            let requiring_snapshot = to_add
+                                .iter()
+                                .filter_map(|(k, _)| {
+                                    if tracker.components.contains_key(*k) {
+                                        None
+                                    } else {
+                                        Some(*k)
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            tracker
+                                .start_tracking(&requiring_snapshot)
+                                .await?;
+                            let snapshots = self
+                                .get_snapshots(header.clone(), &tracker, Some(requiring_snapshot))
+                                .await?
+                                .snapshots;
+
+                            let removed_components = if !to_remove.is_empty() {
+                                tracker.stop_tracking(to_remove.iter().map(|(id, _)| *id))
                             } else {
-                                Some(*k)
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    tracker
-                        .start_tracking(&requiring_snapshot)
-                        .await?;
-                    let snapshots = self
-                        .get_snapshots(header.clone(), &tracker, Some(requiring_snapshot))
-                        .await?
-                        .snapshots;
-
-                    let removed_components = if !to_remove.is_empty() {
-                        tracker.stop_tracking(to_remove.iter().map(|(id, _)| *id))
-                    } else {
-                        Default::default()
-                    };
-                    (snapshots, removed_components)
+                                Default::default()
+                            };
+                            (snapshots, removed_components)
+                        }
+                    }
                 };
 
                 // 3. Filter deltas by currently tracked components / contracts
                 if self.is_native {
                     deltas.filter_by_component(|id| tracker.components.contains_key(id));
                 } else {
+                    deltas.filter_by_component(|id| tracker.components.contains_key(id));
                     deltas.filter_by_contract(|id| tracker.contracts.contains(id));
                 }
                 let n_changes = deltas.n_changes();
 
                 {
                     let mut shared = self.shared.lock().await;
+                    // send header while state is still locked, this avoids overwriting state
+                    // while the consumer has not yet retrieved the header.
+                    block_tx.send(header.clone()).await?;
                     let next = StateSyncMessage {
                         header: header.clone(),
                         snapshots,
@@ -398,7 +411,6 @@ where
                     shared.last_synced_block = Some(header.clone());
                 }
                 debug!(block_number=?header.number, n_changes, "Finished processing delta message");
-                block_tx.send(header).await?;
             } else {
                 let mut shared = self.shared.lock().await;
                 warn!(shared = ?&shared, "Deltas channel closed, resetting shared state.");
@@ -426,7 +438,7 @@ where
     }
 
     async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)> {
-        let (mut block_tx, block_rx) = channel(15);
+        let (mut block_tx, block_rx) = channel(1);
 
         let this = self.clone();
         let jh = tokio::spawn(async move {
@@ -493,7 +505,7 @@ mod test {
     use crate::{
         deltas::{DeltasClient, MockDeltasClient},
         feed::{
-            component_tracker::ComponentTracker,
+            component_tracker::{ComponentFilter, ComponentTracker},
             synchronizer::{
                 NativeSnapshot, ProtocolStateSynchronizer, Snapshot, StateSyncMessage,
                 StateSynchronizer, VMSnapshot,
@@ -622,7 +634,7 @@ mod test {
         ProtocolStateSynchronizer::new(
             ExtractorIdentity::new(Chain::Ethereum, "uniswap-v2"),
             native,
-            50.0,
+            ComponentFilter::MinimumTVL(50.0),
             1,
             rpc_client,
             deltas_client,
@@ -648,7 +660,7 @@ mod test {
         let mut tracker = ComponentTracker::new(
             Chain::Ethereum,
             "uniswap-v2",
-            0.0,
+            ComponentFilter::MinimumTVL(0.0),
             state_sync.rpc_client.clone(),
         );
         let component = ProtocolComponent { id: "Component1".to_string(), ..Default::default() };
@@ -702,7 +714,7 @@ mod test {
         let mut tracker = ComponentTracker::new(
             Chain::Ethereum,
             "uniswap-v2",
-            0.0,
+            ComponentFilter::MinimumTVL(0.0),
             state_sync.rpc_client.clone(),
         );
         let component = ProtocolComponent {

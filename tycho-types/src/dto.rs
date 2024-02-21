@@ -120,8 +120,17 @@ impl Deltas {
             Deltas::Native(data) => {
                 data.state_updates
                     .retain(|k, _| keep(k));
+                data.component_balances
+                    .retain(|k, _| keep(k));
+                data.component_tvl
+                    .retain(|k, _| keep(k));
             }
-            Deltas::VM(_) => panic!("Can't filter vm deltas by component!"),
+            Deltas::VM(data) => {
+                data.component_balances
+                    .retain(|k, _| keep(k));
+                data.component_tvl
+                    .retain(|k, _| keep(k));
+            }
         }
     }
 
