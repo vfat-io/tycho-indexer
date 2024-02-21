@@ -29,10 +29,11 @@ async fn main() {
     let (jh, mut rx) = synchronizer.start().await.unwrap();
 
     while let Some(header) = rx.recv().await {
+        dbg!(&header);
         let msg = synchronizer
             .get_pending(header.hash.clone())
             .await
-            .unwrap();
+            .expect("get pending error");
 
         dbg!(msg);
     }

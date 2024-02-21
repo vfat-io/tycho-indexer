@@ -2,7 +2,6 @@ use std::{
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
     sync::Arc,
-    time::Instant,
 };
 
 use diesel_async::{
@@ -12,12 +11,12 @@ use lru::LruCache;
 use tokio::{
     sync::{
         mpsc,
-        oneshot::{self, error::RecvError},
+        oneshot::{self},
         Mutex,
     },
     task::JoinHandle,
 };
-use tracing::debug;
+use tracing::{debug, error, info, trace};
 
 use crate::{
     extractor::evm::{
@@ -81,10 +80,26 @@ impl WriteOp {
     }
 }
 
+#[derive(Debug)]
+struct BlockRange {
+    start: evm::Block,
+    end: evm::Block,
+}
+
+impl BlockRange {
+    fn new(start: &evm::Block, end: &evm::Block) -> Self {
+        Self { start: *start, end: *end }
+    }
+
+    fn is_single_block(&self) -> bool {
+        self.start.hash == self.end.hash
+    }
+}
+
 /// Represents a transaction in the database, including the block information,
 /// a list of operations to be performed, and a channel to send the result.
 pub struct DBTransaction {
-    block: evm::Block,
+    block_range: BlockRange,
     size: usize,
     operations: Vec<WriteOp>,
     tx: oneshot::Sender<Result<(), StorageError>>,
@@ -157,8 +172,6 @@ impl DBTransaction {
 /// Represents different types of messages that can be sent to the DBCacheWriteExecutor.
 pub enum DBCacheMessage {
     Write(DBTransaction),
-    Flush(oneshot::Sender<Result<(), StorageError>>),
-    Revert(BlockIdentifier, oneshot::Sender<Result<(), StorageError>>),
 }
 
 /// Extractors can start transaction.
@@ -209,15 +222,7 @@ pub struct DBCacheWriteExecutor {
     pool: Pool<AsyncPgConnection>,
     state_gateway: EVMStateGateway<AsyncPgConnection>,
     persisted_block: Option<evm::Block>,
-    latest_rpc_block_number: u64,
-    /// The `pending_block` field denotes the most recent block that is pending processing in this
-    /// cache context. It's important to note that this is distinct from the blockchain's
-    /// concept of a pending block. Typically, this block corresponds to the latest block that
-    /// has been validated and confirmed on the blockchain.
-    pending_block: Option<evm::Block>,
-    pending_db_txs: Vec<WriteOp>,
     msg_receiver: mpsc::Receiver<DBCacheMessage>,
-    error_transmitter: mpsc::Sender<StorageError>,
 }
 
 impl DBCacheWriteExecutor {
@@ -227,8 +232,6 @@ impl DBCacheWriteExecutor {
         pool: Pool<AsyncPgConnection>,
         state_gateway: EVMStateGateway<AsyncPgConnection>,
         msg_receiver: mpsc::Receiver<DBCacheMessage>,
-        error_transmitter: mpsc::Sender<StorageError>,
-        latest_rpc_block_number: u64,
     ) -> Self {
         let mut conn = pool
             .get()
@@ -244,20 +247,8 @@ impl DBCacheWriteExecutor {
         };
 
         tracing::debug!("Persisted block: {:?}", persisted_block);
-        tracing::debug!("Latest_rpc_block_number: {:?}", latest_rpc_block_number);
 
-        Self {
-            name,
-            chain,
-            pool,
-            state_gateway,
-            persisted_block,
-            latest_rpc_block_number,
-            pending_block: None,
-            pending_db_txs: Vec::<WriteOp>::new(),
-            msg_receiver,
-            error_transmitter,
-        }
+        Self { name, chain, pool, state_gateway, persisted_block, msg_receiver }
     }
 
     /// Spawns a task to process incoming database messages (write requests or flush commands).
@@ -270,202 +261,71 @@ impl DBCacheWriteExecutor {
                         // Process the write transaction
                         self.write(db_tx).await;
                     }
-                    DBCacheMessage::Flush(sender) => {
-                        // Flush the current state and send back the result
-                        let flush_result = self.flush().await;
-                        let _ = sender.send(flush_result);
-                    }
-                    DBCacheMessage::Revert(to, sender) => {
-                        let revert_result = self.revert(&to).await;
-                        let _ = sender.send(revert_result);
-                    }
                 }
             }
         })
     }
 
-    /// Processes and caches incoming database transactions until a new block is received.
-    ///
-    /// This method handles incoming write transactions. Transactions for the current pending block
-    /// are cached and accumulated. If a transaction belongs to an older block, it is
-    /// immediately applied to the database. In cases where the incoming transaction's
-    /// block is a direct successor of the current pending block, it triggers a flush
-    /// of all cached transactions to the database, ensuring they are applied in a
-    /// single batch. This approach optimizes database writes by batching them and
-    /// reducing the frequency of write operations, while also maintaining the integrity
-    /// and order of blockchain data.
-    ///
-    /// Errors are sent to the error channel if the incoming transaction's block is too far ahead or
-    /// does not connect with the last persisted block or if we fail to send a transaction to
-    /// the database.
-    async fn write(&mut self, mut new_db_tx: DBTransaction) {
-        // If the extractor is late or syncing, we send the transaction directly to the database
-        if self
-            .persisted_block
-            .map_or(false, |persisted| new_db_tx.block.number <= persisted.number) ||
-            new_db_tx.block.number < self.latest_rpc_block_number
-        {
-            debug!("Received an old block number {:?}", new_db_tx.block.number);
-            // New database transaction for an old block are directly sent to the database
-            let mut conn = self
-                .pool
-                .get()
-                .await
-                .expect("pool should be connected");
-
-            let res = conn
-                .build_transaction()
-                .repeatable_read()
-                .run(|conn| {
-                    async {
-                        for op in new_db_tx.operations {
-                            match self.execute_write_op(&op, conn).await {
-                                Err(StorageError::DuplicateEntry(entity, id)) => {
-                                    // As this db transaction is old. It can contain
-                                    // already stored txs, we log the duplicate entry
-                                    // error and continue
-                                    debug!(
-                                        "Ignoring duplicate entry for {} with id {}",
-                                        entity, id
-                                    );
-                                }
-                                Err(e) => {
-                                    return Err(e);
-                                }
-                                _ => {}
-                            }
-                        }
-                        Result::<(), StorageError>::Ok(())
-                    }
-                    .scope_boxed()
-                })
-                .await;
-
-            // Forward the result to the sender
-            let _ = new_db_tx.tx.send(res);
-            return;
-        }
-
-        match self.pending_block {
-            Some(pending) => {
-                if pending.hash == new_db_tx.block.hash {
-                    // New database transaction for the same block are cached
-                    self.pending_db_txs
-                        .append(&mut new_db_tx.operations);
-                    let _ = new_db_tx.tx.send(Ok(()));
-                } else if new_db_tx.block.parent_hash == pending.hash {
-                    tracing::debug!("New block received {} !", new_db_tx.block.parent_hash);
-                    // New database transaction for the next block, we flush and cache it
-                    self.flush()
-                        .await
-                        .expect("Flush should succeed");
-                    self.pending_block = Some(new_db_tx.block);
-
-                    self.pending_db_txs
-                        .append(&mut new_db_tx.operations);
-                    let _ = new_db_tx.tx.send(Ok(()));
-                } else {
-                    // Other cases send unexpected error
-                    tracing::error!(pending=?&pending, new=?&new_db_tx.block, "WriteCache received unexpected block!");
-                    let _ = self
-                        .error_transmitter
-                        .send(StorageError::Unexpected("Invalid cache state!".into()))
-                        .await;
-                }
-            }
-            None => {
-                // if self.pending_block == None, this case happens when we start Tycho or after
-                // a call to flush().
-                self.pending_block = Some(new_db_tx.block);
-
-                self.pending_db_txs
-                    .append(&mut new_db_tx.operations);
-                let _ = new_db_tx.tx.send(Ok(()));
-            }
-        }
-    }
-
-    /// Commits the current cached state to the database in a single batch operation.
-    /// Extracts write operations from `pending_db_txs`, remove duplicates, executes them,
-    /// updates `persisted_block` with `pending_block`, and sets `pending_block` to `None`.
-    async fn flush(&mut self) -> Result<(), StorageError> {
-        let db_txs = std::mem::take(&mut self.pending_db_txs);
-
-        // Early return if there are no transactions to flush
-        if db_txs.is_empty() {
-            if self.pending_block.is_some() {
-                self.persisted_block = self.pending_block;
-                self.pending_block = None;
-            }
-            return Ok(());
-        }
-
-        tracing::debug!("Flushing cached actions...");
+    async fn write(&mut self, new_db_tx: DBTransaction) {
+        debug!(block_range=?&new_db_tx.block_range, "Received new transaction");
         let mut conn = self
             .pool
             .get()
             .await
             .expect("pool should be connected");
 
-        let mut seen_operations: Vec<WriteOp> = Vec::new();
+        // If persisted block is not set we don't have data for this chain yet.
+        if let Some(db_block) = self.persisted_block {
+            // during sync we insert in batches of blocks.
+            let syncing = !new_db_tx.block_range.is_single_block();
 
-        let start = Instant::now();
-        conn.build_transaction()
+            // if we are not syncing we are not allowed to create a separate block range.
+            if !syncing {
+                let start = new_db_tx.block_range.start;
+                // if we are advancing a block, while not syncing it must fit on top of the
+                // persisted block.
+                if start.number > db_block.number && start.parent_hash != db_block.hash {
+                    error!(
+                        block_range=?&new_db_tx.block_range,
+                        persisted_block=?&db_block,
+                        "Invalid block range encountered"
+                    );
+                    let _ = new_db_tx
+                        .tx
+                        .send(Err(StorageError::InvalidBlockRange()));
+                    return;
+                }
+            }
+        }
+
+        let res = conn
+            .build_transaction()
             .repeatable_read()
             .run(|conn| {
                 async {
-                    for op in db_txs.into_iter() {
-                        if !seen_operations.contains(&op) {
-                            // Only executes if it is not already in seen_operations
-                            match self.execute_write_op(&op, conn).await {
-                                Ok(_) => {
-                                    seen_operations.push(op);
-                                }
-                                Err(e) => {
-                                    // If and error happens, revert the whole transaction
-                                    return Err(e);
-                                }
-                            };
+                    for op in new_db_tx.operations {
+                        match self.execute_write_op(&op, conn).await {
+                            Err(StorageError::DuplicateEntry(entity, id)) => {
+                                // As this db transaction is old. It can contain
+                                // already stored txs, we log the duplicate entry
+                                // error and continue
+                                debug!("Ignoring duplicate entry for {} with id {}", entity, id);
+                            }
+                            Err(e) => {
+                                return Err(e);
+                            }
+                            _ => {}
                         }
                     }
                     Result::<(), StorageError>::Ok(())
                 }
                 .scope_boxed()
             })
-            .await?;
-        let duration = Instant::now() - start;
-        tracing::info!(block=?&self.pending_block, name="FlushSucceeded", duration=duration.as_millis());
+            .await;
 
-        if self.pending_block.is_some() {
-            self.persisted_block = self.pending_block;
-            self.pending_block = None;
-        }
-        Ok(())
-    }
-
-    /// Reverts the whole database state to `to`.
-    async fn revert(&mut self, to: &BlockIdentifier) -> Result<(), StorageError> {
-        tracing::info!(?to, "Reverting database");
-        self.flush()
-            .await
-            .expect("Flush should succeed");
-        let mut conn = self
-            .pool
-            .get()
-            .await
-            .expect("pool should be connected");
-
-        let valid_block = self
-            .state_gateway
-            .get_block(to, &mut conn)
-            .await
-            .expect("get block ok");
-        self.persisted_block = Some(valid_block);
-        self.pending_block = None;
-        self.state_gateway
-            .revert_state(to, &mut conn)
-            .await
-            .map(|_| tracing::info!(to=?valid_block, "Database reverted!"))
+        // Forward the result to the sender
+        let _ = new_db_tx.tx.send(res);
+        info!(block_range=?&new_db_tx.block_range, "Transaction successfully committed to DB!");
     }
 
     /// Executes an operation.
@@ -477,6 +337,7 @@ impl DBCacheWriteExecutor {
         operation: &WriteOp,
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
+        trace!(op=?operation, name="ExecuteWriteOp");
         match operation {
             WriteOp::UpsertBlock(block) => {
                 self.state_gateway
@@ -524,13 +385,9 @@ impl DBCacheWriteExecutor {
                     .await
             }
             WriteOp::InsertComponentBalances(balances) => {
-                let ts = match self.pending_block {
-                    Some(block) => block.ts,
-                    None => chrono::Utc::now().naive_utc(),
-                };
                 let collected_balances: Vec<&evm::ComponentBalance> = balances.iter().collect();
                 self.state_gateway
-                    .add_component_balances(collected_balances.as_slice(), &self.chain, ts, conn)
+                    .add_component_balances(collected_balances.as_slice(), &self.chain, conn)
                     .await
             }
             WriteOp::UpsertProtocolState(deltas) => {
@@ -586,15 +443,23 @@ impl Clone for CachedGateway {
 }
 
 impl CachedGateway {
-    // Accumulating transactions does not drop previous data not are transactions nested.
+    // Accumulating transactions does not drop previous data nor are transactions nested.
     pub async fn start_transaction(&self, block: &evm::Block) {
         let mut open_tx = self.open_tx.lock().await;
 
         if let Some(tx) = open_tx.as_mut() {
-            tx.0.block = *block;
+            tx.0.block_range.end = *block;
         } else {
             let (tx, rx) = oneshot::channel();
-            *open_tx = Some((DBTransaction { block: *block, size: 0, operations: vec![], tx }, rx));
+            *open_tx = Some((
+                DBTransaction {
+                    block_range: BlockRange::new(block, block),
+                    size: 0,
+                    operations: vec![],
+                    tx,
+                },
+                rx,
+            ));
         }
     }
 
@@ -693,18 +558,6 @@ impl CachedGateway {
         Ok(())
     }
 
-    pub async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(DBCacheMessage::Revert(to.clone(), tx))
-            .await
-            .expect("Send message to receiver ok");
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::WriteCacheGoneAway()),
-        }
-    }
-
     pub async fn get_delta(
         &self,
         chain: &Chain,
@@ -731,14 +584,6 @@ impl CachedGateway {
         }
 
         tracing::debug!("Cache didn't hit delta. Getting delta for {:?}", key);
-
-        // Flush the current state and wait for the flush to complete
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .send(DBCacheMessage::Flush(tx))
-            .await;
-        let _ = rx.await;
 
         // Fetch the delta from the database
         let mut db = self.pool.get().await.unwrap();
@@ -794,15 +639,6 @@ impl CachedGateway {
             .await?;
         Ok(())
     }
-
-    pub async fn flush(&self) -> Result<Result<(), StorageError>, RecvError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(DBCacheMessage::Flush(tx))
-            .await
-            .expect("Send message to receiver ok");
-        rx.await
-    }
 }
 
 // These two implementations allow us to inherit EVMStateGateway methods. If CachedGateway doesn't
@@ -824,10 +660,7 @@ impl DerefMut for CachedGateway {
 
 #[cfg(test)]
 mod test_serial_db {
-    use crate::storage::{
-        postgres::{db_fixtures, orm, testing::run_against_db, PostgresGateway},
-        StorageError::NotFound,
-    };
+    use crate::storage::postgres::{db_fixtures, orm, testing::run_against_db, PostgresGateway};
     use ethers::{
         prelude::H256,
         types::{H160, U256},
@@ -836,7 +669,6 @@ mod test_serial_db {
     use tycho_types::Bytes;
 
     use crate::pb::tycho::evm::v1::ChangeType;
-    use tokio::sync::mpsc::error::TryRecvError::Empty;
 
     use super::*;
 
@@ -860,16 +692,12 @@ mod test_serial_db {
             );
 
             let (tx, rx) = mpsc::channel(10);
-            let (err_tx, mut err_rx) = mpsc::channel(10);
-
             let write_executor = DBCacheWriteExecutor::new(
                 "ethereum".to_owned(),
                 Chain::Ethereum,
                 connection_pool.clone(),
                 gateway.clone(),
                 rx,
-                err_tx,
-                0,
             )
             .await;
 
@@ -884,21 +712,6 @@ mod test_serial_db {
                 .expect("Response from channel ok")
                 .expect("Transaction cached");
 
-            // Send flush message
-            let (os_tx_flush, os_rx_flush) = oneshot::channel();
-            tx.send(DBCacheMessage::Flush(os_tx_flush))
-                .await
-                .expect("Failed to send flush message through mpsc channel");
-
-            os_rx_flush
-                .await
-                .expect("Response from channel ok")
-                .expect("DB transaction not flushed");
-
-            let maybe_err = err_rx
-                .try_recv()
-                .expect_err("Error channel should be empty");
-
             handle.abort();
 
             let block_id = BlockIdentifier::Number((Chain::Ethereum, 1));
@@ -908,8 +721,6 @@ mod test_serial_db {
                 .expect("Failed to fetch extraction state");
 
             assert_eq!(fetched_block, block);
-            // Assert no error happened
-            assert_eq!(maybe_err, Empty);
         })
         .await;
     }
@@ -937,7 +748,6 @@ mod test_serial_db {
             );
 
             let (tx, rx) = mpsc::channel(10);
-            let (err_tx, mut err_rx) = mpsc::channel(10);
 
             let write_executor = DBCacheWriteExecutor::new(
                 "ethereum".to_owned(),
@@ -945,8 +755,6 @@ mod test_serial_db {
                 connection_pool.clone(),
                 gateway.clone(),
                 rx,
-                err_tx,
-                0,
             )
             .await;
 
@@ -1038,14 +846,9 @@ mod test_serial_db {
                 .expect("Response from channel ok")
                 .expect("Transaction cached");
 
-            let maybe_err = err_rx
-                .try_recv()
-                .expect_err("Error channel should be empty");
-
             handle.abort();
 
-            // Assert that messages from block 1 and 2 has been cached and flushed, and that block 3
-            // is still cached
+            // Assert that transactions have been flushed
             let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
             let fetched_block_1 = gateway
                 .get_block(&block_id_1, &mut connection)
@@ -1069,10 +872,11 @@ mod test_serial_db {
                 .expect("Failed to fetch block");
 
             let block_id_3 = BlockIdentifier::Number((Chain::Ethereum, 3));
+            let block_3 = get_sample_block(3);
             let fetched_block_3 = gateway
                 .get_block(&block_id_3, &mut connection)
                 .await
-                .expect_err("Failed to fetch block");
+                .expect("Failed to fetch block");
 
             // Assert block 1 messages have been flushed
             assert_eq!(fetched_block_1, block_1);
@@ -1080,121 +884,13 @@ mod test_serial_db {
             assert_eq!(fetched_extraction_state, extraction_state_1);
             // Assert block 2 messages have been flushed
             assert_eq!(fetched_block_2, block_2);
-            // Assert block 3 is still pending in cache
-            assert_eq!(
-                fetched_block_3,
-                NotFound("Block".to_owned(), "Number((Ethereum, 3))".to_owned())
-            );
-
-            // Assert no error happened
-            assert_eq!(maybe_err, Empty);
+            // Assert block 3 messages have been flushed
+            assert_eq!(fetched_block_3, block_3);
         })
         .await
     }
 
-    #[tokio::test]
-    async fn test_revert() {
-        // Setup
-        run_against_db(|connection_pool| async move {
-            let mut connection = connection_pool
-                .get()
-                .await
-                .expect("Failed to get a connection from the pool");
-            setup_data(&mut connection).await;
-            let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut connection)
-                .await,
-            );
-
-            let (tx, rx) = mpsc::channel(10);
-            let (err_tx, mut err_rx) = mpsc::channel(10);
-
-            let write_executor = DBCacheWriteExecutor::new(
-                "ethereum".to_owned(),
-                Chain::Ethereum,
-                connection_pool.clone(),
-                gateway.clone(),
-                rx,
-                err_tx,
-                0,
-            )
-            .await;
-
-            let handle = write_executor.run();
-
-            // Revert to block 1
-            let (os_tx, os_rx) = oneshot::channel();
-            let target = BlockIdentifier::Number((Chain::Ethereum, 1));
-
-            tx.send(DBCacheMessage::Revert(target, os_tx))
-                .await
-                .expect("Failed to send write message through mpsc channel");
-
-            os_rx
-                .await
-                .expect("Response from channel ok")
-                .expect("Revert ok");
-
-            let maybe_err = err_rx
-                .try_recv()
-                .expect_err("Error channel should be empty");
-
-            handle.abort();
-
-            // Assert that block 1 is still here and block above have been reverted
-            let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
-            let fetched_block_1 = gateway
-                .get_block(&block_id_1, &mut connection)
-                .await
-                .expect("Failed to fetch block");
-
-            let fetched_tx = gateway
-                .get_tx(
-                    &H256::from_str(
-                        "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-                    )
-                    .unwrap()
-                    .as_bytes()
-                    .into(),
-                    &mut connection,
-                )
-                .await
-                .expect("Failed to fetch tx");
-
-            let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
-            let fetched_block_2 = gateway
-                .get_block(&block_id_2, &mut connection)
-                .await
-                .expect_err("Failed to fetch block");
-
-            // Assert block 1 and txs at this block are still there
-            assert_eq!(fetched_block_1.number, 1);
-            assert_eq!(
-                fetched_tx.block_hash,
-                H256::from_str(
-                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
-                )
-                .unwrap()
-            );
-            // Assert block 2 has been reverted
-            assert_eq!(
-                fetched_block_2,
-                NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
-            );
-
-            // Assert no error happened
-            assert_eq!(maybe_err, Empty);
-        })
-        .await;
-    }
-
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn test_cached_gateway() {
         // Setup
         run_against_db(|connection_pool| async move {
@@ -1214,7 +910,6 @@ mod test_serial_db {
                 .await,
             );
             let (tx, rx) = mpsc::channel(10);
-            let (err_tx, mut err_rx) = mpsc::channel(10);
 
             let write_executor = DBCacheWriteExecutor::new(
                 "ethereum".to_owned(),
@@ -1222,8 +917,6 @@ mod test_serial_db {
                 connection_pool.clone(),
                 gateway.clone(),
                 rx,
-                err_tx,
-                0,
             )
             .await;
 
@@ -1277,14 +970,9 @@ mod test_serial_db {
                 .await
                 .expect("committing tx failed");
 
-            let maybe_err = err_rx
-                .try_recv()
-                .expect_err("Error channel should be empty");
-
             handle.abort();
 
-            // Assert that messages from block 1 and 2 has been cached and flushed, and that block 3
-            // is still cached
+            // Assert that messages from block 1,2 and 3 have been commited to the db.
             let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
             let fetched_block_1 = cached_gw
                 .get_block(&block_id_1, &mut connection)
@@ -1306,7 +994,7 @@ mod test_serial_db {
             let fetched_block_3 = cached_gw
                 .get_block(&block_id_3, &mut connection)
                 .await
-                .expect_err("Failed to fetch block");
+                .expect("Failed to fetch block");
 
             // Assert block 1 messages have been flushed
             assert_eq!(fetched_block_1, block_1);
@@ -1314,211 +1002,7 @@ mod test_serial_db {
             // Assert block 2 messages have been flushed
             assert_eq!(fetched_block_2, block_2);
             // Assert block 3 is still pending in cache
-            assert_eq!(
-                fetched_block_3,
-                NotFound("Block".to_owned(), "Number((Ethereum, 3))".to_owned())
-            );
-            // Assert no error happened
-            assert_eq!(maybe_err, Empty);
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_cached_gateway_revert() {
-        run_against_db(|connection_pool| async move {
-            let mut connection = connection_pool
-                .get()
-                .await
-                .expect("Failed to get a connection from the pool");
-            setup_data(&mut connection).await;
-            let gateway = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut connection)
-                .await,
-            );
-            let (tx, rx) = mpsc::channel(10);
-            let (err_tx, _) = mpsc::channel(10);
-
-            let write_executor = DBCacheWriteExecutor::new(
-                "ethereum".to_owned(),
-                Chain::Ethereum,
-                connection_pool.clone(),
-                gateway.clone(),
-                rx,
-                err_tx,
-                0,
-            )
-            .await;
-
-            let handle = write_executor.run();
-            let cached_gw = CachedGateway::new(tx, connection_pool.clone(), gateway);
-
-            // Get delta from current state (None) to block 1
-            let delta_0 = cached_gw
-                .get_delta(
-                    &Chain::Ethereum,
-                    None,
-                    &BlockOrTimestamp::Block(BlockIdentifier::Hash(
-                        H256::from_str(
-                            "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-                        )
-                        .unwrap()
-                        .into(),
-                    )),
-                )
-                .await
-                .unwrap();
-
-            // Assert protocol state delta is correctly fetched
-            assert_eq!(delta_0.1.len(), 1);
-
-            cached_gw
-                .start_transaction(&evm::Block::default())
-                .await;
-            // Revert to block 1
-            let _ = cached_gw
-                .revert_state(&BlockIdentifier::Hash(
-                    H256::from_str(
-                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-                    )
-                    .unwrap()
-                    .into(),
-                ))
-                .await;
-            cached_gw
-                .commit_transaction(0)
-                .await
-                .expect("committing tx failed");
-
-            // Assert block 2 has been reverted
-            let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
-            let fetched_block_2 = cached_gw
-                .get_block(&block_id_2, &mut connection)
-                .await
-                .expect_err("Failed to fetch block");
-
-            assert_eq!(
-                fetched_block_2,
-                NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
-            );
-
-            // Send a new block 2 after the revert
-            let block_2 = get_sample_block(2);
-            cached_gw
-                .start_transaction(&block_2)
-                .await;
-            cached_gw
-                .upsert_block(&block_2)
-                .await
-                .expect("Upsert block 2 ok");
-            cached_gw
-                .commit_transaction(0)
-                .await
-                .expect("committing tx failed");
-
-            // Send a new block 3 after the revert
-            let block_3 = get_sample_block(3);
-            cached_gw
-                .start_transaction(&block_3)
-                .await;
-            cached_gw
-                .upsert_block(&block_3)
-                .await
-                .expect("Upsert block 3 ok");
-            cached_gw
-                .commit_transaction(0)
-                .await
-                .expect("committing tx failed");
-
-            // Get delta from current state (None) to block 2, stores it in the lru cache
-            let delta_1 = cached_gw
-                .get_delta(
-                    &Chain::Ethereum,
-                    None,
-                    &BlockOrTimestamp::Block(BlockIdentifier::Hash(
-                        H256::from_str(
-                            "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
-                        )
-                        .unwrap()
-                        .into(),
-                    )),
-                )
-                .await
-                .unwrap();
-
-            // Revert to block 1
-            cached_gw
-                .start_transaction(&evm::Block::default())
-                .await;
-            let _ = cached_gw
-                .revert_state(&BlockIdentifier::Hash(
-                    H256::from_str(
-                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-                    )
-                    .unwrap()
-                    .into(),
-                ))
-                .await;
-            cached_gw
-                .commit_transaction(0)
-                .await
-                .expect("committing tx failed");
-
-            // Assert block 2 has been reverted
-            let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
-            let fetched_block_2 = cached_gw
-                .get_block(&block_id_2, &mut connection)
-                .await
-                .expect_err("Failed to fetch block");
-
-            assert_eq!(
-                fetched_block_2,
-                NotFound("Block".to_owned(), "Number((Ethereum, 2))".to_owned())
-            );
-
-            // Get delta from current state (None) to block 1 again, retrieve it from the lru cache
-            let delta_2 = cached_gw
-                .get_delta(
-                    &Chain::Ethereum,
-                    None,
-                    &BlockOrTimestamp::Block(BlockIdentifier::Hash(
-                        H256::from_str(
-                            "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-                        )
-                        .unwrap()
-                        .into(),
-                    )),
-                )
-                .await
-                .unwrap();
-
-            // Get delta from current state (None) to block 2 again, retrieve it from the lru cache
-            let delta_3 = cached_gw
-                .get_delta(
-                    &Chain::Ethereum,
-                    None,
-                    &BlockOrTimestamp::Block(BlockIdentifier::Hash(
-                        H256::from_str(
-                            "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
-                        )
-                        .unwrap()
-                        .into(),
-                    )),
-                )
-                .await
-                .unwrap();
-
-            handle.abort();
-
-            // Assert that the deltas match
-            assert_eq!(delta_0, delta_2);
-            assert_eq!(delta_1, delta_3);
+            assert_eq!(fetched_block_3, block_3);
         })
         .await;
     }
@@ -1606,7 +1090,12 @@ mod test_serial_db {
         operations: Vec<WriteOp>,
     ) -> oneshot::Receiver<Result<(), StorageError>> {
         let (os_tx, os_rx) = oneshot::channel();
-        let db_transaction = DBTransaction { block, size: operations.len(), operations, tx: os_tx };
+        let db_transaction = DBTransaction {
+            block_range: BlockRange::new(&block, &block),
+            size: operations.len(),
+            operations,
+            tx: os_tx,
+        };
 
         tx.send(DBCacheMessage::Write(db_transaction))
             .await
@@ -1615,6 +1104,7 @@ mod test_serial_db {
     }
 
     //noinspection SpellCheckingInspection
+    #[allow(dead_code)]
     async fn setup_data(conn: &mut AsyncPgConnection) {
         // set up blocks and txns
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;

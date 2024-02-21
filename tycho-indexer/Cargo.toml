@@ -63,3 +63,4 @@ actix-test = "0.1.2"
 rstest = "0.18.2"
 tokio-tungstenite.workspace = true
 pretty_assertions = "1.4.0"
+test-log = { version = "0.2.14", features=["trace"]}

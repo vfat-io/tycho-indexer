@@ -5329,6 +5329,7 @@ dependencies = [
  "serde_json",
  "strum",
  "strum_macros",
+ "test-log",
  "thiserror",
  "tokio",
  "tokio-retry",
