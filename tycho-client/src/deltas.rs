@@ -356,13 +356,13 @@ impl WsDeltasClient {
                 WebSocketMessage,
             >(&text)
             {
-                Ok(WebSocketMessage::BlockChanges { subscription_id, delta }) => {
-                    info!(?delta, "Received a block state change, sending to channel");
+                Ok(WebSocketMessage::BlockChanges { subscription_id, deltas }) => {
+                    info!(?deltas, "Received a block state change, sending to channel");
                     let inner = guard
                         .as_mut()
                         .ok_or_else(|| DeltasError::NotConnected)?;
                     if inner
-                        .send(&subscription_id, delta)
+                        .send(&subscription_id, deltas)
                         .await
                         .is_err()
                     {
@@ -678,7 +678,7 @@ mod tests {
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "delta": {
+                    "deltas": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -737,7 +737,7 @@ mod tests {
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "delta": {
+                    "deltas": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -1009,7 +1009,7 @@ mod tests {
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "delta": {
+                    "deltas": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {

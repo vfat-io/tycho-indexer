@@ -155,7 +155,7 @@ impl Deltas {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum WebSocketMessage {
-    BlockChanges { subscription_id: Uuid, delta: Deltas },
+    BlockChanges { subscription_id: Uuid, deltas: Deltas },
     Response(Response),
 }
 
