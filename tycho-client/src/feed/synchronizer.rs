@@ -61,7 +61,7 @@ pub enum Snapshot {
     NativeSnapshot(NativeSnapshot),
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct StateSyncMessage {
     /// The block number for this update.
     pub header: Header,
@@ -110,8 +110,8 @@ pub trait StateSynchronizer: Send + Sync + 'static {
 
 impl<R, D> ProtocolStateSynchronizer<R, D>
 where
-    // TODO: Consider moving these contraints directly to the
-    // client...
+    // TODO: Consider moving these constraints directly to the
+    //  client...
     R: RPCClient + Clone + Send + Sync + 'static,
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
@@ -156,6 +156,11 @@ where
                     .keys()
                     .collect::<Vec<_>>()
             });
+
+        if ids.is_empty() {
+            return Ok(StateSyncMessage { header, ..Default::default() });
+        }
+
         if !self.is_native {
             let contract_ids = tracked_components.get_contracts_by_component(ids);
 
@@ -301,10 +306,10 @@ where
 
         info!("Waiting for deltas...");
         // we need to wait 2 messages because of cache gateways insertion delay.
-        let first_msg = timeout(Duration::from_secs(30), msg_rx.recv())
+        let first_msg = timeout(Duration::from_secs(360), msg_rx.recv())
             .await?
             .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
-        let second_msg = timeout(Duration::from_secs(30), msg_rx.recv())
+        let second_msg = timeout(Duration::from_secs(360), msg_rx.recv())
             .await?
             .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
 
@@ -360,8 +365,11 @@ where
                         .await?
                         .snapshots;
 
-                    let removed_components =
-                        tracker.stop_tracking(to_remove.iter().map(|(id, _)| *id));
+                    let removed_components = if !to_remove.is_empty() {
+                        tracker.stop_tracking(to_remove.iter().map(|(id, _)| *id))
+                    } else {
+                        Default::default()
+                    };
                     (snapshots, removed_components)
                 };
 

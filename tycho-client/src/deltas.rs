@@ -344,7 +344,7 @@ impl WsDeltasClient {
     ///
     /// If the message returns an error, a reconnect attempt may be considered depending on the
     /// error type.
-    #[instrument(skip(self))]
+    #[instrument(skip(self, msg))]
     async fn handle_msg(
         &self,
         msg: Result<tungstenite::protocol::Message, tokio_tungstenite::tungstenite::error::Error>,
@@ -357,7 +357,7 @@ impl WsDeltasClient {
             >(&text)
             {
                 Ok(WebSocketMessage::BlockChanges { subscription_id, deltas }) => {
-                    info!(?deltas, "Received a block state change, sending to channel");
+                    trace!(?deltas, "Received a block state change, sending to channel");
                     let inner = guard
                         .as_mut()
                         .ok_or_else(|| DeltasError::NotConnected)?;

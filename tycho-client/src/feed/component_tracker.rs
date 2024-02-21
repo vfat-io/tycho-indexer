@@ -65,6 +65,9 @@ where
     /// Add a new component to be tracked
     #[instrument(skip(self))]
     pub async fn start_tracking(&mut self, new_components: &[&String]) -> Result<(), RPCError> {
+        if new_components.is_empty() {
+            return Ok(());
+        }
         let filters = ProtocolComponentRequestParameters::default();
         let request = ProtocolComponentsRequestBody::id_filtered(
             new_components
