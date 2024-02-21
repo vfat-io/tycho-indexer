@@ -137,8 +137,7 @@ impl ExtractorRunner {
                                 }
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
-                                let block = undo_signal.last_valid_block.as_ref().map(|v| v.number).unwrap_or(0);
-                                info!(%block,  "Revert to {block} requested!");
+                                info!(block=?&undo_signal.last_valid_block,  "Revert requested!");
                                 match self.extractor.handle_revert(undo_signal.clone()).await {
                                     Ok(Some(msg)) => {
                                         trace!(msg = %msg, "Propagating block undo message.");

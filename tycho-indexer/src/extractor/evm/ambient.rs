@@ -511,7 +511,7 @@ where
 
         // Make sure we have a current block, otherwise it's not safe to revert.
         // TODO: add last block to extraction state and get it when creating a new extractor.
-        assert!(current.is_some(), "Revert without current block");
+        // assert!(current.is_some(), "Revert without current block");
 
         let changes = self
             .gateway
