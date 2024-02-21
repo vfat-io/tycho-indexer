@@ -312,7 +312,8 @@ async fn start_uniswap_v2_extractor(
     info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V2 extractor");
     let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(start_block)
-        .module_name(module_name);
+        .module_name(module_name)
+        .only_final_blocks();
     if let Some(stop_block) = stop_block {
         builder = builder.end_block(stop_block)
     };
@@ -369,7 +370,8 @@ async fn start_uniswap_v3_extractor(
     info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V3 extractor");
     let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(start_block)
-        .module_name(module_name);
+        .module_name(module_name)
+        .only_final_blocks();
     if let Some(stop_block) = stop_block {
         builder = builder.end_block(stop_block)
     };
