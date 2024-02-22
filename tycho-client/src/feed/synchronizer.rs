@@ -47,14 +47,14 @@ struct SharedState {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct VMSnapshot {
-    state: HashMap<Bytes, ResponseAccount>,
-    component: ProtocolComponent,
+    pub state: HashMap<Bytes, ResponseAccount>,
+    pub component: ProtocolComponent,
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct NativeSnapshot {
-    state: ResponseProtocolState,
-    component: ProtocolComponent,
+    pub state: ResponseProtocolState,
+    pub component: ProtocolComponent,
 }
 
 #[derive(Clone, PartialEq, Debug)]
