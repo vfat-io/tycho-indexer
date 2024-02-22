@@ -262,7 +262,8 @@ async fn start_ambient_extractor(
     info!(%ambient_name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Ambient extractor");
     let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(start_block)
-        .module_name(module_name);
+        .module_name(module_name)
+        .only_final_blocks();
     if let Some(stop_block) = stop_block {
         builder = builder.end_block(stop_block)
     };
