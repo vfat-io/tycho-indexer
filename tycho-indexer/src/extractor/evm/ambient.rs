@@ -7,6 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use ethers::types::{H160, H256};
 use mockall::automock;
@@ -14,11 +15,15 @@ use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
 
-use super::{AccountUpdate, Block};
+use super::{utils::format_duration, AccountUpdate, Block};
+
 use crate::{
     extractor::{
         evm,
-        evm::token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait},
+        evm::{
+            chain_state::ChainState,
+            token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait},
+        },
         ExtractionError, Extractor, ExtractorMsg,
     },
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
@@ -35,12 +40,16 @@ const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224
 struct Inner {
     cursor: Vec<u8>,
     last_processed_block: Option<Block>,
+    /// Used to give more informative logs
+    last_report_ts: NaiveDateTime,
+    last_report_block_number: u64,
 }
 
 pub struct AmbientContractExtractor<G> {
     gateway: G,
     name: String,
     chain: Chain,
+    chain_state: ChainState,
     protocol_system: String,
     // TODO: There is not reason this needs to be shared
     // try removing the Mutex
@@ -59,6 +68,43 @@ impl<DB> AmbientContractExtractor<DB> {
         let mut state = self.inner.lock().await;
         state.last_processed_block = Some(block);
     }
+
+    async fn report_progress(&self, block: Block) {
+        let mut state = self.inner.lock().await;
+        let now = chrono::Local::now().naive_utc();
+        let time_passed = now
+            .signed_duration_since(state.last_report_ts)
+            .num_seconds();
+        let is_syncing = self.is_syncing(block.number).await;
+        if is_syncing && time_passed >= 60 {
+            let current_block = self.chain_state.current_block().await;
+            let distance_to_current = current_block - block.number;
+            let blocks_processed = block.number - state.last_report_block_number;
+            let blocks_per_minute = blocks_processed as f64 * 60.0 / time_passed as f64;
+            let time_remaining =
+                chrono::Duration::minutes((distance_to_current as f64 / blocks_per_minute) as i64);
+            info!(
+                extractor_id = self.name,
+                blocks_per_minute = format!("{blocks_per_minute:.2}"),
+                blocks_processed,
+                height = block.number,
+                current = current_block,
+                time_remaining = format_duration(&time_remaining),
+                name = "SyncProgress"
+            );
+            state.last_report_ts = now;
+            state.last_report_block_number = block.number;
+        }
+    }
+
+    async fn is_syncing(&self, block_number: u64) -> bool {
+        let current_block = self.chain_state.current_block().await;
+        if current_block > block_number {
+            (current_block - block_number) > 5
+        } else {
+            false
+        }
+    }
 }
 
 pub struct AmbientPgGateway<T>
@@ -67,6 +113,7 @@ where
 {
     name: String,
     chain: Chain,
+    sync_batch_size: usize,
     pool: Pool<AsyncPgConnection>,
     state_gateway: CachedGateway,
     token_pre_processor: T,
@@ -83,6 +130,7 @@ pub trait AmbientGateway: Send + Sync {
         &self,
         changes: &evm::BlockContractChanges,
         new_cursor: &str,
+        syncing: bool,
     ) -> Result<(), StorageError>;
 
     async fn revert(
@@ -100,6 +148,7 @@ where
     pub fn new(
         name: &str,
         chain: Chain,
+        sync_batch_size: usize,
         pool: Pool<AsyncPgConnection>,
         gw: CachedGateway,
         token_pre_processor: T,
@@ -107,6 +156,7 @@ where
         AmbientPgGateway {
             name: name.to_owned(),
             chain,
+            sync_batch_size,
             pool,
             state_gateway: gw,
             token_pre_processor,
@@ -162,6 +212,7 @@ where
         &self,
         changes: &evm::BlockContractChanges,
         new_cursor: &str,
+        syncing: bool,
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
         self.state_gateway
@@ -251,8 +302,9 @@ where
             .await?;
         self.save_cursor(new_cursor).await?;
 
+        let batch_size: usize = if syncing { self.sync_batch_size } else { 0 };
         self.state_gateway
-            .commit_transaction(0)
+            .commit_transaction(batch_size)
             .await
     }
 
@@ -352,8 +404,9 @@ impl AmbientGateway for AmbientPgGateway<TokenPreProcessor> {
         &self,
         changes: &evm::BlockContractChanges,
         new_cursor: &str,
+        syncing: bool,
     ) -> Result<(), StorageError> {
-        self.forward(changes, new_cursor)
+        self.forward(changes, new_cursor, syncing)
             .await?;
         Ok(())
     }
@@ -376,6 +429,7 @@ where
     pub async fn new(
         name: &str,
         chain: Chain,
+        chain_state: ChainState,
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
     ) -> Result<Self, ExtractionError> {
@@ -385,9 +439,12 @@ where
                 gateway,
                 name: name.to_owned(),
                 chain,
+                chain_state,
                 inner: Arc::new(Mutex::new(Inner {
                     cursor: Vec::new(),
                     last_processed_block: None,
+                    last_report_ts: chrono::Local::now().naive_utc(),
+                    last_report_block_number: 0,
                 })),
                 protocol_system: "ambient".to_string(),
                 protocol_types,
@@ -396,7 +453,13 @@ where
                 gateway,
                 name: name.to_owned(),
                 chain,
-                inner: Arc::new(Mutex::new(Inner { cursor, last_processed_block: None })),
+                chain_state,
+                inner: Arc::new(Mutex::new(Inner {
+                    cursor,
+                    last_processed_block: None,
+                    last_report_ts: chrono::Local::now().naive_utc(),
+                    last_report_block_number: 0,
+                })),
                 protocol_system: "ambient".to_string(),
                 protocol_types,
             },
@@ -466,10 +529,6 @@ where
         ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
-
-                self.update_last_processed_block(changes.block)
-                    .await;
-
                 changes
             }
             Err(ExtractionError::Empty) => {
@@ -478,9 +537,17 @@ where
             }
             Err(e) => return Err(e),
         };
+
+        let is_syncing = self.is_syncing(msg.block.number).await;
+
         self.gateway
-            .upsert_contract(&msg, inp.cursor.as_ref())
+            .upsert_contract(&msg, inp.cursor.as_ref(), is_syncing)
             .await?;
+
+        self.update_last_processed_block(msg.block)
+            .await;
+
+        self.report_progress(msg.block).await;
 
         self.update_cursor(inp.cursor).await;
         let msg = Arc::new(msg.aggregate_updates()?);
@@ -573,6 +640,7 @@ mod test {
         let extractor = AmbientContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
+            ChainState::default(),
             gw,
             ambient_protocol_types(),
         )
@@ -599,10 +667,11 @@ mod test {
             .returning(|| Ok("cursor".into()));
         gw.expect_upsert_contract()
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
         let extractor = AmbientContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
+            ChainState::default(),
             gw,
             ambient_protocol_types(),
         )
@@ -631,10 +700,11 @@ mod test {
             .returning(|| Ok("cursor".into()));
         gw.expect_upsert_contract()
             .times(0)
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
         let extractor = AmbientContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
+            ChainState::default(),
             gw,
             ambient_protocol_types(),
         )
@@ -674,7 +744,7 @@ mod test {
 
         gw.expect_upsert_contract()
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
         gw.expect_revert()
             .withf(|c, v, cursor| {
@@ -693,6 +763,7 @@ mod test {
         let extractor = AmbientContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
+            ChainState::default(),
             gw,
             ambient_protocol_types(),
         )
@@ -820,6 +891,7 @@ mod test_serial_db {
         let gw = AmbientPgGateway::new(
             "vm:ambient",
             Chain::Ethereum,
+            1000,
             pool.clone(),
             cached_gw,
             get_mocked_token_pre_processor(),
@@ -1017,7 +1089,7 @@ mod test_serial_db {
             let msg = ambient_creation_and_update();
             let exp = ambient_account(0);
 
-            gw.forward(&msg, "cursor@500")
+            gw.forward(&msg, "cursor@500", false)
                 .await
                 .expect("upsert should succeed");
 
@@ -1111,6 +1183,7 @@ mod test_serial_db {
             let gw = AmbientPgGateway::new(
                 "vm:ambient",
                 Chain::Ethereum,
+                1000,
                 pool.clone(),
                 cached_gw,
                 get_mocked_token_pre_processor(),
@@ -1118,10 +1191,10 @@ mod test_serial_db {
 
             let msg0 = ambient_creation_and_update();
             let msg1 = ambient_update02();
-            gw.forward(&msg0, "cursor@0")
+            gw.forward(&msg0, "cursor@0", false)
                 .await
                 .expect("upsert should succeed");
-            gw.forward(&msg1, "cursor@1")
+            gw.forward(&msg1, "cursor@1", false)
                 .await
                 .expect("upsert should succeed");
             let ambient_address = H160(AMBIENT_CONTRACT);
@@ -1186,6 +1259,7 @@ mod test_serial_db {
             let gw = AmbientPgGateway::new(
                 "vm:ambient",
                 Chain::Ethereum,
+                1000,
                 pool.clone(),
                 cached_gw,
                 get_mocked_token_pre_processor(),

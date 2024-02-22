@@ -115,6 +115,12 @@ where
     Ok(T::from(data))
 }
 
+pub fn format_duration(duration: &chrono::Duration) -> String {
+    let hours = duration.num_hours();
+    let minutes = (duration.num_minutes()) % 60;
+    format!("{:02}h{:02}m", hours, minutes)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

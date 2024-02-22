@@ -28,7 +28,8 @@ use tycho_indexer::{
         self,
         evm::{
             self,
-            native::{ChainState, NativeContractExtractor, NativePgGateway},
+            chain_state::ChainState,
+            native::{NativeContractExtractor, NativePgGateway},
         },
         ExtractionError,
     },
@@ -158,13 +159,16 @@ async fn main() -> Result<(), ExtractionError> {
 
     let token_processor = TokenPreProcessor::new(rpc_client);
 
-    // Commented out because the ambient extractor is not working.
-
-    // let (ambient_task, ambient_handle) =
-    //     start_ambient_extractor(&args, pool.clone(), cached_gw.clone(), token_processor.clone())
-    //         .await?;
-    // extractor_handles.push(ambient_handle.clone());
-    // info!("Extractor {} started!", ambient_handle.get_id());
+    let (ambient_task, ambient_handle) = start_ambient_extractor(
+        &args,
+        chain_state,
+        pool.clone(),
+        cached_gw.clone(),
+        token_processor.clone(),
+    )
+    .await?;
+    extractor_handles.push(ambient_handle.clone());
+    info!("Extractor {} started!", ambient_handle.get_id());
 
     let (uniswap_v3_task, uniswap_v3_handle) = start_uniswap_v3_extractor(
         &args,
@@ -205,20 +209,31 @@ async fn main() -> Result<(), ExtractionError> {
 
     let shutdown_task = tokio::spawn(shutdown_handler(server_handle, extractor_handles, handle));
     let (res, _, _) =
-        select_all([uniswap_v2_task, uniswap_v3_task, server_task, shutdown_task]).await;
+        select_all([ambient_task, uniswap_v2_task, uniswap_v3_task, server_task, shutdown_task])
+            .await;
     res.expect("Extractor- nor ServiceTasks should panic!")
 }
 
-#[allow(dead_code)]
 async fn start_ambient_extractor(
     _args: &CliArgs,
+    chain_state: ChainState,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
     token_pre_processor: TokenPreProcessor,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
     let ambient_name = "vm:ambient";
-    let ambient_gw =
-        AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, cached_gw, token_pre_processor);
+    let sync_batch_size = env::var("AMBIENT_SYNC_BATCH_SIZE")
+        .unwrap_or("1000".to_string())
+        .parse::<usize>()
+        .expect("Failed to parse AMBIENT_SYNC_BATCH_SIZE");
+    let ambient_gw = AmbientPgGateway::new(
+        ambient_name,
+        Chain::Ethereum,
+        sync_batch_size,
+        pool,
+        cached_gw,
+        token_pre_processor,
+    );
     let ambient_protocol_types = [(
         "ambient_pool".to_string(),
         ProtocolType::new(
@@ -233,6 +248,7 @@ async fn start_ambient_extractor(
     let extractor = AmbientContractExtractor::new(
         ambient_name,
         Chain::Ethereum,
+        chain_state,
         ambient_gw,
         ambient_protocol_types,
     )
@@ -246,7 +262,8 @@ async fn start_ambient_extractor(
     info!(%ambient_name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Ambient extractor");
     let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(start_block)
-        .module_name(module_name);
+        .module_name(module_name)
+        .only_final_blocks();
     if let Some(stop_block) = stop_block {
         builder = builder.end_block(stop_block)
     };
@@ -310,7 +327,6 @@ async fn start_uniswap_v2_extractor(
     builder.run().await
 }
 
-#[allow(dead_code)]
 async fn start_uniswap_v3_extractor(
     _args: &CliArgs,
     chain_state: ChainState,
