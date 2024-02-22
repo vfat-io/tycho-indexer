@@ -779,7 +779,6 @@ where
         &self,
         component_balances: &[&Self::ComponentBalance],
         chain: &Chain,
-        block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
@@ -803,8 +802,13 @@ where
             .iter()
             .map(|component_balance| component_balance.modify_tx())
             .collect::<Vec<TxHash>>();
-        let transaction_ids: HashMap<TxHash, i64> =
-            orm::Transaction::ids_by_hash(&modify_txs, conn).await?;
+        let txn_hashes = modify_txs.iter().collect::<Vec<_>>();
+        let transaction_ids_and_ts: HashMap<TxHash, (i64, NaiveDateTime)> =
+            orm::Transaction::ids_and_ts_by_hash(txn_hashes.as_ref(), conn)
+                .await?
+                .into_iter()
+                .map(|(db_id, hash, index, ts)| (hash, (db_id, ts)))
+                .collect();
 
         let external_ids: Vec<&str> = component_balances
             .iter()
@@ -820,14 +824,15 @@ where
 
         for component_balance in component_balances.iter() {
             let token_id = token_ids[&component_balance.token()];
-            let transaction_id = transaction_ids[&component_balance.modify_tx()];
+            let (transaction_id, transaction_ts) =
+                transaction_ids_and_ts[&component_balance.modify_tx()];
             let protocol_component_id = protocol_component_ids[&component_balance.component_id];
 
             let new_component_balance = component_balance.to_storage(
                 token_id,
                 transaction_id,
                 protocol_component_id,
-                block_ts,
+                transaction_ts,
             );
             new_component_balances.push(new_component_balance);
         }
@@ -2245,7 +2250,7 @@ mod test {
         };
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
-        gw.add_component_balances(&[&component_balance], &Chain::Starknet, block_ts, &mut conn)
+        gw.add_component_balances(&[&component_balance], &Chain::Starknet, &mut conn)
             .await
             .unwrap();
 
@@ -2292,14 +2297,9 @@ mod test {
         let updated_component_balances = vec![&updated_component_balance];
         let new_block_ts = NaiveDateTime::from_timestamp_opt(2000, 0).unwrap();
 
-        gw.add_component_balances(
-            &updated_component_balances,
-            &Chain::Starknet,
-            new_block_ts,
-            &mut conn,
-        )
-        .await
-        .unwrap();
+        gw.add_component_balances(&updated_component_balances, &Chain::Starknet, &mut conn)
+            .await
+            .unwrap();
 
         // Obtain newest inserted value
         let new_inserted_data = schema::component_balance::table

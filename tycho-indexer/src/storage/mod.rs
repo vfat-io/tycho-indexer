@@ -303,6 +303,8 @@ pub enum StorageError {
     Unsupported(String),
     #[error("Write cache unexpectedly dropped notification channel!")]
     WriteCacheGoneAway(),
+    #[error("Invalid block range encountered")]
+    InvalidBlockRange(),
 }
 
 /// Storage methods for chain specific objects.
@@ -742,7 +744,6 @@ pub trait ProtocolGateway {
         &self,
         component_balances: &[&Self::ComponentBalance],
         chain: &Chain,
-        block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 

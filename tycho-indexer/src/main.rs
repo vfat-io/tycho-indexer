@@ -20,7 +20,7 @@ use ethers::{
     providers::Middleware,
 };
 use std::sync::Arc;
-use tokio::{sync::mpsc, task, task::JoinHandle};
+use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::info;
 
 use tycho_indexer::{
@@ -132,14 +132,6 @@ async fn main() -> Result<(), ExtractionError> {
     info!("Starting Tycho");
     let mut extractor_handles = Vec::new();
     let (tx, rx) = mpsc::channel(10);
-    let (err_tx, mut err_rx) = mpsc::channel(10);
-
-    // Spawn a new task that listens to err_rx
-    task::spawn(async move {
-        if let Some(msg) = err_rx.recv().await {
-            panic!("Database write error received: {}", msg);
-        }
-    });
 
     let rpc_url = env::var("ETH_RPC_URL").expect("ETH_RPC_URL is not set");
     let rpc_client: Provider<Http> =
@@ -158,8 +150,6 @@ async fn main() -> Result<(), ExtractionError> {
         pool.clone(),
         evm_gw.clone(),
         rx,
-        err_tx,
-        block_number,
     )
     .await;
 
@@ -312,7 +302,8 @@ async fn start_uniswap_v2_extractor(
     info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V2 extractor");
     let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(start_block)
-        .module_name(module_name);
+        .module_name(module_name)
+        .only_final_blocks();
     if let Some(stop_block) = stop_block {
         builder = builder.end_block(stop_block)
     };
@@ -369,7 +360,8 @@ async fn start_uniswap_v3_extractor(
     info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V3 extractor");
     let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
         .start_block(start_block)
-        .module_name(module_name);
+        .module_name(module_name)
+        .only_final_blocks();
     if let Some(stop_block) = stop_block {
         builder = builder.end_block(stop_block)
     };

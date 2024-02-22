@@ -22,6 +22,8 @@
 use async_trait::async_trait;
 use futures03::{stream::SplitSink, SinkExt, StreamExt};
 use hyper::Uri;
+#[cfg(test)]
+use mockall::automock;
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::Arc,
@@ -36,7 +38,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_types::dto::{Command, Deltas, ExtractorIdentity, Response, WebSocketMessage};
 use uuid::Uuid;
 
@@ -77,6 +79,7 @@ pub enum DeltasError {
     Fatal(String),
 }
 
+#[cfg_attr(test, automock)]
 #[async_trait]
 pub trait DeltasClient {
     /// Subscribe to an extractor and receive realtime messages
@@ -185,7 +188,7 @@ impl Inner {
     fn mark_active(&mut self, extractor_id: &ExtractorIdentity, subscription_id: Uuid) {
         if let Some(info) = self.pending.remove(extractor_id) {
             if let SubscriptionInfo::RequestedSubscription(ready_tx) = info {
-                let (tx, rx) = mpsc::channel(1);
+                let (tx, rx) = mpsc::channel(16);
                 self.sender.insert(subscription_id, tx);
                 self.subscriptions
                     .insert(subscription_id, SubscriptionInfo::Active);
@@ -341,7 +344,7 @@ impl WsDeltasClient {
     ///
     /// If the message returns an error, a reconnect attempt may be considered depending on the
     /// error type.
-    #[instrument(skip(self))]
+    #[instrument(skip(self, msg))]
     async fn handle_msg(
         &self,
         msg: Result<tungstenite::protocol::Message, tokio_tungstenite::tungstenite::error::Error>,
@@ -353,13 +356,14 @@ impl WsDeltasClient {
                 WebSocketMessage,
             >(&text)
             {
-                Ok(WebSocketMessage::BlockChanges { subscription_id, delta }) => {
-                    info!(?delta, "Received a block state change, sending to channel");
+                Ok(WebSocketMessage::BlockChanges { subscription_id, deltas }) => {
+                    trace!(?deltas, "Received a block state change, sending to channel");
                     let inner = guard
                         .as_mut()
                         .ok_or_else(|| DeltasError::NotConnected)?;
+                    // If we get data too quickly this may block
                     if inner
-                        .send(&subscription_id, delta)
+                        .send(&subscription_id, deltas)
                         .await
                         .is_err()
                     {
@@ -456,6 +460,7 @@ impl DeltasClient for WsDeltasClient {
         &self,
         extractor_id: ExtractorIdentity,
     ) -> Result<(Uuid, Receiver<Deltas>), DeltasError> {
+        trace!("Starting subscribe");
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         {
@@ -463,7 +468,7 @@ impl DeltasClient for WsDeltasClient {
             let inner = guard
                 .as_mut()
                 .expect("ws not connected");
-
+            trace!("Sending subscribe command");
             inner.new_subscription(&extractor_id, ready_tx)?;
             let cmd = Command::Subscribe { extractor_id };
             inner
@@ -472,10 +477,11 @@ impl DeltasClient for WsDeltasClient {
                 ))
                 .await?;
         }
+        trace!("Waiting for subscription response");
         let rx = ready_rx
             .await
             .expect("ready channel closed");
-
+        trace!("Subscription successfull");
         Ok(rx)
     }
 
@@ -673,7 +679,7 @@ mod tests {
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "delta": {
+                    "deltas": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -694,8 +700,8 @@ mod tests {
                                 "change": "Update"
                             }
                         },
-                        "new_protocol_components": [
-                                {
+                        "new_protocol_components": 
+                            { "protocol_1": {
                                     "id": "protocol_1",
                                     "protocol_system": "system_1",
                                     "protocol_type_name": "type_1",
@@ -707,16 +713,23 @@ mod tests {
                                     "creation_tx": "0x01",
                                     "created_at": "2023-09-14T00:00:00"
                                 }
-                            ],
-                            "deleted_protocol_components": [],
-                            "component_balances": [
+                            },
+                        "deleted_protocol_components": {},
+                        "component_balances": {
+                            "protocol_1":
                                 {
-                                    "token": "0x01",
-                                    "new_balance": "0x01f4",
-                                    "modify_tx": "0x01",
-                                    "component_id": "protocol_1"
+                                    "0x01": {
+                                        "token": "0x01",
+                                        "balance": "0x01f4",
+                                        "balance_float": 0.0,
+                                        "modify_tx": "0x01",
+                                        "component_id": "protocol_1"
+                                    }
                                 }
-                            ]
+                        },
+                        "component_tvl": {
+                            "protocol_1": 1000.0
+                        }
                     }
                 }
                 "#.to_owned()
@@ -725,7 +738,7 @@ mod tests {
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "delta": {
+                    "deltas": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -756,6 +769,21 @@ mod tests {
                                 "creation_tx": "0x01",
                                 "created_at": "2023-09-14T00:00:00"
                             }
+                        },
+                        "deleted_protocol_components": {},
+                        "component_balances": {
+                            "protocol_1": {
+                                "0x01": {
+                                    "token": "0x01",
+                                    "balance": "0x01f4",
+                                    "balance_float": 1000.0,
+                                    "modify_tx": "0x01",
+                                    "component_id": "protocol_1"
+                                }
+                            }
+                        },
+                        "component_tvl": {
+                            "protocol_1": 1000.0
                         }
                     }
                 }
@@ -982,7 +1010,7 @@ mod tests {
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "delta": {
+                    "deltas": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -1003,7 +1031,8 @@ mod tests {
                                 "change": "Update"
                             }
                         },
-                        "new_protocol_components": [
+                        "new_protocol_components": {
+                            "protocol_1":
                                 {
                                     "id": "protocol_1",
                                     "protocol_system": "system_1",
@@ -1016,16 +1045,22 @@ mod tests {
                                     "creation_tx": "0x01",
                                     "created_at": "2023-09-14T00:00:00"
                                 }
-                            ],
-                            "deleted_protocol_components": [],
-                            "component_balances": [
-                                {
+                            },
+                        "deleted_protocol_components": {},
+                        "component_balances": {
+                            "protocol_1": {
+                                "0x01": {
                                     "token": "0x01",
-                                    "new_balance": "0x01f4",
+                                    "balance": "0x01f4",
+                                    "balance_float": 1000.0,
                                     "modify_tx": "0x01",
                                     "component_id": "protocol_1"
                                 }
-                            ]
+                            }
+                        },
+                        "component_tvl": {
+                            "protocol_1": 1000.0
+                        }
                     }
                 }
                 "#.to_owned()

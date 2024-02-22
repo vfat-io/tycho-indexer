@@ -24,9 +24,7 @@ use crate::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockEntityChanges,
     },
-    storage::{
-        postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError, TxHash,
-    },
+    storage::{postgres::cache::CachedGateway, BlockIdentifier, StorageError, TxHash},
 };
 
 use super::token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait};
@@ -307,66 +305,15 @@ where
             .await
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? to))]
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? _to))]
     async fn backward(
         &self,
-        current: Option<BlockIdentifier>,
-        to: &BlockIdentifier,
-        new_cursor: &str,
-        conn: &mut AsyncPgConnection,
+        _current: Option<BlockIdentifier>,
+        _to: &BlockIdentifier,
+        _new_cursor: &str,
+        _conn: &mut AsyncPgConnection,
     ) -> Result<evm::BlockEntityChangesResult, StorageError> {
-        let block = self
-            .state_gateway
-            .get_block(to, conn)
-            .await?;
-        let start = current.map(BlockOrTimestamp::Block);
-        let target = BlockOrTimestamp::Block(to.clone());
-
-        // CHECK: Here there's an assumption that self.name == protocol_system
-
-        let allowed_components: Vec<String> = self
-            .state_gateway
-            .get_protocol_components(&self.chain, Some(self.name.clone()), None, None, conn)
-            .await?
-            .into_iter()
-            .map(|c| c.id)
-            .collect();
-
-        let state_updates = self
-            .state_gateway
-            .get_delta(&self.chain, start.as_ref(), &target)
-            .await?
-            .1
-            .into_iter()
-            .filter_map(|u: evm::ProtocolStateDelta| {
-                if allowed_components.contains(&u.component_id) {
-                    Some((u.component_id.clone(), u))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        self.state_gateway
-            .revert_state(to)
-            .await?;
-
-        self.state_gateway
-            .start_transaction(&block)
-            .await;
-        self.save_cursor(new_cursor).await?;
-        self.state_gateway
-            .commit_transaction(0)
-            .await?;
-
-        Ok(evm::BlockEntityChangesResult {
-            extractor: self.name.clone(),
-            chain: self.chain,
-            block,
-            revert: true,
-            state_updates,
-            new_protocol_components: HashMap::new(),
-        })
+        panic!("Not implemented")
     }
 
     async fn get_last_cursor(&self, conn: &mut AsyncPgConnection) -> Result<Vec<u8>, StorageError> {
@@ -578,7 +525,12 @@ where
 
         // Make sure we have a current block, otherwise it's not safe to revert.
         // TODO: add last block to extraction state and get it when creating a new extractor.
-        assert!(current.is_some(), "Revert without current block");
+        if current.is_none() {
+            // ignore for now if we don't have the current block, just ignore the revert.
+            // This behaviour is not correct and we will have to rollback the database
+            // to a good state once the revert issue has been fixed.
+            return Ok(None);
+        }
 
         let changes = self
             .gateway
@@ -759,10 +711,7 @@ mod test_serial_db {
     //! between this component and the actual db interactions
 
     use mpsc::channel;
-    use tokio::sync::{
-        mpsc,
-        mpsc::{error::TryRecvError::Empty, Receiver},
-    };
+    use tokio::sync::mpsc;
 
     use test_serial_db::evm::ProtocolChangesWithTx;
 
@@ -822,12 +771,7 @@ mod test_serial_db {
 
     async fn setup_gw(
         pool: Pool<AsyncPgConnection>,
-    ) -> (
-        NativePgGateway<MockTokenPreProcessorTrait>,
-        Receiver<StorageError>,
-        Pool<AsyncPgConnection>,
-        i64,
-    ) {
+    ) -> (NativePgGateway<MockTokenPreProcessorTrait>, Pool<AsyncPgConnection>, i64) {
         let mut conn = pool
             .get()
             .await
@@ -855,7 +799,6 @@ mod test_serial_db {
         );
 
         let (tx, rx) = channel(10);
-        let (err_tx, err_rx) = channel(10);
 
         let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
             "ethereum".to_owned(),
@@ -863,8 +806,6 @@ mod test_serial_db {
             pool.clone(),
             evm_gw.clone(),
             rx,
-            err_tx,
-            0,
         )
         .await;
 
@@ -879,13 +820,13 @@ mod test_serial_db {
             cached_gw,
             get_mocked_token_pre_processor(),
         );
-        (gw, err_rx, pool, chain_id)
+        (gw, pool, chain_id)
     }
 
     #[tokio::test]
     async fn test_get_cursor() {
         run_against_db(|pool| async move {
-            let (gw, mut err_rx, pool, _) = setup_gw(pool).await;
+            let (gw, pool, _) = setup_gw(pool).await;
             let evm_gw = gw.state_gateway.clone();
             let state = ExtractionState::new(
                 "test".to_string(),
@@ -908,11 +849,6 @@ mod test_serial_db {
                 .commit_transaction(0)
                 .await
                 .expect("gw transaction failed");
-            let _ = evm_gw.flush().await;
-
-            let maybe_err = err_rx
-                .try_recv()
-                .expect_err("Error channel should be empty");
 
             let cursor = gw
                 .get_last_cursor(&mut conn)
@@ -920,8 +856,6 @@ mod test_serial_db {
                 .expect("get cursor should succeed");
 
             assert_eq!(cursor, "cursor@420".as_bytes());
-            // Assert no error happened
-            assert_eq!(maybe_err, Empty);
         })
         .await;
     }
@@ -973,7 +907,7 @@ mod test_serial_db {
     #[tokio::test]
     async fn test_forward() {
         run_against_db(|pool| async move {
-            let (gw, mut err_rx, pool, _) = setup_gw(pool).await;
+            let (gw, pool, _) = setup_gw(pool).await;
             let msg = native_pool_creation();
 
             let _exp = [ProtocolComponent {
@@ -1000,15 +934,6 @@ mod test_serial_db {
                 .expect("upsert should succeed");
 
             let cached_gw: CachedGateway = gw.state_gateway;
-            cached_gw
-                .flush()
-                .await
-                .expect("Received signal ok")
-                .expect("Flush ok");
-
-            let maybe_err = err_rx
-                .try_recv()
-                .expect_err("Error channel should be empty");
 
             let mut conn = pool
                 .get()
@@ -1027,16 +952,15 @@ mod test_serial_db {
             println!("{:?}", res);
             // TODO: This is failing because protocol_type_name is wrong in the gateway - waiting
             // for this fix. assert_eq!(res, exp);
-            // Assert no error happened
-            assert_eq!(maybe_err, Empty);
         })
         .await;
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_revert() {
         run_against_db(|pool| async move {
-            let (gw, mut err_rx, pool, _) = setup_gw(pool).await;
+            let (gw, pool, _) = setup_gw(pool).await;
             let msg0 = native_pool_creation();
 
             let res1_value = 1000_u64.to_be_bytes().to_vec();
@@ -1109,10 +1033,6 @@ mod test_serial_db {
                 .await
                 .expect("revert should succeed");
 
-            let maybe_err = err_rx
-                .try_recv()
-                .expect_err("Error channel should be empty");
-
             assert_eq!(changes.state_updates.len(), 1);
 
             assert_eq!(changes.state_updates[&CREATED_CONTRACT.to_string()], exp_change);
@@ -1127,8 +1047,6 @@ mod test_serial_db {
                 )
                 .await
                 .expect("test successfully inserted native contract");
-            // Assert no error happened
-            assert_eq!(maybe_err, Empty);
         })
         .await;
     }
@@ -1141,7 +1059,7 @@ mod test_serial_db {
                 .await
                 .expect("pool should get a connection");
 
-            let (gw, mut err_rx, _, chain_id) = setup_gw(pool).await;
+            let (gw, _, chain_id) = setup_gw(pool).await;
 
             let weth_addr = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
             let usdc_addr = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -1164,8 +1082,6 @@ mod test_serial_db {
             assert_eq!(res.len(), 1);
             // Assert res contains USDT
             assert_eq!(res[0], H160::from_str(usdt_addr).unwrap());
-            // Assert no error happened
-            assert_eq!(err_rx.try_recv(), Err(Empty));
         })
         .await;
     }

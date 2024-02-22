@@ -20,8 +20,17 @@ serde_json.workspace = true
 chrono.workspace = true
 hex.workspace = true
 anyhow.workspace = true
-
+lru = "0.12.2"
+tracing-subscriber = { version = "0.3.17", default-features = false, features = [
+    "env-filter",
+    "fmt",
+] }
 
 [dev-dependencies]
 mockito = "1.1.1"
-tungstenite = "0.20.1"
+rand = "0.8"
+rstest = "0.18.2"
+pretty_assertions = "1.4.0"
+mockall = "0.11.4"
+tracing-subscriber = "0.3.17"
+test-log = { version = "0.2.14", features=["trace"]}

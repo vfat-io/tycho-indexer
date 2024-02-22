@@ -6,8 +6,10 @@
 //!
 //! Currently we provide only a HTTP implementation.
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
+#[cfg(test)]
+use mockall::automock;
 use thiserror::Error;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 use async_trait::async_trait;
 
@@ -35,6 +37,7 @@ pub enum RPCError {
     ParseResponse(String),
 }
 
+#[cfg_attr(test, automock)]
 #[async_trait]
 pub trait RPCClient {
     /// Retrieves a snapshot of contract state.
@@ -105,7 +108,6 @@ impl RPCClient for HttpRPCClient {
             chain,
             filters.to_query_string()
         );
-        dbg!(&uri);
         debug!(%uri, "Sending contract_state request to Tycho server");
         let body =
             serde_json::to_string(&request).map_err(|e| RPCError::FormatRequest(e.to_string()))?;
@@ -117,21 +119,21 @@ impl RPCClient for HttpRPCClient {
             .header(hyper::header::CONTENT_TYPE, header)
             .body(Body::from(body))
             .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-        debug!(?req, "Sending request to Tycho server");
+        trace!(?req, "Sending request to Tycho server");
 
         let response = self
             .http_client
             .request(req)
             .await
             .map_err(|e| RPCError::HttpClient(e.to_string()))?;
-        debug!(?response, "Received response from Tycho server");
+        trace!(?response, "Received response from Tycho server");
 
         let body = hyper::body::to_bytes(response.into_body())
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         let accounts: StateRequestResponse =
             serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
-        info!(?accounts, "Received contract_state response from Tycho server");
+        trace!(?accounts, "Received contract_state response from Tycho server");
 
         Ok(accounts)
     }
@@ -162,21 +164,21 @@ impl RPCClient for HttpRPCClient {
             .header(hyper::header::CONTENT_TYPE, header)
             .body(Body::from(body))
             .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-        debug!(?req, "Sending request to Tycho server");
+        trace!(?req, "Sending request to Tycho server");
 
         let response = self
             .http_client
             .request(req)
             .await
             .map_err(|e| RPCError::HttpClient(e.to_string()))?;
-        debug!(?response, "Received response from Tycho server");
+        trace!(?response, "Received response from Tycho server");
 
         let body = hyper::body::to_bytes(response.into_body())
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         let components: ProtocolComponentRequestResponse =
             serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
-        info!(?components, "Received protocol_components response from Tycho server");
+        trace!(?components, "Received protocol_components response from Tycho server");
 
         Ok(components)
     }
@@ -218,21 +220,21 @@ impl RPCClient for HttpRPCClient {
             .header(hyper::header::CONTENT_TYPE, header)
             .body(Body::from(body))
             .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-        debug!(?req, "Sending request to Tycho server");
+        trace!(?req, "Sending request to Tycho server");
 
         let response = self
             .http_client
             .request(req)
             .await
             .map_err(|e| RPCError::HttpClient(e.to_string()))?;
-        debug!(?response, "Received response from Tycho server");
+        trace!(?response, "Received response from Tycho server");
 
         let body = hyper::body::to_bytes(response.into_body())
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         let states: ProtocolStateRequestResponse =
             serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
-        info!(?states, "Received protocol_states response from Tycho server");
+        trace!(?states, "Received protocol_states response from Tycho server");
 
         Ok(states)
     }

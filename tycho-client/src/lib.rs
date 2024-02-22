@@ -26,7 +26,12 @@
 const TYCHO_SERVER_VERSION: &str = "v1";
 
 pub mod deltas;
+pub mod feed;
 pub mod rpc;
+
+#[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions;
 
 pub use deltas::{DeltasError, WsDeltasClient};
 pub use rpc::{HttpRPCClient, RPCError};

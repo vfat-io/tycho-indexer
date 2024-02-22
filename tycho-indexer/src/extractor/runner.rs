@@ -137,8 +137,7 @@ impl ExtractorRunner {
                                 }
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
-                                let block = undo_signal.last_valid_block.as_ref().map(|v| v.number).unwrap_or(0);
-                                info!(%block,  "Revert to {block} requested!");
+                                info!(block=?&undo_signal.last_valid_block,  "Revert requested!");
                                 match self.extractor.handle_revert(undo_signal.clone()).await {
                                     Ok(Some(msg)) => {
                                         trace!(msg = %msg, "Propagating block undo message.");
@@ -219,6 +218,7 @@ pub struct ExtractorRunnerBuilder {
     end_block: i64,
     token: String,
     extractor: Arc<dyn Extractor>,
+    final_block_only: bool,
 }
 
 pub type HandleResult = (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle);
@@ -233,6 +233,7 @@ impl ExtractorRunnerBuilder {
             end_block: 0,
             token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
             extractor,
+            final_block_only: false,
         }
     }
 
@@ -263,6 +264,11 @@ impl ExtractorRunnerBuilder {
         self
     }
 
+    pub fn only_final_blocks(mut self) -> Self {
+        self.final_block_only = true;
+        self
+    }
+
     #[instrument(skip(self))]
     pub async fn run(self) -> Result<HandleResult, ExtractionError> {
         let content = std::fs::read(&self.spkg_file)
@@ -284,6 +290,7 @@ impl ExtractorRunnerBuilder {
             self.module_name,
             self.start_block,
             self.end_block as u64,
+            self.final_block_only,
         );
 
         let id = self.extractor.get_id();
