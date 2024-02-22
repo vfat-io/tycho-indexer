@@ -16,7 +16,7 @@ use tycho_types::Bytes;
 
 use crate::{
     extractor::{
-        evm::{self, Block},
+        evm::{self, chain_state::ChainState, Block},
         ExtractionError, Extractor, ExtractorMsg,
     },
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
@@ -27,7 +27,10 @@ use crate::{
     storage::{postgres::cache::CachedGateway, BlockIdentifier, StorageError, TxHash},
 };
 
-use super::token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait};
+use super::{
+    token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait},
+    utils::format_duration,
+};
 
 pub struct Inner {
     cursor: Vec<u8>,
@@ -45,25 +48,6 @@ pub struct NativeContractExtractor<G> {
     protocol_system: String,
     inner: Arc<Mutex<Inner>>,
     protocol_types: HashMap<String, ProtocolType>,
-}
-
-// hacky workaround to estimate current state
-#[derive(Default, Clone, Copy)]
-pub struct ChainState {
-    start: NaiveDateTime,
-    block_number: u64,
-}
-
-impl ChainState {
-    pub fn new(start: NaiveDateTime, block_number: u64) -> Self {
-        Self { start, block_number }
-    }
-    pub async fn current_block(&self) -> u64 {
-        let now = chrono::Local::now().naive_utc();
-        let diff = now.signed_duration_since(self.start);
-        let blocks_passed = (diff.num_seconds() / 12) as u64;
-        self.block_number + blocks_passed
-    }
 }
 
 impl<DB> NativeContractExtractor<DB> {
@@ -113,12 +97,6 @@ impl<DB> NativeContractExtractor<DB> {
             false
         }
     }
-}
-
-fn format_duration(duration: &chrono::Duration) -> String {
-    let hours = duration.num_hours();
-    let minutes = (duration.num_minutes()) % 60;
-    format!("{:02}h{:02}m", hours, minutes)
 }
 
 pub struct NativePgGateway<T>

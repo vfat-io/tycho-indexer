@@ -28,7 +28,8 @@ use tycho_indexer::{
         self,
         evm::{
             self,
-            native::{ChainState, NativeContractExtractor, NativePgGateway},
+            chain_state::ChainState,
+            native::{NativeContractExtractor, NativePgGateway},
         },
         ExtractionError,
     },
@@ -212,13 +213,24 @@ async fn main() -> Result<(), ExtractionError> {
 #[allow(dead_code)]
 async fn start_ambient_extractor(
     _args: &CliArgs,
+    chain_state: ChainState,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
     token_pre_processor: TokenPreProcessor,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
     let ambient_name = "vm:ambient";
-    let ambient_gw =
-        AmbientPgGateway::new(ambient_name, Chain::Ethereum, pool, cached_gw, token_pre_processor);
+    let sync_batch_size = env::var("AMBIENT_SYNC_BATCH_SIZE")
+        .unwrap_or("1000".to_string())
+        .parse::<usize>()
+        .expect("Failed to parse AMBIENT_SYNC_BATCH_SIZE");
+    let ambient_gw = AmbientPgGateway::new(
+        ambient_name,
+        Chain::Ethereum,
+        sync_batch_size,
+        pool,
+        cached_gw,
+        token_pre_processor,
+    );
     let ambient_protocol_types = [(
         "ambient_pool".to_string(),
         ProtocolType::new(
@@ -233,6 +245,7 @@ async fn start_ambient_extractor(
     let extractor = AmbientContractExtractor::new(
         ambient_name,
         Chain::Ethereum,
+        chain_state,
         ambient_gw,
         ambient_protocol_types,
     )

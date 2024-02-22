@@ -25,6 +25,7 @@ use self::utils::TryDecode;
 use super::{u256_num::bytes_to_f64, ExtractionError};
 
 pub mod ambient;
+pub mod chain_state;
 pub mod native;
 pub mod storage;
 pub mod token_pre_processor;
