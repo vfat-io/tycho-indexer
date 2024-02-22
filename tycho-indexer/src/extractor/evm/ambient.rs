@@ -543,7 +543,6 @@ mod test {
         models::{FinancialType, ImplementationType},
         pb::sf::substreams::v1::BlockRef,
     };
-    use std::str::FromStr;
 
     use super::*;
 

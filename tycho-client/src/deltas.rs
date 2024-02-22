@@ -188,7 +188,7 @@ impl Inner {
     fn mark_active(&mut self, extractor_id: &ExtractorIdentity, subscription_id: Uuid) {
         if let Some(info) = self.pending.remove(extractor_id) {
             if let SubscriptionInfo::RequestedSubscription(ready_tx) = info {
-                let (tx, rx) = mpsc::channel(1);
+                let (tx, rx) = mpsc::channel(16);
                 self.sender.insert(subscription_id, tx);
                 self.subscriptions
                     .insert(subscription_id, SubscriptionInfo::Active);
@@ -361,6 +361,7 @@ impl WsDeltasClient {
                     let inner = guard
                         .as_mut()
                         .ok_or_else(|| DeltasError::NotConnected)?;
+                    // If we get data too quickly this may block
                     if inner
                         .send(&subscription_id, deltas)
                         .await

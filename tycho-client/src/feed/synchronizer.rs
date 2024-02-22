@@ -42,9 +42,7 @@ pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
 
 #[derive(Debug, Default)]
 struct SharedState {
-    last_served_block_hash: Option<Bytes>,
     last_synced_block: Option<Header>,
-    pending: Option<StateSyncMessage>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -105,10 +103,19 @@ impl StateSyncMessage {
     }
 }
 
+/// StateSynchronizer
+///
+/// Used to synchronize the state of a single protocol. The synchronizer is responsible for
+/// delivering messages to the client that let him reconstruct subsets of the protocol state.
+///
+/// This involves deciding which components to track according to the clients preferences,
+/// retrieving & emitting snapshots of components which the client has not seen yet and subsequently
+/// delivering delta messages for the components that have changed.
 #[async_trait]
 pub trait StateSynchronizer: Send + Sync + 'static {
-    async fn get_pending(&self, block_hash: Bytes) -> Option<StateSyncMessage>;
-    async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)>;
+    /// Starts the state synchronization.
+    async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<StateSyncMessage>)>;
+    /// Ends the sychronization loop.
     async fn close(&mut self) -> SyncResult<()>;
 }
 
@@ -119,7 +126,7 @@ where
     R: RPCClient + Clone + Send + Sync + 'static,
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
-    #[allow(dead_code)]
+    /// Creates a new state synchronizer.
     pub fn new(
         extractor_id: ExtractorIdentity,
         is_native: bool,
@@ -287,7 +294,7 @@ where
 
     /// Main method that does all the work.
     #[instrument(skip(self, block_tx),fields(extractor_id = %self.extractor_id))]
-    async fn state_sync(self, block_tx: &mut Sender<Header>) -> SyncResult<()> {
+    async fn state_sync(self, block_tx: &mut Sender<StateSyncMessage>) -> SyncResult<()> {
         // initialisation
         let mut tracker = ComponentTracker::new(
             self.extractor_id.chain,
@@ -339,10 +346,10 @@ where
 
         {
             let mut shared = self.shared.lock().await;
-            shared.pending = Some(snapshot);
+            block_tx.send(snapshot).await?;
             shared.last_synced_block = Some(header.clone());
         }
-        block_tx.send(header.clone()).await?;
+
         loop {
             if let Some(mut deltas) = msg_rx.recv().await {
                 let header = Header::from_block(deltas.get_block(), deltas.is_revert());
@@ -391,37 +398,23 @@ where
                 self.filter_deltas(&mut deltas, &tracker);
                 let n_changes = deltas.n_changes();
 
+                let next = StateSyncMessage {
+                    header: header.clone(),
+                    snapshots,
+                    deltas: Some(deltas),
+                    removed_components,
+                };
+                block_tx.send(next).await?;
                 {
                     let mut shared = self.shared.lock().await;
-                    // send header while state is still locked, this avoids overwriting state
-                    // while the consumer has not yet retrieved the header.
-                    block_tx.send(header.clone()).await?;
-                    let next = StateSyncMessage {
-                        header: header.clone(),
-                        snapshots,
-                        deltas: Some(deltas),
-                        removed_components,
-                    };
-                    shared.pending = if let Some(prev) = shared.pending.take() {
-                        debug!(
-                            from = &prev.header.number,
-                            to = &next.header.number,
-                            "StateSynchronizer pending state updated"
-                        );
-                        let new = prev.merge(next);
-                        Some(new)
-                    } else {
-                        Some(next)
-                    };
                     shared.last_synced_block = Some(header.clone());
                 }
+
                 debug!(block_number=?header.number, n_changes, "Finished processing delta message");
             } else {
                 let mut shared = self.shared.lock().await;
                 warn!(shared = ?&shared, "Deltas channel closed, resetting shared state.");
-                shared.pending = None;
                 shared.last_synced_block = None;
-                shared.last_served_block_hash = None;
 
                 return Err(anyhow::format_err!("Deltas channel closed!"));
             }
@@ -444,15 +437,8 @@ where
     R: RPCClient + Clone + Send + Sync + 'static,
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
-    async fn get_pending(&self, block_hash: Bytes) -> Option<StateSyncMessage> {
-        let mut shared = self.shared.lock().await;
-        let to_serve = shared.pending.take();
-        shared.last_served_block_hash = Some(block_hash);
-        to_serve
-    }
-
-    async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)> {
-        let (mut block_tx, block_rx) = channel(1);
+    async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<StateSyncMessage>)> {
+        let (mut tx, rx) = channel(15);
 
         let this = self.clone();
         let jh = tokio::spawn(async move {
@@ -466,7 +452,7 @@ where
                 }
 
                 select! {
-                    res = this.clone().state_sync(&mut block_tx) => {
+                    res = this.clone().state_sync(&mut tx) => {
                         match  res
                         {
                             Err(e) => {
@@ -500,7 +486,7 @@ where
             Err(anyhow::format_err!("Max retries exceeded giving up"))
         });
 
-        Ok((jh, block_rx))
+        Ok((jh, rx))
     }
 
     async fn close(&mut self) -> SyncResult<()> {
@@ -767,32 +753,6 @@ mod test {
         assert_eq!(snap, exp);
     }
 
-    #[test(tokio::test)]
-    async fn test_get_pending() {
-        let state_sync = with_mocked_clients(true, None, None);
-        let state_msg = StateSyncMessage {
-            header: Default::default(),
-            snapshots: Default::default(),
-            deltas: None,
-            removed_components: Default::default(),
-        };
-        {
-            let mut guard = state_sync.shared.lock().await;
-            guard.pending = Some(state_msg.clone());
-        }
-
-        let res = state_sync
-            .get_pending(Bytes::default())
-            .await
-            .expect("Could not get pending state!");
-
-        assert_eq!(res, state_msg);
-        {
-            let guard = state_sync.shared.lock().await;
-            assert!(guard.pending.is_none());
-        }
-    }
-
     fn mock_clients_for_state_sync() -> (MockRPCClient, MockDeltasClient, Sender<Deltas>) {
         let mut rpc_client = MockRPCClient::new();
         // Mocks for the start_tracking call, these need to come first because they are more
@@ -950,7 +910,7 @@ mod test {
         let mut state_sync = with_mocked_clients(true, Some(rpc_client), Some(deltas_client));
 
         // Test starts here
-        let (jh, mut block_rx) = state_sync
+        let (jh, mut rx) = state_sync
             .start()
             .await
             .expect("Failed to start state synchronizer");
@@ -960,32 +920,31 @@ mod test {
         tx.send(deltas[1].clone())
             .await
             .expect("deltas channel msg 1 closed!");
-        timeout(Duration::from_millis(100), block_rx.recv())
+        let first_msg = timeout(Duration::from_millis(100), rx.recv())
             .await
             .expect("waiting for first state msg timed out!")
             .expect("state sync block sender closed!");
         tx.send(deltas[2].clone())
             .await
             .expect("deltas channel msg 2 closed!");
-        let header = timeout(Duration::from_millis(100), block_rx.recv())
+        let second_msg = timeout(Duration::from_millis(100), rx.recv())
             .await
             .expect("waiting for second state msg timed out!")
             .expect("state sync block sender closed!");
         let _ = state_sync.close().await;
-        let res = state_sync
-            .get_pending(header.hash.clone())
-            .await
-            .expect("Failed to get pending state");
         let exit = jh
             .await
             .expect("state sync task panicked!");
 
         // assertions
         let exp = StateSyncMessage {
-            header,
+            header: Header {
+                number: 2,
+                hash: Bytes::from("0x02"),
+                parent_hash: Bytes::from("0x01"),
+                revert: false,
+            },
             snapshots: [
-                // since we did not retrieve the first message the snapshot first,
-                // "Component1" should be included.
                 (
                     "Component1".to_string(),
                     Snapshot::NativeSnapshot(NativeSnapshot {
@@ -999,6 +958,34 @@ mod test {
                         },
                     }),
                 ),
+                (
+                    "Component2".to_string(),
+                    Snapshot::NativeSnapshot(NativeSnapshot {
+                        state: ResponseProtocolState {
+                            component_id: "Component2".to_string(),
+                            ..Default::default()
+                        },
+                        component: ProtocolComponent {
+                            id: "Component2".to_string(),
+                            ..Default::default()
+                        },
+                    }),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            deltas: Some(deltas[1].clone()),
+            removed_components: Default::default(),
+        };
+
+        let exp2 = StateSyncMessage {
+            header: Header {
+                number: 3,
+                hash: Bytes::from("0x03"),
+                parent_hash: Bytes::from("0x02"),
+                revert: false,
+            },
+            snapshots: [
                 // This is the new component we queried once it passed the tvl threshold.
                 (
                     "Component3".to_string(),
@@ -1018,7 +1005,26 @@ mod test {
             .collect(),
             // Our deltas are empty and since merge methods are
             // tested in tycho-types we don't have much to do here.
-            deltas: Some(deltas[2].clone()),
+            deltas: Some(Deltas::Native(BlockEntityChangesResult {
+                extractor: "uniswap-v2".to_string(),
+                chain: Chain::Ethereum,
+                block: Block {
+                    number: 3,
+                    hash: Bytes::from("0x03"),
+                    parent_hash: Bytes::from("0x02"),
+                    chain: Chain::Ethereum,
+                    ts: Default::default(),
+                },
+                revert: false,
+                component_tvl: [
+                    // "Component2" should not show here.
+                    ("Component1".to_string(), 100.0),
+                    ("Component3".to_string(), 1000.0),
+                ]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            })),
             // "Component2" was removed, because it's tvl changed to 0.
             removed_components: [(
                 "Component2".to_string(),
@@ -1027,7 +1033,8 @@ mod test {
             .into_iter()
             .collect(),
         };
-        assert_eq!(res, exp);
+        assert_eq!(first_msg, exp);
+        assert_eq!(second_msg, exp2);
         assert!(exit.is_ok());
     }
 }

@@ -45,51 +45,54 @@ impl Header {
 
 type BlockSyncResult<T> = anyhow::Result<T>;
 
-/// Synchronizes multiple StateSynchronizers on the time dimension.
+/// Aligns multiple StateSynchronizers on the block dimension.
+///
+/// ## Purpose
+///
+/// The purpose of this component is to handle streams from multiple state synchronizers and
+/// basically align/merge them according to their blocks. Ideally this should be done in a
+/// fault-tolerant way meaning we can recover from a state synchronizer suffering from timing
+/// issues. E.g. a delayed or unresponsive state synchronizer might recover again. An advanced state
+/// synchronizer can be included again once we reach the block it is at.
+///
+/// ## Limitations
+/// - Supports only chains with fixed blocks time for now due to the lock step mechanism
 ///
 /// ## Initialisation
-/// Queries all registered synchronizers for the first header. It expects all synchronizers to
-/// return the same header. If this is not the case the run method will error.
+/// Queries all registered synchronizers for their first message. It expects all synchronizers to
+/// return a message from the same header. If this is not the case the run method will error.
 ///
 /// ## Main loop
-/// Once started, the synchronizers are queried for new blocks in lock step: the main loop queries
-/// all ready synchronizers for the last emitted data, builds the `FeedMessage` and sends it through
-/// the channel, then it schedule the wait procedure for the next block.
+/// Once started, the synchronizers are queried concurrently for messages in lock step:
+/// the main loop queries all synchronizers in ready for the last emitted data, builds the
+/// `FeedMessage` and emits it, then it schedules the wait procedure for the
+/// next block.
 ///
-/// ### Synchronization Logic
-/// We know the next block number we expect - this helps us detect gaps (and reverts, but
-/// they don't require special handling)
-/// So the wait procedure consists in waiting for any of the receivers to emit a new block
-/// we check if that block corresponds with what we expected - if that is the case we deem
-/// the respective synchronizer as ready.
-/// At this point a timeout starts for the remaining channels, as soon as they reply, we
-/// again check against the expected block number and if they all reply with the expected
-/// next block within the timeout they are all considered as ready.
+/// ## Synchronization Logic
 ///
-/// #### Note
+/// To classify a synchronizer as delayed or advanced, we need to first define the current
+/// block. Currently, we simply expect all synchronizer to be at the same block at startup. The
+/// block they are at is then simply taken as the current block.
+///
+/// Once we heave the current block we can easily determine which block we expect next. And if a
+/// state synchronizer delivers a different block from that we can classify it as delayed or
+/// advanced.
+///
+/// If any synchronizer is in not ready state we will try to bring it back to the ready state. This
+/// is done by trying to empty any buffers of a delayed synchronizer or waiting to reach
+/// the height of an advanced synchronizer (and flagging it as such in the meantime).
+///
+/// Of course, we can't wait forever for a synchronizer to reply/recover. All of this must happen
+/// within the block production step of the blockchain:
+/// The wait procedure consists in waiting for any of the receivers to emit a new message (within a
+/// max timeout - several multiples of the block time). Once a message is received a very short
+/// timeout start for the remaining synchronizers, to deliver a message. Any synchronizer failing to
+/// do so is transitioned to delayed.
+///
+/// ### Note
 /// The described process above is the goal. It is currently not implemented like that. Instead we
 /// simply wait `block_time` + `wait_time`. Synchronizers are expected to respond within that
-/// timeout. This is simpler but only works on chains with fixed block times.
-///
-/// ### Synchronization State
-/// Now when either all receivers emitted a block or the timeout passed, we are ready for the
-/// next step. At this point each synchronizer can be in one of the following states:
-/// 1. Ready, it emitted the expected block, or a block of same height within the timeout
-/// 2. Advanced, it emitted a future block within the timeout: likely a reconnect happened and there
-///    is some significant back pressure on our channels. This basically means we are too slow to
-///    process messages.
-/// 3. Delayed, it did not emit anything within the timeout, or an older block than expected:
-///    Extractor syncing, connection issue, or firehose too slow.
-///
-/// We will only query synchronizer for state if they are in the ready state or if they are
-/// advanced in which case we simply take the advanced state. For others, we will inform
-/// clients about their current sync state but not actually emit old or advanced data.
-///
-/// Any extractors that have been stale or delayed for too long we will stop waiting for - so
-/// we will end their synchronizers thread and drop the handle.
-///
-/// Any advanced extractors, we will not wait for in the future, they will be assumed ready
-/// until we reach their height and from then on are handled as if they were ready.
+/// timeout. This is simpler but only works well on chains with fixed block times.
 pub struct BlockSynchronizer<S> {
     synchronizers: Option<HashMap<ExtractorIdentity, S>>,
     block_time: std::time::Duration,
@@ -110,31 +113,37 @@ pub enum SynchronizerState {
     Ended,
 }
 
-pub struct SynchronizerHandle<S> {
+pub struct SynchronizerStream {
     extractor_id: ExtractorIdentity,
     state: SynchronizerState,
-    sync: S,
     modify_ts: NaiveDateTime,
-    rx: Receiver<Header>,
+    rx: Receiver<StateSyncMessage>,
 }
 
-impl<S> SynchronizerHandle<S> {
-    async fn try_advance(&mut self, block_history: &BlockHistory, max_wait: std::time::Duration) {
+impl SynchronizerStream {
+    async fn try_advance(
+        &mut self,
+        block_history: &BlockHistory,
+        max_wait: std::time::Duration,
+    ) -> Option<StateSyncMessage> {
         let extractor_id = &self.extractor_id;
         let latest_block = block_history.latest();
         match &self.state {
             SynchronizerState::Started | SynchronizerState::Ended => {
                 warn!(state=?&self.state, "Advancing Synchronizer in this state not supported!");
+                None
             }
             SynchronizerState::Advanced(b) => {
                 let future_block = b.clone();
                 // Transition to ready once we arrived at the expected height
                 self.transition(future_block, block_history);
+                None
             }
             SynchronizerState::Ready(previous_block) => {
                 // Try to recv the next expected block, update state accordingly.
                 self.try_recv_next_expected(max_wait, block_history, previous_block.clone())
-                    .await;
+                    .await
+                // TODO: if we entered advanced state we need to buffer the message for a while.
             }
             SynchronizerState::Delayed(old_block) => {
                 // try to catch up all currently queued blocks until the expected block
@@ -145,7 +154,7 @@ impl<S> SynchronizerHandle<S> {
                     "Trying to catch up to latest block"
                 );
                 self.try_catch_up(block_history, max_wait)
-                    .await;
+                    .await
             }
             SynchronizerState::Stale(old_block) => {
                 debug!(
@@ -155,7 +164,7 @@ impl<S> SynchronizerHandle<S> {
                     "Trying to catch up to latest block"
                 );
                 self.try_catch_up(block_history, max_wait)
-                    .await;
+                    .await
             }
         }
     }
@@ -169,23 +178,28 @@ impl<S> SynchronizerHandle<S> {
         max_wait: std::time::Duration,
         block_history: &BlockHistory,
         previous_block: Header,
-    ) {
+    ) -> Option<StateSyncMessage> {
         let extractor_id = &self.extractor_id;
         match timeout(max_wait, self.rx.recv()).await {
-            Ok(Some(b)) => self.transition(b, block_history),
+            Ok(Some(msg)) => {
+                self.transition(msg.header.clone(), block_history);
+                Some(msg)
+            }
             Ok(None) => {
                 error!(
                     %extractor_id,
                     ?previous_block,
-                    "Extractor terminated: closed header channel!"
+                    "Extractor terminated: channel closed!"
                 );
                 self.state = SynchronizerState::Ended;
                 self.modify_ts = Local::now().naive_utc();
+                None
             }
             Err(_) => {
                 // trying to advance a block timed out
                 debug!(%extractor_id, ?previous_block, "Extractor did not check in within time.");
                 self.state = SynchronizerState::Delayed(previous_block.clone());
+                None
             }
         }
     }
@@ -195,14 +209,18 @@ impl<S> SynchronizerHandle<S> {
     /// If a synchronizer is delayed, this method will try to remove any as many waiting values in
     /// it's queue until it caught up to the latest block, then it will try to wait for the next
     /// expected block within a timeout. Finally the state is updated based on the outcome.
-    async fn try_catch_up(&mut self, block_history: &BlockHistory, max_wait: std::time::Duration) {
+    async fn try_catch_up(
+        &mut self,
+        block_history: &BlockHistory,
+        max_wait: std::time::Duration,
+    ) -> Option<StateSyncMessage> {
         let mut results = Vec::new();
         let extractor_id = &self.extractor_id;
-        while let Ok(block) = self.rx.try_recv() {
+        while let Ok(msg) = self.rx.try_recv() {
             let block_pos = block_history
-                .determine_block_position(&block)
+                .determine_block_position(&msg.header)
                 .unwrap();
-            results.push(Ok(Some(block)));
+            results.push(Ok(Some(msg)));
             if matches!(block_pos, BlockPosition::Latest) {
                 debug!(?extractor_id, "Extractor managed to catch up to latest state!");
                 break;
@@ -210,18 +228,21 @@ impl<S> SynchronizerHandle<S> {
         }
         results.push(timeout(max_wait, self.rx.recv()).await);
 
-        let mut blocks = results
+        let merged = results
             .into_iter()
             .filter_map(|e| match e {
                 Ok(Some(b)) => Some(b),
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .reduce(|l, r| l.merge(r));
 
-        if let Some(b) = blocks.pop() {
+        if let Some(msg) = merged {
             // we were able to get at least one block out
-            debug!(?extractor_id, "Extractor managed to catch up to ready state!");
-            self.transition(b, block_history);
+            debug!(?extractor_id, "Delayed extractor made progress!");
+            self.transition(msg.header.clone(), block_history);
+            Some(msg)
+        } else {
+            None
         }
     }
 
@@ -313,17 +334,18 @@ where
             .synchronizers
             .take()
             .expect("No synchronizers set!");
-        let mut sync_handles = HashMap::with_capacity(synchronizers.len());
-
+        let mut sync_streams = HashMap::with_capacity(synchronizers.len());
+        let mut sync_handles = Vec::new();
         for (extractor_id, synchronizer) in synchronizers.drain() {
             let (jh, rx) = synchronizer.start().await?;
             state_sync_tasks.push(jh);
-            sync_handles.insert(
+            sync_handles.push(synchronizer);
+
+            sync_streams.insert(
                 extractor_id.clone(),
-                SynchronizerHandle {
+                SynchronizerStream {
                     extractor_id,
                     state: SynchronizerState::Started,
-                    sync: synchronizer,
                     modify_ts: Local::now().naive_utc(),
                     rx,
                 },
@@ -334,24 +356,26 @@ where
         // synchronizers.
         debug!("Waiting for initial synchronizer messages...");
         let mut startup_futures = Vec::new();
-        for (id, sh) in sync_handles.iter_mut() {
+        for (id, sh) in sync_streams.iter_mut() {
             let fut = async {
                 let res = timeout(self.block_time, sh.rx.recv()).await;
                 (id.clone(), res)
             };
             startup_futures.push(fut);
         }
+        let mut ready_sync_msgs = HashMap::new();
         join_all(startup_futures)
             .await
             .into_iter()
             .for_each(|(extractor_id, res)| {
-                let synchronizer = sync_handles
+                let synchronizer = sync_streams
                     .get_mut(&extractor_id)
                     .unwrap();
                 match res {
-                    Ok(Some(b)) => {
-                        debug!(%extractor_id, height=?&b.number, "Synchronizer started successfully!");
-                        synchronizer.state = SynchronizerState::Ready(b);
+                    Ok(Some(msg)) => {
+                        debug!(%extractor_id, height=?&msg.header.number, "Synchronizer started successfully!");
+                        synchronizer.state = SynchronizerState::Ready(msg.header.clone());
+                        ready_sync_msgs.insert(extractor_id.name.clone(), msg);
                     }
                     Ok(None) => {
                         warn!(%extractor_id, "Dead synchronizer at startup will be purged!");
@@ -368,72 +392,29 @@ where
         // It's probably worth doing more complex things here if this is problematic e.g. setting
         // some as delayed and waiting for those to catch up, but I want to go with the simplest
         // solution first.
-        sync_handles.retain(|_, v| matches!(v.state, SynchronizerState::Ready(_)));
-        let blocks: Vec<_> = sync_handles
-            .values()
-            .map(|v| match v.state {
-                SynchronizerState::Ready(ref b) => b,
-                _ => panic!("Unreachable"),
-            })
-            .collect();
-
-        if let Some(first) = blocks.first().copied() {
-            if !blocks.iter().all(|v| first == *v) {
+        sync_streams.retain(|_, v| matches!(v.state, SynchronizerState::Ready(_)));
+        let start_header = if let Some(first) = ready_sync_msgs.values().next() {
+            if !ready_sync_msgs
+                .values()
+                .all(|v| first.header == v.header)
+            {
                 anyhow::bail!("not all synchronizers on same block!")
             }
-            let start_block = first;
-            let n_healthy = blocks.len();
-            info!(?start_block, ?n_healthy, "Block synchronisation started successfully!")
+            info!(start_block=?&first.header, n_healthy=?ready_sync_msgs.len(), "Block synchronisation started successfully!");
+            first.header.clone()
         } else {
             anyhow::bail!("Not a single synchronizer healthy!")
-        }
+        };
 
-        let mut block_history = BlockHistory::new(vec![blocks[0].clone()], 15);
+        let mut block_history = BlockHistory::new(vec![start_header], 15);
         let (sync_tx, sync_rx) = mpsc::channel(30);
         let main_loop_jh: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             loop {
-                // Pull data from ready synchronizers
-                let mut pulled_data_fut = Vec::new();
-                let latest_block_hash = &block_history
-                    .latest()
-                    .ok_or_else(|| anyhow::format_err!("Block history was empty!"))?
-                    .hash;
-
-                let mut future_names = Vec::new();
-                for (id, sh) in sync_handles.iter() {
-                    match &sh.state {
-                        SynchronizerState::Ready(_) => {
-                            future_names.push(id);
-                            pulled_data_fut.push(async {
-                                sh.sync
-                                    .get_pending(latest_block_hash.clone())
-                                    .await
-                                    .map(|x| (id.name.clone(), x))
-                            });
-                        }
-                        _ => continue,
-                    }
-                }
-                let synced_msgs = join_all(pulled_data_fut)
-                    .await
-                    .into_iter()
-                    .zip(future_names.iter())
-                    .filter_map(|(m, id)| {
-                        match m {
-                            Some(v) => Some(v),
-                            None => {
-                                warn!(extractor_id = %id, "Lacking data from state synchronizer. Received header pending state was empty.");
-                                None
-                            }
-                        }
-                    })
-                    .collect::<HashMap<_, _>>();
-
                 // Send retrieved data to receivers.
                 sync_tx
                     .send(FeedMessage::new(
-                        synced_msgs,
-                        sync_handles
+                        std::mem::take(&mut ready_sync_msgs),
+                        sync_streams
                             .iter()
                             .map(|(a, b)| (a.name.to_string(), b.state.clone()))
                             .collect(),
@@ -450,15 +431,24 @@ where
                 // a select statement that allows it to exit the first timeout preemptively if any
                 // other try_advance task finished earlier.
                 let mut recv_futures = Vec::new();
-                for sh in sync_handles.values_mut() {
-                    recv_futures
-                        .push(sh.try_advance(&block_history, self.block_time + self.max_wait));
+                for (extractor_id, sh) in sync_streams.iter_mut() {
+                    recv_futures.push(async {
+                        let res = sh
+                            .try_advance(&block_history, self.block_time + self.max_wait)
+                            .await;
+                        res.map(|msg| (extractor_id.name.clone(), msg))
+                    });
                 }
-                join_all(recv_futures).await;
+                ready_sync_msgs.extend(
+                    join_all(recv_futures)
+                        .await
+                        .into_iter()
+                        .flatten(),
+                );
 
                 // Purge any bad synchronizers, respective warnings have already been issued at
                 // transition time.
-                sync_handles.retain(|_, v| match v.state {
+                sync_streams.retain(|_, v| match v.state {
                     SynchronizerState::Started | SynchronizerState::Ended => false,
                     SynchronizerState::Stale(_) => false,
                     SynchronizerState::Ready(_) => true,
@@ -468,7 +458,7 @@ where
 
                 block_history
                     .push(
-                        sync_handles
+                        sync_streams
                             .values()
                             .filter_map(|v| match &v.state {
                                 SynchronizerState::Ready(b) => Some(b),
@@ -477,7 +467,7 @@ where
                             .next()
                             // no synchronizers is ready
                             .ok_or_else(|| {
-                                anyhow::format_err!("Not a single snychronizer was ready.")
+                                anyhow::format_err!("Not a single synchronizer was ready.")
                             })?
                             .clone(),
                     )
@@ -488,7 +478,9 @@ where
         let nanny_jh = tokio::spawn(async move {
             select! {
                 error = state_sync_tasks.select_next_some() => {
-                    // TODO: close all synchronizers
+                    for s in sync_handles.iter_mut() {
+                        s.close().await.expect("StateSynchronizer was not started!");
+                    }
                     error!(?error, "state synchronizer exited");
                 },
                 error = main_loop_jh => {
@@ -512,10 +504,9 @@ mod tests {
 
     #[derive(Clone)]
     struct MockStateSync {
-        header_tx: mpsc::Sender<Header>,
-        header_rx: Arc<Mutex<Option<Receiver<Header>>>>,
+        header_tx: mpsc::Sender<StateSyncMessage>,
+        header_rx: Arc<Mutex<Option<Receiver<StateSyncMessage>>>>,
         end_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
-        pending: Arc<Mutex<Option<StateSyncMessage>>>,
     }
 
     impl MockStateSync {
@@ -525,31 +516,21 @@ mod tests {
                 header_tx: tx,
                 header_rx: Arc::new(Mutex::new(Some(rx))),
                 end_tx: Arc::new(Mutex::new(None)),
-                pending: Arc::new(Mutex::new(None)),
             }
         }
-        async fn send_header(&self, header: Header) {
+        async fn send_header(&self, header: StateSyncMessage) {
             self.header_tx
                 .send(header)
                 .await
                 .expect("sending header failed");
         }
-
-        #[allow(dead_code)]
-        async fn set_pending(&self, state_msg: Option<StateSyncMessage>) {
-            let mut guard = self.pending.lock().await;
-            *guard = state_msg;
-        }
     }
 
     #[async_trait]
     impl StateSynchronizer for MockStateSync {
-        async fn get_pending(&self, _: Bytes) -> Option<StateSyncMessage> {
-            let guard = self.pending.lock().await;
-            guard.clone()
-        }
-
-        async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<Header>)> {
+        async fn start(
+            &self,
+        ) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<StateSyncMessage>)> {
             let block_rx = {
                 let mut guard = self.header_rx.lock().await;
                 guard
@@ -600,12 +581,15 @@ mod tests {
             ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap-v3".to_string() },
             v3_sync.clone(),
         );
-        let start_header = Header { number: 1, ..Default::default() };
+        let start_msg = StateSyncMessage {
+            header: Header { number: 1, ..Default::default() },
+            ..Default::default()
+        };
         v2_sync
-            .send_header(start_header.clone())
+            .send_header(start_msg.clone())
             .await;
         v3_sync
-            .send_header(start_header.clone())
+            .send_header(start_msg.clone())
             .await;
 
         let (_jh, mut rx) = block_sync
@@ -616,12 +600,15 @@ mod tests {
             .recv()
             .await
             .expect("header channel was closed");
-        let second_header = Header { number: 2, ..Default::default() };
+        let second_msg = StateSyncMessage {
+            header: Header { number: 2, ..Default::default() },
+            ..Default::default()
+        };
         v2_sync
-            .send_header(second_header.clone())
+            .send_header(second_msg.clone())
             .await;
         v3_sync
-            .send_header(second_header.clone())
+            .send_header(second_msg.clone())
             .await;
         let second_feed_msg = rx
             .recv()
@@ -629,19 +616,29 @@ mod tests {
             .expect("header channel was closed!");
 
         let exp1 = FeedMessage {
-            state_msgs: HashMap::new(),
+            state_msgs: [
+                ("uniswap-v2".to_string(), start_msg.clone()),
+                ("uniswap-v3".to_string(), start_msg.clone()),
+            ]
+            .into_iter()
+            .collect(),
             sync_states: [
-                ("uniswap-v3".to_string(), SynchronizerState::Ready(start_header.clone())),
-                ("uniswap-v2".to_string(), SynchronizerState::Ready(start_header.clone())),
+                ("uniswap-v3".to_string(), SynchronizerState::Ready(start_msg.header.clone())),
+                ("uniswap-v2".to_string(), SynchronizerState::Ready(start_msg.header.clone())),
             ]
             .into_iter()
             .collect(),
         };
         let exp2 = FeedMessage {
-            state_msgs: HashMap::new(),
+            state_msgs: [
+                ("uniswap-v2".to_string(), second_msg.clone()),
+                ("uniswap-v3".to_string(), second_msg.clone()),
+            ]
+            .into_iter()
+            .collect(),
             sync_states: [
-                ("uniswap-v3".to_string(), SynchronizerState::Ready(second_header.clone())),
-                ("uniswap-v2".to_string(), SynchronizerState::Ready(second_header.clone())),
+                ("uniswap-v3".to_string(), SynchronizerState::Ready(second_msg.header.clone())),
+                ("uniswap-v2".to_string(), SynchronizerState::Ready(second_msg.header.clone())),
             ]
             .into_iter()
             .collect(),
