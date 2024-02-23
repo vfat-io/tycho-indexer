@@ -256,7 +256,7 @@ async fn start_ambient_extractor(
 
     let start_block = 17361664;
     let stop_block = None;
-    let spkg = &"/opt/tycho-indexer/substreams/substreams-ethereum-ambient-v0.4.0.spkg";
+    let spkg = &"/opt/tycho-indexer/substreams/substreams-ethereum-ambient-v0.5.0.spkg";
     let module_name = &"map_changes";
     let block_span = stop_block.map(|stop| stop - start_block);
     info!(%ambient_name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Ambient extractor");
