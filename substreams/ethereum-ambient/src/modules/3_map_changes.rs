@@ -1,4 +1,8 @@
-use std::collections::{hash_map::Entry, HashMap};
+use num_bigint::BigInt;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    str::FromStr,
+};
 use substreams::pb::substreams::StoreDeltas;
 
 use substreams_ethereum::pb::eth::{self};
@@ -316,10 +320,16 @@ fn map_changes(
             let token_type = substreams::key::segment_at(&store_delta.key, 1);
             let token_index = if token_type == "quote" { 1 } else { 0 };
 
+            // store_delta.new_value is an ASCII string representing an integer
+            let ascii_string =
+                String::from_utf8(store_delta.new_value.clone()).expect("Invalid UTF-8 sequence");
+            let balance = BigInt::from_str(&ascii_string).expect("Failed to parse integer");
+            let big_endian_bytes_balance = balance.to_bytes_be().1;
+
             let balance_change = BalanceChange {
                 component_id: pool_hash_hex.as_bytes().to_vec(),
                 token: pool.tokens[token_index].clone(),
-                balance: store_delta.new_value,
+                balance: big_endian_bytes_balance.to_vec(),
             };
             let tx_hash = balance_delta
                 .tx

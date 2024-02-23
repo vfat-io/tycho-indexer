@@ -107,7 +107,7 @@ substreams pack substreams/ethereum-ambient/substreams.yaml
 7. Run `tycho-indexer` locally using cli:
 
 ```bash
-RUST_LOG=info cargo run -- \
+RUST_LOG=info cargo run --bin tycho-indexer -- \
     --endpoint https://mainnet.eth.streamingfast.io:443 \
     --module map_changes \
     --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg \
