@@ -8,3 +8,6 @@ CREATE INDEX IF NOT EXISTS idx_contract_storage_account_id_slot_valid_to ON cont
 -- index to speed up token lookups
 CREATE INDEX IF NOT EXISTS idx_account_address ON account(address);
 
+-- speeds up the tvl aggregation query
+CREATE INDEX idx_component_balance_valid_to ON component_balance(valid_to);
+

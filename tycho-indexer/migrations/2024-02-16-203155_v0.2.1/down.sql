@@ -7,3 +7,5 @@ DROP INDEX IF EXISTS idx_component_balance_component_id_token_id_valid_to;
 
 DROP INDEX IF EXISTS idx_account_address;
 
+DROP INDEX idx_component_balance_valid_to;
+
