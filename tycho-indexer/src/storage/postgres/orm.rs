@@ -6,7 +6,7 @@ use diesel::{
     prelude::*,
     query_builder::{BoxedSqlQuery, SqlQuery},
     sql_query,
-    sql_types::{self, BigInt, Bool, Double},
+    sql_types::{self, BigInt, Bool, Bytea, Double},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
@@ -331,6 +331,40 @@ pub struct ComponentBalance {
     pub inserted_ts: NaiveDateTime,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
+}
+impl ComponentBalance {
+    pub fn update_many(
+        new_balances_values: &HashMap<i64, (Bytes, Bytes, f64)>,
+    ) -> BoxedSqlQuery<'_, Pg, SqlQuery> {
+        let bind_params = (1..=new_balances_values.len() * 4)
+            .collect::<Vec<_>>()
+            .chunks(4)
+            .map(|chunk| format!("(${}, ${}, ${}, ${})", chunk[0], chunk[1], chunk[2], chunk[3])) // Format each chunk as a tuple
+            .collect::<Vec<_>>()
+            .join(", ");
+        let query_tmpl = format!(
+            r#"
+            UPDATE component_balance
+            SET 
+                new_balance = new_values.new_balance,
+                previous_value = new_values.previous_value,
+                balance_float = new_values.balance_float
+            FROM (VALUES
+                {}
+            ) AS new_values(id, new_balance, previous_value, balance_float)
+            WHERE component_balance.id = new_values.id;
+            "#,
+            bind_params
+        );
+        let mut q = sql_query(query_tmpl).into_boxed();
+        for (k, (b, pb, bf)) in new_balances_values.iter() {
+            q = q.bind::<BigInt, _>(*k);
+            q = q.bind::<Bytea, _>(b);
+            q = q.bind::<Bytea, _>(pb);
+            q = q.bind::<Double, _>(bf);
+        }
+        q
+    }
 }
 
 #[async_trait]

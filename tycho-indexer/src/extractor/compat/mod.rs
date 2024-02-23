@@ -5,4 +5,4 @@
 
 mod balances;
 
-pub use balances::{transcode_ambient_balances, transcode_usv2_balances};
+pub use balances::{transcode_ambient_balances, transcode_balances_db, transcode_usv2_balances};
