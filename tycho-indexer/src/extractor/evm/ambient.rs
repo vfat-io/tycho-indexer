@@ -15,7 +15,7 @@ use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
 
-use super::{utils::format_duration, AccountUpdate, Block};
+use super::{utils::format_duration, AccountUpdate, Block, BlockAccountChanges};
 
 use crate::{
     extractor::{
@@ -55,6 +55,8 @@ pub struct AmbientContractExtractor<G> {
     // try removing the Mutex
     inner: Arc<Mutex<Inner>>,
     protocol_types: HashMap<String, ProtocolType>,
+    /// Allows to attach some custom logic, e.g. to fix encoding bugs without re-sync.
+    post_processor: Option<fn(BlockAccountChanges) -> BlockAccountChanges>,
 }
 
 impl<DB> AmbientContractExtractor<DB> {
@@ -448,6 +450,7 @@ where
                 })),
                 protocol_system: "ambient".to_string(),
                 protocol_types,
+                post_processor: None,
             },
             Ok(cursor) => AmbientContractExtractor {
                 gateway,
@@ -462,6 +465,7 @@ where
                 })),
                 protocol_system: "ambient".to_string(),
                 protocol_types,
+                post_processor: None,
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
@@ -550,8 +554,14 @@ where
         self.report_progress(msg.block).await;
 
         self.update_cursor(inp.cursor).await;
-        let msg = Arc::new(msg.aggregate_updates()?);
-        Ok(Some(msg))
+
+        let msg = if let Some(post_process_f) = self.post_processor {
+            post_process_f(msg.aggregate_updates()?)
+        } else {
+            msg.aggregate_updates()?
+        };
+
+        Ok(Some(Arc::new(msg)))
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % inp.last_valid_block.as_ref().unwrap().number))]
@@ -595,7 +605,17 @@ where
         self.update_cursor(inp.last_valid_cursor)
             .await;
 
-        Ok((!changes.account_updates.is_empty()).then_some(Arc::new(changes)))
+        // TODO: We may have changes on balances or components in the future here
+        //  which should be emitted.
+        if changes.account_updates.is_empty() {
+            return Ok(None)
+        }
+
+        if let Some(post_process_f) = self.post_processor {
+            Ok(Some(Arc::new(post_process_f(changes))))
+        } else {
+            Ok(Some(Arc::new(changes)))
+        }
     }
 
     #[instrument(skip_all)]
