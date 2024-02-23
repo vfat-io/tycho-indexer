@@ -360,6 +360,7 @@ where
         protocol_system: String,
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
+        post_processor: Option<fn(BlockEntityChangesResult) -> BlockEntityChangesResult>,
     ) -> Result<Self, ExtractionError> {
         let res = match gateway.get_cursor().await {
             Err(StorageError::NotFound(_, _)) => NativeContractExtractor {
@@ -375,7 +376,7 @@ where
                 })),
                 protocol_system,
                 protocol_types,
-                post_processor: None,
+                post_processor,
             },
             Ok(cursor) => NativeContractExtractor {
                 gateway,
@@ -390,7 +391,7 @@ where
                 })),
                 protocol_system,
                 protocol_types,
-                post_processor: None,
+                post_processor,
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
@@ -569,6 +570,7 @@ mod test {
             TEST_PROTOCOL.to_string(),
             gw,
             protocol_types,
+            None,
         )
         .await
         .expect("Failed to create extractor")

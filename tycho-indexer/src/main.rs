@@ -26,6 +26,7 @@ use tracing::info;
 use tycho_indexer::{
     extractor::{
         self,
+        compat::{transcode_ambient_balances, transcode_usv2_balances},
         evm::{
             self,
             chain_state::ChainState,
@@ -251,6 +252,7 @@ async fn start_ambient_extractor(
         chain_state,
         ambient_gw,
         ambient_protocol_types,
+        Some(transcode_ambient_balances),
     )
     .await?;
 
@@ -308,6 +310,7 @@ async fn start_uniswap_v2_extractor(
         "uniswap_v2".to_owned(),
         gw,
         protocol_types,
+        Some(transcode_usv2_balances),
     )
     .await?;
 
@@ -365,6 +368,7 @@ async fn start_uniswap_v3_extractor(
         "uniswap_v3".to_owned(),
         gw,
         protocol_types,
+        None,
     )
     .await?;
 

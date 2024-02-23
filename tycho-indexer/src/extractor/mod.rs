@@ -15,6 +15,8 @@ pub mod evm;
 pub mod runner;
 mod u256_num;
 
+pub mod compat;
+
 #[derive(Error, Debug, PartialEq)]
 pub enum ExtractionError {
     #[error("Extractor setup failed: {0}")]

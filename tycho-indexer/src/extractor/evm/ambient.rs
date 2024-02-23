@@ -434,6 +434,7 @@ where
         chain_state: ChainState,
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
+        post_processor: Option<fn(BlockAccountChanges) -> BlockAccountChanges>,
     ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
@@ -450,7 +451,7 @@ where
                 })),
                 protocol_system: "ambient".to_string(),
                 protocol_types,
-                post_processor: None,
+                post_processor,
             },
             Ok(cursor) => AmbientContractExtractor {
                 gateway,
@@ -465,7 +466,7 @@ where
                 })),
                 protocol_system: "ambient".to_string(),
                 protocol_types,
-                post_processor: None,
+                post_processor,
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
@@ -663,6 +664,7 @@ mod test {
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            None,
         )
         .await
         .expect("extractor init ok");
@@ -694,6 +696,7 @@ mod test {
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            None,
         )
         .await
         .expect("extractor init ok");
@@ -727,6 +730,7 @@ mod test {
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            None,
         )
         .await
         .expect("extractor init ok");
@@ -786,6 +790,7 @@ mod test {
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            None,
         )
         .await
         .expect("extractor init ok");
