@@ -16,7 +16,7 @@ use tycho_types::Bytes;
 
 use crate::{
     extractor::{
-        evm::{self, chain_state::ChainState, Block, BlockEntityChangesResult},
+        evm::{self, chain_state::ChainState, Block},
         ExtractionError, Extractor, ExtractorMsg,
     },
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
@@ -49,7 +49,7 @@ pub struct NativeContractExtractor<G> {
     inner: Arc<Mutex<Inner>>,
     protocol_types: HashMap<String, ProtocolType>,
     /// Allows to attach some custom logic, e.g. to fix encoding bugs without resync.
-    post_processor: Option<fn(BlockEntityChangesResult) -> BlockEntityChangesResult>,
+    post_processor: Option<fn(evm::BlockEntityChanges) -> evm::BlockEntityChanges>,
 }
 
 impl<DB> NativeContractExtractor<DB> {
@@ -360,7 +360,7 @@ where
         protocol_system: String,
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
-        post_processor: Option<fn(BlockEntityChangesResult) -> BlockEntityChangesResult>,
+        post_processor: Option<fn(evm::BlockEntityChanges) -> evm::BlockEntityChanges>,
     ) -> Result<Self, ExtractionError> {
         let res = match gateway.get_cursor().await {
             Err(StorageError::NotFound(_, _)) => NativeContractExtractor {
@@ -468,6 +468,9 @@ where
             Err(e) => return Err(e),
         };
 
+        let msg =
+            if let Some(post_process_f) = self.post_processor { post_process_f(msg) } else { msg };
+
         trace!(?msg, "Processing message");
 
         let is_syncing = self.is_syncing(msg.block.number).await;
@@ -483,13 +486,7 @@ where
 
         self.update_cursor(inp.cursor).await;
 
-        let msg = if let Some(post_process_f) = self.post_processor {
-            post_process_f(msg.aggregate_updates()?)
-        } else {
-            msg.aggregate_updates()?
-        };
-
-        Ok(Some(Arc::new(msg)))
+        Ok(Some(Arc::new(msg.aggregate_updates()?)))
     }
 
     async fn handle_revert(
@@ -532,17 +529,7 @@ where
         self.update_cursor(inp.last_valid_cursor)
             .await;
 
-        // TODO: We may have changes on balances or components in the future here
-        //  which should be emitted.
-        if changes.state_updates.is_empty() {
-            return Ok(None)
-        }
-
-        if let Some(post_process_f) = self.post_processor {
-            Ok(Some(Arc::new(post_process_f(changes))))
-        } else {
-            Ok(Some(Arc::new(changes)))
-        }
+        Ok((!changes.state_updates.is_empty()).then_some(Arc::new(changes)))
     }
 
     async fn handle_progress(&self, _inp: ModulesProgress) -> Result<(), ExtractionError> {

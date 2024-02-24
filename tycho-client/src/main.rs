@@ -42,7 +42,7 @@ async fn main() {
     let v2_sync = ProtocolStateSynchronizer::new(
         v2_id.clone(),
         true,
-        ComponentFilter::Ids(vec!["0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc".to_string()]),
+        ComponentFilter::Ids(vec!["0xa478c2975ab1ea89e8196811f51a7b7ade33eb11".to_string()]),
         1,
         HttpRPCClient::new(&tycho_rpc_url).unwrap(),
         ws_client.clone(),

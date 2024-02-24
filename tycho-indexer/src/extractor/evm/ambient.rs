@@ -15,7 +15,7 @@ use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
 
-use super::{utils::format_duration, AccountUpdate, Block, BlockAccountChanges};
+use super::{utils::format_duration, AccountUpdate, Block};
 
 use crate::{
     extractor::{
@@ -56,7 +56,7 @@ pub struct AmbientContractExtractor<G> {
     inner: Arc<Mutex<Inner>>,
     protocol_types: HashMap<String, ProtocolType>,
     /// Allows to attach some custom logic, e.g. to fix encoding bugs without re-sync.
-    post_processor: Option<fn(BlockAccountChanges) -> BlockAccountChanges>,
+    post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
 }
 
 impl<DB> AmbientContractExtractor<DB> {
@@ -434,7 +434,7 @@ where
         chain_state: ChainState,
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
-        post_processor: Option<fn(BlockAccountChanges) -> BlockAccountChanges>,
+        post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
     ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
@@ -543,6 +543,9 @@ where
             Err(e) => return Err(e),
         };
 
+        let msg =
+            if let Some(post_process_f) = self.post_processor { post_process_f(msg) } else { msg };
+
         let is_syncing = self.is_syncing(msg.block.number).await;
 
         self.gateway
@@ -556,13 +559,8 @@ where
 
         self.update_cursor(inp.cursor).await;
 
-        let msg = if let Some(post_process_f) = self.post_processor {
-            post_process_f(msg.aggregate_updates()?)
-        } else {
-            msg.aggregate_updates()?
-        };
-
-        Ok(Some(Arc::new(msg)))
+        let msg = Arc::new(msg.aggregate_updates()?);
+        Ok(Some(msg))
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % inp.last_valid_block.as_ref().unwrap().number))]
@@ -606,17 +604,7 @@ where
         self.update_cursor(inp.last_valid_cursor)
             .await;
 
-        // TODO: We may have changes on balances or components in the future here
-        //  which should be emitted.
-        if changes.account_updates.is_empty() {
-            return Ok(None)
-        }
-
-        if let Some(post_process_f) = self.post_processor {
-            Ok(Some(Arc::new(post_process_f(changes))))
-        } else {
-            Ok(Some(Arc::new(changes)))
-        }
+        Ok((!changes.account_updates.is_empty()).then_some(Arc::new(changes)))
     }
 
     #[instrument(skip_all)]

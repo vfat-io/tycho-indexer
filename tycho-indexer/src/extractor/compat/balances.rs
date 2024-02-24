@@ -1,6 +1,6 @@
 use crate::{
     extractor::{
-        evm::{BlockAccountChanges, BlockEntityChangesResult},
+        evm::{BlockContractChanges, BlockEntityChanges},
         u256_num::bytes_to_f64,
     },
     storage::postgres::{
@@ -20,9 +20,15 @@ use tycho_types::Bytes;
 fn transcode_ascii_balance_to_be(ascii_encoded: &Bytes) -> anyhow::Result<Bytes> {
     let ascii_string = String::from_utf8(ascii_encoded.clone().to_vec())
         .map_err(|e| anyhow::format_err!("Invalid UTF-8 sequence: {ascii_encoded}: {e}"))?;
-    let as_integer = U256::from_dec_str(&ascii_string)
-        .map_err(|e| anyhow::format_err!("Invalid integer: {e}"))?;
-    Ok(Bytes::from(as_integer))
+    // Balances can go negative, so if the ascii string starts with a -, we default to
+    // U256::zero(), see WBTC/USDC pool at block 19297943
+    if ascii_string.starts_with('-') {
+        Ok(Bytes::from(U256::zero()))
+    } else {
+        let as_integer = U256::from_dec_str(&ascii_string)
+            .map_err(|e| anyhow::format_err!("Invalid integer: {e}"))?;
+        Ok(Bytes::from(as_integer))
+    }
 }
 
 fn transcode_le_balance_to_be(le_encoded: &Bytes) -> anyhow::Result<Bytes> {
@@ -31,34 +37,44 @@ fn transcode_le_balance_to_be(le_encoded: &Bytes) -> anyhow::Result<Bytes> {
     Ok(Bytes::from(be_encoded))
 }
 
-pub fn transcode_ambient_balances(mut changes: BlockAccountChanges) -> BlockAccountChanges {
+pub fn transcode_ambient_balances(mut changes: BlockContractChanges) -> BlockContractChanges {
     changes
-        .component_balances
+        .tx_updates
         .iter_mut()
-        .for_each(|(_, balance)| {
-            balance
+        .for_each(|tx_changes| {
+            tx_changes
+                .component_balances
                 .iter_mut()
-                .for_each(|(_, value)| {
-                    value.balance = transcode_ascii_balance_to_be(&value.balance)
-                        .expect("Balance transcoding failed");
-                    value.balance_float = bytes_to_f64(value.balance.as_ref())
-                        .expect("failed converting balance to float");
+                .for_each(|(_, balance)| {
+                    balance
+                        .iter_mut()
+                        .for_each(|(_, value)| {
+                            value.balance = transcode_ascii_balance_to_be(&value.balance)
+                                .expect("Balance transcoding failed");
+                            value.balance_float = bytes_to_f64(value.balance.as_ref())
+                                .expect("failed converting balance to float");
+                        });
                 });
         });
     changes
 }
 
-pub fn transcode_usv2_balances(mut changes: BlockEntityChangesResult) -> BlockEntityChangesResult {
+pub fn transcode_usv2_balances(mut changes: BlockEntityChanges) -> BlockEntityChanges {
     changes
-        .component_balances
+        .txs_with_update
         .iter_mut()
-        .for_each(|(_, balance)| {
-            balance
+        .for_each(|tx_changes| {
+            tx_changes
+                .balance_changes
                 .iter_mut()
-                .for_each(|(_, value)| {
-                    value.balance = transcode_le_balance_to_be(&value.balance).unwrap();
-                    value.balance_float = bytes_to_f64(value.balance.as_ref())
-                        .expect("failed converting balance to float");
+                .for_each(|(_, balance)| {
+                    balance
+                        .iter_mut()
+                        .for_each(|(_, value)| {
+                            value.balance = transcode_le_balance_to_be(&value.balance).unwrap();
+                            value.balance_float = bytes_to_f64(value.balance.as_ref())
+                                .expect("failed converting balance to float");
+                        });
                 });
         });
     changes
