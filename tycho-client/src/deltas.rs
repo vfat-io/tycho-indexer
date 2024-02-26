@@ -387,7 +387,7 @@ impl WsDeltasClient {
                         Err(DeltasError::BufferFull) => {
                             error!(?subscription_id, "Buffer full, message dropped!");
                         }
-                        Err(e) => {
+                        Err(_) => {
                             warn!(?subscription_id, "Receiver for has gone away, unsubscribing!");
                             let (tx, _) = oneshot::channel();
                             let _ =
