@@ -48,6 +48,8 @@ pub struct NativeContractExtractor<G> {
     protocol_system: String,
     inner: Arc<Mutex<Inner>>,
     protocol_types: HashMap<String, ProtocolType>,
+    /// Allows to attach some custom logic, e.g. to fix encoding bugs without resync.
+    post_processor: Option<fn(evm::BlockEntityChanges) -> evm::BlockEntityChanges>,
 }
 
 impl<DB> NativeContractExtractor<DB> {
@@ -358,6 +360,7 @@ where
         protocol_system: String,
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
+        post_processor: Option<fn(evm::BlockEntityChanges) -> evm::BlockEntityChanges>,
     ) -> Result<Self, ExtractionError> {
         let res = match gateway.get_cursor().await {
             Err(StorageError::NotFound(_, _)) => NativeContractExtractor {
@@ -373,6 +376,7 @@ where
                 })),
                 protocol_system,
                 protocol_types,
+                post_processor,
             },
             Ok(cursor) => NativeContractExtractor {
                 gateway,
@@ -387,6 +391,7 @@ where
                 })),
                 protocol_system,
                 protocol_types,
+                post_processor,
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
@@ -463,6 +468,9 @@ where
             Err(e) => return Err(e),
         };
 
+        let msg =
+            if let Some(post_process_f) = self.post_processor { post_process_f(msg) } else { msg };
+
         trace!(?msg, "Processing message");
 
         let is_syncing = self.is_syncing(msg.block.number).await;
@@ -477,8 +485,8 @@ where
         self.report_progress(msg.block).await;
 
         self.update_cursor(inp.cursor).await;
-        let msg = Arc::new(msg.aggregate_updates()?);
-        Ok(Some(msg))
+
+        Ok(Some(Arc::new(msg.aggregate_updates()?)))
     }
 
     async fn handle_revert(
@@ -549,6 +557,7 @@ mod test {
             TEST_PROTOCOL.to_string(),
             gw,
             protocol_types,
+            None,
         )
         .await
         .expect("Failed to create extractor")

@@ -55,6 +55,8 @@ pub struct AmbientContractExtractor<G> {
     // try removing the Mutex
     inner: Arc<Mutex<Inner>>,
     protocol_types: HashMap<String, ProtocolType>,
+    /// Allows to attach some custom logic, e.g. to fix encoding bugs without re-sync.
+    post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
 }
 
 impl<DB> AmbientContractExtractor<DB> {
@@ -432,6 +434,7 @@ where
         chain_state: ChainState,
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
+        post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
     ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
@@ -448,6 +451,7 @@ where
                 })),
                 protocol_system: "ambient".to_string(),
                 protocol_types,
+                post_processor,
             },
             Ok(cursor) => AmbientContractExtractor {
                 gateway,
@@ -462,6 +466,7 @@ where
                 })),
                 protocol_system: "ambient".to_string(),
                 protocol_types,
+                post_processor,
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
@@ -538,6 +543,9 @@ where
             Err(e) => return Err(e),
         };
 
+        let msg =
+            if let Some(post_process_f) = self.post_processor { post_process_f(msg) } else { msg };
+
         let is_syncing = self.is_syncing(msg.block.number).await;
 
         self.gateway
@@ -550,6 +558,7 @@ where
         self.report_progress(msg.block).await;
 
         self.update_cursor(inp.cursor).await;
+
         let msg = Arc::new(msg.aggregate_updates()?);
         Ok(Some(msg))
     }
@@ -643,6 +652,7 @@ mod test {
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            None,
         )
         .await
         .expect("extractor init ok");
@@ -674,6 +684,7 @@ mod test {
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            None,
         )
         .await
         .expect("extractor init ok");
@@ -707,6 +718,7 @@ mod test {
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            None,
         )
         .await
         .expect("extractor init ok");
@@ -766,6 +778,7 @@ mod test {
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            None,
         )
         .await
         .expect("extractor init ok");

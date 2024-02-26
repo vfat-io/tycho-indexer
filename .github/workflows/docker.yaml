@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - patch/*
+      - ah/fix-balance-encoding
 
 permissions:
   id-token: write

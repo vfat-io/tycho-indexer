@@ -21,11 +21,12 @@ use ethers::{
 };
 use std::sync::Arc;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::info;
+use tracing::{info, warn};
 
 use tycho_indexer::{
     extractor::{
         self,
+        compat::{transcode_ambient_balances, transcode_balances_db, transcode_usv2_balances},
         evm::{
             self,
             chain_state::ChainState,
@@ -112,8 +113,20 @@ async fn main() -> Result<(), ExtractionError> {
     tracing_subscriber::fmt::init();
 
     let args = CliArgs::parse();
-
     let pool = postgres::connect(&args.database_url).await?;
+
+    if env::var("TRANSCODE_BALANCES")
+        .map(|e| e == "true")
+        .unwrap_or(false)
+    {
+        warn!("Starting balance transcode...");
+        transcode_balances_db(pool.clone()).await;
+        info!("Transcoding Successful!! Please restart without the TRANSCODE_BALANCE flag.");
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        }
+    }
+
     postgres::ensure_chains(&[Chain::Ethereum], pool.clone()).await;
     // TODO: Find a dynamic way to load protocol systems into the application.
     postgres::ensure_protocol_systems(
@@ -215,7 +228,7 @@ async fn main() -> Result<(), ExtractionError> {
 }
 
 async fn start_ambient_extractor(
-    _args: &CliArgs,
+    args: &CliArgs,
     chain_state: ChainState,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
@@ -251,16 +264,17 @@ async fn start_ambient_extractor(
         chain_state,
         ambient_gw,
         ambient_protocol_types,
+        Some(transcode_ambient_balances),
     )
     .await?;
 
     let start_block = 17361664;
     let stop_block = None;
-    let spkg = &"/opt/tycho-indexer/substreams/substreams-ethereum-ambient-v0.4.0.spkg";
+    let spkg = format!("{}/substreams-ethereum-ambient-v0.4.0.spkg", args.spkg);
     let module_name = &"map_changes";
     let block_span = stop_block.map(|stop| stop - start_block);
     info!(%ambient_name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Ambient extractor");
-    let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
+    let mut builder = ExtractorRunnerBuilder::new(&spkg, Arc::new(extractor))
         .start_block(start_block)
         .module_name(module_name)
         .only_final_blocks();
@@ -271,7 +285,7 @@ async fn start_ambient_extractor(
 }
 
 async fn start_uniswap_v2_extractor(
-    _args: &CliArgs,
+    args: &CliArgs,
     chain_state: ChainState,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
@@ -308,16 +322,17 @@ async fn start_uniswap_v2_extractor(
         "uniswap_v2".to_owned(),
         gw,
         protocol_types,
+        Some(transcode_usv2_balances),
     )
     .await?;
 
     let start_block = 10008300;
     let stop_block = None;
-    let spkg = &"/opt/tycho-indexer/substreams/substreams-ethereum-uniswap-v2-v0.1.0.spkg";
+    let spkg = format!("{}/substreams-ethereum-uniswap-v2-v0.1.0.spkg", args.spkg);
     let module_name = &"map_pool_events";
     let block_span = stop_block.map(|stop| stop - start_block);
     info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V2 extractor");
-    let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
+    let mut builder = ExtractorRunnerBuilder::new(&spkg, Arc::new(extractor))
         .start_block(start_block)
         .module_name(module_name)
         .only_final_blocks();
@@ -328,7 +343,7 @@ async fn start_uniswap_v2_extractor(
 }
 
 async fn start_uniswap_v3_extractor(
-    _args: &CliArgs,
+    args: &CliArgs,
     chain_state: ChainState,
     pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
@@ -365,16 +380,17 @@ async fn start_uniswap_v3_extractor(
         "uniswap_v3".to_owned(),
         gw,
         protocol_types,
+        None,
     )
     .await?;
 
     let start_block = 12369621;
     let stop_block = None;
-    let spkg = &"/opt/tycho-indexer/substreams/substreams-ethereum-uniswap-v3-v0.1.0.spkg";
+    let spkg = format!("{}/substreams-ethereum-uniswap-v3-v0.1.0.spkg", args.spkg);
     let module_name = &"map_pool_events";
     let block_span = stop_block.map(|stop| stop - start_block);
     info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V3 extractor");
-    let mut builder = ExtractorRunnerBuilder::new(spkg, Arc::new(extractor))
+    let mut builder = ExtractorRunnerBuilder::new(&spkg, Arc::new(extractor))
         .start_block(start_block)
         .module_name(module_name)
         .only_final_blocks();
