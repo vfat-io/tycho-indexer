@@ -343,7 +343,8 @@ where
             });
 
         let n_components = tracker.components.len();
-        info!(n_components, "Initial snapshot retrieved, starting delta message feed");
+        let n_snapshots = snapshot.snapshots.len();
+        info!(n_components, n_snapshots, "Initial snapshot retrieved, starting delta message feed");
 
         {
             let mut shared = self.shared.lock().await;
