@@ -286,7 +286,8 @@ impl DBCacheWriteExecutor {
             // during sync we insert in batches of blocks.
             let syncing = !new_db_tx.block_range.is_single_block();
 
-            // if we are not syncing we are not allowed to create a separate block range.
+            // if we are not syncing (catching up) we are not allowed to create a separate block
+            // range.
             if !syncing {
                 let start = &new_db_tx.block_range.start;
                 // if we are advancing a block, while not syncing it must fit on top of the
@@ -329,6 +330,16 @@ impl DBCacheWriteExecutor {
                 .scope_boxed()
             })
             .await;
+
+        match self.persisted_block.as_ref() {
+            None => {
+                self.persisted_block = Some(new_db_tx.block_range.end);
+            }
+            Some(db_block) if db_block.number < new_db_tx.block_range.start.number => {
+                self.persisted_block = Some(new_db_tx.block_range.end);
+            }
+            _ => {}
+        }
 
         if res.is_ok() {
             info!(block_range=?&new_db_tx.block_range, "Transaction successfully committed to DB!");
