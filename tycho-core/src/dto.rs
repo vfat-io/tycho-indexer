@@ -242,7 +242,7 @@ pub struct Block {
     pub ts: NaiveDateTime,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 pub struct BlockParam {
     #[schema(value_type=Option<String>)]
     #[serde(with = "hex_bytes_option", default)]
@@ -752,7 +752,7 @@ impl Display for ContractId {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 pub struct VersionParam {
     pub timestamp: Option<NaiveDateTime>,
     pub block: Option<BlockParam>,

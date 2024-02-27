@@ -14,8 +14,8 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::{
     dto::{
-        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolStateRequestBody,
-        ResponseAccount, ResponseProtocolState, StateRequestBody, VersionParam,
+        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ResponseAccount,
+        ResponseProtocolState, StateRequestBody, VersionParam,
     },
     Bytes,
 };
@@ -249,10 +249,12 @@ where
 
             let mut protocol_states = self
                 .rpc_client
-                .get_protocol_states(
+                .get_protocol_states_paginated(
                     self.extractor_id.chain,
-                    &Default::default(),
-                    &ProtocolStateRequestBody::id_filtered(component_ids),
+                    &component_ids,
+                    &version,
+                    50,
+                    4,
                 )
                 .await?
                 .states
