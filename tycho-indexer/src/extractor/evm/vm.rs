@@ -57,6 +57,8 @@ pub struct VmContractExtractor<G> {
     protocol_types: HashMap<String, ProtocolType>,
     /// Allows to attach some custom logic, e.g. to fix encoding bugs without re-sync.
     post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
+    /// The number of blocks behind the current block to be considered as syncing.
+    sync_threshold: u64,
 }
 
 impl<DB> VmContractExtractor<DB> {
@@ -102,7 +104,7 @@ impl<DB> VmContractExtractor<DB> {
     async fn is_syncing(&self, block_number: u64) -> bool {
         let current_block = self.chain_state.current_block().await;
         if current_block > block_number {
-            (current_block - block_number) > 5
+            (current_block - block_number) > self.sync_threshold
         } else {
             false
         }
@@ -356,6 +358,7 @@ impl<G> VmContractExtractor<G>
 where
     G: VmGateway,
 {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         name: &str,
         chain: Chain,
@@ -364,6 +367,7 @@ where
         protocol_types: HashMap<String, ProtocolType>,
         protocol_system: String,
         post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
+        sync_threshold: u64,
     ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
@@ -381,6 +385,7 @@ where
                 protocol_system,
                 protocol_types,
                 post_processor,
+                sync_threshold,
             },
             Ok(cursor) => VmContractExtractor {
                 gateway,
@@ -396,6 +401,7 @@ where
                 protocol_system,
                 protocol_types,
                 post_processor,
+                sync_threshold,
             },
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
@@ -580,6 +586,7 @@ mod test {
             ambient_protocol_types(),
             "ambient".into(),
             None,
+            5,
         )
         .await
         .expect("extractor init ok");
@@ -613,6 +620,7 @@ mod test {
             ambient_protocol_types(),
             "ambient".to_owned(),
             None,
+            5,
         )
         .await
         .expect("extractor init ok");
@@ -648,6 +656,7 @@ mod test {
             ambient_protocol_types(),
             "ambient".to_owned(),
             None,
+            5,
         )
         .await
         .expect("extractor init ok");
@@ -709,6 +718,7 @@ mod test {
             ambient_protocol_types(),
             "ambient".to_owned(),
             None,
+            5,
         )
         .await
         .expect("extractor init ok");
