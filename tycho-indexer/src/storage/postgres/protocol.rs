@@ -663,10 +663,11 @@ where
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
-
+        let chain_db_id = self.get_chain_id(&chain);
         let mut query = token
             .inner_join(account)
-            .select((token::all_columns(), schema::account::chain_id, schema::account::address))
+            .select((token::all_columns(), schema::account::address))
+            .filter(schema::account::chain_id.eq(chain_db_id))
             .into_boxed();
 
         if let Some(addrs) = addresses {
@@ -675,14 +676,13 @@ where
 
         let results = query
             .order(schema::token::symbol.asc())
-            .load::<(orm::Token, i64, Address)>(conn)
+            .load::<(orm::Token, Address)>(conn)
             .await
             .map_err(|err| StorageError::from_diesel(err, "Token", &chain.to_string(), None))?;
 
         let tokens: Result<Vec<Self::Token>, StorageError> = results
             .into_iter()
-            .map(|(orm_token, chain_id_, address_)| {
-                let chain = self.get_chain(&chain_id_);
+            .map(|(orm_token, address_)| {
                 let contract_id = ContractId::new(chain, address_);
 
                 Self::Token::from_storage(orm_token, contract_id)
