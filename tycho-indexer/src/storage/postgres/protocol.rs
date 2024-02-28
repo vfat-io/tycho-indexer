@@ -663,10 +663,11 @@ where
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
-
+        let chain_db_id = self.get_chain_id(&chain);
         let mut query = token
             .inner_join(account)
-            .select((token::all_columns(), schema::account::chain_id, schema::account::address))
+            .select((token::all_columns(), schema::account::address))
+            .filter(schema::account::chain_id.eq(chain_db_id))
             .into_boxed();
 
         if let Some(addrs) = addresses {
@@ -675,14 +676,13 @@ where
 
         let results = query
             .order(schema::token::symbol.asc())
-            .load::<(orm::Token, i64, Address)>(conn)
+            .load::<(orm::Token, Address)>(conn)
             .await
             .map_err(|err| StorageError::from_diesel(err, "Token", &chain.to_string(), None))?;
 
         let tokens: Result<Vec<Self::Token>, StorageError> = results
             .into_iter()
-            .map(|(orm_token, chain_id_, address_)| {
-                let chain = self.get_chain(&chain_id_);
+            .map(|(orm_token, address_)| {
                 let contract_id = ContractId::new(chain, address_);
 
                 Self::Token::from_storage(orm_token, contract_id)
@@ -1281,6 +1281,7 @@ mod test {
     const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
     const LUSD: &str = "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0";
     const DAI: &str = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
+    const ZKSYNC_PEPE: &str = "0xFD282F16a64c6D304aC05d1A58Da15bed0467c71";
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -1302,6 +1303,7 @@ mod test {
     async fn setup_data(conn: &mut AsyncPgConnection) -> Vec<String> {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let chain_id_sn = db_fixtures::insert_chain(conn, "starknet").await;
+        let chain_id_zk = db_fixtures::insert_chain(conn, "zksync").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
         let tx_hashes = [
             "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945".to_string(),
@@ -1338,6 +1340,7 @@ mod test {
         .await;
 
         // insert tokens
+        // Ethereum
         let (account_id_weth, weth_id) =
             db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
                 .await;
@@ -1350,6 +1353,16 @@ mod test {
         let (account_id_lusd, lusd_id) =
             db_fixtures::insert_token(conn, chain_id, LUSD.trim_start_matches("0x"), "LUSD", 18)
                 .await;
+
+        // ZK Sync
+        let (account_id_usdt_zk, usdt_id_zksync) = db_fixtures::insert_token(
+            conn,
+            chain_id_zk,
+            ZKSYNC_PEPE.trim_start_matches("0x"),
+            "PEPE",
+            6,
+        )
+        .await;
 
         // insert token prices
         db_fixtures::insert_token_prices(&[(weth_id, 1.0), (usdc_id, 0.0005)], conn).await;
@@ -2137,7 +2150,7 @@ mod test {
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
-        // get all tokens (no address filter)
+        // get all eth tokens (no address filter)
         let tokens = gw
             .get_tokens(Chain::Ethereum, None, &mut conn)
             .await
@@ -2162,6 +2175,31 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_get_tokens_zksync() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let tokens = gw
+            .get_tokens(Chain::ZkSync, None, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(tokens.len(), 1);
+        let expected_token = ERC20Token {
+            address: H160::from_str(ZKSYNC_PEPE).unwrap(),
+            symbol: "PEPE".to_string(),
+            decimals: 6,
+            tax: 10,
+            gas: vec![Some(10)],
+            chain: Chain::ZkSync,
+            quality: 0,
+        };
+
+        assert_eq!(tokens[0], expected_token);
+    }
+
+    #[tokio::test]
     async fn test_add_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2170,7 +2208,7 @@ mod test {
         // Insert one new token (USDT) and an existing token (WETH)
         let weth_symbol = "WETH".to_string();
         let old_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
-        let old_account = &orm::Account::by_address(
+        let old_weth_account = &orm::Account::by_address(
             &Bytes::from_str(WETH.trim_start_matches("0x")).expect("address ok"),
             &mut conn,
         )
@@ -2218,14 +2256,14 @@ mod test {
         // make sure nothing changed on WETH (ids included)
         let new_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
         assert_eq!(new_token, old_token);
-        let new_account = &orm::Account::by_address(
+        let updated_weth_account = &orm::Account::by_address(
             &Bytes::from_str(WETH.trim_start_matches("0x")).expect("address ok"),
             &mut conn,
         )
         .await
         .unwrap()[0];
-        assert_eq!(new_account, old_account);
-        assert!(inserted_account.id > new_account.id);
+        assert_eq!(updated_weth_account, old_weth_account);
+        assert!(inserted_account.id > updated_weth_account.id);
     }
 
     #[tokio::test]

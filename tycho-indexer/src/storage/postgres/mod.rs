@@ -1189,7 +1189,8 @@ pub mod db_fixtures {
         symbol: &str,
         decimals: i32,
     ) -> (i64, i64) {
-        let account_id = insert_account(conn, address, "token", chain_id, None).await;
+        let title = &format!("token_{}", symbol);
+        let account_id = insert_account(conn, address, title, chain_id, None).await;
 
         let query = diesel::insert_into(schema::token::table).values((
             schema::token::account_id.eq(account_id),
