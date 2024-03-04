@@ -4,9 +4,7 @@ use crate::{
     extractor::evm,
     models,
     models::Chain,
-    storage::{
-        self, Address, BlockIdentifier, BlockOrTimestamp, ContractStateGateway, StorageError,
-    },
+    storage::{self, Address, BlockIdentifier, BlockOrTimestamp, StorageError},
 };
 use tycho_types::{dto::ProtocolComponentRequestParameters, Bytes};
 
@@ -205,13 +203,31 @@ pub struct RpcHandler {
 
 impl From<models::contract::Contract> for dto::ResponseAccount {
     fn from(value: Contract) -> Self {
-        todo!()
+        dto::ResponseAccount::new(
+            value.chain.into(),
+            value.address,
+            value.title,
+            value.slots,
+            value.balance,
+            value.code,
+            value.code_hash,
+            value.balance_modify_tx,
+            value.code_modify_tx,
+            value.creation_tx,
+        )
     }
 }
 
 impl From<models::contract::ContractDelta> for dto::AccountUpdate {
     fn from(value: ContractDelta) -> Self {
-        todo!()
+        dto::AccountUpdate::new(
+            value.address,
+            value.chain.into(),
+            value.slots,
+            value.balance,
+            value.code,
+            value.change.into(),
+        )
     }
 }
 

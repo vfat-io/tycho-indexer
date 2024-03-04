@@ -33,8 +33,8 @@ use crate::{
         tycho::evm::v1::BlockContractChanges,
     },
     storage::{
-        postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, ExtractionStateGateway,
-        ProtocolGateway, StorageError,
+        postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, ProtocolGateway,
+        StorageError,
     },
 };
 use tycho_types::Bytes;
@@ -222,7 +222,7 @@ where
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
         self.state_gateway
-            .start_transaction(&changes.block)
+            .start_transaction(&(&changes.block).into())
             .await;
         let protocol_components = changes
             .tx_updates
@@ -253,14 +253,14 @@ where
         for update in changes.tx_updates.iter() {
             debug!(tx_hash = ?update.tx.hash, "Processing transaction");
             self.state_gateway
-                .upsert_tx(&update.tx)
+                .upsert_tx(&(&update.tx).into())
                 .await?;
             for (_, acc_update) in update.account_updates.iter() {
                 if acc_update.is_creation() {
                     let new: evm::Account = acc_update.ref_into_account(&update.tx);
                     info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
                     self.state_gateway
-                        .insert_contract(&new)
+                        .insert_contract(&(&new).into())
                         .await?;
                 }
             }
@@ -295,7 +295,7 @@ where
                     .clone()
                     .into_iter()
                     .filter(|(_, acc_u)| acc_u.is_update())
-                    .map(|(_, acc_u)| (tycho_types::Bytes::from(u.tx.hash), acc_u.into()))
+                    .map(|(_, acc_u)| (tycho_types::Bytes::from(u.tx.hash), (&acc_u).into()))
                     .collect();
                 a
             })
@@ -338,7 +338,7 @@ where
         let account_updates: HashMap<H160, AccountUpdate> = account_updates
             .into_iter()
             .filter_map(|u| {
-                if &u.address == &address {
+                if u.address == address {
                     Some((H160::from_slice(&u.address), u.into()))
                 } else {
                     None
@@ -831,7 +831,7 @@ mod test_serial_db {
         storage::{
             postgres,
             postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
-            ChangeType, ContractId, ContractStateGateway,
+            ChangeType, ContractId,
         },
     };
     use ethers::types::U256;
@@ -930,7 +930,7 @@ mod test_serial_db {
                 .await
                 .expect("pool should get a connection");
             evm_gw
-                .start_transaction(&evm::Block::default())
+                .start_transaction(&models::blockchain::Block::default())
                 .await;
             evm_gw
                 .save_state(&state)
@@ -951,9 +951,9 @@ mod test_serial_db {
         .await;
     }
 
-    fn ambient_account(at_version: u64) -> evm::Account {
+    fn ambient_account(at_version: u64) -> models::contract::Contract {
         match at_version {
-            0 => evm::Account::new(
+            0 => (&evm::Account::new(
                 Chain::Ethereum,
                 "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688"
                     .parse()
@@ -968,7 +968,8 @@ mod test_serial_db {
                 TX_HASH_1.parse().unwrap(),
                 TX_HASH_0.parse().unwrap(),
                 Some(TX_HASH_0.parse().unwrap()),
-            ),
+            ))
+                .into(),
             _ => panic!("Unkown version"),
         }
     }

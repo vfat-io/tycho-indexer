@@ -1,32 +1,31 @@
-use std::{
-    collections::{HashMap, HashSet},
-    str::FromStr,
-    sync::Arc,
+use crate::{
+    extractor::{
+        evm::{self, chain_state::ChainState, Block},
+        ExtractionError, Extractor, ExtractorMsg,
+    },
+    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
+    pb::{
+        sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
+        tycho::evm::v1::BlockEntityChanges,
+    },
+    storage::{
+        postgres::cache::CachedGateway, BlockIdentifier, ProtocolGateway, StorageError, TxHash,
+    },
 };
-
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::Arc,
+};
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
 use tycho_types::Bytes;
-
-use crate::{
-    extractor::{
-        evm::{self, chain_state::ChainState, Block},
-        ExtractionError, Extractor, ExtractorMsg,
-    },
-    models,
-    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
-    pb::{
-        sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
-        tycho::evm::v1::BlockEntityChanges,
-    },
-    storage::{postgres::cache::CachedGateway, BlockIdentifier, StorageError, TxHash},
-};
 
 use super::{
     token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait},
@@ -210,7 +209,7 @@ where
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
         self.state_gateway
-            .start_transaction(&changes.block)
+            .start_transaction(&(&changes.block).into())
             .await;
         self.state_gateway
             .upsert_block(&(&changes.block).into())
@@ -224,7 +223,7 @@ where
 
         for tx in changes.txs_with_update.iter() {
             self.state_gateway
-                .upsert_tx(&tx.tx)
+                .upsert_tx(&(&tx.tx).into())
                 .await?;
 
             let hash: TxHash = tx.tx.hash.into();
@@ -708,6 +707,7 @@ mod test_serial_db {
             token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, ProtocolStateDelta,
             Transaction,
         },
+        models,
         storage::{
             postgres,
             postgres::{
@@ -818,7 +818,7 @@ mod test_serial_db {
                 .await
                 .expect("pool should get a connection");
             evm_gw
-                .start_transaction(&evm::Block::default())
+                .start_transaction(&models::blockchain::Block::default())
                 .await;
             evm_gw
                 .save_state(&state)

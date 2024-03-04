@@ -1,12 +1,4 @@
-use crate::{
-    extractor::{
-        evm,
-        evm::{Account, AccountUpdate},
-    },
-    models::Chain,
-    storage,
-    storage::ChangeType,
-};
+use crate::{extractor::evm, models::Chain, storage, storage::ChangeType};
 use ethers::prelude::{H160, U256};
 use std::collections::HashMap;
 use tycho_types::Bytes;
@@ -60,19 +52,20 @@ impl Contract {
     }
 }
 
-impl From<evm::Account> for Contract {
-    fn from(value: Account) -> Self {
+impl From<&evm::Account> for Contract {
+    fn from(value: &evm::Account) -> Self {
         Self {
             chain: value.chain,
             address: Bytes::from(value.address.as_bytes()),
             title: value.title.clone(),
             slots: value
                 .slots
+                .clone()
                 .into_iter()
                 .map(|(u, v)| (Bytes::from(u), Bytes::from(v)))
                 .collect(),
             balance: Bytes::from(value.balance),
-            code: value.code,
+            code: value.code.clone(),
             code_hash: Bytes::from(value.code_hash.as_bytes()),
             balance_modify_tx: Bytes::from(value.balance_modify_tx.as_bytes()),
             code_modify_tx: Bytes::from(value.code_modify_tx.as_bytes()),
@@ -83,7 +76,7 @@ impl From<evm::Account> for Contract {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct ContractDelta {
     pub chain: Chain,
     pub address: Bytes,
@@ -94,27 +87,60 @@ pub struct ContractDelta {
 }
 
 impl ContractDelta {
-    pub fn new() -> Self {
-        todo!();
+    pub fn deleted(chain: &Chain, address: &Bytes) -> Self {
+        Self {
+            chain: *chain,
+            address: address.clone(),
+            change: ChangeType::Deletion,
+            ..Default::default()
+        }
     }
+
+    pub fn new(
+        chain: &Chain,
+        address: &Bytes,
+        slots: Option<&HashMap<Bytes, Option<Bytes>>>,
+        balance: Option<&Bytes>,
+        code: Option<&Bytes>,
+        change: ChangeType,
+    ) -> Self {
+        Self {
+            chain: *chain,
+            address: address.clone(),
+            change,
+            slots: slots
+                .map(|storage| {
+                    storage
+                        .iter()
+                        // TODO: unwrap or default converts to 0x0 instead of a 32 byte 0 string
+                        .map(|(k, v)| (k.clone(), v.clone().unwrap_or_default()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            balance: balance.cloned(),
+            code: code.cloned(),
+        }
+    }
+
     pub fn contract_id(&self) -> storage::ContractId {
         storage::ContractId::new(self.chain, self.address.clone())
     }
 }
 
 // Temporary until evm models are phased out
-impl From<evm::AccountUpdate> for ContractDelta {
-    fn from(value: AccountUpdate) -> Self {
+impl From<&evm::AccountUpdate> for ContractDelta {
+    fn from(value: &evm::AccountUpdate) -> Self {
         Self {
             chain: value.chain,
             address: Bytes::from(value.address.as_bytes()),
             slots: value
                 .slots
+                .clone()
                 .into_iter()
                 .map(|(u, v)| (Bytes::from(u), Bytes::from(v)))
                 .collect(),
-            balance: value.balance.map(|s| Bytes::from(s)),
-            code: value.code,
+            balance: value.balance.map(Bytes::from),
+            code: value.code.clone(),
             change: value.change,
         }
     }
@@ -130,7 +156,7 @@ impl From<ContractDelta> for evm::AccountUpdate {
                 .into_iter()
                 .map(|(k, v)| (k.into(), v.into()))
                 .collect(),
-            balance: value.balance.map(|b| U256::from(b)),
+            balance: value.balance.map(U256::from),
             code: value.code,
             change: value.change,
         }

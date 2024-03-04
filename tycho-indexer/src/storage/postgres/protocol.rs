@@ -20,10 +20,10 @@ use crate::{
             versioning::apply_delta_versioning,
             PostgresGateway,
         },
-        Address, Balance, BlockOrTimestamp, ComponentId, ContractDelta, ContractId,
-        ProtocolGateway, StorableComponentBalance, StorableContract, StorableProtocolComponent,
-        StorableProtocolState, StorableProtocolStateDelta, StorableProtocolType, StorableToken,
-        StorageError, StoreVal, TxHash, Version,
+        Address, Balance, BlockOrTimestamp, ComponentId, ContractId, ProtocolGateway,
+        StorableComponentBalance, StorableProtocolComponent, StorableProtocolState,
+        StorableProtocolStateDelta, StorableProtocolType, StorableToken, StorageError, StoreVal,
+        TxHash, Version,
     },
 };
 use tycho_types::Bytes;

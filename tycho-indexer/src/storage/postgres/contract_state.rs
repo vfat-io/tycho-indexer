@@ -2,16 +2,14 @@ use std::collections::{hash_map::Entry, HashSet};
 
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::RunQueryDsl;
-use async_trait::async_trait;
 use ethers::utils::keccak256;
 use tracing::instrument;
 
 use crate::{
     models,
     storage::{
-        AccountToContractStore, Address, Balance, BlockOrTimestamp, ChangeType, Code,
-        ContractDelta, ContractId, ContractStateGateway, ContractStore, StorableContract,
-        StorableToken, StoreKey, StoreVal, TxHash, Version,
+        AccountToContractStore, Address, Balance, BlockOrTimestamp, ChangeType, Code, ContractId,
+        ContractStore, StorableToken, StoreKey, StoreVal, TxHash, Version,
     },
 };
 use tycho_types::Bytes;
@@ -403,7 +401,7 @@ where
                         // assuming these have ChangeType created
                         update.clone()
                     } else {
-                        models::contract::ContractDelta::new()
+                        models::contract::ContractDelta::deleted(chain, &acc.address)
                     };
                     Ok((acc.address.clone(), update))
                 })
@@ -436,7 +434,7 @@ where
             let deltas = deleted
                 .iter()
                 .map(|acc| {
-                    let update = models::contract::ContractDelta::new();
+                    let update = models::contract::ContractDelta::deleted(chain, &acc.address);
                     Ok((acc.address.clone(), update))
                 })
                 .collect::<Result<HashMap<_, _>, StorageError>>()?;
@@ -834,8 +832,7 @@ where
             .into_iter()
             .zip(balances.into_iter().zip(codes))
             .map(|(account, (balance, code))| -> Result<models::contract::Contract, StorageError> {
-                if !(&account.id == &balance.account_id && &balance.account_id == &code.account_id)
-                {
+                if !(account.id == balance.account_id && balance.account_id == code.account_id) {
                     return Err(StorageError::Unexpected(format!(
                         "Identity mismatch - while retrieving entries for account id: {} \
                             encountered balance for id {} and code for id {}",
@@ -1226,7 +1223,15 @@ where
                 } else {
                     ChangeType::Update
                 };
-                let update = models::contract::ContractDelta::new();
+
+                let update = models::contract::ContractDelta::new(
+                    chain,
+                    &address,
+                    slots,
+                    balance_deltas.get(&id),
+                    code_deltas.get(&id),
+                    state,
+                );
                 Ok((address, update))
             })
             .chain(
@@ -1246,12 +1251,12 @@ mod test {
     //!
     //! The tests below test the functionality using the concrete EVM types.
 
-    uuse crate::{
-        extractor::evm::{self, Account},
+    use crate::{
+        extractor::evm::{self},
         storage::postgres::db_fixtures,
     };
     use diesel_async::{AsyncConnection, RunQueryDsl};
-    use ethers::types::{H160, H256, U256};
+    use ethers::types::U256;
     use rstest::rstest;
     use tycho_types::Bytes;
 
@@ -1398,7 +1403,7 @@ mod test {
 
     fn account_c0(version: u64) -> models::contract::Contract {
         match version {
-            1 => evm::Account {
+            1 => (&evm::Account {
                 chain: Chain::Ethereum,
                 address: "0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
@@ -1423,9 +1428,9 @@ mod test {
                         .parse()
                         .unwrap(),
                 ),
-            }
-            .into(),
-            2 => evm::Account {
+            })
+                .into(),
+            2 => (&evm::Account {
                 chain: Chain::Ethereum,
                 address: "0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
@@ -1450,8 +1455,8 @@ mod test {
                         .parse()
                         .unwrap(),
                 ),
-            }
-            .into(),
+            })
+                .into(),
             _ => panic!("No version found"),
         }
     }
@@ -1462,9 +1467,18 @@ mod test {
             .collect()
     }
 
+    fn contract_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap<Bytes, Option<Bytes>> {
+        data.into_iter()
+            .map(|(s, v)| {
+                let val = if v == 0 { None } else { Some(Bytes::from(U256::from(v))) };
+                (Bytes::from(U256::from(s)), val)
+            })
+            .collect()
+    }
+
     fn account_c1(version: u64) -> models::contract::Contract {
         match version {
-            2 => evm::Account {
+            2 => (&evm::Account {
                 chain: Chain::Ethereum,
                 address: "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
                     .parse()
@@ -1489,15 +1503,15 @@ mod test {
                         .parse()
                         .unwrap(),
                 ),
-            }
-            .into(),
+            })
+                .into(),
             _ => panic!("No version found"),
         }
     }
 
     fn account_c2(version: u64) -> models::contract::Contract {
         match version {
-            1 => evm::Account {
+            1 => (&evm::Account {
                 chain: Chain::Ethereum,
                 address: "0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
                     .parse()
@@ -1522,8 +1536,8 @@ mod test {
                         .parse()
                         .unwrap(),
                 ),
-            }
-            .into(),
+            })
+                .into(),
             _ => panic!("No version found"),
         }
     }
@@ -1700,15 +1714,14 @@ mod test {
         db_fixtures::insert_txns(&mut conn, &[(block.id, 100, modify_txhash)]).await;
         let mut account = account_c1(2);
         account.set_balance(&Bytes::from("0x2710"), &modify_txhash.parse().unwrap());
-        let update = models::contract::ContractDelta::new();
-        /*
-        account.address,
-            account.chain,
-            HashMap::new(),
-            Some(U256::from(10_000)),
+        let update = models::contract::ContractDelta::new(
+            &account.chain,
+            &account.address,
+            None,
+            Some(Bytes::from("0x2710")).as_ref(),
             None,
             ChangeType::Update,
-        */
+        );
 
         let contract_id = ContractId::new(Chain::Ethereum, account.address.clone());
 
@@ -2188,41 +2201,38 @@ mod test {
         let gw = EvmGateway::from_connection(&mut conn).await;
         let exp = vec![
             // c0 had some changes which need to be reverted
-            evm::AccountUpdate::new(
-                "0x6b175474e89094c44da98b954eedeac495271d0f"
+            models::contract::ContractDelta::new(
+                &Chain::Ethereum,
+                &("0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
-                    .expect("addr ok"),
-                Chain::Ethereum,
-                evm_slots([(6, 0), (0, 1), (1, 5), (5, 0)]),
-                Some(U256::from(100)),
+                    .expect("addr ok")),
+                Some(&contract_slots([(6, 0), (0, 1), (1, 5), (5, 0)])),
+                Some(Bytes::from(U256::from(100))).as_ref(),
                 None,
                 ChangeType::Update,
-            )
-            .into(),
+            ),
             // c1 which was deployed on block 2 is deleted
-            evm::AccountUpdate::new(
-                "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
+            models::contract::ContractDelta::new(
+                &Chain::Ethereum,
+                &("0x73bce791c239c8010cd3c857d96580037ccdd0ee"
                     .parse()
-                    .expect("addr ok"),
-                Chain::Ethereum,
-                evm_slots([]),
+                    .expect("addr ok")),
+                Some(&contract_slots([])),
                 None,
                 None,
                 ChangeType::Deletion,
-            )
-            .into(),
+            ),
             // c2 is recreated
-            evm::AccountUpdate::new(
-                "0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
+            models::contract::ContractDelta::new(
+                &Chain::Ethereum,
+                &("0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
                     .parse()
-                    .expect("addr ok"),
-                Chain::Ethereum,
-                evm_slots([(1, 2), (2, 4)]),
-                Some(U256::from(25)),
-                Some(Bytes::from_str("C2C2C2").expect("code ok")),
+                    .expect("addr ok")),
+                Some(&contract_slots([(1, 2), (2, 4)])),
+                Some(Bytes::from(U256::from(25))).as_ref(),
+                Some(Bytes::from_str("C2C2C2").expect("code ok")).as_ref(),
                 ChangeType::Creation,
-            )
-            .into(),
+            ),
         ];
 
         let mut changes = gw
@@ -2246,7 +2256,7 @@ mod test {
         let gw = EvmGateway::from_connection(&mut conn).await;
         let exp = vec![
             // c0 updates some slots and balances
-            evm::AccountUpdate::new(
+            (&evm::AccountUpdate::new(
                 "0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
                     .expect("addr ok"),
@@ -2255,10 +2265,10 @@ mod test {
                 Some(U256::from(101)),
                 None,
                 ChangeType::Update,
-            )
-            .into(),
+            ))
+                .into(),
             // c1 was deployed
-            evm::AccountUpdate::new(
+            (&evm::AccountUpdate::new(
                 "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
                     .parse()
                     .expect("addr ok"),
@@ -2267,10 +2277,10 @@ mod test {
                 Some(U256::from(50)),
                 Some(Bytes::from_str("C1C1C1").expect("code ok")),
                 ChangeType::Creation,
-            )
-            .into(),
+            ))
+                .into(),
             // c2 is deleted
-            evm::AccountUpdate::new(
+            (&evm::AccountUpdate::new(
                 "0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
                     .parse()
                     .expect("addr ok"),
@@ -2279,8 +2289,8 @@ mod test {
                 None,
                 None,
                 ChangeType::Deletion,
-            )
-            .into(),
+            ))
+                .into(),
         ];
 
         let mut changes = gw

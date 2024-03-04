@@ -6,9 +6,7 @@ use std::collections::HashMap;
 use tracing::{instrument, warn};
 use tycho_types::Bytes;
 
-use crate::storage::{
-    BlockHash, BlockIdentifier, StorableContract, StorableToken, StorageError, TxHash,
-};
+use crate::storage::{BlockHash, BlockIdentifier, StorableToken, StorageError, TxHash};
 
 use super::{orm, schema, PostgresGateway};
 use crate::models::blockchain::*;
@@ -20,15 +18,15 @@ where
     #[instrument(skip_all)]
     pub async fn upsert_block(
         &self,
-        blocks: &[&Block],
+        blocks: &[Block],
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         use super::schema::block::dsl::*;
-        if new.is_empty() {
+        if blocks.is_empty() {
             warn!("Upsert blocks called with empty blocks!");
             return Ok(())
         }
-        let block_chain_id = self.get_chain_id(new[0].chain());
+        let block_chain_id = self.get_chain_id(&blocks[0].chain);
         let new_blocks = blocks
             .iter()
             .map(|new| orm::NewBlock {
@@ -121,9 +119,9 @@ where
         let orm_txns = new
             .iter()
             .map(|new| {
-                let block_h = new.block_hash;
+                let block_h = &new.block_hash;
                 let bid = *parent_blocks
-                    .get(&block_h)
+                    .get(block_h)
                     .ok_or_else(|| {
                         StorageError::NoRelatedEntity(
                             "Block".to_string(),
@@ -133,7 +131,7 @@ where
                     })?;
                 Ok(orm::NewTransaction {
                     hash: new.hash.clone(),
-                    block_id: parent_block,
+                    block_id: bid,
                     from: new.from.clone(),
                     to: new.to.clone().unwrap_or_default(),
                     index: new.index as i64,
@@ -354,7 +352,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
         let block = block("0xbadbabe000000000000000000000000000000000000000000000000000000000");
 
-        gw.upsert_block(&[block], &mut conn)
+        gw.upsert_block(&[block.clone()], &mut conn)
             .await
             .unwrap();
         let retrieved_block = gw
@@ -380,7 +378,7 @@ mod test {
             ts: "2020-01-01T00:00:00".parse().unwrap(),
         };
 
-        gw.upsert_block(&[block], &mut conn)
+        gw.upsert_block(&[block.clone()], &mut conn)
             .await
             .unwrap();
         let retrieved_block = gw
@@ -428,7 +426,7 @@ mod test {
         tx.block_hash =
             Bytes::from("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9");
 
-        gw.upsert_tx(&[tx], &mut conn)
+        gw.upsert_tx(&[tx.clone()], &mut conn)
             .await
             .unwrap();
         let retrieved_tx = gw
@@ -454,7 +452,7 @@ mod test {
             index: 1,
         };
 
-        gw.upsert_tx(&[tx], &mut conn)
+        gw.upsert_tx(&[tx.clone()], &mut conn)
             .await
             .unwrap();
         let retrieved_tx = gw

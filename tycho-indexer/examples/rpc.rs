@@ -18,9 +18,7 @@ async fn main() -> Result<(), ExtractionError> {
 
     let pool =
         postgres::connect("postgres://postgres:mypassword@localhost:5432/tycho_indexer_0").await?;
-    let evm_gw =
-        PostgresGateway::<evm::Account, evm::AccountUpdate, evm::ERC20Token>::new(pool.clone())
-            .await?;
+    let evm_gw = PostgresGateway::<evm::ERC20Token>::new(pool.clone()).await?;
 
     info!("Starting Tycho RPC");
 

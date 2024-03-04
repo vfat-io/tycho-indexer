@@ -23,8 +23,8 @@ use crate::{
     models,
     models::{Chain, ExtractionState},
     storage::{
-        postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ContractStateGateway,
-        ExtractionStateGateway, ProtocolGateway, StorageError, TxHash,
+        postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ProtocolGateway,
+        StorageError, TxHash,
     },
 };
 
@@ -118,12 +118,12 @@ impl DBTransaction {
             match (existing_op, &op) {
                 (WriteOp::UpsertBlock(l), WriteOp::UpsertBlock(r)) => {
                     self.size += r.len();
-                    l.extend(r);
+                    l.extend(r.iter().cloned());
                     return Ok(());
                 }
                 (WriteOp::UpsertTx(l), WriteOp::UpsertTx(r)) => {
                     self.size += r.len();
-                    l.extend(r);
+                    l.extend(r.iter().cloned());
                     return Ok(());
                 }
                 (WriteOp::SaveExtractionState(l), WriteOp::SaveExtractionState(r)) => {
@@ -278,13 +278,13 @@ impl DBCacheWriteExecutor {
             .expect("pool should be connected");
 
         // If persisted block is not set we don't have data for this chain yet.
-        if let Some(db_block) = self.persisted_block {
+        if let Some(db_block) = &self.persisted_block {
             // during sync we insert in batches of blocks.
             let syncing = !new_db_tx.block_range.is_single_block();
 
             // if we are not syncing we are not allowed to create a separate block range.
             if !syncing {
-                let start = new_db_tx.block_range.start;
+                let start = &new_db_tx.block_range.start;
                 // if we are advancing a block, while not syncing it must fit on top of the
                 // persisted block.
                 if start.number > db_block.number && start.parent_hash != db_block.hash {
@@ -451,7 +451,7 @@ impl CachedGateway {
         let mut open_tx = self.open_tx.lock().await;
 
         if let Some(tx) = open_tx.as_mut() {
-            tx.0.block_range.end = *block;
+            tx.0.block_range.end = block.clone();
         } else {
             let (tx, rx) = oneshot::channel();
             *open_tx = Some((
@@ -528,14 +528,17 @@ impl CachedGateway {
             lru_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(5).unwrap()))),
         }
     }
-    pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpsertBlock(vec![*new]))
+    pub async fn upsert_block(&self, new: &models::blockchain::Block) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertBlock(vec![new.clone()]))
             .await?;
         Ok(())
     }
 
-    pub async fn upsert_tx(&self, new: &evm::Transaction) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpsertTx(vec![*new]))
+    pub async fn upsert_tx(
+        &self,
+        new: &models::blockchain::Transaction,
+    ) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertTx(vec![new.clone()]))
             .await?;
         Ok(())
     }
@@ -546,7 +549,10 @@ impl CachedGateway {
         Ok(())
     }
 
-    pub async fn insert_contract(&self, new: &evm::Account) -> Result<(), StorageError> {
+    pub async fn insert_contract(
+        &self,
+        new: &models::contract::Contract,
+    ) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertContract(vec![new.clone()]))
             .await?;
         Ok(())
@@ -554,7 +560,6 @@ impl CachedGateway {
 
     pub async fn update_contracts(
         &self,
-        block: &models::blockchain::Block,
         new: &[(TxHash, models::contract::ContractDelta)],
     ) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpdateContracts(new.to_owned()))
@@ -666,7 +671,7 @@ impl DerefMut for CachedGateway {
 
 #[cfg(test)]
 mod test_serial_db {
-    use crate::storage::postgres::{db_fixtures, orm, testing::run_against_db, PostgresGateway};
+    use crate::storage::postgres::{db_fixtures, orm, testing::run_against_db};
     use ethers::{
         prelude::H256,
         types::{H160, U256},
@@ -701,8 +706,12 @@ mod test_serial_db {
 
             // Send write block message
             let block = get_sample_block(1);
-            let os_rx =
-                send_write_message(&tx, block, vec![WriteOp::UpsertBlock(vec![block])]).await;
+            let os_rx = send_write_message(
+                &tx,
+                block.clone(),
+                vec![WriteOp::UpsertBlock(vec![block.clone()])],
+            )
+            .await;
             os_rx
                 .await
                 .expect("Response from channel ok")
@@ -785,8 +794,8 @@ mod test_serial_db {
                 &tx,
                 block_1.clone(),
                 vec![
-                    WriteOp::UpsertBlock(vec![block_1]),
-                    WriteOp::UpsertTx(vec![tx_1]),
+                    WriteOp::UpsertBlock(vec![block_1.clone()]),
+                    WriteOp::UpsertTx(vec![tx_1.clone()]),
                     WriteOp::SaveExtractionState(extraction_state_1.clone()),
                     WriteOp::InsertTokens(vec![token]),
                     WriteOp::InsertProtocolComponents(vec![protocol_component]),
@@ -810,11 +819,8 @@ mod test_serial_db {
                 &tx,
                 block_2.clone(),
                 vec![
-                    WriteOp::UpsertBlock(vec![block_2]),
-                    WriteOp::UpsertProtocolState(vec![(
-                        tx_1.hash.as_bytes().into(),
-                        protocol_state_delta,
-                    )]),
+                    WriteOp::UpsertBlock(vec![block_2.clone()]),
+                    WriteOp::UpsertProtocolState(vec![(tx_1.hash.clone(), protocol_state_delta)]),
                 ],
             )
             .await;
@@ -826,7 +832,8 @@ mod test_serial_db {
             // Send third block messages
             let block_3 = get_sample_block(3);
             let os_rx_3 =
-                send_write_message(&tx, block_3, vec![WriteOp::UpsertBlock(vec![block_3])]).await;
+                send_write_message(&tx, block_3.clone(), vec![WriteOp::UpsertBlock(vec![block_3])])
+                    .await;
             os_rx_3
                 .await
                 .expect("Response from channel ok")

@@ -1,10 +1,7 @@
-use async_trait::async_trait;
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
-use crate::storage::{
-    ContractDelta, ExtractionState, ExtractionStateGateway, StorableContract, StorableToken,
-};
+use crate::storage::{ExtractionState, StorableToken};
 
 use super::{orm, schema, Chain, PostgresGateway, StorageError};
 
