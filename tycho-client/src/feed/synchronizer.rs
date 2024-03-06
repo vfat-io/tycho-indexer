@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::Serialize;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::{
@@ -45,25 +46,25 @@ struct SharedState {
     last_synced_block: Option<Header>,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize)]
 pub struct VMSnapshot {
     pub state: HashMap<Bytes, ResponseAccount>,
     pub component: ProtocolComponent,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize)]
 pub struct NativeSnapshot {
     pub state: ResponseProtocolState,
     pub component: ProtocolComponent,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize)]
 pub enum Snapshot {
     VMSnapshot(VMSnapshot),
     NativeSnapshot(NativeSnapshot),
 }
 
-#[derive(Clone, PartialEq, Debug, Default)]
+#[derive(Clone, PartialEq, Debug, Default, Serialize)]
 pub struct StateSyncMessage {
     /// The block number for this update.
     pub header: Header,
