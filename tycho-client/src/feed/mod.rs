@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use chrono::{Local, NaiveDateTime};
 use futures03::{future::join_all, stream::FuturesUnordered, StreamExt};
 
+use serde::Serialize;
 use tokio::{
     select,
     sync::mpsc::{self, Receiver},
@@ -24,7 +25,7 @@ mod block_history;
 pub mod component_tracker;
 pub mod synchronizer;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct Header {
     pub hash: Bytes,
     pub number: u64,
@@ -99,7 +100,8 @@ pub struct BlockSynchronizer<S> {
     max_wait: std::time::Duration,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
 pub enum SynchronizerState {
     Started,
     Ready(Header),
@@ -299,7 +301,7 @@ impl SynchronizerStream {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize)]
 pub struct FeedMessage {
     pub state_msgs: HashMap<String, StateSyncMessage>,
     pub sync_states: HashMap<String, SynchronizerState>,
