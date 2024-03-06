@@ -253,7 +253,10 @@ where
             let new_tokens = self
                 .token_pre_processor
                 .get_tokens(new_tokens_addresses)
-                .await;
+                .await
+                .iter()
+                .map(Into::into)
+                .collect::<Vec<_>>();
             self.state_gateway
                 .add_tokens(&new_tokens)
                 .await?;

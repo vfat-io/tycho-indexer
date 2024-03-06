@@ -689,7 +689,7 @@ impl ProtocolGateway for PostgresGateway {
 
     async fn add_tokens(
         &self,
-        tokens: &[&models::token::CurrencyToken],
+        tokens: &[models::token::CurrencyToken],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let titles: Vec<String> = tokens
@@ -2203,7 +2203,7 @@ mod test {
 
         let usdt_symbol = "USDT".to_string();
         let tokens = [
-            &models::token::CurrencyToken::new(
+            models::token::CurrencyToken::new(
                 &Bytes::from(USDT),
                 usdt_symbol.as_str(),
                 6,
@@ -2212,7 +2212,7 @@ mod test {
                 Chain::Ethereum,
                 100,
             ),
-            &models::token::CurrencyToken::new(
+            models::token::CurrencyToken::new(
                 &Bytes::from(WETH),
                 weth_symbol.as_str(),
                 18,

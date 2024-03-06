@@ -743,7 +743,7 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_tokens(
         &self,
-        tokens: &[&models::token::CurrencyToken],
+        tokens: &[models::token::CurrencyToken],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 

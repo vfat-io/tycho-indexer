@@ -43,7 +43,15 @@ impl CurrencyToken {
 }
 
 impl From<&evm::ERC20Token> for CurrencyToken {
-    fn from(_value: &ERC20Token) -> Self {
-        todo!()
+    fn from(value: &ERC20Token) -> Self {
+        Self {
+            address: Bytes::from(value.address.as_bytes()),
+            symbol: value.symbol.clone(),
+            decimals: value.decimals,
+            tax: value.tax,
+            gas: value.gas.clone(),
+            chain: value.chain,
+            quality: value.quality,
+        }
     }
 }

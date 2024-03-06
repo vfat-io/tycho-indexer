@@ -44,7 +44,7 @@ pub(crate) enum WriteOp {
     // Simply merge
     InsertProtocolComponents(Vec<evm::ProtocolComponent>),
     // Simply merge
-    InsertTokens(Vec<evm::ERC20Token>),
+    InsertTokens(Vec<models::token::CurrencyToken>),
     // Simply merge
     InsertComponentBalances(Vec<evm::ComponentBalance>),
     // Simply merge
@@ -382,11 +382,8 @@ impl DBCacheWriteExecutor {
                     .await
             }
             WriteOp::InsertTokens(tokens) => {
-                let collected_tokens: Vec<models::token::CurrencyToken> =
-                    tokens.iter().map(Into::into).collect();
-                let token_references: Vec<_> = collected_tokens.iter().collect();
                 self.state_gateway
-                    .add_tokens(token_references.as_slice(), conn)
+                    .add_tokens(tokens.as_slice(), conn)
                     .await
             }
             WriteOp::InsertComponentBalances(balances) => {
@@ -638,7 +635,10 @@ impl CachedGateway {
         Ok(())
     }
 
-    pub async fn add_tokens(&self, new: &[evm::ERC20Token]) -> Result<(), StorageError> {
+    pub async fn add_tokens(
+        &self,
+        new: &[models::token::CurrencyToken],
+    ) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertTokens(Vec::from(new)))
             .await?;
         Ok(())
@@ -673,10 +673,7 @@ impl DerefMut for CachedGateway {
 
 #[cfg(test)]
 mod test_serial_db {
-    use crate::{
-        extractor::evm::ERC20Token,
-        storage::postgres::{db_fixtures, orm, testing::run_against_db},
-    };
+    use crate::storage::postgres::{db_fixtures, orm, testing::run_against_db};
     use ethers::{
         prelude::H256,
         types::{H160, U256},
@@ -766,12 +763,12 @@ mod test_serial_db {
             let extraction_state_1 = get_sample_extraction(1);
             let usdc_address =
                 H160::from_str("0xdAC17F958D2ee523a2206206994597C13D831ec7").unwrap();
-            let token = ERC20Token::new(
-                usdc_address,
-                "USDT".to_string(),
+            let token = models::token::CurrencyToken::new(
+                &Bytes::from(usdc_address.as_bytes()),
+                "USDT",
                 6,
                 0,
-                vec![Some(64), None],
+                &[Some(64), None],
                 Chain::Ethereum,
                 100,
             );

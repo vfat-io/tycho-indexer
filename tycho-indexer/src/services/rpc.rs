@@ -235,8 +235,15 @@ impl From<models::contract::ContractDelta> for dto::AccountUpdate {
 }
 
 impl From<models::token::CurrencyToken> for ResponseToken {
-    fn from(_value: CurrencyToken) -> Self {
-        todo!()
+    fn from(value: CurrencyToken) -> Self {
+        Self {
+            chain: value.chain.into(),
+            address: value.address,
+            symbol: value.symbol,
+            decimals: value.decimals,
+            tax: value.tax,
+            gas: value.gas,
+        }
     }
 }
 
