@@ -489,7 +489,7 @@ pub struct BlockContractChanges {
     pub tx_updates: Vec<TransactionVMUpdates>,
 }
 
-pub type EVMStateGateway<DB> = StateGatewayType<DB, ERC20Token>;
+pub type EVMStateGateway<DB> = StateGatewayType<DB>;
 
 impl Block {
     /// Parses block from tychos protobuf block message

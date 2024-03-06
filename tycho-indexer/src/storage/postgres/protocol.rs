@@ -11,6 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    models,
     models::{Chain, ProtocolType},
     storage::{
         postgres::{
@@ -20,10 +21,9 @@ use crate::{
             versioning::apply_delta_versioning,
             PostgresGateway,
         },
-        Address, Balance, BlockOrTimestamp, ComponentId, ContractId, ProtocolGateway,
-        StorableComponentBalance, StorableProtocolComponent, StorableProtocolState,
-        StorableProtocolStateDelta, StorableProtocolType, StorableToken, StorageError, StoreVal,
-        TxHash, Version,
+        Address, Balance, BlockOrTimestamp, ComponentId, ProtocolGateway, StorableComponentBalance,
+        StorableProtocolComponent, StorableProtocolState, StorableProtocolStateDelta,
+        StorableProtocolType, StorageError, StoreVal, TxHash, Version,
     },
 };
 use tycho_types::Bytes;
@@ -31,10 +31,7 @@ use tycho_types::Bytes;
 use super::WithTxHash;
 
 // Private methods
-impl<T> PostgresGateway<T>
-where
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
+impl PostgresGateway {
     /// # Decoding ProtocolStates from database results.
     ///
     /// This function takes as input the database result for querying protocol states and their
@@ -105,7 +102,7 @@ where
     async fn _get_or_create_protocol_system_id(
         &self,
         new: String,
-        conn: &mut <PostgresGateway<T> as ProtocolGateway>::DB,
+        conn: &mut <PostgresGateway as ProtocolGateway>::DB,
     ) -> Result<i64, StorageError> {
         use super::schema::protocol_system::dsl::*;
 
@@ -132,12 +129,9 @@ where
 }
 
 #[async_trait]
-impl<T> ProtocolGateway for PostgresGateway<T>
-where
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
+impl ProtocolGateway for PostgresGateway {
     type DB = AsyncPgConnection;
-    type Token = T;
+
     type ProtocolState = ProtocolState;
     type ProtocolStateDelta = ProtocolStateDelta;
     type ProtocolType = ProtocolType;
@@ -652,7 +646,7 @@ where
         chain: Chain,
         addresses: Option<&[&Address]>,
         conn: &mut Self::DB,
-    ) -> Result<Vec<Self::Token>, StorageError> {
+    ) -> Result<Vec<models::token::CurrencyToken>, StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
         let chain_db_id = self.get_chain_id(&chain);
         let mut query = token
@@ -671,13 +665,23 @@ where
             .await
             .map_err(|err| StorageError::from_diesel(err, "Token", &chain.to_string(), None))?;
 
-        let tokens: Result<Vec<Self::Token>, StorageError> = results
+        let tokens: Result<Vec<models::token::CurrencyToken>, StorageError> = results
             .into_iter()
             .map(|(orm_token, address_)| {
-                let contract_id = ContractId::new(chain, address_);
-
-                Self::Token::from_storage(orm_token, contract_id)
-                    .map_err(|err| StorageError::DecodeError(err.to_string()))
+                let gas_usage: Vec<_> = orm_token
+                    .gas
+                    .iter()
+                    .map(|u| u.map(|g| g as u64))
+                    .collect();
+                Ok(models::token::CurrencyToken::new(
+                    &address_,
+                    orm_token.symbol.as_str(),
+                    orm_token.decimals as u32,
+                    orm_token.tax as u64,
+                    gas_usage.as_slice(),
+                    chain,
+                    orm_token.quality as u32,
+                ))
             })
             .collect();
         tokens
@@ -685,13 +689,13 @@ where
 
     async fn add_tokens(
         &self,
-        tokens: &[&Self::Token],
+        tokens: &[&models::token::CurrencyToken],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         let titles: Vec<String> = tokens
             .iter()
             .map(|token| {
-                format!("{:?}_{}", token.chain(), token.symbol())
+                format!("{:?}_{}", token.chain, token.symbol)
                     .graphemes(true)
                     .take(255)
                     .collect::<String>()
@@ -700,7 +704,7 @@ where
 
         let addresses: Vec<_> = tokens
             .iter()
-            .map(|token| token.address().as_bytes().to_vec())
+            .map(|token| token.address.clone())
             .collect();
 
         let new_accounts: Vec<NewAccount> = tokens
@@ -708,7 +712,7 @@ where
             .zip(titles.iter())
             .zip(addresses.iter())
             .map(|((token, title), address)| {
-                let chain_id = self.get_chain_id(&token.chain());
+                let chain_id = self.get_chain_id(&token.chain);
                 NewAccount {
                     title,
                     address,
@@ -743,14 +747,14 @@ where
         let new_tokens: Vec<orm::NewToken> = tokens
             .iter()
             .map(|token| {
-                let token_chain_id = self.get_chain_id(&token.chain());
-                let account_key = (token.address().as_ref().to_vec(), token_chain_id);
+                let token_chain_id = self.get_chain_id(&token.chain);
+                let account_key = (token.address.to_vec(), token_chain_id);
 
                 let account_id = *account_map
                     .get(&account_key)
                     .expect("Account ID not found");
 
-                token.to_storage(account_id)
+                orm::NewToken::from_token(account_id, token)
             })
             .collect();
 
@@ -1241,10 +1245,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        extractor::evm::{self, ERC20Token},
-        storage::{BlockIdentifier, ChangeType},
-    };
+    use crate::storage::{BlockIdentifier, ChangeType};
 
     use diesel_async::AsyncConnection;
     use ethers::{prelude::H160, types::U256};
@@ -1259,7 +1260,7 @@ mod test {
     use ethers::prelude::H256;
     use std::str::FromStr;
 
-    type EVMGateway = PostgresGateway<evm::ERC20Token>;
+    type EVMGateway = PostgresGateway;
 
     const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -2171,15 +2172,15 @@ mod test {
             .unwrap();
 
         assert_eq!(tokens.len(), 1);
-        let expected_token = ERC20Token {
-            address: H160::from_str(ZKSYNC_PEPE).unwrap(),
-            symbol: "PEPE".to_string(),
-            decimals: 6,
-            tax: 10,
-            gas: vec![Some(10)],
-            chain: Chain::ZkSync,
-            quality: 0,
-        };
+        let expected_token = models::token::CurrencyToken::new(
+            &ZKSYNC_PEPE.parse().unwrap(),
+            "PEPE",
+            6,
+            10,
+            &[Some(10)],
+            Chain::ZkSync,
+            0,
+        );
 
         assert_eq!(tokens[0], expected_token);
     }
@@ -2202,24 +2203,24 @@ mod test {
 
         let usdt_symbol = "USDT".to_string();
         let tokens = [
-            &ERC20Token {
-                address: H160::from_str(USDT).unwrap(),
-                symbol: usdt_symbol.clone(),
-                decimals: 6,
-                tax: 0,
-                gas: vec![Some(64), None],
-                chain: Chain::Ethereum,
-                quality: 100,
-            },
-            &ERC20Token {
-                address: H160::from_str(WETH).unwrap(),
-                symbol: weth_symbol.clone(),
-                decimals: 18,
-                tax: 0,
-                gas: vec![Some(100), None],
-                chain: Chain::Ethereum,
-                quality: 100,
-            },
+            &models::token::CurrencyToken::new(
+                &Bytes::from(USDT),
+                usdt_symbol.as_str(),
+                6,
+                0,
+                &[Some(64), None],
+                Chain::Ethereum,
+                100,
+            ),
+            &models::token::CurrencyToken::new(
+                &Bytes::from(WETH),
+                weth_symbol.as_str(),
+                18,
+                0,
+                &[Some(100), None],
+                Chain::Ethereum,
+                100,
+            ),
         ];
 
         gw.add_tokens(&tokens, &mut conn)

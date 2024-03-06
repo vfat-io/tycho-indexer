@@ -208,7 +208,7 @@ where
             .await?;
 
         for token in db_tokens {
-            tokens_set.remove(&token.address);
+            tokens_set.remove(&H160::from_slice(token.address.as_ref()));
         }
         Ok(tokens_set.into_iter().collect())
     }
@@ -887,7 +887,7 @@ mod test_serial_db {
         postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
         postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
         postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None).await;
-        let evm_gw = PostgresGateway::<evm::ERC20Token>::from_connection(&mut conn).await;
+        let evm_gw = PostgresGateway::from_connection(&mut conn).await;
 
         let (tx, rx) = channel(10);
 
@@ -1172,7 +1172,7 @@ mod test_serial_db {
             postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
             postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None)
                 .await;
-            let evm_gw = PostgresGateway::<evm::ERC20Token>::from_connection(&mut conn).await;
+            let evm_gw = PostgresGateway::from_connection(&mut conn).await;
 
             let (tx, rx) = channel(10);
             let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
@@ -1251,7 +1251,7 @@ mod test_serial_db {
                 .expect("pool should get a connection");
             let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
 
-            let evm_gw = PostgresGateway::<evm::ERC20Token>::from_connection(&mut conn).await;
+            let evm_gw = PostgresGateway::from_connection(&mut conn).await;
             let (tx, rx) = channel(10);
             let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
             let gw = AmbientPgGateway::new(

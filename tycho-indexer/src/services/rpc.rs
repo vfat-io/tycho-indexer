@@ -18,7 +18,10 @@ use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
 use crate::{
-    models::contract::{Contract, ContractDelta},
+    models::{
+        contract::{Contract, ContractDelta},
+        token::CurrencyToken,
+    },
     storage::ProtocolGateway,
 };
 use tycho_types::{
@@ -228,6 +231,12 @@ impl From<models::contract::ContractDelta> for dto::AccountUpdate {
             value.code,
             value.change.into(),
         )
+    }
+}
+
+impl From<models::token::CurrencyToken> for ResponseToken {
+    fn from(_value: CurrencyToken) -> Self {
+        todo!()
     }
 }
 

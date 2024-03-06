@@ -190,7 +190,7 @@ where
 
         let db_token_addresses: HashSet<_> = db_tokens
             .iter()
-            .map(|token| token.address)
+            .map(|token| H160::from_slice(token.address.as_ref()))
             .collect();
         let filtered_tokens = tokens
             .into_iter()
@@ -775,7 +775,7 @@ mod test_serial_db {
         )
         .await;
 
-        let evm_gw = PostgresGateway::<evm::ERC20Token>::from_connection(&mut conn).await;
+        let evm_gw = PostgresGateway::from_connection(&mut conn).await;
 
         let (tx, rx) = channel(10);
 

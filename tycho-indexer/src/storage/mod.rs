@@ -81,6 +81,7 @@ use utoipa::ToSchema;
 
 use crate::{
     extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
+    models,
     models::{Chain, ExtractionState, ProtocolType},
     storage::postgres::orm,
 };
@@ -600,7 +601,6 @@ pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
 #[async_trait]
 pub trait ProtocolGateway {
     type DB;
-    type Token;
 
     type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
     type ProtocolStateDelta: StorableProtocolStateDelta<
@@ -666,23 +666,6 @@ pub trait ProtocolGateway {
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
-    /// Stores new found ProtocolComponents.
-    ///
-    /// Components are assumed to bimmutable. Any state belonging to a
-    /// component that is dynamic, should be made available on ProtocolState,
-    /// not on the Component.
-    ///
-    /// # Parameters
-    /// - `new`  The new protocol components.
-    ///
-    /// # Returns
-    /// Ok if stored successfully, may error if:
-    /// - related entities are not in store yet.
-    /// - component with same is id already present.
-    // TODO: uncomment to implement in ENG 2031
-    // async fn upsert_components(&self, new: &[Self::ProtocolComponent]) -> Result<(),
-    // StorageError>;
-
     /// Retrieve protocol component states
     ///
     /// This resource is versioned, the version can be specified by either block
@@ -728,7 +711,7 @@ pub trait ProtocolGateway {
         chain: Chain,
         address: Option<&[&Address]>,
         conn: &mut Self::DB,
-    ) -> Result<Vec<Self::Token>, StorageError>;
+    ) -> Result<Vec<models::token::CurrencyToken>, StorageError>;
 
     /// Saves multiple component balances to storage.
     ///
@@ -760,7 +743,7 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_tokens(
         &self,
-        tokens: &[&Self::Token],
+        tokens: &[&models::token::CurrencyToken],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -1148,10 +1131,9 @@ pub trait ContractStateGateway {
 
 pub trait StateGateway<DB>: ProtocolGateway<DB = DB> + Send + Sync {}
 
-pub type StateGatewayType<DB, T> = Arc<
+pub type StateGatewayType<DB> = Arc<
     dyn StateGateway<
         DB,
-        Token = T,
         ProtocolState = ProtocolState,
         ProtocolStateDelta = ProtocolStateDelta,
         ProtocolType = ProtocolType,

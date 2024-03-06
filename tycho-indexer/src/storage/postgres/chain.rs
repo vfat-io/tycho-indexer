@@ -6,15 +6,12 @@ use std::collections::HashMap;
 use tracing::{instrument, warn};
 use tycho_types::Bytes;
 
-use crate::storage::{BlockHash, BlockIdentifier, StorableToken, StorageError, TxHash};
+use crate::storage::{BlockHash, BlockIdentifier, StorageError, TxHash};
 
 use super::{orm, schema, PostgresGateway};
 use crate::models::blockchain::*;
 
-impl<T> PostgresGateway<T>
-where
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
+impl PostgresGateway {
     #[instrument(skip_all)]
     pub async fn upsert_block(
         &self,
@@ -270,11 +267,11 @@ mod test {
     use diesel_async::AsyncConnection;
     use ethers::types::{H256, U256};
 
-    use crate::{extractor::evm, models::Chain, storage::postgres::db_fixtures};
+    use crate::{models::Chain, storage::postgres::db_fixtures};
 
     use super::*;
 
-    type EVMGateway = PostgresGateway<evm::ERC20Token>;
+    type EVMGateway = PostgresGateway;
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();

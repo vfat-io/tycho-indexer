@@ -4,6 +4,7 @@ use crate::{
 };
 use tycho_types::Bytes;
 
+#[derive(PartialEq, Debug, Clone)]
 pub struct CurrencyToken {
     pub address: Bytes,
     pub symbol: String,
@@ -19,8 +20,30 @@ pub struct CurrencyToken {
     pub quality: u32,
 }
 
-impl From<evm::ERC20Token> for CurrencyToken {
-    fn from(_value: ERC20Token) -> Self {
+impl CurrencyToken {
+    pub fn new(
+        address: &Bytes,
+        symbol: &str,
+        decimals: u32,
+        tax: u64,
+        gas: &[Option<u64>],
+        chain: Chain,
+        quality: u32,
+    ) -> Self {
+        Self {
+            address: address.clone(),
+            symbol: symbol.to_string(),
+            decimals,
+            tax,
+            gas: gas.to_owned(),
+            chain,
+            quality,
+        }
+    }
+}
+
+impl From<&evm::ERC20Token> for CurrencyToken {
+    fn from(_value: &ERC20Token) -> Self {
         todo!()
     }
 }

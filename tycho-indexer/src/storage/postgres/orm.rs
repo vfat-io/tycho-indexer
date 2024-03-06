@@ -1085,6 +1085,23 @@ pub struct NewToken {
     pub quality: i32,
 }
 
+impl NewToken {
+    pub fn from_token(account_id: i64, token: &models::token::CurrencyToken) -> Self {
+        Self {
+            account_id,
+            symbol: token.symbol.clone(),
+            decimals: token.decimals as i32,
+            tax: token.tax as i64,
+            gas: token
+                .gas
+                .iter()
+                .map(|g| g.map(|u| u as i64))
+                .collect(),
+            quality: token.quality as i32,
+        }
+    }
+}
+
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name = account_balance)]

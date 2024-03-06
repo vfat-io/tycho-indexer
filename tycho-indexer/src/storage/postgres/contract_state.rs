@@ -9,7 +9,7 @@ use crate::{
     models,
     storage::{
         AccountToContractStore, Address, Balance, BlockOrTimestamp, ChangeType, Code, ContractId,
-        ContractStore, StorableToken, StoreKey, StoreVal, TxHash, Version,
+        ContractStore, StoreKey, StoreVal, TxHash, Version,
     },
 };
 use tycho_types::Bytes;
@@ -26,10 +26,7 @@ struct CreatedOrDeleted<T> {
 }
 
 // Private methods
-impl<T> PostgresGateway<T>
-where
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
+impl PostgresGateway {
     /// Retrieves the changes in balance for all accounts of a chain.
     ///
     /// See [ContractStateGateway::get_accounts_delta] for more information on
@@ -1262,7 +1259,7 @@ mod test {
 
     use super::*;
 
-    type EvmGateway = PostgresGateway<evm::ERC20Token>;
+    type EvmGateway = PostgresGateway;
     type MaybeTS = Option<NaiveDateTime>;
 
     async fn setup_db() -> AsyncPgConnection {

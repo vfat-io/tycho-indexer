@@ -1,14 +1,11 @@
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
-use crate::storage::{ExtractionState, StorableToken};
+use crate::storage::ExtractionState;
 
 use super::{orm, schema, Chain, PostgresGateway, StorageError};
 
-impl<T> PostgresGateway<T>
-where
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
+impl PostgresGateway {
     pub async fn get_state(
         &self,
         name: &str,
@@ -88,8 +85,6 @@ mod test {
     use diesel::prelude::*;
     use diesel_async::{AsyncConnection, RunQueryDsl};
 
-    use crate::extractor::evm;
-
     use super::*;
 
     async fn setup_db() -> AsyncPgConnection {
@@ -131,8 +126,8 @@ mod test {
         conn
     }
 
-    async fn get_dgw(conn: &mut AsyncPgConnection) -> PostgresGateway<evm::ERC20Token> {
-        PostgresGateway::<evm::ERC20Token>::from_connection(conn).await
+    async fn get_dgw(conn: &mut AsyncPgConnection) -> PostgresGateway {
+        PostgresGateway::from_connection(conn).await
     }
 
     #[tokio::test]

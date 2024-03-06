@@ -3,7 +3,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    extractor::{evm, runner::ExtractorHandle, ExtractionError},
+    extractor::{runner::ExtractorHandle, ExtractionError},
     models::Chain,
     storage::{postgres::PostgresGateway, ContractId},
 };
@@ -26,9 +26,7 @@ use tycho_types::dto::{
 mod rpc;
 mod ws;
 
-pub type EvmPostgresGateway = PostgresGateway<
-    evm::ERC20Token, //T
->;
+pub type EvmPostgresGateway = PostgresGateway;
 
 pub struct ServicesBuilder {
     prefix: String,

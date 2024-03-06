@@ -19,7 +19,7 @@ use tokio::{
 use tracing::{debug, error, info, trace};
 
 use crate::{
-    extractor::evm::{self, ComponentBalance, ERC20Token, ProtocolComponent, ProtocolStateDelta},
+    extractor::evm::{self, ComponentBalance, ProtocolComponent, ProtocolStateDelta},
     models,
     models::{Chain, ExtractionState},
     storage::{
@@ -184,7 +184,7 @@ pub enum DBCacheMessage {
 /// - If the block is pending, we group the transaction with other transactions that finish before
 ///   we observe the next block.
 
-type EVMGateway = PostgresGateway<evm::ERC20Token>;
+type EVMGateway = PostgresGateway;
 
 /// # Write Cache
 ///
@@ -382,9 +382,11 @@ impl DBCacheWriteExecutor {
                     .await
             }
             WriteOp::InsertTokens(tokens) => {
-                let collected_tokens: Vec<&ERC20Token> = tokens.iter().collect();
+                let collected_tokens: Vec<models::token::CurrencyToken> =
+                    tokens.iter().map(Into::into).collect();
+                let token_references: Vec<_> = collected_tokens.iter().collect();
                 self.state_gateway
-                    .add_tokens(collected_tokens.as_slice(), conn)
+                    .add_tokens(token_references.as_slice(), conn)
                     .await
             }
             WriteOp::InsertComponentBalances(balances) => {
@@ -671,7 +673,10 @@ impl DerefMut for CachedGateway {
 
 #[cfg(test)]
 mod test_serial_db {
-    use crate::storage::postgres::{db_fixtures, orm, testing::run_against_db};
+    use crate::{
+        extractor::evm::ERC20Token,
+        storage::postgres::{db_fixtures, orm, testing::run_against_db},
+    };
     use ethers::{
         prelude::H256,
         types::{H160, U256},

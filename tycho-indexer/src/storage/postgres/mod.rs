@@ -129,9 +129,7 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-use std::{
-    collections::HashMap, hash::Hash, i64, marker::PhantomData, ops::Deref, str::FromStr, sync::Arc,
-};
+use std::{collections::HashMap, hash::Hash, i64, ops::Deref, str::FromStr, sync::Arc};
 
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -145,8 +143,7 @@ use tracing::{debug, info};
 use crate::models::Chain;
 
 use super::{
-    BlockIdentifier, BlockOrTimestamp, StateGateway, StorableToken, StorageError, TxHash, Version,
-    VersionKind,
+    BlockIdentifier, BlockOrTimestamp, StateGateway, StorageError, TxHash, Version, VersionKind,
 };
 
 pub mod cache;
@@ -363,25 +360,17 @@ impl Version {
 }
 
 #[derive(Clone)]
-pub struct PostgresGateway<T> {
+pub struct PostgresGateway {
     protocol_system_id_cache: Arc<ProtocolSystemEnumCache>,
     chain_id_cache: Arc<ChainEnumCache>,
-    _phantom_token: PhantomData<T>,
 }
 
-impl<T> PostgresGateway<T>
-where
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
+impl PostgresGateway {
     pub fn with_cache(
         cache: Arc<ChainEnumCache>,
         protocol_system_cache: Arc<ProtocolSystemEnumCache>,
     ) -> Self {
-        Self {
-            protocol_system_id_cache: protocol_system_cache,
-            chain_id_cache: cache,
-            _phantom_token: PhantomData,
-        }
+        Self { protocol_system_id_cache: protocol_system_cache, chain_id_cache: cache }
     }
 
     #[allow(clippy::needless_pass_by_ref_mut)]
@@ -436,16 +425,13 @@ where
         let cache = ChainEnumCache::from_pool(pool.clone()).await?;
         let protocol_system_cache: ValueIdTableCache<String> =
             ProtocolSystemEnumCache::from_pool(pool.clone()).await?;
-        let gw = PostgresGateway::<T>::with_cache(Arc::new(cache), Arc::new(protocol_system_cache));
+        let gw = PostgresGateway::with_cache(Arc::new(cache), Arc::new(protocol_system_cache));
 
         Ok(gw)
     }
 }
 
-impl<T> StateGateway<AsyncPgConnection> for PostgresGateway<T>
-where
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
+impl StateGateway<AsyncPgConnection> for PostgresGateway {
     // No methods in here - this just ties everything together
 }
 
@@ -613,8 +599,10 @@ pub mod testing {
     ///
     /// ## Example
     /// ```
+    /// use tycho_indexer::storage::postgres::testing::run_against_db;
+    ///
     /// #[tokio::test]
-    /// fn test_serial_db_mytest_name() {
+    /// async fn test_serial_db_mytest_name() {
     ///     run_against_db(|connection_pool| async move {
     ///         println!("here goes actual test code")
     ///     }).await;

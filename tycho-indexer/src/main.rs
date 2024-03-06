@@ -28,7 +28,6 @@ use tycho_indexer::{
         self,
         compat::{transcode_ambient_balances, transcode_balances_db, transcode_usv2_balances},
         evm::{
-            self,
             chain_state::ChainState,
             native::{NativeContractExtractor, NativePgGateway},
         },
@@ -134,7 +133,7 @@ async fn main() -> Result<(), ExtractionError> {
         pool.clone(),
     )
     .await;
-    let evm_gw = PostgresGateway::<evm::ERC20Token>::new(pool.clone()).await?;
+    let evm_gw = PostgresGateway::new(pool.clone()).await?;
 
     info!("Starting Tycho");
     let mut extractor_handles = Vec::new();
