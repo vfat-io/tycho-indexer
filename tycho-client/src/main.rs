@@ -136,3 +136,22 @@ async fn run(tycho_url: String, exchanges: Vec<(String, String)>, block_time: u6
     tracing::debug!("RX closed");
     jh.await.unwrap();
 }
+
+#[cfg(test)]
+mod cli_tests {
+    use clap::Parser;
+
+    use super::CliArgs;
+
+    #[tokio::test]
+    async fn test_cli_args() {
+        let args = CliArgs::parse_from(&["tycho-client", "--tycho-url", "localhost:5000", "--exchange", "uniswap_v2:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640", "--block-time", "50", "--timeout", "5", "--log-folder", "test_logs", "--example"]);
+        let exchanges: Vec<String> = vec!["uniswap_v2:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640".to_string()];
+        assert_eq!(args.tycho_url, "localhost:5000");
+        assert_eq!(args.exchange, exchanges);
+        assert_eq!(args.block_time, 50);
+        assert_eq!(args.timeout, 5);
+        assert_eq!(args.log_folder, "test_logs");
+        assert_eq!(args.example, true);
+    }
+}
