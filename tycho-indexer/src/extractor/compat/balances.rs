@@ -1,12 +1,6 @@
-use crate::{
-    extractor::{
-        evm::{BlockContractChanges, BlockEntityChanges},
-        u256_num::bytes_to_f64,
-    },
-    storage::postgres::{
-        orm,
-        schema::{component_balance, protocol_component, protocol_system},
-    },
+use crate::extractor::{
+    evm::{BlockContractChanges, BlockEntityChanges},
+    u256_num::bytes_to_f64,
 };
 use diesel::prelude::*;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection, RunQueryDsl};
@@ -15,6 +9,10 @@ use futures03::future::join;
 use std::{collections::HashMap, time::Duration};
 use tokio::time::Instant;
 use tracing::{debug, error, info};
+use tycho_storage::postgres::{
+    orm,
+    schema::{component_balance, protocol_component, protocol_system},
+};
 use tycho_types::Bytes;
 
 fn transcode_ascii_balance_to_be(ascii_encoded: &Bytes) -> anyhow::Result<Bytes> {

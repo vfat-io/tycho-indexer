@@ -1,8 +1,10 @@
 use self::versioning::{apply_delta_versioning, apply_versioning};
-use super::*;
-use crate::storage::{
-    AccountToContractStore, Balance, BlockOrTimestamp, Code, ContractStore, StoreKey, StoreVal,
-    TxHash, Version,
+use super::{
+    super::{
+        AccountToContractStore, Balance, BlockOrTimestamp, Code, ContractStore, StoreKey, StoreVal,
+        TxHash, Version,
+    },
+    *,
 };
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::RunQueryDsl;
@@ -1247,7 +1249,7 @@ mod test {
 
     use crate::{
         extractor::evm::{self},
-        storage::postgres::db_fixtures,
+        postgres::db_fixtures,
     };
     use diesel_async::{AsyncConnection, RunQueryDsl};
     use ethers::types::U256;

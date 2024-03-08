@@ -1,7 +1,6 @@
 pub mod extractor;
 pub mod pb;
 pub mod services;
-pub mod storage;
 pub mod substreams;
 
 #[cfg(test)]

@@ -2,14 +2,12 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{
-    extractor::{runner::ExtractorHandle, ExtractionError},
-    storage::postgres::PostgresGateway,
-};
+use crate::extractor::{runner::ExtractorHandle, ExtractionError};
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use tokio::task::JoinHandle;
+use tycho_storage::storage::postgres::PostgresGateway;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 

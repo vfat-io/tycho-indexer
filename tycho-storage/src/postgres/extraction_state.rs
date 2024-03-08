@@ -1,6 +1,4 @@
-use super::{orm, schema, PostgresGateway, StorageError};
-use crate::storage::ExtractionState;
-
+use super::{super::ExtractionState, orm, schema, PostgresGateway, StorageError};
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use tycho_types::models::Chain;

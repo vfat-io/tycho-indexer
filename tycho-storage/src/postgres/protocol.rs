@@ -1,28 +1,28 @@
+use super::{
+    super::{
+        postgres::{
+            orm,
+            orm::{Account, ComponentTVL, NewAccount},
+            schema,
+            versioning::apply_delta_versioning,
+            PostgresGateway,
+        },
+        Balance, BlockOrTimestamp, ComponentId, StorageError, TxHash, Version,
+    },
+    WithTxHash,
+};
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{instrument, warn};
-use unicode_segmentation::UnicodeSegmentation;
-
-use crate::storage::{
-    postgres::{
-        orm,
-        orm::{Account, ComponentTVL, NewAccount},
-        schema,
-        versioning::apply_delta_versioning,
-        PostgresGateway,
-    },
-    Balance, BlockOrTimestamp, ComponentId, StorageError, TxHash, Version,
-};
 use tycho_types::{
     models,
     models::{Address, Chain, ChangeType, FinancialType, ImplementationType},
     Bytes,
 };
-
-use super::WithTxHash;
+use unicode_segmentation::UnicodeSegmentation;
 
 // Private methods
 impl PostgresGateway {
@@ -1289,14 +1289,14 @@ impl PostgresGateway {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::storage::BlockIdentifier;
+    use crate::BlockIdentifier;
 
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
     use rstest::rstest;
     use serde_json::json;
 
-    use crate::storage::postgres::db_fixtures;
+    use crate::postgres::db_fixtures;
     use ethers::prelude::H256;
     use std::str::FromStr;
     use tycho_types::{

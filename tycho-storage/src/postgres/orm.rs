@@ -1,17 +1,16 @@
 use super::{
+    super::{
+        AttrStoreKey, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ComponentId,
+        StorageError, StoreVal, TxHash,
+    },
     schema::{
         account, account_balance, block, chain, component_balance, component_tvl, contract_code,
         contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
         protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
         transaction,
     },
-    versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
+    versioning::{DeltaVersionedRow, StoredDeltaVersionedRow, StoredVersionedRow, VersionedRow},
 };
-use crate::storage::{
-    postgres::versioning::StoredDeltaVersionedRow, AttrStoreKey, Balance, BlockHash,
-    BlockIdentifier, Code, CodeHash, ComponentId, StorageError, StoreVal, TxHash,
-};
-
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
@@ -288,7 +287,7 @@ pub struct NewProtocolSystem {
 }
 
 #[derive(Debug, DbEnum, Clone, PartialEq)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialType"]
+#[ExistingTypePath = "crate::postgres::schema::sql_types::FinancialType"]
 pub enum FinancialType {
     Swap,
     Psm,
@@ -297,7 +296,7 @@ pub enum FinancialType {
 }
 
 #[derive(Debug, DbEnum, Clone, PartialEq)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ImplementationType"]
+#[ExistingTypePath = "crate::postgres::schema::sql_types::ImplementationType"]
 pub enum ImplementationType {
     Custom,
     Vm,

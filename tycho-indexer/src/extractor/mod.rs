@@ -1,15 +1,10 @@
-use std::sync::Arc;
-
+use crate::pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress};
 use async_trait::async_trait;
 use mockall::automock;
 use prost::DecodeError;
+use std::sync::Arc;
 use thiserror::Error;
-
-use crate::{
-    pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
-    storage::StorageError,
-};
-
+use tycho_storage::postgres::{self, cache::CachedGateway, PostgresGateway};
 use tycho_types::models::{ExtractorIdentity, NormalisedMessage};
 
 pub mod evm;

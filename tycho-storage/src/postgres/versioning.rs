@@ -35,6 +35,7 @@
 //! There are basically two versions to resolve this, modify the ORM structs to use smart pointers
 //! thus making the clones cheap. Or modify the traits and the function defined here to work around
 //! the lifetime issues.
+use super::super::StorageError;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
@@ -44,10 +45,7 @@ use diesel::{
     sql_types::{BigInt, Timestamp},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use std::{collections::HashMap, hash::Hash};
-
-use crate::storage::StorageError;
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 /// Trait indicating that a struct can be inserted into a versioned table.
 ///

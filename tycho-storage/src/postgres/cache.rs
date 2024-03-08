@@ -1,7 +1,7 @@
-use crate::storage::{
-    postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, StorageError, TxHash,
+use super::{
+    super::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
+    PostgresGateway,
 };
-
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
@@ -679,17 +679,14 @@ impl DerefMut for CachedGateway {
 
 #[cfg(test)]
 mod test_serial_db {
-    use crate::storage::postgres::{db_fixtures, orm, testing::run_against_db};
+    use super::*;
+    use crate::postgres::{db_fixtures, orm, testing::run_against_db};
     use ethers::types::U256;
     use std::{
         collections::{HashMap, HashSet},
         str::FromStr,
     };
-    use tycho_types::Bytes;
-
-    use crate::pb::tycho::evm::v1::ChangeType;
-
-    use super::*;
+    use tycho_types::{models::ChangeType, Bytes};
 
     #[tokio::test]
     async fn test_write_and_flush() {
@@ -785,7 +782,7 @@ mod test_serial_db {
                 chain: Default::default(),
                 tokens: vec![usdc_address.clone()],
                 contract_addresses: vec![],
-                change: ChangeType::Creation.into(),
+                change: ChangeType::Creation,
                 creation_tx: tx_1.hash.clone(),
                 static_attributes: Default::default(),
                 created_at: Default::default(),

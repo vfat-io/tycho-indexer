@@ -130,8 +130,6 @@
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
 use super::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash, Version, VersionKind};
-use std::{collections::HashMap, hash::Hash, i64, ops::Deref, str::FromStr, sync::Arc};
-
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{
@@ -139,6 +137,7 @@ use diesel_async::{
     AsyncPgConnection, RunQueryDsl,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use std::{collections::HashMap, hash::Hash, i64, ops::Deref, str::FromStr, sync::Arc};
 use tracing::{debug, info};
 use tycho_types::models::Chain;
 
@@ -661,7 +660,7 @@ pub mod db_fixtures {
     //! the entries that are crucial to your test case.
     use std::str::FromStr;
 
-    use crate::storage::{Balance, Code};
+    use crate::{Balance, Code};
     use chrono::NaiveDateTime;
     use diesel::{prelude::*, sql_query};
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -673,7 +672,7 @@ pub mod db_fixtures {
         orm::{FinancialType, ImplementationType},
         schema,
     };
-    use crate::storage::postgres::orm;
+    use crate::postgres::orm;
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {

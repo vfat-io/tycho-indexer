@@ -1,5 +1,5 @@
 use super::{orm, schema, PostgresGateway};
-use crate::storage::{BlockHash, BlockIdentifier, StorageError, TxHash};
+use crate::{BlockHash, BlockIdentifier, StorageError, TxHash};
 
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -260,12 +260,10 @@ impl PostgresGateway {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
+    use crate::postgres::db_fixtures;
     use diesel_async::AsyncConnection;
     use ethers::types::{H256, U256};
-
-    use crate::storage::postgres::db_fixtures;
+    use std::str::FromStr;
     use tycho_types::models::Chain;
 
     use super::*;

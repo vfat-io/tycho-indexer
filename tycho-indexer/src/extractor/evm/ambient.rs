@@ -12,9 +12,7 @@ use crate::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
     },
-    storage::{postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError},
 };
-
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
@@ -28,6 +26,9 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
+use tycho_storage::{
+    postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError,
+};
 use tycho_types::{
     models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
@@ -835,19 +836,17 @@ mod test_serial_db {
     //!
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
-    use crate::{
-        extractor::evm::{
-            token_pre_processor::MockTokenPreProcessorTrait, ComponentBalance, ProtocolComponent,
-        },
-        storage::{
-            postgres,
-            postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
-        },
+    use crate::extractor::evm::{
+        token_pre_processor::MockTokenPreProcessorTrait, ComponentBalance, ProtocolComponent,
     };
     use ethers::types::U256;
     use mpsc::channel;
     use test_log::test;
     use tokio::sync::mpsc;
+    use tycho_storage::{
+        postgres,
+        postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
+    };
     use tycho_types::models::{ChangeType, ContractId};
 
     use super::*;

@@ -25,9 +25,8 @@ tokio.workspace = true
 ethers.workspace = true
 diesel.workspace = true
 diesel-async.workspace = true
-unicode-segmentation.workspace = true
-tycho-types = { workspace = true, features = ["diesel"] }
-
+tycho-types = { workspace = true }
+tycho-storage.workspace = true
 anyhow.workspace = true
 async-stream = "0.3"
 reqwest = "0.11"
@@ -36,8 +35,6 @@ tokio-retry = "0.3"
 tonic = { version = "0.9", features = ["tls-roots"] }
 prost = "0.11"
 prost-types = "0.11"
-diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
-diesel_migrations = "2.1.0"
 clap = { version = "4.4.2", features = ["derive", "env"] }
 tracing-subscriber = { version = "0.3.17", default-features = false, features = [
     "env-filter",
@@ -55,8 +52,6 @@ actix-web-opentelemetry = "0.16.0"
 typetag = "0.2"
 utoipa = { version = "4.2.0", features = ["chrono"] }
 utoipa-swagger-ui = { version = "6.0.0", features = ["actix-web"] }
-lru = "0.12.1"
-itertools = "0.12.1"
 
 [dev-dependencies]
 actix-rt = "2.9.0"

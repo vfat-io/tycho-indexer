@@ -1,13 +1,9 @@
 [workspace]
 members = [
     "tycho-indexer",
-    "substreams/common",
-    "substreams/substreams-helper",
-    "substreams/ethereum-ambient",
-    "substreams/ethereum-uniswap-v2",
-    "substreams/ethereum-uniswap-v3",
     "tycho-client",
     "tycho-types",
+    "tycho-storage"
 ]
 resolver = "2"
 
@@ -33,6 +29,7 @@ uuid = { version = "1.4.1", features = [
 ] }
 hex = "0.4.3"
 tycho-types = { path = "./tycho-types" }
+tycho-storage = { path = "./tycho-storage" }
 futures03 = { version = "0.3.1", package = "futures", features = ["compat"] }
 thiserror = "1"
 tracing = "0.1.37"

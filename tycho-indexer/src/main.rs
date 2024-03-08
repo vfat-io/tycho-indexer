@@ -34,9 +34,8 @@ use tycho_indexer::{
         ExtractionError,
     },
     services::ServicesBuilder,
-    storage::postgres::{self, cache::CachedGateway, PostgresGateway},
 };
-
+use tycho_storage::postgres::{self, cache::CachedGateway, PostgresGateway};
 use tycho_types::models::{self, FinancialType, ImplementationType, ProtocolType};
 
 #[cfg(test)]

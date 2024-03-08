@@ -5,11 +5,8 @@ use std::sync::Arc;
 
 use actix_web::dev::ServerHandle;
 use tracing::info;
-use tycho_indexer::{
-    extractor::ExtractionError,
-    services::ServicesBuilder,
-    storage::postgres::{self, PostgresGateway},
-};
+use tycho_indexer::{extractor::ExtractionError, services::ServicesBuilder};
+use tycho_storage::postgres::{self, PostgresGateway};
 
 #[tokio::main]
 async fn main() -> Result<(), ExtractionError> {

@@ -1,9 +1,6 @@
 //! This module contains Tycho RPC implementation
 
-use crate::{
-    extractor::evm,
-    storage::{self, BlockIdentifier, BlockOrTimestamp, StorageError},
-};
+use crate::extractor::evm;
 use actix_web::{web, HttpResponse};
 use diesel_async::{
     pooled_connection::deadpool::{self, Pool},
@@ -12,6 +9,7 @@ use diesel_async::{
 use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
+use tycho_storage::{self, BlockIdentifier, BlockOrTimestamp, StorageError};
 use tycho_types::{
     dto,
     dto::{ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
