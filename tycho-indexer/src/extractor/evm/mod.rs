@@ -843,7 +843,6 @@ pub struct ProtocolStateDelta {
     pub deleted_attributes: HashSet<AttrStoreKey>,
 }
 
-// TODO: remove dead code check skip once extractor is implemented
 impl ProtocolStateDelta {
     pub fn new(component_id: ComponentId, attributes: HashMap<AttrStoreKey, StoreVal>) -> Self {
         Self { component_id, updated_attributes: attributes, deleted_attributes: HashSet::new() }

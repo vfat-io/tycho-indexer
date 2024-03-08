@@ -430,6 +430,29 @@ pub struct NewComponentBalance {
     pub valid_to: Option<NaiveDateTime>,
 }
 
+impl NewComponentBalance {
+    pub fn new(
+        token_id: i64,
+        new_balance: Balance,
+        balance_float: f64,
+        previous_value: Option<Balance>,
+        modify_tx: i64,
+        protocol_component_id: i64,
+        valid_from: NaiveDateTime,
+    ) -> Self {
+        Self {
+            token_id,
+            new_balance,
+            previous_value: previous_value.unwrap_or_else(|| Bytes::from("0x00")),
+            balance_float,
+            modify_tx,
+            protocol_component_id,
+            valid_from,
+            valid_to: None,
+        }
+    }
+}
+
 impl VersionedRow for NewComponentBalance {
     type SortKey = (i64, i64, NaiveDateTime);
     type EntityId = (i64, i64);
@@ -537,6 +560,31 @@ pub struct NewProtocolComponent {
     pub creation_tx: i64,
     pub created_at: NaiveDateTime,
     pub attributes: Option<serde_json::Value>,
+}
+
+impl NewProtocolComponent {
+    #[allow(unused_variables, clippy::too_many_arguments)]
+    pub fn new(
+        external_id: &str,
+        chain_id: i64,
+        protocol_type_id: i64,
+        protocol_system_id: i64,
+        creation_tx: i64,
+        created_at: NaiveDateTime,
+        attributes: &HashMap<String, Bytes>,
+    ) -> Self {
+        let attributes =
+            (!attributes.is_empty()).then(|| serde_json::to_value(attributes).unwrap());
+        Self {
+            external_id: external_id.to_string(),
+            chain_id,
+            protocol_type_id,
+            protocol_system_id,
+            creation_tx,
+            created_at,
+            attributes,
+        }
+    }
 }
 
 impl ProtocolComponent {
@@ -933,6 +981,26 @@ pub struct NewProtocolState {
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
+}
+
+impl NewProtocolState {
+    pub fn new(
+        protocol_component_id: i64,
+        attribute_name: &str,
+        attribute_value: Option<&Bytes>,
+        modify_tx: i64,
+        valid_from: NaiveDateTime,
+    ) -> Self {
+        Self {
+            protocol_component_id,
+            attribute_name: Some(attribute_name.to_string()),
+            attribute_value: attribute_value.cloned(),
+            previous_value: None,
+            modify_tx,
+            valid_from,
+            valid_to: None,
+        }
+    }
 }
 
 impl VersionedRow for NewProtocolState {

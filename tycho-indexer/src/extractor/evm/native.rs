@@ -3,6 +3,7 @@ use crate::{
         evm::{self, chain_state::ChainState, Block},
         ExtractionError, Extractor, ExtractorMsg,
     },
+    models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
@@ -215,9 +216,10 @@ where
             .upsert_block(&(&changes.block).into())
             .await?;
 
-        let mut new_protocol_components: Vec<evm::ProtocolComponent> = vec![];
-        let mut state_updates: Vec<(TxHash, evm::ProtocolStateDelta)> = vec![];
-        let mut balance_changes: Vec<evm::ComponentBalance> = vec![];
+        let mut new_protocol_components: Vec<models::protocol::ProtocolComponent> = vec![];
+        let mut state_updates: Vec<(TxHash, models::protocol::ProtocolComponentStateDelta)> =
+            vec![];
+        let mut balance_changes: Vec<models::protocol::ComponentBalance> = vec![];
 
         let mut protocol_tokens: HashSet<H160> = HashSet::new();
 
@@ -229,20 +231,20 @@ where
             let hash: TxHash = tx.tx.hash.into();
 
             for (_component_id, new_protocol_component) in tx.new_protocol_components.iter() {
-                new_protocol_components.push(new_protocol_component.clone());
+                new_protocol_components.push(new_protocol_component.into());
                 protocol_tokens.extend(new_protocol_component.tokens.iter());
             }
 
             state_updates.extend(
                 tx.protocol_states
                     .values()
-                    .map(|state_change| (hash.clone(), state_change.clone())),
+                    .map(|state_change| (hash.clone(), state_change.into())),
             );
 
             balance_changes.extend(
                 tx.balance_changes
                     .iter()
-                    .flat_map(|(_component_id, tokens)| tokens.values().cloned()),
+                    .flat_map(|(_, tokens)| tokens.values().map(Into::into)),
             );
         }
 

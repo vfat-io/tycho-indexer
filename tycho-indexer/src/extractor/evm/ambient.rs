@@ -268,20 +268,21 @@ where
                 }
             }
             if !update.protocol_components.is_empty() {
-                let protocol_components: Vec<evm::ProtocolComponent> = update
+                let protocol_components: Vec<models::protocol::ProtocolComponent> = update
                     .protocol_components
                     .values()
-                    .cloned()
+                    .map(Into::into)
                     .collect();
                 self.state_gateway
                     .add_protocol_components(&protocol_components)
                     .await?;
             }
             if !update.component_balances.is_empty() {
-                let mut component_balances_vec: Vec<evm::ComponentBalance> = Vec::new();
+                let mut component_balances_vec: Vec<models::protocol::ComponentBalance> =
+                    Vec::new();
                 for inner_map in update.component_balances.values() {
                     for balance in inner_map.values() {
-                        component_balances_vec.push(balance.clone());
+                        component_balances_vec.push(balance.into());
                     }
                 }
                 self.state_gateway
@@ -351,15 +352,15 @@ where
 
         let mut component_balances_map: HashMap<
             evm::ComponentId,
-            HashMap<H160, evm::ComponentBalance>,
+            HashMap<Bytes, models::protocol::ComponentBalance>,
         > = HashMap::new();
         for balance in component_balances {
             let component_id = balance.component_id.clone();
-            let h160 = balance.token;
+            let token_address = balance.token.clone();
             let inner_map = component_balances_map
                 .entry(component_id)
                 .or_default();
-            inner_map.insert(h160, balance);
+            inner_map.insert(token_address, balance.clone());
         }
 
         /* This method does not exist anymore
@@ -386,7 +387,20 @@ where
             //  and remove components that were added.
             HashMap::new(),
             HashMap::new(),
-            component_balances_map,
+            component_balances_map
+                .into_iter()
+                .map(|(component_id, balances)| {
+                    (
+                        component_id,
+                        balances
+                            .into_iter()
+                            .map(|(token_address, balance)| {
+                                (H160::from_slice(token_address.as_ref()), balance.into())
+                            })
+                            .collect(),
+                    )
+                })
+                .collect(),
         );
         Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
     }
@@ -1140,7 +1154,7 @@ mod test_serial_db {
                 .await
                 .unwrap();
             assert_eq!(protocol_components.len(), 1);
-            assert_eq!(protocol_components[0].creation_tx, TX_HASH_0.parse().unwrap());
+            assert_eq!(protocol_components[0].creation_tx, Bytes::from(TX_HASH_0));
 
             let component_balances = cached_gw
                 .get_balance_deltas(

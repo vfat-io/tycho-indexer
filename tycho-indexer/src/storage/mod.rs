@@ -80,10 +80,8 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::{
-    extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
     models,
-    models::{Chain, ExtractionState, ProtocolType},
-    storage::postgres::orm,
+    models::{Chain, ExtractionState},
 };
 use tycho_types::Bytes;
 
@@ -602,27 +600,6 @@ pub trait StorableProtocolStateDelta<S, N, I>: Sized + Send + Sync + 'static {
 pub trait ProtocolGateway {
     type DB;
 
-    type ProtocolState: StorableProtocolState<orm::ProtocolState, orm::NewProtocolState, i64>;
-    type ProtocolStateDelta: StorableProtocolStateDelta<
-        orm::ProtocolState,
-        orm::NewProtocolState,
-        i64,
-    >;
-
-    type ProtocolType: StorableProtocolType<orm::ProtocolType, orm::NewProtocolType, i64>;
-
-    type ProtocolComponent: StorableProtocolComponent<
-        orm::ProtocolComponent,
-        orm::NewProtocolComponent,
-        i64,
-    >;
-
-    type ComponentBalance: StorableComponentBalance<
-        orm::ComponentBalance,
-        orm::NewComponentBalance,
-        i64,
-    >;
-
     /// Retrieve ProtocolComponent from the db
     ///
     /// # Parameters
@@ -639,17 +616,17 @@ pub trait ProtocolGateway {
         ids: Option<&[&str]>,
         min_tvl: Option<f64>,
         conn: &mut Self::DB,
-    ) -> Result<Vec<Self::ProtocolComponent>, StorageError>;
+    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError>;
 
     async fn add_protocol_components(
         &self,
-        new: &[&Self::ProtocolComponent],
+        new: &[models::protocol::ProtocolComponent],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
     async fn delete_protocol_components(
         &self,
-        to_delete: &[&Self::ProtocolComponent],
+        to_delete: &[models::protocol::ProtocolComponent],
         block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
@@ -662,7 +639,7 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully.
     async fn add_protocol_types(
         &self,
-        new_protocol_types: &[Self::ProtocolType],
+        new_protocol_types: &[models::ProtocolType],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -689,12 +666,12 @@ pub trait ProtocolGateway {
         system: Option<String>,
         id: Option<&[&str]>,
         conn: &mut Self::DB,
-    ) -> Result<Vec<ProtocolState>, StorageError>;
+    ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError>;
 
     async fn update_protocol_states(
         &self,
         chain: &Chain,
-        new: &[(TxHash, &ProtocolStateDelta)],
+        new: &[(TxHash, &models::protocol::ProtocolComponentStateDelta)],
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -725,7 +702,7 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_component_balances(
         &self,
-        component_balances: &[&Self::ComponentBalance],
+        component_balances: &[models::protocol::ComponentBalance],
         chain: &Chain,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
@@ -764,7 +741,7 @@ pub trait ProtocolGateway {
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<Vec<ProtocolStateDelta>, StorageError>;
+    ) -> Result<Vec<models::protocol::ProtocolComponentStateDelta>, StorageError>;
 
     /// Retrieve protocol component balance changes
     ///
@@ -783,7 +760,7 @@ pub trait ProtocolGateway {
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut Self::DB,
-    ) -> Result<Vec<ComponentBalance>, StorageError>;
+    ) -> Result<Vec<models::protocol::ComponentBalance>, StorageError>;
 
     async fn get_balances(
         &self,
@@ -1131,13 +1108,4 @@ pub trait ContractStateGateway {
 
 pub trait StateGateway<DB>: ProtocolGateway<DB = DB> + Send + Sync {}
 
-pub type StateGatewayType<DB> = Arc<
-    dyn StateGateway<
-        DB,
-        ProtocolState = ProtocolState,
-        ProtocolStateDelta = ProtocolStateDelta,
-        ProtocolType = ProtocolType,
-        ProtocolComponent = ProtocolComponent,
-        ComponentBalance = ComponentBalance,
-    >,
->;
+pub type StateGatewayType<DB> = Arc<dyn StateGateway<DB>>;

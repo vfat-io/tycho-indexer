@@ -19,7 +19,6 @@ use tokio::{
 use tracing::{debug, error, info, trace};
 
 use crate::{
-    extractor::evm::{self, ComponentBalance, ProtocolComponent, ProtocolStateDelta},
     models,
     models::{Chain, ExtractionState},
     storage::{
@@ -42,13 +41,13 @@ pub(crate) enum WriteOp {
     // Simply merge
     UpdateContracts(Vec<(TxHash, models::contract::ContractDelta)>),
     // Simply merge
-    InsertProtocolComponents(Vec<evm::ProtocolComponent>),
+    InsertProtocolComponents(Vec<models::protocol::ProtocolComponent>),
     // Simply merge
     InsertTokens(Vec<models::token::CurrencyToken>),
     // Simply merge
-    InsertComponentBalances(Vec<evm::ComponentBalance>),
+    InsertComponentBalances(Vec<models::protocol::ComponentBalance>),
     // Simply merge
-    UpsertProtocolState(Vec<(TxHash, ProtocolStateDelta)>),
+    UpsertProtocolState(Vec<(TxHash, models::protocol::ProtocolComponentStateDelta)>),
 }
 
 impl WriteOp {
@@ -376,9 +375,8 @@ impl DBCacheWriteExecutor {
                     .await
             }
             WriteOp::InsertProtocolComponents(components) => {
-                let collected_components: Vec<&ProtocolComponent> = components.iter().collect();
                 self.state_gateway
-                    .add_protocol_components(collected_components.as_slice(), conn)
+                    .add_protocol_components(components.as_slice(), conn)
                     .await
             }
             WriteOp::InsertTokens(tokens) => {
@@ -387,13 +385,15 @@ impl DBCacheWriteExecutor {
                     .await
             }
             WriteOp::InsertComponentBalances(balances) => {
-                let collected_balances: Vec<&evm::ComponentBalance> = balances.iter().collect();
                 self.state_gateway
-                    .add_component_balances(collected_balances.as_slice(), &self.chain, conn)
+                    .add_component_balances(balances.as_slice(), &self.chain, conn)
                     .await
             }
             WriteOp::UpsertProtocolState(deltas) => {
-                let collected_changes: Vec<(TxHash, &ProtocolStateDelta)> = deltas
+                let collected_changes: Vec<(
+                    TxHash,
+                    &models::protocol::ProtocolComponentStateDelta,
+                )> = deltas
                     .iter()
                     .map(|(tx, update)| (tx.clone(), update))
                     .collect();
@@ -414,7 +414,11 @@ struct RevertParameters {
 
 type DeltasCache = LruCache<
     RevertParameters,
-    (Vec<models::contract::ContractDelta>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
+    (
+        Vec<models::contract::ContractDelta>,
+        Vec<models::protocol::ProtocolComponentStateDelta>,
+        Vec<models::protocol::ComponentBalance>,
+    ),
 >;
 
 type OpenTx = (DBTransaction, oneshot::Receiver<Result<(), StorageError>>);
@@ -572,7 +576,11 @@ impl CachedGateway {
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
     ) -> Result<
-        (Vec<models::contract::ContractDelta>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
+        (
+            Vec<models::contract::ContractDelta>,
+            Vec<models::protocol::ProtocolComponentStateDelta>,
+            Vec<models::protocol::ComponentBalance>,
+        ),
         StorageError,
     > {
         let mut lru_cache = self.lru_cache.lock().await;
@@ -619,7 +627,7 @@ impl CachedGateway {
 
     pub async fn update_protocol_states(
         &self,
-        new: &[(TxHash, ProtocolStateDelta)],
+        new: &[(TxHash, models::protocol::ProtocolComponentStateDelta)],
     ) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpsertProtocolState(new.to_owned()))
             .await?;
@@ -628,7 +636,7 @@ impl CachedGateway {
 
     pub async fn add_protocol_components(
         &self,
-        new: &[evm::ProtocolComponent],
+        new: &[models::protocol::ProtocolComponent],
     ) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertProtocolComponents(Vec::from(new)))
             .await?;
@@ -646,7 +654,7 @@ impl CachedGateway {
 
     pub async fn add_component_balances(
         &self,
-        new: &[evm::ComponentBalance],
+        new: &[models::protocol::ComponentBalance],
     ) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertComponentBalances(Vec::from(new)))
             .await?;
@@ -674,11 +682,11 @@ impl DerefMut for CachedGateway {
 #[cfg(test)]
 mod test_serial_db {
     use crate::storage::postgres::{db_fixtures, orm, testing::run_against_db};
-    use ethers::{
-        prelude::H256,
-        types::{H160, U256},
+    use ethers::types::U256;
+    use std::{
+        collections::{HashMap, HashSet},
+        str::FromStr,
     };
-    use std::{collections::HashMap, str::FromStr};
     use tycho_types::Bytes;
 
     use crate::pb::tycho::evm::v1::ChangeType;
@@ -761,10 +769,9 @@ mod test_serial_db {
             let block_1 = get_sample_block(1);
             let tx_1 = get_sample_transaction(1);
             let extraction_state_1 = get_sample_extraction(1);
-            let usdc_address =
-                H160::from_str("0xdAC17F958D2ee523a2206206994597C13D831ec7").unwrap();
+            let usdc_address = Bytes::from("0xdAC17F958D2ee523a2206206994597C13D831ec7");
             let token = models::token::CurrencyToken::new(
-                &Bytes::from(usdc_address.as_bytes()),
+                &usdc_address,
                 "USDT",
                 6,
                 0,
@@ -773,23 +780,23 @@ mod test_serial_db {
                 100,
             );
             let protocol_component_id = "ambient_USDT-USDC".to_owned();
-            let protocol_component = ProtocolComponent {
+            let protocol_component = models::protocol::ProtocolComponent {
                 id: protocol_component_id.clone(),
                 protocol_system: "ambient".to_string(),
                 protocol_type_name: "ambient_pool".to_string(),
                 chain: Default::default(),
-                tokens: vec![usdc_address],
-                contract_ids: vec![],
+                tokens: vec![usdc_address.clone()],
+                contract_addresses: vec![],
                 change: ChangeType::Creation.into(),
-                creation_tx: H256::from_slice(&tx_1.hash),
+                creation_tx: tx_1.hash.clone(),
                 static_attributes: Default::default(),
                 created_at: Default::default(),
             };
-            let component_balance = ComponentBalance {
-                token: usdc_address,
+            let component_balance = models::protocol::ComponentBalance {
+                token: usdc_address.clone(),
                 balance_float: 0.0,
-                balance: Bytes::from(&[0u8]),
-                modify_tx: H256::from_slice(&tx_1.hash),
+                new_balance: Bytes::from(&[0u8]),
+                modify_tx: tx_1.hash.clone(),
                 component_id: protocol_component_id.clone(),
             };
             let os_rx_1 = send_write_message(
@@ -816,7 +823,11 @@ mod test_serial_db {
                 vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
                     .into_iter()
                     .collect();
-            let protocol_state_delta = ProtocolStateDelta::new(protocol_component_id, attributes);
+            let protocol_state_delta = models::protocol::ProtocolComponentStateDelta::new(
+                protocol_component_id.as_str(),
+                attributes,
+                HashSet::new(),
+            );
             let os_rx_2 = send_write_message(
                 &tx,
                 block_2.clone(),

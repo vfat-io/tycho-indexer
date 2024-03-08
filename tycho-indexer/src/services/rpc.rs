@@ -247,6 +247,43 @@ impl From<models::token::CurrencyToken> for ResponseToken {
     }
 }
 
+impl From<models::protocol::ProtocolComponentState> for dto::ResponseProtocolState {
+    fn from(value: models::protocol::ProtocolComponentState) -> Self {
+        Self {
+            component_id: value.component_id,
+            attributes: value.attributes,
+            modify_tx: value.modify_tx,
+        }
+    }
+}
+
+impl From<models::protocol::ProtocolComponent> for dto::ProtocolComponent {
+    fn from(value: models::protocol::ProtocolComponent) -> Self {
+        Self {
+            id: value.id,
+            protocol_system: value.protocol_system,
+            protocol_type_name: value.protocol_type_name,
+            chain: value.chain.into(),
+            tokens: value.tokens,
+            contract_ids: value.contract_addresses,
+            static_attributes: value.static_attributes,
+            change: value.change.into(),
+            creation_tx: value.creation_tx,
+            created_at: value.created_at,
+        }
+    }
+}
+
+impl From<models::protocol::ProtocolComponentStateDelta> for dto::ProtocolStateDelta {
+    fn from(value: models::protocol::ProtocolComponentStateDelta) -> Self {
+        Self {
+            component_id: value.component_id,
+            updated_attributes: value.updated_attributes,
+            deleted_attributes: value.removed_attributes,
+        }
+    }
+}
+
 impl RpcHandler {
     pub fn new(
         db_gateway: Arc<EvmPostgresGateway>,

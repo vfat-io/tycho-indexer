@@ -681,7 +681,7 @@ pub mod db_fixtures {
         orm::{FinancialType, ImplementationType},
         schema,
     };
-    use crate::storage::orm;
+    use crate::storage::postgres::orm;
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
