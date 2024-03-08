@@ -1,5 +1,4 @@
 pub mod extractor;
-pub mod models;
 pub mod pb;
 pub mod services;
 pub mod storage;

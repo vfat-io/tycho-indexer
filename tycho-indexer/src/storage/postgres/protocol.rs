@@ -6,21 +6,21 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{instrument, warn};
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{
-    models,
-    models::{Chain, FinancialType, ImplementationType},
-    storage::{
-        postgres::{
-            orm,
-            orm::{Account, ComponentTVL, NewAccount},
-            schema,
-            versioning::apply_delta_versioning,
-            PostgresGateway,
-        },
-        Address, Balance, BlockOrTimestamp, ChangeType, ComponentId, StorageError, TxHash, Version,
+use crate::storage::{
+    postgres::{
+        orm,
+        orm::{Account, ComponentTVL, NewAccount},
+        schema,
+        versioning::apply_delta_versioning,
+        PostgresGateway,
     },
+    Balance, BlockOrTimestamp, ComponentId, StorageError, TxHash, Version,
 };
-use tycho_types::Bytes;
+use tycho_types::{
+    models,
+    models::{Address, Chain, ChangeType, FinancialType, ImplementationType},
+    Bytes,
+};
 
 use super::WithTxHash;
 
@@ -1289,20 +1289,20 @@ impl PostgresGateway {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::storage::{BlockIdentifier, ChangeType};
+    use crate::storage::BlockIdentifier;
 
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
     use rstest::rstest;
     use serde_json::json;
 
-    use crate::{
-        models,
-        models::{FinancialType, ImplementationType},
-        storage::postgres::db_fixtures,
-    };
+    use crate::storage::postgres::db_fixtures;
     use ethers::prelude::H256;
     use std::str::FromStr;
+    use tycho_types::{
+        models,
+        models::{ChangeType, FinancialType, ImplementationType},
+    };
 
     type EVMGateway = PostgresGateway;
 

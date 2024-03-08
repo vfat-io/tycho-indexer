@@ -1,8 +1,5 @@
 //! This module contains Tycho Websocket implementation
-use crate::{
-    extractor::{runner::MessageSender, ExtractorMsg},
-    models::ExtractorIdentity,
-};
+use crate::extractor::{runner::MessageSender, ExtractorMsg};
 use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
@@ -16,6 +13,7 @@ use std::{
 };
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
+use tycho_types::models::ExtractorIdentity;
 use uuid::Uuid;
 
 /// How often heartbeat pings are sent
@@ -340,10 +338,8 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsActor {
 
 #[cfg(test)]
 mod tests {
-    use crate::{extractor::runner::ControlMessage, models::Chain};
-
     use super::*;
-    use crate::models::NormalisedMessage;
+    use crate::extractor::runner::ControlMessage;
     use actix_rt::time::timeout;
     use actix_test::{start, start_with, TestServerConfig};
     use actix_web::App;
@@ -363,6 +359,7 @@ mod tests {
         MaybeTlsStream, WebSocketStream,
     };
     use tracing::{debug, info_span, Instrument};
+    use tycho_types::models::{Chain, NormalisedMessage};
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     struct DummyMessage {

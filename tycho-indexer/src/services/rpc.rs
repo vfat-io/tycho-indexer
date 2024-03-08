@@ -2,12 +2,8 @@
 
 use crate::{
     extractor::evm,
-    models,
-    models::Chain,
-    storage::{self, Address, BlockIdentifier, BlockOrTimestamp, StorageError},
+    storage::{self, BlockIdentifier, BlockOrTimestamp, StorageError},
 };
-use tycho_types::{dto::ProtocolComponentRequestParameters, Bytes};
-
 use actix_web::{web, HttpResponse};
 use diesel_async::{
     pooled_connection::deadpool::{self, Pool},
@@ -16,14 +12,11 @@ use diesel_async::{
 use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
-
-use crate::models::{
-    contract::{Contract, ContractDelta},
-    token::CurrencyToken,
-};
 use tycho_types::{
     dto,
-    dto::{ResponseToken, StateRequestParameters},
+    dto::{ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
+    models::{Address, Chain},
+    Bytes,
 };
 
 use super::EvmPostgresGateway;
@@ -94,36 +87,6 @@ impl From<evm::AccountUpdate> for dto::AccountUpdate {
             balance: account_update.balance.map(Bytes::from),
             code: account_update.code,
             change: account_update.change.into(),
-        }
-    }
-}
-
-impl From<storage::ChangeType> for dto::ChangeType {
-    fn from(value: storage::ChangeType) -> Self {
-        match value {
-            storage::ChangeType::Update => dto::ChangeType::Update,
-            storage::ChangeType::Creation => dto::ChangeType::Creation,
-            storage::ChangeType::Deletion => dto::ChangeType::Deletion,
-        }
-    }
-}
-
-impl From<dto::Chain> for Chain {
-    fn from(value: dto::Chain) -> Self {
-        match value {
-            dto::Chain::Ethereum => Chain::Ethereum,
-            dto::Chain::Starknet => Chain::Starknet,
-            dto::Chain::ZkSync => Chain::ZkSync,
-        }
-    }
-}
-
-impl From<Chain> for dto::Chain {
-    fn from(value: Chain) -> Self {
-        match value {
-            Chain::Ethereum => dto::Chain::Ethereum,
-            Chain::Starknet => dto::Chain::Starknet,
-            Chain::ZkSync => dto::Chain::ZkSync,
         }
     }
 }
@@ -199,86 +162,6 @@ impl TryFrom<&dto::VersionParam> for BlockOrTimestamp {
 pub struct RpcHandler {
     db_gateway: Arc<EvmPostgresGateway>,
     db_connection_pool: Pool<AsyncPgConnection>,
-}
-
-impl From<models::contract::Contract> for dto::ResponseAccount {
-    fn from(value: Contract) -> Self {
-        dto::ResponseAccount::new(
-            value.chain.into(),
-            value.address,
-            value.title,
-            value.slots,
-            value.balance,
-            value.code,
-            value.code_hash,
-            value.balance_modify_tx,
-            value.code_modify_tx,
-            value.creation_tx,
-        )
-    }
-}
-
-impl From<models::contract::ContractDelta> for dto::AccountUpdate {
-    fn from(value: ContractDelta) -> Self {
-        dto::AccountUpdate::new(
-            value.address,
-            value.chain.into(),
-            value.slots,
-            value.balance,
-            value.code,
-            value.change.into(),
-        )
-    }
-}
-
-impl From<models::token::CurrencyToken> for ResponseToken {
-    fn from(value: CurrencyToken) -> Self {
-        Self {
-            chain: value.chain.into(),
-            address: value.address,
-            symbol: value.symbol,
-            decimals: value.decimals,
-            tax: value.tax,
-            gas: value.gas,
-        }
-    }
-}
-
-impl From<models::protocol::ProtocolComponentState> for dto::ResponseProtocolState {
-    fn from(value: models::protocol::ProtocolComponentState) -> Self {
-        Self {
-            component_id: value.component_id,
-            attributes: value.attributes,
-            modify_tx: value.modify_tx,
-        }
-    }
-}
-
-impl From<models::protocol::ProtocolComponent> for dto::ProtocolComponent {
-    fn from(value: models::protocol::ProtocolComponent) -> Self {
-        Self {
-            id: value.id,
-            protocol_system: value.protocol_system,
-            protocol_type_name: value.protocol_type_name,
-            chain: value.chain.into(),
-            tokens: value.tokens,
-            contract_ids: value.contract_addresses,
-            static_attributes: value.static_attributes,
-            change: value.change.into(),
-            creation_tx: value.creation_tx,
-            created_at: value.created_at,
-        }
-    }
-}
-
-impl From<models::protocol::ProtocolComponentStateDelta> for dto::ProtocolStateDelta {
-    fn from(value: models::protocol::ProtocolComponentStateDelta) -> Self {
-        Self {
-            component_id: value.component_id,
-            updated_attributes: value.updated_attributes,
-            deleted_attributes: value.removed_attributes,
-        }
-    }
 }
 
 impl RpcHandler {
@@ -830,6 +713,7 @@ mod tests {
     use ethers::prelude::H256;
 
     use diesel_async::RunQueryDsl;
+    use tycho_types::models::ChangeType;
 
     use super::*;
 
@@ -1496,7 +1380,7 @@ mod tests {
             evm_slots([(6, 30), (5, 25), (1, 3), (0, 2)]),
             Some(U256::from(101)),
             None,
-            storage::ChangeType::Update,
+            ChangeType::Update,
         );
 
         let request = dto::ContractDeltaRequestBody {

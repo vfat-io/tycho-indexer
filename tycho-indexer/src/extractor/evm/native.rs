@@ -3,8 +3,6 @@ use crate::{
         evm::{self, chain_state::ChainState, Block},
         ExtractionError, Extractor, ExtractorMsg,
     },
-    models,
-    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockEntityChanges,
@@ -24,7 +22,11 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
-use tycho_types::Bytes;
+use tycho_types::{
+    models,
+    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
+    Bytes,
+};
 
 use super::{
     token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait},
@@ -700,17 +702,11 @@ mod test_serial_db {
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
 
-    use mpsc::channel;
-    use tokio::sync::mpsc;
-
-    use test_serial_db::evm::ProtocolChangesWithTx;
-
     use crate::{
         extractor::evm::{
             token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, ProtocolStateDelta,
             Transaction,
         },
-        models,
         storage::{
             postgres,
             postgres::{
@@ -720,6 +716,10 @@ mod test_serial_db {
             },
         },
     };
+    use mpsc::channel;
+    use test_serial_db::evm::ProtocolChangesWithTx;
+    use tokio::sync::mpsc;
+    use tycho_types::models;
 
     use super::*;
 

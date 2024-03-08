@@ -1,9 +1,11 @@
-use crate::{extractor::evm::ERC20Token, models::Chain};
+use crate::extractor::evm::ERC20Token;
 use async_trait::async_trait;
 use ethers::{abi::Abi, contract::Contract, prelude::Provider, providers::Http, types::H160};
 use serde_json::from_str;
 use std::sync::Arc;
 use tracing::instrument;
+
+use tycho_types::models::Chain;
 
 #[derive(Debug, Clone)]
 pub struct TokenPreProcessor {

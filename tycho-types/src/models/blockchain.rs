@@ -1,11 +1,12 @@
-use crate::models::Chain; // TODO: Move change type
 use crate::{
-    models::protocol::{ComponentBalance, ProtocolComponent},
-    storage::ComponentId,
+    models::{
+        protocol::{ComponentBalance, ProtocolComponent},
+        Chain, ComponentId,
+    },
+    Bytes,
 };
 use chrono::NaiveDateTime;
 use std::collections::HashMap;
-use tycho_types::Bytes;
 
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct Block {

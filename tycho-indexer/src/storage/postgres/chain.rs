@@ -1,15 +1,13 @@
+use super::{orm, schema, PostgresGateway};
+use crate::storage::{BlockHash, BlockIdentifier, StorageError, TxHash};
+
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use std::collections::HashMap;
 use tracing::{instrument, warn};
-use tycho_types::Bytes;
-
-use crate::storage::{BlockHash, BlockIdentifier, StorageError, TxHash};
-
-use super::{orm, schema, PostgresGateway};
-use crate::models::blockchain::*;
+use tycho_types::{models::blockchain::*, Bytes};
 
 impl PostgresGateway {
     #[instrument(skip_all)]
@@ -267,7 +265,8 @@ mod test {
     use diesel_async::AsyncConnection;
     use ethers::types::{H256, U256};
 
-    use crate::{models::Chain, storage::postgres::db_fixtures};
+    use crate::storage::postgres::db_fixtures;
+    use tycho_types::models::Chain;
 
     use super::*;
 

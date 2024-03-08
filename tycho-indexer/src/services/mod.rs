@@ -4,8 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     extractor::{runner::ExtractorHandle, ExtractionError},
-    models::Chain,
-    storage::{postgres::PostgresGateway, ContractId},
+    storage::postgres::PostgresGateway,
 };
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
@@ -14,13 +13,16 @@ use tokio::task::JoinHandle;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use tycho_types::dto::{
-    AccountUpdate, BlockParam, ChangeType, ContractDeltaRequestBody, ContractDeltaRequestResponse,
-    ProtocolComponent, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody,
-    ProtocolDeltaRequestBody, ProtocolDeltaRequestResponse, ProtocolId, ProtocolStateDelta,
-    ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState,
-    ResponseToken, StateRequestBody, StateRequestResponse, TokensRequestBody,
-    TokensRequestResponse, VersionParam,
+use tycho_types::{
+    dto::{
+        AccountUpdate, BlockParam, ChangeType, ContractDeltaRequestBody,
+        ContractDeltaRequestResponse, ProtocolComponent, ProtocolComponentRequestResponse,
+        ProtocolComponentsRequestBody, ProtocolDeltaRequestBody, ProtocolDeltaRequestResponse,
+        ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody, ProtocolStateRequestResponse,
+        ResponseAccount, ResponseProtocolState, ResponseToken, StateRequestBody,
+        StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
+    },
+    models::{Chain, ContractId},
 };
 
 mod rpc;

@@ -70,25 +70,17 @@
 //! for these enums. Following this approach paves the way for initializing a
 //! cross-chain compatible gateway (For instance, refer
 //! [enum_dispatch](https://docs.rs/enum_dispatch/latest/enum_dispatch/) crate).
-use std::{collections::HashMap, fmt::Display};
-
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, fmt::Display};
 use thiserror::Error;
-use utoipa::ToSchema;
-
-use crate::{
+use tycho_types::{
     models,
-    models::{Chain, ExtractionState},
+    models::{Address, Chain, ContractId, ExtractionState},
+    Bytes,
 };
-use tycho_types::Bytes;
 
 pub mod postgres;
-
-/// Address hash literal type to uniquely identify contracts/accounts on a
-/// blockchain.
-pub type Address = Bytes;
 
 /// Block hash literal type to uniquely identify a block in the chain and
 /// likely across chains.
@@ -352,30 +344,6 @@ pub enum VersionKind {
     Index(i64),
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
-pub struct ContractId {
-    #[schema(value_type=String)]
-    pub address: Address,
-    pub chain: Chain,
-}
-
-/// Uniquely identifies a contract on a specific chain.
-impl ContractId {
-    pub fn new(chain: Chain, address: Address) -> Self {
-        Self { address, chain }
-    }
-
-    pub fn address(&self) -> &Address {
-        &self.address
-    }
-}
-
-impl Display for ContractId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}: 0x{}", self.chain, hex::encode(&self.address))
-    }
-}
-
 /// A version desribes the state of the DB at a exact point in time.
 /// See the module level docs for more information on how versioning works.
 #[derive(Debug, Clone)]
@@ -581,14 +549,6 @@ pub trait ProtocolGateway {
         tvl_values: &HashMap<String, f64>,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
-}
-
-#[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize)]
-pub enum ChangeType {
-    #[default]
-    Update,
-    Deletion,
-    Creation,
 }
 
 /// Manage contracts and their state in storage.

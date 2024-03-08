@@ -5,9 +5,17 @@ pub mod contract;
 pub mod protocol;
 pub mod token;
 
+use crate::{dto, Bytes};
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use strum_macros::{Display, EnumString};
 use utoipa::ToSchema;
+
+/// Address hash literal type to uniquely identify contracts/accounts on a
+/// blockchain.
+pub type Address = Bytes;
+
+pub type ComponentId = String;
 
 #[derive(
     Debug,
@@ -30,6 +38,16 @@ pub enum Chain {
     Ethereum,
     Starknet,
     ZkSync,
+}
+
+impl From<dto::Chain> for Chain {
+    fn from(value: dto::Chain) -> Self {
+        match value {
+            dto::Chain::Ethereum => Chain::Ethereum,
+            dto::Chain::Starknet => Chain::Starknet,
+            dto::Chain::ZkSync => Chain::ZkSync,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -74,6 +92,7 @@ impl ExtractionState {
     }
 }
 
+// TODO: replace with types from dto on extractor
 #[typetag::serde(tag = "type")]
 pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static {
     fn source(&self) -> ExtractorIdentity;
@@ -111,5 +130,37 @@ impl ProtocolType {
         implementation: ImplementationType,
     ) -> Self {
         ProtocolType { name, financial_type, attribute_schema, implementation }
+    }
+}
+
+#[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize)]
+pub enum ChangeType {
+    #[default]
+    Update,
+    Deletion,
+    Creation,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+pub struct ContractId {
+    #[schema(value_type=String)]
+    pub address: Address,
+    pub chain: Chain,
+}
+
+/// Uniquely identifies a contract on a specific chain.
+impl ContractId {
+    pub fn new(chain: Chain, address: Address) -> Self {
+        Self { address, chain }
+    }
+
+    pub fn address(&self) -> &Address {
+        &self.address
+    }
+}
+
+impl Display for ContractId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}: 0x{}", self.chain, hex::encode(&self.address))
     }
 }

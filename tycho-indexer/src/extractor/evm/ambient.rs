@@ -1,20 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    str::FromStr,
-    sync::Arc,
-};
-
-use async_trait::async_trait;
-use chrono::NaiveDateTime;
-use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-use ethers::types::{H160, H256};
-use mockall::automock;
-use prost::Message;
-use tokio::sync::Mutex;
-use tracing::{debug, info, instrument, trace};
-
 use super::{utils::format_duration, AccountUpdate, Block};
-
 use crate::{
     extractor::{
         evm,
@@ -24,15 +8,31 @@ use crate::{
         },
         ExtractionError, Extractor, ExtractorMsg,
     },
-    models,
-    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
     },
     storage::{postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError},
 };
-use tycho_types::Bytes;
+
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
+use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
+use ethers::types::{H160, H256};
+use mockall::automock;
+use prost::Message;
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::Arc,
+};
+use tokio::sync::Mutex;
+use tracing::{debug, info, instrument, trace};
+use tycho_types::{
+    models,
+    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
+    Bytes,
+};
 
 #[allow(dead_code)]
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
@@ -640,12 +640,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        models::{FinancialType, ImplementationType},
-        pb::sf::substreams::v1::BlockRef,
-    };
-
     use super::*;
+    use crate::pb::sf::substreams::v1::BlockRef;
+    use tycho_types::models::{FinancialType, ImplementationType};
 
     fn ambient_protocol_types() -> HashMap<String, ProtocolType> {
         let mut ambient_protocol_types = HashMap::new();
@@ -845,13 +842,13 @@ mod test_serial_db {
         storage::{
             postgres,
             postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
-            ChangeType, ContractId,
         },
     };
     use ethers::types::U256;
     use mpsc::channel;
     use test_log::test;
     use tokio::sync::mpsc;
+    use tycho_types::models::{ChangeType, ContractId};
 
     use super::*;
 

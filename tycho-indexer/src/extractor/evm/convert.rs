@@ -1,8 +1,9 @@
-use crate::{
-    extractor::{
-        evm,
-        evm::{ERC20Token, ProtocolState, ProtocolStateDelta},
-    },
+use crate::extractor::{
+    evm,
+    evm::{ERC20Token, ProtocolState, ProtocolStateDelta},
+};
+use ethers::prelude::{H160, H256, U256};
+use tycho_types::{
     models::{
         blockchain::{Block, Transaction},
         contract::{Contract, ContractDelta},
@@ -12,10 +13,8 @@ use crate::{
         },
         token::CurrencyToken,
     },
-    storage::ChangeType,
+    Bytes,
 };
-use ethers::prelude::{H160, H256, U256};
-use tycho_types::Bytes;
 
 impl From<&evm::Block> for Block {
     fn from(value: &evm::Block) -> Self {
@@ -125,19 +124,6 @@ impl From<ContractDelta> for evm::AccountUpdate {
             balance: value.balance.map(U256::from),
             code: value.code,
             change: value.change,
-        }
-    }
-}
-
-impl From<Contract> for ContractDelta {
-    fn from(value: Contract) -> Self {
-        Self {
-            chain: value.chain,
-            address: value.address,
-            slots: value.slots,
-            balance: Some(value.balance),
-            code: Some(value.code),
-            change: ChangeType::Creation,
         }
     }
 }

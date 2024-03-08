@@ -1,13 +1,16 @@
-use std::{
-    num::NonZeroUsize,
-    ops::{Deref, DerefMut},
-    sync::Arc,
+use crate::storage::{
+    postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, StorageError, TxHash,
 };
 
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
 use lru::LruCache;
+use std::{
+    num::NonZeroUsize,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 use tokio::{
     sync::{
         mpsc,
@@ -17,11 +20,9 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{debug, error, info, trace};
-
-use crate::{
+use tycho_types::{
     models,
     models::{Chain, ExtractionState},
-    storage::{postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
 };
 
 /// Represents different types of database write operations.

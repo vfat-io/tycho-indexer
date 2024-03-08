@@ -33,10 +33,11 @@ use tycho_indexer::{
         },
         ExtractionError,
     },
-    models::{self, FinancialType, ImplementationType, ProtocolType},
     services::ServicesBuilder,
     storage::postgres::{self, cache::CachedGateway, PostgresGateway},
 };
+
+use tycho_types::models::{self, FinancialType, ImplementationType, ProtocolType};
 
 #[cfg(test)]
 #[macro_use]

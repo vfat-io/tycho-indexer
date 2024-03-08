@@ -1,9 +1,9 @@
-use diesel::ExpressionMethods;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
-
+use super::{orm, schema, PostgresGateway, StorageError};
 use crate::storage::ExtractionState;
 
-use super::{orm, schema, Chain, PostgresGateway, StorageError};
+use diesel::ExpressionMethods;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use tycho_types::models::Chain;
 
 impl PostgresGateway {
     pub async fn get_state(

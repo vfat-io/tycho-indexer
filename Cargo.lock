@@ -5365,6 +5365,7 @@ dependencies = [
  "strum_macros",
  "thiserror",
  "tokio",
+ "typetag",
  "utoipa",
  "uuid 1.7.0",
 ]

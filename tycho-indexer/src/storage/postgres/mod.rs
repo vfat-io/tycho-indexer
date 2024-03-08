@@ -129,6 +129,7 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
+use super::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash, Version, VersionKind};
 use std::{collections::HashMap, hash::Hash, i64, ops::Deref, str::FromStr, sync::Arc};
 
 use chrono::NaiveDateTime;
@@ -139,10 +140,7 @@ use diesel_async::{
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use tracing::{debug, info};
-
-use crate::models::Chain;
-
-use super::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash, Version, VersionKind};
+use tycho_types::models::Chain;
 
 pub mod cache;
 pub mod chain;

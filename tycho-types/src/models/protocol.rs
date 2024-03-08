@@ -1,7 +1,9 @@
-use crate::{models::Chain, storage::ChangeType};
+use crate::{
+    models::{Chain, ChangeType},
+    Bytes,
+};
 use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet};
-use tycho_types::Bytes;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolComponent {

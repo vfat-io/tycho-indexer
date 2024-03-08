@@ -1,3 +1,12 @@
+use super::{Extractor, ExtractorMsg};
+use crate::{
+    extractor::ExtractionError,
+    pb::sf::substreams::v1::Package,
+    substreams::{
+        stream::{BlockResponse, SubstreamsStream},
+        SubstreamsEndpoint,
+    },
+};
 use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
 use prost::Message;
@@ -11,17 +20,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
-
-use super::{Extractor, ExtractorMsg};
-use crate::{
-    extractor::ExtractionError,
-    models::ExtractorIdentity,
-    pb::sf::substreams::v1::Package,
-    substreams::{
-        stream::{BlockResponse, SubstreamsStream},
-        SubstreamsEndpoint,
-    },
-};
+use tycho_types::models::ExtractorIdentity;
 
 pub enum ControlMessage {
     Stop,
@@ -309,12 +308,11 @@ impl ExtractorRunnerBuilder {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+    use crate::extractor::MockExtractor;
     use serde::{Deserialize, Serialize};
     use tracing::info_span;
-
-    use crate::{extractor::MockExtractor, models::NormalisedMessage};
-
-    use super::*;
+    use tycho_types::models::NormalisedMessage;
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     struct DummyMessage {

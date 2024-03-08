@@ -1,22 +1,19 @@
-use std::collections::{hash_map::Entry, HashSet};
-
+use self::versioning::{apply_delta_versioning, apply_versioning};
+use super::*;
+use crate::storage::{
+    AccountToContractStore, Balance, BlockOrTimestamp, Code, ContractStore, StoreKey, StoreVal,
+    TxHash, Version,
+};
 use chrono::{NaiveDateTime, Utc};
 use diesel_async::RunQueryDsl;
 use ethers::utils::keccak256;
+use std::collections::{hash_map::Entry, HashSet};
 use tracing::instrument;
-
-use crate::{
+use tycho_types::{
     models,
-    storage::{
-        AccountToContractStore, Address, Balance, BlockOrTimestamp, ChangeType, Code, ContractId,
-        ContractStore, StoreKey, StoreVal, TxHash, Version,
-    },
+    models::{Address, ChangeType, ContractId},
+    Bytes,
 };
-use tycho_types::Bytes;
-
-use self::versioning::{apply_delta_versioning, apply_versioning};
-
-use super::*;
 
 struct CreatedOrDeleted<T> {
     /// Accounts that were created (and deltas are equal to their updates)

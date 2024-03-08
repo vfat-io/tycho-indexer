@@ -14,6 +14,11 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
+    models,
+    models::{
+        contract::{Contract, ContractDelta},
+        token::CurrencyToken,
+    },
     serde_primitives::{
         hex_bytes, hex_bytes_option, hex_bytes_vec, hex_hashmap_key, hex_hashmap_key_value,
         hex_hashmap_value,
@@ -33,6 +38,33 @@ pub enum Chain {
     ZkSync,
 }
 
+impl From<models::contract::Contract> for ResponseAccount {
+    fn from(value: Contract) -> Self {
+        ResponseAccount::new(
+            value.chain.into(),
+            value.address,
+            value.title,
+            value.slots,
+            value.balance,
+            value.code,
+            value.code_hash,
+            value.balance_modify_tx,
+            value.code_modify_tx,
+            value.creation_tx,
+        )
+    }
+}
+
+impl From<models::Chain> for Chain {
+    fn from(value: models::Chain) -> Self {
+        match value {
+            models::Chain::Ethereum => Chain::Ethereum,
+            models::Chain::Starknet => Chain::Starknet,
+            models::Chain::ZkSync => Chain::ZkSync,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize, ToSchema)]
 pub enum ChangeType {
     #[default]
@@ -40,6 +72,16 @@ pub enum ChangeType {
     Deletion,
     Creation,
     Unspecified,
+}
+
+impl From<models::ChangeType> for ChangeType {
+    fn from(value: models::ChangeType) -> Self {
+        match value {
+            models::ChangeType::Update => ChangeType::Update,
+            models::ChangeType::Creation => ChangeType::Creation,
+            models::ChangeType::Deletion => ChangeType::Deletion,
+        }
+    }
 }
 
 impl ChangeType {
@@ -373,6 +415,19 @@ impl AccountUpdate {
     }
 }
 
+impl From<models::contract::ContractDelta> for AccountUpdate {
+    fn from(value: ContractDelta) -> Self {
+        AccountUpdate::new(
+            value.address,
+            value.chain.into(),
+            value.slots,
+            value.balance,
+            value.code,
+            value.change.into(),
+        )
+    }
+}
+
 /// Represents the static parts of a protocol component.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize, ToSchema)]
 pub struct ProtocolComponent {
@@ -394,6 +449,23 @@ pub struct ProtocolComponent {
     #[schema(value_type=String)]
     pub creation_tx: Bytes,
     pub created_at: NaiveDateTime,
+}
+
+impl From<models::protocol::ProtocolComponent> for ProtocolComponent {
+    fn from(value: models::protocol::ProtocolComponent) -> Self {
+        Self {
+            id: value.id,
+            protocol_system: value.protocol_system,
+            protocol_type_name: value.protocol_type_name,
+            chain: value.chain.into(),
+            tokens: value.tokens,
+            contract_ids: value.contract_addresses,
+            static_attributes: value.static_attributes,
+            change: value.change.into(),
+            creation_tx: value.creation_tx,
+            created_at: value.created_at,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
@@ -472,6 +544,15 @@ pub struct ProtocolStateDelta {
     pub deleted_attributes: HashSet<String>,
 }
 
+impl From<models::protocol::ProtocolComponentStateDelta> for ProtocolStateDelta {
+    fn from(value: models::protocol::ProtocolComponentStateDelta) -> Self {
+        Self {
+            component_id: value.component_id,
+            updated_attributes: value.updated_attributes,
+            deleted_attributes: value.removed_attributes,
+        }
+    }
+}
 impl ProtocolStateDelta {
     /// Merges 'other' into 'self'.
     ///
@@ -753,6 +834,19 @@ pub struct ResponseToken {
     pub gas: Vec<Option<u64>>,
 }
 
+impl From<models::token::CurrencyToken> for ResponseToken {
+    fn from(value: CurrencyToken) -> Self {
+        Self {
+            chain: value.chain.into(),
+            address: value.address,
+            symbol: value.symbol,
+            decimals: value.decimals,
+            tax: value.tax,
+            gas: value.gas,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
 pub struct ProtocolComponentsRequestBody {
     pub protocol_system: Option<String>,
@@ -846,6 +940,16 @@ pub struct ResponseProtocolState {
     #[schema(value_type=String)]
     #[serde(with = "hex_bytes")]
     pub modify_tx: Bytes,
+}
+
+impl From<models::protocol::ProtocolComponentState> for ResponseProtocolState {
+    fn from(value: models::protocol::ProtocolComponentState) -> Self {
+        Self {
+            component_id: value.component_id,
+            attributes: value.attributes,
+            modify_tx: value.modify_tx,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema, Default)]

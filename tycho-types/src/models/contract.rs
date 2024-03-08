@@ -1,6 +1,8 @@
-use crate::{models::Chain, storage, storage::ChangeType};
+use crate::{
+    models::{Chain, ChangeType, ContractId},
+    Bytes,
+};
 use std::collections::HashMap;
-use tycho_types::Bytes;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Contract {
@@ -44,7 +46,6 @@ impl Contract {
         }
     }
 
-    #[cfg(test)]
     pub fn set_balance(&mut self, new_balance: &Bytes, modified_at: &Bytes) {
         self.balance = new_balance.clone();
         self.balance_modify_tx = modified_at.clone();
@@ -97,7 +98,20 @@ impl ContractDelta {
         }
     }
 
-    pub fn contract_id(&self) -> storage::ContractId {
-        storage::ContractId::new(self.chain, self.address.clone())
+    pub fn contract_id(&self) -> ContractId {
+        ContractId::new(self.chain, self.address.clone())
+    }
+}
+
+impl From<Contract> for ContractDelta {
+    fn from(value: Contract) -> Self {
+        Self {
+            chain: value.chain,
+            address: value.address,
+            slots: value.slots,
+            balance: Some(value.balance),
+            code: Some(value.code),
+            change: ChangeType::Creation,
+        }
     }
 }

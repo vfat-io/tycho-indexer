@@ -1,5 +1,4 @@
-use crate::models::Chain;
-use tycho_types::Bytes;
+use crate::{models::Chain, Bytes};
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct CurrencyToken {

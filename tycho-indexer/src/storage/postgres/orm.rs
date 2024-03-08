@@ -1,3 +1,17 @@
+use super::{
+    schema::{
+        account, account_balance, block, chain, component_balance, component_tvl, contract_code,
+        contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
+        protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
+        transaction,
+    },
+    versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
+};
+use crate::storage::{
+    postgres::versioning::StoredDeltaVersionedRow, AttrStoreKey, Balance, BlockHash,
+    BlockIdentifier, Code, CodeHash, ComponentId, StorageError, StoreVal, TxHash,
+};
+
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
@@ -11,24 +25,10 @@ use diesel::{
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
 use std::collections::{HashMap, HashSet};
-
-use crate::{
+use tycho_types::{
     models,
-    storage::{
-        postgres::versioning::StoredDeltaVersionedRow, Address, AttrStoreKey, Balance, BlockHash,
-        BlockIdentifier, Code, CodeHash, ComponentId, ContractId, StorageError, StoreVal, TxHash,
-    },
-};
-use tycho_types::Bytes;
-
-use super::{
-    schema::{
-        account, account_balance, block, chain, component_balance, component_tvl, contract_code,
-        contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
-        protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
-        transaction,
-    },
-    versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
+    models::{Address, ContractId},
+    Bytes,
 };
 
 #[derive(Identifiable, Queryable, Selectable)]

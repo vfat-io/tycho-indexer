@@ -1,3 +1,9 @@
+use self::utils::TryDecode;
+use super::{u256_num::bytes_to_f64, ExtractionError};
+use crate::{
+    pb::tycho::evm::v1 as substreams,
+    storage::{AttrStoreKey, ComponentId, StoreVal},
+};
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
@@ -6,19 +12,11 @@ use ethers::{
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use tracing::log::warn;
-
-use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
-
-use crate::{
-    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolType},
-    pb::tycho::evm::v1 as substreams,
-    storage::{Address, AttrStoreKey, ChangeType, ComponentId, StoreVal},
+use tycho_types::{
+    models::{Address, Chain, ChangeType, ExtractorIdentity, NormalisedMessage, ProtocolType},
+    Bytes,
 };
-use tycho_types::Bytes;
-
-use self::utils::TryDecode;
-
-use super::{u256_num::bytes_to_f64, ExtractionError};
+use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 pub mod ambient;
 pub mod chain_state;

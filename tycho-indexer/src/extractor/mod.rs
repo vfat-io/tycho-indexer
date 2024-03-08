@@ -6,10 +6,11 @@ use prost::DecodeError;
 use thiserror::Error;
 
 use crate::{
-    models::{ExtractorIdentity, NormalisedMessage},
     pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
     storage::StorageError,
 };
+
+use tycho_types::models::{ExtractorIdentity, NormalisedMessage};
 
 pub mod evm;
 pub mod runner;
