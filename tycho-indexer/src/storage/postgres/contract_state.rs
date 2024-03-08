@@ -37,7 +37,7 @@ impl PostgresGateway {
     /// map indicates the new balance that needs to be applied to reach the desired target
     /// version.
     #[instrument(skip(self, conn))]
-    async fn get_balance_deltas(
+    async fn get_balance_deltas_internal(
         &self,
         chain_id: i64,
         start_version_ts: &NaiveDateTime,
@@ -1171,7 +1171,7 @@ impl PostgresGateway {
         let target_version_ts = target_version.to_ts(conn).await?;
 
         let balance_deltas = self
-            .get_balance_deltas(chain_id, &start_version_ts, &target_version_ts, conn)
+            .get_balance_deltas_internal(chain_id, &start_version_ts, &target_version_ts, conn)
             .await?;
         let code_deltas = self
             .get_code_deltas(chain_id, &start_version_ts, &target_version_ts, conn)

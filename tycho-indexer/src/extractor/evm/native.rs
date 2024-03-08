@@ -9,9 +9,7 @@ use crate::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockEntityChanges,
     },
-    storage::{
-        postgres::cache::CachedGateway, BlockIdentifier, ProtocolGateway, StorageError, TxHash,
-    },
+    storage::{postgres::cache::CachedGateway, BlockIdentifier, StorageError, TxHash},
 };
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
@@ -320,7 +318,7 @@ impl NativeGateway for NativePgGateway<TokenPreProcessor> {
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
         let mut conn = self.pool.get().await.unwrap();
         self.state_gateway
-            .add_protocol_types(new_protocol_types, &mut *conn)
+            .add_protocol_types(new_protocol_types, &mut conn)
             .await
             .expect("Couldn't insert protocol types");
     }

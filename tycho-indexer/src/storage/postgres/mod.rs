@@ -142,9 +142,7 @@ use tracing::{debug, info};
 
 use crate::models::Chain;
 
-use super::{
-    BlockIdentifier, BlockOrTimestamp, StateGateway, StorageError, TxHash, Version, VersionKind,
-};
+use super::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash, Version, VersionKind};
 
 pub mod cache;
 pub mod chain;
@@ -429,10 +427,6 @@ impl PostgresGateway {
 
         Ok(gw)
     }
-}
-
-impl StateGateway<AsyncPgConnection> for PostgresGateway {
-    // No methods in here - this just ties everything together
 }
 
 /// Establishes a connection to the database and creates a connection pool.

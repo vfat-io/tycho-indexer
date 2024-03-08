@@ -16,7 +16,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 use crate::{
     models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolType},
     pb::tycho::evm::v1 as substreams,
-    storage::{Address, AttrStoreKey, ChangeType, ComponentId, StateGatewayType, StoreVal},
+    storage::{Address, AttrStoreKey, ChangeType, ComponentId, StoreVal},
 };
 use tycho_types::Bytes;
 
@@ -488,8 +488,6 @@ pub struct BlockContractChanges {
     pub revert: bool,
     pub tx_updates: Vec<TransactionVMUpdates>,
 }
-
-pub type EVMStateGateway<DB> = StateGatewayType<DB>;
 
 impl Block {
     /// Parses block from tychos protobuf block message

@@ -32,10 +32,7 @@ use crate::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
     },
-    storage::{
-        postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, ProtocolGateway,
-        StorageError,
-    },
+    storage::{postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError},
 };
 use tycho_types::Bytes;
 
@@ -424,7 +421,7 @@ impl AmbientGateway for AmbientPgGateway<TokenPreProcessor> {
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
         let mut conn = self.pool.get().await.unwrap();
         self.state_gateway
-            .add_protocol_types(new_protocol_types, &mut *conn)
+            .add_protocol_types(new_protocol_types, &mut conn)
             .await
             .expect("Couldn't insert protocol types");
     }

@@ -21,10 +21,7 @@ use tracing::{debug, error, info, trace};
 use crate::{
     models,
     models::{Chain, ExtractionState},
-    storage::{
-        postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, ProtocolGateway,
-        StorageError, TxHash,
-    },
+    storage::{postgres::PostgresGateway, BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
 };
 
 /// Represents different types of database write operations.

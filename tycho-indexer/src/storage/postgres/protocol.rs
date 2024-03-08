@@ -1,6 +1,3 @@
-#![allow(unused_variables)]
-
-use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -20,8 +17,7 @@ use crate::{
             versioning::apply_delta_versioning,
             PostgresGateway,
         },
-        Address, Balance, BlockOrTimestamp, ChangeType, ComponentId, ProtocolGateway, StorageError,
-        TxHash, Version,
+        Address, Balance, BlockOrTimestamp, ChangeType, ComponentId, StorageError, TxHash, Version,
     },
 };
 use tycho_types::Bytes;
@@ -100,7 +96,7 @@ impl PostgresGateway {
     async fn _get_or_create_protocol_system_id(
         &self,
         new: String,
-        conn: &mut <PostgresGateway as ProtocolGateway>::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<i64, StorageError> {
         use super::schema::protocol_system::dsl::*;
 
@@ -124,19 +120,14 @@ impl PostgresGateway {
             Ok(inserted_protocol_system.id)
         }
     }
-}
 
-#[async_trait]
-impl ProtocolGateway for PostgresGateway {
-    type DB = AsyncPgConnection;
-
-    async fn get_protocol_components(
+    pub async fn get_protocol_components(
         &self,
         chain: &Chain,
         system: Option<String>,
         ids: Option<&[&str]>,
         min_tvl: Option<f64>,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError> {
         use super::schema::{protocol_component::dsl::*, transaction::dsl::*};
         let chain_id_value = self.get_chain_id(chain);
@@ -283,10 +274,10 @@ impl ProtocolGateway for PostgresGateway {
             .collect()
     }
 
-    async fn add_protocol_components(
+    pub async fn add_protocol_components(
         &self,
         new: &[models::protocol::ProtocolComponent],
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         use super::schema::{
             account::dsl::*, protocol_component::dsl::*, protocol_component_holds_contract::dsl::*,
@@ -479,11 +470,11 @@ impl ProtocolGateway for PostgresGateway {
         Ok(())
     }
 
-    async fn delete_protocol_components(
+    pub async fn delete_protocol_components(
         &self,
         to_delete: &[models::protocol::ProtocolComponent],
         block_ts: NaiveDateTime,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         use super::schema::protocol_component::dsl::*;
 
@@ -498,10 +489,10 @@ impl ProtocolGateway for PostgresGateway {
             .await?;
         Ok(())
     }
-    async fn add_protocol_types(
+    pub async fn add_protocol_types(
         &self,
         new_protocol_types: &[models::ProtocolType],
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         use super::schema::protocol_type::dsl::*;
         let values: Vec<orm::NewProtocolType> = new_protocol_types
@@ -547,14 +538,14 @@ impl ProtocolGateway for PostgresGateway {
     // The filters are applied in the following order: component ids, protocol system, chain. If
     // component ids are provided, the protocol system filter is ignored. The chain filter is
     // always applied.
-    async fn get_protocol_states(
+    pub async fn get_protocol_states(
         &self,
         chain: &Chain,
         at: Option<Version>,
         // TODO: change to &str
         system: Option<String>,
         ids: Option<&[&str]>,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
         let version_ts = match &at {
@@ -591,11 +582,11 @@ impl ProtocolGateway for PostgresGateway {
         }
     }
 
-    async fn update_protocol_states(
+    pub async fn update_protocol_states(
         &self,
         chain: &Chain,
         new: &[(TxHash, &models::protocol::ProtocolComponentStateDelta)],
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let chain_db_id = self.get_chain_id(chain);
         let new = new
@@ -687,11 +678,11 @@ impl ProtocolGateway for PostgresGateway {
         Ok(())
     }
 
-    async fn get_tokens(
+    pub async fn get_tokens(
         &self,
         chain: Chain,
         addresses: Option<&[&Address]>,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::token::CurrencyToken>, StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
         let chain_db_id = self.get_chain_id(&chain);
@@ -733,10 +724,10 @@ impl ProtocolGateway for PostgresGateway {
         tokens
     }
 
-    async fn add_tokens(
+    pub async fn add_tokens(
         &self,
         tokens: &[models::token::CurrencyToken],
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let titles: Vec<String> = tokens
             .iter()
@@ -816,11 +807,11 @@ impl ProtocolGateway for PostgresGateway {
         Ok(())
     }
 
-    async fn add_component_balances(
+    pub async fn add_component_balances(
         &self,
         component_balances: &[models::protocol::ComponentBalance],
         chain: &Chain,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
 
@@ -848,7 +839,7 @@ impl ProtocolGateway for PostgresGateway {
             orm::Transaction::ids_and_ts_by_hash(txn_hashes.as_ref(), conn)
                 .await?
                 .into_iter()
-                .map(|(db_id, hash, index, ts)| (hash, (db_id, ts)))
+                .map(|(db_id, hash, _, ts)| (hash, (db_id, ts)))
                 .collect();
 
         let external_ids: Vec<&str> = component_balances
@@ -894,12 +885,12 @@ impl ProtocolGateway for PostgresGateway {
     }
 
     #[instrument(skip(self, conn))]
-    async fn get_balance_deltas(
+    pub async fn get_balance_deltas(
         &self,
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::protocol::ComponentBalance>, StorageError> {
         use schema::component_balance::dsl::*;
         let chain_id = self.get_chain_id(chain);
@@ -1010,12 +1001,12 @@ impl ProtocolGateway for PostgresGateway {
         Ok(res)
     }
 
-    async fn get_balances(
+    pub async fn get_balances(
         &self,
         chain: &Chain,
         ids: Option<&[&str]>,
         at: Option<&BlockOrTimestamp>,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
         let version_ts = match &at {
             Some(version) => Some(version.to_ts(conn).await?),
@@ -1062,12 +1053,12 @@ impl ProtocolGateway for PostgresGateway {
         Ok(balances)
     }
 
-    async fn get_protocol_states_delta(
+    pub async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::protocol::ProtocolComponentStateDelta>, StorageError> {
         let start_ts = match start_version {
             Some(version) => version.to_ts(conn).await?,
@@ -1241,10 +1232,10 @@ impl ProtocolGateway for PostgresGateway {
         }
     }
 
-    async fn get_token_prices(
+    pub async fn get_token_prices(
         &self,
         chain: &Chain,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<Bytes, f64>, StorageError> {
         use schema::token_price::dsl::*;
         let chain_id = self.get_chain_id(chain);
@@ -1259,11 +1250,11 @@ impl ProtocolGateway for PostgresGateway {
             .collect::<HashMap<_, _>>())
     }
 
-    async fn upsert_component_tvl(
+    pub async fn upsert_component_tvl(
         &self,
         chain: &Chain,
         tvl_values: &HashMap<String, f64>,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let chain_id = self.get_chain_id(chain);
         let external_ids = tvl_values
@@ -1383,18 +1374,18 @@ mod test {
         let (account_id_weth, weth_id) =
             db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
                 .await;
-        let (account_id_usdc, usdc_id) =
+        let (_, usdc_id) =
             db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
                 .await;
-        let (account_id_dai, dai_id) =
+        let (_, dai_id) =
             db_fixtures::insert_token(conn, chain_id, DAI.trim_start_matches("0x"), "DAI", 18)
                 .await;
-        let (account_id_lusd, lusd_id) =
+        let (_, lusd_id) =
             db_fixtures::insert_token(conn, chain_id, LUSD.trim_start_matches("0x"), "LUSD", 18)
                 .await;
 
         // ZK Sync
-        let (account_id_usdt_zk, usdt_id_zksync) = db_fixtures::insert_token(
+        db_fixtures::insert_token(
             conn,
             chain_id_zk,
             ZKSYNC_PEPE.trim_start_matches("0x"),
@@ -1512,7 +1503,7 @@ mod test {
         )
         .await;
         // component without balances and thus without tvl
-        let protocol_component_id2 = db_fixtures::insert_protocol_component(
+        db_fixtures::insert_protocol_component(
             conn,
             "no_tvl",
             chain_id,
@@ -2309,7 +2300,6 @@ mod test {
             modify_tx: tx_hash.clone(),
             component_id: component_external_id.clone(),
         };
-        let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
         gw.add_component_balances(&[component_balance], &Chain::Starknet, &mut conn)
             .await
@@ -2355,7 +2345,6 @@ mod test {
         };
 
         let updated_component_balances = vec![updated_component_balance.clone()];
-        let new_block_ts = NaiveDateTime::from_timestamp_opt(2000, 0).unwrap();
 
         gw.add_component_balances(&updated_component_balances, &Chain::Starknet, &mut conn)
             .await
@@ -2624,7 +2613,7 @@ mod test {
         #[case] exp_ids: &[&str],
     ) {
         let mut conn = setup_db().await;
-        let tx_hashes = setup_data(&mut conn).await;
+        setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
         let exp = exp_ids
             .iter()
@@ -2653,7 +2642,7 @@ mod test {
         #[case] exp_ids: &[&str],
     ) {
         let mut conn = setup_db().await;
-        let tx_hashes = setup_data(&mut conn).await;
+        setup_data(&mut conn).await;
         let exp = exp_ids
             .iter()
             .map(|&s| s.to_owned())
@@ -2743,5 +2732,7 @@ mod test {
             .unwrap()
             .into_iter()
             .collect::<HashMap<_, _>>();
+
+        assert_eq!(tvl_values, exp);
     }
 }

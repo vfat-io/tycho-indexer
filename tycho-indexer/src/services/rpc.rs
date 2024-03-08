@@ -17,12 +17,9 @@ use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 
-use crate::{
-    models::{
-        contract::{Contract, ContractDelta},
-        token::CurrencyToken,
-    },
-    storage::ProtocolGateway,
+use crate::models::{
+    contract::{Contract, ContractDelta},
+    token::CurrencyToken,
 };
 use tycho_types::{
     dto,
