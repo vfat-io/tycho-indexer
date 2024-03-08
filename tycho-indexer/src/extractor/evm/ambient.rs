@@ -1,5 +1,3 @@
-#![allow(unused_variables)]
-
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
@@ -36,6 +34,7 @@ use crate::{
 };
 use tycho_types::Bytes;
 
+#[allow(dead_code)]
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
 struct Inner {
@@ -438,6 +437,7 @@ impl AmbientGateway for AmbientPgGateway<TokenPreProcessor> {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % to))]
     async fn revert(
         &self,
@@ -811,7 +811,7 @@ mod test {
         // Call handle_tick_scoped_data to initialize the last processed block.
         let inp = evm::fixtures::pb_block_scoped_data(block_contract_changes_ok());
 
-        let res = extractor
+        extractor
             .handle_tick_scoped_data(inp)
             .await
             .unwrap();
@@ -914,7 +914,7 @@ mod test_serial_db {
         )
         .await;
 
-        let handle = write_executor.run();
+        write_executor.run();
         let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
 
         let gw = AmbientPgGateway::new(
@@ -1198,7 +1198,7 @@ mod test_serial_db {
             )
             .await;
 
-            let handle = write_executor.run();
+            write_executor.run();
             let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
 
             let gw = AmbientPgGateway::new(
@@ -1266,7 +1266,7 @@ mod test_serial_db {
             let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
 
             let evm_gw = PostgresGateway::from_connection(&mut conn).await;
-            let (tx, rx) = channel(10);
+            let (tx, _rx) = channel(10);
             let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
             let gw = AmbientPgGateway::new(
                 "vm:ambient",
