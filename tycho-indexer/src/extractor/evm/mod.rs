@@ -22,13 +22,10 @@ use super::{u256_num::bytes_to_f64, ExtractionError};
 
 pub mod ambient;
 pub mod chain_state;
+mod convert;
 pub mod native;
-
 pub mod token_pre_processor;
 mod utils;
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct SwapPool {}
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ERC20Token {

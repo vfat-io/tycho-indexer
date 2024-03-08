@@ -1,11 +1,4 @@
-use crate::{
-    extractor::{
-        evm,
-        evm::{ProtocolState, ProtocolStateDelta},
-    },
-    models::Chain,
-    storage::ChangeType,
-};
+use crate::{models::Chain, storage::ChangeType};
 use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet};
 use tycho_types::Bytes;
@@ -54,30 +47,6 @@ impl ProtocolComponent {
     }
 }
 
-impl From<&evm::ProtocolComponent> for ProtocolComponent {
-    fn from(value: &evm::ProtocolComponent) -> Self {
-        Self {
-            id: value.id.clone(),
-            protocol_system: value.protocol_system.clone(),
-            protocol_type_name: value.protocol_type_name.clone(),
-            chain: value.chain,
-            tokens: value
-                .tokens
-                .iter()
-                .map(|t| t.as_bytes().into())
-                .collect(),
-            contract_addresses: value
-                .contract_ids
-                .iter()
-                .map(|a| a.as_bytes().into())
-                .collect(),
-            static_attributes: value.static_attributes.clone(),
-            change: value.change,
-            creation_tx: value.creation_tx.into(),
-            created_at: value.created_at,
-        }
-    }
-}
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolComponentState {
     pub component_id: String,
@@ -88,16 +57,6 @@ pub struct ProtocolComponentState {
 impl ProtocolComponentState {
     pub fn new(component_id: &str, attributes: HashMap<String, Bytes>, modify_tx: Bytes) -> Self {
         Self { component_id: component_id.to_string(), attributes, modify_tx }
-    }
-}
-
-impl From<&evm::ProtocolState> for ProtocolComponentState {
-    fn from(value: &ProtocolState) -> Self {
-        Self {
-            component_id: value.component_id.clone(),
-            attributes: value.attributes.clone(),
-            modify_tx: Bytes::from(value.modify_tx.as_bytes()),
-        }
     }
 }
 
@@ -116,16 +75,6 @@ impl ProtocolComponentStateDelta {
         removed_attributes: HashSet<String>,
     ) -> Self {
         Self { component_id: component_id.to_string(), updated_attributes, removed_attributes }
-    }
-}
-
-impl From<&evm::ProtocolStateDelta> for ProtocolComponentStateDelta {
-    fn from(value: &ProtocolStateDelta) -> Self {
-        Self {
-            component_id: value.component_id.clone(),
-            updated_attributes: value.updated_attributes.clone(),
-            removed_attributes: value.deleted_attributes.clone(),
-        }
     }
 }
 
@@ -153,24 +102,5 @@ impl ComponentBalance {
             modify_tx,
             component_id: component_id.to_string(),
         }
-    }
-}
-
-impl From<&evm::ComponentBalance> for ComponentBalance {
-    fn from(value: &evm::ComponentBalance) -> Self {
-        Self {
-            token: value.token.as_bytes().into(),
-            new_balance: value.balance.clone(),
-            balance_float: value.balance_float,
-            modify_tx: value.modify_tx.as_bytes().into(),
-            component_id: value.component_id.clone(),
-        }
-    }
-}
-
-// TODO: remove this, only here so the old revert method compiles.
-impl From<ComponentBalance> for evm::ComponentBalance {
-    fn from(_value: ComponentBalance) -> Self {
-        todo!()
     }
 }

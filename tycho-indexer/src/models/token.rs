@@ -1,7 +1,4 @@
-use crate::{
-    extractor::{evm, evm::ERC20Token},
-    models::Chain,
-};
+use crate::models::Chain;
 use tycho_types::Bytes;
 
 #[derive(PartialEq, Debug, Clone)]
@@ -38,20 +35,6 @@ impl CurrencyToken {
             gas: gas.to_owned(),
             chain,
             quality,
-        }
-    }
-}
-
-impl From<&evm::ERC20Token> for CurrencyToken {
-    fn from(value: &ERC20Token) -> Self {
-        Self {
-            address: Bytes::from(value.address.as_bytes()),
-            symbol: value.symbol.clone(),
-            decimals: value.decimals,
-            tax: value.tax,
-            gas: value.gas.clone(),
-            chain: value.chain,
-            quality: value.quality,
         }
     }
 }
