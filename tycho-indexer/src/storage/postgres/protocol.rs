@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     models,
-    models::Chain,
+    models::{Chain, FinancialType, ImplementationType},
     storage::{
         postgres::{
             orm,
@@ -20,8 +20,8 @@ use crate::{
             versioning::apply_delta_versioning,
             PostgresGateway,
         },
-        Address, Balance, BlockOrTimestamp, ChangeType, ComponentId, ProtocolGateway,
-        StorableProtocolType, StorageError, TxHash, Version,
+        Address, Balance, BlockOrTimestamp, ChangeType, ComponentId, ProtocolGateway, StorageError,
+        TxHash, Version,
     },
 };
 use tycho_types::Bytes;
@@ -506,7 +506,30 @@ impl ProtocolGateway for PostgresGateway {
         use super::schema::protocol_type::dsl::*;
         let values: Vec<orm::NewProtocolType> = new_protocol_types
             .iter()
-            .map(|new_protocol_type| new_protocol_type.to_storage())
+            .map(|new_protocol_type| {
+                let financial_protocol_type: orm::FinancialType =
+                    match new_protocol_type.financial_type {
+                        FinancialType::Swap => orm::FinancialType::Swap,
+                        FinancialType::Psm => orm::FinancialType::Psm,
+                        FinancialType::Debt => orm::FinancialType::Debt,
+                        FinancialType::Leverage => orm::FinancialType::Leverage,
+                    };
+
+                let protocol_implementation_type: orm::ImplementationType =
+                    match new_protocol_type.implementation {
+                        ImplementationType::Custom => orm::ImplementationType::Custom,
+                        ImplementationType::Vm => orm::ImplementationType::Vm,
+                    };
+
+                orm::NewProtocolType {
+                    name: new_protocol_type.name.clone(),
+                    implementation: protocol_implementation_type,
+                    attribute_schema: new_protocol_type
+                        .attribute_schema
+                        .clone(),
+                    financial_type: financial_protocol_type,
+                }
+            })
             .collect();
 
         diesel::insert_into(protocol_type)
