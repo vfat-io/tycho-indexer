@@ -1,8 +1,7 @@
 use super::{
-    super::{BlockOrTimestamp, StorageError, Version},
-    orm, schema,
+    maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema,
     versioning::{apply_delta_versioning, apply_versioning},
-    PostgresGateway, WithTxHash,
+    PostgresError, PostgresGateway, WithTxHash,
 };
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
@@ -16,6 +15,7 @@ use tycho_types::{
         AccountToContractStore, Address, Balance, Chain, ChangeType, Code, ContractId,
         ContractStore, StoreKey, StoreVal, TxHash,
     },
+    storage::{BlockOrTimestamp, StorageError, Version},
     Bytes,
 };
 
@@ -546,7 +546,7 @@ impl PostgresGateway {
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<Address, ContractStore>, StorageError> {
         let version_ts = match &at {
-            Some(version) => version.to_ts(conn).await?,
+            Some(version) => maybe_lookup_version_ts(version, conn).await?,
             None => Utc::now().naive_utc(),
         };
 
@@ -622,10 +622,10 @@ impl PostgresGateway {
         let account_orm: orm::Account = orm::Account::by_id(id, db)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(err, "Account", &hex::encode(&id.address), None)
+                PostgresError::from_diesel(err, "Account", &hex::encode(&id.address), None)
             })?;
         let version_ts = match &version {
-            Some(version) => version.to_ts(db).await?,
+            Some(version) => maybe_lookup_version_ts(version, db).await?,
             None => Utc::now().naive_utc(),
         };
 
@@ -647,7 +647,7 @@ impl PostgresGateway {
             .first::<(Bytes, orm::AccountBalance)>(db)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(
+                PostgresError::from_diesel(
                     err,
                     "AccountBalance",
                     &hex::encode(&id.address),
@@ -673,7 +673,7 @@ impl PostgresGateway {
             .first::<(Bytes, orm::ContractCode)>(db)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(
+                PostgresError::from_diesel(
                     err,
                     "ContractCode",
                     &hex::encode(&id.address),
@@ -727,7 +727,7 @@ impl PostgresGateway {
     ) -> Result<Vec<models::contract::Contract>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
         let version_ts = match &version {
-            Some(version) => version.to_ts(conn).await?,
+            Some(version) => maybe_lookup_version_ts(version, conn).await?,
             None => Utc::now().naive_utc(),
         };
         let accounts = {
@@ -885,7 +885,7 @@ impl PostgresGateway {
                 .first::<(i64, NaiveDateTime)>(db)
                 .await
                 .map_err(|err| {
-                    StorageError::from_diesel(
+                    PostgresError::from_diesel(
                         err,
                         "Transaction",
                         &hex::encode(h),
@@ -917,7 +917,7 @@ impl PostgresGateway {
             .returning(schema::account::id)
             .get_result::<i64>(db)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "Account", &hex_addr, None))?;
+            .map_err(|err| PostgresError::from_diesel(err, "Account", &hex_addr, None))?;
 
         // we can only insert balance and contract_code if we have a creation transaction.
         if let Some(tx_id) = creation_tx_id {
@@ -925,12 +925,14 @@ impl PostgresGateway {
                 .values(new_contract.new_balance(account_id, tx_id, created_ts))
                 .execute(db)
                 .await
-                .map_err(|err| StorageError::from_diesel(err, "AccountBalance", &hex_addr, None))?;
+                .map_err(|err| {
+                    PostgresError::from_diesel(err, "AccountBalance", &hex_addr, None)
+                })?;
             diesel::insert_into(schema::contract_code::table)
                 .values(new_contract.new_code(account_id, tx_id, created_ts))
                 .execute(db)
                 .await
-                .map_err(|err| StorageError::from_diesel(err, "ContractCode", &hex_addr, None))?;
+                .map_err(|err| PostgresError::from_diesel(err, "ContractCode", &hex_addr, None))?;
             self.upsert_slots(
                 [(
                     tx_id,
@@ -1099,11 +1101,11 @@ impl PostgresGateway {
     ) -> Result<(), StorageError> {
         let account = orm::Account::by_id(id, conn)
             .await
-            .map_err(|err| StorageError::from_diesel(err, "Account", &id.to_string(), None))?;
+            .map_err(|err| PostgresError::from_diesel(err, "Account", &id.to_string(), None))?;
         let tx = orm::Transaction::by_hash(at_tx, conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(
+                PostgresError::from_diesel(
                     err,
                     "Account",
                     &hex::encode(at_tx),
@@ -1166,10 +1168,10 @@ impl PostgresGateway {
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
         let start_version_ts = match start_version {
-            Some(version) => version.to_ts(conn).await?,
+            Some(version) => maybe_lookup_block_ts(version, conn).await?,
             None => Utc::now().naive_utc(),
         };
-        let target_version_ts = target_version.to_ts(conn).await?;
+        let target_version_ts = maybe_lookup_block_ts(target_version, conn).await?;
 
         let balance_deltas = self
             .get_balance_deltas_internal(chain_id, &start_version_ts, &target_version_ts, conn)
@@ -1249,11 +1251,14 @@ mod test {
     //!
     //! The tests below test the functionality using the concrete EVM types.
 
-    use crate::{postgres::db_fixtures, BlockIdentifier, Version, VersionKind};
+    use crate::postgres::db_fixtures;
     use diesel_async::{AsyncConnection, RunQueryDsl};
     use ethers::types::U256;
     use rstest::rstest;
-    use tycho_types::Bytes;
+    use tycho_types::{
+        storage::{BlockIdentifier, VersionKind},
+        Bytes,
+    };
 
     use super::*;
 

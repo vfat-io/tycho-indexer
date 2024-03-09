@@ -1,5 +1,4 @@
 use super::{
-    super::{BlockIdentifier, StorageError},
     schema::{
         account, account_balance, block, chain, component_balance, component_tvl, contract_code,
         contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
@@ -27,6 +26,7 @@ use tycho_types::{
         Address, AttrStoreKey, Balance, BlockHash, Code, CodeHash, ComponentId, ContractId,
         StoreVal, TxHash,
     },
+    storage::{BlockIdentifier, StorageError},
     Bytes,
 };
 

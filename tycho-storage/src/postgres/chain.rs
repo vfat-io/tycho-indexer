@@ -1,6 +1,4 @@
-use super::{orm, schema, PostgresGateway};
-use crate::{BlockIdentifier, StorageError};
-
+use super::{orm, schema, PostgresError, PostgresGateway};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -9,6 +7,7 @@ use std::collections::HashMap;
 use tracing::{instrument, warn};
 use tycho_types::{
     models::{blockchain::*, BlockHash, TxHash},
+    storage::{BlockIdentifier, StorageError},
     Bytes,
 };
 
@@ -44,7 +43,7 @@ impl PostgresGateway {
             .execute(conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(
+                PostgresError::from_diesel(
                     err,
                     "Block",
                     &format!("Batch: {} and {} more", &new_blocks[0].hash, new_blocks.len() - 1),
@@ -71,7 +70,7 @@ impl PostgresGateway {
             BlockIdentifier::Hash(block_hash) => orm::Block::by_hash(block_hash, conn).await,
             BlockIdentifier::Latest(chain) => orm::Block::most_recent(*chain, conn).await,
         }
-        .map_err(|err| StorageError::from_diesel(err, "Block", &block_id.to_string(), None))?;
+        .map_err(|err| PostgresError::from_diesel(err, "Block", &block_id.to_string(), None))?;
         let chain = self.get_chain(&orm_block.chain_id);
         Ok(Block {
             hash: std::mem::take(&mut orm_block.hash),
@@ -104,7 +103,7 @@ impl PostgresGateway {
             .get_results::<(Bytes, i64)>(conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(
+                PostgresError::from_diesel(
                     err,
                     "Transaction",
                     &format!("Batch: {:x} and {} more", &block_hashes[0], block_hashes.len() - 1),
@@ -144,7 +143,7 @@ impl PostgresGateway {
             .execute(conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(
+                PostgresError::from_diesel(
                     err,
                     "Transaction",
                     &format!("Batch {:x} and {} more", &orm_txns[0].hash, orm_txns.len() - 1),
@@ -176,7 +175,7 @@ impl PostgresGateway {
                 })
             })
             .map_err(|err| {
-                StorageError::from_diesel(err, "Transaction", &hex::encode(hash), None)
+                PostgresError::from_diesel(err, "Transaction", &hex::encode(hash), None)
             })?
     }
 

@@ -4971,7 +4971,6 @@ dependencies = [
 name = "tycho-storage"
 version = "0.3.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "chrono",
  "diesel",
@@ -4998,6 +4997,8 @@ dependencies = [
 name = "tycho-types"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
  "bytes",
  "chrono",
  "diesel",

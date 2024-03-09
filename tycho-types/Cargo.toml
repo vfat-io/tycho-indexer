@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# TODO: remove or keep only for testing
 ethers.workspace = true
 serde.workspace = true
 diesel = { workspace = true, optional = true }
@@ -17,9 +18,10 @@ strum.workspace = true
 strum_macros.workspace = true
 uuid.workspace = true
 utoipa.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
 # share with workspace?
 typetag = "0.2"
-
 bytes = "1.5.0"
 
 [dev-dependencies]

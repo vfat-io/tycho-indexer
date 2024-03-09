@@ -1,7 +1,4 @@
-use super::{
-    super::{BlockIdentifier, BlockOrTimestamp, StorageError},
-    PostgresGateway,
-};
+use super::PostgresGateway;
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
@@ -23,6 +20,7 @@ use tracing::{debug, error, info, trace};
 use tycho_types::{
     models,
     models::{Chain, ExtractionState, TxHash},
+    storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
 };
 
 /// Represents different types of database write operations.
