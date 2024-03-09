@@ -7,7 +7,7 @@ pub mod token;
 
 use crate::{dto, Bytes};
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 use strum_macros::{Display, EnumString};
 use utoipa::ToSchema;
 
@@ -15,6 +15,39 @@ use utoipa::ToSchema;
 /// blockchain.
 pub type Address = Bytes;
 
+/// Block hash literal type to uniquely identify a block in the chain and
+/// likely across chains.
+pub type BlockHash = Bytes;
+
+/// Transaction hash literal type to uniquely identify a transaction in the
+/// chain and likely across chains.
+pub type TxHash = Bytes;
+
+/// Smart contract code is represented as a byte vector containing opcodes.
+pub type Code = Bytes;
+
+/// The hash of a contract's code is used to identify it.
+pub type CodeHash = Bytes;
+
+/// The balance of an account is a big endian serialised integer of variable size.
+pub type Balance = Bytes;
+
+/// Key literal type of the contract store.
+pub type StoreKey = Bytes;
+
+/// Key literal type of the attribute store.
+pub type AttrStoreKey = String;
+
+/// Value literal type of the contract store.
+pub type StoreVal = Bytes;
+
+/// A binary key value store for an account.
+pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
+
+/// Multiple key values stores grouped by account address.
+pub type AccountToContractStore = HashMap<Address, ContractStore>;
+
+/// Component id literal type to uniquely identify a component.
 pub type ComponentId = String;
 
 #[derive(

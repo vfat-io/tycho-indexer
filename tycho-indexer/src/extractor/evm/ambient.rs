@@ -901,7 +901,7 @@ mod test_serial_db {
 
         let (tx, rx) = channel(10);
 
-        let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
+        let write_executor = tycho_storage::postgres::cache::DBCacheWriteExecutor::new(
             "ethereum".to_owned(),
             Chain::Ethereum,
             pool.clone(),
@@ -1185,7 +1185,7 @@ mod test_serial_db {
             let evm_gw = PostgresGateway::from_connection(&mut conn).await;
 
             let (tx, rx) = channel(10);
-            let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
+            let write_executor = tycho_storage::postgres::cache::DBCacheWriteExecutor::new(
                 "ethereum".to_owned(),
                 Chain::Ethereum,
                 pool.clone(),

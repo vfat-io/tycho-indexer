@@ -7,7 +7,7 @@ use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
 use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use tokio::task::JoinHandle;
-use tycho_storage::storage::postgres::PostgresGateway;
+use tycho_storage::postgres::PostgresGateway;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 

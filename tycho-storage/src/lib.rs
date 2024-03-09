@@ -75,48 +75,18 @@ use chrono::NaiveDateTime;
 use std::{collections::HashMap, fmt::Display};
 use thiserror::Error;
 use tycho_types::{
-    models,
-    models::{Address, Chain, ContractId, ExtractionState},
+    dto, models,
+    models::{Address, BlockHash, Chain, ContractId, ExtractionState, TxHash},
     Bytes,
 };
 
+#[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions;
+
 pub mod postgres;
 
-/// Block hash literal type to uniquely identify a block in the chain and
-/// likely across chains.
-pub type BlockHash = Bytes;
-
-/// Transaction hash literal type to uniquely identify a transaction in the
-/// chain and likely across chains.
-pub type TxHash = Bytes;
-
-/// Smart contract code is represented as a byte vector containing opcodes.
-pub type Code = Bytes;
-
-/// The hash of a contract's code is used to identify it.
-pub type CodeHash = Bytes;
-
-/// The balance of an account is a big endian serialised integer of variable size.
-pub type Balance = Bytes;
-
-/// Key literal type of the contract store.
-pub type StoreKey = Bytes;
-
-/// Key literal type of the attribute store.
-pub type AttrStoreKey = String;
-
-/// Value literal type of the contract store.
-pub type StoreVal = Bytes;
-
-/// A binary key value store for an account.
-pub type ContractStore = HashMap<StoreKey, Option<StoreVal>>;
-
-/// Multiple key values stores grouped by account address.
-pub type AccountToContractStore = HashMap<Address, ContractStore>;
-
-/// Component id literal type to uniquely identify a component.
-pub type ComponentId = String;
-
+// TODO: Move to tycho_storage::models?
 /// Identifies a block in storage.
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum BlockIdentifier {
@@ -317,6 +287,32 @@ pub trait ExtractionStateGateway {
 pub enum BlockOrTimestamp {
     Block(BlockIdentifier),
     Timestamp(NaiveDateTime),
+}
+
+impl TryFrom<&dto::VersionParam> for BlockOrTimestamp {
+    type Error = anyhow::Error;
+
+    fn try_from(version: &dto::VersionParam) -> Result<Self, Self::Error> {
+        match (&version.timestamp, &version.block) {
+            (_, Some(block)) => {
+                // If a full block is provided, we prioritize hash over number and chain
+                let block_identifier = match (&block.hash, &block.chain, &block.number) {
+                    (Some(hash), _, _) => BlockIdentifier::Hash(hash.clone()),
+                    (_, Some(chain), Some(number)) => {
+                        BlockIdentifier::Number((Chain::from(*chain), *number))
+                    }
+                    _ => {
+                        return Err(anyhow::format_err!("Insufficient block information".to_owned()))
+                    }
+                };
+                Ok(BlockOrTimestamp::Block(block_identifier))
+            }
+            (Some(timestamp), None) => Ok(BlockOrTimestamp::Timestamp(*timestamp)),
+            (None, None) => {
+                Err(anyhow::format_err!("Missing timestamp or block identifier".to_owned()))
+            }
+        }
+    }
 }
 
 /// References certain states within a single block.

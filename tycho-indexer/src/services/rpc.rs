@@ -2,6 +2,7 @@
 
 use crate::extractor::evm;
 use actix_web::{web, HttpResponse};
+use anyhow::Error;
 use diesel_async::{
     pooled_connection::deadpool::{self, Pool},
     AsyncPgConnection,
@@ -9,7 +10,7 @@ use diesel_async::{
 use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
-use tycho_storage::{self, BlockIdentifier, BlockOrTimestamp, StorageError};
+use tycho_storage::{self, BlockOrTimestamp, StorageError};
 use tycho_types::{
     dto,
     dto::{ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
@@ -29,6 +30,12 @@ pub enum RpcError {
 
     #[error("Failed to get database connection: {0}")]
     Connection(#[from] deadpool::PoolError),
+}
+
+impl From<anyhow::Error> for RpcError {
+    fn from(value: Error) -> Self {
+        Self::Parse(value.to_string())
+    }
 }
 
 impl From<evm::Account> for dto::ResponseAccount {
@@ -132,31 +139,6 @@ impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
         }
     }
 }
-
-impl TryFrom<&dto::VersionParam> for BlockOrTimestamp {
-    type Error = RpcError;
-
-    fn try_from(version: &dto::VersionParam) -> Result<Self, Self::Error> {
-        match (&version.timestamp, &version.block) {
-            (_, Some(block)) => {
-                // If a full block is provided, we prioritize hash over number and chain
-                let block_identifier = match (&block.hash, &block.chain, &block.number) {
-                    (Some(hash), _, _) => BlockIdentifier::Hash(hash.clone()),
-                    (_, Some(chain), Some(number)) => {
-                        BlockIdentifier::Number((Chain::from(*chain), *number))
-                    }
-                    _ => return Err(RpcError::Parse("Insufficient block information".to_owned())),
-                };
-                Ok(BlockOrTimestamp::Block(block_identifier))
-            }
-            (Some(timestamp), None) => Ok(BlockOrTimestamp::Timestamp(*timestamp)),
-            (None, None) => {
-                Err(RpcError::Parse("Missing timestamp or block identifier".to_owned()))
-            }
-        }
-    }
-}
-
 pub struct RpcHandler {
     db_gateway: Arc<EvmPostgresGateway>,
     db_connection_pool: Pool<AsyncPgConnection>,
@@ -195,7 +177,7 @@ impl RpcHandler {
         //TODO: handle when no contract is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
 
-        let version = storage::Version(at, storage::VersionKind::Last);
+        let version = tycho_storage::Version(at, tycho_storage::VersionKind::Last);
 
         // Get the contract IDs from the request
         let contract_ids = request.contract_ids.clone();
@@ -314,7 +296,7 @@ impl RpcHandler {
         //TODO: handle when no id is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
 
-        let version = storage::Version(at, storage::VersionKind::Last);
+        let version = tycho_storage::Version(at, tycho_storage::VersionKind::Last);
 
         // Get the protocol IDs from the request
         let protocol_ids: Option<Vec<dto::ProtocolId>> = request.protocol_ids.clone();
@@ -697,20 +679,21 @@ pub async fn protocol_delta(
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::postgres::{self, db_fixtures, schema};
     use actix_web::test;
     use chrono::Utc;
     use diesel::prelude::*;
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, U256};
+    use tycho_storage::postgres::{self, db_fixtures, schema};
 
     use std::{collections::HashMap, str::FromStr};
 
-    use self::storage::postgres::orm;
+    use tycho_storage::postgres::orm;
 
     use ethers::prelude::H256;
 
     use diesel_async::RunQueryDsl;
+    use tycho_storage::BlockIdentifier;
     use tycho_types::models::ChangeType;
 
     use super::*;

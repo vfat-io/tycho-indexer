@@ -4,7 +4,7 @@ use mockall::automock;
 use prost::DecodeError;
 use std::sync::Arc;
 use thiserror::Error;
-use tycho_storage::postgres::{self, cache::CachedGateway, PostgresGateway};
+use tycho_storage::StorageError;
 use tycho_types::models::{ExtractorIdentity, NormalisedMessage};
 
 pub mod evm;

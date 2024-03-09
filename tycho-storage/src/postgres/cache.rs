@@ -1,5 +1,5 @@
 use super::{
-    super::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
+    super::{BlockIdentifier, BlockOrTimestamp, StorageError},
     PostgresGateway,
 };
 use diesel_async::{
@@ -22,7 +22,7 @@ use tokio::{
 use tracing::{debug, error, info, trace};
 use tycho_types::{
     models,
-    models::{Chain, ExtractionState},
+    models::{Chain, ExtractionState, TxHash},
 };
 
 /// Represents different types of database write operations.

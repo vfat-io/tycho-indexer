@@ -4971,6 +4971,7 @@ dependencies = [
 name = "tycho-storage"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "chrono",
  "diesel",
@@ -4981,6 +4982,7 @@ dependencies = [
  "hex",
  "itertools 0.12.1",
  "lru",
+ "pretty_assertions",
  "rstest",
  "serde_json",
  "test-log",

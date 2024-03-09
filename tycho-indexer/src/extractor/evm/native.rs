@@ -1,3 +1,7 @@
+use super::{
+    token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait},
+    utils::format_duration,
+};
 use crate::{
     extractor::{
         evm::{self, chain_state::ChainState, Block},
@@ -7,7 +11,6 @@ use crate::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockEntityChanges,
     },
-    storage::{postgres::cache::CachedGateway, BlockIdentifier, StorageError, TxHash},
 };
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
@@ -22,15 +25,11 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
+use tycho_storage::{postgres::cache::CachedGateway, BlockIdentifier, StorageError};
 use tycho_types::{
     models,
-    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
+    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType, TxHash},
     Bytes,
-};
-
-use super::{
-    token_pre_processor::{TokenPreProcessor, TokenPreProcessorTrait},
-    utils::format_duration,
 };
 
 pub struct Inner {
@@ -702,23 +701,22 @@ mod test_serial_db {
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
 
-    use crate::{
-        extractor::evm::{
-            token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, ProtocolStateDelta,
-            Transaction,
-        },
-        storage::{
-            postgres,
-            postgres::{
-                orm::{FinancialType, ImplementationType},
-                testing::run_against_db,
-                PostgresGateway,
-            },
-        },
+    use crate::extractor::evm::{
+        token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, ProtocolStateDelta,
+        Transaction,
     };
     use mpsc::channel;
     use test_serial_db::evm::ProtocolChangesWithTx;
     use tokio::sync::mpsc;
+    use tycho_storage::{
+        postgres,
+        postgres::{
+            orm::{FinancialType, ImplementationType},
+            testing::run_against_db,
+            PostgresGateway,
+        },
+        BlockIdentifier,
+    };
     use tycho_types::models;
 
     use super::*;
@@ -782,7 +780,7 @@ mod test_serial_db {
 
         let (tx, rx) = channel(10);
 
-        let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
+        let write_executor = tycho_storage::postgres::cache::DBCacheWriteExecutor::new(
             "ethereum".to_owned(),
             Chain::Ethereum,
             pool.clone(),

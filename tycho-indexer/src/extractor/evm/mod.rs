@@ -1,9 +1,6 @@
 use self::utils::TryDecode;
 use super::{u256_num::bytes_to_f64, ExtractionError};
-use crate::{
-    pb::tycho::evm::v1 as substreams,
-    storage::{AttrStoreKey, ComponentId, StoreVal},
-};
+use crate::pb::tycho::evm::v1 as substreams;
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
@@ -13,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use tracing::log::warn;
 use tycho_types::{
-    models::{Address, Chain, ChangeType, ExtractorIdentity, NormalisedMessage, ProtocolType},
+    models::{
+        Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
+        NormalisedMessage, ProtocolType, StoreVal,
+    },
     Bytes,
 };
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};

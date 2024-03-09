@@ -7,7 +7,7 @@ use super::{
             versioning::apply_delta_versioning,
             PostgresGateway,
         },
-        Balance, BlockOrTimestamp, ComponentId, StorageError, TxHash, Version,
+        BlockOrTimestamp, StorageError, Version,
     },
     WithTxHash,
 };
@@ -19,7 +19,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{instrument, warn};
 use tycho_types::{
     models,
-    models::{Address, Chain, ChangeType, FinancialType, ImplementationType},
+    models::{
+        Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType, TxHash,
+    },
     Bytes,
 };
 use unicode_segmentation::UnicodeSegmentation;

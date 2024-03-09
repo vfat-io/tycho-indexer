@@ -129,7 +129,7 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-use super::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash, Version, VersionKind};
+use super::{BlockIdentifier, BlockOrTimestamp, StorageError, Version, VersionKind};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{
@@ -139,7 +139,7 @@ use diesel_async::{
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use std::{collections::HashMap, hash::Hash, i64, ops::Deref, str::FromStr, sync::Arc};
 use tracing::{debug, info};
-use tycho_types::models::Chain;
+use tycho_types::models::{Chain, TxHash};
 
 pub mod cache;
 pub mod chain;
@@ -368,8 +368,6 @@ impl PostgresGateway {
         Self { protocol_system_id_cache: protocol_system_cache, chain_id_cache: cache }
     }
 
-    #[allow(clippy::needless_pass_by_ref_mut)]
-    #[cfg(test)]
     pub async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
         let chain_id_mapping: Vec<(i64, String)> = async {
             use schema::chain::dsl::*;
@@ -519,7 +517,7 @@ fn run_migrations(db_url: &str) {
         .expect("migrations should execute without errors");
 }
 
-#[cfg(test)]
+// TODO: add cfg(test) once we have better mocks to be used in indexer crate
 pub mod testing {
     //! # Reusable components to write tests against the DB.
     use diesel::sql_query;
@@ -625,7 +623,7 @@ pub mod testing {
     }
 }
 
-#[cfg(test)]
+// TODO: add cfg(test) once we have better mocks to be used in indexer crate
 pub mod db_fixtures {
     //! # General Purpose Fixtures for Database State Modification
     //!
@@ -658,15 +656,16 @@ pub mod db_fixtures {
     //! local copy might serve your needs better. For instance, if the complete
     //! shared setup isn't necessary for your test case, copy it and keep only
     //! the entries that are crucial to your test case.
-    use std::str::FromStr;
-
-    use crate::{Balance, Code};
     use chrono::NaiveDateTime;
     use diesel::{prelude::*, sql_query};
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
-    use tycho_types::Bytes;
+    use std::str::FromStr;
+    use tycho_types::{
+        models::{Balance, Code},
+        Bytes,
+    };
 
     use super::{
         orm::{FinancialType, ImplementationType},

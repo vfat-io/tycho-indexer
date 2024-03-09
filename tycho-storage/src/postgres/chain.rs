@@ -1,5 +1,5 @@
 use super::{orm, schema, PostgresGateway};
-use crate::{BlockHash, BlockIdentifier, StorageError, TxHash};
+use crate::{BlockIdentifier, StorageError};
 
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -7,7 +7,10 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use std::collections::HashMap;
 use tracing::{instrument, warn};
-use tycho_types::{models::blockchain::*, Bytes};
+use tycho_types::{
+    models::{blockchain::*, BlockHash, TxHash},
+    Bytes,
+};
 
 impl PostgresGateway {
     #[instrument(skip_all)]

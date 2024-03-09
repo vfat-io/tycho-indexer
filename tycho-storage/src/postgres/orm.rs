@@ -1,8 +1,5 @@
 use super::{
-    super::{
-        AttrStoreKey, Balance, BlockHash, BlockIdentifier, Code, CodeHash, ComponentId,
-        StorageError, StoreVal, TxHash,
-    },
+    super::{BlockIdentifier, StorageError},
     schema::{
         account, account_balance, block, chain, component_balance, component_tvl, contract_code,
         contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
@@ -26,7 +23,10 @@ use diesel_derive_enum::DbEnum;
 use std::collections::{HashMap, HashSet};
 use tycho_types::{
     models,
-    models::{Address, ContractId},
+    models::{
+        Address, AttrStoreKey, Balance, BlockHash, Code, CodeHash, ComponentId, ContractId,
+        StoreVal, TxHash,
+    },
     Bytes,
 };
 
