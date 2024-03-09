@@ -25,10 +25,11 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
-use tycho_storage::{postgres::cache::CachedGateway, BlockIdentifier, StorageError};
+use tycho_storage::postgres::cache::CachedGateway;
 use tycho_types::{
     models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType, TxHash},
+    storage::{BlockIdentifier, StorageError},
     Bytes,
 };
 
@@ -715,9 +716,8 @@ mod test_serial_db {
             testing::run_against_db,
             PostgresGateway,
         },
-        BlockIdentifier,
     };
-    use tycho_types::models;
+    use tycho_types::{models, storage::BlockIdentifier};
 
     use super::*;
 

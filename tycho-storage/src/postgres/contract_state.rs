@@ -1,5 +1,5 @@
 use super::{
-    maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema,
+    maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema, storage_error_from_diesel,
     versioning::{apply_delta_versioning, apply_versioning},
     PostgresError, PostgresGateway, WithTxHash,
 };
@@ -69,7 +69,8 @@ impl PostgresGateway {
                 .order_by((account_id, valid_from.desc(), schema::transaction::index.desc()))
                 .distinct_on(account_id)
                 .get_results::<(i64, Balance)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .collect::<HashMap<i64, Balance>>()
         } else {
@@ -95,7 +96,8 @@ impl PostgresGateway {
                 .order_by((account_id, valid_from.asc(), schema::transaction::index.asc()))
                 .distinct_on(account_id)
                 .get_results::<(i64, Bytes)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .collect::<HashMap<i64, Bytes>>()
         };
@@ -143,7 +145,8 @@ impl PostgresGateway {
                 .order_by((account_id, valid_from.desc(), schema::transaction::index.desc()))
                 .distinct_on(account_id)
                 .get_results::<(i64, Code)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .collect::<HashMap<i64, Code>>()
         } else {
@@ -169,7 +172,8 @@ impl PostgresGateway {
                 .order_by((account_id, valid_from.asc(), schema::transaction::index.asc()))
                 .distinct_on(account_id)
                 .get_results::<(i64, Code)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .collect::<HashMap<i64, Code>>()
         };
@@ -221,7 +225,8 @@ impl PostgresGateway {
                 ))
                 .distinct_on((schema::account::id, schema::contract_storage::slot))
                 .get_results::<(i64, StoreKey, Option<StoreVal>)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
         } else {
             // Going backwards
             //                  ]     changes to revert    ]
@@ -251,7 +256,8 @@ impl PostgresGateway {
                 ))
                 .distinct_on((schema::account::id, schema::contract_storage::slot))
                 .get_results::<(i64, Bytes, Option<Bytes>)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
         };
         let mut result: HashMap<i64, ContractStore> = HashMap::new();
         for (cid, raw_key, raw_val) in changed_values.into_iter() {
@@ -324,7 +330,8 @@ impl PostgresGateway {
                 )
                 .select(orm::Account::as_select())
                 .get_results::<orm::Account>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
         };
         // Handle creation and deletion of same account within range. Currently
         // not properly supported. We only check for the existence of such a
@@ -387,7 +394,8 @@ impl PostgresGateway {
             let version = Some(Version::from_ts(*target_version_ts));
             let restored: HashMap<Address, models::contract::ContractDelta> = self
                 .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .map(|acc| (acc.address.clone(), acc.into()))
                 .collect();
@@ -467,7 +475,8 @@ impl PostgresGateway {
             .filter(schema::transaction::id.eq_any(txns))
             .select((schema::transaction::id, (schema::transaction::index, schema::block::ts)))
             .get_results::<(i64, (i64, NaiveDateTime))>(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .collect();
         #[allow(clippy::mutable_key_type)]
@@ -479,7 +488,8 @@ impl PostgresGateway {
             .filter(schema::account::address.eq_any(accounts))
             .select((schema::account::address, schema::account::id))
             .get_results::<(Bytes, i64)>(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .collect();
 
@@ -520,7 +530,8 @@ impl PostgresGateway {
         diesel::insert_into(schema::contract_storage::table)
             .values(&new_entries)
             .execute(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
         Ok(())
     }
 
@@ -574,10 +585,12 @@ impl PostgresGateway {
                 q = q.filter(account::address.eq_any(filter_val));
             }
             q.get_results::<(i64, Bytes, Option<Bytes>)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
         };
         let accounts = orm::Account::get_addresses_by_id(slots.iter().map(|(cid, _, _)| cid), conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .collect::<HashMap<i64, Bytes>>();
         Self::construct_account_to_contract_store(slots.into_iter(), accounts)
@@ -622,7 +635,7 @@ impl PostgresGateway {
         let account_orm: orm::Account = orm::Account::by_id(id, db)
             .await
             .map_err(|err| {
-                PostgresError::from_diesel(err, "Account", &hex::encode(&id.address), None)
+                storage_error_from_diesel(err, "Account", &hex::encode(&id.address), None)
             })?;
         let version_ts = match &version {
             Some(version) => maybe_lookup_version_ts(version, db).await?,
@@ -647,7 +660,7 @@ impl PostgresGateway {
             .first::<(Bytes, orm::AccountBalance)>(db)
             .await
             .map_err(|err| {
-                PostgresError::from_diesel(
+                storage_error_from_diesel(
                     err,
                     "AccountBalance",
                     &hex::encode(&id.address),
@@ -673,7 +686,7 @@ impl PostgresGateway {
             .first::<(Bytes, orm::ContractCode)>(db)
             .await
             .map_err(|err| {
-                PostgresError::from_diesel(
+                storage_error_from_diesel(
                     err,
                     "ContractCode",
                     &hex::encode(&id.address),
@@ -754,7 +767,8 @@ impl PostgresGateway {
                 q = q.filter(address.eq_any(contract_ids));
             }
             q.get_results::<(orm::Account, Option<Bytes>)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .map(|(entity, tx)| WithTxHash { entity, tx })
                 .collect::<Vec<_>>()
@@ -781,7 +795,8 @@ impl PostgresGateway {
                 .select((orm::AccountBalance::as_select(), schema::transaction::hash))
                 .distinct_on(account_id)
                 .get_results::<(orm::AccountBalance, Bytes)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .map(|(entity, tx)| WithTxHash { entity, tx: Some(tx) })
                 .collect::<Vec<_>>()
@@ -801,7 +816,8 @@ impl PostgresGateway {
                 .select((orm::ContractCode::as_select(), schema::transaction::hash))
                 .distinct_on(account_id)
                 .get_results::<(orm::ContractCode, Bytes)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .map(|(entity, tx)| WithTxHash { entity, tx: Some(tx) })
                 .collect::<Vec<_>>()
@@ -885,7 +901,7 @@ impl PostgresGateway {
                 .first::<(i64, NaiveDateTime)>(db)
                 .await
                 .map_err(|err| {
-                    PostgresError::from_diesel(
+                    storage_error_from_diesel(
                         err,
                         "Transaction",
                         &hex::encode(h),
@@ -917,7 +933,7 @@ impl PostgresGateway {
             .returning(schema::account::id)
             .get_result::<i64>(db)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "Account", &hex_addr, None))?;
+            .map_err(|err| storage_error_from_diesel(err, "Account", &hex_addr, None))?;
 
         // we can only insert balance and contract_code if we have a creation transaction.
         if let Some(tx_id) = creation_tx_id {
@@ -925,14 +941,12 @@ impl PostgresGateway {
                 .values(new_contract.new_balance(account_id, tx_id, created_ts))
                 .execute(db)
                 .await
-                .map_err(|err| {
-                    PostgresError::from_diesel(err, "AccountBalance", &hex_addr, None)
-                })?;
+                .map_err(|err| storage_error_from_diesel(err, "AccountBalance", &hex_addr, None))?;
             diesel::insert_into(schema::contract_code::table)
                 .values(new_contract.new_code(account_id, tx_id, created_ts))
                 .execute(db)
                 .await
-                .map_err(|err| PostgresError::from_diesel(err, "ContractCode", &hex_addr, None))?;
+                .map_err(|err| storage_error_from_diesel(err, "ContractCode", &hex_addr, None))?;
             self.upsert_slots(
                 [(
                     tx_id,
@@ -972,7 +986,8 @@ impl PostgresGateway {
             .filter(schema::transaction::hash.eq_any(new.iter().filter_map(|u| u.tx.as_ref())))
             .select((schema::transaction::hash, (schema::transaction::id, schema::block::ts)))
             .get_results::<(Bytes, (i64, NaiveDateTime))>(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .collect();
 
@@ -996,7 +1011,8 @@ impl PostgresGateway {
             .filter(schema::account::address.eq_any(addresses?))
             .select((schema::account::address, schema::account::id))
             .get_results::<(Bytes, i64)>(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .collect();
 
@@ -1076,14 +1092,16 @@ impl PostgresGateway {
             diesel::insert_into(schema::account_balance::table)
                 .values(&balance_data)
                 .execute(conn)
-                .await?;
+                .await
+                .map_err(PostgresError::from)?;
         }
         if !code_data.is_empty() {
             apply_versioning::<_, orm::ContractCode>(&mut code_data, conn).await?;
             diesel::insert_into(schema::contract_code::table)
                 .values(&code_data)
                 .execute(conn)
-                .await?;
+                .await
+                .map_err(PostgresError::from)?;
         }
 
         if !slot_data.is_empty() {
@@ -1101,11 +1119,11 @@ impl PostgresGateway {
     ) -> Result<(), StorageError> {
         let account = orm::Account::by_id(id, conn)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "Account", &id.to_string(), None))?;
+            .map_err(|err| storage_error_from_diesel(err, "Account", &id.to_string(), None))?;
         let tx = orm::Transaction::by_hash(at_tx, conn)
             .await
             .map_err(|err| {
-                PostgresError::from_diesel(
+                storage_error_from_diesel(
                     err,
                     "Account",
                     &hex::encode(at_tx),
@@ -1116,7 +1134,8 @@ impl PostgresGateway {
             .filter(schema::block::id.eq(tx.block_id))
             .select(schema::block::ts)
             .first::<NaiveDateTime>(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
         if let Some(tx_id) = account.deletion_tx {
             if tx.id != tx_id {
                 return Err(StorageError::Unexpected(format!(
@@ -1131,14 +1150,16 @@ impl PostgresGateway {
         diesel::update(schema::account::table.filter(schema::account::id.eq(account.id)))
             .set((schema::account::deletion_tx.eq(tx.id), schema::account::deleted_at.eq(block_ts)))
             .execute(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
         diesel::update(
             schema::contract_storage::table
                 .filter(schema::contract_storage::account_id.eq(account.id)),
         )
         .set(schema::contract_storage::valid_to.eq(block_ts))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::account_balance::table
@@ -1146,14 +1167,16 @@ impl PostgresGateway {
         )
         .set(schema::account_balance::valid_to.eq(block_ts))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::contract_code::table.filter(schema::contract_code::account_id.eq(account.id)),
         )
         .set(schema::contract_code::valid_to.eq(block_ts))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
         Ok(())
     }
 
@@ -1209,7 +1232,8 @@ impl PostgresGateway {
             )
             .select((schema::account::id, schema::account::address))
             .get_results::<(i64, Address)>(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
 
         let deltas = account_addresses
             .into_iter()
@@ -2099,7 +2123,8 @@ mod test {
             .filter(schema::account::address.eq(address))
             .select(schema::account::id)
             .first::<i64>(conn)
-            .await?)
+            .await
+            .map_err(PostgresError::from)?)
     }
 
     #[tokio::test]

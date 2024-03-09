@@ -26,12 +26,11 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
-use tycho_storage::{
-    postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError,
-};
+use tycho_storage::postgres::cache::CachedGateway;
 use tycho_types::{
     models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
+    storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
     Bytes,
 };
 

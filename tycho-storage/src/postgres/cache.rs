@@ -1,4 +1,4 @@
-use super::PostgresGateway;
+use super::{PostgresError, PostgresGateway};
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
@@ -303,7 +303,7 @@ impl DBCacheWriteExecutor {
                 async {
                     for op in new_db_tx.operations {
                         match self.execute_write_op(&op, conn).await {
-                            Err(StorageError::DuplicateEntry(entity, id)) => {
+                            Err(PostgresError(StorageError::DuplicateEntry(entity, id))) => {
                                 // As this db transaction is old. It can contain
                                 // already stored txs, we log the duplicate entry
                                 // error and continue
@@ -315,14 +315,16 @@ impl DBCacheWriteExecutor {
                             _ => {}
                         }
                     }
-                    Result::<(), StorageError>::Ok(())
+                    Result::<(), PostgresError>::Ok(())
                 }
                 .scope_boxed()
             })
             .await;
 
         // Forward the result to the sender
-        let _ = new_db_tx.tx.send(res);
+        let _ = new_db_tx
+            .tx
+            .send(res.map_err(Into::into));
         info!(block_range=?&new_db_tx.block_range, "Transaction successfully committed to DB!");
     }
 
@@ -334,23 +336,23 @@ impl DBCacheWriteExecutor {
         &mut self,
         operation: &WriteOp,
         conn: &mut AsyncPgConnection,
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), PostgresError> {
         trace!(op=?operation, name="ExecuteWriteOp");
         match operation {
             WriteOp::UpsertBlock(block) => {
                 self.state_gateway
                     .upsert_block(block, conn)
-                    .await
+                    .await?
             }
             WriteOp::UpsertTx(transaction) => {
                 self.state_gateway
                     .upsert_tx(transaction, conn)
-                    .await
+                    .await?
             }
             WriteOp::SaveExtractionState(state) => {
                 self.state_gateway
                     .save_state(state, conn)
-                    .await
+                    .await?
             }
             WriteOp::InsertContract(contracts) => {
                 for contract in contracts.iter() {
@@ -358,7 +360,6 @@ impl DBCacheWriteExecutor {
                         .insert_contract(contract, conn)
                         .await?
                 }
-                Ok(())
             }
             WriteOp::UpdateContracts(contracts) => {
                 let collected_changes: Vec<(TxHash, &models::contract::ContractDelta)> = contracts
@@ -368,22 +369,22 @@ impl DBCacheWriteExecutor {
                 let changes_slice = collected_changes.as_slice();
                 self.state_gateway
                     .update_contracts(&self.chain, changes_slice, conn)
-                    .await
+                    .await?
             }
             WriteOp::InsertProtocolComponents(components) => {
                 self.state_gateway
                     .add_protocol_components(components.as_slice(), conn)
-                    .await
+                    .await?
             }
             WriteOp::InsertTokens(tokens) => {
                 self.state_gateway
                     .add_tokens(tokens.as_slice(), conn)
-                    .await
+                    .await?
             }
             WriteOp::InsertComponentBalances(balances) => {
                 self.state_gateway
                     .add_component_balances(balances.as_slice(), &self.chain, conn)
-                    .await
+                    .await?
             }
             WriteOp::UpsertProtocolState(deltas) => {
                 let collected_changes: Vec<(
@@ -396,9 +397,10 @@ impl DBCacheWriteExecutor {
                 let changes_slice = collected_changes.as_slice();
                 self.state_gateway
                     .update_protocol_states(&self.chain, changes_slice, conn)
-                    .await
+                    .await?
             }
-        }
+        };
+        Ok(())
     }
 }
 

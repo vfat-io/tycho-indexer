@@ -1,7 +1,7 @@
 use super::{
     maybe_lookup_block_ts, maybe_lookup_version_ts, orm,
     orm::{Account, ComponentTVL, NewAccount},
-    schema,
+    schema, storage_error_from_diesel,
     versioning::apply_delta_versioning,
     PostgresError, PostgresGateway, WithTxHash,
 };
@@ -86,7 +86,7 @@ impl PostgresGateway {
                 Ok(protocol_states)
             }
 
-            Err(err) => Err(PostgresError::from_diesel(err, "ProtocolStates", context, None)),
+            Err(err) => Err(storage_error_from_diesel(err, "ProtocolStates", context, None).into()),
         }
     }
 
@@ -112,7 +112,7 @@ impl PostgresGateway {
                 .get_result::<orm::ProtocolSystem>(conn)
                 .await
                 .map_err(|err| {
-                    PostgresError::from_diesel(err, "ProtocolSystem", &new.to_string(), None)
+                    storage_error_from_diesel(err, "ProtocolSystem", &new.to_string(), None)
                 })?;
             Ok(inserted_protocol_system.id)
         }
@@ -172,7 +172,8 @@ impl PostgresGateway {
 
         let orm_protocol_components = query
             .load::<(orm::ProtocolComponent, TxHash)>(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
 
         let protocol_component_ids = orm_protocol_components
             .iter()
@@ -194,7 +195,8 @@ impl PostgresGateway {
                         .eq_any(protocol_component_ids.clone()),
                 )
                 .load::<(i64, Address)>(conn)
-                .await?;
+                .await
+                .map_err(PostgresError::from)?;
 
         let protocol_component_contracts: Vec<(i64, Address)> =
             schema::protocol_component_holds_contract::table
@@ -212,7 +214,8 @@ impl PostgresGateway {
                         .eq_any(protocol_component_ids),
                 )
                 .load::<(i64, Address)>(conn)
-                .await?;
+                .await
+                .map_err(PostgresError::from)?;
 
         fn map_addresses_to_protocol_component(
             protocol_component_to_address: Vec<(i64, Address)>,
@@ -286,11 +289,13 @@ impl PostgresGateway {
             .map(|pc| pc.creation_tx.clone())
             .collect();
         let tx_hash_id_mapping: HashMap<TxHash, i64> =
-            orm::Transaction::ids_by_hash(&tx_hashes, conn).await?;
+            orm::Transaction::ids_by_hash(&tx_hashes, conn)
+                .await
+                .map_err(PostgresError::from)?;
         let pt_id = orm::ProtocolType::id_by_name(&new[0].protocol_type_name, conn)
             .await
             .map_err(|err| {
-                PostgresError::from_diesel(err, "ProtocolType", &new[0].protocol_type_name, None)
+                storage_error_from_diesel(err, "ProtocolType", &new[0].protocol_type_name, None)
             })?;
         for pc in new {
             let txh = tx_hash_id_mapping
@@ -323,7 +328,7 @@ impl PostgresGateway {
                 .get_results(conn)
                 .await
                 .map_err(|err| {
-                    PostgresError::from_diesel(err, "ProtocolComponent", "Batch insert", None)
+                    storage_error_from_diesel(err, "ProtocolComponent", "Batch insert", None)
                 })?;
 
         let mut protocol_db_id_map = HashMap::new();
@@ -379,7 +384,7 @@ impl PostgresGateway {
             .into_boxed()
             .load::<(Address, i64)>(conn)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "Token", "Several Chains", None))?
+            .map_err(|err| storage_error_from_diesel(err, "Token", "Several Chains", None))?
             .into_iter()
             .collect();
 
@@ -402,7 +407,8 @@ impl PostgresGateway {
         diesel::insert_into(protocol_component_holds_token)
             .values(&protocol_component_token_junction?)
             .execute(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
 
         // establish component-contract junction
         let contract_addresses: HashSet<Address> = new
@@ -439,7 +445,7 @@ impl PostgresGateway {
             .into_boxed()
             .load::<(Address, i64)>(conn)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "Contract", "Several Chains", None))?
+            .map_err(|err| storage_error_from_diesel(err, "Contract", "Several Chains", None))?
             .into_iter()
             .collect();
 
@@ -462,7 +468,8 @@ impl PostgresGateway {
         diesel::insert_into(protocol_component_holds_contract)
             .values(&protocol_component_contract_junction?)
             .execute(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
 
         Ok(())
     }
@@ -483,7 +490,8 @@ impl PostgresGateway {
         diesel::update(protocol_component.filter(external_id.eq_any(ids_to_delete)))
             .set(deleted_at.eq(block_ts))
             .execute(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
         Ok(())
     }
     pub async fn add_protocol_types(
@@ -526,7 +534,7 @@ impl PostgresGateway {
             .do_nothing()
             .execute(conn)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "ProtocolType", "Batch insert", None))?;
+            .map_err(|err| storage_error_from_diesel(err, "ProtocolType", "Batch insert", None))?;
 
         Ok(())
     }
@@ -598,7 +606,8 @@ impl PostgresGateway {
                 .as_slice(),
             conn,
         )
-        .await?
+        .await
+        .map_err(PostgresError::from)?
         .into_iter()
         .map(|(id, hash, index, ts)| (hash, (id, index, ts)))
         .collect();
@@ -611,7 +620,8 @@ impl PostgresGateway {
             chain_db_id,
             conn,
         )
-        .await?
+        .await
+        .map_err(PostgresError::from)?
         .into_iter()
         .map(|(id, external_id)| (external_id, id))
         .collect();
@@ -660,7 +670,8 @@ impl PostgresGateway {
                     .filter(schema::protocol_state::valid_to.is_null())
                     .set(schema::protocol_state::valid_to.eq(tx_db.2))
                     .execute(conn)
-                    .await?;
+                    .await
+                    .map_err(PostgresError::from)?;
             }
         }
 
@@ -670,7 +681,8 @@ impl PostgresGateway {
             diesel::insert_into(schema::protocol_state::table)
                 .values(&state_data)
                 .execute(conn)
-                .await?;
+                .await
+                .map_err(PostgresError::from)?;
         }
         Ok(())
     }
@@ -697,7 +709,7 @@ impl PostgresGateway {
             .order(schema::token::symbol.asc())
             .load::<(orm::Token, Address)>(conn)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "Token", &chain.to_string(), None))?;
+            .map_err(|err| storage_error_from_diesel(err, "Token", &chain.to_string(), None))?;
 
         let tokens: Result<Vec<models::token::CurrencyToken>, StorageError> = results
             .into_iter()
@@ -764,14 +776,14 @@ impl PostgresGateway {
             .do_nothing()
             .execute(conn)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "Account", "batch", None))?;
+            .map_err(|err| storage_error_from_diesel(err, "Account", "batch", None))?;
 
         let accounts: Vec<Account> = schema::account::table
             .filter(schema::account::address.eq_any(addresses))
             .select(Account::as_select())
             .get_results::<Account>(conn)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "Account", "retrieve", None))?;
+            .map_err(|err| storage_error_from_diesel(err, "Account", "retrieve", None))?;
 
         let account_map: HashMap<(Vec<u8>, i64), i64> = accounts
             .iter()
@@ -799,7 +811,7 @@ impl PostgresGateway {
             .do_nothing()
             .execute(conn)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "Token", "batch", None))?;
+            .map_err(|err| storage_error_from_diesel(err, "Token", "batch", None))?;
 
         Ok(())
     }
@@ -823,7 +835,8 @@ impl PostgresGateway {
             .select((schema::account::address, schema::token::id))
             .filter(schema::account::address.eq_any(&token_addresses))
             .load::<(Address, i64)>(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .collect();
 
@@ -834,7 +847,8 @@ impl PostgresGateway {
         let txn_hashes = modify_txs.iter().collect::<Vec<_>>();
         let transaction_ids_and_ts: HashMap<TxHash, (i64, NaiveDateTime)> =
             orm::Transaction::ids_and_ts_by_hash(txn_hashes.as_ref(), conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .map(|(db_id, hash, _, ts)| (hash, (db_id, ts)))
                 .collect();
@@ -846,7 +860,8 @@ impl PostgresGateway {
 
         let protocol_component_ids: HashMap<String, i64> =
             orm::ProtocolComponent::ids_by_external_ids(&external_ids, chain_db_id, conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .map(|(component_id, external_id)| (external_id, component_id))
                 .collect();
@@ -876,9 +891,7 @@ impl PostgresGateway {
                 .values(&new_component_balances)
                 .execute(conn)
                 .await
-                .map_err(|err| {
-                    PostgresError::from_diesel(err, "ComponentBalance", "batch", None)
-                })?;
+                .map_err(|err| storage_error_from_diesel(err, "ComponentBalance", "batch", None))?;
         }
         Ok(())
     }
@@ -936,7 +949,8 @@ impl PostgresGateway {
                     schema::transaction::hash,
                 ))
                 .get_results::<(String, Address, Balance, f64, TxHash)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .map(|(component_id, address, balance, bal_f64, tx)| {
                     models::protocol::ComponentBalance::new(
@@ -984,7 +998,8 @@ impl PostgresGateway {
                     schema::transaction::hash,
                 ))
                 .get_results::<(String, Address, Balance, TxHash)>(conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .map(|(component_id, address, balance, tx)| {
                     models::protocol::ComponentBalance::new(
@@ -1008,7 +1023,7 @@ impl PostgresGateway {
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
         let version_ts = match &at {
-            Some(version) => Some(version.to_ts(conn).await?),
+            Some(version) => Some(maybe_lookup_block_ts(version, conn).await?),
             None => None,
         };
         let chain_id = self.get_chain_id(chain);
@@ -1035,7 +1050,8 @@ impl PostgresGateway {
 
         let balances: HashMap<_, _> = q
             .get_results::<(String, Bytes, f64)>(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .group_by(|e| e.0.clone())
             .into_iter()
@@ -1081,7 +1097,7 @@ impl PostgresGateway {
                 orm::ProtocolState::forward_deltas_by_chain(chain_db_id, start_ts, end_ts, conn)
                     .await
                     .map_err(|err| {
-                        PostgresError::from_diesel(
+                        storage_error_from_diesel(
                             err,
                             "ProtocolStates",
                             chain.to_string().as_str(),
@@ -1098,7 +1114,7 @@ impl PostgresGateway {
             )
             .await
             .map_err(|err| {
-                PostgresError::from_diesel(err, "ProtocolStates", chain.to_string().as_str(), None)
+                storage_error_from_diesel(err, "ProtocolStates", chain.to_string().as_str(), None)
             })?;
 
             // Decode final state deltas. We can assume both the deleted_attrs and state_updates
@@ -1178,7 +1194,7 @@ impl PostgresGateway {
                 orm::ProtocolState::reverse_delta_by_chain(chain_db_id, start_ts, end_ts, conn)
                     .await
                     .map_err(|err| {
-                        PostgresError::from_diesel(
+                        storage_error_from_diesel(
                             err,
                             "ProtocolStates",
                             chain.to_string().as_str(),
@@ -1244,7 +1260,7 @@ impl PostgresGateway {
             .filter(schema::account::chain_id.eq(chain_id))
             .get_results::<(Bytes, f64)>(conn)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "TokenPrice", &chain.to_string(), None))?
+            .map_err(|err| storage_error_from_diesel(err, "TokenPrice", &chain.to_string(), None))?
             .into_iter()
             .collect::<HashMap<_, _>>())
     }
@@ -1262,7 +1278,8 @@ impl PostgresGateway {
             .collect::<Vec<_>>();
         let external_db_id_map =
             orm::ProtocolComponent::ids_by_external_ids(&external_ids, chain_id, conn)
-                .await?
+                .await
+                .map_err(PostgresError::from)?
                 .into_iter()
                 .map(|(a, b)| (b, a))
                 .collect::<HashMap<_, _>>();
@@ -1280,7 +1297,8 @@ impl PostgresGateway {
             .collect();
         ComponentTVL::upsert_many(&upsert_map)
             .execute(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
         Ok(())
     }
 }

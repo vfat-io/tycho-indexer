@@ -4,8 +4,10 @@ use mockall::automock;
 use prost::DecodeError;
 use std::sync::Arc;
 use thiserror::Error;
-use tycho_storage::StorageError;
-use tycho_types::models::{ExtractorIdentity, NormalisedMessage};
+use tycho_types::{
+    models::{ExtractorIdentity, NormalisedMessage},
+    storage::StorageError,
+};
 
 pub mod evm;
 pub mod runner;

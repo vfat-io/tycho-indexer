@@ -6,6 +6,7 @@ use super::{
         transaction,
     },
     versioning::{DeltaVersionedRow, StoredDeltaVersionedRow, StoredVersionedRow, VersionedRow},
+    PostgresError,
 };
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
@@ -239,7 +240,8 @@ impl Transaction {
             .filter(hash.eq_any(hashes))
             .select((hash, id))
             .load::<(TxHash, i64)>(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
 
         Ok(results.into_iter().collect())
     }
@@ -403,7 +405,8 @@ impl StoredVersionedRow for ComponentBalance {
                     .and(component_balance::valid_to.is_null()),
             )
             .get_results(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.token_id)))
             .map(Box::new)
@@ -949,7 +952,8 @@ impl StoredVersionedRow for ProtocolState {
                     .and(protocol_state::valid_to.is_null()),
             )
             .get_results(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.attribute_name)))
             .map(Box::new)
@@ -1225,7 +1229,8 @@ impl StoredVersionedRow for AccountBalance {
             )
             .select(Self::as_select())
             .get_results::<Self>(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .map(Box::new)
             .collect())
@@ -1326,7 +1331,8 @@ impl StoredVersionedRow for ContractCode {
             )
             .select(Self::as_select())
             .get_results::<Self>(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .map(Box::new)
             .collect())
@@ -1482,7 +1488,8 @@ impl StoredVersionedRow for ContractStorage {
                     .and(contract_storage::valid_to.is_null()),
             )
             .get_results(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(&cs.account_id, &cs.slot)))
             .map(Box::new)

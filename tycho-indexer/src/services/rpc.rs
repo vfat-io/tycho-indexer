@@ -10,11 +10,11 @@ use diesel_async::{
 use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
-use tycho_storage::{self, BlockOrTimestamp, StorageError};
 use tycho_types::{
     dto,
     dto::{ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
     models::{Address, Chain},
+    storage::{BlockOrTimestamp, StorageError, Version, VersionKind},
     Bytes,
 };
 
@@ -177,7 +177,7 @@ impl RpcHandler {
         //TODO: handle when no contract is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
 
-        let version = tycho_storage::Version(at, tycho_storage::VersionKind::Last);
+        let version = Version(at, VersionKind::Last);
 
         // Get the contract IDs from the request
         let contract_ids = request.contract_ids.clone();
@@ -296,7 +296,7 @@ impl RpcHandler {
         //TODO: handle when no id is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
 
-        let version = tycho_storage::Version(at, tycho_storage::VersionKind::Last);
+        let version = Version(at, VersionKind::Last);
 
         // Get the protocol IDs from the request
         let protocol_ids: Option<Vec<dto::ProtocolId>> = request.protocol_ids.clone();
@@ -693,8 +693,7 @@ mod tests {
     use ethers::prelude::H256;
 
     use diesel_async::RunQueryDsl;
-    use tycho_storage::BlockIdentifier;
-    use tycho_types::models::ChangeType;
+    use tycho_types::{models::ChangeType, storage::BlockIdentifier};
 
     use super::*;
 

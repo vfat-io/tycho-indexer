@@ -1,4 +1,4 @@
-use super::{orm, schema, PostgresError, PostgresGateway};
+use super::{orm, schema, storage_error_from_diesel, PostgresError, PostgresGateway};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -43,7 +43,7 @@ impl PostgresGateway {
             .execute(conn)
             .await
             .map_err(|err| {
-                PostgresError::from_diesel(
+                storage_error_from_diesel(
                     err,
                     "Block",
                     &format!("Batch: {} and {} more", &new_blocks[0].hash, new_blocks.len() - 1),
@@ -70,7 +70,7 @@ impl PostgresGateway {
             BlockIdentifier::Hash(block_hash) => orm::Block::by_hash(block_hash, conn).await,
             BlockIdentifier::Latest(chain) => orm::Block::most_recent(*chain, conn).await,
         }
-        .map_err(|err| PostgresError::from_diesel(err, "Block", &block_id.to_string(), None))?;
+        .map_err(|err| storage_error_from_diesel(err, "Block", &block_id.to_string(), None))?;
         let chain = self.get_chain(&orm_block.chain_id);
         Ok(Block {
             hash: std::mem::take(&mut orm_block.hash),
@@ -103,7 +103,7 @@ impl PostgresGateway {
             .get_results::<(Bytes, i64)>(conn)
             .await
             .map_err(|err| {
-                PostgresError::from_diesel(
+                storage_error_from_diesel(
                     err,
                     "Transaction",
                     &format!("Batch: {:x} and {} more", &block_hashes[0], block_hashes.len() - 1),
@@ -143,7 +143,7 @@ impl PostgresGateway {
             .execute(conn)
             .await
             .map_err(|err| {
-                PostgresError::from_diesel(
+                storage_error_from_diesel(
                     err,
                     "Transaction",
                     &format!("Batch {:x} and {} more", &orm_txns[0].hash, orm_txns.len() - 1),
@@ -175,7 +175,7 @@ impl PostgresGateway {
                 })
             })
             .map_err(|err| {
-                PostgresError::from_diesel(err, "Transaction", &hex::encode(hash), None)
+                storage_error_from_diesel(err, "Transaction", &hex::encode(hash), None)
             })?
     }
 
@@ -188,7 +188,9 @@ impl PostgresGateway {
         // from a big number of tables. Reverting state, signifies deleting
         // history. We will not keep any branches in the db only the main branch
         // will be kept.
-        let block = orm::Block::by_id(to, conn).await?;
+        let block = orm::Block::by_id(to, conn)
+            .await
+            .map_err(PostgresError::from)?;
 
         // All entities and version updates are connected to the block via a
         // cascade delete, this ensures that the state is reverted by simply
@@ -201,7 +203,8 @@ impl PostgresGateway {
                 .filter(schema::block::chain_id.eq(block.chain_id)),
         )
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         // Any versioned table's rows, which have `valid_to` set to "> block.ts"
         // need, to be updated to be valid again (thus, valid_to = NULL).
@@ -210,28 +213,32 @@ impl PostgresGateway {
         )
         .set(schema::contract_storage::valid_to.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::account_balance::table.filter(schema::account_balance::valid_to.gt(block.ts)),
         )
         .set(schema::account_balance::valid_to.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::contract_code::table.filter(schema::contract_code::valid_to.gt(block.ts)),
         )
         .set(schema::contract_code::valid_to.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::protocol_state::table.filter(schema::protocol_state::valid_to.gt(block.ts)),
         )
         .set(schema::protocol_state::valid_to.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::protocol_calls_contract::table
@@ -239,14 +246,16 @@ impl PostgresGateway {
         )
         .set(schema::protocol_calls_contract::valid_to.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         // Any versioned table's rows, which have `deleted_at` set to "> block.ts"
         // need, to be updated to be valid again (thus, deleted_at = NULL).
         diesel::update(schema::account::table.filter(schema::account::deleted_at.gt(block.ts)))
             .set(schema::account::deleted_at.eq(Option::<NaiveDateTime>::None))
             .execute(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::protocol_component::table
@@ -254,7 +263,8 @@ impl PostgresGateway {
         )
         .set(schema::protocol_component::deleted_at.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         Ok(())
     }

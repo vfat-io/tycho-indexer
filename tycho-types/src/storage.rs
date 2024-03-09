@@ -268,7 +268,6 @@ pub enum VersionKind {
 pub struct Version(pub BlockOrTimestamp, pub VersionKind);
 
 impl Version {
-    #[cfg(test)]
     pub fn from_block_number(chain: Chain, number: i64) -> Self {
         Self(BlockOrTimestamp::Block(BlockIdentifier::Number((chain, number))), VersionKind::Last)
     }

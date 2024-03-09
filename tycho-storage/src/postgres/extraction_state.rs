@@ -1,4 +1,4 @@
-use super::{orm, schema, PostgresError, PostgresGateway, StorageError};
+use super::{orm, schema, storage_error_from_diesel, PostgresGateway, StorageError};
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use tycho_types::models::{Chain, ExtractionState};
@@ -23,7 +23,7 @@ impl PostgresGateway {
                 Ok(state)
             }
             Ok(None) => Err(StorageError::NotFound("ExtractionState".to_owned(), name.to_owned())),
-            Err(err) => Err(PostgresError::from_diesel(err, "ExtractionState", name, None)),
+            Err(err) => Err(storage_error_from_diesel(err, "ExtractionState", name, None).into()),
         }
     }
 
@@ -48,7 +48,7 @@ impl PostgresGateway {
                     .execute(conn)
                     .await
                     .map_err(|err| {
-                        PostgresError::from_diesel(err, "ExtractionState", &state.name, None)
+                        storage_error_from_diesel(err, "ExtractionState", &state.name, None)
                     })?;
             }
             Ok(None) => {
@@ -67,11 +67,13 @@ impl PostgresGateway {
                     .execute(conn)
                     .await
                     .map_err(|err| {
-                        PostgresError::from_diesel(err, "ExtractionState", &state.name, None)
+                        storage_error_from_diesel(err, "ExtractionState", &state.name, None)
                     })?;
             }
             Err(err) => {
-                return Err(PostgresError::from_diesel(err, "ExtractionState", &state.name, None));
+                return Err(
+                    storage_error_from_diesel(err, "ExtractionState", &state.name, None).into()
+                );
             }
         }
         Ok(())

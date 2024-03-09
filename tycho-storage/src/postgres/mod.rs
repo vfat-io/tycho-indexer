@@ -136,7 +136,6 @@ use diesel_async::{
     AsyncPgConnection, RunQueryDsl,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use ethers::types::spoof::Storage;
 use std::{collections::HashMap, hash::Hash, i64, ops::Deref, str::FromStr, sync::Arc};
 use tracing::{debug, info};
 use tycho_types::{
@@ -286,47 +285,51 @@ impl From<diesel::result::Error> for PostgresError {
     }
 }
 
-impl PostgresError {
-    fn from_diesel(
-        err: diesel::result::Error,
-        entity: &str,
-        id: &str,
-        fetch_args: Option<String>,
-    ) -> PostgresError {
-        let err_string = err.to_string();
-        match err {
-            diesel::result::Error::DatabaseError(
-                diesel::result::DatabaseErrorKind::UniqueViolation,
-                details,
-            ) => {
-                if let Some(col) = details.column_name() {
-                    if col == "id" {
-                        return PostgresError(StorageError::DuplicateEntry(
-                            entity.to_owned(),
-                            id.to_owned(),
-                        ));
-                    }
-                }
-                PostgresError(StorageError::Unexpected(err_string))
-            }
-            diesel::result::Error::NotFound => {
-                if let Some(related_entitiy) = fetch_args {
-                    return PostgresError(StorageError::NoRelatedEntity(
-                        entity.to_owned(),
-                        id.to_owned(),
-                        related_entitiy,
-                    ));
-                }
-                PostgresError(StorageError::NotFound(entity.to_owned(), id.to_owned()))
-            }
-            _ => PostgresError(StorageError::Unexpected(err_string)),
-        }
-    }
-}
-
 impl From<PostgresError> for StorageError {
     fn from(value: PostgresError) -> Self {
         value.0
+    }
+}
+
+impl From<StorageError> for PostgresError {
+    fn from(value: StorageError) -> Self {
+        PostgresError(value)
+    }
+}
+
+fn storage_error_from_diesel(
+    err: diesel::result::Error,
+    entity: &str,
+    id: &str,
+    fetch_args: Option<String>,
+) -> PostgresError {
+    let err_string = err.to_string();
+    match err {
+        diesel::result::Error::DatabaseError(
+            diesel::result::DatabaseErrorKind::UniqueViolation,
+            details,
+        ) => {
+            if let Some(col) = details.column_name() {
+                if col == "id" {
+                    return PostgresError(StorageError::DuplicateEntry(
+                        entity.to_owned(),
+                        id.to_owned(),
+                    ));
+                }
+            }
+            PostgresError(StorageError::Unexpected(err_string))
+        }
+        diesel::result::Error::NotFound => {
+            if let Some(related_entitiy) = fetch_args {
+                return PostgresError(StorageError::NoRelatedEntity(
+                    entity.to_owned(),
+                    id.to_owned(),
+                    related_entitiy,
+                ));
+            }
+            PostgresError(StorageError::NotFound(entity.to_owned(), id.to_owned()))
+        }
+        _ => PostgresError(StorageError::Unexpected(err_string)),
     }
 }
 
@@ -337,18 +340,18 @@ pub async fn maybe_lookup_block_ts(
     match block {
         BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(h, conn)
             .await
-            .map_err(|err| PostgresError::from_diesel(err, "Block", &hex::encode(h), None))?
+            .map_err(|err| storage_error_from_diesel(err, "Block", &hex::encode(h), None))?
             .ts),
         BlockOrTimestamp::Block(BlockIdentifier::Number((chain, no))) => {
             Ok(orm::Block::by_number(*chain, *no, conn)
                 .await
-                .map_err(|err| PostgresError::from_diesel(err, "Block", &format!("{}", no), None))?
+                .map_err(|err| storage_error_from_diesel(err, "Block", &format!("{}", no), None))?
                 .ts)
         }
         BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)) => {
             Ok(orm::Block::most_recent(*chain, conn)
                 .await
-                .map_err(|err| PostgresError::from_diesel(err, "Block", "latest", None))?
+                .map_err(|err| storage_error_from_diesel(err, "Block", "latest", None))?
                 .ts)
         }
         BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
