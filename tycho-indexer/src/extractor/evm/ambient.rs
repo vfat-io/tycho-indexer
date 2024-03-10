@@ -1,4 +1,4 @@
-use super::{utils::format_duration, AccountUpdate, Block};
+use super::{utils::format_duration, Block};
 use crate::{
     extractor::{
         evm,
@@ -15,7 +15,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use diesel_async::AsyncPgConnection;
+
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
@@ -31,8 +31,8 @@ use tycho_types::{
     models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     storage::{
-        BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
-        ExtractionStateGateway, ProtocolGateway, StorageError,
+        BlockIdentifier, ChainGateway, ContractStateGateway, ExtractionStateGateway,
+        ProtocolGateway, StorageError,
     },
     Bytes,
 };
@@ -307,89 +307,6 @@ where
         self.state_gateway
             .commit_transaction(batch_size)
             .await
-    }
-
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? to))]
-    async fn backward(
-        &self,
-        current: Option<BlockIdentifier>,
-        to: &BlockIdentifier,
-        new_cursor: &str,
-        _conn: &mut AsyncPgConnection,
-    ) -> Result<evm::BlockAccountChanges, StorageError> {
-        let block = self.state_gateway.get_block(to).await?;
-        let start = current.map(BlockOrTimestamp::Block);
-
-        let target = BlockOrTimestamp::Block(to.clone());
-        let address = Bytes::from(AMBIENT_CONTRACT);
-        let (account_updates, _, component_balances) = self
-            .state_gateway
-            .get_delta(&self.chain, start.as_ref(), &target)
-            .await?;
-        let account_updates: HashMap<H160, AccountUpdate> = account_updates
-            .into_iter()
-            .filter_map(|u| {
-                if u.address == address {
-                    Some((H160::from_slice(&u.address), u.into()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let mut component_balances_map: HashMap<
-            evm::ComponentId,
-            HashMap<Bytes, models::protocol::ComponentBalance>,
-        > = HashMap::new();
-        for balance in component_balances {
-            let component_id = balance.component_id.clone();
-            let token_address = balance.token.clone();
-            let inner_map = component_balances_map
-                .entry(component_id)
-                .or_default();
-            inner_map.insert(token_address, balance.clone());
-        }
-
-        /* This method does not exist anymore
-        self.state_gateway
-            .revert_state(to)
-            .await?;
-        */
-
-        self.state_gateway
-            .start_transaction(&block)
-            .await;
-        self.save_cursor(new_cursor).await?;
-        self.state_gateway
-            .commit_transaction(0)
-            .await?;
-
-        let changes = evm::BlockAccountChanges::new(
-            &self.name,
-            self.chain,
-            block.into(),
-            true,
-            account_updates,
-            // TODO: consider adding components that were deleted back
-            //  and remove components that were added.
-            HashMap::new(),
-            HashMap::new(),
-            component_balances_map
-                .into_iter()
-                .map(|(component_id, balances)| {
-                    (
-                        component_id,
-                        balances
-                            .into_iter()
-                            .map(|(token_address, balance)| {
-                                (H160::from_slice(token_address.as_ref()), balance.into())
-                            })
-                            .collect(),
-                    )
-                })
-                .collect(),
-        );
-        Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
     }
 
     async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
@@ -825,9 +742,10 @@ mod test_serial_db {
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
     use crate::extractor::evm::{
-        token_pre_processor::MockTokenPreProcessorTrait, ComponentBalance, ProtocolComponent,
+        token_pre_processor::MockTokenPreProcessorTrait, AccountUpdate, ComponentBalance,
+        ProtocolComponent,
     };
-    use diesel_async::pooled_connection::deadpool::Pool;
+    use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
     use ethers::types::U256;
     use mpsc::channel;
     use test_log::test;
@@ -836,7 +754,10 @@ mod test_serial_db {
         postgres,
         postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
     };
-    use tycho_types::models::{ChangeType, ContractId};
+    use tycho_types::{
+        models::{ChangeType, ContractId},
+        storage::BlockOrTimestamp,
+    };
 
     use super::*;
 
@@ -1058,6 +979,8 @@ mod test_serial_db {
         }
     }
 
+    // Allow dead code until reverts are supported again
+    #[allow(dead_code)]
     fn ambient_update02() -> evm::BlockContractChanges {
         let block = evm::Block {
             number: 1,
@@ -1144,86 +1067,6 @@ mod test_serial_db {
             assert_eq!(component_balances.len(), 1);
             dbg!(&component_balances);
             assert_eq!(component_balances[0].component_id, "ambient_USDC_ETH");
-        })
-        .await;
-    }
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_revert() {
-        run_against_db(|pool| async move {
-            let mut conn = pool
-                .get()
-                .await
-                .expect("pool should get a connection");
-            postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
-            postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
-            postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None)
-                .await;
-            let evm_gw = PostgresGateway::from_connection(&mut conn).await;
-
-            let (tx, rx) = channel(10);
-            let write_executor = tycho_storage::postgres::cache::DBCacheWriteExecutor::new(
-                "ethereum".to_owned(),
-                Chain::Ethereum,
-                pool.clone(),
-                evm_gw.clone(),
-                rx,
-            )
-            .await;
-
-            write_executor.run();
-            let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
-
-            let gw = AmbientPgGateway::new(
-                "vm:ambient",
-                Chain::Ethereum,
-                1000,
-                cached_gw,
-                get_mocked_token_pre_processor(),
-            );
-
-            let msg0 = ambient_creation_and_update();
-            let msg1 = ambient_update02();
-            gw.forward(&msg0, "cursor@0", false)
-                .await
-                .expect("upsert should succeed");
-            gw.forward(&msg1, "cursor@1", false)
-                .await
-                .expect("upsert should succeed");
-            let ambient_address = H160(AMBIENT_CONTRACT);
-            let exp_change = evm::AccountUpdate::new(
-                ambient_address,
-                Chain::Ethereum,
-                evm::fixtures::evm_slots([(42, 0)]),
-                Some(U256::from(1000)),
-                None,
-                ChangeType::Update,
-            );
-            let exp_account = ambient_account(0);
-
-            let changes = gw
-                .backward(
-                    None,
-                    &BlockIdentifier::Number((Chain::Ethereum, 0)),
-                    "cursor@2",
-                    &mut conn,
-                )
-                .await
-                .expect("revert should succeed");
-
-            assert_eq!(changes.account_updates.len(), 1);
-            assert_eq!(changes.account_updates[&ambient_address], exp_change);
-            let cached_gw: CachedGateway = gw.state_gateway;
-            let account = cached_gw
-                .get_contract(
-                    &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
-                    None,
-                    true,
-                )
-                .await
-                .expect("test successfully retrieved ambient contract");
-            assert_eq!(account, exp_account);
         })
         .await;
     }

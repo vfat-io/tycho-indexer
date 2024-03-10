@@ -1,6 +1,5 @@
 #![doc = include_str!("../../Readme.md")]
 
-use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use futures03::future::select_all;
 use std::env;
 
@@ -170,25 +169,15 @@ async fn main() -> Result<(), ExtractionError> {
     extractor_handles.push(ambient_handle.clone());
     info!("Extractor {} started!", ambient_handle.get_id());
 
-    let (uniswap_v3_task, uniswap_v3_handle) = start_uniswap_v3_extractor(
-        &args,
-        chain_state,
-        pool.clone(),
-        cached_gw.clone(),
-        token_processor.clone(),
-    )
-    .await?;
+    let (uniswap_v3_task, uniswap_v3_handle) =
+        start_uniswap_v3_extractor(&args, chain_state, cached_gw.clone(), token_processor.clone())
+            .await?;
     extractor_handles.push(uniswap_v3_handle.clone());
     info!("Extractor {} started!", uniswap_v3_handle.get_id());
 
-    let (uniswap_v2_task, uniswap_v2_handle) = start_uniswap_v2_extractor(
-        &args,
-        chain_state,
-        pool.clone(),
-        cached_gw.clone(),
-        token_processor.clone(),
-    )
-    .await?;
+    let (uniswap_v2_task, uniswap_v2_handle) =
+        start_uniswap_v2_extractor(&args, chain_state, cached_gw.clone(), token_processor.clone())
+            .await?;
     extractor_handles.push(uniswap_v2_handle.clone());
     info!("Extractor {} started!", uniswap_v2_handle.get_id());
 
@@ -272,7 +261,6 @@ async fn start_ambient_extractor(
 async fn start_uniswap_v2_extractor(
     args: &CliArgs,
     chain_state: ChainState,
-    pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
     token_pre_processor: TokenPreProcessor,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
@@ -285,7 +273,6 @@ async fn start_uniswap_v2_extractor(
         name,
         Chain::Ethereum,
         sync_batch_size,
-        pool,
         cached_gw,
         token_pre_processor,
     );
@@ -330,7 +317,6 @@ async fn start_uniswap_v2_extractor(
 async fn start_uniswap_v3_extractor(
     args: &CliArgs,
     chain_state: ChainState,
-    pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
     token_pre_processor: TokenPreProcessor,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
@@ -343,7 +329,6 @@ async fn start_uniswap_v3_extractor(
         name,
         Chain::Ethereum,
         sync_batch_size,
-        pool,
         cached_gw,
         token_pre_processor,
     );

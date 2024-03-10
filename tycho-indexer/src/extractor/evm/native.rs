@@ -14,7 +14,6 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
@@ -111,7 +110,6 @@ where
     name: String,
     chain: Chain,
     sync_batch_size: usize,
-    pool: Pool<AsyncPgConnection>,
     state_gateway: CachedGateway,
     token_pre_processor: T,
 }
@@ -146,18 +144,10 @@ where
         name: &str,
         chain: Chain,
         sync_batch_size: usize,
-        pool: Pool<AsyncPgConnection>,
         state_gateway: CachedGateway,
         token_pre_processor: T,
     ) -> Self {
-        Self {
-            name: name.to_owned(),
-            chain,
-            sync_batch_size,
-            pool,
-            state_gateway,
-            token_pre_processor,
-        }
+        Self { name: name.to_owned(), chain, sync_batch_size, state_gateway, token_pre_processor }
     }
 
     #[instrument(skip_all)]
@@ -286,17 +276,6 @@ where
             .await
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? _to))]
-    async fn backward(
-        &self,
-        _current: Option<BlockIdentifier>,
-        _to: &BlockIdentifier,
-        _new_cursor: &str,
-        _conn: &mut AsyncPgConnection,
-    ) -> Result<evm::BlockEntityChangesResult, StorageError> {
-        panic!("Not implemented")
-    }
-
     async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
         let state = self
             .state_gateway
@@ -331,20 +310,13 @@ impl NativeGateway for NativePgGateway<TokenPreProcessor> {
         Ok(())
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % to))]
     async fn revert(
         &self,
-        current: Option<BlockIdentifier>,
-        to: &BlockIdentifier,
-        new_cursor: &str,
+        _current: Option<BlockIdentifier>,
+        _to: &BlockIdentifier,
+        _new_cursor: &str,
     ) -> Result<evm::BlockEntityChangesResult, StorageError> {
-        tracing::debug!("Reverting to block {}", to);
-        let mut conn = self.pool.get().await.unwrap();
-        let res = self
-            .backward(current, to, new_cursor, &mut conn)
-            .await?;
-        tracing::debug!("Revert delta {:?}", res);
-        Ok(res)
+        panic!("Not implemented")
     }
 }
 
@@ -697,9 +669,9 @@ mod test_serial_db {
     //! between this component and the actual db interactions
 
     use crate::extractor::evm::{
-        token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, ProtocolStateDelta,
-        Transaction,
+        token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, Transaction,
     };
+    use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
     use mpsc::channel;
     use test_serial_db::evm::ProtocolChangesWithTx;
     use tokio::sync::mpsc;
@@ -711,14 +683,11 @@ mod test_serial_db {
             PostgresGateway,
         },
     };
-    use tycho_types::{models, storage::BlockIdentifier};
+    use tycho_types::models;
 
     use super::*;
 
-    const TX_HASH_0: &str = "0x2f6350a292c0fc918afe67cb893744a080dacb507b0cea4cc07437b8aff23cdb";
-    const TX_HASH_1: &str = "0x0d9e0da36cf9f305a189965b248fc79c923619801e8ab5ef158d4fd528a291ad";
     const BLOCK_HASH_0: &str = "0xc520bd7f8d7b964b1a6017a3d747375fcefea0f85994e3cc1810c2523b139da8";
-    const BLOCK_HASH_1: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
     const CREATED_CONTRACT: &str = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc";
 
     fn get_mocked_token_pre_processor() -> MockTokenPreProcessorTrait {
@@ -790,7 +759,6 @@ mod test_serial_db {
             "test",
             Chain::Ethereum,
             1000,
-            pool.clone(),
             cached_gw,
             get_mocked_token_pre_processor(),
         );
@@ -916,100 +884,6 @@ mod test_serial_db {
             println!("{:?}", res);
             // TODO: This is failing because protocol_type_name is wrong in the gateway - waiting
             // for this fix. assert_eq!(res, exp);
-        })
-        .await;
-    }
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_revert() {
-        run_against_db(|pool| async move {
-            let (gw, pool, _) = setup_gw(pool).await;
-            let msg0 = native_pool_creation();
-
-            let res1_value = 1000_u64.to_be_bytes().to_vec();
-            let res2_value = 500_u64.to_be_bytes().to_vec();
-            let state = ProtocolStateDelta {
-                component_id: CREATED_CONTRACT.to_string(),
-                updated_attributes: vec![
-                    ("reserve1".to_owned(), Bytes::from(res1_value)),
-                    ("reserve2".to_owned(), Bytes::from(res2_value)),
-                ]
-                .into_iter()
-                .collect(),
-                deleted_attributes: HashSet::new(),
-            };
-
-            let msg1 = evm::BlockEntityChanges {
-                extractor: "native:test".to_owned(),
-                chain: Chain::Ethereum,
-                block: evm::Block {
-                    number: 1,
-                    chain: Chain::Ethereum,
-                    hash: BLOCK_HASH_1.parse().unwrap(),
-                    parent_hash: BLOCK_HASH_0.parse().unwrap(),
-                    ts: "2020-01-02T01:00:00".parse().unwrap(),
-                },
-                revert: false,
-                txs_with_update: vec![ProtocolChangesWithTx {
-                    tx: Transaction::new(
-                        TX_HASH_1.parse().unwrap(),
-                        BLOCK_HASH_1.parse().unwrap(),
-                        H160::zero(),
-                        Some(H160::zero()),
-                        10,
-                    ),
-                    protocol_states: HashMap::from([(TX_HASH_0.to_owned(), state)]),
-                    balance_changes: HashMap::new(),
-                    new_protocol_components: HashMap::new(),
-                }],
-            };
-
-            gw.forward(&msg0, "cursor@0", false)
-                .await
-                .expect("upsert should succeed");
-            gw.forward(&msg1, "cursor@1", false)
-                .await
-                .expect("upsert should succeed");
-
-            let del_attributes: HashSet<String> =
-                vec!["reserve1".to_owned(), "reserve2".to_owned()]
-                    .into_iter()
-                    .collect();
-            let exp_change = evm::ProtocolStateDelta {
-                component_id: CREATED_CONTRACT.to_string(),
-                updated_attributes: HashMap::new(),
-                deleted_attributes: del_attributes,
-            };
-
-            let mut conn = pool
-                .get()
-                .await
-                .expect("pool should get a connection");
-
-            let changes = gw
-                .backward(
-                    None,
-                    &BlockIdentifier::Number((Chain::Ethereum, 0)),
-                    "cursor@2",
-                    &mut conn,
-                )
-                .await
-                .expect("revert should succeed");
-
-            assert_eq!(changes.state_updates.len(), 1);
-
-            assert_eq!(changes.state_updates[&CREATED_CONTRACT.to_string()], exp_change);
-            let cached_gw: CachedGateway = gw.state_gateway;
-            let _res = cached_gw
-                .get_protocol_components(
-                    &Chain::Ethereum,
-                    None,
-                    Some([CREATED_CONTRACT].as_slice()),
-                    None,
-                )
-                .await
-                .expect("test successfully inserted native contract");
         })
         .await;
     }
