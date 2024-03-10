@@ -1,7 +1,10 @@
 //! Storage traits used by Tycho
 use crate::{
     dto, models,
-    models::{Address, BlockHash, Chain, ContractId, ExtractionState, TxHash},
+    models::{
+        blockchain::{Block, Transaction},
+        Address, BlockHash, Chain, ContractId, ExtractionState, TxHash,
+    },
     Bytes,
 };
 use async_trait::async_trait;
@@ -75,10 +78,6 @@ pub enum StorageError {
 /// * `Transaction`: represents a transaction within a block.
 #[async_trait]
 pub trait ChainGateway {
-    type DB;
-    type Block;
-    type Transaction;
-
     /// Upserts a new block to the blockchain's storage.
     ///
     /// Ignores any existing tx, if the new entry has different attributes
@@ -89,11 +88,7 @@ pub trait ChainGateway {
     ///
     /// # Returns
     /// - Empty ok result indicates success. Failure might occur if the block is already present.
-    async fn upsert_block(
-        &self,
-        new: &[Self::Block],
-        db: &mut Self::DB,
-    ) -> Result<(), StorageError>;
+    async fn upsert_block(&self, new: &[Block]) -> Result<(), StorageError>;
     /// Retrieves a block from storage.
     ///
     /// # Parameters
@@ -101,11 +96,7 @@ pub trait ChainGateway {
     ///
     /// # Returns
     /// - An Ok result containing the block. Might fail if the block does not exist yet.
-    async fn get_block(
-        &self,
-        id: &BlockIdentifier,
-        db: &mut Self::DB,
-    ) -> Result<Self::Block, StorageError>;
+    async fn get_block(&self, id: &BlockIdentifier) -> Result<Block, StorageError>;
     /// Upserts a transaction to storage.
     ///
     /// Ignores any existing tx, if the new entry has different attributes
@@ -118,11 +109,7 @@ pub trait ChainGateway {
     /// - Empty ok result indicates success. Failure might occur if the
     /// corresponding block does not exists yet, or if the transaction already
     /// exists.
-    async fn upsert_tx(
-        &self,
-        new: &[Self::Transaction],
-        db: &mut Self::DB,
-    ) -> Result<(), StorageError>;
+    async fn upsert_tx(&self, new: &[Transaction]) -> Result<(), StorageError>;
 
     /// Tries to retrieve a transaction from the blockchain's storage using its
     /// hash.
@@ -132,11 +119,7 @@ pub trait ChainGateway {
     ///
     /// # Returns
     /// - An Ok result containing the transaction. Might fail if the transaction does not exist yet.
-    async fn get_tx(
-        &self,
-        hash: &TxHash,
-        db: &mut Self::DB,
-    ) -> Result<Self::Transaction, StorageError>;
+    async fn get_tx(&self, hash: &TxHash) -> Result<Transaction, StorageError>;
 
     /// Reverts the blockchain storage to a previous version.
     ///
@@ -151,11 +134,7 @@ pub trait ChainGateway {
     ///
     /// # Returns
     /// - An Ok if the revert is successful, or a `StorageError` if not.
-    async fn revert_state(
-        &self,
-        to: &BlockIdentifier,
-        db: &mut Self::DB,
-    ) -> Result<(), StorageError>;
+    async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError>;
 }
 
 /// Store and retrieve state of Extractors.
@@ -168,8 +147,6 @@ pub trait ChainGateway {
 /// they are indexing.
 #[async_trait]
 pub trait ExtractionStateGateway {
-    type DB;
-
     /// Retrieves the state of an extractor instance from a storage.
     ///
     /// # Parameters
@@ -179,12 +156,7 @@ pub trait ExtractionStateGateway {
     /// # Returns
     /// Ok if the corrsponding state was retrieved successfully, Err in
     /// case the state was not found.
-    async fn get_state(
-        &self,
-        name: &str,
-        chain: &Chain,
-        conn: &mut Self::DB,
-    ) -> Result<ExtractionState, StorageError>;
+    async fn get_state(&self, name: &str, chain: &Chain) -> Result<ExtractionState, StorageError>;
 
     /// Saves the state of an extractor instance to a storage.
     ///
@@ -196,11 +168,7 @@ pub trait ExtractionStateGateway {
     ///
     /// # Returns
     /// Ok, if state was stored successfully, Err if the state is not valid.
-    async fn save_state(
-        &self,
-        state: &ExtractionState,
-        conn: &mut Self::DB,
-    ) -> Result<(), StorageError>;
+    async fn save_state(&self, state: &ExtractionState) -> Result<(), StorageError>;
 }
 
 /// Point in time as either block or timestamp. If a block is chosen it
@@ -282,8 +250,6 @@ impl Version {
 /// tokens from storage.
 #[async_trait]
 pub trait ProtocolGateway {
-    type DB;
-
     /// Retrieve ProtocolComponent from the db
     ///
     /// # Parameters
@@ -299,20 +265,17 @@ pub trait ProtocolGateway {
         system: Option<String>,
         ids: Option<&[&str]>,
         min_tvl: Option<f64>,
-        conn: &mut Self::DB,
     ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError>;
 
     async fn add_protocol_components(
         &self,
         new: &[models::protocol::ProtocolComponent],
-        conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
     async fn delete_protocol_components(
         &self,
         to_delete: &[models::protocol::ProtocolComponent],
         block_ts: NaiveDateTime,
-        conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
     /// Stores new found ProtocolTypes.
     ///
@@ -324,7 +287,6 @@ pub trait ProtocolGateway {
     async fn add_protocol_types(
         &self,
         new_protocol_types: &[models::ProtocolType],
-        conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
     /// Retrieve protocol component states
@@ -349,14 +311,12 @@ pub trait ProtocolGateway {
         at: Option<Version>,
         system: Option<String>,
         id: Option<&[&str]>,
-        conn: &mut Self::DB,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError>;
 
     async fn update_protocol_states(
         &self,
         chain: &Chain,
         new: &[(TxHash, &models::protocol::ProtocolComponentStateDelta)],
-        conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
     /// Retrieves a tokens from storage
@@ -371,7 +331,6 @@ pub trait ProtocolGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
-        conn: &mut Self::DB,
     ) -> Result<Vec<models::token::CurrencyToken>, StorageError>;
 
     /// Saves multiple component balances to storage.
@@ -388,7 +347,6 @@ pub trait ProtocolGateway {
         &self,
         component_balances: &[models::protocol::ComponentBalance],
         chain: &Chain,
-        conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
     /// Saves multiple tokens to storage.
@@ -402,11 +360,8 @@ pub trait ProtocolGateway {
     /// # Return
     /// Ok if all tokens could be inserted, Err if at least one token failed to
     /// insert.
-    async fn add_tokens(
-        &self,
-        tokens: &[models::token::CurrencyToken],
-        conn: &mut Self::DB,
-    ) -> Result<(), StorageError>;
+    async fn add_tokens(&self, tokens: &[models::token::CurrencyToken])
+        -> Result<(), StorageError>;
 
     /// Retrieve protocol state changes
     ///
@@ -424,7 +379,6 @@ pub trait ProtocolGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-        conn: &mut Self::DB,
     ) -> Result<Vec<models::protocol::ProtocolComponentStateDelta>, StorageError>;
 
     /// Retrieve protocol component balance changes
@@ -443,7 +397,6 @@ pub trait ProtocolGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
-        conn: &mut Self::DB,
     ) -> Result<Vec<models::protocol::ComponentBalance>, StorageError>;
 
     async fn get_balances(
@@ -451,20 +404,14 @@ pub trait ProtocolGateway {
         chain: &Chain,
         ids: Option<&[&str]>,
         at: Option<&BlockOrTimestamp>,
-        conn: &mut Self::DB,
     ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError>;
 
-    async fn get_token_prices(
-        &self,
-        chain: &Chain,
-        conn: &mut Self::DB,
-    ) -> Result<HashMap<Bytes, f64>, StorageError>;
+    async fn get_token_prices(&self, chain: &Chain) -> Result<HashMap<Bytes, f64>, StorageError>;
 
     async fn upsert_component_tvl(
         &self,
         chain: &Chain,
         tvl_values: &HashMap<String, f64>,
-        conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 }
 
@@ -473,8 +420,6 @@ pub trait ProtocolGateway {
 /// Specifies how to retrieve, add and update contracts in storage.
 #[async_trait]
 pub trait ContractStateGateway {
-    type DB;
-
     /// Get a contracts state from storage
     ///
     /// This method retrieves a single contract from the database.
@@ -490,7 +435,6 @@ pub trait ContractStateGateway {
         id: &ContractId,
         version: Option<&Version>,
         include_slots: bool,
-        db: &mut Self::DB,
     ) -> Result<models::contract::Contract, StorageError>;
 
     /// Get multiple contracts' states from storage.
@@ -518,7 +462,6 @@ pub trait ContractStateGateway {
         addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
-        db: &mut Self::DB,
     ) -> Result<Vec<models::contract::Contract>, StorageError>;
 
     /// Inserts a new contract into the database.
@@ -534,11 +477,7 @@ pub trait ContractStateGateway {
     /// - A Result with Ok if the operation was successful, and an Err containing `StorageError` if
     ///   there was an issue inserting the contract into the database. E.g. if the contract already
     ///   existed.
-    async fn insert_contract(
-        &self,
-        new: &models::contract::Contract,
-        db: &mut Self::DB,
-    ) -> Result<(), StorageError>;
+    async fn insert_contract(&self, new: &models::contract::Contract) -> Result<(), StorageError>;
 
     /// Update multiple contracts
     ///
@@ -566,7 +505,6 @@ pub trait ContractStateGateway {
         &self,
         chain: &Chain,
         new: &[(TxHash, &models::contract::ContractDelta)],
-        db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
     /// Mark a contract as deleted
@@ -584,12 +522,7 @@ pub trait ContractStateGateway {
     ///  - Contract is not present in storage.
     ///  - Deletion transaction is not present in storage.
     ///  - Contract was already deleted.
-    async fn delete_contract(
-        &self,
-        id: &ContractId,
-        at_tx: &TxHash,
-        db: &mut Self::DB,
-    ) -> Result<(), StorageError>;
+    async fn delete_contract(&self, id: &ContractId, at_tx: &TxHash) -> Result<(), StorageError>;
 
     /// Retrieve a account delta between two versions.
     ///
@@ -634,6 +567,5 @@ pub trait ContractStateGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-        db: &mut Self::DB,
     ) -> Result<Vec<models::contract::ContractDelta>, StorageError>;
 }
