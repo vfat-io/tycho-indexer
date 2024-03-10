@@ -503,8 +503,7 @@ pub trait ContractStateGateway {
     /// the one specified.
     async fn update_contracts(
         &self,
-        chain: &Chain,
-        new: &[(TxHash, &models::contract::ContractDelta)],
+        new: &[(TxHash, models::contract::ContractDelta)],
     ) -> Result<(), StorageError>;
 
     /// Mark a contract as deleted

@@ -31,7 +31,8 @@ use tycho_types::{
     models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     storage::{
-        BlockIdentifier, BlockOrTimestamp, ChainGateway, ExtractionStateGateway, StorageError,
+        BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
+        ExtractionStateGateway, StorageError,
     },
     Bytes,
 };
@@ -1123,7 +1124,6 @@ mod test_serial_db {
                     &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
                     None,
                     true,
-                    &mut conn,
                 )
                 .await
                 .expect("test successfully inserted ambient contract");
@@ -1236,7 +1236,6 @@ mod test_serial_db {
                     &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
                     None,
                     true,
-                    &mut conn,
                 )
                 .await
                 .expect("test successfully retrieved ambient contract");

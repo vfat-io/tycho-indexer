@@ -22,10 +22,12 @@ use tycho_types::{
     models,
     models::{
         blockchain::{Block, Transaction},
-        Chain, ExtractionState, TxHash,
+        contract::{Contract, ContractDelta},
+        Address, Chain, ContractId, ExtractionState, TxHash,
     },
     storage::{
-        BlockIdentifier, BlockOrTimestamp, ChainGateway, ExtractionStateGateway, StorageError,
+        BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
+        ExtractionStateGateway, StorageError, Version,
     },
 };
 
@@ -534,24 +536,6 @@ impl CachedGateway {
         }
     }
 
-    pub async fn insert_contract(
-        &self,
-        new: &models::contract::Contract,
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertContract(vec![new.clone()]))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn update_contracts(
-        &self,
-        new: &[(TxHash, models::contract::ContractDelta)],
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpdateContracts(new.to_owned()))
-            .await?;
-        Ok(())
-    }
-
     pub async fn get_delta(
         &self,
         chain: &Chain,
@@ -704,6 +688,77 @@ impl ChainGateway for CachedGateway {
             })?;
         self.state_gateway
             .revert_state(to, &mut conn)
+            .await
+    }
+}
+
+#[async_trait]
+impl ContractStateGateway for CachedGateway {
+    async fn get_contract(
+        &self,
+        id: &ContractId,
+        version: Option<&Version>,
+        include_slots: bool,
+    ) -> Result<Contract, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_contract(id, version, include_slots, &mut conn)
+            .await
+    }
+
+    async fn get_contracts(
+        &self,
+        chain: &Chain,
+        addresses: Option<&[Address]>,
+        version: Option<&Version>,
+        include_slots: bool,
+    ) -> Result<Vec<Contract>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_contracts(chain, addresses, version, include_slots, &mut conn)
+            .await
+    }
+
+    async fn insert_contract(&self, new: &Contract) -> Result<(), StorageError> {
+        self.add_op(WriteOp::InsertContract(vec![new.clone()]))
+            .await?;
+        Ok(())
+    }
+
+    async fn update_contracts(&self, new: &[(TxHash, ContractDelta)]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpdateContracts(new.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_contract(&self, id: &ContractId, at_tx: &TxHash) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .delete_contract(id, at_tx, &mut conn)
+            .await
+    }
+
+    async fn get_accounts_delta(
+        &self,
+        chain: &Chain,
+        start_version: Option<&BlockOrTimestamp>,
+        end_version: &BlockOrTimestamp,
+    ) -> Result<Vec<ContractDelta>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_accounts_delta(chain, start_version, end_version, &mut conn)
             .await
     }
 }
