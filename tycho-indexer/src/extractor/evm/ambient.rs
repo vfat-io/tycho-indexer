@@ -15,7 +15,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
+use diesel_async::AsyncPgConnection;
 use ethers::types::{H160, H256};
 use mockall::automock;
 use prost::Message;
@@ -32,7 +32,7 @@ use tycho_types::{
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
-        ExtractionStateGateway, StorageError,
+        ExtractionStateGateway, ProtocolGateway, StorageError,
     },
     Bytes,
 };
@@ -119,7 +119,6 @@ where
     name: String,
     chain: Chain,
     sync_batch_size: usize,
-    pool: Pool<AsyncPgConnection>,
     state_gateway: CachedGateway,
     token_pre_processor: T,
 }
@@ -154,7 +153,6 @@ where
         name: &str,
         chain: Chain,
         sync_batch_size: usize,
-        pool: Pool<AsyncPgConnection>,
         gw: CachedGateway,
         token_pre_processor: T,
     ) -> Self {
@@ -162,7 +160,6 @@ where
             name: name.to_owned(),
             chain,
             sync_batch_size,
-            pool,
             state_gateway: gw,
             token_pre_processor,
         }
@@ -182,12 +179,6 @@ where
         &self,
         protocol_components: Vec<evm::ProtocolComponent>,
     ) -> Result<Vec<H160>, StorageError> {
-        let mut conn = self
-            .pool
-            .get()
-            .await
-            .expect("pool should be connected");
-
         let mut tokens_set = HashSet::new();
         let mut addresses = HashSet::new();
         for component in protocol_components {
@@ -203,7 +194,7 @@ where
 
         let db_tokens = self
             .state_gateway
-            .get_tokens(self.chain, addresses_option, &mut conn)
+            .get_tokens(self.chain, addresses_option)
             .await?;
 
         for token in db_tokens {
@@ -417,9 +408,8 @@ impl AmbientGateway for AmbientPgGateway<TokenPreProcessor> {
     }
 
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
-        let mut conn = self.pool.get().await.unwrap();
         self.state_gateway
-            .add_protocol_types(new_protocol_types, &mut conn)
+            .add_protocol_types(new_protocol_types)
             .await
             .expect("Couldn't insert protocol types");
     }
@@ -837,6 +827,7 @@ mod test_serial_db {
     use crate::extractor::evm::{
         token_pre_processor::MockTokenPreProcessorTrait, ComponentBalance, ProtocolComponent,
     };
+    use diesel_async::pooled_connection::deadpool::Pool;
     use ethers::types::U256;
     use mpsc::channel;
     use test_log::test;
@@ -915,7 +906,6 @@ mod test_serial_db {
             "vm:ambient",
             Chain::Ethereum,
             1000,
-            pool.clone(),
             cached_gw,
             get_mocked_token_pre_processor(),
         );
@@ -1105,7 +1095,7 @@ mod test_serial_db {
     #[test(tokio::test)]
     async fn test_upsert_contract() {
         run_against_db(|pool| async move {
-            let (gw, pool) = setup_gw(pool).await;
+            let (gw, _) = setup_gw(pool).await;
             let msg = ambient_creation_and_update();
             let exp = ambient_account(0);
 
@@ -1115,10 +1105,6 @@ mod test_serial_db {
 
             let cached_gw: CachedGateway = gw.state_gateway;
 
-            let mut conn = pool
-                .get()
-                .await
-                .expect("pool should get a connection");
             let res = cached_gw
                 .get_contract(
                     &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
@@ -1130,13 +1116,13 @@ mod test_serial_db {
             assert_eq!(res, exp);
 
             let tokens = cached_gw
-                .get_tokens(Chain::Ethereum, None, &mut conn)
+                .get_tokens(Chain::Ethereum, None)
                 .await
                 .unwrap();
             assert_eq!(tokens.len(), 2);
 
             let protocol_components = cached_gw
-                .get_protocol_components(&Chain::Ethereum, None, None, None, &mut conn)
+                .get_protocol_components(&Chain::Ethereum, None, None, None)
                 .await
                 .unwrap();
             assert_eq!(protocol_components.len(), 1);
@@ -1150,7 +1136,6 @@ mod test_serial_db {
                         Chain::Ethereum,
                         msg.block.number as i64,
                     ))),
-                    &mut conn,
                 )
                 .await
                 .unwrap();
@@ -1194,7 +1179,6 @@ mod test_serial_db {
                 "vm:ambient",
                 Chain::Ethereum,
                 1000,
-                pool.clone(),
                 cached_gw,
                 get_mocked_token_pre_processor(),
             );
@@ -1260,7 +1244,6 @@ mod test_serial_db {
                 "vm:ambient",
                 Chain::Ethereum,
                 1000,
-                pool.clone(),
                 cached_gw,
                 get_mocked_token_pre_processor(),
             );

@@ -29,7 +29,9 @@ use tycho_storage::postgres::cache::CachedGateway;
 use tycho_types::{
     models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType, TxHash},
-    storage::{BlockIdentifier, ChainGateway, ExtractionStateGateway, StorageError},
+    storage::{
+        BlockIdentifier, ChainGateway, ExtractionStateGateway, ProtocolGateway, StorageError,
+    },
     Bytes,
 };
 
@@ -170,12 +172,6 @@ where
 
     /// Get tokens that are not in the database
     async fn get_new_tokens(&self, tokens: HashSet<H160>) -> Result<Vec<H160>, StorageError> {
-        let mut conn = self
-            .pool
-            .get()
-            .await
-            .expect("pool should be connected");
-
         let addresses: Vec<Bytes> = tokens
             .iter()
             .map(|a| Bytes::from(a.as_bytes().to_vec()))
@@ -186,7 +182,7 @@ where
 
         let db_tokens = self
             .state_gateway
-            .get_tokens(self.chain, addresses_option, &mut conn)
+            .get_tokens(self.chain, addresses_option)
             .await?;
 
         let db_token_addresses: HashSet<_> = db_tokens
@@ -317,9 +313,8 @@ impl NativeGateway for NativePgGateway<TokenPreProcessor> {
     }
 
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
-        let mut conn = self.pool.get().await.unwrap();
         self.state_gateway
-            .add_protocol_types(new_protocol_types, &mut conn)
+            .add_protocol_types(new_protocol_types)
             .await
             .expect("Couldn't insert protocol types");
     }
@@ -882,7 +877,7 @@ mod test_serial_db {
     #[tokio::test]
     async fn test_forward() {
         run_against_db(|pool| async move {
-            let (gw, pool, _) = setup_gw(pool).await;
+            let (gw, _, _) = setup_gw(pool).await;
             let msg = native_pool_creation();
 
             let _exp = [ProtocolComponent {
@@ -909,18 +904,12 @@ mod test_serial_db {
                 .expect("upsert should succeed");
 
             let cached_gw: CachedGateway = gw.state_gateway;
-
-            let mut conn = pool
-                .get()
-                .await
-                .expect("pool should get a connection");
             let res = cached_gw
                 .get_protocol_components(
                     &Chain::Ethereum,
                     None,
                     Some([CREATED_CONTRACT].as_slice()),
                     None,
-                    &mut conn,
                 )
                 .await
                 .expect("test successfully inserted native contract");
@@ -1018,7 +1007,6 @@ mod test_serial_db {
                     None,
                     Some([CREATED_CONTRACT].as_slice()),
                     None,
-                    &mut conn,
                 )
                 .await
                 .expect("test successfully inserted native contract");

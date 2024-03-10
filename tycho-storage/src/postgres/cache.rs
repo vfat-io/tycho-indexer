@@ -1,10 +1,12 @@
 use super::{PostgresError, PostgresGateway};
 use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
 use lru::LruCache;
 use std::{
+    collections::HashMap,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -23,12 +25,18 @@ use tycho_types::{
     models::{
         blockchain::{Block, Transaction},
         contract::{Contract, ContractDelta},
-        Address, Chain, ContractId, ExtractionState, TxHash,
+        protocol::{
+            ComponentBalance, ProtocolComponent, ProtocolComponentState,
+            ProtocolComponentStateDelta,
+        },
+        token::CurrencyToken,
+        Address, Chain, ContractId, ExtractionState, ProtocolType, TxHash,
     },
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
-        ExtractionStateGateway, StorageError, Version,
+        ExtractionStateGateway, ProtocolGateway, StorageError, Version,
     },
+    Bytes,
 };
 
 /// Represents different types of database write operations.
@@ -590,42 +598,6 @@ impl CachedGateway {
 
         Ok((accounts_delta, protocol_delta, balance_deltas))
     }
-
-    pub async fn update_protocol_states(
-        &self,
-        new: &[(TxHash, models::protocol::ProtocolComponentStateDelta)],
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpsertProtocolState(new.to_owned()))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn add_protocol_components(
-        &self,
-        new: &[models::protocol::ProtocolComponent],
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertProtocolComponents(Vec::from(new)))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn add_tokens(
-        &self,
-        new: &[models::token::CurrencyToken],
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertTokens(Vec::from(new)))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn add_component_balances(
-        &self,
-        new: &[models::protocol::ComponentBalance],
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertComponentBalances(Vec::from(new)))
-            .await?;
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -759,6 +731,182 @@ impl ContractStateGateway for CachedGateway {
             })?;
         self.state_gateway
             .get_accounts_delta(chain, start_version, end_version, &mut conn)
+            .await
+    }
+}
+
+#[async_trait]
+impl ProtocolGateway for CachedGateway {
+    async fn get_protocol_components(
+        &self,
+        chain: &Chain,
+        system: Option<String>,
+        ids: Option<&[&str]>,
+        min_tvl: Option<f64>,
+    ) -> Result<Vec<ProtocolComponent>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_protocol_components(chain, system, ids, min_tvl, &mut conn)
+            .await
+    }
+
+    async fn add_protocol_components(&self, new: &[ProtocolComponent]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::InsertProtocolComponents(new.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_protocol_components(
+        &self,
+        to_delete: &[ProtocolComponent],
+        block_ts: NaiveDateTime,
+    ) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .delete_protocol_components(to_delete, block_ts, &mut conn)
+            .await
+    }
+
+    async fn add_protocol_types(
+        &self,
+        new_protocol_types: &[ProtocolType],
+    ) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .add_protocol_types(new_protocol_types, &mut conn)
+            .await
+    }
+
+    async fn get_protocol_states(
+        &self,
+        chain: &Chain,
+        at: Option<Version>,
+        system: Option<String>,
+        id: Option<&[&str]>,
+    ) -> Result<Vec<ProtocolComponentState>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_protocol_states(chain, at, system, id, &mut conn)
+            .await
+    }
+
+    async fn update_protocol_states(
+        &self,
+        new: &[(TxHash, ProtocolComponentStateDelta)],
+    ) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertProtocolState(new.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn get_tokens(
+        &self,
+        chain: Chain,
+        address: Option<&[&Address]>,
+    ) -> Result<Vec<CurrencyToken>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_tokens(chain, address, &mut conn)
+            .await
+    }
+
+    async fn add_component_balances(
+        &self,
+        component_balances: &[ComponentBalance],
+    ) -> Result<(), StorageError> {
+        self.add_op(WriteOp::InsertComponentBalances(component_balances.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn add_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::InsertTokens(tokens.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn get_protocol_states_delta(
+        &self,
+        chain: &Chain,
+        start_version: Option<&BlockOrTimestamp>,
+        end_version: &BlockOrTimestamp,
+    ) -> Result<Vec<ProtocolComponentStateDelta>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_protocol_states_delta(chain, start_version, end_version, &mut conn)
+            .await
+    }
+
+    async fn get_balance_deltas(
+        &self,
+        chain: &Chain,
+        start_version: Option<&BlockOrTimestamp>,
+        target_version: &BlockOrTimestamp,
+    ) -> Result<Vec<ComponentBalance>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_balance_deltas(chain, start_version, target_version, &mut conn)
+            .await
+    }
+
+    async fn get_balances(
+        &self,
+        chain: &Chain,
+        ids: Option<&[&str]>,
+        at: Option<&BlockOrTimestamp>,
+    ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_balances(chain, ids, at, &mut conn)
+            .await
+    }
+
+    async fn get_token_prices(&self, chain: &Chain) -> Result<HashMap<Bytes, f64>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_token_prices(chain, &mut conn)
+            .await
+    }
+
+    /// TODO: add to transaction instead
+    async fn upsert_component_tvl(
+        &self,
+        chain: &Chain,
+        tvl_values: &HashMap<String, f64>,
+    ) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .upsert_component_tvl(chain, tvl_values, &mut conn)
             .await
     }
 }

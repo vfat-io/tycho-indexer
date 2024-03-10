@@ -164,14 +164,9 @@ async fn main() -> Result<(), ExtractionError> {
 
     let token_processor = TokenPreProcessor::new(rpc_client);
 
-    let (ambient_task, ambient_handle) = start_ambient_extractor(
-        &args,
-        chain_state,
-        pool.clone(),
-        cached_gw.clone(),
-        token_processor.clone(),
-    )
-    .await?;
+    let (ambient_task, ambient_handle) =
+        start_ambient_extractor(&args, chain_state, cached_gw.clone(), token_processor.clone())
+            .await?;
     extractor_handles.push(ambient_handle.clone());
     info!("Extractor {} started!", ambient_handle.get_id());
 
@@ -222,7 +217,6 @@ async fn main() -> Result<(), ExtractionError> {
 async fn start_ambient_extractor(
     args: &CliArgs,
     chain_state: ChainState,
-    pool: Pool<AsyncPgConnection>,
     cached_gw: CachedGateway,
     token_pre_processor: TokenPreProcessor,
 ) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
@@ -235,7 +229,6 @@ async fn start_ambient_extractor(
         ambient_name,
         Chain::Ethereum,
         sync_batch_size,
-        pool,
         cached_gw,
         token_pre_processor,
     );

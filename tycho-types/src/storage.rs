@@ -315,8 +315,7 @@ pub trait ProtocolGateway {
 
     async fn update_protocol_states(
         &self,
-        chain: &Chain,
-        new: &[(TxHash, &models::protocol::ProtocolComponentStateDelta)],
+        new: &[(TxHash, models::protocol::ProtocolComponentStateDelta)],
     ) -> Result<(), StorageError>;
 
     /// Retrieves a tokens from storage
@@ -346,7 +345,6 @@ pub trait ProtocolGateway {
     async fn add_component_balances(
         &self,
         component_balances: &[models::protocol::ComponentBalance],
-        chain: &Chain,
     ) -> Result<(), StorageError>;
 
     /// Saves multiple tokens to storage.
