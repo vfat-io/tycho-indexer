@@ -30,7 +30,9 @@ use tycho_storage::postgres::cache::CachedGateway;
 use tycho_types::{
     models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
-    storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
+    storage::{
+        BlockIdentifier, BlockOrTimestamp, ChainGateway, ExtractionStateGateway, StorageError,
+    },
     Bytes,
 };
 
@@ -247,12 +249,12 @@ where
         }
 
         self.state_gateway
-            .upsert_block(&(&changes.block).into())
+            .upsert_block(&[(&changes.block).into()])
             .await?;
         for update in changes.tx_updates.iter() {
             debug!(tx_hash = ?update.tx.hash, "Processing transaction");
             self.state_gateway
-                .upsert_tx(&(&update.tx).into())
+                .upsert_tx(&[(&update.tx).into()])
                 .await?;
             for (_, acc_update) in update.account_updates.iter() {
                 if acc_update.is_creation() {
@@ -321,12 +323,9 @@ where
         current: Option<BlockIdentifier>,
         to: &BlockIdentifier,
         new_cursor: &str,
-        conn: &mut AsyncPgConnection,
+        _conn: &mut AsyncPgConnection,
     ) -> Result<evm::BlockAccountChanges, StorageError> {
-        let block = self
-            .state_gateway
-            .get_block(to, conn)
-            .await?;
+        let block = self.state_gateway.get_block(to).await?;
         let start = current.map(BlockOrTimestamp::Block);
 
         let target = BlockOrTimestamp::Block(to.clone());
@@ -401,10 +400,10 @@ where
         Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
     }
 
-    async fn get_last_cursor(&self, conn: &mut AsyncPgConnection) -> Result<Vec<u8>, StorageError> {
+    async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
         let state = self
             .state_gateway
-            .get_state(&self.name, &self.chain, conn)
+            .get_state(&self.name, &self.chain)
             .await?;
         Ok(state.cursor)
     }
@@ -413,8 +412,7 @@ where
 #[async_trait]
 impl AmbientGateway for AmbientPgGateway<TokenPreProcessor> {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
-        let mut conn = self.pool.get().await.unwrap();
-        self.get_last_cursor(&mut conn).await
+        self.get_last_cursor().await
     }
 
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
@@ -926,7 +924,7 @@ mod test_serial_db {
     #[tokio::test]
     async fn test_get_cursor() {
         run_against_db(|pool| async move {
-            let (gw, pool) = setup_gw(pool).await;
+            let (gw, _) = setup_gw(pool).await;
             let evm_gw = gw.state_gateway.clone();
             let state = ExtractionState::new(
                 "vm:ambient".to_string(),
@@ -934,10 +932,6 @@ mod test_serial_db {
                 None,
                 "cursor@420".as_bytes(),
             );
-            let mut conn = pool
-                .get()
-                .await
-                .expect("pool should get a connection");
             evm_gw
                 .start_transaction(&models::blockchain::Block::default())
                 .await;
@@ -951,7 +945,7 @@ mod test_serial_db {
                 .expect("gw transaction failed");
 
             let cursor = gw
-                .get_last_cursor(&mut conn)
+                .get_last_cursor()
                 .await
                 .expect("get cursor should succeed");
 

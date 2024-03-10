@@ -1,4 +1,5 @@
 use super::{PostgresError, PostgresGateway};
+use async_trait::async_trait;
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
@@ -19,8 +20,13 @@ use tokio::{
 use tracing::{debug, error, info, trace};
 use tycho_types::{
     models,
-    models::{Chain, ExtractionState, TxHash},
-    storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
+    models::{
+        blockchain::{Block, Transaction},
+        Chain, ExtractionState, TxHash,
+    },
+    storage::{
+        BlockIdentifier, BlockOrTimestamp, ChainGateway, ExtractionStateGateway, StorageError,
+    },
 };
 
 /// Represents different types of database write operations.
@@ -179,8 +185,6 @@ pub enum DBCacheMessage {
 /// - If the block is pending, we group the transaction with other transactions that finish before
 ///   we observe the next block.
 
-type EVMGateway = PostgresGateway;
-
 /// # Write Cache
 ///
 /// This struct handles writes in a centralised and sequential manner. It
@@ -218,7 +222,7 @@ pub struct DBCacheWriteExecutor {
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
-    state_gateway: EVMGateway,
+    state_gateway: PostgresGateway,
     persisted_block: Option<models::blockchain::Block>,
     msg_receiver: mpsc::Receiver<DBCacheMessage>,
 }
@@ -228,7 +232,7 @@ impl DBCacheWriteExecutor {
         name: String,
         chain: Chain,
         pool: Pool<AsyncPgConnection>,
-        state_gateway: EVMGateway,
+        state_gateway: PostgresGateway,
         msg_receiver: mpsc::Receiver<DBCacheMessage>,
     ) -> Self {
         let mut conn = pool
@@ -429,7 +433,7 @@ pub struct CachedGateway {
     open_tx: Arc<Mutex<Option<OpenTx>>>,
     tx: mpsc::Sender<DBCacheMessage>,
     pool: Pool<AsyncPgConnection>,
-    state_gateway: EVMGateway,
+    state_gateway: PostgresGateway,
     lru_cache: Arc<Mutex<DeltasCache>>,
 }
 
@@ -519,7 +523,7 @@ impl CachedGateway {
     pub fn new(
         tx: mpsc::Sender<DBCacheMessage>,
         pool: Pool<AsyncPgConnection>,
-        state_gateway: EVMGateway,
+        state_gateway: PostgresGateway,
     ) -> Self {
         CachedGateway {
             tx,
@@ -528,26 +532,6 @@ impl CachedGateway {
             state_gateway,
             lru_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(5).unwrap()))),
         }
-    }
-    pub async fn upsert_block(&self, new: &models::blockchain::Block) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpsertBlock(vec![new.clone()]))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn upsert_tx(
-        &self,
-        new: &models::blockchain::Transaction,
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpsertTx(vec![new.clone()]))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn save_state(&self, new: &ExtractionState) -> Result<(), StorageError> {
-        self.add_op(WriteOp::SaveExtractionState(new.clone()))
-            .await?;
-        Ok(())
     }
 
     pub async fn insert_contract(
@@ -660,11 +644,75 @@ impl CachedGateway {
     }
 }
 
+#[async_trait]
+impl ExtractionStateGateway for CachedGateway {
+    async fn get_state(&self, name: &str, chain: &Chain) -> Result<ExtractionState, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_state(name, chain, &mut conn)
+            .await
+    }
+
+    async fn save_state(&self, new: &ExtractionState) -> Result<(), StorageError> {
+        self.add_op(WriteOp::SaveExtractionState(new.clone()))
+            .await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ChainGateway for CachedGateway {
+    async fn upsert_block(&self, new: &[Block]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertBlock(new.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn get_block(&self, id: &BlockIdentifier) -> Result<Block, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_block(id, &mut conn)
+            .await
+    }
+
+    async fn upsert_tx(&self, new: &[Transaction]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertTx(new.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn get_tx(&self, hash: &TxHash) -> Result<Transaction, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_tx(hash, &mut conn)
+            .await
+    }
+
+    async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .revert_state(to, &mut conn)
+            .await
+    }
+}
+
 // These two implementations allow us to inherit EVMStateGateway methods. If CachedGateway doesn't
 // implement the called method and EVMStateGateway does, then the call will be forwarded to
 // EVMStateGateway.
 impl Deref for CachedGateway {
-    type Target = EVMGateway;
+    type Target = PostgresGateway;
 
     fn deref(&self) -> &Self::Target {
         &self.state_gateway
@@ -696,7 +744,7 @@ mod test_serial_db {
                 .await
                 .expect("Failed to get a connection from the pool");
             db_fixtures::insert_chain(&mut connection, "ethereum").await;
-            let gateway: EVMGateway = EVMGateway::from_connection(&mut connection).await;
+            let gateway: PostgresGateway = PostgresGateway::from_connection(&mut connection).await;
             let (tx, rx) = mpsc::channel(10);
             let write_executor = DBCacheWriteExecutor::new(
                 "ethereum".to_owned(),
@@ -746,7 +794,7 @@ mod test_serial_db {
             db_fixtures::insert_protocol_system(&mut connection, "ambient".to_owned()).await;
             db_fixtures::insert_protocol_type(&mut connection, "ambient_pool", None, None, None)
                 .await;
-            let gateway: EVMGateway = EVMGateway::from_connection(&mut connection).await;
+            let gateway: PostgresGateway = PostgresGateway::from_connection(&mut connection).await;
             let (tx, rx) = mpsc::channel(10);
 
             let write_executor = DBCacheWriteExecutor::new(
@@ -900,7 +948,7 @@ mod test_serial_db {
                 .await
                 .expect("Failed to get a connection from the pool");
             db_fixtures::insert_chain(&mut connection, "ethereum").await;
-            let gateway: EVMGateway = EVMGateway::from_connection(&mut connection).await;
+            let gateway: PostgresGateway = PostgresGateway::from_connection(&mut connection).await;
             let (tx, rx) = mpsc::channel(10);
 
             let write_executor = DBCacheWriteExecutor::new(
@@ -922,11 +970,11 @@ mod test_serial_db {
                 .start_transaction(&block_1)
                 .await;
             cached_gw
-                .upsert_block(&block_1)
+                .upsert_block(&[block_1.clone()])
                 .await
                 .expect("Upsert block 1 ok");
             cached_gw
-                .upsert_tx(&tx_1)
+                .upsert_tx(&[tx_1.clone()])
                 .await
                 .expect("Upsert tx 1 ok");
             cached_gw
@@ -940,7 +988,7 @@ mod test_serial_db {
                 .start_transaction(&block_2)
                 .await;
             cached_gw
-                .upsert_block(&block_2)
+                .upsert_block(&[block_2.clone()])
                 .await
                 .expect("Upsert block 2 ok");
             cached_gw
@@ -954,7 +1002,7 @@ mod test_serial_db {
                 .start_transaction(&block_3)
                 .await;
             cached_gw
-                .upsert_block(&block_3)
+                .upsert_block(&[block_3.clone()])
                 .await
                 .expect("Upsert block 3 ok");
             cached_gw
@@ -967,24 +1015,24 @@ mod test_serial_db {
             // Assert that messages from block 1,2 and 3 have been commited to the db.
             let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
             let fetched_block_1 = cached_gw
-                .get_block(&block_id_1, &mut connection)
+                .get_block(&block_id_1)
                 .await
                 .expect("Failed to fetch block");
 
             let fetched_tx = cached_gw
-                .get_tx(&tx_1.hash.clone(), &mut connection)
+                .get_tx(&tx_1.hash.clone())
                 .await
                 .expect("Failed to fetch tx");
 
             let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
             let fetched_block_2 = cached_gw
-                .get_block(&block_id_2, &mut connection)
+                .get_block(&block_id_2)
                 .await
                 .expect("Failed to fetch block");
 
             let block_id_3 = BlockIdentifier::Number((Chain::Ethereum, 3));
             let fetched_block_3 = cached_gw
-                .get_block(&block_id_3, &mut connection)
+                .get_block(&block_id_3)
                 .await
                 .expect("Failed to fetch block");
 
