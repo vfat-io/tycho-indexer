@@ -20,7 +20,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
-use tycho_types::models::ExtractorIdentity;
+use tycho_core::models::ExtractorIdentity;
 
 pub enum ControlMessage {
     Stop,
@@ -312,7 +312,7 @@ mod test {
     use crate::extractor::MockExtractor;
     use serde::{Deserialize, Serialize};
     use tracing::info_span;
-    use tycho_types::models::NormalisedMessage;
+    use tycho_core::models::NormalisedMessage;
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     struct DummyMessage {

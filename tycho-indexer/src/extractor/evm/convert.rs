@@ -3,7 +3,7 @@ use crate::extractor::{
     evm::{ERC20Token, ProtocolState, ProtocolStateDelta},
 };
 use ethers::prelude::{H160, H256, U256};
-use tycho_types::{
+use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
         contract::{Contract, ContractDelta},

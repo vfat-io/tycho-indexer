@@ -2,7 +2,7 @@
 members = [
     "tycho-indexer",
     "tycho-client",
-    "tycho-types",
+    "tycho-core",
     "tycho-storage"
 ]
 resolver = "2"
@@ -28,7 +28,7 @@ uuid = { version = "1.4.1", features = [
     "macro-diagnostics",
 ] }
 hex = "0.4.3"
-tycho-types = { path = "./tycho-types" }
+tycho-core = { path = "tycho-core" }
 tycho-storage = { path = "./tycho-storage" }
 futures03 = { version = "0.3.1", package = "futures", features = ["compat"] }
 thiserror = "1"

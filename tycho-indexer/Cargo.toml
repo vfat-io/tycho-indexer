@@ -25,7 +25,7 @@ tokio.workspace = true
 ethers.workspace = true
 diesel.workspace = true
 diesel-async.workspace = true
-tycho-types = { workspace = true }
+tycho-core = { workspace = true }
 tycho-storage.workspace = true
 anyhow.workspace = true
 async-stream = "0.3"

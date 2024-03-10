@@ -4913,7 +4913,32 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
- "tycho-types",
+ "tycho-core",
+ "uuid 1.7.0",
+]
+
+[[package]]
+name = "tycho-core"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "diesel",
+ "diesel-async",
+ "ethers",
+ "hex",
+ "maplit",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "strum",
+ "strum_macros",
+ "thiserror",
+ "tokio",
+ "typetag",
+ "utoipa",
  "uuid 1.7.0",
 ]
 
@@ -4959,8 +4984,8 @@ dependencies = [
  "tracing",
  "tracing-actix-web",
  "tracing-subscriber",
+ "tycho-core",
  "tycho-storage",
- "tycho-types",
  "typetag",
  "utoipa",
  "utoipa-swagger-ui",
@@ -4989,33 +5014,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "tycho-types",
+ "tycho-core",
  "unicode-segmentation",
-]
-
-[[package]]
-name = "tycho-types"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "chrono",
- "diesel",
- "diesel-async",
- "ethers",
- "hex",
- "maplit",
- "pretty_assertions",
- "serde",
- "serde_json",
- "strum",
- "strum_macros",
- "thiserror",
- "tokio",
- "typetag",
- "utoipa",
- "uuid 1.7.0",
 ]
 
 [[package]]

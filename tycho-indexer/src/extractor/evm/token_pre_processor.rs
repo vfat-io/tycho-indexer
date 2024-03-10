@@ -5,7 +5,7 @@ use serde_json::from_str;
 use std::sync::Arc;
 use tracing::instrument;
 
-use tycho_types::models::Chain;
+use tycho_core::models::Chain;
 
 #[derive(Debug, Clone)]
 pub struct TokenPreProcessor {

@@ -1,7 +1,7 @@
 use super::{orm, schema, storage_error_from_diesel, PostgresGateway, StorageError};
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use tycho_types::models::{Chain, ExtractionState};
+use tycho_core::models::{Chain, ExtractionState};
 
 impl PostgresGateway {
     pub async fn get_state(

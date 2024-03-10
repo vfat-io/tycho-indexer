@@ -46,7 +46,7 @@ use diesel::{
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
-use tycho_types::storage::StorageError;
+use tycho_core::storage::StorageError;
 
 /// Trait indicating that a struct can be inserted into a versioned table.
 ///

@@ -9,11 +9,11 @@ use futures03::future::join;
 use std::{collections::HashMap, time::Duration};
 use tokio::time::Instant;
 use tracing::{debug, error, info};
+use tycho_core::Bytes;
 use tycho_storage::postgres::{
     orm,
     schema::{component_balance, protocol_component, protocol_system},
 };
-use tycho_types::Bytes;
 
 fn transcode_ascii_balance_to_be(ascii_encoded: &Bytes) -> anyhow::Result<Bytes> {
     let ascii_string = String::from_utf8(ascii_encoded.clone().to_vec())

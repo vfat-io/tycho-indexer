@@ -26,8 +26,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
-use tycho_storage::postgres::cache::CachedGateway;
-use tycho_types::{
+use tycho_core::{
     models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     storage::{
@@ -36,6 +35,7 @@ use tycho_types::{
     },
     Bytes,
 };
+use tycho_storage::postgres::cache::CachedGateway;
 
 #[allow(dead_code)]
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
@@ -289,7 +289,7 @@ where
                     .clone()
                     .into_iter()
                     .filter(|(_, acc_u)| acc_u.is_update())
-                    .map(|(_, acc_u)| (tycho_types::Bytes::from(u.tx.hash), (&acc_u).into()))
+                    .map(|(_, acc_u)| (tycho_core::Bytes::from(u.tx.hash), (&acc_u).into()))
                     .collect();
                 a
             })
@@ -548,7 +548,7 @@ where
 mod test {
     use super::*;
     use crate::pb::sf::substreams::v1::BlockRef;
-    use tycho_types::models::{FinancialType, ImplementationType};
+    use tycho_core::models::{FinancialType, ImplementationType};
 
     fn ambient_protocol_types() -> HashMap<String, ProtocolType> {
         let mut ambient_protocol_types = HashMap::new();
@@ -750,13 +750,13 @@ mod test_serial_db {
     use mpsc::channel;
     use test_log::test;
     use tokio::sync::mpsc;
+    use tycho_core::{
+        models::{ChangeType, ContractId},
+        storage::BlockOrTimestamp,
+    };
     use tycho_storage::{
         postgres,
         postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
-    };
-    use tycho_types::{
-        models::{ChangeType, ContractId},
-        storage::BlockOrTimestamp,
     };
 
     use super::*;

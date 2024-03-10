@@ -20,7 +20,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{debug, error, info, trace};
-use tycho_types::{
+use tycho_core::{
     models,
     models::{
         blockchain::{Block, Transaction},
@@ -937,7 +937,7 @@ mod test_serial_db {
         collections::{HashMap, HashSet},
         str::FromStr,
     };
-    use tycho_types::{models::ChangeType, Bytes};
+    use tycho_core::{models::ChangeType, Bytes};
 
     #[tokio::test]
     async fn test_write_and_flush() {

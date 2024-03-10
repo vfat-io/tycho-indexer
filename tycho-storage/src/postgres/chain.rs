@@ -5,7 +5,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use std::collections::HashMap;
 use tracing::{instrument, warn};
-use tycho_types::{
+use tycho_core::{
     models::{blockchain::*, BlockHash, TxHash},
     storage::{BlockIdentifier, StorageError},
     Bytes,
@@ -276,7 +276,7 @@ mod test {
     use diesel_async::AsyncConnection;
     use ethers::types::{H256, U256};
     use std::str::FromStr;
-    use tycho_types::models::Chain;
+    use tycho_core::models::Chain;
 
     use super::*;
 

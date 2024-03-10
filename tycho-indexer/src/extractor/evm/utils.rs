@@ -1,6 +1,6 @@
 use ethers::types::{H160, H256, U256};
 
-use tycho_types::Bytes;
+use tycho_core::Bytes;
 
 /// Decoding trait with nice contextual error messages
 pub trait TryDecode: Sized {

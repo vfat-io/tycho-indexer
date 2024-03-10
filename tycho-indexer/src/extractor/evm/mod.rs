@@ -9,7 +9,7 @@ use ethers::{
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use tracing::log::warn;
-use tycho_types::{
+use tycho_core::{
     models::{
         Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
         NormalisedMessage, ProtocolType, StoreVal,

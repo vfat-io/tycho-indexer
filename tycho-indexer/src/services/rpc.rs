@@ -10,7 +10,7 @@ use diesel_async::{
 use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
-use tycho_types::{
+use tycho_core::{
     dto,
     dto::{ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
     models::{Address, Chain},
@@ -693,7 +693,7 @@ mod tests {
     use ethers::prelude::H256;
 
     use diesel_async::RunQueryDsl;
-    use tycho_types::{models::ChangeType, storage::BlockIdentifier};
+    use tycho_core::{models::ChangeType, storage::BlockIdentifier};
 
     use super::*;
 

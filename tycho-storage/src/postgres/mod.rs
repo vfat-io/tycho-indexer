@@ -138,7 +138,7 @@ use diesel_async::{
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use std::{collections::HashMap, hash::Hash, i64, ops::Deref, str::FromStr, sync::Arc};
 use tracing::{debug, info};
-use tycho_types::{
+use tycho_core::{
     models::{Chain, TxHash},
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError, Version, VersionKind},
 };
@@ -676,7 +676,7 @@ pub mod db_fixtures {
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
     use std::str::FromStr;
-    use tycho_types::{
+    use tycho_core::{
         models::{Balance, Code},
         Bytes,
     };

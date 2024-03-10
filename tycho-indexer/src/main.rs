@@ -22,6 +22,7 @@ use std::sync::Arc;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{info, warn};
 
+use tycho_core::models::{self, FinancialType, ImplementationType, ProtocolType};
 use tycho_indexer::{
     extractor::{
         self,
@@ -35,7 +36,6 @@ use tycho_indexer::{
     services::ServicesBuilder,
 };
 use tycho_storage::postgres::{self, cache::CachedGateway, PostgresGateway};
-use tycho_types::models::{self, FinancialType, ImplementationType, ProtocolType};
 
 #[cfg(test)]
 #[macro_use]

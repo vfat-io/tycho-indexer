@@ -103,7 +103,7 @@ mod test {
 
     use super::*;
     use rstest::rstest;
-    use tycho_types::Bytes;
+    use tycho_core::Bytes;
 
     #[rstest]
     #[case::one(U256::one(), 1.0f64)]

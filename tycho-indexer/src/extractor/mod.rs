@@ -4,7 +4,7 @@ use mockall::automock;
 use prost::DecodeError;
 use std::sync::Arc;
 use thiserror::Error;
-use tycho_types::{
+use tycho_core::{
     models::{ExtractorIdentity, NormalisedMessage},
     storage::StorageError,
 };

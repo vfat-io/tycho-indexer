@@ -24,8 +24,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace};
-use tycho_storage::postgres::cache::CachedGateway;
-use tycho_types::{
+use tycho_core::{
     models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType, TxHash},
     storage::{
@@ -33,6 +32,7 @@ use tycho_types::{
     },
     Bytes,
 };
+use tycho_storage::postgres::cache::CachedGateway;
 
 pub struct Inner {
     cursor: Vec<u8>,
@@ -675,6 +675,7 @@ mod test_serial_db {
     use mpsc::channel;
     use test_serial_db::evm::ProtocolChangesWithTx;
     use tokio::sync::mpsc;
+    use tycho_core::models;
     use tycho_storage::{
         postgres,
         postgres::{
@@ -683,7 +684,6 @@ mod test_serial_db {
             PostgresGateway,
         },
     };
-    use tycho_types::models;
 
     use super::*;
 

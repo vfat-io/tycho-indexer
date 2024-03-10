@@ -9,7 +9,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use ethers::utils::keccak256;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use tracing::instrument;
-use tycho_types::{
+use tycho_core::{
     models,
     models::{
         AccountToContractStore, Address, Balance, Chain, ChangeType, Code, ContractId,
@@ -1279,7 +1279,7 @@ mod test {
     use diesel_async::{AsyncConnection, RunQueryDsl};
     use ethers::types::U256;
     use rstest::rstest;
-    use tycho_types::{
+    use tycho_core::{
         storage::{BlockIdentifier, VersionKind},
         Bytes,
     };

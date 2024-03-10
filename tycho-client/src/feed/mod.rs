@@ -10,7 +10,7 @@ use tokio::{
     time::timeout,
 };
 use tracing::{debug, error, info, warn};
-use tycho_types::{
+use tycho_core::{
     dto::{Block, ExtractorIdentity},
     Bytes,
 };
@@ -500,7 +500,7 @@ mod tests {
     use std::sync::Arc;
     use test_log::test;
     use tokio::sync::{oneshot, Mutex};
-    use tycho_types::dto::Chain;
+    use tycho_core::dto::Chain;
 
     #[derive(Clone)]
     struct MockStateSync {

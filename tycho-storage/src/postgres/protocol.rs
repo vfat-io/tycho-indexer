@@ -11,7 +11,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{instrument, warn};
-use tycho_types::{
+use tycho_core::{
     models,
     models::{
         Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType, TxHash,
@@ -1306,7 +1306,7 @@ impl PostgresGateway {
 #[cfg(test)]
 mod test {
     use super::*;
-    use tycho_types::storage::BlockIdentifier;
+    use tycho_core::storage::BlockIdentifier;
 
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
@@ -1316,7 +1316,7 @@ mod test {
     use crate::postgres::db_fixtures;
     use ethers::prelude::H256;
     use std::str::FromStr;
-    use tycho_types::{
+    use tycho_core::{
         models,
         models::{ChangeType, FinancialType, ImplementationType},
     };

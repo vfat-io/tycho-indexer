@@ -13,7 +13,7 @@ use std::{
 };
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
-use tycho_types::models::ExtractorIdentity;
+use tycho_core::models::ExtractorIdentity;
 use uuid::Uuid;
 
 /// How often heartbeat pings are sent
@@ -359,7 +359,7 @@ mod tests {
         MaybeTlsStream, WebSocketStream,
     };
     use tracing::{debug, info_span, Instrument};
-    use tycho_types::models::{Chain, NormalisedMessage};
+    use tycho_core::models::{Chain, NormalisedMessage};
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     struct DummyMessage {

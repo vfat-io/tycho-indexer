@@ -21,7 +21,7 @@ use diesel::{
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
 use std::collections::{HashMap, HashSet};
-use tycho_types::{
+use tycho_core::{
     models,
     models::{
         Address, AttrStoreKey, Balance, BlockHash, Code, CodeHash, ComponentId, ContractId,

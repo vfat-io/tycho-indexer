@@ -11,7 +11,7 @@ use tycho_storage::postgres::PostgresGateway;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use tycho_types::{
+use tycho_core::{
     dto::{
         AccountUpdate, BlockParam, ChangeType, ContractDeltaRequestBody,
         ContractDeltaRequestResponse, ProtocolComponent, ProtocolComponentRequestResponse,
