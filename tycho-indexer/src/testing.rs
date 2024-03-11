@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
+#[cfg(test)]
+use ethers::types::U256;
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
@@ -22,15 +24,15 @@ use tycho_core::{
 };
 
 mock! {
-    MockGateway {}
+    pub Gateway {}
     #[async_trait]
-    impl ExtractionStateGateway for MockGateway {
+    impl ExtractionStateGateway for Gateway {
         async fn get_state(&self, name: &str, chain: &Chain) -> Result<ExtractionState, StorageError>;
         async fn save_state(&self, state: &ExtractionState) -> Result<(), StorageError>;
     }
 
     #[async_trait]
-    impl ChainGateway for MockGateway {
+    impl ChainGateway for Gateway {
         async fn upsert_block(&self, new: &[Block]) -> Result<(), StorageError>;
         async fn get_block(&self, id: &BlockIdentifier) -> Result<Block, StorageError>;
         async fn upsert_tx(&self, new: &[Transaction]) -> Result<(), StorageError>;
@@ -38,7 +40,7 @@ mock! {
         async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError>;
     }
 
-    impl ContractStateGateway for MockGateway {
+    impl ContractStateGateway for Gateway {
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn get_contract<'life0, 'life1, 'life2, 'async_trait>(
             &'life0 self,
@@ -151,7 +153,7 @@ mock! {
 
     }
 
-    impl ProtocolGateway for MockGateway {
+    impl ProtocolGateway for Gateway {
         /// Retrieve ProtocolComponent from the db
         ///
         /// # Parameters
@@ -501,5 +503,12 @@ mock! {
             Self: 'async_trait;
     }
 
-    impl Gateway for MockGateway {}
+    impl Gateway for Gateway {}
+}
+
+#[cfg(test)]
+pub fn evm_contract_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap<Bytes, Bytes> {
+    data.into_iter()
+        .map(|(s, v)| (Bytes::from(U256::from(s)), Bytes::from(U256::from(v))))
+        .collect()
 }
