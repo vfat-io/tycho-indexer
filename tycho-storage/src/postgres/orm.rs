@@ -297,11 +297,31 @@ pub enum FinancialType {
     Leverage,
 }
 
+impl From<models::FinancialType> for FinancialType {
+    fn from(value: models::FinancialType) -> Self {
+        match value {
+            models::FinancialType::Swap => Self::Swap,
+            models::FinancialType::Psm => Self::Psm,
+            models::FinancialType::Debt => Self::Debt,
+            models::FinancialType::Leverage => Self::Leverage,
+        }
+    }
+}
+
 #[derive(Debug, DbEnum, Clone, PartialEq)]
 #[ExistingTypePath = "crate::postgres::schema::sql_types::ImplementationType"]
 pub enum ImplementationType {
     Custom,
     Vm,
+}
+
+impl From<models::ImplementationType> for ImplementationType {
+    fn from(value: models::ImplementationType) -> Self {
+        match value {
+            models::ImplementationType::Vm => Self::Vm,
+            models::ImplementationType::Custom => Self::Custom,
+        }
+    }
 }
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -1567,12 +1587,6 @@ impl<'a> DeltaVersionedRow for NewSlot<'a> {
     fn set_previous_value(&mut self, previous_value: Self::Value) {
         self.previous_value = previous_value;
     }
-}
-
-pub struct Contract {
-    pub account: Account,
-    pub balance: AccountBalance,
-    pub code: ContractCode,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]

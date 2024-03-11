@@ -676,11 +676,7 @@ mod test_serial_db {
     use tycho_core::models;
     use tycho_storage::{
         postgres,
-        postgres::{
-            builder::GatewayBuilder,
-            orm::{FinancialType, ImplementationType},
-            testing::run_against_db,
-        },
+        postgres::{builder::GatewayBuilder, testing::run_against_db},
     };
 
     use super::*;
@@ -730,9 +726,9 @@ mod test_serial_db {
         postgres::db_fixtures::insert_protocol_type(
             &mut conn,
             "Pool",
-            Some(FinancialType::Swap),
+            Some(models::FinancialType::Swap),
             None,
-            Some(ImplementationType::Custom),
+            Some(models::ImplementationType::Custom),
         )
         .await;
 

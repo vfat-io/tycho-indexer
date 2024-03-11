@@ -145,17 +145,17 @@ use tycho_core::{
 
 pub mod builder;
 pub mod cache;
-pub mod chain;
-pub mod contract_state;
-pub mod extraction_state;
-pub mod orm;
-pub mod protocol;
-pub mod schema;
+mod chain;
+mod contract_state;
+mod extraction_state;
+mod orm;
+mod protocol;
+mod schema;
 mod versioning;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
-pub struct ValueIdTableCache<E> {
+pub(crate) struct ValueIdTableCache<E> {
     map_id: HashMap<E, i64>,
     map_enum: HashMap<i64, E>,
 }
@@ -334,7 +334,7 @@ fn storage_error_from_diesel(
     }
 }
 
-pub async fn maybe_lookup_block_ts(
+async fn maybe_lookup_block_ts(
     block: &BlockOrTimestamp,
     conn: &mut AsyncPgConnection,
 ) -> Result<NaiveDateTime, StorageError> {
@@ -359,7 +359,7 @@ pub async fn maybe_lookup_block_ts(
     }
 }
 
-pub async fn maybe_lookup_version_ts(
+async fn maybe_lookup_version_ts(
     version: &Version,
     conn: &mut AsyncPgConnection,
 ) -> Result<NaiveDateTime, StorageError> {
@@ -370,7 +370,7 @@ pub async fn maybe_lookup_version_ts(
 }
 
 #[derive(Clone)]
-pub struct PostgresGateway {
+pub(crate) struct PostgresGateway {
     protocol_system_id_cache: Arc<ProtocolSystemEnumCache>,
     chain_id_cache: Arc<ChainEnumCache>,
 }
@@ -383,6 +383,7 @@ impl PostgresGateway {
         Self { protocol_system_id_cache: protocol_system_cache, chain_id_cache: cache }
     }
 
+    #[allow(dead_code)]
     pub async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
         let chain_id_mapping: Vec<(i64, String)> = async {
             use schema::chain::dsl::*;
@@ -457,7 +458,7 @@ impl PostgresGateway {
 /// - `Ok`: Contains a `Pool` of `AsyncPgConnection`s if the connection was established
 ///   successfully.
 /// - `Err`: Contains a `StorageError` if there was an issue creating the connection pool.
-pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageError> {
+async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageError> {
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url);
     let pool = Pool::builder(config)
         .build()
@@ -491,7 +492,7 @@ pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageErr
 ///
 /// - If it failed to get a connection from the provided pool.
 /// - If there was an issue ensuring the presence of chains in the database.
-pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
+async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
     let mut conn = pool.get().await.expect("connection ok");
     diesel::insert_into(schema::chain::table)
         .values(
@@ -507,7 +508,7 @@ pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
     debug!("Ensured chain enum presence for: {:?}", chains);
 }
 
-pub async fn ensure_protocol_systems(protocol_systems: &[String], pool: Pool<AsyncPgConnection>) {
+async fn ensure_protocol_systems(protocol_systems: &[String], pool: Pool<AsyncPgConnection>) {
     let mut conn = pool.get().await.expect("connection ok");
 
     diesel::insert_into(schema::protocol_system::table)
@@ -678,14 +679,11 @@ pub mod db_fixtures {
     use serde_json::Value;
     use std::str::FromStr;
     use tycho_core::{
-        models::{Balance, Code},
+        models::{Balance, Code, FinancialType, ImplementationType},
         Bytes,
     };
 
-    use super::{
-        orm::{FinancialType, ImplementationType},
-        schema,
-    };
+    use super::schema;
     use crate::postgres::orm;
 
     // Insert a new chain
@@ -1020,8 +1018,12 @@ pub mod db_fixtures {
         attribute: Option<Value>,
         implementation_type: Option<ImplementationType>,
     ) -> i64 {
-        let financial_type = financial_type.unwrap_or(FinancialType::Swap);
-        let implementation_type = implementation_type.unwrap_or(ImplementationType::Custom);
+        let financial_type: orm::FinancialType = financial_type
+            .unwrap_or(FinancialType::Swap)
+            .into();
+        let implementation_type: orm::ImplementationType = implementation_type
+            .unwrap_or(ImplementationType::Custom)
+            .into();
         let query = diesel::insert_into(schema::protocol_type::table).values((
             schema::protocol_type::name.eq(name),
             schema::protocol_type::financial_type.eq(financial_type),

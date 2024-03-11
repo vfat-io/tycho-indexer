@@ -1380,9 +1380,9 @@ mod test {
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
-            Some(orm::FinancialType::Swap),
+            Some(models::FinancialType::Swap),
             None,
-            Some(orm::ImplementationType::Custom),
+            Some(models::ImplementationType::Custom),
         )
         .await;
 

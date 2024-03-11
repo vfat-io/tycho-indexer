@@ -223,7 +223,7 @@ pub enum DBCacheMessage {
 /// Read Operations
 /// The class does provide read operations for completeness, but it will not consider any
 /// cached changes while reading. Any reads are direct pass through to the database.
-pub struct DBCacheWriteExecutor {
+pub(crate) struct DBCacheWriteExecutor {
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
@@ -233,7 +233,7 @@ pub struct DBCacheWriteExecutor {
 }
 
 impl DBCacheWriteExecutor {
-    pub async fn new(
+    pub(crate) async fn new(
         name: String,
         chain: Chain,
         pool: Pool<AsyncPgConnection>,
@@ -911,7 +911,7 @@ impl Gateway for CachedGateway {}
 #[cfg(test)]
 mod test_serial_db {
     use super::*;
-    use crate::postgres::{db_fixtures, orm, testing::run_against_db};
+    use crate::postgres::{db_fixtures, testing::run_against_db};
     use ethers::types::U256;
     use std::{
         collections::{HashMap, HashSet},
@@ -1432,9 +1432,9 @@ mod test_serial_db {
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
-            Some(orm::FinancialType::Swap),
+            Some(models::FinancialType::Swap),
             None,
-            Some(orm::ImplementationType::Custom),
+            Some(models::ImplementationType::Custom),
         )
         .await;
         let protocol_component_id = db_fixtures::insert_protocol_component(
