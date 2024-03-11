@@ -566,3 +566,12 @@ pub trait ContractStateGateway {
         end_version: &BlockOrTimestamp,
     ) -> Result<Vec<models::contract::ContractDelta>, StorageError>;
 }
+
+pub trait Gateway:
+    ChainGateway
+    + ContractStateGateway
+    + ExtractionStateGateway
+    + ProtocolGateway
+    + ContractStateGateway
+{
+}

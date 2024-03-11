@@ -143,6 +143,7 @@ use tycho_core::{
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError, Version, VersionKind},
 };
 
+pub mod builder;
 pub mod cache;
 pub mod chain;
 pub mod contract_state;

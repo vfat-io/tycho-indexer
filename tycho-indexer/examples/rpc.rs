@@ -1,21 +1,21 @@
 /// Script to run only the RPC server
 /// Usage: cargo run --example rpc
 use futures03::future::select_all;
-use std::sync::Arc;
 
 use actix_web::dev::ServerHandle;
 use tracing::info;
 use tycho_indexer::{extractor::ExtractionError, services::ServicesBuilder};
-use tycho_storage::postgres::{self, PostgresGateway};
+use tycho_storage::postgres::builder::GatewayBuilder;
 
 #[tokio::main]
 async fn main() -> Result<(), ExtractionError> {
     // Set up the subscriber
     tracing_subscriber::fmt::init();
 
-    let pool =
-        postgres::connect("postgres://postgres:mypassword@localhost:5432/tycho_indexer_0").await?;
-    let evm_gw = PostgresGateway::new(pool.clone()).await?;
+    let (cached_gw, _jh) =
+        GatewayBuilder::new("postgres://postgres:mypassword@localhost:5432/tycho_indexer_0")
+            .build()
+            .await?;
 
     info!("Starting Tycho RPC");
 
@@ -23,7 +23,7 @@ async fn main() -> Result<(), ExtractionError> {
     let server_port = 4242;
     let server_version_prefix = "v1";
     let server_url = format!("http://{}:{}", server_addr, server_port);
-    let (server_handle, server_task) = ServicesBuilder::new(Arc::new(evm_gw), pool)
+    let (server_handle, server_task) = ServicesBuilder::new(cached_gw)
         .prefix(server_version_prefix)
         .bind(server_addr)
         .port(server_port)

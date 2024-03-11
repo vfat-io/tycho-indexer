@@ -34,7 +34,7 @@ use tycho_core::{
     },
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
-        ExtractionStateGateway, ProtocolGateway, StorageError, Version,
+        ExtractionStateGateway, Gateway, ProtocolGateway, StorageError, Version,
     },
     Bytes,
 };
@@ -910,6 +910,8 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 }
+
+impl Gateway for CachedGateway {}
 
 // These two implementations allow us to inherit EVMStateGateway methods. If CachedGateway doesn't
 // implement the called method and EVMStateGateway does, then the call will be forwarded to

@@ -5,7 +5,6 @@ use std::{collections::HashMap, sync::Arc};
 use crate::extractor::{runner::ExtractorHandle, ExtractionError};
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
-use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
 use tokio::task::JoinHandle;
 use tycho_storage::postgres::PostgresGateway;
 use utoipa::OpenApi;
@@ -21,6 +20,7 @@ use tycho_core::{
         StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
     },
     models::{Chain, ContractId},
+    storage::Gateway,
 };
 
 mod rpc;
@@ -28,27 +28,25 @@ mod ws;
 
 pub type EvmPostgresGateway = PostgresGateway;
 
-pub struct ServicesBuilder {
+pub struct ServicesBuilder<G> {
     prefix: String,
     port: u16,
     bind: String,
     extractor_handles: ws::MessageSenderMap,
-    db_gateway: Arc<EvmPostgresGateway>,
-    db_connection_pool: Pool<AsyncPgConnection>,
+    db_gateway: G,
 }
 
-impl ServicesBuilder {
-    pub fn new(
-        db_gateway: Arc<EvmPostgresGateway>,
-        db_connection_pool: Pool<AsyncPgConnection>,
-    ) -> Self {
+impl<G> ServicesBuilder<G>
+where
+    G: Gateway + Send + Sync + 'static,
+{
+    pub fn new(db_gateway: G) -> Self {
         Self {
             prefix: "v1".to_owned(),
             port: 4242,
             bind: "0.0.0.0".to_owned(),
             extractor_handles: HashMap::new(),
             db_gateway,
-            db_connection_pool,
         }
     }
 
@@ -118,37 +116,36 @@ impl ServicesBuilder {
 
         let openapi = ApiDoc::openapi();
         let ws_data = web::Data::new(ws::WsData::new(self.extractor_handles));
-        let rpc_data =
-            web::Data::new(rpc::RpcHandler::new(self.db_gateway, self.db_connection_pool));
+        let rpc_data = web::Data::new(rpc::RpcHandler::new(self.db_gateway));
         let server = HttpServer::new(move || {
             App::new()
                 .app_data(rpc_data.clone())
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/contract_state", self.prefix))
-                        .route(web::post().to(rpc::contract_state)),
+                        .route(web::post().to(rpc::contract_state::<G>)),
                 )
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/contract_delta", self.prefix))
-                        .route(web::post().to(rpc::contract_delta)),
+                        .route(web::post().to(rpc::contract_delta::<G>)),
                 )
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/protocol_state", self.prefix))
-                        .route(web::post().to(rpc::protocol_state)),
+                        .route(web::post().to(rpc::protocol_state::<G>)),
                 )
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/protocol_delta", self.prefix))
-                        .route(web::post().to(rpc::protocol_delta)),
+                        .route(web::post().to(rpc::protocol_delta::<G>)),
                 )
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/tokens", self.prefix))
-                        .route(web::post().to(rpc::tokens)),
+                        .route(web::post().to(rpc::tokens::<G>)),
                 )
                 .service(
                     web::resource(format!(
                         "/{}/{{execution_env}}/protocol_components",
                         self.prefix
                     ))
-                    .route(web::post().to(rpc::protocol_components)),
+                    .route(web::post().to(rpc::protocol_components::<G>)),
                 )
                 .app_data(ws_data.clone())
                 .service(
