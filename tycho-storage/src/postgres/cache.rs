@@ -5,12 +5,7 @@ use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
 use lru::LruCache;
-use std::{
-    collections::HashMap,
-    num::NonZeroUsize,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use tokio::{
     sync::{
         mpsc,
@@ -912,23 +907,6 @@ impl ProtocolGateway for CachedGateway {
 }
 
 impl Gateway for CachedGateway {}
-
-// These two implementations allow us to inherit EVMStateGateway methods. If CachedGateway doesn't
-// implement the called method and EVMStateGateway does, then the call will be forwarded to
-// EVMStateGateway.
-impl Deref for CachedGateway {
-    type Target = PostgresGateway;
-
-    fn deref(&self) -> &Self::Target {
-        &self.state_gateway
-    }
-}
-
-impl DerefMut for CachedGateway {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state_gateway
-    }
-}
 
 #[cfg(test)]
 mod test_serial_db {

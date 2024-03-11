@@ -672,16 +672,14 @@ mod test_serial_db {
         token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, Transaction,
     };
     use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-    use mpsc::channel;
     use test_serial_db::evm::ProtocolChangesWithTx;
-    use tokio::sync::mpsc;
     use tycho_core::models;
     use tycho_storage::{
         postgres,
         postgres::{
+            builder::GatewayBuilder,
             orm::{FinancialType, ImplementationType},
             testing::run_against_db,
-            PostgresGateway,
         },
     };
 
@@ -723,13 +721,12 @@ mod test_serial_db {
 
     async fn setup_gw(
         pool: Pool<AsyncPgConnection>,
-    ) -> (NativePgGateway<MockTokenPreProcessorTrait>, Pool<AsyncPgConnection>, i64) {
+    ) -> (NativePgGateway<MockTokenPreProcessorTrait>, i64) {
         let mut conn = pool
             .get()
             .await
             .expect("pool should get a connection");
         let chain_id = postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
-        postgres::db_fixtures::insert_protocol_system(&mut conn, "test".to_owned()).await;
         postgres::db_fixtures::insert_protocol_type(
             &mut conn,
             "Pool",
@@ -739,21 +736,13 @@ mod test_serial_db {
         )
         .await;
 
-        let evm_gw = PostgresGateway::from_connection(&mut conn).await;
-
-        let (tx, rx) = channel(10);
-
-        let write_executor = tycho_storage::postgres::cache::DBCacheWriteExecutor::new(
-            "ethereum".to_owned(),
-            Chain::Ethereum,
-            pool.clone(),
-            evm_gw.clone(),
-            rx,
-        )
-        .await;
-
-        write_executor.run();
-        let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
+        let db_url = std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+        let (cached_gw, _jh) = GatewayBuilder::new(db_url.as_str())
+            .set_chains(&[Chain::Ethereum])
+            .set_protocol_systems(&["test".to_string()])
+            .build()
+            .await
+            .expect("failed to build postgres gateway");
 
         let gw = NativePgGateway::new(
             "test",
@@ -762,13 +751,13 @@ mod test_serial_db {
             cached_gw,
             get_mocked_token_pre_processor(),
         );
-        (gw, pool, chain_id)
+        (gw, chain_id)
     }
 
     #[tokio::test]
     async fn test_get_cursor() {
         run_against_db(|pool| async move {
-            let (gw, _, _) = setup_gw(pool).await;
+            let (gw, _) = setup_gw(pool).await;
             let evm_gw = gw.state_gateway.clone();
             let state = ExtractionState::new(
                 "test".to_string(),
@@ -845,7 +834,7 @@ mod test_serial_db {
     #[tokio::test]
     async fn test_forward() {
         run_against_db(|pool| async move {
-            let (gw, _, _) = setup_gw(pool).await;
+            let (gw, _) = setup_gw(pool).await;
             let msg = native_pool_creation();
 
             let _exp = [ProtocolComponent {
@@ -896,7 +885,7 @@ mod test_serial_db {
                 .await
                 .expect("pool should get a connection");
 
-            let (gw, _, chain_id) = setup_gw(pool).await;
+            let (gw, chain_id) = setup_gw(pool).await;
 
             let weth_addr = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
             let usdc_addr = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";

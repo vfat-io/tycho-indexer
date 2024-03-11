@@ -747,16 +747,14 @@ mod test_serial_db {
     };
     use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
     use ethers::types::U256;
-    use mpsc::channel;
     use test_log::test;
-    use tokio::sync::mpsc;
     use tycho_core::{
         models::{ChangeType, ContractId},
         storage::BlockOrTimestamp,
     };
     use tycho_storage::{
         postgres,
-        postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
+        postgres::{builder::GatewayBuilder, db_fixtures, testing::run_against_db},
     };
 
     use super::*;
@@ -765,6 +763,10 @@ mod test_serial_db {
     const TX_HASH_1: &str = "0x0d9e0da36cf9f305a189965b248fc79c923619801e8ab5ef158d4fd528a291ad";
     const TX_HASH_2: &str = "0xcf574444be25450fe26d16b85102b241e964a6e01d75dd962203d4888269be3d";
     const BLOCK_HASH_0: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
+
+    const WETH_ADDRESS: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+    const USDC_ADDRESS: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+    const USDT_ADDRESS: &str = "dAC17F958D2ee523a2206206994597C13D831ec7";
 
     fn get_mocked_token_pre_processor() -> MockTokenPreProcessorTrait {
         let mut mock_processor = MockTokenPreProcessorTrait::new();
@@ -799,44 +801,37 @@ mod test_serial_db {
 
     async fn setup_gw(
         pool: Pool<AsyncPgConnection>,
-    ) -> (AmbientPgGateway<MockTokenPreProcessorTrait>, Pool<AsyncPgConnection>) {
+    ) -> AmbientPgGateway<MockTokenPreProcessorTrait> {
         let mut conn = pool
             .get()
             .await
             .expect("pool should get a connection");
-        postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
-        postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
+
         postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None).await;
-        let evm_gw = PostgresGateway::from_connection(&mut conn).await;
+        let chain_id = postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        db_fixtures::insert_token(&mut conn, chain_id, WETH_ADDRESS, "WETH", 18).await;
+        db_fixtures::insert_token(&mut conn, chain_id, USDC_ADDRESS, "USDC", 6).await;
 
-        let (tx, rx) = channel(10);
-
-        let write_executor = tycho_storage::postgres::cache::DBCacheWriteExecutor::new(
-            "ethereum".to_owned(),
-            Chain::Ethereum,
-            pool.clone(),
-            evm_gw.clone(),
-            rx,
-        )
-        .await;
-
-        write_executor.run();
-        let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
-
-        let gw = AmbientPgGateway::new(
+        let db_url = std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+        let (cached_gw, _jh) = GatewayBuilder::new(db_url.as_str())
+            .set_chains(&[Chain::Ethereum])
+            .set_protocol_systems(&["ambient".to_string()])
+            .build()
+            .await
+            .expect("failed to build postgres gateway");
+        AmbientPgGateway::new(
             "vm:ambient",
             Chain::Ethereum,
             1000,
             cached_gw,
             get_mocked_token_pre_processor(),
-        );
-        (gw, pool)
+        )
     }
 
     #[tokio::test]
     async fn test_get_cursor() {
         run_against_db(|pool| async move {
-            let (gw, _) = setup_gw(pool).await;
+            let gw = setup_gw(pool).await;
             let evm_gw = gw.state_gateway.clone();
             let state = ExtractionState::new(
                 "vm:ambient".to_string(),
@@ -1018,7 +1013,7 @@ mod test_serial_db {
     #[test(tokio::test)]
     async fn test_upsert_contract() {
         run_against_db(|pool| async move {
-            let (gw, _) = setup_gw(pool).await;
+            let gw = setup_gw(pool).await;
             let msg = ambient_creation_and_update();
             let exp = ambient_account(0);
 
@@ -1074,28 +1069,7 @@ mod test_serial_db {
     #[tokio::test]
     async fn test_get_new_tokens() {
         run_against_db(|pool| async move {
-            let mut conn = pool
-                .get()
-                .await
-                .expect("pool should get a connection");
-            let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
-
-            let evm_gw = PostgresGateway::from_connection(&mut conn).await;
-            let (tx, _rx) = channel(10);
-            let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
-            let gw = AmbientPgGateway::new(
-                "vm:ambient",
-                Chain::Ethereum,
-                1000,
-                cached_gw,
-                get_mocked_token_pre_processor(),
-            );
-
-            let weth_address: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
-            let usdc_address: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
-            let usdt_address: &str = "dAC17F958D2ee523a2206206994597C13D831ec7";
-            db_fixtures::insert_token(&mut conn, chain_id, weth_address, "WETH", 18).await;
-            db_fixtures::insert_token(&mut conn, chain_id, usdc_address, "USDC", 6).await;
+            let gw = setup_gw(pool.clone()).await;
 
             let component_1 = evm::ProtocolComponent {
                 id: "ambient_USDC_WETH".to_owned(),
@@ -1103,8 +1077,8 @@ mod test_serial_db {
                 protocol_type_name: "vm:pool".to_string(),
                 chain: Default::default(),
                 tokens: vec![
-                    H160::from_str(weth_address).expect("Invalid H160 address"),
-                    H160::from_str(usdc_address).expect("Invalid H160 address"),
+                    H160::from_str(WETH_ADDRESS).expect("Invalid H160 address"),
+                    H160::from_str(USDC_ADDRESS).expect("Invalid H160 address"),
                 ],
                 contract_ids: vec![],
                 creation_tx: Default::default(),
@@ -1118,8 +1092,8 @@ mod test_serial_db {
                 protocol_type_name: "vm:pool".to_string(),
                 chain: Default::default(),
                 tokens: vec![
-                    H160::from_str(weth_address).expect("Invalid H160 address"),
-                    H160::from_str(usdt_address).expect("Invalid H160 address"),
+                    H160::from_str(WETH_ADDRESS).expect("Invalid H160 address"),
+                    H160::from_str(USDT_ADDRESS).expect("Invalid H160 address"),
                 ],
                 contract_ids: vec![],
                 creation_tx: Default::default(),
@@ -1140,7 +1114,7 @@ mod test_serial_db {
                 .await
                 .unwrap();
             assert_eq!(new_tokens.len(), 1);
-            assert_eq!(new_tokens[0], H160::from_str(usdt_address).expect("Invalid H160 address"));
+            assert_eq!(new_tokens[0], H160::from_str(USDT_ADDRESS).expect("Invalid H160 address"));
         })
         .await;
     }

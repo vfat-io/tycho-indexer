@@ -6,7 +6,6 @@ use crate::extractor::{runner::ExtractorHandle, ExtractionError};
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
 use tokio::task::JoinHandle;
-use tycho_storage::postgres::PostgresGateway;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -25,9 +24,6 @@ use tycho_core::{
 
 mod rpc;
 mod ws;
-
-pub type EvmPostgresGateway = PostgresGateway;
-
 pub struct ServicesBuilder<G> {
     prefix: String,
     port: u16,
