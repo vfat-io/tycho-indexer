@@ -34,6 +34,7 @@ pub struct BlockTransactionDeltas<T> {
     pub deltas: Vec<TransactionDeltaGroup<T>>,
 }
 
+#[allow(dead_code)]
 pub struct TransactionDeltaGroup<T> {
     changes: T,
     protocol_component: HashMap<String, ProtocolComponent>,
@@ -51,5 +52,6 @@ pub struct BlockAggregatedDeltas<T> {
     pub new_components: HashMap<String, ProtocolComponent>,
     pub deleted_components: HashMap<String, ProtocolComponent>,
     pub component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+    #[allow(dead_code)]
     component_tvl: HashMap<String, f64>,
 }

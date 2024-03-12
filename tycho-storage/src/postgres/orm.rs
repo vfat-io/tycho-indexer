@@ -585,7 +585,7 @@ pub struct NewProtocolComponent {
 }
 
 impl NewProtocolComponent {
-    #[allow(unused_variables, clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         external_id: &str,
         chain_id: i64,

@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# TODO: remove or keep only for testing
+# TODO: eventually remove this dependency, currently used only by hex_bytes.
 ethers.workspace = true
 serde.workspace = true
 diesel = { workspace = true, optional = true }

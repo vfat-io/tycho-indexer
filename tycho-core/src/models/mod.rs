@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod blockchain;
 pub mod contract;
 pub mod protocol;

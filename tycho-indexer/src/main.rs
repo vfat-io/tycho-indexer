@@ -10,7 +10,6 @@ use extractor::{
     },
     runner::{ExtractorHandle, ExtractorRunnerBuilder},
 };
-use models::Chain;
 
 use actix_web::dev::ServerHandle;
 use clap::Parser;
@@ -22,7 +21,7 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::info;
 
-use tycho_core::models::{self, FinancialType, ImplementationType, ProtocolType};
+use tycho_core::models::{Chain, FinancialType, ImplementationType, ProtocolType};
 use tycho_indexer::{
     extractor::{
         self,
