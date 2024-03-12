@@ -237,7 +237,6 @@ pub mod hex_hashmap_key_value {
 mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
-    use serde_json;
 
     #[derive(Debug, Serialize, Deserialize)]
     struct TestStruct {

@@ -1,7 +1,7 @@
 specVersion: v0.1.0
 package:
   name: "substreams_ethereum_ambient"
-  version: v0.3.0
+  version: v0.4.0
 
 protobuf:
   files:
@@ -45,6 +45,7 @@ modules:
       - source: sf.ethereum.type.v2.Block
       - map: map_pool_changes
       - store: store_pool_balances
+        mode: deltas
       - store: store_pools
     output:
       type: proto:tycho.evm.state.v1.BlockContractChanges

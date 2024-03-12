@@ -159,15 +159,34 @@ fn merge_block(
     tx_changes: &mut HashMap<Vec<u8>, PartialChanges>,
     block_entity_changes: &mut BlockEntityChanges,
 ) {
+    let mut tx_entity_changes_map = HashMap::new();
+
+    // Add created pools to the tx_changes_map
+    for change in block_entity_changes
+        .changes
+        .clone()
+        .into_iter()
+    {
+        let transaction = change.tx.as_ref().unwrap();
+        tx_entity_changes_map
+            .entry(transaction.hash.clone())
+            .and_modify(|c: &mut TransactionEntityChanges| {
+                c.component_changes
+                    .extend(change.component_changes.clone())
+            })
+            .or_insert(change);
+    }
+
     // First, iterate through the previously created transactions, extracted from the
     // map_pool_created step. If there are sync events for this transaction, add them to the
     // block_entity_changes and the corresponding balance changes.
-    for change in block_entity_changes.changes.iter_mut() {
+    for change in tx_entity_changes_map.values_mut() {
         let tx = change
             .clone()
             .tx
             .expect("Transaction not found")
             .clone();
+
         // If there are sync events for this transaction, add them to the block_entity_changes
         if let Some(partial_changes) = tx_changes.remove(&tx.hash) {
             change.entity_changes = partial_changes
@@ -186,9 +205,9 @@ fn merge_block(
     // end of this function, we expect block_entity_changes to be up-to-date with the changes
     // for all sync and new_pools in the block.
     for partial_changes in tx_changes.values() {
-        block_entity_changes
-            .changes
-            .push(TransactionEntityChanges {
+        tx_entity_changes_map.insert(
+            partial_changes.transaction.hash.clone(),
+            TransactionEntityChanges {
                 tx: Some(partial_changes.transaction.clone()),
                 entity_changes: partial_changes
                     .clone()
@@ -199,6 +218,11 @@ fn merge_block(
                     .into_values()
                     .collect(),
                 component_changes: vec![],
-            });
+            },
+        );
     }
+
+    block_entity_changes.changes = tx_entity_changes_map
+        .into_values()
+        .collect();
 }

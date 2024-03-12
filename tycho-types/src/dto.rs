@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{NaiveDateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt::Display;
 use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
@@ -40,6 +40,16 @@ pub enum ChangeType {
     Deletion,
     Creation,
     Unspecified,
+}
+
+impl ChangeType {
+    pub fn merge(&self, other: &Self) -> Self {
+        if matches!(self, Self::Creation) {
+            Self::Creation
+        } else {
+            *other
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -76,18 +86,106 @@ pub enum Response {
     SubscriptionEnded { subscription_id: Uuid },
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Deltas {
     VM(BlockAccountChanges),
     Native(BlockEntityChangesResult),
 }
 
+impl Deltas {
+    pub fn get_block(&self) -> &Block {
+        match self {
+            Deltas::VM(data) => &data.block,
+            Deltas::Native(data) => &data.block,
+        }
+    }
+
+    pub fn is_revert(&self) -> bool {
+        match self {
+            Deltas::VM(data) => data.revert,
+            Deltas::Native(data) => data.revert,
+        }
+    }
+
+    pub fn component_tvl(&self) -> &HashMap<String, f64> {
+        match self {
+            Deltas::VM(data) => &data.component_tvl,
+            Deltas::Native(data) => &data.component_tvl,
+        }
+    }
+
+    pub fn filter_by_component<F: Fn(&str) -> bool>(&mut self, keep: F) {
+        match self {
+            Deltas::Native(data) => {
+                data.state_updates
+                    .retain(|k, _| keep(k));
+                data.component_balances
+                    .retain(|k, _| keep(k));
+                data.component_tvl
+                    .retain(|k, _| keep(k));
+            }
+            Deltas::VM(data) => {
+                data.component_balances
+                    .retain(|k, _| keep(k));
+                data.component_tvl
+                    .retain(|k, _| keep(k));
+            }
+        }
+    }
+
+    pub fn filter_by_contract<F: Fn(&Bytes) -> bool>(&mut self, keep: F) {
+        match self {
+            Deltas::VM(data) => {
+                data.account_updates
+                    .retain(|k, _| keep(k));
+            }
+            Deltas::Native(_) => panic!("Can't filter native deltas by contract!"),
+        }
+    }
+
+    pub fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Deltas::VM(left), Deltas::VM(right)) => Deltas::VM(left.merge(right)),
+            (Deltas::Native(left), Deltas::Native(right)) => Deltas::Native(left.merge(right)),
+            _ => panic!("Not allowed to merge deltas of different types"),
+        }
+    }
+
+    pub fn n_changes(&self) -> usize {
+        match self {
+            Deltas::VM(deltas) => deltas.account_updates.len(),
+            Deltas::Native(deltas) => deltas.state_updates.len(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Deltas {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let json: serde_json::Value = serde_json::Value::deserialize(deserializer)?;
+        if json.get("account_updates").is_some() {
+            return BlockAccountChanges::deserialize(json)
+                .map(Deltas::VM)
+                .map_err(serde::de::Error::custom);
+        }
+        if json.get("state_updates").is_some() {
+            return BlockEntityChangesResult::deserialize(json)
+                .map(Deltas::Native)
+                .map_err(serde::de::Error::custom);
+        }
+
+        Err(serde::de::Error::custom("data did not match any variant of untagged enum Deltas"))
+    }
+}
+
 /// A message sent from the server to the client
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum WebSocketMessage {
-    BlockChanges { subscription_id: Uuid, delta: Deltas },
+    BlockChanges { subscription_id: Uuid, deltas: Deltas },
     Response(Response),
 }
 
@@ -111,6 +209,13 @@ pub struct BlockParam {
     pub chain: Option<Chain>,
     #[serde(default)]
     pub number: Option<i64>,
+}
+
+impl From<&Block> for BlockParam {
+    fn from(value: &Block) -> Self {
+        // The hash should uniquely identify a block across chains
+        BlockParam { hash: Some(value.hash.clone()), chain: None, number: None }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Default, Deserialize, Serialize)]
@@ -147,9 +252,19 @@ pub struct BlockAccountChanges {
     pub revert: bool,
     #[serde(with = "hex_hashmap_key")]
     pub account_updates: HashMap<Bytes, AccountUpdate>,
-    pub new_protocol_components: Vec<ProtocolComponent>,
-    pub deleted_protocol_components: Vec<ProtocolComponent>,
-    pub component_balances: Vec<ComponentBalance>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
+    pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
+    pub component_balances: HashMap<String, TokenBalances>,
+    pub component_tvl: HashMap<String, f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+pub struct TokenBalances(#[serde(with = "hex_hashmap_key")] HashMap<Bytes, ComponentBalance>);
+
+impl From<HashMap<Bytes, ComponentBalance>> for TokenBalances {
+    fn from(value: HashMap<Bytes, ComponentBalance>) -> Self {
+        TokenBalances(value)
+    }
 }
 
 impl BlockAccountChanges {
@@ -160,9 +275,9 @@ impl BlockAccountChanges {
         block: Block,
         revert: bool,
         account_updates: HashMap<Bytes, AccountUpdate>,
-        new_protocol_components: Vec<ProtocolComponent>,
-        deleted_protocol_components: Vec<ProtocolComponent>,
-        component_balances: Vec<ComponentBalance>,
+        new_protocol_components: HashMap<String, ProtocolComponent>,
+        deleted_protocol_components: HashMap<String, ProtocolComponent>,
+        component_balances: HashMap<String, HashMap<Bytes, ComponentBalance>>,
     ) -> Self {
         BlockAccountChanges {
             extractor: extractor.to_owned(),
@@ -172,8 +287,45 @@ impl BlockAccountChanges {
             account_updates,
             new_protocol_components,
             deleted_protocol_components,
-            component_balances,
+            component_balances: component_balances
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+            component_tvl: HashMap::new(),
         }
+    }
+
+    pub fn merge(mut self, other: Self) -> Self {
+        other
+            .account_updates
+            .into_iter()
+            .for_each(|(k, v)| {
+                self.account_updates
+                    .entry(k)
+                    .and_modify(|e| {
+                        e.merge(&v);
+                    })
+                    .or_insert(v);
+            });
+
+        other
+            .component_balances
+            .into_iter()
+            .for_each(|(k, v)| {
+                self.component_balances
+                    .entry(k)
+                    .and_modify(|e| e.0.extend(v.0.clone()))
+                    .or_insert_with(|| v);
+            });
+
+        self.new_protocol_components
+            .extend(other.new_protocol_components);
+        self.deleted_protocol_components
+            .extend(other.deleted_protocol_components);
+        self.revert = other.revert;
+        self.block = other.block;
+
+        self
     }
 }
 
@@ -207,6 +359,18 @@ impl AccountUpdate {
     ) -> Self {
         Self { address, chain, slots, balance, code, change }
     }
+
+    pub fn merge(&mut self, other: &Self) {
+        self.slots.extend(
+            other
+                .slots
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+        self.balance = other.balance.clone();
+        self.code = other.code.clone();
+        self.change = self.change.merge(&other.change);
+    }
 }
 
 /// Represents the static parts of a protocol component.
@@ -232,11 +396,12 @@ pub struct ProtocolComponent {
     pub created_at: NaiveDateTime,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct ComponentBalance {
     #[serde(with = "hex_bytes")]
     pub token: Bytes,
-    pub new_balance: Bytes,
+    pub balance: Bytes,
+    pub balance_float: f64,
     #[serde(with = "hex_bytes")]
     pub modify_tx: Bytes,
     pub component_id: String,
@@ -250,12 +415,52 @@ pub struct ComponentBalance {
 /// TODO - update once new structure is merged
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct BlockEntityChangesResult {
-    extractor: String,
-    chain: Chain,
+    pub extractor: String,
+    pub chain: Chain,
     pub block: Block,
     pub revert: bool,
     pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
+    pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
+    pub component_balances: HashMap<String, TokenBalances>,
+    pub component_tvl: HashMap<String, f64>,
+}
+
+impl BlockEntityChangesResult {
+    pub fn merge(mut self, other: Self) -> Self {
+        other
+            .state_updates
+            .into_iter()
+            .for_each(|(k, v)| {
+                self.state_updates
+                    .entry(k)
+                    .and_modify(|e| {
+                        e.merge(&v);
+                    })
+                    .or_insert(v);
+            });
+
+        other
+            .component_balances
+            .into_iter()
+            .for_each(|(k, v)| {
+                self.component_balances
+                    .entry(k)
+                    .and_modify(|e| e.0.extend(v.0.clone()))
+                    .or_insert_with(|| v);
+            });
+
+        self.component_tvl
+            .extend(other.component_tvl);
+        self.new_protocol_components
+            .extend(other.new_protocol_components);
+        self.deleted_protocol_components
+            .extend(other.deleted_protocol_components);
+        self.revert = other.revert;
+        self.block = other.block;
+
+        self
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -265,6 +470,51 @@ pub struct ProtocolStateDelta {
     #[schema(value_type=HashMap<String, String>)]
     pub updated_attributes: HashMap<String, Bytes>,
     pub deleted_attributes: HashSet<String>,
+}
+
+impl ProtocolStateDelta {
+    /// Merges 'other' into 'self'.
+    ///
+    ///
+    /// During merge of these deltas a special situation can arise when an attribute is present in
+    /// `self.deleted_attributes` and `other.update_attributes``. If we would just merge the sets
+    /// of deleted attributes or vice versa, it would be ambiguous and potential lead to a
+    /// deletion of an attribute that should actually be present, or retention of an actually
+    /// deleted attribute.
+    ///
+    /// This situation is handled the following way:
+    ///
+    ///     - If an attribute is deleted and in the next message recreated, it is removed from the
+    ///       set of deleted attributes and kept in updated_attributes. This way it's temporary
+    ///       deletion is never communicated to the final receiver.
+    ///     - If an attribute was updated and is deleted in the next message, it is removed from
+    ///       updated attributes and kept in deleted. This way the attributes temporary update (or
+    ///       potentially short-lived existence) before its deletion is never communicated to the
+    ///       final receiver.
+    pub fn merge(&mut self, other: &Self) {
+        // either updated and then deleted -> keep in deleted, remove from updated
+        self.updated_attributes
+            .retain(|k, _| !other.deleted_attributes.contains(k));
+
+        // or deleted and then updated/recreated -> remove from deleted and keep in updated
+        self.deleted_attributes.retain(|attr| {
+            !other
+                .updated_attributes
+                .contains_key(attr)
+        });
+
+        // simply merge updates
+        self.updated_attributes.extend(
+            other
+                .updated_attributes
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+
+        // simply merge deletions
+        self.deleted_attributes
+            .extend(other.deleted_attributes.iter().cloned());
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
@@ -511,6 +761,16 @@ pub struct ProtocolComponentsRequestBody {
 }
 
 impl ProtocolComponentsRequestBody {
+    pub fn system_filtered(system: &str) -> Self {
+        Self { protocol_system: Some(system.to_string()), component_ids: None }
+    }
+
+    pub fn id_filtered(ids: Vec<String>) -> Self {
+        Self { protocol_system: None, component_ids: Some(ids) }
+    }
+}
+
+impl ProtocolComponentsRequestBody {
     pub fn new(protocol_system: Option<String>, component_ids: Option<Vec<String>>) -> Self {
         Self { protocol_system, component_ids }
     }
@@ -518,8 +778,13 @@ impl ProtocolComponentsRequestBody {
 
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct ProtocolComponentRequestParameters {
-    #[param(default = 0)]
     pub tvl_gt: Option<f64>,
+}
+
+impl ProtocolComponentRequestParameters {
+    pub fn tvl_filtered(min_tvl: f64) -> Self {
+        Self { tvl_gt: Some(min_tvl) }
+    }
 }
 
 impl ProtocolComponentRequestParameters {
@@ -593,6 +858,12 @@ pub struct ProtocolStateRequestBody {
     pub version: VersionParam,
 }
 
+impl ProtocolStateRequestBody {
+    pub fn id_filtered(ids: Vec<ProtocolId>) -> Self {
+        Self { protocol_ids: Some(ids), ..Default::default() }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct ProtocolStateRequestResponse {
     pub states: Vec<ResponseProtocolState>,
@@ -625,8 +896,17 @@ impl ProtocolDeltaRequestResponse {
     }
 }
 
+#[derive(Clone, PartialEq, Hash, Eq)]
+pub struct ProtocolComponentId {
+    pub chain: Chain,
+    pub system: String,
+    pub id: String,
+}
+
 #[cfg(test)]
 mod test {
+    use maplit::hashmap;
+
     use super::*;
 
     #[test]
@@ -715,5 +995,489 @@ mod test {
         };
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_block_account_changes() {
+        let json_data = r#"
+        {
+            "extractor": "vm:ambient",
+            "chain": "ethereum",
+            "block": {
+                "number": 123,
+                "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "chain": "ethereum",             
+                "ts": "2023-09-14T00:00:00"
+            },
+            "revert": false,
+            "account_updates": {
+                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                    "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                    "chain": "ethereum",
+                    "slots": {},
+                    "balance": "0x01f4",
+                    "code": "",
+                    "change": "Update"
+                }
+            },
+            "new_protocol_components": 
+                { "protocol_1": {
+                        "id": "protocol_1",
+                        "protocol_system": "system_1",
+                        "protocol_type_name": "type_1",
+                        "chain": "ethereum",
+                        "tokens": ["0x01", "0x02"],
+                        "contract_ids": ["0x01", "0x02"],
+                        "static_attributes": {"attr1": "0x01f4"},
+                        "change": "Update",
+                        "creation_tx": "0x01",
+                        "created_at": "2023-09-14T00:00:00"
+                    }
+                },
+            "deleted_protocol_components": {},
+            "component_balances": {
+                "protocol_1":
+                    {
+                        "0x01": {
+                            "token": "0x01",
+                            "balance": "0xb77831d23691653a01",
+                            "balance_float": 3.3844151001790677e21,
+                            "modify_tx": "0x01",
+                            "component_id": "protocol_1"
+                        }
+                    }
+            },
+            "component_tvl": {
+                "protocol_1": 1000.0
+            }
+        }
+        "#;
+
+        serde_json::from_str::<BlockAccountChanges>(json_data).expect("parsing failed");
+    }
+
+    #[test]
+    fn test_parse_block_entity_changes() {
+        let json_data = r#"
+        {
+            "extractor": "vm:ambient",
+            "chain": "ethereum",
+            "block": {
+                "number": 123,
+                "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "chain": "ethereum",             
+                "ts": "2023-09-14T00:00:00"
+            },
+            "revert": false,
+            "state_updates": {
+                "component_1": {
+                    "component_id": "component_1",
+                    "updated_attributes": {"attr1": "0x01"},
+                    "deleted_attributes": ["attr2"]
+                }
+            },
+            "new_protocol_components": {
+                "protocol_1": {
+                    "id": "protocol_1",
+                    "protocol_system": "system_1",
+                    "protocol_type_name": "type_1",
+                    "chain": "ethereum",
+                    "tokens": ["0x01", "0x02"],
+                    "contract_ids": ["0x01", "0x02"],
+                    "static_attributes": {"attr1": "0x01f4"},
+                    "change": "Update",
+                    "creation_tx": "0x01",
+                    "created_at": "2023-09-14T00:00:00"
+                }
+            },
+            "deleted_protocol_components": {},
+            "component_balances": {
+                "protocol_1": {
+                    "0x01": {
+                        "token": "0x01",
+                        "balance": "0x01f4",
+                        "balance_float": 0.0,
+                        "modify_tx": "0x01",
+                        "component_id": "protocol_1"
+                    }
+                }
+            },
+            "component_tvl": {
+                "protocol_1": 1000.0
+            }
+        }
+        "#;
+
+        serde_json::from_str::<BlockEntityChangesResult>(json_data).expect("parsing failed");
+    }
+
+    #[test]
+    fn test_parse_native_websocket_message() {
+        let json_data = r#"
+        {
+            "subscription_id": "5d23bfbe-89ad-4ea3-8672-dc9e973ac9dc",
+            "deltas": {
+                "type": "BlockEntityChangesResult",
+                "extractor": "uniswap_v2",
+                "chain": "ethereum",
+                "block": {
+                "number": 19291517,
+                "hash": "0xbc3ea4896c0be8da6229387a8571b72818aa258daf4fab46471003ad74c4ee83",
+                "parent_hash": "0x89ca5b8d593574cf6c886f41ef8208bf6bdc1a90ef36046cb8c84bc880b9af8f",
+                "chain": "ethereum",
+                "ts": "2024-02-23T16:35:35"
+                },
+                "revert": false,
+                "state_updates": {
+                    "0xde6faedbcae38eec6d33ad61473a04a6dd7f6e28": {
+                        "component_id": "0xde6faedbcae38eec6d33ad61473a04a6dd7f6e28",
+                        "updated_attributes": {
+                        "reserve0": "0x87f7b5973a7f28a8b32404",
+                        "reserve1": "0x09e9564b11"
+                        },
+                        "deleted_attributes": [ ]
+                    },
+                    "0x99c59000f5a76c54c4fd7d82720c045bdcf1450d": {
+                        "component_id": "0x99c59000f5a76c54c4fd7d82720c045bdcf1450d",
+                        "updated_attributes": {
+                        "reserve1": "0x44d9a8fd662c2f4d03",
+                        "reserve0": "0x500b1261f811d5bf423e"
+                        },
+                        "deleted_attributes": [ ]
+                    }
+                },
+                "new_protocol_components": { },
+                "deleted_protocol_components": { },
+                "component_balances": {
+                    "0x99c59000f5a76c54c4fd7d82720c045bdcf1450d": {
+                        "0x9012744b7a564623b6c3e40b144fc196bdedf1a9": {
+                        "token": "0x9012744b7a564623b6c3e40b144fc196bdedf1a9",
+                        "balance": "0x500b1261f811d5bf423e",
+                        "balance_float": 3.779935574269033E23,
+                        "modify_tx": "0xe46c4db085fb6c6f3408a65524555797adb264e1d5cf3b66ad154598f85ac4bf",
+                        "component_id": "0x99c59000f5a76c54c4fd7d82720c045bdcf1450d"
+                        },
+                        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": {
+                        "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                        "balance": "0x44d9a8fd662c2f4d03",
+                        "balance_float": 1.270062661329837E21,
+                        "modify_tx": "0xe46c4db085fb6c6f3408a65524555797adb264e1d5cf3b66ad154598f85ac4bf",
+                        "component_id": "0x99c59000f5a76c54c4fd7d82720c045bdcf1450d"
+                        }
+                    }
+                },
+                "component_tvl": { }
+            }
+            }
+        "#;
+        serde_json::from_str::<WebSocketMessage>(json_data).expect("parsing failed");
+    }
+
+    #[test]
+    fn test_protocol_state_delta_merge_update_delete() {
+        // Initialize ProtocolStateDelta instances
+        let mut delta1 = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: [("Attribute1".to_string(), Bytes::from("0xbadbabe420"))]
+                .iter()
+                .cloned()
+                .collect(),
+            deleted_attributes: HashSet::new(),
+        };
+        let delta2 = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: [("Attribute2".to_string(), Bytes::from("0x0badbabe"))]
+                .iter()
+                .cloned()
+                .collect(),
+            deleted_attributes: ["Attribute1".to_string()]
+                .iter()
+                .cloned()
+                .collect(),
+        };
+        let exp = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: [("Attribute2".to_string(), Bytes::from("0x0badbabe"))]
+                .iter()
+                .cloned()
+                .collect(),
+            deleted_attributes: ["Attribute1".to_string()]
+                .iter()
+                .cloned()
+                .collect(),
+        };
+
+        delta1.merge(&delta2);
+
+        assert_eq!(delta1, exp);
+    }
+
+    #[test]
+    fn test_protocol_state_delta_merge_delete_update() {
+        // Initialize ProtocolStateDelta instances
+        let mut delta1 = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: HashMap::new(),
+            deleted_attributes: ["Attribute1".to_string()]
+                .iter()
+                .cloned()
+                .collect(),
+        };
+        let delta2 = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: [("Attribute1".to_string(), Bytes::from("0x0badbabe"))]
+                .iter()
+                .cloned()
+                .collect(),
+            deleted_attributes: HashSet::new(),
+        };
+        let exp = ProtocolStateDelta {
+            component_id: "Component1".to_string(),
+            updated_attributes: [("Attribute1".to_string(), Bytes::from("0x0badbabe"))]
+                .iter()
+                .cloned()
+                .collect(),
+            deleted_attributes: HashSet::new(),
+        };
+
+        delta1.merge(&delta2);
+
+        assert_eq!(delta1, exp);
+    }
+
+    #[test]
+    fn test_account_update_merge() {
+        // Initialize AccountUpdate instances with same address and valid hex strings for Bytes
+        let mut account1 = AccountUpdate::new(
+            Bytes::from(b"0x1234"),
+            Chain::Ethereum,
+            [(Bytes::from("0xaabb"), Bytes::from("0xccdd"))]
+                .iter()
+                .cloned()
+                .collect(),
+            Some(Bytes::from("0x1000")),
+            Some(Bytes::from("0xdeadbeaf")),
+            ChangeType::Creation,
+        );
+
+        let account2 = AccountUpdate::new(
+            Bytes::from(b"0x1234"), // Same id as account1
+            Chain::Ethereum,
+            [(Bytes::from("0xeeff"), Bytes::from("0x11223344"))]
+                .iter()
+                .cloned()
+                .collect(),
+            Some(Bytes::from("0x2000")),
+            Some(Bytes::from("0xcafebabe")),
+            ChangeType::Update,
+        );
+
+        // Merge account2 into account1
+        account1.merge(&account2);
+
+        // Define the expected state after merge
+        let expected = AccountUpdate::new(
+            Bytes::from(b"0x1234"), // Same id as before the merge
+            Chain::Ethereum,
+            [
+                (Bytes::from("0xaabb"), Bytes::from("0xccdd")), // Original slot from account1
+                (Bytes::from("0xeeff"), Bytes::from("0x11223344")), // New slot from account2
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+            Some(Bytes::from("0x2000")),     // Updated balance
+            Some(Bytes::from("0xcafebabe")), // Updated code
+            ChangeType::Creation,            // Updated change type
+        );
+
+        // Assert the new account1 equals to the expected state
+        assert_eq!(account1, expected);
+    }
+
+    #[test]
+    fn test_block_account_changes_merge() {
+        // Prepare account updates
+        let old_account_updates: HashMap<Bytes, AccountUpdate> = [(
+            Bytes::from("0x0011"),
+            AccountUpdate {
+                address: Bytes::from("0x00"),
+                chain: Chain::Ethereum,
+                slots: [(Bytes::from("0x0022"), Bytes::from("0x0033"))]
+                    .into_iter()
+                    .collect(),
+                balance: Some(Bytes::from("0x01")),
+                code: Some(Bytes::from("0x02")),
+                change: ChangeType::Creation,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let new_account_updates: HashMap<Bytes, AccountUpdate> = [(
+            Bytes::from("0x0011"),
+            AccountUpdate {
+                address: Bytes::from("0x00"),
+                chain: Chain::Ethereum,
+                slots: [(Bytes::from("0x0044"), Bytes::from("0x0055"))]
+                    .into_iter()
+                    .collect(),
+                balance: Some(Bytes::from("0x03")),
+                code: Some(Bytes::from("0x04")),
+                change: ChangeType::Update,
+            },
+        )]
+        .into_iter()
+        .collect();
+        // Create initial and new BlockAccountChanges instances
+        let block_account_changes_initial = BlockAccountChanges::new(
+            "extractor1",
+            Chain::Ethereum,
+            Block::default(),
+            false,
+            old_account_updates,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+
+        let block_account_changes_new = BlockAccountChanges::new(
+            "extractor2",
+            Chain::Ethereum,
+            Block::default(),
+            true,
+            new_account_updates,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+
+        // Merge the new BlockAccountChanges into the initial one
+        let res = block_account_changes_initial.merge(block_account_changes_new);
+
+        // Create the expected result of the merge operation
+        let expected_account_updates: HashMap<Bytes, AccountUpdate> = [(
+            Bytes::from("0x0011"),
+            AccountUpdate {
+                address: Bytes::from("0x00"),
+                chain: Chain::Ethereum,
+                slots: [
+                    (Bytes::from("0x0044"), Bytes::from("0x0055")),
+                    (Bytes::from("0x0022"), Bytes::from("0x0033")),
+                ]
+                .into_iter()
+                .collect(),
+                balance: Some(Bytes::from("0x03")),
+                code: Some(Bytes::from("0x04")),
+                change: ChangeType::Creation,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let block_account_changes_expected = BlockAccountChanges::new(
+            "extractor1",
+            Chain::Ethereum,
+            Block::default(),
+            true,
+            expected_account_updates,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+        assert_eq!(res, block_account_changes_expected);
+    }
+
+    #[test]
+    fn test_block_entity_changes_merge() {
+        // Initialize two BlockEntityChangesResult instances with different details
+        let block_entity_changes_result1 = BlockEntityChangesResult {
+            extractor: String::from("extractor1"),
+            chain: Chain::Ethereum,
+            block: Block::default(),
+            revert: false,
+            state_updates: hashmap! { "state1".to_string() => ProtocolStateDelta::default() },
+            new_protocol_components: hashmap! { "component1".to_string() => ProtocolComponent::default() },
+            deleted_protocol_components: HashMap::new(),
+            component_balances: hashmap! {
+                "component1".to_string() => TokenBalances(hashmap! {
+                    Bytes::from("0x01") => ComponentBalance {
+                            token: Bytes::from("0x01"),
+                            balance: Bytes::from("0x01"),
+                            balance_float: 1.0,
+                            modify_tx: Bytes::from("0x00"),
+                            component_id: "component1".to_string()
+                        },
+                    Bytes::from("0x02") => ComponentBalance {
+                        token: Bytes::from("0x02"),
+                        balance: Bytes::from("0x02"),
+                        balance_float: 2.0,
+                        modify_tx: Bytes::from("0x00"),
+                        component_id: "component1".to_string()
+                    },
+                })
+
+            },
+            component_tvl: hashmap! { "tvl1".to_string() => 1000.0 },
+        };
+        let block_entity_changes_result2 = BlockEntityChangesResult {
+            extractor: String::from("extractor2"),
+            chain: Chain::Ethereum,
+            block: Block::default(),
+            revert: true,
+            state_updates: hashmap! { "state2".to_string() => ProtocolStateDelta::default() },
+            new_protocol_components: hashmap! { "component2".to_string() => ProtocolComponent::default() },
+            deleted_protocol_components: hashmap! { "component3".to_string() => ProtocolComponent::default() },
+            component_balances: hashmap! {
+                "component1".to_string() => TokenBalances::default(),
+                "component2".to_string() => TokenBalances::default()
+            },
+            component_tvl: hashmap! { "tvl2".to_string() => 2000.0 },
+        };
+
+        let res = block_entity_changes_result1.merge(block_entity_changes_result2);
+
+        let expected_block_entity_changes_result = BlockEntityChangesResult {
+            extractor: String::from("extractor1"),
+            chain: Chain::Ethereum,
+            block: Block::default(),
+            revert: true,
+            state_updates: hashmap! {
+                "state1".to_string() => ProtocolStateDelta::default(),
+                "state2".to_string() => ProtocolStateDelta::default(),
+            },
+            new_protocol_components: hashmap! {
+                "component1".to_string() => ProtocolComponent::default(),
+                "component2".to_string() => ProtocolComponent::default(),
+            },
+            deleted_protocol_components: hashmap! {
+                "component3".to_string() => ProtocolComponent::default(),
+            },
+            component_balances: hashmap! {
+                "component1".to_string() => TokenBalances(hashmap! {
+                    Bytes::from("0x01") => ComponentBalance {
+                            token: Bytes::from("0x01"),
+                            balance: Bytes::from("0x01"),
+                            balance_float: 1.0,
+                            modify_tx: Bytes::from("0x00"),
+                            component_id: "component1".to_string()
+                        },
+                    Bytes::from("0x02") => ComponentBalance {
+                        token: Bytes::from("0x02"),
+                        balance: Bytes::from("0x02"),
+                        balance_float: 2.0,
+                        modify_tx: Bytes::from("0x00"),
+                        component_id: "component1".to_string()
+                        },
+                    }),
+                "component2".to_string() => TokenBalances::default(),
+            },
+            component_tvl: hashmap! {
+                "tvl1".to_string() => 1000.0,
+                "tvl2".to_string() => 2000.0
+            },
+        };
+
+        assert_eq!(res, expected_block_entity_changes_result);
     }
 }

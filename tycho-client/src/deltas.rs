@@ -22,24 +22,23 @@
 use async_trait::async_trait;
 use futures03::{stream::SplitSink, SinkExt, StreamExt};
 use hyper::Uri;
+#[cfg(test)]
+use mockall::automock;
 use std::{
     collections::{hash_map::Entry, HashMap},
-    string::ToString,
     sync::Arc,
 };
 use thiserror::Error;
 use tokio::{
     net::TcpStream,
     sync::{
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, error::TrySendError, Receiver, Sender},
         oneshot, Mutex, Notify,
     },
     task::JoinHandle,
 };
-use tokio_tungstenite::{
-    connect_async, tungstenite, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
-};
-use tracing::{debug, error, info, instrument, warn};
+use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
+use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_types::dto::{Command, Deltas, ExtractorIdentity, Response, WebSocketMessage};
 use uuid::Uuid;
 
@@ -59,6 +58,10 @@ pub enum DeltasError {
     /// certain conditions.
     #[error("{0}")]
     TransportError(String),
+    /// An internal buffer is full. This likely means that messages are not being consumed fast
+    /// enough. If the incoming load emits messages in bursts, consider increasing the buffer size.
+    #[error("The buffer is full!")]
+    BufferFull,
     /// The client has currently no active connection but it was accessed e.g. by calling
     /// subscribe.
     #[error("The client is not connected!")]
@@ -80,6 +83,7 @@ pub enum DeltasError {
     Fatal(String),
 }
 
+#[cfg_attr(test, automock)]
 #[async_trait]
 pub trait DeltasClient {
     /// Subscribe to an extractor and receive realtime messages
@@ -109,13 +113,20 @@ pub struct WsDeltasClient {
     uri: Uri,
     /// Maximum amount of reconnects to try before giving up.
     max_reconnects: u32,
+    /// The client will buffer this many messages incoming from the websocket
+    /// before starting to drop them.
+    ws_buffer_size: usize,
+    /// The client will buffer that many messages for each subscription before it starts droppping
+    /// them.
+    subscription_buffer_size: usize,
     /// Notify tasks waiting for a connection to be established.
     conn_notify: Arc<Notify>,
     /// Shared client instance state.
     inner: Arc<Mutex<Option<Inner>>>,
 }
 
-type WebSocketSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+type WebSocketSink =
+    SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, tungstenite::protocol::Message>;
 
 /// Subscription State
 ///
@@ -151,19 +162,22 @@ struct Inner {
     /// For eachs subscription we keep a sender handle, the receiver is returned to the caller of
     /// subscribe.
     sender: HashMap<Uuid, Sender<Deltas>>,
+    /// How many messages to buffer per subscription before starting to drop new messages.
+    buffer_size: usize,
 }
 
 /// Shared state betweeen all client instances.
 ///
 /// This state is behind a mutex and requires synchronisation to be read of modified.
 impl Inner {
-    fn new(cmd_tx: Sender<()>, sink: WebSocketSink) -> Self {
+    fn new(cmd_tx: Sender<()>, sink: WebSocketSink, buffer_size: usize) -> Self {
         Self {
             sink,
             cmd_tx,
             pending: HashMap::new(),
             subscriptions: HashMap::new(),
             sender: HashMap::new(),
+            buffer_size,
         }
     }
 
@@ -187,7 +201,7 @@ impl Inner {
     fn mark_active(&mut self, extractor_id: &ExtractorIdentity, subscription_id: Uuid) {
         if let Some(info) = self.pending.remove(extractor_id) {
             if let SubscriptionInfo::RequestedSubscription(ready_tx) = info {
-                let (tx, rx) = mpsc::channel(1);
+                let (tx, rx) = mpsc::channel(self.buffer_size);
                 self.sender.insert(subscription_id, tx);
                 self.subscriptions
                     .insert(subscription_id, SubscriptionInfo::Active);
@@ -217,21 +231,25 @@ impl Inner {
         }
     }
 
-    /// Sends a message to a subscriptions receiver.
-    async fn send(&mut self, id: &Uuid, msg: Deltas) -> Result<(), DeltasError> {
+    /// Sends a message to a subscription's receiver.
+    fn send(&mut self, id: &Uuid, msg: Deltas) -> Result<(), DeltasError> {
         if let Some(sender) = self.sender.get_mut(id) {
             sender
-                .send(msg)
-                .await
-                .map_err(|e| DeltasError::TransportError(e.to_string()))?;
+                .try_send(msg)
+                .map_err(|e| match e {
+                    TrySendError::Full(_) => DeltasError::BufferFull,
+                    TrySendError::Closed(_) => {
+                        DeltasError::TransportError("The subscriber has gone away".to_string())
+                    }
+                })?;
         }
         Ok(())
     }
 
     /// Requests a subscription to end.
     ///
-    /// The subsription needs to exist and be active for this to have any effect. Wll use `ready_tx`
-    /// to notify the receiver once the transition to ended completed.
+    /// The subscription needs to exist and be active for this to have any effect. Wll use
+    /// `ready_tx` to notify the receiver once the transition to ended completed.
     fn end_subscription(&mut self, subscription_id: &Uuid, ready_tx: oneshot::Sender<()>) {
         if let Some(info) = self
             .subscriptions
@@ -248,7 +266,7 @@ impl Inner {
 
     /// Removes and fully ends a subscription
     ///
-    /// Any calls for non existing subscriptions will be simply ignored. May panic on internal state
+    /// Any calls for non-existing subscriptions will be simply ignored. May panic on internal state
     /// inconsistencies: e.g. if the subscription exists but there is no sender for it.
     /// Will remove a subscription even it was in active or pending state before, this is to support
     /// any server side failure of the subscription.
@@ -284,7 +302,7 @@ impl Inner {
     }
 
     /// Sends a message through the websocket.
-    async fn ws_send(&mut self, msg: Message) -> Result<(), DeltasError> {
+    async fn ws_send(&mut self, msg: tungstenite::protocol::Message) -> Result<(), DeltasError> {
         self.sink.send(msg).await.map_err(|e| {
             DeltasError::TransportError(format!("Failed to send message to websocket: {e}"))
         })
@@ -302,6 +320,8 @@ impl WsDeltasClient {
         Ok(Self {
             uri,
             inner: Arc::new(Mutex::new(None)),
+            ws_buffer_size: 128,
+            subscription_buffer_size: 128,
             conn_notify: Arc::new(Notify::new()),
             max_reconnects: 5,
         })
@@ -316,6 +336,8 @@ impl WsDeltasClient {
         Ok(Self {
             uri,
             inner: Arc::new(Mutex::new(None)),
+            ws_buffer_size: 128,
+            subscription_buffer_size: 128,
             conn_notify: Arc::new(Notify::new()),
             max_reconnects,
         })
@@ -343,28 +365,35 @@ impl WsDeltasClient {
     ///
     /// If the message returns an error, a reconnect attempt may be considered depending on the
     /// error type.
-    #[instrument(skip(self))]
+    #[instrument(skip(self, msg))]
     async fn handle_msg(
         &self,
-        msg: Result<Message, tokio_tungstenite::tungstenite::error::Error>,
+        msg: Result<tungstenite::protocol::Message, tokio_tungstenite::tungstenite::error::Error>,
     ) -> Result<(), DeltasError> {
         let mut guard = self.inner.lock().await;
 
         match msg {
-            Ok(Message::Text(text)) => match serde_json::from_str::<WebSocketMessage>(&text) {
-                Ok(WebSocketMessage::BlockChanges { subscription_id, delta }) => {
-                    info!(?delta, "Received a block state change, sending to channel");
+            Ok(tungstenite::protocol::Message::Text(text)) => match serde_json::from_str::<
+                WebSocketMessage,
+            >(&text)
+            {
+                Ok(WebSocketMessage::BlockChanges { subscription_id, deltas }) => {
+                    trace!(?deltas, "Received a block state change, sending to channel");
                     let inner = guard
                         .as_mut()
                         .ok_or_else(|| DeltasError::NotConnected)?;
-                    if inner
-                        .send(&subscription_id, delta)
-                        .await
-                        .is_err()
-                    {
-                        warn!(?subscription_id, "Receiver for has gone away, unsubscribing!");
-                        let (tx, _) = oneshot::channel();
-                        let _ = WsDeltasClient::unsubscribe_inner(inner, subscription_id, tx).await;
+                    // If we get data too quickly this may block
+                    match inner.send(&subscription_id, deltas) {
+                        Err(DeltasError::BufferFull) => {
+                            error!(?subscription_id, "Buffer full, message dropped!");
+                        }
+                        Err(_) => {
+                            warn!(?subscription_id, "Receiver for has gone away, unsubscribing!");
+                            let (tx, _) = oneshot::channel();
+                            let _ =
+                                WsDeltasClient::unsubscribe_inner(inner, subscription_id, tx).await;
+                        }
+                        _ => { /* Do nothing */ }
                     }
                 }
                 Ok(WebSocketMessage::Response(Response::NewSubscription {
@@ -389,22 +418,22 @@ impl WsDeltasClient {
                     error!(error = %e, message=text, "Failed to deserialize message");
                 }
             },
-            Ok(Message::Ping(_)) => {
+            Ok(tungstenite::protocol::Message::Ping(_)) => {
                 // Respond to pings with pongs.
                 let inner = guard
                     .as_mut()
                     .ok_or_else(|| DeltasError::NotConnected)?;
                 if let Err(error) = inner
-                    .ws_send(Message::Pong(Vec::new()))
+                    .ws_send(tungstenite::protocol::Message::Pong(Vec::new()))
                     .await
                 {
                     debug!(?error, "Failed to send pong!");
                 }
             }
-            Ok(Message::Pong(_)) => {
+            Ok(tungstenite::protocol::Message::Pong(_)) => {
                 // Do nothing.
             }
-            Ok(Message::Close(_)) => {
+            Ok(tungstenite::protocol::Message::Close(_)) => {
                 return Err(DeltasError::ConnectionClosed);
             }
             Ok(unknown_msg) => {
@@ -440,7 +469,7 @@ impl WsDeltasClient {
         inner.end_subscription(&subscription_id, ready_tx);
         let cmd = Command::Unsubscribe { subscription_id };
         inner
-            .ws_send(Message::Text(
+            .ws_send(tungstenite::protocol::Message::Text(
                 serde_json::to_string(&cmd).expect("serialize cmd encode error"),
             ))
             .await?;
@@ -455,6 +484,7 @@ impl DeltasClient for WsDeltasClient {
         &self,
         extractor_id: ExtractorIdentity,
     ) -> Result<(Uuid, Receiver<Deltas>), DeltasError> {
+        trace!("Starting subscribe");
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
         {
@@ -462,19 +492,20 @@ impl DeltasClient for WsDeltasClient {
             let inner = guard
                 .as_mut()
                 .expect("ws not connected");
-
+            trace!("Sending subscribe command");
             inner.new_subscription(&extractor_id, ready_tx)?;
             let cmd = Command::Subscribe { extractor_id };
             inner
-                .ws_send(Message::Text(
+                .ws_send(tungstenite::protocol::Message::Text(
                     serde_json::to_string(&cmd).expect("serialize cmd encode error"),
                 ))
                 .await?;
         }
+        trace!("Waiting for subscription response");
         let rx = ready_rx
             .await
             .expect("ready channel closed");
-
+        trace!("Subscription successfull");
         Ok(rx)
     }
 
@@ -505,13 +536,13 @@ impl DeltasClient for WsDeltasClient {
         let ws_uri = format!("{}{}/ws", self.uri, TYCHO_SERVER_VERSION);
         info!(?ws_uri, "Starting TychoWebsocketClient");
 
-        let (cmd_tx, mut cmd_rx) = mpsc::channel(30);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(self.ws_buffer_size);
         let (conn, _) = connect_async(&ws_uri).await?;
         let (ws_tx, ws_rx) = conn.split();
         let mut ws_rx = Some(ws_rx);
         {
             let mut guard = self.inner.as_ref().lock().await;
-            *guard = Some(Inner::new(cmd_tx.clone(), ws_tx));
+            *guard = Some(Inner::new(cmd_tx.clone(), ws_tx, self.subscription_buffer_size));
         }
         let this = self.clone();
         let jh = tokio::spawn(async move {
@@ -525,7 +556,8 @@ impl DeltasClient for WsDeltasClient {
                     let (conn, _) = connect_async(&ws_uri).await?;
                     let (ws_tx_new, ws_rx_new) = conn.split();
                     let mut guard = this.inner.as_ref().lock().await;
-                    *guard = Some(Inner::new(cmd_tx.clone(), ws_tx_new));
+                    *guard =
+                        Some(Inner::new(cmd_tx.clone(), ws_tx_new, this.subscription_buffer_size));
                     ws_rx_new.boxed()
                 };
 
@@ -598,8 +630,8 @@ mod tests {
 
     #[derive(Clone)]
     enum ExpectedComm {
-        Receive(u64, Message),
-        Send(Message),
+        Receive(u64, tungstenite::protocol::Message),
+        Send(tungstenite::protocol::Message),
     }
 
     async fn mock_tycho_ws(
@@ -649,7 +681,7 @@ mod tests {
     #[tokio::test]
     async fn test_subscribe_receive() {
         let exp_comm = [
-            ExpectedComm::Receive(100, Message::Text(r#"
+            ExpectedComm::Receive(100, tungstenite::protocol::Message::Text(r#"
                 {
                     "method":"subscribe",
                     "extractor_id":{
@@ -658,7 +690,7 @@ mod tests {
                     }
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
-            ExpectedComm::Send(Message::Text(r#"
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "method":"newsubscription",
                     "extractor_id":{
@@ -669,10 +701,10 @@ mod tests {
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
             // VM block message
-            ExpectedComm::Send(Message::Text(r#"
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "delta": {
+                    "deltas": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -693,8 +725,8 @@ mod tests {
                                 "change": "Update"
                             }
                         },
-                        "new_protocol_components": [
-                                {
+                        "new_protocol_components": 
+                            { "protocol_1": {
                                     "id": "protocol_1",
                                     "protocol_system": "system_1",
                                     "protocol_type_name": "type_1",
@@ -706,25 +738,32 @@ mod tests {
                                     "creation_tx": "0x01",
                                     "created_at": "2023-09-14T00:00:00"
                                 }
-                            ],
-                            "deleted_protocol_components": [],
-                            "component_balances": [
+                            },
+                        "deleted_protocol_components": {},
+                        "component_balances": {
+                            "protocol_1":
                                 {
-                                    "token": "0x01",
-                                    "new_balance": "0x01f4",
-                                    "modify_tx": "0x01",
-                                    "component_id": "protocol_1"
+                                    "0x01": {
+                                        "token": "0x01",
+                                        "balance": "0x01f4",
+                                        "balance_float": 0.0,
+                                        "modify_tx": "0x01",
+                                        "component_id": "protocol_1"
+                                    }
                                 }
-                            ]
+                        },
+                        "component_tvl": {
+                            "protocol_1": 1000.0
+                        }
                     }
                 }
                 "#.to_owned()
             )),
             // Native protocol block message
-            ExpectedComm::Send(Message::Text(r#"
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "delta": {
+                    "deltas": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -755,6 +794,21 @@ mod tests {
                                 "creation_tx": "0x01",
                                 "created_at": "2023-09-14T00:00:00"
                             }
+                        },
+                        "deleted_protocol_components": {},
+                        "component_balances": {
+                            "protocol_1": {
+                                "0x01": {
+                                    "token": "0x01",
+                                    "balance": "0x01f4",
+                                    "balance_float": 1000.0,
+                                    "modify_tx": "0x01",
+                                    "component_id": "protocol_1"
+                                }
+                            }
+                        },
+                        "component_tvl": {
+                            "protocol_1": 1000.0
                         }
                     }
                 }
@@ -798,7 +852,7 @@ mod tests {
         let exp_comm = [
             ExpectedComm::Receive(
                 100,
-                Message::Text(
+                tungstenite::protocol::Message::Text(
                     r#"
                 {
                     "method": "subscribe",
@@ -811,7 +865,7 @@ mod tests {
                     .replace(|c: char| c.is_whitespace(), ""),
                 ),
             ),
-            ExpectedComm::Send(Message::Text(
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(
                 r#"
                 {
                     "method": "newsubscription",
@@ -826,7 +880,7 @@ mod tests {
             )),
             ExpectedComm::Receive(
                 100,
-                Message::Text(
+                tungstenite::protocol::Message::Text(
                     r#"
                 {
                     "method": "unsubscribe",
@@ -837,7 +891,7 @@ mod tests {
                     .replace(|c: char| c.is_whitespace(), ""),
                 ),
             ),
-            ExpectedComm::Send(Message::Text(
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(
                 r#"
                 {
                     "method": "subscriptionended",
@@ -889,7 +943,7 @@ mod tests {
         let exp_comm = [
             ExpectedComm::Receive(
                 100,
-                Message::Text(
+                tungstenite::protocol::Message::Text(
                     r#"
                 {
                     "method":"subscribe",
@@ -902,7 +956,7 @@ mod tests {
                     .replace(|c: char| c.is_whitespace(), ""),
                 ),
             ),
-            ExpectedComm::Send(Message::Text(
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(
                 r#"
                 {
                     "method":"newsubscription",
@@ -915,7 +969,7 @@ mod tests {
                 .to_owned()
                 .replace(|c: char| c.is_whitespace(), ""),
             )),
-            ExpectedComm::Send(Message::Text(
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(
                 r#"
                 {
                     "method": "subscriptionended",
@@ -959,7 +1013,7 @@ mod tests {
     #[tokio::test]
     async fn test_reconnect() {
         let exp_comm = [
-            ExpectedComm::Receive(100, Message::Text(r#"
+            ExpectedComm::Receive(100, tungstenite::protocol::Message::Text(r#"
                 {
                     "method":"subscribe",
                     "extractor_id":{
@@ -968,7 +1022,7 @@ mod tests {
                     }
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
-            ExpectedComm::Send(Message::Text(r#"
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "method":"newsubscription",
                     "extractor_id":{
@@ -978,10 +1032,10 @@ mod tests {
                     "subscription_id":"30b740d1-cf09-4e0e-8cfe-b1434d447ece"
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
-            ExpectedComm::Send(Message::Text(r#"
+            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "delta": {
+                    "deltas": {
                         "extractor": "vm:ambient",
                         "chain": "ethereum",
                         "block": {
@@ -1002,7 +1056,8 @@ mod tests {
                                 "change": "Update"
                             }
                         },
-                        "new_protocol_components": [
+                        "new_protocol_components": {
+                            "protocol_1":
                                 {
                                     "id": "protocol_1",
                                     "protocol_system": "system_1",
@@ -1015,16 +1070,22 @@ mod tests {
                                     "creation_tx": "0x01",
                                     "created_at": "2023-09-14T00:00:00"
                                 }
-                            ],
-                            "deleted_protocol_components": [],
-                            "component_balances": [
-                                {
+                            },
+                        "deleted_protocol_components": {},
+                        "component_balances": {
+                            "protocol_1": {
+                                "0x01": {
                                     "token": "0x01",
-                                    "new_balance": "0x01f4",
+                                    "balance": "0x01f4",
+                                    "balance_float": 1000.0,
                                     "modify_tx": "0x01",
                                     "component_id": "protocol_1"
                                 }
-                            ]
+                            }
+                        },
+                        "component_tvl": {
+                            "protocol_1": 1000.0
+                        }
                     }
                 }
                 "#.to_owned()

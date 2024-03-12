@@ -5,11 +5,9 @@ use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
-use std::{
-    cmp::Ordering,
-    collections::{BTreeSet, HashMap, HashSet},
-};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{instrument, warn};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     extractor::evm::{ComponentBalance, ProtocolComponent, ProtocolState, ProtocolStateDelta},
@@ -31,7 +29,7 @@ use crate::{
 };
 use tycho_types::Bytes;
 
-use super::{versioning::apply_versioning, WithTxHash};
+use super::WithTxHash;
 
 // Private methods
 impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
@@ -609,7 +607,7 @@ where
         .map(|(id, external_id)| (external_id, id))
         .collect();
 
-        let mut state_data: Vec<(orm::NewProtocolState, i64)> = Vec::new();
+        let mut state_data: Vec<orm::NewProtocolState> = Vec::new();
 
         for state in new {
             let tx = state
@@ -629,11 +627,10 @@ where
                     state.component_id.to_string(),
                 ))?;
 
-            let mut new_states: Vec<(orm::NewProtocolState, i64)> =
+            state_data.extend(
                 ProtocolStateDelta::to_storage(state.entity, component_db_id, tx_db.0, tx_db.2)
-                    .into_iter()
-                    .map(|state| (state, tx_db.1))
-                    .collect();
+                    .into_iter(),
+            );
 
             // invalidated db entities for deleted attributes
             for attr in &state.deleted_attributes {
@@ -646,57 +643,11 @@ where
                     .execute(conn)
                     .await?;
             }
-
-            state_data.append(&mut new_states);
         }
-
-        // Sort state_data by protocol_component_id, attribute_name, and transaction index
-        state_data.sort_by(|a, b| {
-            let order =
-                a.0.protocol_component_id
-                    .cmp(&b.0.protocol_component_id);
-            if order == Ordering::Equal {
-                let sub_order =
-                    a.0.attribute_name
-                        .cmp(&b.0.attribute_name);
-
-                if sub_order == Ordering::Equal {
-                    // Sort by block ts and tx_index as well
-                    a.1.cmp(&b.1)
-                } else {
-                    sub_order
-                }
-            } else {
-                order
-            }
-        });
-
-        // Invalidate older states within the new state data
-        let mut i = 0;
-        while i + 1 < state_data.len() {
-            let next_state = &state_data[i + 1].0.clone();
-            let (current_state, _) = &mut state_data[i];
-
-            // Check if next_state has same protocol_component_id and attribute_name
-            if current_state.protocol_component_id == next_state.protocol_component_id &&
-                current_state.attribute_name == next_state.attribute_name
-            {
-                // Invalidate the current state
-                current_state.valid_to = Some(next_state.valid_from);
-            }
-
-            i += 1;
-        }
-
-        let mut state_data: Vec<orm::NewProtocolState> = state_data
-            .into_iter()
-            .map(|(state, _index)| state)
-            .collect();
 
         // insert the prepared protocol state deltas
         if !state_data.is_empty() {
             apply_delta_versioning::<_, orm::ProtocolState>(&mut state_data, conn).await?;
-            apply_versioning::<_, orm::ProtocolState>(&mut state_data, conn).await?;
             diesel::insert_into(schema::protocol_state::table)
                 .values(&state_data)
                 .execute(conn)
@@ -712,10 +663,11 @@ where
         conn: &mut Self::DB,
     ) -> Result<Vec<Self::Token>, StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
-
+        let chain_db_id = self.get_chain_id(&chain);
         let mut query = token
             .inner_join(account)
-            .select((token::all_columns(), schema::account::chain_id, schema::account::address))
+            .select((token::all_columns(), schema::account::address))
+            .filter(schema::account::chain_id.eq(chain_db_id))
             .into_boxed();
 
         if let Some(addrs) = addresses {
@@ -724,14 +676,13 @@ where
 
         let results = query
             .order(schema::token::symbol.asc())
-            .load::<(orm::Token, i64, Address)>(conn)
+            .load::<(orm::Token, Address)>(conn)
             .await
             .map_err(|err| StorageError::from_diesel(err, "Token", &chain.to_string(), None))?;
 
         let tokens: Result<Vec<Self::Token>, StorageError> = results
             .into_iter()
-            .map(|(orm_token, chain_id_, address_)| {
-                let chain = self.get_chain(&chain_id_);
+            .map(|(orm_token, address_)| {
                 let contract_id = ContractId::new(chain, address_);
 
                 Self::Token::from_storage(orm_token, contract_id)
@@ -748,7 +699,12 @@ where
     ) -> Result<(), StorageError> {
         let titles: Vec<String> = tokens
             .iter()
-            .map(|token| format!("{:?}_{}", token.chain(), token.symbol()))
+            .map(|token| {
+                format!("{:?}_{}", token.chain(), token.symbol())
+                    .graphemes(true)
+                    .take(255)
+                    .collect::<String>()
+            })
             .collect();
 
         let addresses: Vec<_> = tokens
@@ -823,7 +779,6 @@ where
         &self,
         component_balances: &[&Self::ComponentBalance],
         chain: &Chain,
-        block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
@@ -847,8 +802,13 @@ where
             .iter()
             .map(|component_balance| component_balance.modify_tx())
             .collect::<Vec<TxHash>>();
-        let transaction_ids: HashMap<TxHash, i64> =
-            orm::Transaction::ids_by_hash(&modify_txs, conn).await?;
+        let txn_hashes = modify_txs.iter().collect::<Vec<_>>();
+        let transaction_ids_and_ts: HashMap<TxHash, (i64, NaiveDateTime)> =
+            orm::Transaction::ids_and_ts_by_hash(txn_hashes.as_ref(), conn)
+                .await?
+                .into_iter()
+                .map(|(db_id, hash, index, ts)| (hash, (db_id, ts)))
+                .collect();
 
         let external_ids: Vec<&str> = component_balances
             .iter()
@@ -864,14 +824,15 @@ where
 
         for component_balance in component_balances.iter() {
             let token_id = token_ids[&component_balance.token()];
-            let transaction_id = transaction_ids[&component_balance.modify_tx()];
+            let (transaction_id, transaction_ts) =
+                transaction_ids_and_ts[&component_balance.modify_tx()];
             let protocol_component_id = protocol_component_ids[&component_balance.component_id];
 
             let new_component_balance = component_balance.to_storage(
                 token_id,
                 transaction_id,
                 protocol_component_id,
-                block_ts,
+                transaction_ts,
             );
             new_component_balances.push(new_component_balance);
         }
@@ -1293,7 +1254,7 @@ mod test {
         extractor::evm::{self, ERC20Token},
         storage::{BlockIdentifier, ChangeType},
     };
-    use chrono::{NaiveDateTime, Utc};
+
     use diesel_async::AsyncConnection;
     use ethers::{prelude::H160, types::U256};
     use rstest::rstest;
@@ -1302,11 +1263,10 @@ mod test {
     use crate::{
         models,
         models::{FinancialType, ImplementationType},
-        storage::postgres::{db_fixtures, orm, schema, PostgresGateway},
+        storage::postgres::db_fixtures,
     };
     use ethers::prelude::H256;
-    use std::{collections::HashMap, str::FromStr};
-    use tycho_types::Bytes;
+    use std::str::FromStr;
 
     type EVMGateway = PostgresGateway<
         evm::Block,
@@ -1321,6 +1281,7 @@ mod test {
     const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
     const LUSD: &str = "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0";
     const DAI: &str = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
+    const ZKSYNC_PEPE: &str = "0xFD282F16a64c6D304aC05d1A58Da15bed0467c71";
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -1342,6 +1303,7 @@ mod test {
     async fn setup_data(conn: &mut AsyncPgConnection) -> Vec<String> {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let chain_id_sn = db_fixtures::insert_chain(conn, "starknet").await;
+        let chain_id_zk = db_fixtures::insert_chain(conn, "zksync").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
         let tx_hashes = [
             "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945".to_string(),
@@ -1378,6 +1340,7 @@ mod test {
         .await;
 
         // insert tokens
+        // Ethereum
         let (account_id_weth, weth_id) =
             db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
                 .await;
@@ -1390,6 +1353,16 @@ mod test {
         let (account_id_lusd, lusd_id) =
             db_fixtures::insert_token(conn, chain_id, LUSD.trim_start_matches("0x"), "LUSD", 18)
                 .await;
+
+        // ZK Sync
+        let (account_id_usdt_zk, usdt_id_zksync) = db_fixtures::insert_token(
+            conn,
+            chain_id_zk,
+            ZKSYNC_PEPE.trim_start_matches("0x"),
+            "PEPE",
+            6,
+        )
+        .await;
 
         // insert token prices
         db_fixtures::insert_token_prices(&[(weth_id, 1.0), (usdc_id, 0.0005)], conn).await;
@@ -2177,7 +2150,7 @@ mod test {
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
-        // get all tokens (no address filter)
+        // get all eth tokens (no address filter)
         let tokens = gw
             .get_tokens(Chain::Ethereum, None, &mut conn)
             .await
@@ -2202,6 +2175,31 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_get_tokens_zksync() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let tokens = gw
+            .get_tokens(Chain::ZkSync, None, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(tokens.len(), 1);
+        let expected_token = ERC20Token {
+            address: H160::from_str(ZKSYNC_PEPE).unwrap(),
+            symbol: "PEPE".to_string(),
+            decimals: 6,
+            tax: 10,
+            gas: vec![Some(10)],
+            chain: Chain::ZkSync,
+            quality: 0,
+        };
+
+        assert_eq!(tokens[0], expected_token);
+    }
+
+    #[tokio::test]
     async fn test_add_tokens() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2210,7 +2208,7 @@ mod test {
         // Insert one new token (USDT) and an existing token (WETH)
         let weth_symbol = "WETH".to_string();
         let old_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
-        let old_account = &orm::Account::by_address(
+        let old_weth_account = &orm::Account::by_address(
             &Bytes::from_str(WETH.trim_start_matches("0x")).expect("address ok"),
             &mut conn,
         )
@@ -2258,14 +2256,14 @@ mod test {
         // make sure nothing changed on WETH (ids included)
         let new_token = db_fixtures::get_token_by_symbol(&mut conn, weth_symbol.clone()).await;
         assert_eq!(new_token, old_token);
-        let new_account = &orm::Account::by_address(
+        let updated_weth_account = &orm::Account::by_address(
             &Bytes::from_str(WETH.trim_start_matches("0x")).expect("address ok"),
             &mut conn,
         )
         .await
         .unwrap()[0];
-        assert_eq!(new_account, old_account);
-        assert!(inserted_account.id > new_account.id);
+        assert_eq!(updated_weth_account, old_weth_account);
+        assert!(inserted_account.id > updated_weth_account.id);
     }
 
     #[tokio::test]
@@ -2290,7 +2288,7 @@ mod test {
         };
         let block_ts = NaiveDateTime::from_timestamp_opt(1000, 0).unwrap();
 
-        gw.add_component_balances(&[&component_balance], &Chain::Starknet, block_ts, &mut conn)
+        gw.add_component_balances(&[&component_balance], &Chain::Starknet, &mut conn)
             .await
             .unwrap();
 
@@ -2337,14 +2335,9 @@ mod test {
         let updated_component_balances = vec![&updated_component_balance];
         let new_block_ts = NaiveDateTime::from_timestamp_opt(2000, 0).unwrap();
 
-        gw.add_component_balances(
-            &updated_component_balances,
-            &Chain::Starknet,
-            new_block_ts,
-            &mut conn,
-        )
-        .await
-        .unwrap();
+        gw.add_component_balances(&updated_component_balances, &Chain::Starknet, &mut conn)
+            .await
+            .unwrap();
 
         // Obtain newest inserted value
         let new_inserted_data = schema::component_balance::table

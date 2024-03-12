@@ -442,7 +442,7 @@ impl RpcHandler {
     ) -> Result<dto::ProtocolComponentRequestResponse, RpcError> {
         let mut conn = self.db_connection_pool.get().await?;
 
-        info!(?chain, ?request, "Getting tokens.");
+        info!(?chain, ?request, "Getting protocol components.");
         self.get_protocol_components_inner(chain, request, params, &mut conn)
             .await
     }
@@ -740,25 +740,17 @@ mod tests {
     use crate::storage::postgres::{self, db_fixtures, schema};
     use actix_web::test;
     use chrono::Utc;
-    use diesel::{prelude::*, ExpressionMethods};
+    use diesel::prelude::*;
     use diesel_async::AsyncConnection;
     use ethers::types::{H160, U256};
-    use tycho_types::Bytes;
 
-    use std::{collections::HashMap, str::FromStr, sync::Arc};
+    use std::{collections::HashMap, str::FromStr};
 
     use self::storage::postgres::orm;
 
-    use crate::{
-        extractor::evm::{self},
-        storage::BlockIdentifier,
-    };
-
     use ethers::prelude::H256;
 
-    use diesel_async::{AsyncPgConnection, RunQueryDsl};
-
-    use crate::{models::Chain, storage::BlockOrTimestamp};
+    use diesel_async::RunQueryDsl;
 
     use super::*;
 

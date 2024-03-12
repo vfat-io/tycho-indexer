@@ -121,7 +121,8 @@ impl ExtractorRunner {
                                 let block_number = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 tracing::Span::current().record("block_number", block_number);
                                 debug!("New block data received.");
-                                match self.extractor.handle_tick_scoped_data(data).await {
+                                // TODO: change interface to take a reference to avoid this clone
+                                match self.extractor.handle_tick_scoped_data(data.clone()).await {
                                     Ok(Some(msg)) => {
                                         trace!("Propagating new block data message.");
                                         Self::propagate_msg(&self.subscriptions, msg).await
@@ -130,15 +131,14 @@ impl ExtractorRunner {
                                         trace!("No message to propagate.");
                                     }
                                     Err(err) => {
-                                        error!(error = %err, "Error while processing tick!");
+                                        error!(error = %err, msg = ?data, "Error while processing tick!");
                                         return Err(err);
                                     }
                                 }
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
-                                let block = undo_signal.last_valid_block.as_ref().map(|v| v.number).unwrap_or(0);
-                                warn!(%block,  "Revert to {block} requested!");
-                                match self.extractor.handle_revert(undo_signal).await {
+                                info!(block=?&undo_signal.last_valid_block,  "Revert requested!");
+                                match self.extractor.handle_revert(undo_signal.clone()).await {
                                     Ok(Some(msg)) => {
                                         trace!(msg = %msg, "Propagating block undo message.");
                                         Self::propagate_msg(&self.subscriptions, msg).await
@@ -147,7 +147,7 @@ impl ExtractorRunner {
                                         trace!("No message to propagate.");
                                     }
                                     Err(err) => {
-                                        error!(error = %err, "Error while processing revert!");
+                                        error!(error = %err, ?undo_signal, "Error while processing revert!");
                                         return Err(err);
                                     }
                                 }
@@ -179,7 +179,7 @@ impl ExtractorRunner {
     // TODO: add message tracing_id to the log
     #[instrument(skip_all)]
     async fn propagate_msg(subscribers: &Arc<Mutex<SubscriptionsMap>>, message: ExtractorMsg) {
-        info!(msg = %message, "Propagating message to subscribers.");
+        debug!(msg = %message, "Propagating message to subscribers.");
         // TODO: rename variable here instead
         let arced_message = message;
 
@@ -218,6 +218,7 @@ pub struct ExtractorRunnerBuilder {
     end_block: i64,
     token: String,
     extractor: Arc<dyn Extractor>,
+    final_block_only: bool,
 }
 
 pub type HandleResult = (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle);
@@ -232,6 +233,7 @@ impl ExtractorRunnerBuilder {
             end_block: 0,
             token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
             extractor,
+            final_block_only: false,
         }
     }
 
@@ -262,6 +264,11 @@ impl ExtractorRunnerBuilder {
         self
     }
 
+    pub fn only_final_blocks(mut self) -> Self {
+        self.final_block_only = true;
+        self
+    }
+
     #[instrument(skip(self))]
     pub async fn run(self) -> Result<HandleResult, ExtractionError> {
         let content = std::fs::read(&self.spkg_file)
@@ -283,6 +290,7 @@ impl ExtractorRunnerBuilder {
             self.module_name,
             self.start_block,
             self.end_block as u64,
+            self.final_block_only,
         );
 
         let id = self.extractor.get_id();

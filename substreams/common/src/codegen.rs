@@ -5,7 +5,6 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
-    string::ToString,
 };
 use substreams_ethereum::Abigen;
 

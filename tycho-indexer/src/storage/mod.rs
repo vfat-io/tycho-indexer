@@ -303,6 +303,8 @@ pub enum StorageError {
     Unsupported(String),
     #[error("Write cache unexpectedly dropped notification channel!")]
     WriteCacheGoneAway(),
+    #[error("Invalid block range encountered")]
+    InvalidBlockRange(),
 }
 
 /// Storage methods for chain specific objects.
@@ -336,7 +338,11 @@ pub trait ChainGateway {
     ///
     /// # Returns
     /// - Empty ok result indicates success. Failure might occur if the block is already present.
-    async fn upsert_block(&self, new: &Self::Block, db: &mut Self::DB) -> Result<(), StorageError>;
+    async fn upsert_block(
+        &self,
+        new: &[Self::Block],
+        db: &mut Self::DB,
+    ) -> Result<(), StorageError>;
     /// Retrieves a block from storage.
     ///
     /// # Parameters
@@ -363,7 +369,7 @@ pub trait ChainGateway {
     /// exists.
     async fn upsert_tx(
         &self,
-        new: &Self::Transaction,
+        new: &[Self::Transaction],
         db: &mut Self::DB,
     ) -> Result<(), StorageError>;
 
@@ -738,7 +744,6 @@ pub trait ProtocolGateway {
         &self,
         component_balances: &[&Self::ComponentBalance],
         chain: &Chain,
-        block_ts: NaiveDateTime,
         conn: &mut Self::DB,
     ) -> Result<(), StorageError>;
 

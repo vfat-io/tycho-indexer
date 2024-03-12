@@ -10,7 +10,7 @@ use std::{
 };
 use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
-use tracing::{error, info, info_span, warn};
+use tracing::{error, info, info_span, trace, warn};
 
 use crate::pb::sf::substreams::{
     rpc::v2::{response::Message, BlockScopedData, BlockUndoSignal, Request, Response},
@@ -36,6 +36,7 @@ impl SubstreamsStream {
         output_module_name: String,
         start_block: i64,
         end_block: u64,
+        final_blocks_only: bool,
     ) -> Self {
         SubstreamsStream {
             stream: Box::pin(stream_blocks(
@@ -45,6 +46,7 @@ impl SubstreamsStream {
                 output_module_name,
                 start_block,
                 end_block,
+                final_blocks_only,
             )),
         }
     }
@@ -61,6 +63,7 @@ fn stream_blocks(
     output_module_name: String,
     start_block_num: i64,
     stop_block_num: u64,
+    final_blocks_only: bool,
 ) -> impl Stream<Item = Result<BlockResponse, Error>> {
     let mut latest_cursor = cursor.unwrap_or_default();
     let mut retry_count = 0;
@@ -79,7 +82,7 @@ fn stream_blocks(
                 start_block_num,
                 start_cursor: latest_cursor.clone(),
                 stop_block_num,
-                final_blocks_only: false,
+                final_blocks_only,
                 modules: modules.clone(),
                 output_module: output_module_name.clone(),
                 // There is usually no good reason for you to consume the stream development mode (so switching `true`
@@ -175,7 +178,7 @@ async fn process_substreams_response(
         Some(Message::BlockUndoSignal(block_undo_signal)) => {
             BlockProcessedResult::BlockUndoSignal(block_undo_signal)
         }
-        Some(Message::Progress(_progress)) => {
+        Some(Message::Progress(progress)) => {
             // The `ModulesProgress` messages goal is to report active parallel processing happening
             // either to fill up backward (relative to your request's start block) some missing
             // state or pre-process forward blocks (again relative).
@@ -208,7 +211,7 @@ async fn process_substreams_response(
             //     })
             //     .collect();
 
-            // info!("Progess {}", progresses.join(", "));
+            trace!("Progess {:?}", progress);
 
             BlockProcessedResult::Skip()
         }
