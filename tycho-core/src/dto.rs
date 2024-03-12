@@ -553,7 +553,7 @@ impl From<models::protocol::ProtocolComponentStateDelta> for ProtocolStateDelta 
         Self {
             component_id: value.component_id,
             updated_attributes: value.updated_attributes,
-            deleted_attributes: value.removed_attributes,
+            deleted_attributes: value.deleted_attributes,
         }
     }
 }

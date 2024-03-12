@@ -14,7 +14,6 @@ pub struct ProtocolComponent {
     pub tokens: Vec<Bytes>,
     pub contract_addresses: Vec<Bytes>,
     pub static_attributes: HashMap<String, Bytes>,
-    // TODO: decide for a module. dto or storage. -> probably promote change type eventually
     pub change: ChangeType,
     pub creation_tx: Bytes,
     pub created_at: NaiveDateTime,
@@ -66,17 +65,16 @@ impl ProtocolComponentState {
 pub struct ProtocolComponentStateDelta {
     pub component_id: String,
     pub updated_attributes: HashMap<String, Bytes>,
-    // TODO: rename back to deleted_attributes
-    pub removed_attributes: HashSet<String>,
+    pub deleted_attributes: HashSet<String>,
 }
 
 impl ProtocolComponentStateDelta {
     pub fn new(
         component_id: &str,
         updated_attributes: HashMap<String, Bytes>,
-        removed_attributes: HashSet<String>,
+        deleted_attributes: HashSet<String>,
     ) -> Self {
-        Self { component_id: component_id.to_string(), updated_attributes, removed_attributes }
+        Self { component_id: component_id.to_string(), updated_attributes, deleted_attributes }
     }
 }
 

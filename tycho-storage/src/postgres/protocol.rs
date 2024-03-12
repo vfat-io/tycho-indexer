@@ -662,7 +662,7 @@ impl PostgresGateway {
             );
 
             // invalidated db entities for deleted attributes
-            for attr in &state.removed_attributes {
+            for attr in &state.deleted_attributes {
                 // PERF: slow but required due to diesel restrictions
                 diesel::update(schema::protocol_state::table)
                     .filter(schema::protocol_state::protocol_component_id.eq(component_db_id))
@@ -1701,7 +1701,7 @@ mod test {
         .into_iter()
         .collect();
         new_state1.updated_attributes = attributes1.clone();
-        new_state1.removed_attributes = vec!["deletable".to_owned()]
+        new_state1.deleted_attributes = vec!["deletable".to_owned()]
             .into_iter()
             .collect();
         let tx_1: H256 = "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
@@ -1995,13 +1995,13 @@ mod test {
         // expected result
         let mut state_delta = protocol_state_delta();
         state_delta.component_id = "state1".to_owned();
-        state_delta.removed_attributes = vec!["deleted".to_owned()]
+        state_delta.deleted_attributes = vec!["deleted".to_owned()]
             .into_iter()
             .collect();
         let other_state_delta = models::protocol::ProtocolComponentStateDelta {
             component_id: "state3".to_owned(),
             updated_attributes: HashMap::new(),
-            removed_attributes: vec!["deleted2".to_owned()]
+            deleted_attributes: vec!["deleted2".to_owned()]
                 .into_iter()
                 .collect(),
         };
@@ -2108,7 +2108,7 @@ mod test {
         let state_delta = models::protocol::ProtocolComponentStateDelta {
             component_id: "state1".to_owned(),
             updated_attributes: attributes,
-            removed_attributes: vec!["to_delete".to_owned()]
+            deleted_attributes: vec!["to_delete".to_owned()]
                 .into_iter()
                 .collect(),
         };

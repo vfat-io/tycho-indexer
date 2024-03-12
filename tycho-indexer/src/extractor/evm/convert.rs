@@ -168,7 +168,7 @@ impl From<&evm::ProtocolStateDelta> for ProtocolComponentStateDelta {
         Self {
             component_id: value.component_id.clone(),
             updated_attributes: value.updated_attributes.clone(),
-            removed_attributes: value.deleted_attributes.clone(),
+            deleted_attributes: value.deleted_attributes.clone(),
         }
     }
 }
@@ -182,13 +182,6 @@ impl From<&evm::ComponentBalance> for ComponentBalance {
             modify_tx: value.modify_tx.as_bytes().into(),
             component_id: value.component_id.clone(),
         }
-    }
-}
-
-// TODO: remove this, only here so the old revert method compiles.
-impl From<ComponentBalance> for evm::ComponentBalance {
-    fn from(_value: ComponentBalance) -> Self {
-        todo!()
     }
 }
 
