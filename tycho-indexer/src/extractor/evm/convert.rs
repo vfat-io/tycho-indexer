@@ -101,7 +101,7 @@ impl From<&evm::AccountUpdate> for ContractDelta {
                 .slots
                 .clone()
                 .into_iter()
-                .map(|(u, v)| (Bytes::from(u), Bytes::from(v)))
+                .map(|(u, v)| (Bytes::from(u), Some(Bytes::from(v))))
                 .collect(),
             balance: value.balance.map(Bytes::from),
             code: value.code.clone(),
@@ -119,7 +119,7 @@ impl From<ContractDelta> for evm::AccountUpdate {
             slots: value
                 .slots
                 .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
+                .map(|(k, v)| (k.into(), v.map(Into::into).unwrap_or_default()))
                 .collect(),
             balance: value.balance.map(U256::from),
             code: value.code,

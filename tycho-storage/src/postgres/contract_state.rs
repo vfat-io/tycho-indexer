@@ -1061,12 +1061,7 @@ impl PostgresGateway {
                 code_data.push(new);
             }
 
-            let slots = delta
-                .slots
-                .clone()
-                .into_iter()
-                .map(|(k, v)| (k, Some(v)))
-                .collect::<HashMap<_, _>>();
+            let slots = delta.slots.clone();
             if !slots.is_empty() {
                 match slot_data.entry(tx_id) {
                     Entry::Occupied(mut e) => {

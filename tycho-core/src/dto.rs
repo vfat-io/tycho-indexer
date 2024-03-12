@@ -420,7 +420,11 @@ impl From<models::contract::ContractDelta> for AccountUpdate {
         AccountUpdate::new(
             value.address,
             value.chain.into(),
-            value.slots,
+            value
+                .slots
+                .into_iter()
+                .map(|(k, v)| (k, v.unwrap_or_default()))
+                .collect(),
             value.balance,
             value.code,
             value.change.into(),
