@@ -876,6 +876,7 @@ impl ProtocolComponentsRequestBody {
 
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct ProtocolComponentRequestParameters {
+    #[param(default = 0)]
     pub tvl_gt: Option<f64>,
 }
 

@@ -5,8 +5,8 @@ use std::env;
 
 use extractor::{
     evm::{
-        ambient::{AmbientContractExtractor, AmbientPgGateway},
         token_pre_processor::TokenPreProcessor,
+        vm::{VmContractExtractor, VmPgGateway},
     },
     runner::{ExtractorHandle, ExtractorRunnerBuilder},
 };
@@ -131,6 +131,7 @@ async fn main() -> Result<(), ExtractionError> {
             "ambient".to_string(),
             "uniswap_v2".to_string(),
             "uniswap_v3".to_string(),
+            "balancer".to_string(),
         ])
         .build()
         .await?;
@@ -155,6 +156,12 @@ async fn main() -> Result<(), ExtractionError> {
     extractor_handles.push(uniswap_v2_handle.clone());
     info!("Extractor {} started!", uniswap_v2_handle.get_id());
 
+    let (balancer_task, balancer_handle) =
+        start_balancer_extractor(&args, chain_state, cached_gw.clone(), token_processor.clone())
+            .await?;
+    extractor_handles.push(balancer_handle.clone());
+    info!("Extractor {} started!", balancer_handle.get_id());
+
     // TODO: read from env variable
     let server_addr = "0.0.0.0";
     let server_port = 4242;
@@ -165,16 +172,23 @@ async fn main() -> Result<(), ExtractionError> {
         .bind(server_addr)
         .port(server_port)
         // .register_extractor(ambient_handle)
-        .register_extractor(uniswap_v2_handle)
-        .register_extractor(uniswap_v3_handle)
+        // .register_extractor(uniswap_v2_handle)
+        // .register_extractor(uniswap_v3_handle)
+        .register_extractor(balancer_handle)
         .run()?;
     info!(server_url, "Http and Ws server started");
 
     let shutdown_task =
         tokio::spawn(shutdown_handler(server_handle, extractor_handles, gw_writer_thread));
-    let (res, _, _) =
-        select_all([ambient_task, uniswap_v2_task, uniswap_v3_task, server_task, shutdown_task])
-            .await;
+    let (res, _, _) = select_all([
+        ambient_task,
+        uniswap_v2_task,
+        uniswap_v3_task,
+        balancer_task,
+        server_task,
+        shutdown_task,
+    ])
+    .await;
     res.expect("Extractor- nor ServiceTasks should panic!")
 }
 
@@ -189,7 +203,7 @@ async fn start_ambient_extractor(
         .unwrap_or("1000".to_string())
         .parse::<usize>()
         .expect("Failed to parse AMBIENT_SYNC_BATCH_SIZE");
-    let ambient_gw = AmbientPgGateway::new(
+    let ambient_gw = VmPgGateway::new(
         ambient_name,
         Chain::Ethereum,
         sync_batch_size,
@@ -207,19 +221,20 @@ async fn start_ambient_extractor(
     )]
     .into_iter()
     .collect();
-    let extractor = AmbientContractExtractor::new(
+    let extractor = VmContractExtractor::new(
         ambient_name,
         Chain::Ethereum,
         chain_state,
         ambient_gw,
         ambient_protocol_types,
+        "ambient".to_owned(),
         Some(transcode_ambient_balances),
     )
     .await?;
 
     let start_block = 17361664;
     let stop_block = None;
-    let spkg = format!("{}/substreams-ethereum-ambient-v0.4.0.spkg", args.spkg);
+    let spkg = format!("{}/ethereum-ambient/substreams-ethereum-ambient-v0.4.0.spkg", args.spkg);
     let module_name = &"map_changes";
     let block_span = stop_block.map(|stop| stop - start_block);
     info!(%ambient_name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Ambient extractor");
@@ -275,7 +290,8 @@ async fn start_uniswap_v2_extractor(
 
     let start_block = 10008300;
     let stop_block = None;
-    let spkg = format!("{}/substreams-ethereum-uniswap-v2-v0.1.0.spkg", args.spkg);
+    let spkg =
+        format!("{}/ethereum-uniswap-v2/substreams-ethereum-uniswap-v2-v0.1.0.spkg", args.spkg);
     let module_name = &"map_pool_events";
     let block_span = stop_block.map(|stop| stop - start_block);
     info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V2 extractor");
@@ -331,10 +347,67 @@ async fn start_uniswap_v3_extractor(
 
     let start_block = 12369621;
     let stop_block = None;
-    let spkg = format!("{}/substreams-ethereum-uniswap-v3-v0.1.0.spkg", args.spkg);
+    let spkg =
+        format!("{}/ethereum-uniswap-v3/substreams-ethereum-uniswap-v3-v0.1.0.spkg", args.spkg);
     let module_name = &"map_pool_events";
     let block_span = stop_block.map(|stop| stop - start_block);
     info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V3 extractor");
+    let mut builder = ExtractorRunnerBuilder::new(&spkg, Arc::new(extractor))
+        .start_block(start_block)
+        .module_name(module_name)
+        .only_final_blocks();
+    if let Some(stop_block) = stop_block {
+        builder = builder.end_block(stop_block)
+    };
+    builder.run().await
+}
+
+async fn start_balancer_extractor(
+    args: &CliArgs,
+    chain_state: ChainState,
+    cached_gw: CachedGateway,
+    token_pre_processor: TokenPreProcessor,
+) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
+    let balancer_name = "vm:balancer";
+    let sync_batch_size = env::var("balancer_SYNC_BATCH_SIZE")
+        .unwrap_or("1000".to_string())
+        .parse::<usize>()
+        .expect("Failed to parse balancer_SYNC_BATCH_SIZE");
+    let balancer_gw = VmPgGateway::new(
+        balancer_name,
+        Chain::Ethereum,
+        sync_batch_size,
+        cached_gw,
+        token_pre_processor,
+    );
+    let balancer_protocol_types = [(
+        "balancer_pool".to_string(),
+        ProtocolType::new(
+            "balancer_pool".to_string(),
+            FinancialType::Swap,
+            None,
+            ImplementationType::Vm,
+        ),
+    )]
+    .into_iter()
+    .collect();
+    let extractor = VmContractExtractor::new(
+        balancer_name,
+        Chain::Ethereum,
+        chain_state,
+        balancer_gw,
+        balancer_protocol_types,
+        "balancer".to_owned(),
+        None,
+    )
+    .await?;
+
+    let start_block = 12369300;
+    let stop_block = None;
+    let spkg = format!("{}/ethereum-balancer/substreams-ethereum-balancer-v0.1.0.spkg", args.spkg);
+    let module_name = &"map_changes";
+    let block_span = stop_block.map(|stop| stop - start_block);
+    info!(%balancer_name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Balancer extractor");
     let mut builder = ExtractorRunnerBuilder::new(&spkg, Arc::new(extractor))
         .start_block(start_block)
         .module_name(module_name)
