@@ -35,6 +35,7 @@
 //! There are basically two versions to resolve this, modify the ORM structs to use smart pointers
 //! thus making the clones cheap. Or modify the traits and the function defined here to work around
 //! the lifetime issues.
+use crate::postgres::PostgresError;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
@@ -44,10 +45,8 @@ use diesel::{
     sql_types::{BigInt, Timestamp},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use std::{collections::HashMap, hash::Hash};
-
-use crate::storage::StorageError;
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
+use tycho_core::storage::StorageError;
 
 /// Trait indicating that a struct can be inserted into a versioned table.
 ///
@@ -241,11 +240,14 @@ where
     }
 
     let end_versions = set_versioning_attributes(new_data);
-    let db_rows = S::latest_versions_by_ids(end_versions.keys().cloned(), conn).await?;
+    let db_rows = S::latest_versions_by_ids(end_versions.keys().cloned(), conn)
+        .await
+        .map_err(PostgresError::from)?;
     if !db_rows.is_empty() {
         build_batch_update_query(&db_rows, S::table_name(), &end_versions)
             .execute(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
     }
     Ok(())
 }
@@ -273,7 +275,9 @@ where
         return Ok(())
     }
     let end_versions = set_delta_versioning_attributes(new_data);
-    let db_rows = S::latest_versions_by_ids(end_versions.keys().cloned(), conn).await?;
+    let db_rows = S::latest_versions_by_ids(end_versions.keys().cloned(), conn)
+        .await
+        .map_err(PostgresError::from)?;
 
     // Not terribly efficient but works (using find is very inefficient especially if new data is
     // big)
@@ -292,7 +296,8 @@ where
     if !db_rows.is_empty() {
         build_batch_update_query(&db_rows, S::table_name(), &end_versions)
             .execute(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
     }
     Ok(())
 }

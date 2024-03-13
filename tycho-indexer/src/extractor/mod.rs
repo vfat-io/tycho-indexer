@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
+use crate::pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress};
 use async_trait::async_trait;
 use mockall::automock;
 use prost::DecodeError;
+use std::sync::Arc;
 use thiserror::Error;
-
-use crate::{
+use tycho_core::{
     models::{ExtractorIdentity, NormalisedMessage},
-    pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
     storage::StorageError,
 };
 

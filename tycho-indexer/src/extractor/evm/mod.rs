@@ -1,38 +1,29 @@
-#![allow(dead_code)]
-
+use self::utils::TryDecode;
+use super::{u256_num::bytes_to_f64, ExtractionError};
+use crate::pb::tycho::evm::v1 as substreams;
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
     utils::keccak256,
 };
-#[allow(unused_imports)]
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use tracing::log::warn;
-
-use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
-
-use crate::{
-    models::{Chain, ExtractorIdentity, NormalisedMessage, ProtocolType},
-    pb::tycho::evm::v1 as substreams,
-    storage::{Address, AttrStoreKey, ChangeType, ComponentId, StateGatewayType, StoreVal},
+use tycho_core::{
+    models::{
+        Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
+        NormalisedMessage, ProtocolType, StoreVal,
+    },
+    Bytes,
 };
-use tycho_types::Bytes;
-
-use self::utils::TryDecode;
-
-use super::{u256_num::bytes_to_f64, ExtractionError};
+use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
 pub mod ambient;
 pub mod chain_state;
+mod convert;
 pub mod native;
-pub mod storage;
 pub mod token_pre_processor;
 mod utils;
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct SwapPool {}
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ERC20Token {
@@ -489,9 +480,6 @@ pub struct BlockContractChanges {
     pub tx_updates: Vec<TransactionVMUpdates>,
 }
 
-pub type EVMStateGateway<DB> =
-    StateGatewayType<DB, Block, Transaction, Account, AccountUpdate, ERC20Token>;
-
 impl Block {
     /// Parses block from tychos protobuf block message
     pub fn try_from_message(msg: substreams::Block, chain: Chain) -> Result<Self, ExtractionError> {
@@ -844,7 +832,6 @@ pub struct ProtocolStateDelta {
     pub deleted_attributes: HashSet<AttrStoreKey>,
 }
 
-// TODO: remove dead code check skip once extractor is implemented
 impl ProtocolStateDelta {
     pub fn new(component_id: ComponentId, attributes: HashMap<AttrStoreKey, StoreVal>) -> Self {
         Self { component_id, updated_attributes: attributes, deleted_attributes: HashSet::new() }

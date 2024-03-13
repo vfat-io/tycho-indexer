@@ -39,7 +39,7 @@ use tokio::{
 };
 use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, instrument, trace, warn};
-use tycho_types::dto::{Command, Deltas, ExtractorIdentity, Response, WebSocketMessage};
+use tycho_core::dto::{Command, Deltas, ExtractorIdentity, Response, WebSocketMessage};
 use uuid::Uuid;
 
 use crate::TYCHO_SERVER_VERSION;
@@ -618,7 +618,7 @@ impl DeltasClient for WsDeltasClient {
 
 #[cfg(test)]
 mod tests {
-    use tycho_types::dto::Chain;
+    use tycho_core::dto::Chain;
 
     use super::*;
 

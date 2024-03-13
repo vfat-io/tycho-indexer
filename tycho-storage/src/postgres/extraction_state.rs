@@ -1,30 +1,14 @@
-use async_trait::async_trait;
+use super::{orm, schema, storage_error_from_diesel, PostgresGateway, StorageError};
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use tycho_core::models::{Chain, ExtractionState};
 
-use crate::storage::{
-    ContractDelta, ExtractionState, ExtractionStateGateway, StorableBlock, StorableContract,
-    StorableToken, StorableTransaction,
-};
-
-use super::{orm, schema, Chain, PostgresGateway, StorageError};
-
-#[async_trait]
-impl<B, TX, A, D, T> ExtractionStateGateway for PostgresGateway<B, TX, A, D, T>
-where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    D: ContractDelta,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
-    type DB = AsyncPgConnection;
-
-    async fn get_state(
+impl PostgresGateway {
+    pub async fn get_state(
         &self,
         name: &str,
         chain: &Chain,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<ExtractionState, StorageError> {
         let block_chain_id = self.get_chain_id(chain);
 
@@ -39,14 +23,14 @@ where
                 Ok(state)
             }
             Ok(None) => Err(StorageError::NotFound("ExtractionState".to_owned(), name.to_owned())),
-            Err(err) => Err(StorageError::from_diesel(err, "ExtractionState", name, None)),
+            Err(err) => Err(storage_error_from_diesel(err, "ExtractionState", name, None).into()),
         }
     }
 
-    async fn save_state(
+    pub async fn save_state(
         &self,
         state: &ExtractionState,
-        conn: &mut Self::DB,
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let block_chain_id = self.get_chain_id(&state.chain);
         match orm::ExtractionState::by_name(&state.name, block_chain_id, conn).await {
@@ -64,7 +48,7 @@ where
                     .execute(conn)
                     .await
                     .map_err(|err| {
-                        StorageError::from_diesel(err, "ExtractionState", &state.name, None)
+                        storage_error_from_diesel(err, "ExtractionState", &state.name, None)
                     })?;
             }
             Ok(None) => {
@@ -83,11 +67,13 @@ where
                     .execute(conn)
                     .await
                     .map_err(|err| {
-                        StorageError::from_diesel(err, "ExtractionState", &state.name, None)
+                        storage_error_from_diesel(err, "ExtractionState", &state.name, None)
                     })?;
             }
             Err(err) => {
-                return Err(StorageError::from_diesel(err, "ExtractionState", &state.name, None));
+                return Err(
+                    storage_error_from_diesel(err, "ExtractionState", &state.name, None).into()
+                );
             }
         }
         Ok(())
@@ -98,8 +84,6 @@ where
 mod test {
     use diesel::prelude::*;
     use diesel_async::{AsyncConnection, RunQueryDsl};
-
-    use crate::extractor::evm;
 
     use super::*;
 
@@ -142,23 +126,8 @@ mod test {
         conn
     }
 
-    async fn get_dgw(
-        conn: &mut AsyncPgConnection,
-    ) -> PostgresGateway<
-        evm::Block,
-        evm::Transaction,
-        evm::Account,
-        evm::AccountUpdate,
-        evm::ERC20Token,
-    > {
-        PostgresGateway::<
-            evm::Block,
-            evm::Transaction,
-            evm::Account,
-            evm::AccountUpdate,
-            evm::ERC20Token,
-        >::from_connection(conn)
-        .await
+    async fn get_dgw(conn: &mut AsyncPgConnection) -> PostgresGateway {
+        PostgresGateway::from_connection(conn).await
     }
 
     #[tokio::test]
