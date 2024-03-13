@@ -564,7 +564,7 @@ mod test {
 
     #[tokio::test]
     async fn test_get_cursor() {
-        let mut gw = VmGateway::new();
+        let mut gw = MockVmGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -595,7 +595,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data() {
-        let mut gw = VmGateway::new();
+        let mut gw = MockVmGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -630,7 +630,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data_skip() {
-        let mut gw = VmGateway::new();
+        let mut gw = MockVmGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -675,7 +675,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_revert() {
-        let mut gw: VmGateway = VmGateway::new();
+        let mut gw = MockVmGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
