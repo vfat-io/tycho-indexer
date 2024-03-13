@@ -13,7 +13,7 @@ use tracing::{debug, error, instrument, trace, warn};
 
 use async_trait::async_trait;
 
-use tycho_types::dto::{
+use tycho_core::dto::{
     Chain, ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
     ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
     StateRequestBody, StateRequestParameters, StateRequestResponse,
@@ -242,7 +242,7 @@ impl RPCClient for HttpRPCClient {
 
 #[cfg(test)]
 mod tests {
-    use tycho_types::Bytes;
+    use tycho_core::Bytes;
 
     use super::*;
 

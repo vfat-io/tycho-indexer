@@ -1,47 +1,39 @@
-use async_trait::async_trait;
+use super::{orm, schema, storage_error_from_diesel, PostgresError, PostgresGateway};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use std::collections::HashMap;
 use tracing::{instrument, warn};
-use tycho_types::Bytes;
-
-use crate::storage::{
-    BlockHash, BlockIdentifier, ChainGateway, ContractDelta, StorableBlock, StorableContract,
-    StorableToken, StorableTransaction, StorageError, TxHash,
+use tycho_core::{
+    models::{blockchain::*, BlockHash, TxHash},
+    storage::{BlockIdentifier, StorageError},
+    Bytes,
 };
 
-use super::{orm, schema, PostgresGateway};
-
-#[async_trait]
-impl<B, TX, A, D, T> ChainGateway for PostgresGateway<B, TX, A, D, T>
-where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    D: ContractDelta,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
-    type DB = AsyncPgConnection;
-    type Block = B;
-    type Transaction = TX;
-
+impl PostgresGateway {
     #[instrument(skip_all)]
-    async fn upsert_block(
+    pub async fn upsert_block(
         &self,
-        new: &[Self::Block],
-        conn: &mut Self::DB,
+        blocks: &[Block],
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         use super::schema::block::dsl::*;
-        if new.is_empty() {
+        if blocks.is_empty() {
             warn!("Upsert blocks called with empty blocks!");
             return Ok(())
         }
-        let block_chain_id = self.get_chain_id(new[0].chain());
-        let new_blocks = new
+        let block_chain_id = self.get_chain_id(&blocks[0].chain);
+        let new_blocks = blocks
             .iter()
-            .map(|n| n.to_storage(block_chain_id))
+            .map(|new| orm::NewBlock {
+                hash: new.hash.clone(),
+                parent_hash: new.parent_hash.clone(),
+                chain_id: block_chain_id,
+                main: true,
+                number: new.number as i64,
+                ts: new.ts,
+            })
             .collect_vec();
 
         // assumes that block with the same hash will not appear with different values
@@ -51,7 +43,7 @@ where
             .execute(conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(
+                storage_error_from_diesel(
                     err,
                     "Block",
                     &format!("Batch: {} and {} more", &new_blocks[0].hash, new_blocks.len() - 1),
@@ -62,15 +54,15 @@ where
     }
 
     #[instrument(skip_all)]
-    async fn get_block(
+    pub async fn get_block(
         &self,
         block_id: &BlockIdentifier,
-        conn: &mut Self::DB,
-    ) -> Result<Self::Block, StorageError> {
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Block, StorageError> {
         // taking a reference here is necessary, to not move block_id
         // so it can be used in the map_err closure later on. It would
         // be better if BlockIdentifier was copy though (complicates lifetimes).
-        let orm_block = match &block_id {
+        let mut orm_block = match &block_id {
             BlockIdentifier::Number((chain, number)) => {
                 orm::Block::by_number(*chain, *number, conn).await
             }
@@ -78,16 +70,22 @@ where
             BlockIdentifier::Hash(block_hash) => orm::Block::by_hash(block_hash, conn).await,
             BlockIdentifier::Latest(chain) => orm::Block::most_recent(*chain, conn).await,
         }
-        .map_err(|err| StorageError::from_diesel(err, "Block", &block_id.to_string(), None))?;
+        .map_err(|err| storage_error_from_diesel(err, "Block", &block_id.to_string(), None))?;
         let chain = self.get_chain(&orm_block.chain_id);
-        B::from_storage(orm_block, chain)
+        Ok(Block {
+            hash: std::mem::take(&mut orm_block.hash),
+            parent_hash: std::mem::take(&mut orm_block.parent_hash),
+            number: orm_block.number as u64,
+            chain,
+            ts: orm_block.ts,
+        })
     }
 
     #[instrument(skip_all)]
-    async fn upsert_tx(
+    pub async fn upsert_tx(
         &self,
-        new: &[Self::Transaction],
-        conn: &mut Self::DB,
+        new: &[Transaction],
+        conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         use super::schema::transaction::dsl::*;
         if new.is_empty() {
@@ -97,7 +95,7 @@ where
 
         let block_hashes = new
             .iter()
-            .map(|n| n.block_hash())
+            .map(|n| n.block_hash.clone())
             .collect_vec();
         let parent_blocks = schema::block::table
             .filter(schema::block::hash.eq_any(&block_hashes))
@@ -105,7 +103,7 @@ where
             .get_results::<(Bytes, i64)>(conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(
+                storage_error_from_diesel(
                     err,
                     "Transaction",
                     &format!("Batch: {:x} and {} more", &block_hashes[0], block_hashes.len() - 1),
@@ -117,10 +115,10 @@ where
 
         let orm_txns = new
             .iter()
-            .map(|n| {
-                let block_h = n.block_hash();
+            .map(|new| {
+                let block_h = &new.block_hash;
                 let bid = *parent_blocks
-                    .get(&block_h)
+                    .get(block_h)
                     .ok_or_else(|| {
                         StorageError::NoRelatedEntity(
                             "Block".to_string(),
@@ -128,7 +126,13 @@ where
                             format!("{}", block_h),
                         )
                     })?;
-                Ok(n.to_storage(bid))
+                Ok(orm::NewTransaction {
+                    hash: new.hash.clone(),
+                    block_id: bid,
+                    from: new.from.clone(),
+                    to: new.to.clone().unwrap_or_default(),
+                    index: new.index as i64,
+                })
             })
             .collect::<Result<Vec<orm::NewTransaction>, StorageError>>()?;
 
@@ -139,7 +143,7 @@ where
             .execute(conn)
             .await
             .map_err(|err| {
-                StorageError::from_diesel(
+                storage_error_from_diesel(
                     err,
                     "Transaction",
                     &format!("Batch {:x} and {} more", &orm_txns[0].hash, orm_txns.len() - 1),
@@ -150,24 +154,32 @@ where
     }
 
     #[instrument(skip_all)]
-    async fn get_tx(
+    pub async fn get_tx(
         &self,
         hash: &TxHash,
-        conn: &mut Self::DB,
-    ) -> Result<Self::Transaction, StorageError> {
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Transaction, StorageError> {
         schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::hash.eq(&hash))
             .select((orm::Transaction::as_select(), schema::block::hash))
             .first::<(orm::Transaction, BlockHash)>(conn)
             .await
-            .map(|(orm_tx, block_hash)| TX::from_storage(orm_tx, &block_hash))
+            .map(|(mut orm_tx, block_hash)| {
+                Ok(Transaction {
+                    hash: std::mem::take(&mut orm_tx.hash),
+                    block_hash,
+                    from: std::mem::take(&mut orm_tx.from),
+                    to: Some(std::mem::take(&mut orm_tx.to)),
+                    index: orm_tx.index as u64,
+                })
+            })
             .map_err(|err| {
-                StorageError::from_diesel(err, "Transaction", &hex::encode(hash), None)
+                storage_error_from_diesel(err, "Transaction", &hex::encode(hash), None)
             })?
     }
 
-    async fn revert_state(
+    pub async fn revert_state(
         &self,
         to: &BlockIdentifier,
         conn: &mut AsyncPgConnection,
@@ -176,7 +188,9 @@ where
         // from a big number of tables. Reverting state, signifies deleting
         // history. We will not keep any branches in the db only the main branch
         // will be kept.
-        let block = orm::Block::by_id(to, conn).await?;
+        let block = orm::Block::by_id(to, conn)
+            .await
+            .map_err(PostgresError::from)?;
 
         // All entities and version updates are connected to the block via a
         // cascade delete, this ensures that the state is reverted by simply
@@ -189,7 +203,8 @@ where
                 .filter(schema::block::chain_id.eq(block.chain_id)),
         )
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         // Any versioned table's rows, which have `valid_to` set to "> block.ts"
         // need, to be updated to be valid again (thus, valid_to = NULL).
@@ -198,28 +213,32 @@ where
         )
         .set(schema::contract_storage::valid_to.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::account_balance::table.filter(schema::account_balance::valid_to.gt(block.ts)),
         )
         .set(schema::account_balance::valid_to.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::contract_code::table.filter(schema::contract_code::valid_to.gt(block.ts)),
         )
         .set(schema::contract_code::valid_to.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::protocol_state::table.filter(schema::protocol_state::valid_to.gt(block.ts)),
         )
         .set(schema::protocol_state::valid_to.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::protocol_calls_contract::table
@@ -227,14 +246,16 @@ where
         )
         .set(schema::protocol_calls_contract::valid_to.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         // Any versioned table's rows, which have `deleted_at` set to "> block.ts"
         // need, to be updated to be valid again (thus, deleted_at = NULL).
         diesel::update(schema::account::table.filter(schema::account::deleted_at.gt(block.ts)))
             .set(schema::account::deleted_at.eq(Option::<NaiveDateTime>::None))
             .execute(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
 
         diesel::update(
             schema::protocol_component::table
@@ -242,7 +263,8 @@ where
         )
         .set(schema::protocol_component::deleted_at.eq(Option::<NaiveDateTime>::None))
         .execute(conn)
-        .await?;
+        .await
+        .map_err(PostgresError::from)?;
 
         Ok(())
     }
@@ -250,22 +272,15 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
+    use crate::postgres::db_fixtures;
     use diesel_async::AsyncConnection;
-    use ethers::types::{H160, H256, U256};
-
-    use crate::{extractor::evm, models::Chain, storage::postgres::db_fixtures};
+    use ethers::types::{H256, U256};
+    use std::str::FromStr;
+    use tycho_core::models::Chain;
 
     use super::*;
 
-    type EVMGateway = PostgresGateway<
-        evm::Block,
-        evm::Transaction,
-        evm::Account,
-        evm::AccountUpdate,
-        evm::ERC20Token,
-    >;
+    type EVMGateway = PostgresGateway;
 
     async fn setup_db() -> AsyncPgConnection {
         let db_url = std::env::var("DATABASE_URL").unwrap();
@@ -292,14 +307,13 @@ mod test {
         .await;
     }
 
-    fn block(hash: &str) -> evm::Block {
-        evm::Block {
+    fn block(hash: &str) -> Block {
+        Block {
             number: 2,
-            hash: H256::from_str(hash).unwrap(),
-            parent_hash: H256::from_str(
+            hash: Bytes::from(hash),
+            parent_hash: Bytes::from(
                 "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-            )
-            .unwrap(),
+            ),
             chain: Chain::Ethereum,
             ts: "2020-01-01T01:00:00".parse().unwrap(),
         }
@@ -344,11 +358,11 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
         let block = block("0xbadbabe000000000000000000000000000000000000000000000000000000000");
 
-        gw.upsert_block(&[block], &mut conn)
+        gw.upsert_block(&[block.clone()], &mut conn)
             .await
             .unwrap();
         let retrieved_block = gw
-            .get_block(&BlockIdentifier::Hash(block.hash.into()), &mut conn)
+            .get_block(&BlockIdentifier::Hash(block.hash.clone()), &mut conn)
             .await
             .unwrap();
 
@@ -360,40 +374,35 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-        let block = evm::Block {
+        let block = Block {
             number: 1,
-            hash: H256::from_str(
-                "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-            )
-            .unwrap(),
-            parent_hash: H256::from_str(
+            hash: Bytes::from("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"),
+            parent_hash: Bytes::from(
                 "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
-            )
-            .unwrap(),
+            ),
             chain: Chain::Ethereum,
             ts: "2020-01-01T00:00:00".parse().unwrap(),
         };
 
-        gw.upsert_block(&[block], &mut conn)
+        gw.upsert_block(&[block.clone()], &mut conn)
             .await
             .unwrap();
         let retrieved_block = gw
-            .get_block(&BlockIdentifier::Hash(block.hash.into()), &mut conn)
+            .get_block(&BlockIdentifier::Hash(block.hash.clone()), &mut conn)
             .await
             .unwrap();
 
         assert_eq!(retrieved_block, block);
     }
 
-    fn transaction(hash: &str) -> evm::Transaction {
-        evm::Transaction {
-            hash: H256::from_str(hash).expect("tx hash ok"),
-            block_hash: H256::from_str(
+    fn transaction(hash: &str) -> Transaction {
+        Transaction {
+            hash: Bytes::from(hash),
+            block_hash: Bytes::from(
                 "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-            )
-            .expect("block hash ok"),
-            from: H160::from_str("0x4648451b5f87ff8f0f7d622bd40574bb97e25980").expect("from ok"),
-            to: Some(H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").expect("to ok")),
+            ),
+            from: Bytes::from("0x4648451b5f87ff8f0f7d622bd40574bb97e25980"),
+            to: Some(Bytes::from("0x6b175474e89094c44da98b954eedeac495271d0f")),
             index: 1,
         }
     }
@@ -406,7 +415,7 @@ mod test {
         let exp = transaction("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945");
 
         let tx = gw
-            .get_tx(&exp.hash.into(), &mut conn)
+            .get_tx(&exp.hash.clone(), &mut conn)
             .await
             .unwrap();
 
@@ -421,14 +430,13 @@ mod test {
         let mut tx =
             transaction("0xbadbabe000000000000000000000000000000000000000000000000000000000");
         tx.block_hash =
-            H256::from_str("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9")
-                .unwrap();
+            Bytes::from("0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9");
 
-        gw.upsert_tx(&[tx], &mut conn)
+        gw.upsert_tx(&[tx.clone()], &mut conn)
             .await
             .unwrap();
         let retrieved_tx = gw
-            .get_tx(&tx.hash.into(), &mut conn)
+            .get_tx(&tx.hash.clone(), &mut conn)
             .await
             .unwrap();
 
@@ -440,25 +448,21 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-        let tx = evm::Transaction {
-            hash: H256::from_str(
-                "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-            )
-            .expect("tx hash ok"),
-            block_hash: H256::from_str(
+        let tx = Transaction {
+            hash: Bytes::from("0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"),
+            block_hash: Bytes::from(
                 "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-            )
-            .expect("block hash ok"),
-            from: H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980").expect("from ok"),
-            to: Some(H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").expect("to ok")),
+            ),
+            from: Bytes::from("0x4648451b5F87FF8F0F7D622bD40574bb97E25980"),
+            to: Some(Bytes::from("0x6B175474E89094C44Da98b954EedeAC495271d0F")),
             index: 1,
         };
 
-        gw.upsert_tx(&[tx], &mut conn)
+        gw.upsert_tx(&[tx.clone()], &mut conn)
             .await
             .unwrap();
         let retrieved_tx = gw
-            .get_tx(&tx.hash.into(), &mut conn)
+            .get_tx(&tx.hash.clone(), &mut conn)
             .await
             .unwrap();
 

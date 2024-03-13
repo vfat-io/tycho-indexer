@@ -1,3 +1,13 @@
+use super::{
+    schema::{
+        account, account_balance, block, chain, component_balance, component_tvl, contract_code,
+        contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
+        protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
+        transaction,
+    },
+    versioning::{DeltaVersionedRow, StoredDeltaVersionedRow, StoredVersionedRow, VersionedRow},
+    PostgresError,
+};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
@@ -11,24 +21,14 @@ use diesel::{
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
 use std::collections::{HashMap, HashSet};
-
-use crate::{
+use tycho_core::{
     models,
-    storage::{
-        postgres::versioning::StoredDeltaVersionedRow, Address, AttrStoreKey, Balance, BlockHash,
-        BlockIdentifier, Code, CodeHash, ComponentId, ContractId, StorageError, StoreVal, TxHash,
+    models::{
+        Address, AttrStoreKey, Balance, BlockHash, Code, CodeHash, ComponentId, ContractId,
+        StoreVal, TxHash,
     },
-};
-use tycho_types::Bytes;
-
-use super::{
-    schema::{
-        account, account_balance, block, chain, component_balance, component_tvl, contract_code,
-        contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
-        protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
-        transaction,
-    },
-    versioning::{DeltaVersionedRow, StoredVersionedRow, VersionedRow},
+    storage::{BlockIdentifier, StorageError},
+    Bytes,
 };
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -240,7 +240,8 @@ impl Transaction {
             .filter(hash.eq_any(hashes))
             .select((hash, id))
             .load::<(TxHash, i64)>(conn)
-            .await?;
+            .await
+            .map_err(PostgresError::from)?;
 
         Ok(results.into_iter().collect())
     }
@@ -288,7 +289,7 @@ pub struct NewProtocolSystem {
 }
 
 #[derive(Debug, DbEnum, Clone, PartialEq)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::FinancialType"]
+#[ExistingTypePath = "crate::postgres::schema::sql_types::FinancialType"]
 pub enum FinancialType {
     Swap,
     Psm,
@@ -296,11 +297,31 @@ pub enum FinancialType {
     Leverage,
 }
 
+impl From<models::FinancialType> for FinancialType {
+    fn from(value: models::FinancialType) -> Self {
+        match value {
+            models::FinancialType::Swap => Self::Swap,
+            models::FinancialType::Psm => Self::Psm,
+            models::FinancialType::Debt => Self::Debt,
+            models::FinancialType::Leverage => Self::Leverage,
+        }
+    }
+}
+
 #[derive(Debug, DbEnum, Clone, PartialEq)]
-#[ExistingTypePath = "crate::storage::postgres::schema::sql_types::ImplementationType"]
+#[ExistingTypePath = "crate::postgres::schema::sql_types::ImplementationType"]
 pub enum ImplementationType {
     Custom,
     Vm,
+}
+
+impl From<models::ImplementationType> for ImplementationType {
+    fn from(value: models::ImplementationType) -> Self {
+        match value {
+            models::ImplementationType::Vm => Self::Vm,
+            models::ImplementationType::Custom => Self::Custom,
+        }
+    }
 }
 
 #[derive(Identifiable, Queryable, Selectable)]
@@ -404,7 +425,8 @@ impl StoredVersionedRow for ComponentBalance {
                     .and(component_balance::valid_to.is_null()),
             )
             .get_results(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.token_id)))
             .map(Box::new)
@@ -428,6 +450,29 @@ pub struct NewComponentBalance {
     pub protocol_component_id: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
+}
+
+impl NewComponentBalance {
+    pub fn new(
+        token_id: i64,
+        new_balance: Balance,
+        balance_float: f64,
+        previous_value: Option<Balance>,
+        modify_tx: i64,
+        protocol_component_id: i64,
+        valid_from: NaiveDateTime,
+    ) -> Self {
+        Self {
+            token_id,
+            new_balance,
+            previous_value: previous_value.unwrap_or_else(|| Bytes::from("0x00")),
+            balance_float,
+            modify_tx,
+            protocol_component_id,
+            valid_from,
+            valid_to: None,
+        }
+    }
 }
 
 impl VersionedRow for NewComponentBalance {
@@ -537,6 +582,31 @@ pub struct NewProtocolComponent {
     pub creation_tx: i64,
     pub created_at: NaiveDateTime,
     pub attributes: Option<serde_json::Value>,
+}
+
+impl NewProtocolComponent {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        external_id: &str,
+        chain_id: i64,
+        protocol_type_id: i64,
+        protocol_system_id: i64,
+        creation_tx: i64,
+        created_at: NaiveDateTime,
+        attributes: &HashMap<String, Bytes>,
+    ) -> Self {
+        let attributes =
+            (!attributes.is_empty()).then(|| serde_json::to_value(attributes).unwrap());
+        Self {
+            external_id: external_id.to_string(),
+            chain_id,
+            protocol_type_id,
+            protocol_system_id,
+            creation_tx,
+            created_at,
+            attributes,
+        }
+    }
 }
 
 impl ProtocolComponent {
@@ -902,7 +972,8 @@ impl StoredVersionedRow for ProtocolState {
                     .and(protocol_state::valid_to.is_null()),
             )
             .get_results(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.attribute_name)))
             .map(Box::new)
@@ -933,6 +1004,26 @@ pub struct NewProtocolState {
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
+}
+
+impl NewProtocolState {
+    pub fn new(
+        protocol_component_id: i64,
+        attribute_name: &str,
+        attribute_value: Option<&Bytes>,
+        modify_tx: i64,
+        valid_from: NaiveDateTime,
+    ) -> Self {
+        Self {
+            protocol_component_id,
+            attribute_name: Some(attribute_name.to_string()),
+            attribute_value: attribute_value.cloned(),
+            previous_value: None,
+            modify_tx,
+            valid_from,
+            valid_to: None,
+        }
+    }
 }
 
 impl VersionedRow for NewProtocolState {
@@ -1085,6 +1176,23 @@ pub struct NewToken {
     pub quality: i32,
 }
 
+impl NewToken {
+    pub fn from_token(account_id: i64, token: &models::token::CurrencyToken) -> Self {
+        Self {
+            account_id,
+            symbol: token.symbol.clone(),
+            decimals: token.decimals as i32,
+            tax: token.tax as i64,
+            gas: token
+                .gas
+                .iter()
+                .map(|g| g.map(|u| u as i64))
+                .collect(),
+            quality: token.quality as i32,
+        }
+    }
+}
+
 #[derive(Identifiable, Queryable, Associations, Selectable, Debug)]
 #[diesel(belongs_to(Account))]
 #[diesel(table_name = account_balance)]
@@ -1141,7 +1249,8 @@ impl StoredVersionedRow for AccountBalance {
             )
             .select(Self::as_select())
             .get_results::<Self>(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .map(Box::new)
             .collect())
@@ -1242,7 +1351,8 @@ impl StoredVersionedRow for ContractCode {
             )
             .select(Self::as_select())
             .get_results::<Self>(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .map(Box::new)
             .collect())
@@ -1398,7 +1508,8 @@ impl StoredVersionedRow for ContractStorage {
                     .and(contract_storage::valid_to.is_null()),
             )
             .get_results(conn)
-            .await?
+            .await
+            .map_err(PostgresError::from)?
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(&cs.account_id, &cs.slot)))
             .map(Box::new)
@@ -1476,12 +1587,6 @@ impl<'a> DeltaVersionedRow for NewSlot<'a> {
     fn set_previous_value(&mut self, previous_value: Self::Value) {
         self.previous_value = previous_value;
     }
-}
-
-pub struct Contract {
-    pub account: Account,
-    pub balance: AccountBalance,
-    pub code: ContractCode,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]

@@ -1,7 +1,7 @@
 use crate::{rpc::RPCClient, RPCError};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, instrument, warn};
-use tycho_types::{
+use tycho_core::{
     dto::{
         Chain, ProtocolComponent, ProtocolComponentRequestParameters,
         ProtocolComponentsRequestBody, ProtocolId,
@@ -156,7 +156,7 @@ mod test {
         feed::component_tracker::{ComponentFilter, ComponentTracker},
         rpc::MockRPCClient,
     };
-    use tycho_types::{
+    use tycho_core::{
         dto::{Chain, ProtocolComponent, ProtocolComponentRequestResponse, ProtocolId},
         Bytes,
     };

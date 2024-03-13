@@ -7,7 +7,7 @@ use tycho_client::{
     },
     HttpRPCClient, WsDeltasClient,
 };
-use tycho_types::dto::{Chain, ExtractorIdentity};
+use tycho_core::dto::{Chain, ExtractorIdentity};
 
 /// Run a simple example of a block synchronizer.
 ///
