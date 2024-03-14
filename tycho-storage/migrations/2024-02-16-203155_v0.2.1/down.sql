@@ -9,3 +9,4 @@ DROP INDEX IF EXISTS idx_account_address;
 
 DROP INDEX idx_component_balance_valid_to;
 
+CREATE INDEX IF NOT EXISTS idx_block_number_identity ON block("number", "chain_id");

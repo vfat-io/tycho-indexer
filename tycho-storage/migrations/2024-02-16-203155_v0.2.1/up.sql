@@ -11,3 +11,5 @@ CREATE INDEX IF NOT EXISTS idx_account_address ON account(address);
 -- speeds up the tvl aggregation query
 CREATE INDEX idx_component_balance_valid_to ON component_balance(valid_to);
 
+-- speeds up block inserts
+DROP INDEX idx_block_number_identity;
