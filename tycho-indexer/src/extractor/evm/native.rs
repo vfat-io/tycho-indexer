@@ -328,9 +328,9 @@ where
         name: &str,
         chain: Chain,
         chain_state: ChainState,
-        protocol_system: String,
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
+        protocol_system: String,
         post_processor: Option<fn(evm::BlockEntityChanges) -> evm::BlockEntityChanges>,
     ) -> Result<Self, ExtractionError> {
         let res = match gateway.get_cursor().await {

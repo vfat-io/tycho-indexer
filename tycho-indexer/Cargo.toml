@@ -48,6 +48,9 @@ tracing-actix-web = "0.7.6"
 hex-literal = "0.4.1"
 mockall = "0.11.4"
 actix-web-opentelemetry = "0.16.0"
+aws-config = { version = "1.1.8", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.18.0"
+serde_yaml = "0.9.32"
 # TODO still required??
 typetag = "0.2"
 utoipa = { version = "4.2.0", features = ["chrono"] }
@@ -59,4 +62,4 @@ actix-test = "0.1.2"
 rstest = "0.18.2"
 tokio-tungstenite.workspace = true
 pretty_assertions = "1.4.0"
-test-log = { version = "0.2.14", features=["trace"]}
+test-log = { version = "0.2.14", features = ["trace"] }

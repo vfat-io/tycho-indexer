@@ -9,6 +9,7 @@ use tycho_core::{
     storage::StorageError,
 };
 
+pub mod builder;
 pub mod evm;
 pub mod runner;
 mod u256_num;

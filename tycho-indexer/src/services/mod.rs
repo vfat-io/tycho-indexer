@@ -46,10 +46,12 @@ where
         }
     }
 
-    pub fn register_extractor(mut self, handle: ExtractorHandle) -> Self {
-        let id = handle.get_id();
-        self.extractor_handles
-            .insert(id, Arc::new(handle));
+    pub fn register_extractors(mut self, handle: Vec<ExtractorHandle>) -> Self {
+        for e in handle {
+            let id = e.get_id();
+            self.extractor_handles
+                .insert(id, Arc::new(e));
+        }
         self
     }
 
