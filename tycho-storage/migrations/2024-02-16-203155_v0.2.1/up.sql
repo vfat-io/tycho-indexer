@@ -13,3 +13,7 @@ CREATE INDEX idx_component_balance_valid_to ON component_balance(valid_to);
 
 -- speeds up block inserts
 DROP INDEX idx_block_number_identity;
+ALTER TABLE "block" DROP CONSTRAINT block_chain_id_hash_key;
+
+-- speeds up transaction inserts
+ALTER TABLE "transaction" DROP CONSTRAINT transaction_hash_block_id_key;
