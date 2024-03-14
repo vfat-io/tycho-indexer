@@ -942,8 +942,8 @@ pub struct ResponseProtocolState {
     #[serde(with = "hex_hashmap_value")]
     pub attributes: HashMap<String, Bytes>,
     #[schema(value_type=String)]
-    #[serde(with = "hex_bytes")]
-    pub modify_tx: Bytes,
+    #[serde(with = "hex_bytes_option")]
+    pub modify_tx: Option<Bytes>,
 }
 
 impl From<models::protocol::ProtocolComponentState> for ResponseProtocolState {
