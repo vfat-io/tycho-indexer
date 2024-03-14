@@ -1,22 +1,4 @@
-#![allow(unused_variables)]
-
-use std::{
-    collections::{HashMap, HashSet},
-    str::FromStr,
-    sync::Arc,
-};
-
-use async_trait::async_trait;
-use chrono::NaiveDateTime;
-use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-use ethers::types::{H160, H256};
-use mockall::automock;
-use prost::Message;
-use tokio::sync::Mutex;
-use tracing::{debug, info, instrument, trace};
-
-use super::{utils::format_duration, AccountUpdate, Block};
-
+use super::{utils::format_duration, Block};
 use crate::{
     extractor::{
         evm,
@@ -26,15 +8,36 @@ use crate::{
         },
         ExtractionError, Extractor, ExtractorMsg,
     },
-    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
     pb::{
         sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
         tycho::evm::v1::BlockContractChanges,
     },
-    storage::{postgres::cache::CachedGateway, BlockIdentifier, BlockOrTimestamp, StorageError},
 };
-use tycho_types::Bytes;
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
 
+use ethers::types::{H160, H256};
+use mockall::automock;
+use prost::Message;
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::Arc,
+};
+use tokio::sync::Mutex;
+use tracing::{debug, info, instrument, trace};
+use tycho_core::{
+    models,
+    models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
+    storage::{
+        BlockIdentifier, ChainGateway, ContractStateGateway, ExtractionStateGateway,
+        ProtocolGateway, StorageError,
+    },
+    Bytes,
+};
+use tycho_storage::postgres::cache::CachedGateway;
+
+#[allow(dead_code)]
 const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
 struct Inner {
@@ -116,7 +119,6 @@ where
     name: String,
     chain: Chain,
     sync_batch_size: usize,
-    pool: Pool<AsyncPgConnection>,
     state_gateway: CachedGateway,
     token_pre_processor: T,
 }
@@ -151,7 +153,6 @@ where
         name: &str,
         chain: Chain,
         sync_batch_size: usize,
-        pool: Pool<AsyncPgConnection>,
         gw: CachedGateway,
         token_pre_processor: T,
     ) -> Self {
@@ -159,7 +160,6 @@ where
             name: name.to_owned(),
             chain,
             sync_batch_size,
-            pool,
             state_gateway: gw,
             token_pre_processor,
         }
@@ -179,12 +179,6 @@ where
         &self,
         protocol_components: Vec<evm::ProtocolComponent>,
     ) -> Result<Vec<H160>, StorageError> {
-        let mut conn = self
-            .pool
-            .get()
-            .await
-            .expect("pool should be connected");
-
         let mut tokens_set = HashSet::new();
         let mut addresses = HashSet::new();
         for component in protocol_components {
@@ -200,11 +194,11 @@ where
 
         let db_tokens = self
             .state_gateway
-            .get_tokens(self.chain, addresses_option, &mut conn)
+            .get_tokens(self.chain, addresses_option)
             .await?;
 
         for token in db_tokens {
-            tokens_set.remove(&token.address);
+            tokens_set.remove(&H160::from_slice(token.address.as_ref()));
         }
         Ok(tokens_set.into_iter().collect())
     }
@@ -218,7 +212,7 @@ where
     ) -> Result<(), StorageError> {
         debug!("Upserting block");
         self.state_gateway
-            .start_transaction(&changes.block)
+            .start_transaction(&(&changes.block).into())
             .await;
         let protocol_components = changes
             .tx_updates
@@ -236,7 +230,10 @@ where
             let new_tokens = self
                 .token_pre_processor
                 .get_tokens(new_tokens_addresses)
-                .await;
+                .await
+                .iter()
+                .map(Into::into)
+                .collect::<Vec<_>>();
 
             self.state_gateway
                 .add_tokens(&new_tokens)
@@ -244,37 +241,38 @@ where
         }
 
         self.state_gateway
-            .upsert_block(&changes.block)
+            .upsert_block(&[(&changes.block).into()])
             .await?;
         for update in changes.tx_updates.iter() {
             debug!(tx_hash = ?update.tx.hash, "Processing transaction");
             self.state_gateway
-                .upsert_tx(&update.tx)
+                .upsert_tx(&[(&update.tx).into()])
                 .await?;
             for (_, acc_update) in update.account_updates.iter() {
                 if acc_update.is_creation() {
                     let new: evm::Account = acc_update.ref_into_account(&update.tx);
                     info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
                     self.state_gateway
-                        .insert_contract(&new)
+                        .insert_contract(&(&new).into())
                         .await?;
                 }
             }
             if !update.protocol_components.is_empty() {
-                let protocol_components: Vec<evm::ProtocolComponent> = update
+                let protocol_components: Vec<models::protocol::ProtocolComponent> = update
                     .protocol_components
                     .values()
-                    .cloned()
+                    .map(Into::into)
                     .collect();
                 self.state_gateway
                     .add_protocol_components(&protocol_components)
                     .await?;
             }
             if !update.component_balances.is_empty() {
-                let mut component_balances_vec: Vec<evm::ComponentBalance> = Vec::new();
+                let mut component_balances_vec: Vec<models::protocol::ComponentBalance> =
+                    Vec::new();
                 for inner_map in update.component_balances.values() {
                     for balance in inner_map.values() {
-                        component_balances_vec.push(balance.clone());
+                        component_balances_vec.push(balance.into());
                     }
                 }
                 self.state_gateway
@@ -282,22 +280,23 @@ where
                     .await?;
             }
         }
-        let collected_changes: Vec<(Bytes, AccountUpdate)> = changes
+        let collected_changes: Vec<(Bytes, models::contract::ContractDelta)> = changes
             .tx_updates
             .iter()
             .flat_map(|u| {
-                let a: Vec<(Bytes, AccountUpdate)> = u
+                let a: Vec<(Bytes, models::contract::ContractDelta)> = u
                     .account_updates
                     .clone()
                     .into_iter()
                     .filter(|(_, acc_u)| acc_u.is_update())
-                    .map(|(_, acc_u)| (tycho_types::Bytes::from(u.tx.hash), acc_u))
+                    .map(|(_, acc_u)| (tycho_core::Bytes::from(u.tx.hash), (&acc_u).into()))
                     .collect();
                 a
             })
             .collect();
 
-        let changes_slice: &[(Bytes, AccountUpdate)] = collected_changes.as_slice();
+        let changes_slice: &[(Bytes, models::contract::ContractDelta)] =
+            collected_changes.as_slice();
 
         self.state_gateway
             .update_contracts(changes_slice)
@@ -310,77 +309,10 @@ where
             .await
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block = ? to))]
-    async fn backward(
-        &self,
-        current: Option<BlockIdentifier>,
-        to: &BlockIdentifier,
-        new_cursor: &str,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<evm::BlockAccountChanges, StorageError> {
-        let block = self
-            .state_gateway
-            .get_block(to, conn)
-            .await?;
-        let start = current.map(BlockOrTimestamp::Block);
-
-        let target = BlockOrTimestamp::Block(to.clone());
-        let address = H160(AMBIENT_CONTRACT);
-        let (account_updates, _, component_balances) = self
-            .state_gateway
-            .get_delta(&self.chain, start.as_ref(), &target)
-            .await?;
-        let account_updates = account_updates
-            .into_iter()
-            .filter_map(|u| if u.address == address { Some((u.address, u)) } else { None })
-            .collect();
-
-        let mut component_balances_map: HashMap<
-            evm::ComponentId,
-            HashMap<H160, evm::ComponentBalance>,
-        > = HashMap::new();
-        for balance in component_balances {
-            let component_id = balance.component_id.clone();
-            let h160 = balance.token;
-            let inner_map = component_balances_map
-                .entry(component_id)
-                .or_default();
-            inner_map.insert(h160, balance);
-        }
-
-        /* This method does not exist anymore
-        self.state_gateway
-            .revert_state(to)
-            .await?;
-        */
-
-        self.state_gateway
-            .start_transaction(&block)
-            .await;
-        self.save_cursor(new_cursor).await?;
-        self.state_gateway
-            .commit_transaction(0)
-            .await?;
-
-        let changes = evm::BlockAccountChanges::new(
-            &self.name,
-            self.chain,
-            block,
-            true,
-            account_updates,
-            // TODO: consider adding components that were deleted back
-            //  and remove components that were added.
-            HashMap::new(),
-            HashMap::new(),
-            component_balances_map,
-        );
-        Result::<evm::BlockAccountChanges, StorageError>::Ok(changes)
-    }
-
-    async fn get_last_cursor(&self, conn: &mut AsyncPgConnection) -> Result<Vec<u8>, StorageError> {
+    async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
         let state = self
             .state_gateway
-            .get_state(&self.name, &self.chain, conn)
+            .get_state(&self.name, &self.chain)
             .await?;
         Ok(state.cursor)
     }
@@ -389,14 +321,12 @@ where
 #[async_trait]
 impl AmbientGateway for AmbientPgGateway<TokenPreProcessor> {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
-        let mut conn = self.pool.get().await.unwrap();
-        self.get_last_cursor(&mut conn).await
+        self.get_last_cursor().await
     }
 
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
-        let mut conn = self.pool.get().await.unwrap();
         self.state_gateway
-            .add_protocol_types(new_protocol_types, &mut *conn)
+            .add_protocol_types(new_protocol_types)
             .await
             .expect("Couldn't insert protocol types");
     }
@@ -413,6 +343,7 @@ impl AmbientGateway for AmbientPgGateway<TokenPreProcessor> {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % to))]
     async fn revert(
         &self,
@@ -615,12 +546,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        models::{FinancialType, ImplementationType},
-        pb::sf::substreams::v1::BlockRef,
-    };
-
     use super::*;
+    use crate::pb::sf::substreams::v1::BlockRef;
+    use tycho_core::models::{FinancialType, ImplementationType};
 
     fn ambient_protocol_types() -> HashMap<String, ProtocolType> {
         let mut ambient_protocol_types = HashMap::new();
@@ -786,7 +714,7 @@ mod test {
         // Call handle_tick_scoped_data to initialize the last processed block.
         let inp = evm::fixtures::pb_block_scoped_data(block_contract_changes_ok());
 
-        let res = extractor
+        extractor
             .handle_tick_scoped_data(inp)
             .await
             .unwrap();
@@ -813,20 +741,21 @@ mod test_serial_db {
     //!
     //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
     //! between this component and the actual db interactions
-    use crate::{
-        extractor::evm::{
-            token_pre_processor::MockTokenPreProcessorTrait, ComponentBalance, ProtocolComponent,
-        },
-        storage::{
-            postgres,
-            postgres::{db_fixtures, testing::run_against_db, PostgresGateway},
-            ChangeType, ContractId,
-        },
+    use crate::extractor::evm::{
+        token_pre_processor::MockTokenPreProcessorTrait, AccountUpdate, ComponentBalance,
+        ProtocolComponent,
     };
+    use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
     use ethers::types::U256;
-    use mpsc::channel;
     use test_log::test;
-    use tokio::sync::mpsc;
+    use tycho_core::{
+        models::{ChangeType, ContractId},
+        storage::BlockOrTimestamp,
+    };
+    use tycho_storage::{
+        postgres,
+        postgres::{builder::GatewayBuilder, db_fixtures, testing::run_against_db},
+    };
 
     use super::*;
 
@@ -834,6 +763,10 @@ mod test_serial_db {
     const TX_HASH_1: &str = "0x0d9e0da36cf9f305a189965b248fc79c923619801e8ab5ef158d4fd528a291ad";
     const TX_HASH_2: &str = "0xcf574444be25450fe26d16b85102b241e964a6e01d75dd962203d4888269be3d";
     const BLOCK_HASH_0: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
+
+    const WETH_ADDRESS: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+    const USDC_ADDRESS: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+    const USDT_ADDRESS: &str = "dAC17F958D2ee523a2206206994597C13D831ec7";
 
     fn get_mocked_token_pre_processor() -> MockTokenPreProcessorTrait {
         let mut mock_processor = MockTokenPreProcessorTrait::new();
@@ -868,54 +801,37 @@ mod test_serial_db {
 
     async fn setup_gw(
         pool: Pool<AsyncPgConnection>,
-    ) -> (AmbientPgGateway<MockTokenPreProcessorTrait>, Pool<AsyncPgConnection>) {
+    ) -> AmbientPgGateway<MockTokenPreProcessorTrait> {
         let mut conn = pool
             .get()
             .await
             .expect("pool should get a connection");
-        postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
-        postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
+
         postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None).await;
-        let evm_gw = Arc::new(
-            PostgresGateway::<
-                evm::Block,
-                evm::Transaction,
-                evm::Account,
-                evm::AccountUpdate,
-                evm::ERC20Token,
-            >::from_connection(&mut conn)
-            .await,
-        );
+        let chain_id = postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        db_fixtures::insert_token(&mut conn, chain_id, WETH_ADDRESS, "WETH", 18).await;
+        db_fixtures::insert_token(&mut conn, chain_id, USDC_ADDRESS, "USDC", 6).await;
 
-        let (tx, rx) = channel(10);
-
-        let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
-            "ethereum".to_owned(),
-            Chain::Ethereum,
-            pool.clone(),
-            evm_gw.clone(),
-            rx,
-        )
-        .await;
-
-        let handle = write_executor.run();
-        let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
-
-        let gw = AmbientPgGateway::new(
+        let db_url = std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+        let (cached_gw, _jh) = GatewayBuilder::new(db_url.as_str())
+            .set_chains(&[Chain::Ethereum])
+            .set_protocol_systems(&["ambient".to_string()])
+            .build()
+            .await
+            .expect("failed to build postgres gateway");
+        AmbientPgGateway::new(
             "vm:ambient",
             Chain::Ethereum,
             1000,
-            pool.clone(),
             cached_gw,
             get_mocked_token_pre_processor(),
-        );
-        (gw, pool)
+        )
     }
 
     #[tokio::test]
     async fn test_get_cursor() {
         run_against_db(|pool| async move {
-            let (gw, pool) = setup_gw(pool).await;
+            let gw = setup_gw(pool).await;
             let evm_gw = gw.state_gateway.clone();
             let state = ExtractionState::new(
                 "vm:ambient".to_string(),
@@ -923,12 +839,8 @@ mod test_serial_db {
                 None,
                 "cursor@420".as_bytes(),
             );
-            let mut conn = pool
-                .get()
-                .await
-                .expect("pool should get a connection");
             evm_gw
-                .start_transaction(&evm::Block::default())
+                .start_transaction(&models::blockchain::Block::default())
                 .await;
             evm_gw
                 .save_state(&state)
@@ -940,7 +852,7 @@ mod test_serial_db {
                 .expect("gw transaction failed");
 
             let cursor = gw
-                .get_last_cursor(&mut conn)
+                .get_last_cursor()
                 .await
                 .expect("get cursor should succeed");
 
@@ -949,9 +861,9 @@ mod test_serial_db {
         .await;
     }
 
-    fn ambient_account(at_version: u64) -> evm::Account {
+    fn ambient_account(at_version: u64) -> models::contract::Contract {
         match at_version {
-            0 => evm::Account::new(
+            0 => (&evm::Account::new(
                 Chain::Ethereum,
                 "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688"
                     .parse()
@@ -966,7 +878,8 @@ mod test_serial_db {
                 TX_HASH_1.parse().unwrap(),
                 TX_HASH_0.parse().unwrap(),
                 Some(TX_HASH_0.parse().unwrap()),
-            ),
+            ))
+                .into(),
             _ => panic!("Unkown version"),
         }
     }
@@ -1061,6 +974,8 @@ mod test_serial_db {
         }
     }
 
+    // Allow dead code until reverts are supported again
+    #[allow(dead_code)]
     fn ambient_update02() -> evm::BlockContractChanges {
         let block = evm::Block {
             number: 1,
@@ -1098,7 +1013,7 @@ mod test_serial_db {
     #[test(tokio::test)]
     async fn test_upsert_contract() {
         run_against_db(|pool| async move {
-            let (gw, pool) = setup_gw(pool).await;
+            let gw = setup_gw(pool).await;
             let msg = ambient_creation_and_update();
             let exp = ambient_account(0);
 
@@ -1108,33 +1023,28 @@ mod test_serial_db {
 
             let cached_gw: CachedGateway = gw.state_gateway;
 
-            let mut conn = pool
-                .get()
-                .await
-                .expect("pool should get a connection");
             let res = cached_gw
                 .get_contract(
                     &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
                     None,
                     true,
-                    &mut conn,
                 )
                 .await
                 .expect("test successfully inserted ambient contract");
             assert_eq!(res, exp);
 
             let tokens = cached_gw
-                .get_tokens(Chain::Ethereum, None, &mut conn)
+                .get_tokens(Chain::Ethereum, None)
                 .await
                 .unwrap();
             assert_eq!(tokens.len(), 2);
 
             let protocol_components = cached_gw
-                .get_protocol_components(&Chain::Ethereum, None, None, None, &mut conn)
+                .get_protocol_components(&Chain::Ethereum, None, None, None)
                 .await
                 .unwrap();
             assert_eq!(protocol_components.len(), 1);
-            assert_eq!(protocol_components[0].creation_tx, TX_HASH_0.parse().unwrap());
+            assert_eq!(protocol_components[0].creation_tx, Bytes::from(TX_HASH_0));
 
             let component_balances = cached_gw
                 .get_balance_deltas(
@@ -1144,7 +1054,6 @@ mod test_serial_db {
                         Chain::Ethereum,
                         msg.block.number as i64,
                     ))),
-                    &mut conn,
                 )
                 .await
                 .unwrap();
@@ -1157,132 +1066,10 @@ mod test_serial_db {
         .await;
     }
 
-    #[ignore]
-    #[tokio::test]
-    async fn test_revert() {
-        run_against_db(|pool| async move {
-            let mut conn = pool
-                .get()
-                .await
-                .expect("pool should get a connection");
-            postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
-            postgres::db_fixtures::insert_protocol_system(&mut conn, "ambient".to_owned()).await;
-            postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None)
-                .await;
-            let evm_gw = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut conn)
-                .await,
-            );
-
-            let (tx, rx) = channel(10);
-            let write_executor = crate::storage::postgres::cache::DBCacheWriteExecutor::new(
-                "ethereum".to_owned(),
-                Chain::Ethereum,
-                pool.clone(),
-                evm_gw.clone(),
-                rx,
-            )
-            .await;
-
-            let handle = write_executor.run();
-            let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
-
-            let gw = AmbientPgGateway::new(
-                "vm:ambient",
-                Chain::Ethereum,
-                1000,
-                pool.clone(),
-                cached_gw,
-                get_mocked_token_pre_processor(),
-            );
-
-            let msg0 = ambient_creation_and_update();
-            let msg1 = ambient_update02();
-            gw.forward(&msg0, "cursor@0", false)
-                .await
-                .expect("upsert should succeed");
-            gw.forward(&msg1, "cursor@1", false)
-                .await
-                .expect("upsert should succeed");
-            let ambient_address = H160(AMBIENT_CONTRACT);
-            let exp_change = evm::AccountUpdate::new(
-                ambient_address,
-                Chain::Ethereum,
-                evm::fixtures::evm_slots([(42, 0)]),
-                Some(U256::from(1000)),
-                None,
-                ChangeType::Update,
-            );
-            let exp_account = ambient_account(0);
-
-            let changes = gw
-                .backward(
-                    None,
-                    &BlockIdentifier::Number((Chain::Ethereum, 0)),
-                    "cursor@2",
-                    &mut conn,
-                )
-                .await
-                .expect("revert should succeed");
-
-            assert_eq!(changes.account_updates.len(), 1);
-            assert_eq!(changes.account_updates[&ambient_address], exp_change);
-            let cached_gw: CachedGateway = gw.state_gateway;
-            let account = cached_gw
-                .get_contract(
-                    &ContractId::new(Chain::Ethereum, AMBIENT_CONTRACT.into()),
-                    None,
-                    true,
-                    &mut conn,
-                )
-                .await
-                .expect("test successfully retrieved ambient contract");
-            assert_eq!(account, exp_account);
-        })
-        .await;
-    }
-
     #[tokio::test]
     async fn test_get_new_tokens() {
         run_against_db(|pool| async move {
-            let mut conn = pool
-                .get()
-                .await
-                .expect("pool should get a connection");
-            let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
-
-            let evm_gw = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut conn)
-                .await,
-            );
-            let (tx, rx) = channel(10);
-            let cached_gw = CachedGateway::new(tx, pool.clone(), evm_gw.clone());
-            let gw = AmbientPgGateway::new(
-                "vm:ambient",
-                Chain::Ethereum,
-                1000,
-                pool.clone(),
-                cached_gw,
-                get_mocked_token_pre_processor(),
-            );
-
-            let weth_address: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
-            let usdc_address: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
-            let usdt_address: &str = "dAC17F958D2ee523a2206206994597C13D831ec7";
-            db_fixtures::insert_token(&mut conn, chain_id, weth_address, "WETH", 18).await;
-            db_fixtures::insert_token(&mut conn, chain_id, usdc_address, "USDC", 6).await;
+            let gw = setup_gw(pool.clone()).await;
 
             let component_1 = evm::ProtocolComponent {
                 id: "ambient_USDC_WETH".to_owned(),
@@ -1290,8 +1077,8 @@ mod test_serial_db {
                 protocol_type_name: "vm:pool".to_string(),
                 chain: Default::default(),
                 tokens: vec![
-                    H160::from_str(weth_address).expect("Invalid H160 address"),
-                    H160::from_str(usdc_address).expect("Invalid H160 address"),
+                    H160::from_str(WETH_ADDRESS).expect("Invalid H160 address"),
+                    H160::from_str(USDC_ADDRESS).expect("Invalid H160 address"),
                 ],
                 contract_ids: vec![],
                 creation_tx: Default::default(),
@@ -1305,8 +1092,8 @@ mod test_serial_db {
                 protocol_type_name: "vm:pool".to_string(),
                 chain: Default::default(),
                 tokens: vec![
-                    H160::from_str(weth_address).expect("Invalid H160 address"),
-                    H160::from_str(usdt_address).expect("Invalid H160 address"),
+                    H160::from_str(WETH_ADDRESS).expect("Invalid H160 address"),
+                    H160::from_str(USDT_ADDRESS).expect("Invalid H160 address"),
                 ],
                 contract_ids: vec![],
                 creation_tx: Default::default(),
@@ -1327,7 +1114,7 @@ mod test_serial_db {
                 .await
                 .unwrap();
             assert_eq!(new_tokens.len(), 1);
-            assert_eq!(new_tokens[0], H160::from_str(usdt_address).expect("Invalid H160 address"));
+            assert_eq!(new_tokens[0], H160::from_str(USDT_ADDRESS).expect("Invalid H160 address"));
         })
         .await;
     }

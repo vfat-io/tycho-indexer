@@ -1,13 +1,11 @@
-use std::{
-    num::NonZeroUsize,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
-
+use super::{PostgresError, PostgresGateway};
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
 use lru::LruCache;
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use tokio::{
     sync::{
         mpsc,
@@ -17,37 +15,46 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{debug, error, info, trace};
-
-use crate::{
-    extractor::evm::{
-        self, AccountUpdate, ComponentBalance, ERC20Token, EVMStateGateway, ProtocolComponent,
-        ProtocolStateDelta,
+use tycho_core::{
+    models,
+    models::{
+        blockchain::{Block, Transaction},
+        contract::{Contract, ContractDelta},
+        protocol::{
+            ComponentBalance, ProtocolComponent, ProtocolComponentState,
+            ProtocolComponentStateDelta,
+        },
+        token::CurrencyToken,
+        Address, Chain, ContractId, ExtractionState, ProtocolType, TxHash,
     },
-    models::{Chain, ExtractionState},
-    storage::{BlockIdentifier, BlockOrTimestamp, StorageError, TxHash},
+    storage::{
+        BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
+        ExtractionStateGateway, Gateway, ProtocolGateway, StorageError, Version,
+    },
+    Bytes,
 };
 
 /// Represents different types of database write operations.
 #[derive(PartialEq, Clone, Debug)]
 pub(crate) enum WriteOp {
     // Simply merge
-    UpsertBlock(Vec<evm::Block>),
+    UpsertBlock(Vec<models::blockchain::Block>),
     // Simply merge
-    UpsertTx(Vec<evm::Transaction>),
+    UpsertTx(Vec<models::blockchain::Transaction>),
     // Simply keep last
     SaveExtractionState(ExtractionState),
     // Support saving a batch
-    InsertContract(Vec<evm::Account>),
+    InsertContract(Vec<models::contract::Contract>),
     // Simply merge
-    UpdateContracts(Vec<(TxHash, AccountUpdate)>),
+    UpdateContracts(Vec<(TxHash, models::contract::ContractDelta)>),
     // Simply merge
-    InsertProtocolComponents(Vec<evm::ProtocolComponent>),
+    InsertProtocolComponents(Vec<models::protocol::ProtocolComponent>),
     // Simply merge
-    InsertTokens(Vec<evm::ERC20Token>),
+    InsertTokens(Vec<models::token::CurrencyToken>),
     // Simply merge
-    InsertComponentBalances(Vec<evm::ComponentBalance>),
+    InsertComponentBalances(Vec<models::protocol::ComponentBalance>),
     // Simply merge
-    UpsertProtocolState(Vec<(TxHash, ProtocolStateDelta)>),
+    UpsertProtocolState(Vec<(TxHash, models::protocol::ProtocolComponentStateDelta)>),
 }
 
 impl WriteOp {
@@ -82,13 +89,13 @@ impl WriteOp {
 
 #[derive(Debug)]
 struct BlockRange {
-    start: evm::Block,
-    end: evm::Block,
+    start: models::blockchain::Block,
+    end: models::blockchain::Block,
 }
 
 impl BlockRange {
-    fn new(start: &evm::Block, end: &evm::Block) -> Self {
-        Self { start: *start, end: *end }
+    fn new(start: &models::blockchain::Block, end: &models::blockchain::Block) -> Self {
+        Self { start: start.clone(), end: end.clone() }
     }
 
     fn is_single_block(&self) -> bool {
@@ -117,12 +124,12 @@ impl DBTransaction {
             match (existing_op, &op) {
                 (WriteOp::UpsertBlock(l), WriteOp::UpsertBlock(r)) => {
                     self.size += r.len();
-                    l.extend(r);
+                    l.extend(r.iter().cloned());
                     return Ok(());
                 }
                 (WriteOp::UpsertTx(l), WriteOp::UpsertTx(r)) => {
                     self.size += r.len();
-                    l.extend(r);
+                    l.extend(r.iter().cloned());
                     return Ok(());
                 }
                 (WriteOp::SaveExtractionState(l), WriteOp::SaveExtractionState(r)) => {
@@ -216,21 +223,21 @@ pub enum DBCacheMessage {
 /// Read Operations
 /// The class does provide read operations for completeness, but it will not consider any
 /// cached changes while reading. Any reads are direct pass through to the database.
-pub struct DBCacheWriteExecutor {
+pub(crate) struct DBCacheWriteExecutor {
     name: String,
     chain: Chain,
     pool: Pool<AsyncPgConnection>,
-    state_gateway: EVMStateGateway<AsyncPgConnection>,
-    persisted_block: Option<evm::Block>,
+    state_gateway: PostgresGateway,
+    persisted_block: Option<models::blockchain::Block>,
     msg_receiver: mpsc::Receiver<DBCacheMessage>,
 }
 
 impl DBCacheWriteExecutor {
-    pub async fn new(
+    pub(crate) async fn new(
         name: String,
         chain: Chain,
         pool: Pool<AsyncPgConnection>,
-        state_gateway: EVMStateGateway<AsyncPgConnection>,
+        state_gateway: PostgresGateway,
         msg_receiver: mpsc::Receiver<DBCacheMessage>,
     ) -> Self {
         let mut conn = pool
@@ -275,13 +282,13 @@ impl DBCacheWriteExecutor {
             .expect("pool should be connected");
 
         // If persisted block is not set we don't have data for this chain yet.
-        if let Some(db_block) = self.persisted_block {
+        if let Some(db_block) = &self.persisted_block {
             // during sync we insert in batches of blocks.
             let syncing = !new_db_tx.block_range.is_single_block();
 
             // if we are not syncing we are not allowed to create a separate block range.
             if !syncing {
-                let start = new_db_tx.block_range.start;
+                let start = &new_db_tx.block_range.start;
                 // if we are advancing a block, while not syncing it must fit on top of the
                 // persisted block.
                 if start.number > db_block.number && start.parent_hash != db_block.hash {
@@ -305,7 +312,7 @@ impl DBCacheWriteExecutor {
                 async {
                     for op in new_db_tx.operations {
                         match self.execute_write_op(&op, conn).await {
-                            Err(StorageError::DuplicateEntry(entity, id)) => {
+                            Err(PostgresError(StorageError::DuplicateEntry(entity, id))) => {
                                 // As this db transaction is old. It can contain
                                 // already stored txs, we log the duplicate entry
                                 // error and continue
@@ -317,14 +324,16 @@ impl DBCacheWriteExecutor {
                             _ => {}
                         }
                     }
-                    Result::<(), StorageError>::Ok(())
+                    Result::<(), PostgresError>::Ok(())
                 }
                 .scope_boxed()
             })
             .await;
 
         // Forward the result to the sender
-        let _ = new_db_tx.tx.send(res);
+        let _ = new_db_tx
+            .tx
+            .send(res.map_err(Into::into));
         info!(block_range=?&new_db_tx.block_range, "Transaction successfully committed to DB!");
     }
 
@@ -336,23 +345,23 @@ impl DBCacheWriteExecutor {
         &mut self,
         operation: &WriteOp,
         conn: &mut AsyncPgConnection,
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), PostgresError> {
         trace!(op=?operation, name="ExecuteWriteOp");
         match operation {
             WriteOp::UpsertBlock(block) => {
                 self.state_gateway
                     .upsert_block(block, conn)
-                    .await
+                    .await?
             }
             WriteOp::UpsertTx(transaction) => {
                 self.state_gateway
                     .upsert_tx(transaction, conn)
-                    .await
+                    .await?
             }
             WriteOp::SaveExtractionState(state) => {
                 self.state_gateway
                     .save_state(state, conn)
-                    .await
+                    .await?
             }
             WriteOp::InsertContract(contracts) => {
                 for contract in contracts.iter() {
@@ -360,47 +369,47 @@ impl DBCacheWriteExecutor {
                         .insert_contract(contract, conn)
                         .await?
                 }
-                Ok(())
             }
             WriteOp::UpdateContracts(contracts) => {
-                let collected_changes: Vec<(TxHash, &AccountUpdate)> = contracts
+                let collected_changes: Vec<(TxHash, &models::contract::ContractDelta)> = contracts
                     .iter()
                     .map(|(tx, update)| (tx.clone(), update))
                     .collect();
                 let changes_slice = collected_changes.as_slice();
                 self.state_gateway
                     .update_contracts(&self.chain, changes_slice, conn)
-                    .await
+                    .await?
             }
             WriteOp::InsertProtocolComponents(components) => {
-                let collected_components: Vec<&ProtocolComponent> = components.iter().collect();
                 self.state_gateway
-                    .add_protocol_components(collected_components.as_slice(), conn)
-                    .await
+                    .add_protocol_components(components.as_slice(), conn)
+                    .await?
             }
             WriteOp::InsertTokens(tokens) => {
-                let collected_tokens: Vec<&ERC20Token> = tokens.iter().collect();
                 self.state_gateway
-                    .add_tokens(collected_tokens.as_slice(), conn)
-                    .await
+                    .add_tokens(tokens.as_slice(), conn)
+                    .await?
             }
             WriteOp::InsertComponentBalances(balances) => {
-                let collected_balances: Vec<&evm::ComponentBalance> = balances.iter().collect();
                 self.state_gateway
-                    .add_component_balances(collected_balances.as_slice(), &self.chain, conn)
-                    .await
+                    .add_component_balances(balances.as_slice(), &self.chain, conn)
+                    .await?
             }
             WriteOp::UpsertProtocolState(deltas) => {
-                let collected_changes: Vec<(TxHash, &ProtocolStateDelta)> = deltas
+                let collected_changes: Vec<(
+                    TxHash,
+                    &models::protocol::ProtocolComponentStateDelta,
+                )> = deltas
                     .iter()
                     .map(|(tx, update)| (tx.clone(), update))
                     .collect();
                 let changes_slice = collected_changes.as_slice();
                 self.state_gateway
                     .update_protocol_states(&self.chain, changes_slice, conn)
-                    .await
+                    .await?
             }
-        }
+        };
+        Ok(())
     }
 }
 
@@ -412,7 +421,11 @@ struct RevertParameters {
 
 type DeltasCache = LruCache<
     RevertParameters,
-    (Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>),
+    (
+        Vec<models::contract::ContractDelta>,
+        Vec<models::protocol::ProtocolComponentStateDelta>,
+        Vec<models::protocol::ComponentBalance>,
+    ),
 >;
 
 type OpenTx = (DBTransaction, oneshot::Receiver<Result<(), StorageError>>);
@@ -425,7 +438,7 @@ pub struct CachedGateway {
     open_tx: Arc<Mutex<Option<OpenTx>>>,
     tx: mpsc::Sender<DBCacheMessage>,
     pool: Pool<AsyncPgConnection>,
-    state_gateway: EVMStateGateway<AsyncPgConnection>,
+    state_gateway: PostgresGateway,
     lru_cache: Arc<Mutex<DeltasCache>>,
 }
 
@@ -444,11 +457,11 @@ impl Clone for CachedGateway {
 
 impl CachedGateway {
     // Accumulating transactions does not drop previous data nor are transactions nested.
-    pub async fn start_transaction(&self, block: &evm::Block) {
+    pub async fn start_transaction(&self, block: &models::blockchain::Block) {
         let mut open_tx = self.open_tx.lock().await;
 
         if let Some(tx) = open_tx.as_mut() {
-            tx.0.block_range.end = *block;
+            tx.0.block_range.end = block.clone();
         } else {
             let (tx, rx) = oneshot::channel();
             *open_tx = Some((
@@ -515,7 +528,7 @@ impl CachedGateway {
     pub fn new(
         tx: mpsc::Sender<DBCacheMessage>,
         pool: Pool<AsyncPgConnection>,
-        state_gateway: EVMStateGateway<AsyncPgConnection>,
+        state_gateway: PostgresGateway,
     ) -> Self {
         CachedGateway {
             tx,
@@ -525,46 +538,20 @@ impl CachedGateway {
             lru_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(5).unwrap()))),
         }
     }
-    pub async fn upsert_block(&self, new: &evm::Block) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpsertBlock(vec![*new]))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn upsert_tx(&self, new: &evm::Transaction) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpsertTx(vec![*new]))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn save_state(&self, new: &ExtractionState) -> Result<(), StorageError> {
-        self.add_op(WriteOp::SaveExtractionState(new.clone()))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn insert_contract(&self, new: &evm::Account) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertContract(vec![new.clone()]))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn update_contracts(
-        &self,
-        new: &[(TxHash, AccountUpdate)],
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpdateContracts(new.to_owned()))
-            .await?;
-        Ok(())
-    }
 
     pub async fn get_delta(
         &self,
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<(Vec<AccountUpdate>, Vec<ProtocolStateDelta>, Vec<ComponentBalance>), StorageError>
-    {
+    ) -> Result<
+        (
+            Vec<models::contract::ContractDelta>,
+            Vec<models::protocol::ProtocolComponentStateDelta>,
+            Vec<models::protocol::ComponentBalance>,
+        ),
+        StorageError,
+    > {
         let mut lru_cache = self.lru_cache.lock().await;
 
         if start_version.is_none() {
@@ -606,71 +593,331 @@ impl CachedGateway {
 
         Ok((accounts_delta, protocol_delta, balance_deltas))
     }
+}
 
-    pub async fn update_protocol_states(
-        &self,
-        new: &[(TxHash, ProtocolStateDelta)],
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpsertProtocolState(new.to_owned()))
-            .await?;
-        Ok(())
+#[async_trait]
+impl ExtractionStateGateway for CachedGateway {
+    async fn get_state(&self, name: &str, chain: &Chain) -> Result<ExtractionState, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_state(name, chain, &mut conn)
+            .await
     }
 
-    pub async fn add_protocol_components(
-        &self,
-        new: &[evm::ProtocolComponent],
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertProtocolComponents(Vec::from(new)))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn add_tokens(&self, new: &[evm::ERC20Token]) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertTokens(Vec::from(new)))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn add_component_balances(
-        &self,
-        new: &[evm::ComponentBalance],
-    ) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertComponentBalances(Vec::from(new)))
+    async fn save_state(&self, new: &ExtractionState) -> Result<(), StorageError> {
+        self.add_op(WriteOp::SaveExtractionState(new.clone()))
             .await?;
         Ok(())
     }
 }
 
-// These two implementations allow us to inherit EVMStateGateway methods. If CachedGateway doesn't
-// implement the called method and EVMStateGateway does, then the call will be forwarded to
-// EVMStateGateway.
-impl Deref for CachedGateway {
-    type Target = EVMStateGateway<AsyncPgConnection>;
+#[async_trait]
+impl ChainGateway for CachedGateway {
+    async fn upsert_block(&self, new: &[Block]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertBlock(new.to_vec()))
+            .await?;
+        Ok(())
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.state_gateway
+    async fn get_block(&self, id: &BlockIdentifier) -> Result<Block, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_block(id, &mut conn)
+            .await
+    }
+
+    async fn upsert_tx(&self, new: &[Transaction]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertTx(new.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn get_tx(&self, hash: &TxHash) -> Result<Transaction, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_tx(hash, &mut conn)
+            .await
+    }
+
+    async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .revert_state(to, &mut conn)
+            .await
     }
 }
 
-impl DerefMut for CachedGateway {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state_gateway
+#[async_trait]
+impl ContractStateGateway for CachedGateway {
+    async fn get_contract(
+        &self,
+        id: &ContractId,
+        version: Option<&Version>,
+        include_slots: bool,
+    ) -> Result<Contract, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_contract(id, version, include_slots, &mut conn)
+            .await
+    }
+
+    async fn get_contracts(
+        &self,
+        chain: &Chain,
+        addresses: Option<&[Address]>,
+        version: Option<&Version>,
+        include_slots: bool,
+    ) -> Result<Vec<Contract>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_contracts(chain, addresses, version, include_slots, &mut conn)
+            .await
+    }
+
+    async fn insert_contract(&self, new: &Contract) -> Result<(), StorageError> {
+        self.add_op(WriteOp::InsertContract(vec![new.clone()]))
+            .await?;
+        Ok(())
+    }
+
+    async fn update_contracts(&self, new: &[(TxHash, ContractDelta)]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpdateContracts(new.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_contract(&self, id: &ContractId, at_tx: &TxHash) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .delete_contract(id, at_tx, &mut conn)
+            .await
+    }
+
+    async fn get_accounts_delta(
+        &self,
+        chain: &Chain,
+        start_version: Option<&BlockOrTimestamp>,
+        end_version: &BlockOrTimestamp,
+    ) -> Result<Vec<ContractDelta>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_accounts_delta(chain, start_version, end_version, &mut conn)
+            .await
     }
 }
+
+#[async_trait]
+impl ProtocolGateway for CachedGateway {
+    async fn get_protocol_components(
+        &self,
+        chain: &Chain,
+        system: Option<String>,
+        ids: Option<&[&str]>,
+        min_tvl: Option<f64>,
+    ) -> Result<Vec<ProtocolComponent>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_protocol_components(chain, system, ids, min_tvl, &mut conn)
+            .await
+    }
+
+    async fn add_protocol_components(&self, new: &[ProtocolComponent]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::InsertProtocolComponents(new.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_protocol_components(
+        &self,
+        to_delete: &[ProtocolComponent],
+        block_ts: NaiveDateTime,
+    ) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .delete_protocol_components(to_delete, block_ts, &mut conn)
+            .await
+    }
+
+    async fn add_protocol_types(
+        &self,
+        new_protocol_types: &[ProtocolType],
+    ) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .add_protocol_types(new_protocol_types, &mut conn)
+            .await
+    }
+
+    async fn get_protocol_states(
+        &self,
+        chain: &Chain,
+        at: Option<Version>,
+        system: Option<String>,
+        id: Option<&[&str]>,
+    ) -> Result<Vec<ProtocolComponentState>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_protocol_states(chain, at, system, id, &mut conn)
+            .await
+    }
+
+    async fn update_protocol_states(
+        &self,
+        new: &[(TxHash, ProtocolComponentStateDelta)],
+    ) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertProtocolState(new.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn get_tokens(
+        &self,
+        chain: Chain,
+        address: Option<&[&Address]>,
+    ) -> Result<Vec<CurrencyToken>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_tokens(chain, address, &mut conn)
+            .await
+    }
+
+    async fn add_component_balances(
+        &self,
+        component_balances: &[ComponentBalance],
+    ) -> Result<(), StorageError> {
+        self.add_op(WriteOp::InsertComponentBalances(component_balances.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn add_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::InsertTokens(tokens.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn get_protocol_states_delta(
+        &self,
+        chain: &Chain,
+        start_version: Option<&BlockOrTimestamp>,
+        end_version: &BlockOrTimestamp,
+    ) -> Result<Vec<ProtocolComponentStateDelta>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_protocol_states_delta(chain, start_version, end_version, &mut conn)
+            .await
+    }
+
+    async fn get_balance_deltas(
+        &self,
+        chain: &Chain,
+        start_version: Option<&BlockOrTimestamp>,
+        target_version: &BlockOrTimestamp,
+    ) -> Result<Vec<ComponentBalance>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_balance_deltas(chain, start_version, target_version, &mut conn)
+            .await
+    }
+
+    async fn get_balances(
+        &self,
+        chain: &Chain,
+        ids: Option<&[&str]>,
+        at: Option<&BlockOrTimestamp>,
+    ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_balances(chain, ids, at, &mut conn)
+            .await
+    }
+
+    async fn get_token_prices(&self, chain: &Chain) -> Result<HashMap<Bytes, f64>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_token_prices(chain, &mut conn)
+            .await
+    }
+
+    /// TODO: add to transaction instead
+    async fn upsert_component_tvl(
+        &self,
+        chain: &Chain,
+        tvl_values: &HashMap<String, f64>,
+    ) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .upsert_component_tvl(chain, tvl_values, &mut conn)
+            .await
+    }
+}
+
+impl Gateway for CachedGateway {}
 
 #[cfg(test)]
 mod test_serial_db {
-    use crate::storage::postgres::{db_fixtures, orm, testing::run_against_db, PostgresGateway};
-    use ethers::{
-        prelude::H256,
-        types::{H160, U256},
-    };
-    use std::{collections::HashMap, str::FromStr};
-    use tycho_types::Bytes;
-
-    use crate::pb::tycho::evm::v1::ChangeType;
-
     use super::*;
+    use crate::postgres::{db_fixtures, testing::run_against_db};
+    use ethers::types::U256;
+    use std::{
+        collections::{HashMap, HashSet},
+        str::FromStr,
+    };
+    use tycho_core::{models::ChangeType, Bytes};
 
     #[tokio::test]
     async fn test_write_and_flush() {
@@ -680,17 +927,7 @@ mod test_serial_db {
                 .await
                 .expect("Failed to get a connection from the pool");
             db_fixtures::insert_chain(&mut connection, "ethereum").await;
-            let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut connection)
-                .await,
-            );
-
+            let gateway: PostgresGateway = PostgresGateway::from_connection(&mut connection).await;
             let (tx, rx) = mpsc::channel(10);
             let write_executor = DBCacheWriteExecutor::new(
                 "ethereum".to_owned(),
@@ -705,8 +942,12 @@ mod test_serial_db {
 
             // Send write block message
             let block = get_sample_block(1);
-            let os_rx =
-                send_write_message(&tx, block, vec![WriteOp::UpsertBlock(vec![block])]).await;
+            let os_rx = send_write_message(
+                &tx,
+                block.clone(),
+                vec![WriteOp::UpsertBlock(vec![block.clone()])],
+            )
+            .await;
             os_rx
                 .await
                 .expect("Response from channel ok")
@@ -736,17 +977,7 @@ mod test_serial_db {
             db_fixtures::insert_protocol_system(&mut connection, "ambient".to_owned()).await;
             db_fixtures::insert_protocol_type(&mut connection, "ambient_pool", None, None, None)
                 .await;
-            let gateway: EVMStateGateway<AsyncPgConnection> = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut connection)
-                .await,
-            );
-
+            let gateway: PostgresGateway = PostgresGateway::from_connection(&mut connection).await;
             let (tx, rx) = mpsc::channel(10);
 
             let write_executor = DBCacheWriteExecutor::new(
@@ -764,43 +995,42 @@ mod test_serial_db {
             let block_1 = get_sample_block(1);
             let tx_1 = get_sample_transaction(1);
             let extraction_state_1 = get_sample_extraction(1);
-            let usdc_address =
-                H160::from_str("0xdAC17F958D2ee523a2206206994597C13D831ec7").unwrap();
-            let token = ERC20Token::new(
-                usdc_address,
-                "USDT".to_string(),
+            let usdc_address = Bytes::from("0xdAC17F958D2ee523a2206206994597C13D831ec7");
+            let token = models::token::CurrencyToken::new(
+                &usdc_address,
+                "USDT",
                 6,
                 0,
-                vec![Some(64), None],
+                &[Some(64), None],
                 Chain::Ethereum,
                 100,
             );
             let protocol_component_id = "ambient_USDT-USDC".to_owned();
-            let protocol_component = ProtocolComponent {
+            let protocol_component = models::protocol::ProtocolComponent {
                 id: protocol_component_id.clone(),
                 protocol_system: "ambient".to_string(),
                 protocol_type_name: "ambient_pool".to_string(),
                 chain: Default::default(),
-                tokens: vec![usdc_address],
-                contract_ids: vec![],
-                change: ChangeType::Creation.into(),
-                creation_tx: tx_1.hash,
+                tokens: vec![usdc_address.clone()],
+                contract_addresses: vec![],
+                change: ChangeType::Creation,
+                creation_tx: tx_1.hash.clone(),
                 static_attributes: Default::default(),
                 created_at: Default::default(),
             };
-            let component_balance = ComponentBalance {
-                token: usdc_address,
+            let component_balance = models::protocol::ComponentBalance {
+                token: usdc_address.clone(),
                 balance_float: 0.0,
-                balance: Bytes::from(&[0u8]),
-                modify_tx: tx_1.hash,
+                new_balance: Bytes::from(&[0u8]),
+                modify_tx: tx_1.hash.clone(),
                 component_id: protocol_component_id.clone(),
             };
             let os_rx_1 = send_write_message(
                 &tx,
-                block_1,
+                block_1.clone(),
                 vec![
-                    WriteOp::UpsertBlock(vec![block_1]),
-                    WriteOp::UpsertTx(vec![tx_1]),
+                    WriteOp::UpsertBlock(vec![block_1.clone()]),
+                    WriteOp::UpsertTx(vec![tx_1.clone()]),
                     WriteOp::SaveExtractionState(extraction_state_1.clone()),
                     WriteOp::InsertTokens(vec![token]),
                     WriteOp::InsertProtocolComponents(vec![protocol_component]),
@@ -819,16 +1049,17 @@ mod test_serial_db {
                 vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
                     .into_iter()
                     .collect();
-            let protocol_state_delta = ProtocolStateDelta::new(protocol_component_id, attributes);
+            let protocol_state_delta = models::protocol::ProtocolComponentStateDelta::new(
+                protocol_component_id.as_str(),
+                attributes,
+                HashSet::new(),
+            );
             let os_rx_2 = send_write_message(
                 &tx,
-                block_2,
+                block_2.clone(),
                 vec![
-                    WriteOp::UpsertBlock(vec![block_2]),
-                    WriteOp::UpsertProtocolState(vec![(
-                        tx_1.hash.as_bytes().into(),
-                        protocol_state_delta,
-                    )]),
+                    WriteOp::UpsertBlock(vec![block_2.clone()]),
+                    WriteOp::UpsertProtocolState(vec![(tx_1.hash.clone(), protocol_state_delta)]),
                 ],
             )
             .await;
@@ -840,7 +1071,8 @@ mod test_serial_db {
             // Send third block messages
             let block_3 = get_sample_block(3);
             let os_rx_3 =
-                send_write_message(&tx, block_3, vec![WriteOp::UpsertBlock(vec![block_3])]).await;
+                send_write_message(&tx, block_3.clone(), vec![WriteOp::UpsertBlock(vec![block_3])])
+                    .await;
             os_rx_3
                 .await
                 .expect("Response from channel ok")
@@ -856,7 +1088,7 @@ mod test_serial_db {
                 .expect("Failed to fetch block");
 
             let fetched_tx = gateway
-                .get_tx(&tx_1.hash.as_bytes().into(), &mut connection)
+                .get_tx(&tx_1.hash.clone(), &mut connection)
                 .await
                 .expect("Failed to fetch tx");
 
@@ -899,16 +1131,7 @@ mod test_serial_db {
                 .await
                 .expect("Failed to get a connection from the pool");
             db_fixtures::insert_chain(&mut connection, "ethereum").await;
-            let gateway = Arc::new(
-                PostgresGateway::<
-                    evm::Block,
-                    evm::Transaction,
-                    evm::Account,
-                    evm::AccountUpdate,
-                    evm::ERC20Token,
-                >::from_connection(&mut connection)
-                .await,
-            );
+            let gateway: PostgresGateway = PostgresGateway::from_connection(&mut connection).await;
             let (tx, rx) = mpsc::channel(10);
 
             let write_executor = DBCacheWriteExecutor::new(
@@ -930,11 +1153,11 @@ mod test_serial_db {
                 .start_transaction(&block_1)
                 .await;
             cached_gw
-                .upsert_block(&block_1)
+                .upsert_block(&[block_1.clone()])
                 .await
                 .expect("Upsert block 1 ok");
             cached_gw
-                .upsert_tx(&tx_1)
+                .upsert_tx(&[tx_1.clone()])
                 .await
                 .expect("Upsert tx 1 ok");
             cached_gw
@@ -948,7 +1171,7 @@ mod test_serial_db {
                 .start_transaction(&block_2)
                 .await;
             cached_gw
-                .upsert_block(&block_2)
+                .upsert_block(&[block_2.clone()])
                 .await
                 .expect("Upsert block 2 ok");
             cached_gw
@@ -962,7 +1185,7 @@ mod test_serial_db {
                 .start_transaction(&block_3)
                 .await;
             cached_gw
-                .upsert_block(&block_3)
+                .upsert_block(&[block_3.clone()])
                 .await
                 .expect("Upsert block 3 ok");
             cached_gw
@@ -975,24 +1198,24 @@ mod test_serial_db {
             // Assert that messages from block 1,2 and 3 have been commited to the db.
             let block_id_1 = BlockIdentifier::Number((Chain::Ethereum, 1));
             let fetched_block_1 = cached_gw
-                .get_block(&block_id_1, &mut connection)
+                .get_block(&block_id_1)
                 .await
                 .expect("Failed to fetch block");
 
             let fetched_tx = cached_gw
-                .get_tx(&tx_1.hash.as_bytes().into(), &mut connection)
+                .get_tx(&tx_1.hash.clone())
                 .await
                 .expect("Failed to fetch tx");
 
             let block_id_2 = BlockIdentifier::Number((Chain::Ethereum, 2));
             let fetched_block_2 = cached_gw
-                .get_block(&block_id_2, &mut connection)
+                .get_block(&block_id_2)
                 .await
                 .expect("Failed to fetch block");
 
             let block_id_3 = BlockIdentifier::Number((Chain::Ethereum, 3));
             let fetched_block_3 = cached_gw
-                .get_block(&block_id_3, &mut connection)
+                .get_block(&block_id_3)
                 .await
                 .expect("Failed to fetch block");
 
@@ -1007,20 +1230,20 @@ mod test_serial_db {
         .await;
     }
 
-    fn get_sample_block(version: usize) -> evm::Block {
+    fn get_sample_block(version: usize) -> models::blockchain::Block {
         match version {
-            1 => evm::Block {
+            1 => models::blockchain::Block {
                 number: 1,
                 chain: Chain::Ethereum,
                 hash: "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
                     .parse()
                     .expect("Invalid hash"),
-                parent_hash: H256::zero(),
+                parent_hash: Bytes::default(),
                 ts: "2020-01-01T01:00:00"
                     .parse()
                     .expect("Invalid timestamp"),
             },
-            2 => evm::Block {
+            2 => models::blockchain::Block {
                 number: 2,
                 chain: Chain::Ethereum,
                 hash: "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
@@ -1033,7 +1256,7 @@ mod test_serial_db {
                     .parse()
                     .expect("Invalid timestamp"),
             },
-            3 => evm::Block {
+            3 => models::blockchain::Block {
                 number: 3,
                 chain: Chain::Ethereum,
                 hash: "0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741"
@@ -1050,22 +1273,17 @@ mod test_serial_db {
         }
     }
 
-    fn get_sample_transaction(version: usize) -> evm::Transaction {
+    fn get_sample_transaction(version: usize) -> models::blockchain::Transaction {
         match version {
-            1 => evm::Transaction {
-                hash: H256::from_str(
+            1 => models::blockchain::Transaction {
+                hash: Bytes::from(
                     "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945",
-                )
-                .expect("tx hash ok"),
-                block_hash: H256::from_str(
-                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
-                )
-                .expect("block hash ok"),
-                from: H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980")
-                    .expect("from ok"),
-                to: Some(
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").expect("to ok"),
                 ),
+                block_hash: Bytes::from(
+                    "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                ),
+                from: Bytes::from("0x4648451b5F87FF8F0F7D622bD40574bb97E25980"),
+                to: Some(Bytes::from("0x6B175474E89094C44Da98b954EedeAC495271d0F")),
                 index: 1,
             },
             _ => panic!("Block version not found"),
@@ -1086,7 +1304,7 @@ mod test_serial_db {
 
     async fn send_write_message(
         tx: &mpsc::Sender<DBCacheMessage>,
-        block: evm::Block,
+        block: models::blockchain::Block,
         operations: Vec<WriteOp>,
     ) -> oneshot::Receiver<Result<(), StorageError>> {
         let (os_tx, os_rx) = oneshot::channel();
@@ -1214,9 +1432,9 @@ mod test_serial_db {
         let protocol_type_id = db_fixtures::insert_protocol_type(
             conn,
             "Pool",
-            Some(orm::FinancialType::Swap),
+            Some(models::FinancialType::Swap),
             None,
-            Some(orm::ImplementationType::Custom),
+            Some(models::ImplementationType::Custom),
         )
         .await;
         let protocol_component_id = db_fixtures::insert_protocol_component(

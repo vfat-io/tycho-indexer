@@ -10,7 +10,7 @@ name = "tycho-client"
 path = "src/main.rs"
 
 [dependencies]
-tycho-types.workspace = true
+tycho-core.workspace = true
 futures03.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -52,7 +52,7 @@ jobs:
           crate: diesel_cli
           features: postgres
       - name: DB Setup
-        run: cd tycho-indexer && diesel migration run
+        run: cd tycho-storage && diesel migration run
       - name: Install latest nextest release
         uses: taiki-e/install-action@nextest
       - name: Test

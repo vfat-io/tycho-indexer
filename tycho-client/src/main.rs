@@ -12,7 +12,7 @@ use tycho_client::{
     },
     HttpRPCClient, WsDeltasClient,
 };
-use tycho_types::dto::{Chain, ExtractorIdentity};
+use tycho_core::dto::{Chain, ExtractorIdentity};
 
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
 #[clap(version = "0.1.0")]

@@ -129,10 +129,6 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-use std::{
-    collections::HashMap, hash::Hash, i64, marker::PhantomData, ops::Deref, str::FromStr, sync::Arc,
-};
-
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{
@@ -140,28 +136,26 @@ use diesel_async::{
     AsyncPgConnection, RunQueryDsl,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use std::{collections::HashMap, hash::Hash, i64, ops::Deref, str::FromStr, sync::Arc};
 use tracing::{debug, info};
-
-use crate::models::Chain;
-
-use super::{
-    BlockIdentifier, BlockOrTimestamp, ContractDelta, StateGateway, StorableBlock,
-    StorableContract, StorableToken, StorableTransaction, StorageError, TxHash, Version,
-    VersionKind,
+use tycho_core::{
+    models::{Chain, TxHash},
+    storage::{BlockIdentifier, BlockOrTimestamp, StorageError, Version, VersionKind},
 };
 
+pub mod builder;
 pub mod cache;
-pub mod chain;
-pub mod contract_state;
-pub mod extraction_state;
-pub mod orm;
-pub mod protocol;
-pub mod schema;
+mod chain;
+mod contract_state;
+mod extraction_state;
+mod orm;
+mod protocol;
+mod schema;
 mod versioning;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
-pub struct ValueIdTableCache<E> {
+pub(crate) struct ValueIdTableCache<E> {
     map_id: HashMap<E, i64>,
     map_enum: HashMap<i64, E>,
 }
@@ -284,120 +278,112 @@ impl<T> Deref for WithTxHash<T> {
     }
 }
 
-impl From<diesel::result::Error> for StorageError {
+struct PostgresError(StorageError);
+
+impl From<diesel::result::Error> for PostgresError {
     fn from(value: diesel::result::Error) -> Self {
-        StorageError::Unexpected(format!("DieselError: {}", value))
+        PostgresError(StorageError::Unexpected(format!("DieselError: {}", value)))
     }
 }
 
-impl StorageError {
-    fn from_diesel(
-        err: diesel::result::Error,
-        entity: &str,
-        id: &str,
-        fetch_args: Option<String>,
-    ) -> StorageError {
-        let err_string = err.to_string();
-        match err {
-            diesel::result::Error::DatabaseError(
-                diesel::result::DatabaseErrorKind::UniqueViolation,
-                details,
-            ) => {
-                if let Some(col) = details.column_name() {
-                    if col == "id" {
-                        return StorageError::DuplicateEntry(entity.to_owned(), id.to_owned());
-                    }
-                }
-                StorageError::Unexpected(err_string)
-            }
-            diesel::result::Error::NotFound => {
-                if let Some(related_entitiy) = fetch_args {
-                    return StorageError::NoRelatedEntity(
+impl From<PostgresError> for StorageError {
+    fn from(value: PostgresError) -> Self {
+        value.0
+    }
+}
+
+impl From<StorageError> for PostgresError {
+    fn from(value: StorageError) -> Self {
+        PostgresError(value)
+    }
+}
+
+fn storage_error_from_diesel(
+    err: diesel::result::Error,
+    entity: &str,
+    id: &str,
+    fetch_args: Option<String>,
+) -> PostgresError {
+    let err_string = err.to_string();
+    match err {
+        diesel::result::Error::DatabaseError(
+            diesel::result::DatabaseErrorKind::UniqueViolation,
+            details,
+        ) => {
+            if let Some(col) = details.column_name() {
+                if col == "id" {
+                    return PostgresError(StorageError::DuplicateEntry(
                         entity.to_owned(),
                         id.to_owned(),
-                        related_entitiy,
-                    );
+                    ));
                 }
-                StorageError::NotFound(entity.to_owned(), id.to_owned())
             }
-            _ => StorageError::Unexpected(err_string),
+            PostgresError(StorageError::Unexpected(err_string))
         }
+        diesel::result::Error::NotFound => {
+            if let Some(related_entitiy) = fetch_args {
+                return PostgresError(StorageError::NoRelatedEntity(
+                    entity.to_owned(),
+                    id.to_owned(),
+                    related_entitiy,
+                ));
+            }
+            PostgresError(StorageError::NotFound(entity.to_owned(), id.to_owned()))
+        }
+        _ => PostgresError(StorageError::Unexpected(err_string)),
     }
 }
 
-impl BlockOrTimestamp {
-    pub async fn to_ts(&self, conn: &mut AsyncPgConnection) -> Result<NaiveDateTime, StorageError> {
-        match self {
-            BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(h, conn)
+async fn maybe_lookup_block_ts(
+    block: &BlockOrTimestamp,
+    conn: &mut AsyncPgConnection,
+) -> Result<NaiveDateTime, StorageError> {
+    match block {
+        BlockOrTimestamp::Block(BlockIdentifier::Hash(h)) => Ok(orm::Block::by_hash(h, conn)
+            .await
+            .map_err(|err| storage_error_from_diesel(err, "Block", &hex::encode(h), None))?
+            .ts),
+        BlockOrTimestamp::Block(BlockIdentifier::Number((chain, no))) => {
+            Ok(orm::Block::by_number(*chain, *no, conn)
                 .await
-                .map_err(|err| StorageError::from_diesel(err, "Block", &hex::encode(h), None))?
-                .ts),
-            BlockOrTimestamp::Block(BlockIdentifier::Number((chain, no))) => {
-                Ok(orm::Block::by_number(*chain, *no, conn)
-                    .await
-                    .map_err(|err| {
-                        StorageError::from_diesel(err, "Block", &format!("{}", no), None)
-                    })?
-                    .ts)
-            }
-            BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)) => {
-                Ok(orm::Block::most_recent(*chain, conn)
-                    .await
-                    .map_err(|err| StorageError::from_diesel(err, "Block", "latest", None))?
-                    .ts)
-            }
-            BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
+                .map_err(|err| storage_error_from_diesel(err, "Block", &format!("{}", no), None))?
+                .ts)
         }
+        BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)) => {
+            Ok(orm::Block::most_recent(*chain, conn)
+                .await
+                .map_err(|err| storage_error_from_diesel(err, "Block", "latest", None))?
+                .ts)
+        }
+        BlockOrTimestamp::Timestamp(ts) => Ok(*ts),
     }
 }
 
-impl Version {
-    pub async fn to_ts(&self, conn: &mut AsyncPgConnection) -> Result<NaiveDateTime, StorageError> {
-        if !matches!(self.1, VersionKind::Last) {
-            return Err(StorageError::Unsupported(format!(
-                "Unsupported version kind: {:?}",
-                self.1
-            )));
-        }
-        self.0.to_ts(conn).await
+async fn maybe_lookup_version_ts(
+    version: &Version,
+    conn: &mut AsyncPgConnection,
+) -> Result<NaiveDateTime, StorageError> {
+    if !matches!(version.1, VersionKind::Last) {
+        return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", version.1)));
     }
+    maybe_lookup_block_ts(&version.0, conn).await
 }
 
-pub struct PostgresGateway<B, TX, A, D, T> {
+#[derive(Clone)]
+pub(crate) struct PostgresGateway {
     protocol_system_id_cache: Arc<ProtocolSystemEnumCache>,
     chain_id_cache: Arc<ChainEnumCache>,
-    _phantom_block: PhantomData<B>,
-    _phantom_tx: PhantomData<TX>,
-    _phantom_acc: PhantomData<A>,
-    _phantom_delta: PhantomData<D>,
-    _phantom_token: PhantomData<T>,
 }
 
-impl<B, TX, A, D, T> PostgresGateway<B, TX, A, D, T>
-where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    D: ContractDelta,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
+impl PostgresGateway {
     pub fn with_cache(
         cache: Arc<ChainEnumCache>,
         protocol_system_cache: Arc<ProtocolSystemEnumCache>,
     ) -> Self {
-        Self {
-            protocol_system_id_cache: protocol_system_cache,
-            chain_id_cache: cache,
-            _phantom_block: PhantomData,
-            _phantom_tx: PhantomData,
-            _phantom_acc: PhantomData,
-            _phantom_delta: PhantomData,
-            _phantom_token: PhantomData,
-        }
+        Self { protocol_system_id_cache: protocol_system_cache, chain_id_cache: cache }
     }
 
-    #[allow(clippy::needless_pass_by_ref_mut)]
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn from_connection(conn: &mut AsyncPgConnection) -> Self {
         let chain_id_mapping: Vec<(i64, String)> = async {
             use schema::chain::dsl::*;
@@ -444,28 +430,14 @@ where
             .get_value(id)
     }
 
-    pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Arc<Self>, StorageError> {
+    pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
         let cache = ChainEnumCache::from_pool(pool.clone()).await?;
         let protocol_system_cache: ValueIdTableCache<String> =
             ProtocolSystemEnumCache::from_pool(pool.clone()).await?;
-        let gw = Arc::new(PostgresGateway::<B, TX, A, D, T>::with_cache(
-            Arc::new(cache),
-            Arc::new(protocol_system_cache),
-        ));
+        let gw = PostgresGateway::with_cache(Arc::new(cache), Arc::new(protocol_system_cache));
 
         Ok(gw)
     }
-}
-
-impl<B, TX, A, D, T> StateGateway<AsyncPgConnection> for PostgresGateway<B, TX, A, D, T>
-where
-    B: StorableBlock<orm::Block, orm::NewBlock, i64>,
-    TX: StorableTransaction<orm::Transaction, orm::NewTransaction, i64>,
-    D: ContractDelta + From<A>,
-    A: StorableContract<orm::Contract, orm::NewContract, i64>,
-    T: StorableToken<orm::Token, orm::NewToken, i64>,
-{
-    // No methods in here - this just ties everything together
 }
 
 /// Establishes a connection to the database and creates a connection pool.
@@ -486,7 +458,7 @@ where
 /// - `Ok`: Contains a `Pool` of `AsyncPgConnection`s if the connection was established
 ///   successfully.
 /// - `Err`: Contains a `StorageError` if there was an issue creating the connection pool.
-pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageError> {
+async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageError> {
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url);
     let pool = Pool::builder(config)
         .build()
@@ -520,7 +492,7 @@ pub async fn connect(db_url: &str) -> Result<Pool<AsyncPgConnection>, StorageErr
 ///
 /// - If it failed to get a connection from the provided pool.
 /// - If there was an issue ensuring the presence of chains in the database.
-pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
+async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
     let mut conn = pool.get().await.expect("connection ok");
     diesel::insert_into(schema::chain::table)
         .values(
@@ -536,7 +508,7 @@ pub async fn ensure_chains(chains: &[Chain], pool: Pool<AsyncPgConnection>) {
     debug!("Ensured chain enum presence for: {:?}", chains);
 }
 
-pub async fn ensure_protocol_systems(protocol_systems: &[String], pool: Pool<AsyncPgConnection>) {
+async fn ensure_protocol_systems(protocol_systems: &[String], pool: Pool<AsyncPgConnection>) {
     let mut conn = pool.get().await.expect("connection ok");
 
     diesel::insert_into(schema::protocol_system::table)
@@ -561,7 +533,7 @@ fn run_migrations(db_url: &str) {
         .expect("migrations should execute without errors");
 }
 
-#[cfg(test)]
+// TODO: add cfg(test) once we have better mocks to be used in indexer crate
 pub mod testing {
     //! # Reusable components to write tests against the DB.
     use diesel::sql_query;
@@ -632,8 +604,10 @@ pub mod testing {
     ///
     /// ## Example
     /// ```
+    /// use tycho_indexer::storage::postgres::testing::run_against_db;
+    ///
     /// #[tokio::test]
-    /// fn test_serial_db_mytest_name() {
+    /// async fn test_serial_db_mytest_name() {
     ///     run_against_db(|connection_pool| async move {
     ///         println!("here goes actual test code")
     ///     }).await;
@@ -665,7 +639,7 @@ pub mod testing {
     }
 }
 
-#[cfg(test)]
+// TODO: add cfg(test) once we have better mocks to be used in indexer crate
 pub mod db_fixtures {
     //! # General Purpose Fixtures for Database State Modification
     //!
@@ -698,21 +672,19 @@ pub mod db_fixtures {
     //! local copy might serve your needs better. For instance, if the complete
     //! shared setup isn't necessary for your test case, copy it and keep only
     //! the entries that are crucial to your test case.
-    use std::str::FromStr;
-
-    use crate::storage::{Balance, Code};
     use chrono::NaiveDateTime;
     use diesel::{prelude::*, sql_query};
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
-    use tycho_types::Bytes;
-
-    use super::{
-        orm::{FinancialType, ImplementationType},
-        schema,
+    use std::str::FromStr;
+    use tycho_core::{
+        models::{Balance, Code, FinancialType, ImplementationType},
+        Bytes,
     };
-    use crate::storage::orm;
+
+    use super::schema;
+    use crate::postgres::orm;
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -1046,8 +1018,12 @@ pub mod db_fixtures {
         attribute: Option<Value>,
         implementation_type: Option<ImplementationType>,
     ) -> i64 {
-        let financial_type = financial_type.unwrap_or(FinancialType::Swap);
-        let implementation_type = implementation_type.unwrap_or(ImplementationType::Custom);
+        let financial_type: orm::FinancialType = financial_type
+            .unwrap_or(FinancialType::Swap)
+            .into();
+        let implementation_type: orm::ImplementationType = implementation_type
+            .unwrap_or(ImplementationType::Custom)
+            .into();
         let query = diesel::insert_into(schema::protocol_type::table).values((
             schema::protocol_type::name.eq(name),
             schema::protocol_type::financial_type.eq(financial_type),

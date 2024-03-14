@@ -12,7 +12,7 @@ use tokio::{
     time::timeout,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
-use tycho_types::{
+use tycho_core::{
     dto::{
         BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolStateRequestBody,
         ResponseAccount, ResponseProtocolState, StateRequestBody, VersionParam,
@@ -525,7 +525,7 @@ mod test {
         task::JoinHandle,
         time::timeout,
     };
-    use tycho_types::{
+    use tycho_core::{
         dto::{
             Block, BlockEntityChangesResult, Chain, Deltas, ExtractorIdentity, ProtocolComponent,
             ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
@@ -1005,7 +1005,7 @@ mod test {
             .into_iter()
             .collect(),
             // Our deltas are empty and since merge methods are
-            // tested in tycho-types we don't have much to do here.
+            // tested in tycho-core we don't have much to do here.
             deltas: Some(Deltas::Native(BlockEntityChangesResult {
                 extractor: "uniswap-v2".to_string(),
                 chain: Chain::Ethereum,
