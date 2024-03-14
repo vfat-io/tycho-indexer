@@ -158,7 +158,7 @@ impl From<&evm::ProtocolState> for ProtocolComponentState {
         Self {
             component_id: value.component_id.clone(),
             attributes: value.attributes.clone(),
-            modify_tx: Bytes::from(value.modify_tx.as_bytes()),
+            modify_tx: Some(Bytes::from(value.modify_tx.as_bytes())),
         }
     }
 }

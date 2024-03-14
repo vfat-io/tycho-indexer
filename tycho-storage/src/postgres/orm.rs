@@ -651,20 +651,18 @@ pub struct ProtocolState {
 impl ProtocolState {
     /// Used to fetch the full state of a component at a given version, filtered by component ids.
     ///
-    /// Retrieves all matching protocol states, filtered by component id, along with their linked
-    /// component ids and transaction hashes. If no version is provided, the latest state is
-    /// returned. The results are grouped by component id and ordered by transaction to allow for
-    /// easy state reconstruction. It can be trusted that all state updates for a given component
-    /// are together and the updates can be applied in order with the latest update last.
+    /// Retrieves all matching protocol states and their component id, filtered by component id.
+    /// If no version is provided, the latest state is returned. The results are grouped by
+    /// component id to allow for easy state reconstruction. It can be trusted that all state
+    /// updates for a given component are sequential.
     pub async fn by_id(
         component_ids: &[&str],
         chain_id: i64,
         version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Vec<(Self, ComponentId, TxHash)>> {
+    ) -> QueryResult<Vec<(Self, ComponentId)>> {
         let mut query = protocol_state::table
             .inner_join(protocol_component::table)
-            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
             .filter(protocol_component::external_id.eq_any(component_ids))
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
@@ -680,19 +678,18 @@ impl ProtocolState {
         }
 
         query
-            .order_by((protocol_component::external_id, transaction::block_id, transaction::index))
-            .select((Self::as_select(), protocol_component::external_id, transaction::hash))
-            .get_results::<(Self, String, Bytes)>(conn)
+            .order_by(protocol_component::external_id)
+            .select((Self::as_select(), protocol_component::external_id))
+            .get_results::<(Self, String)>(conn)
             .await
     }
 
     /// Used to fetch the full state of a component at a given version, filtered by protocol system.
     ///
-    /// Retrieves all matching protocol states, filtered by protocol system, along with their linked
-    /// component ids and transaction hashes. If no version is provided, the latest state is
-    /// returned. The results are grouped by component id and ordered by transaction to allow for
-    /// easy state reconstruction. It can be trusted that all state updates for a given component
-    /// are together and the updates can be applied in order with the latest update last.
+    /// Retrieves all matching protocol states and their component id, filtered by protocol system.
+    /// If no version is provided, the latest state is returned. The results are grouped by
+    /// component id to allow for easy state reconstruction. It can be trusted that all state
+    /// updates for a given component are sequential.
     ///
     /// Note - follows the same logic as by_ids, but filters by protocol system instead of component
     /// ids.
@@ -701,14 +698,13 @@ impl ProtocolState {
         chain_id: i64,
         version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Vec<(Self, ComponentId, TxHash)>> {
+    ) -> QueryResult<Vec<(Self, ComponentId)>> {
         let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .inner_join(
                 protocol_system::table
                     .on(protocol_component::protocol_system_id.eq(protocol_system::id)),
             )
-            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
             .filter(protocol_system::name.eq(system.to_string()))
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
@@ -724,33 +720,27 @@ impl ProtocolState {
         }
 
         query
-            .order_by((
-                protocol_state::protocol_component_id,
-                transaction::block_id,
-                transaction::index,
-            ))
-            .select((Self::as_select(), protocol_component::external_id, transaction::hash))
-            .get_results::<(Self, String, Bytes)>(conn)
+            .order_by(protocol_state::protocol_component_id)
+            .select((Self::as_select(), protocol_component::external_id))
+            .get_results::<(Self, String)>(conn)
             .await
     }
 
     /// Used to fetch the full state of a component at a given version, filtered by chain.
     ///
-    /// Retrieves all matching protocol states, filtered by chain, along with their linked
-    /// component ids and transaction hashes. If no version is provided, the latest state is
-    /// returned. The results are grouped by component id and ordered by transaction to allow for
-    /// easy state reconstruction. It can be trusted that all state updates for a given component
-    /// are together and the updates can be applied in order with the latest update last.
+    /// Retrieves all matching protocol states and their component id, filtered by chain.
+    /// If no version is provided, the latest state is returned. The results are grouped by
+    /// component id to allow for easy state reconstruction. It can be trusted that all state
+    /// updates for a given component are sequential.
     ///
     /// Note - follows the same logic as by_ids, but filters by chain instead of component ids.
     pub async fn by_chain(
         chain_id: i64,
         version_ts: Option<NaiveDateTime>,
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Vec<(Self, ComponentId, TxHash)>> {
+    ) -> QueryResult<Vec<(Self, ComponentId)>> {
         let mut query = protocol_state::table
             .inner_join(protocol_component::table)
-            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
                 protocol_state::valid_to
@@ -765,13 +755,9 @@ impl ProtocolState {
         }
 
         query
-            .order_by((
-                protocol_state::protocol_component_id,
-                transaction::block_id,
-                transaction::index,
-            ))
-            .select((Self::as_select(), protocol_component::external_id, transaction::hash))
-            .get_results::<(Self, String, Bytes)>(conn)
+            .order_by(protocol_state::protocol_component_id)
+            .select((Self::as_select(), protocol_component::external_id))
+            .get_results::<(Self, String)>(conn)
             .await
     }
 
@@ -779,18 +765,16 @@ impl ProtocolState {
     ///
     /// Retrieves all state updates applied after start_ts and still valid by end_ts, filtered by
     /// chain. Please note - this function is intended to be used to fetch forward changes/deltas.
-    /// The results are grouped by component id and ordered by transaction to allow for easy state
-    /// reconstruction. It can be trusted that all state updates for a given component are together
-    /// and the updates can be applied in order with the latest update last.
+    /// The results are grouped by component id to allow for easy state reconstruction. It can be
+    /// trusted that all state updates for a given component are together.
     pub async fn forward_deltas_by_chain(
         chain_id: i64,
         start_ts: NaiveDateTime,
         end_ts: NaiveDateTime,
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Vec<(Self, ComponentId, TxHash)>> {
+    ) -> QueryResult<Vec<(Self, ComponentId)>> {
         protocol_state::table
             .inner_join(protocol_component::table)
-            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
                 protocol_state::valid_to
@@ -799,23 +783,17 @@ impl ProtocolState {
             )
             .filter(protocol_state::valid_from.le(end_ts))
             .filter(protocol_state::valid_from.gt(start_ts))
-            .order_by((
-                protocol_state::protocol_component_id,
-                transaction::block_id,
-                transaction::index,
-            ))
-            .select((Self::as_select(), protocol_component::external_id, transaction::hash))
-            .get_results::<(Self, String, Bytes)>(conn)
+            .order_by(protocol_state::protocol_component_id)
+            .select((Self::as_select(), protocol_component::external_id))
+            .get_results::<(Self, String)>(conn)
             .await
     }
 
     /// Used to detect attributes that were deleted within a given timeframe.
     ///
     /// Retrieves all component-attribute pairs that have a valid version at start_ts and have no
-    /// valid version at end_ts. The results are grouped by component id and ordered by
-    /// transaction to allow for easy state reconstruction. It can be trusted that all state updates
-    /// for a given component are together and the updates can be applied in order with the latest
-    /// update last.
+    /// valid version at end_ts. The results are grouped by component id to allow for easy state
+    /// reconstruction. It can be trusted that all state updates for a given component are together.
     pub async fn deleted_attributes_by_chain(
         chain_id: i64,
         start_ts: NaiveDateTime,
@@ -837,18 +815,13 @@ impl ProtocolState {
         // i.e. potentially_deleted - not_deleted = deleted
         protocol_state::table
             .inner_join(protocol_component::table)
-            .inner_join(transaction::table.on(transaction::id.eq(protocol_state::modify_tx)))
             .filter(protocol_component::chain_id.eq(chain_id))
             // validity ends during the timeframe (potentially deleted)
             .filter(protocol_state::valid_to.le(end_ts))
             .filter(protocol_state::valid_to.gt(start_ts))
             // subquery to remove those that weren't deleted (valid version exists at end_ts)
             .filter(sql::<Bool>(&sub_query))
-            .order_by((
-                protocol_state::protocol_component_id,
-                transaction::block_id,
-                transaction::index,
-            ))
+            .order_by(protocol_state::protocol_component_id)
             .select((protocol_component::external_id, protocol_state::attribute_name))
             .get_results::<(String, String)>(conn)
             .await
