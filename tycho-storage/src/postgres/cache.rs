@@ -330,11 +330,14 @@ impl DBCacheWriteExecutor {
             })
             .await;
 
+        if res.is_ok() {
+            info!(block_range=?&new_db_tx.block_range, "Transaction successfully committed to DB!");
+        }
+
         // Forward the result to the sender
         let _ = new_db_tx
             .tx
             .send(res.map_err(Into::into));
-        info!(block_range=?&new_db_tx.block_range, "Transaction successfully committed to DB!");
     }
 
     /// Executes an operation.
