@@ -52,11 +52,15 @@ impl ProtocolComponent {
 pub struct ProtocolComponentState {
     pub component_id: String,
     pub attributes: HashMap<String, Bytes>,
-    pub modify_tx: Bytes,
+    pub modify_tx: Option<Bytes>,
 }
 
 impl ProtocolComponentState {
-    pub fn new(component_id: &str, attributes: HashMap<String, Bytes>, modify_tx: Bytes) -> Self {
+    pub fn new(
+        component_id: &str,
+        attributes: HashMap<String, Bytes>,
+        modify_tx: Option<Bytes>,
+    ) -> Self {
         Self { component_id: component_id.to_string(), attributes, modify_tx }
     }
 }
