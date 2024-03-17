@@ -1,5 +1,4 @@
-use super::{orm, schema, storage_error_from_diesel, PostgresError, PostgresGateway};
-use chrono::NaiveDateTime;
+use super::{orm, schema, storage_error_from_diesel, PostgresError, PostgresGateway, MAX_TS};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
@@ -211,7 +210,7 @@ impl PostgresGateway {
         diesel::update(
             schema::contract_storage::table.filter(schema::contract_storage::valid_to.gt(block.ts)),
         )
-        .set(schema::contract_storage::valid_to.eq(Option::<NaiveDateTime>::None))
+        .set(schema::contract_storage::valid_to.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -219,7 +218,7 @@ impl PostgresGateway {
         diesel::update(
             schema::account_balance::table.filter(schema::account_balance::valid_to.gt(block.ts)),
         )
-        .set(schema::account_balance::valid_to.eq(Option::<NaiveDateTime>::None))
+        .set(schema::account_balance::valid_to.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -227,7 +226,7 @@ impl PostgresGateway {
         diesel::update(
             schema::contract_code::table.filter(schema::contract_code::valid_to.gt(block.ts)),
         )
-        .set(schema::contract_code::valid_to.eq(Option::<NaiveDateTime>::None))
+        .set(schema::contract_code::valid_to.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -235,7 +234,7 @@ impl PostgresGateway {
         diesel::update(
             schema::protocol_state::table.filter(schema::protocol_state::valid_to.gt(block.ts)),
         )
-        .set(schema::protocol_state::valid_to.eq(Option::<NaiveDateTime>::None))
+        .set(schema::protocol_state::valid_to.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -244,7 +243,7 @@ impl PostgresGateway {
             schema::protocol_calls_contract::table
                 .filter(schema::protocol_calls_contract::valid_to.gt(block.ts)),
         )
-        .set(schema::protocol_calls_contract::valid_to.eq(Option::<NaiveDateTime>::None))
+        .set(schema::protocol_calls_contract::valid_to.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -252,7 +251,7 @@ impl PostgresGateway {
         // Any versioned table's rows, which have `deleted_at` set to "> block.ts"
         // need, to be updated to be valid again (thus, deleted_at = NULL).
         diesel::update(schema::account::table.filter(schema::account::deleted_at.gt(block.ts)))
-            .set(schema::account::deleted_at.eq(Option::<NaiveDateTime>::None))
+            .set(schema::account::deleted_at.eq(MAX_TS))
             .execute(conn)
             .await
             .map_err(PostgresError::from)?;
@@ -261,7 +260,7 @@ impl PostgresGateway {
             schema::protocol_component::table
                 .filter(schema::protocol_component::deleted_at.gt(block.ts)),
         )
-        .set(schema::protocol_component::deleted_at.eq(Option::<NaiveDateTime>::None))
+        .set(schema::protocol_component::deleted_at.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;

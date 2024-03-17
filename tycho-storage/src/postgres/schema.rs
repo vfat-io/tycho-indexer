@@ -253,10 +253,13 @@ diesel::allow_tables_to_appear_in_same_query!(
     token,
     token_price,
     transaction,
+    component_balance,
+    contract_storage,
+    protocol_state
 );
 
 diesel::table! {
-    component_balance (token_id, modify_tx) {
+    component_balance (protocol_component_id, token_id, modify_tx) {
         token_id -> Int8,
         new_balance -> Bytea,
         previous_value -> Bytea,
@@ -297,3 +300,11 @@ diesel::table! {
         previous_value -> Nullable<Bytea>,
     }
 }
+
+diesel::joinable!(component_balance -> protocol_component (protocol_component_id));
+diesel::joinable!(component_balance -> token (token_id));
+diesel::joinable!(component_balance -> transaction (modify_tx));
+diesel::joinable!(contract_storage -> account (account_id));
+diesel::joinable!(contract_storage -> transaction (modify_tx));
+diesel::joinable!(protocol_state -> protocol_component (protocol_component_id));
+diesel::joinable!(protocol_state -> transaction (modify_tx));

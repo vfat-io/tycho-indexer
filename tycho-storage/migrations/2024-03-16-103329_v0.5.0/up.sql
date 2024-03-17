@@ -88,6 +88,9 @@ SELECT
 
 CALL partman.partition_data_proc(p_parent_table := 'public.protocol_state', p_loop_count := 90, p_source_table := 'public.protocol_state_old', p_order := 'DESC');
 
+-- this constraint allows us to to upserts into this table.
+ALTER TABLE protocol_state_default ADD CONSTRAINT protocol_state_default_unique_pk UNIQUE (protocol_component_id, attribute_name);
+
 DROP TABLE protocol_state_old;
 
 -- CONTRACT STATE
@@ -125,6 +128,8 @@ ALTER TABLE public.contract_storage
 SELECT partman.create_parent(p_parent_table := 'public.contract_storage', p_control := 'valid_to', p_interval := '1 day', p_type := 'range', p_premake := 7, p_default_table := TRUE, p_automatic_maintenance := 'on');
 
 CALL partman.partition_data_proc(p_parent_table := 'public.contract_storage', p_loop_count := 90, p_source_table := 'public.contract_storage_old', p_order := 'DESC');
+
+ALTER TABLE contract_storage_default ADD CONSTRAINT contract_storage_default_unique_pk UNIQUE (account_id, slot);
 
 DROP TABLE contract_storage_old;
 
@@ -164,5 +169,7 @@ SELECT
     partman.create_parent(p_parent_table := 'public.component_balance', p_control := 'valid_to', p_interval := '1 day', p_type := 'range', p_premake := 7, p_default_table := TRUE, p_automatic_maintenance := 'on');
 
 CALL partman.partition_data_proc(p_parent_table := 'public.component_balance', p_loop_count := 90, p_source_table := 'public.component_balance_old', p_order := 'DESC');
+
+ALTER TABLE component_balance_default ADD CONSTRAINT component_balance_default_unique_pk UNIQUE (protocol_component_id, token_id);
 
 DROP TABLE component_balance_old;

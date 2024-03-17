@@ -340,9 +340,9 @@ pub struct ProtocolType {
 #[derive(Identifiable, Queryable, Selectable)]
 #[diesel(table_name = component_balance)]
 #[diesel(belongs_to(ProtocolComponent))]
+#[diesel(primary_key(protocol_component_id, token_id, modify_tx))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ComponentBalance {
-    pub id: i64,
     pub token_id: i64,
     pub new_balance: Balance,
     pub balance_float: f64,
@@ -351,7 +351,7 @@ pub struct ComponentBalance {
     pub protocol_component_id: i64,
     pub inserted_ts: NaiveDateTime,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
 }
 impl ComponentBalance {
     pub fn update_many(
@@ -395,7 +395,7 @@ impl StoredVersionedRow for ComponentBalance {
     type Version = NaiveDateTime;
 
     fn get_pk(&self) -> Self::PrimaryKey {
-        self.id
+        todo!()
     }
 
     fn get_entity_id(&self) -> Self::EntityId {
@@ -631,15 +631,15 @@ pub struct NewProtocolComponentHoldsContract {
 #[diesel(belongs_to(ProtocolComponent))]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(primary_key(protocol_component_id, attribute_name, modify_tx))]
 pub struct ProtocolState {
-    pub id: i64,
     pub protocol_component_id: i64,
     pub attribute_name: String,
     pub attribute_value: Bytes,
     pub previous_value: Option<Bytes>,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
@@ -663,7 +663,7 @@ impl ProtocolState {
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
                 protocol_state::valid_to
-                    .gt(version_ts) // if version_ts is None, diesel equates this expression to "False"
+                    .gt(version_ts.unwrap()) // if version_ts is None, diesel equates this expression to "False"
                     .or(protocol_state::valid_to.is_null()),
             )
             .into_boxed();
@@ -705,7 +705,7 @@ impl ProtocolState {
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
                 protocol_state::valid_to
-                    .gt(version_ts)
+                    .gt(version_ts.unwrap())
                     .or(protocol_state::valid_to.is_null()),
             )
             .into_boxed();
@@ -740,7 +740,7 @@ impl ProtocolState {
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(
                 protocol_state::valid_to
-                    .gt(version_ts)
+                    .gt(version_ts.unwrap())
                     .or(protocol_state::valid_to.is_null()),
             )
             .into_boxed();
@@ -914,7 +914,7 @@ impl StoredVersionedRow for ProtocolState {
     type Version = NaiveDateTime;
 
     fn get_pk(&self) -> Self::PrimaryKey {
-        self.id
+        todo!()
     }
 
     fn get_entity_id(&self) -> Self::EntityId {
@@ -1413,8 +1413,8 @@ impl NewContract {
 #[diesel(belongs_to(Account))]
 #[diesel(table_name = contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(primary_key(account_id, slot, modify_tx))]
 pub struct ContractStorage {
-    pub id: i64,
     pub slot: Bytes,
     pub value: Option<Bytes>,
     pub previous_value: Option<Bytes>,
@@ -1422,7 +1422,7 @@ pub struct ContractStorage {
     pub modify_tx: i64,
     pub ordinal: i64,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
@@ -1434,7 +1434,7 @@ impl StoredVersionedRow for ContractStorage {
     type Version = NaiveDateTime;
 
     fn get_pk(&self) -> Self::PrimaryKey {
-        self.id
+        todo!()
     }
 
     fn get_entity_id(&self) -> Self::EntityId {

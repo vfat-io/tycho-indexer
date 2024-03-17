@@ -21,7 +21,7 @@ use super::{
     orm::{self, Account, ComponentTVL, NewAccount},
     schema, storage_error_from_diesel,
     versioning::apply_delta_versioning,
-    PostgresError, PostgresGateway, WithOrdinal, WithTxHash,
+    PostgresError, PostgresGateway, WithOrdinal, WithTxHash, MAX_TS
 };
 
 // Private methods
@@ -1245,8 +1245,7 @@ impl PostgresGateway {
             )
             .filter(
                 schema::component_balance::valid_to
-                    .gt(version_ts) // if version_ts is None, diesel equates this expression to "False"
-                    .or(schema::component_balance::valid_to.is_null()),
+                    .gt(version_ts.unwrap_or(MAX_TS)) // if version_ts is None, diesel equates this expression to "False"
             )
             .into_boxed();
         // if a version timestamp is provided, we want to filter by valid_from <= version_ts
@@ -2125,7 +2124,7 @@ mod test {
             .first::<orm::ProtocolState>(&mut conn)
             .await
             .expect("Failed to fetch protocol state");
-        assert_eq!(older_state.valid_to, Some(newer_state.valid_from));
+        assert_eq!(older_state.valid_to, newer_state.valid_from);
     }
 
     #[tokio::test]
@@ -2867,7 +2866,7 @@ mod test {
         // Obtain newest inserted value
         let new_inserted_data = schema::component_balance::table
             .select(orm::ComponentBalance::as_select())
-            .order_by(schema::component_balance::id.desc())
+            .order_by(schema::component_balance::token_id.desc())
             .first::<orm::ComponentBalance>(&mut conn)
             .await;
 

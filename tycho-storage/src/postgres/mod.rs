@@ -157,6 +157,8 @@ mod versioning;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
+const MAX_TS: NaiveDateTime = NaiveDateTime::MAX;
+
 pub(crate) struct ValueIdTableCache<E> {
     map_id: HashMap<E, i64>,
     map_enum: HashMap<i64, E>,
@@ -703,7 +705,7 @@ pub mod db_fixtures {
 
     use crate::postgres::orm;
 
-    use super::schema;
+    use super::{schema, MAX_TS};
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -839,7 +841,7 @@ pub mod db_fixtures {
         valid_from: &str,
         valid_to: Option<&str>,
         slots: &[(u64, u64, Option<u64>)],
-    ) -> Vec<i64> {
+    ) {
         let ts = valid_from
             .parse::<chrono::NaiveDateTime>()
             .unwrap();
@@ -868,7 +870,7 @@ pub mod db_fixtures {
                     schema::contract_storage::account_id.eq(contract_id),
                     schema::contract_storage::modify_tx.eq(modify_tx),
                     schema::contract_storage::valid_from.eq(ts),
-                    schema::contract_storage::valid_to.eq(end_ts),
+                    schema::contract_storage::valid_to.eq(end_ts.unwrap_or(MAX_TS)),
                     schema::contract_storage::ordinal.eq(idx as i64),
                 )
             })
@@ -876,10 +878,9 @@ pub mod db_fixtures {
 
         diesel::insert_into(schema::contract_storage::table)
             .values(&data)
-            .returning(schema::contract_storage::id)
-            .get_results(conn)
+            .execute(conn)
             .await
-            .unwrap()
+            .unwrap();
     }
 
     pub async fn insert_account_balance(
@@ -1181,7 +1182,7 @@ pub mod db_fixtures {
             schema::protocol_state::modify_tx.eq(tx_id),
             schema::protocol_state::modified_ts.eq(ts),
             schema::protocol_state::valid_from.eq(ts),
-            schema::protocol_state::valid_to.eq(valid_to_ts),
+            schema::protocol_state::valid_to.eq(valid_to_ts.unwrap_or(MAX_TS)),
             schema::protocol_state::attribute_name.eq(attribute_name),
             schema::protocol_state::attribute_value.eq(attribute_value),
             schema::protocol_state::previous_value.eq(previous_value),
