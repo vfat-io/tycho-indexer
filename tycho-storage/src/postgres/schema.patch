@@ -1,0 +1,68 @@
+diff --git a/tycho-storage/src/postgres/schema.rs b/tycho-storage/src/postgres/schema.rs
+index d71a8300..ca29dda1 100644
+--- a/tycho-storage/src/postgres/schema.rs
++++ b/tycho-storage/src/postgres/schema.rs
+@@ -237,20 +237,63 @@ diesel::joinable!(token_price -> token (token_id));
+ diesel::joinable!(transaction -> block (block_id));
+ 
+ diesel::allow_tables_to_appear_in_same_query!(
+     account,
+     account_balance,
+     block,
+     chain,
+     component_tvl,
+     contract_code,
+     extraction_state,
+     protocol_calls_contract,
+     protocol_component,
+     protocol_component_holds_contract,
+     protocol_component_holds_token,
+     protocol_system,
+     protocol_type,
+     token,
+     token_price,
+     transaction,
+ );
++
++diesel::table! {
++    component_balance (token_id, modify_tx) {
++        token_id -> Int8,
++        new_balance -> Bytea,
++        previous_value -> Bytea,
++        balance_float -> Float8,
++        modify_tx -> Int8,
++        protocol_component_id -> Int8,
++        inserted_ts -> Timestamptz,
++        valid_from -> Timestamptz,
++        valid_to -> Timestamptz,
++    }
++}
++
++diesel::table! {
++    contract_storage (account_id, slot, modify_tx) {
++        slot -> Bytea,
++        value -> Nullable<Bytea>,
++        previous_value -> Nullable<Bytea>,
++        account_id -> Int8,
++        modify_tx -> Int8,
++        ordinal -> Int8,
++        valid_from -> Timestamptz,
++        valid_to -> Timestamptz,
++        inserted_ts -> Timestamptz,
++        modified_ts -> Timestamptz,
++    }
++}
++
++diesel::table! {
++    protocol_state (protocol_component_id, attribute_name, modify_tx) {
++        modify_tx -> Int8,
++        valid_from -> Timestamptz,
++        valid_to -> Timestamptz,
++        inserted_ts -> Timestamptz,
++        modified_ts -> Timestamptz,
++        protocol_component_id -> Int8,
++        attribute_name -> Varchar,
++        attribute_value -> Bytea,
++        previous_value -> Nullable<Bytea>,
++    }
++}

@@ -254,3 +254,46 @@ diesel::allow_tables_to_appear_in_same_query!(
     token_price,
     transaction,
 );
+
+diesel::table! {
+    component_balance (token_id, modify_tx) {
+        token_id -> Int8,
+        new_balance -> Bytea,
+        previous_value -> Bytea,
+        balance_float -> Float8,
+        modify_tx -> Int8,
+        protocol_component_id -> Int8,
+        inserted_ts -> Timestamptz,
+        valid_from -> Timestamptz,
+        valid_to -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    contract_storage (account_id, slot, modify_tx) {
+        slot -> Bytea,
+        value -> Nullable<Bytea>,
+        previous_value -> Nullable<Bytea>,
+        account_id -> Int8,
+        modify_tx -> Int8,
+        ordinal -> Int8,
+        valid_from -> Timestamptz,
+        valid_to -> Timestamptz,
+        inserted_ts -> Timestamptz,
+        modified_ts -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    protocol_state (protocol_component_id, attribute_name, modify_tx) {
+        modify_tx -> Int8,
+        valid_from -> Timestamptz,
+        valid_to -> Timestamptz,
+        inserted_ts -> Timestamptz,
+        modified_ts -> Timestamptz,
+        protocol_component_id -> Int8,
+        attribute_name -> Varchar,
+        attribute_value -> Bytea,
+        previous_value -> Nullable<Bytea>,
+    }
+}
