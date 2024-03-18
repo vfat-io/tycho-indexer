@@ -18,12 +18,12 @@ use tycho_core::{
 };
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
-pub mod ambient;
 pub mod chain_state;
 mod convert;
 pub mod native;
 pub mod token_pre_processor;
 mod utils;
+pub mod vm;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ERC20Token {

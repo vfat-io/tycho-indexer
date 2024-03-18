@@ -1,14 +1,12 @@
 #![doc = include_str!("../../Readme.md")]
 
 use futures03::future::select_all;
-use std::env;
+use serde::Deserialize;
+use std::{env, fs::File, io::Read};
 
 use extractor::{
-    evm::{
-        ambient::{AmbientContractExtractor, AmbientPgGateway},
-        token_pre_processor::TokenPreProcessor,
-    },
-    runner::{ExtractorHandle, ExtractorRunnerBuilder},
+    evm::token_pre_processor::TokenPreProcessor,
+    runner::{ExtractorBuilder, ExtractorHandle},
 };
 
 use actix_web::dev::ServerHandle;
@@ -17,19 +15,15 @@ use ethers::{
     prelude::{Http, Provider},
     providers::Middleware,
 };
-use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::info;
 
-use tycho_core::models::{Chain, FinancialType, ImplementationType, ProtocolType};
+use tycho_core::models::Chain;
 use tycho_indexer::{
     extractor::{
         self,
-        compat::{transcode_ambient_balances, transcode_usv2_balances},
-        evm::{
-            chain_state::ChainState,
-            native::{NativeContractExtractor, NativePgGateway},
-        },
+        evm::chain_state::ChainState,
+        runner::{ExtractorConfig, HandleResult},
         ExtractionError,
     },
     services::ServicesBuilder,
@@ -104,15 +98,29 @@ impl CliArgs {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct ExtractorConfigs {
+    extractors: std::collections::HashMap<String, ExtractorConfig>,
+}
+
+impl ExtractorConfigs {
+    fn from_yaml(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut file = File::open(path)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        let config: ExtractorConfigs = serde_yaml::from_str(&contents)?;
+        Ok(config)
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), ExtractionError> {
     // Set up the subscriber
     tracing_subscriber::fmt::init();
 
-    let args = CliArgs::parse();
+    let args: CliArgs = CliArgs::parse();
 
     info!("Starting Tycho");
-    let mut extractor_handles = Vec::new();
 
     let rpc_url = env::var("ETH_RPC_URL").expect("ETH_RPC_URL is not set");
     let rpc_client: Provider<Http> =
@@ -125,35 +133,29 @@ async fn main() -> Result<(), ExtractionError> {
 
     let chain_state = ChainState::new(chrono::Local::now().naive_utc(), block_number);
 
+    let extractors_config = ExtractorConfigs::from_yaml("./tycho-indexer/extractors.yaml")
+        .map_err(|e| ExtractionError::Setup(format!("Failed to load extractors.yaml. {}", e)))?;
+
+    let protocol_systems: Vec<String> = extractors_config
+        .extractors
+        .keys()
+        .cloned()
+        .collect();
+
     let (cached_gw, gw_writer_thread) = GatewayBuilder::new(&args.database_url)
         .set_chains(&[Chain::Ethereum])
-        .set_protocol_systems(&[
-            "ambient".to_string(),
-            "uniswap_v2".to_string(),
-            "uniswap_v3".to_string(),
-        ])
+        .set_protocol_systems(&protocol_systems)
         .build()
         .await?;
 
     let token_processor = TokenPreProcessor::new(rpc_client);
 
-    let (ambient_task, ambient_handle) =
-        start_ambient_extractor(&args, chain_state, cached_gw.clone(), token_processor.clone())
-            .await?;
-    extractor_handles.push(ambient_handle.clone());
-    info!("Extractor {} started!", ambient_handle.get_id());
-
-    let (uniswap_v3_task, uniswap_v3_handle) =
-        start_uniswap_v3_extractor(&args, chain_state, cached_gw.clone(), token_processor.clone())
-            .await?;
-    extractor_handles.push(uniswap_v3_handle.clone());
-    info!("Extractor {} started!", uniswap_v3_handle.get_id());
-
-    let (uniswap_v2_task, uniswap_v2_handle) =
-        start_uniswap_v2_extractor(&args, chain_state, cached_gw.clone(), token_processor.clone())
-            .await?;
-    extractor_handles.push(uniswap_v2_handle.clone());
-    info!("Extractor {} started!", uniswap_v2_handle.get_id());
+    let (mut tasks, extractor_handles): (Vec<_>, Vec<_>) =
+        build_all_extractors(&extractors_config, chain_state, &cached_gw, &token_processor)
+            .await
+            .map_err(|e| ExtractionError::Setup(format!("Failed to create extractors: {}", e)))?
+            .into_iter()
+            .unzip();
 
     // TODO: read from env variable
     let server_addr = "0.0.0.0";
@@ -164,185 +166,40 @@ async fn main() -> Result<(), ExtractionError> {
         .prefix(server_version_prefix)
         .bind(server_addr)
         .port(server_port)
-        // .register_extractor(ambient_handle)
-        .register_extractor(uniswap_v2_handle)
-        .register_extractor(uniswap_v3_handle)
+        .register_extractors(extractor_handles.clone())
         .run()?;
     info!(server_url, "Http and Ws server started");
 
     let shutdown_task =
         tokio::spawn(shutdown_handler(server_handle, extractor_handles, gw_writer_thread));
-    let (res, _, _) =
-        select_all([ambient_task, uniswap_v2_task, uniswap_v3_task, server_task, shutdown_task])
-            .await;
+
+    tasks.extend(vec![server_task, shutdown_task]);
+
+    let (res, _, _) = select_all(tasks).await;
     res.expect("Extractor- nor ServiceTasks should panic!")
 }
 
-async fn start_ambient_extractor(
-    args: &CliArgs,
+async fn build_all_extractors(
+    config: &ExtractorConfigs,
     chain_state: ChainState,
-    cached_gw: CachedGateway,
-    token_pre_processor: TokenPreProcessor,
-) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
-    let ambient_name = "vm:ambient";
-    let sync_batch_size = env::var("AMBIENT_SYNC_BATCH_SIZE")
-        .unwrap_or("1000".to_string())
-        .parse::<usize>()
-        .expect("Failed to parse AMBIENT_SYNC_BATCH_SIZE");
-    let ambient_gw = AmbientPgGateway::new(
-        ambient_name,
-        Chain::Ethereum,
-        sync_batch_size,
-        cached_gw,
-        token_pre_processor,
-    );
-    let ambient_protocol_types = [(
-        "ambient_pool".to_string(),
-        ProtocolType::new(
-            "ambient_pool".to_string(),
-            FinancialType::Swap,
-            None,
-            ImplementationType::Vm,
-        ),
-    )]
-    .into_iter()
-    .collect();
-    let extractor = AmbientContractExtractor::new(
-        ambient_name,
-        Chain::Ethereum,
-        chain_state,
-        ambient_gw,
-        ambient_protocol_types,
-        Some(transcode_ambient_balances),
-    )
-    .await?;
+    cached_gw: &CachedGateway,
+    token_pre_processor: &TokenPreProcessor,
+) -> Result<Vec<HandleResult>, ExtractionError> {
+    let mut extractor_handles = Vec::new();
 
-    let start_block = 17361664;
-    let stop_block = None;
-    let spkg = format!("{}/substreams-ethereum-ambient-v0.4.0.spkg", args.spkg);
-    let module_name = &"map_changes";
-    let block_span = stop_block.map(|stop| stop - start_block);
-    info!(%ambient_name, %start_block, ?stop_block, ?block_span, %spkg, "Starting Ambient extractor");
-    let mut builder = ExtractorRunnerBuilder::new(&spkg, Arc::new(extractor))
-        .start_block(start_block)
-        .module_name(module_name)
-        .only_final_blocks();
-    if let Some(stop_block) = stop_block {
-        builder = builder.end_block(stop_block)
-    };
-    builder.run().await
-}
+    for extractor_config in config.extractors.values() {
+        let (task, handle) = ExtractorBuilder::new(extractor_config)
+            .only_final_blocks()
+            .build(chain_state, cached_gw, token_pre_processor)
+            .await?
+            .run()
+            .await?;
 
-async fn start_uniswap_v2_extractor(
-    args: &CliArgs,
-    chain_state: ChainState,
-    cached_gw: CachedGateway,
-    token_pre_processor: TokenPreProcessor,
-) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
-    let name = "uniswap_v2";
-    let sync_batch_size = env::var("USV2_SYNC_BATCH_SIZE")
-        .unwrap_or("1000".to_string())
-        .parse::<usize>()
-        .expect("Failed to parse USV2_SYNC_BATCH_SIZE");
-    let gw = NativePgGateway::new(
-        name,
-        Chain::Ethereum,
-        sync_batch_size,
-        cached_gw,
-        token_pre_processor,
-    );
-    let protocol_types = [(
-        "uniswap_v2_pool".to_string(),
-        ProtocolType::new(
-            "uniswap_v2_pool".to_string(),
-            FinancialType::Swap,
-            None,
-            ImplementationType::Custom,
-        ),
-    )]
-    .into_iter()
-    .collect();
-    let extractor = NativeContractExtractor::new(
-        name,
-        Chain::Ethereum,
-        chain_state,
-        "uniswap_v2".to_owned(),
-        gw,
-        protocol_types,
-        Some(transcode_usv2_balances),
-    )
-    .await?;
+        info!("Extractor {} started!", handle.get_id());
+        extractor_handles.push((task, handle));
+    }
 
-    let start_block = 10008300;
-    let stop_block = None;
-    let spkg = format!("{}/substreams-ethereum-uniswap-v2-v0.1.0.spkg", args.spkg);
-    let module_name = &"map_pool_events";
-    let block_span = stop_block.map(|stop| stop - start_block);
-    info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V2 extractor");
-    let mut builder = ExtractorRunnerBuilder::new(&spkg, Arc::new(extractor))
-        .start_block(start_block)
-        .module_name(module_name)
-        .only_final_blocks();
-    if let Some(stop_block) = stop_block {
-        builder = builder.end_block(stop_block)
-    };
-    builder.run().await
-}
-
-async fn start_uniswap_v3_extractor(
-    args: &CliArgs,
-    chain_state: ChainState,
-    cached_gw: CachedGateway,
-    token_pre_processor: TokenPreProcessor,
-) -> Result<(JoinHandle<Result<(), ExtractionError>>, ExtractorHandle), ExtractionError> {
-    let name = "uniswap_v3";
-    let sync_batch_size = env::var("USV3_SYNC_BATCH_SIZE")
-        .unwrap_or("1000".to_string())
-        .parse::<usize>()
-        .expect("Failed to parse USV3_SYNC_BATCH_SIZE");
-    let gw = NativePgGateway::new(
-        name,
-        Chain::Ethereum,
-        sync_batch_size,
-        cached_gw,
-        token_pre_processor,
-    );
-    let protocol_types = [(
-        "uniswap_v3_pool".to_string(),
-        ProtocolType::new(
-            "uniswap_v3_pool".to_string(),
-            FinancialType::Swap,
-            None,
-            ImplementationType::Custom,
-        ),
-    )]
-    .into_iter()
-    .collect();
-    let extractor = NativeContractExtractor::new(
-        name,
-        Chain::Ethereum,
-        chain_state,
-        "uniswap_v3".to_owned(),
-        gw,
-        protocol_types,
-        None,
-    )
-    .await?;
-
-    let start_block = 12369621;
-    let stop_block = None;
-    let spkg = format!("{}/substreams-ethereum-uniswap-v3-v0.1.0.spkg", args.spkg);
-    let module_name = &"map_pool_events";
-    let block_span = stop_block.map(|stop| stop - start_block);
-    info!(%name, %start_block, ?stop_block, ?block_span, %sync_batch_size, %spkg, "Starting Uniswap V3 extractor");
-    let mut builder = ExtractorRunnerBuilder::new(&spkg, Arc::new(extractor))
-        .start_block(start_block)
-        .module_name(module_name)
-        .only_final_blocks();
-    if let Some(stop_block) = stop_block {
-        builder = builder.end_block(stop_block)
-    };
-    builder.run().await
+    Ok(extractor_handles)
 }
 
 async fn shutdown_handler(

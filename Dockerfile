@@ -29,6 +29,8 @@ RUN rustup target add wasm32-unknown-unknown && ./stable-build.sh
 FROM debian:bookworm
 WORKDIR /opt/tycho-indexer
 COPY --from=build /build/target/release/tycho-indexer ./tycho-indexer
+COPY --from=build /build/target/release/tycho-client ./tycho-client
+COPY --from=build /build/tycho-indexer/extractors.yaml ./extractors.yaml
 COPY --from=build /build/substreams/ethereum-ambient/substreams-ethereum-ambient-v0.4.0.spkg ./substreams/substreams-ethereum-ambient-v0.4.0.spkg
 COPY --from=build /build/substreams/ethereum-uniswap-v2/substreams-ethereum-uniswap-v2-v0.1.0.spkg ./substreams/substreams-ethereum-uniswap-v2-v0.1.0.spkg
 COPY --from=build /build/substreams/ethereum-uniswap-v3/substreams-ethereum-uniswap-v3-v0.1.0.spkg ./substreams/substreams-ethereum-uniswap-v3-v0.1.0.spkg

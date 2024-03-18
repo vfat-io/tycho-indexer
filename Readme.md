@@ -320,6 +320,33 @@ If the schema.rs file does not automatically update after you've run a migration
 diesel print-schema > ./tycho-indexer/src/storage/postgres/schema.rs
 ```
 
+## Access to our RDS databases
+
+Our infra uses two RDS PostgreSQL databases for storing data: dev and prod.
+For security purpose, theses databases are only accessible from inside our cluster.
+
+In your terminal, run the following command to create a postgres client pod.
+
+```bash
+kubectl run postgres-client --image=postgres:latest --rm -i -t -- bash
+```
+
+It will open a terminal inside the postgres pod. From there you can connect to the databases using one of the following commands:
+
+For dev:
+
+```bash
+psql -h terraform-20231114200049679600000001.ccqaypweylhx.eu-central-1.rds.amazonaws.com -U tycho -d tycho_postgres_dev
+```
+
+For prod:
+
+```bash
+psql -h terraform-20231115132306743400000001.ccqaypweylhx.eu-central-1.rds.amazonaws.com -U tycho -d tycho_postgres_prod
+```
+
+Then you will find the password in our aws `{env}/tycho_credentials`
+
 # Architecture
 
 The logical diagram below illustrates the architecture of the system. Each component will be discussed individually:
