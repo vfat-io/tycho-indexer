@@ -6,7 +6,6 @@ on:
       - main
       - patch/*
 
-
 permissions:
   id-token: write
   contents: read

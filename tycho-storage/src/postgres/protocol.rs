@@ -42,7 +42,7 @@ impl PostgresGateway {
     /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
     fn _decode_protocol_states(
         &self,
-        result: Result<Vec<(orm::ProtocolState, ComponentId, TxHash)>, diesel::result::Error>,
+        result: Result<Vec<(orm::ProtocolState, ComponentId)>, diesel::result::Error>,
         context: &str,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError> {
         match result {
@@ -65,12 +65,6 @@ impl PostgresGateway {
                     }
 
                     let states_slice = &data_vec[component_start..index];
-                    let tx_hash = &states_slice
-                        .last()
-                        .ok_or(StorageError::Unexpected(
-                            "Could not get tx_hash from ProtocolState".to_string(),
-                        ))?
-                        .2; // Last element has the latest transaction
 
                     let protocol_state = models::protocol::ProtocolComponentState::new(
                         current_component_id,
@@ -78,7 +72,7 @@ impl PostgresGateway {
                             .iter()
                             .map(|x| (x.0.attribute_name.clone(), x.0.attribute_value.clone()))
                             .collect(),
-                        tx_hash.clone(),
+                        None,
                     );
 
                     protocol_states.push(protocol_state);
@@ -1579,11 +1573,7 @@ mod test {
         ]
         .into_iter()
         .collect();
-        models::protocol::ProtocolComponentState::new(
-            "state1",
-            attributes,
-            Bytes::from("0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"),
-        )
+        models::protocol::ProtocolComponentState::new("state1", attributes, None)
     }
 
     #[rstest]
@@ -1625,10 +1615,6 @@ mod test {
         .into_iter()
         .collect();
         protocol_state.attributes = attributes;
-        protocol_state.modify_tx =
-            "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945"
-                .parse()
-                .unwrap();
         let expected = vec![protocol_state];
 
         let result = gateway
