@@ -297,7 +297,7 @@ impl ExtractorBuilder {
         self
     }
 
-    pub async fn ensure_spkg(&self) -> Result<(), ExtractionError> {
+    async fn ensure_spkg(&self) -> Result<(), ExtractionError> {
         // Pull spkg from s3 and copy it at `spkg_path`
         if !Path::new(&self.config.spkg).exists() {
             download_file_from_s3(
@@ -438,7 +438,7 @@ impl ExtractorBuilder {
     }
 }
 
-pub async fn download_file_from_s3(
+async fn download_file_from_s3(
     bucket: &str,
     key: &str,
     download_path: &Path,
