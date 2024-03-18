@@ -151,9 +151,8 @@ pub fn decode_pool_init(
                     protocol_type: Some(crate::pb::tycho::evm::v1::ProtocolType {
                         name: "ambient_pool".to_string(),
                         attribute_schema: vec![],
-                        financial_type: crate::pb::tycho::evm::v1::FinancialType::Swap.into(),
-                        implementation_type: crate::pb::tycho::evm::v1::ImplementationType::Vm
-                            .into(),
+                        financial_type: 0,
+                        implementation_type: 0,
                     }),
                     tx: Some(tx.clone()),
                 };
