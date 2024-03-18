@@ -451,7 +451,7 @@ impl PostgresGateway {
             .map(|(pc_id, t_address)| {
                 let t_id = contract_add_by_id
                     .get(t_address)
-                    .ok_or(StorageError::NotFound("".to_string(), "".to_string()))?;
+                    .ok_or(StorageError::NotFound("Account".to_string(), t_address.to_string()))?;
                 Ok(orm::NewProtocolComponentHoldsContract {
                     protocol_component_id: *pc_id,
                     contract_code_id: *t_id,

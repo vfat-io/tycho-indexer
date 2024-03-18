@@ -37,9 +37,6 @@ use tycho_core::{
 };
 use tycho_storage::postgres::cache::CachedGateway;
 
-#[allow(dead_code)]
-const AMBIENT_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
-
 struct Inner {
     cursor: Vec<u8>,
     last_processed_block: Option<Block>,
@@ -48,7 +45,7 @@ struct Inner {
     last_report_block_number: u64,
 }
 
-pub struct AmbientContractExtractor<G> {
+pub struct VmContractExtractor<G> {
     gateway: G,
     name: String,
     chain: Chain,
@@ -62,7 +59,7 @@ pub struct AmbientContractExtractor<G> {
     post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
 }
 
-impl<DB> AmbientContractExtractor<DB> {
+impl<DB> VmContractExtractor<DB> {
     async fn update_cursor(&self, cursor: String) {
         let cursor_bytes: Vec<u8> = cursor.into();
         let mut state = self.inner.lock().await;
@@ -112,7 +109,7 @@ impl<DB> AmbientContractExtractor<DB> {
     }
 }
 
-pub struct AmbientPgGateway<T>
+pub struct VmPgGateway<T>
 where
     T: TokenPreProcessorTrait,
 {
@@ -125,7 +122,7 @@ where
 
 #[automock]
 #[async_trait]
-pub trait AmbientGateway: Send + Sync {
+pub trait VmGateway: Send + Sync {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
 
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]);
@@ -145,7 +142,7 @@ pub trait AmbientGateway: Send + Sync {
     ) -> Result<evm::BlockAccountChanges, StorageError>;
 }
 
-impl<T> AmbientPgGateway<T>
+impl<T> VmPgGateway<T>
 where
     T: TokenPreProcessorTrait,
 {
@@ -156,7 +153,7 @@ where
         gw: CachedGateway,
         token_pre_processor: T,
     ) -> Self {
-        AmbientPgGateway {
+        VmPgGateway {
             name: name.to_owned(),
             chain,
             sync_batch_size,
@@ -319,7 +316,7 @@ where
 }
 
 #[async_trait]
-impl AmbientGateway for AmbientPgGateway<TokenPreProcessor> {
+impl VmGateway for VmPgGateway<TokenPreProcessor> {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
         self.get_last_cursor().await
     }
@@ -355,9 +352,9 @@ impl AmbientGateway for AmbientPgGateway<TokenPreProcessor> {
     }
 }
 
-impl<G> AmbientContractExtractor<G>
+impl<G> VmContractExtractor<G>
 where
-    G: AmbientGateway,
+    G: VmGateway,
 {
     pub async fn new(
         name: &str,
@@ -365,11 +362,12 @@ where
         chain_state: ChainState,
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
+        protocol_system: String,
         post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
     ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
-            Err(StorageError::NotFound(_, _)) => AmbientContractExtractor {
+            Err(StorageError::NotFound(_, _)) => VmContractExtractor {
                 gateway,
                 name: name.to_owned(),
                 chain,
@@ -380,11 +378,11 @@ where
                     last_report_ts: chrono::Local::now().naive_utc(),
                     last_report_block_number: 0,
                 })),
-                protocol_system: "ambient".to_string(),
+                protocol_system,
                 protocol_types,
                 post_processor,
             },
-            Ok(cursor) => AmbientContractExtractor {
+            Ok(cursor) => VmContractExtractor {
                 gateway,
                 name: name.to_owned(),
                 chain,
@@ -395,7 +393,7 @@ where
                     last_report_ts: chrono::Local::now().naive_utc(),
                     last_report_block_number: 0,
                 })),
-                protocol_system: "ambient".to_string(),
+                protocol_system,
                 protocol_types,
                 post_processor,
             },
@@ -408,9 +406,9 @@ where
 }
 
 #[async_trait]
-impl<G> Extractor for AmbientContractExtractor<G>
+impl<G> Extractor for VmContractExtractor<G>
 where
-    G: AmbientGateway,
+    G: VmGateway,
 {
     fn get_id(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.name)
@@ -566,7 +564,7 @@ mod test {
 
     #[tokio::test]
     async fn test_get_cursor() {
-        let mut gw = MockAmbientGateway::new();
+        let mut gw = MockVmGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -574,12 +572,13 @@ mod test {
             .times(1)
             .returning(|| Ok("cursor".into()));
 
-        let extractor = AmbientContractExtractor::new(
+        let extractor = VmContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            "ambient".into(),
             None,
         )
         .await
@@ -596,7 +595,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data() {
-        let mut gw = MockAmbientGateway::new();
+        let mut gw = MockVmGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -606,12 +605,13 @@ mod test {
         gw.expect_upsert_contract()
             .times(1)
             .returning(|_, _, _| Ok(()));
-        let extractor = AmbientContractExtractor::new(
+        let extractor = VmContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            "ambient".to_owned(),
             None,
         )
         .await
@@ -630,7 +630,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data_skip() {
-        let mut gw = MockAmbientGateway::new();
+        let mut gw = MockVmGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -640,12 +640,13 @@ mod test {
         gw.expect_upsert_contract()
             .times(0)
             .returning(|_, _, _| Ok(()));
-        let extractor = AmbientContractExtractor::new(
+        let extractor = VmContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            "ambient".to_owned(),
             None,
         )
         .await
@@ -674,7 +675,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_revert() {
-        let mut gw: MockAmbientGateway = MockAmbientGateway::new();
+        let mut gw = MockVmGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -700,12 +701,13 @@ mod test {
             })
             .times(1)
             .returning(|_, _, _| Ok(evm::BlockAccountChanges::default()));
-        let extractor = AmbientContractExtractor::new(
+        let extractor = VmContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
             ChainState::default(),
             gw,
             ambient_protocol_types(),
+            "ambient".to_owned(),
             None,
         )
         .await
@@ -768,6 +770,9 @@ mod test_serial_db {
     const USDC_ADDRESS: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
     const USDT_ADDRESS: &str = "dAC17F958D2ee523a2206206994597C13D831ec7";
 
+    const AMBIENT_CONTRACT: [u8; 20] =
+        hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
+
     fn get_mocked_token_pre_processor() -> MockTokenPreProcessorTrait {
         let mut mock_processor = MockTokenPreProcessorTrait::new();
         let new_tokens = vec![
@@ -799,9 +804,7 @@ mod test_serial_db {
         mock_processor
     }
 
-    async fn setup_gw(
-        pool: Pool<AsyncPgConnection>,
-    ) -> AmbientPgGateway<MockTokenPreProcessorTrait> {
+    async fn setup_gw(pool: Pool<AsyncPgConnection>) -> VmPgGateway<MockTokenPreProcessorTrait> {
         let mut conn = pool
             .get()
             .await
@@ -819,7 +822,7 @@ mod test_serial_db {
             .build()
             .await
             .expect("failed to build postgres gateway");
-        AmbientPgGateway::new(
+        VmPgGateway::new(
             "vm:ambient",
             Chain::Ethereum,
             1000,
