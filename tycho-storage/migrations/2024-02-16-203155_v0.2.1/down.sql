@@ -9,3 +9,7 @@ DROP INDEX IF EXISTS idx_account_address;
 
 DROP INDEX idx_component_balance_valid_to;
 
+CREATE INDEX IF NOT EXISTS idx_block_number_identity ON block("number", "chain_id");
+ALTER TABLE block ADD CONSTRAINT block_chain_id_hash_key UNIQUE (chain_id, hash);
+
+ALTER TABLE transaction ADD CONSTRAINT transaction_hash_block_id_key UNIQUE (hash, block_id);
