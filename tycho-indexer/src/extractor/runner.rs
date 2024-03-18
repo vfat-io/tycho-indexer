@@ -297,6 +297,12 @@ impl ExtractorBuilder {
         self
     }
 
+    #[cfg(test)]
+    pub fn set_extractor(mut self, val: Arc<dyn Extractor>) -> Self {
+        self.extractor = Some(val);
+        self
+    }
+
     async fn ensure_spkg(&self) -> Result<(), ExtractionError> {
         // Pull spkg from s3 and copy it at `spkg_path`
         if !Path::new(&self.config.spkg).exists() {
@@ -552,15 +558,22 @@ mod test {
 
         // Build the ExtractorRunnerBuilder
         let extractor = Arc::new(mock_extractor);
-        let builder = ExtractorRunnerBuilder::new(
-            "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg",
-            extractor,
-        )
-        .endpoint_url("https://mainnet.eth.streamingfast.io:443")
-        .module_name("test_module")
-        .start_block(0)
+        let builder = ExtractorBuilder::new(&ExtractorConfig {
+            name: "test_module".to_owned(),
+            chain: Chain::Ethereum,
+            implementation_type: ImplementationType::Vm,
+            sync_batch_size: 0,
+            start_block: 0,
+            protocol_types: vec![ProtocolTypeConfig {
+                name: "test_module_pool".to_owned(),
+                financial_type: FinancialType::Swap,
+            }],
+            spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
+            module_name: "test_module".to_owned(),
+        })
         .end_block(10)
-        .token("test_token");
+        .token("test_token")
+        .set_extractor(extractor);
 
         // Run the builder
         let (task, _handle) = builder.run().await.unwrap();

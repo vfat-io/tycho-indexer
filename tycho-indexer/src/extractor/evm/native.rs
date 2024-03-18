@@ -525,9 +525,9 @@ mod test {
             EXTRACTOR_NAME,
             Chain::Ethereum,
             ChainState::default(),
-            TEST_PROTOCOL.to_string(),
             gw,
             protocol_types,
+            TEST_PROTOCOL.to_string(),
             None,
         )
         .await
