@@ -45,6 +45,7 @@ use diesel::{
     sql_types::{BigInt, Timestamp},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use itertools::Itertools;
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
 use tycho_core::storage::StorageError;
 
@@ -302,4 +303,126 @@ where
             .map_err(PostgresError::from)?;
     }
     Ok(())
+}
+
+pub trait PartitionedVersionedRow: Clone + Send + Sync {
+    type EntityId: Clone + Ord + Hash + Debug + Send + Sync;
+    fn get_id(&self) -> Self::EntityId;
+    fn get_valid_to(&self) -> NaiveDateTime;
+    fn archive(&mut self, next_version: &Self);
+    fn delete(&mut self, delete_version: NaiveDateTime);
+    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
+        ids: I,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Self>, StorageError>
+    where
+        Self: Sized;
+}
+
+fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
+    data: &[N],
+    delete_version: &HashMap<N::EntityId, NaiveDateTime>,
+) -> (Vec<N>, Vec<N>) {
+    let mut latest = HashMap::<N::EntityId, N>::new();
+    let mut archived = Vec::new();
+    for i in 0..data.len() {
+        let id = data[i].get_id();
+
+        // Handle deleted rows
+        if let Some(delete_version) = delete_version.get(&id) {
+            let mut delete_row = data[i].clone();
+            delete_row.delete(*delete_version);
+            archived.push(delete_row);
+            continue;
+        }
+
+        // Handle updated rows
+        if let Some(mut prev) = latest.remove(&id) {
+            prev.archive(&data[i]);
+            archived.push(prev);
+        }
+        latest.insert(id, data[i].clone());
+    }
+    (latest.into_values().collect(), archived)
+}
+
+/// Applies versioning using partitioned tables.
+///
+/// Applying versioning on a partitioned table is a bit more involved since we can't
+/// simply update a column value that is part of the partitioning logic.
+///
+/// Partitioned tables are partitioned over the `valid_to` column. This means there is a table for
+/// each day. Currently valid rows, are put into a default partition, since their valid_to value is
+/// infinite (usually modeled with a very far in the future date).
+///
+/// To update a row, we to move it into an archive partition by setting its valid_to column
+/// correctly. Since rows are not automatically moved between partitions upon updates, we need to
+/// retrieve the row, update its `valid_to` value and insert it into the partitioned table again
+/// (the routing to which exact partition is then handled by postgres automatically). Next we need
+/// to update the attributes of the current version in the default partition.
+///
+/// In case of inserts, we can skip the archival insert since there is no previous version. The
+/// update of the current state should be replaced with simple insert.
+///
+/// ## Batch Updates
+/// If inserting a lot of rows, as is usually the case, and the update contains multiple version of
+/// the same entity, we directly create the archival version on the application side saving us
+/// multiple round trips to the database. This method will handle this for you.
+///
+/// ## Retention Horizon
+/// Partitioned tables usually have a retention horizon meaning any outdated versions
+/// older than the horizon are not kept in storage. To achieve this, archive versions strictly older
+/// than the horizon are simply dropped before issuing the inserts.
+///
+/// ## Deletions
+/// Deletion simply move the row from the default partition to an archive parition by setting the
+/// valid_to column and skipping the update or insert into the current state.
+///
+/// ## Overview
+///
+/// This function will execute the following steps:
+///
+/// - Retrieve the current state of all entities to be updated or deleted.
+/// - Apply application side versioning, calling either delete or archive on the respective rows.
+/// - Filter any archived rows by the retention horizon.
+///
+/// ## Returns
+/// The method returns a vector with the latest version as well as vector of archive versions.
+/// The latest version are supposed to be executed as upserts into the default partition directly,
+/// the archive version can simply be inserted into the partitioned table. Actually executing these
+/// operations is left to the caller since the exact implementation may vary based on the table
+/// schema.
+///
+/// ## Note
+/// This method may only works for rows that have a primary key know before insert. So e.g.
+/// `BIGSERIAL` primary keys won't work here since the method can only deal with a single type, so
+/// you can't use a `New*` orm models here combined with an already stored orm model type.
+pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
+    new_data: &[T],
+    delete_versions: &HashMap<T::EntityId, NaiveDateTime>,
+    retention_horizon: NaiveDateTime,
+    conn: &mut AsyncPgConnection,
+) -> Result<(Vec<T>, Vec<T>), StorageError> {
+    if new_data.is_empty() && delete_versions.is_empty() {
+        return Ok((Vec::new(), Vec::new()))
+    }
+    let db_rows: Vec<T> = T::latest_versions_by_ids(
+        new_data
+            .iter()
+            .map(|e| e.get_id())
+            .chain(delete_versions.keys().cloned())
+            .unique(),
+        conn,
+    )
+    .await?
+    .into_iter()
+    .chain(new_data.iter().cloned())
+    .collect();
+
+    let (latest, archive) = set_partitioned_versioning_attributes(&db_rows, delete_versions);
+    let filtered_archive: Vec<_> = archive
+        .into_iter()
+        .filter(|e| e.get_valid_to() > retention_horizon)
+        .collect();
+    Ok((latest, filtered_archive))
 }

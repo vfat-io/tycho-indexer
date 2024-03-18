@@ -751,6 +751,7 @@ impl PostgresGateway {
                     }),
             );
 
+            // TODO: we need to fix this as well for partitioning
             // invalidated db entities for deleted attributes
             for attr in &state.deleted_attributes {
                 // PERF: slow but required due to diesel restrictions
