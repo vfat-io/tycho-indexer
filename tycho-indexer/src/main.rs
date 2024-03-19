@@ -133,7 +133,8 @@ async fn main() -> Result<(), ExtractionError> {
 
     let chain_state = ChainState::new(chrono::Local::now().naive_utc(), block_number);
 
-    let extractors_config = ExtractorConfigs::from_yaml("./tycho-indexer/extractors.yaml")
+    let config_path = env::var("TYCHO_CONFIG").unwrap_or("./extractors.yaml".to_string());
+    let extractors_config = ExtractorConfigs::from_yaml(config_path.as_str())
         .map_err(|e| ExtractionError::Setup(format!("Failed to load extractors.yaml. {}", e)))?;
 
     let protocol_systems: Vec<String> = extractors_config
