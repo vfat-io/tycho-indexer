@@ -471,6 +471,12 @@ async fn download_file_from_s3(
 
     let data = resp.body.collect().await.unwrap();
 
+    // Ensure the directory exists
+    if let Some(parent) = download_path.parent() {
+        std::fs::create_dir_all(parent)
+            .context(format!("Failed to create directories for {:?}", parent))?;
+    }
+
     std::fs::write(download_path, data.into_bytes()).unwrap();
 
     Ok(())
