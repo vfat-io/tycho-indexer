@@ -883,7 +883,7 @@ impl ProtocolGateway for CachedGateway {
         &self,
         chain: &Chain,
         ids: Option<&[&str]>,
-        at: Option<&BlockOrTimestamp>,
+        at: Option<&Version>,
     ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {

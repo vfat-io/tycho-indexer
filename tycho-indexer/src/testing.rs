@@ -369,7 +369,7 @@ mock! {
             &'life0 self,
             chain: &'life1 Chain,
             ids: Option<&'life2 [&'life3 str]>,
-            at: Option<&'life4 BlockOrTimestamp>,
+            at: Option<&'life4 Version>,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<

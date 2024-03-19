@@ -969,6 +969,7 @@ pub mod db_fixtures {
     }
 
     // Insert a new Component Balance
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_component_balance(
         conn: &mut AsyncPgConnection,
         balance: Balance,
@@ -977,6 +978,7 @@ pub mod db_fixtures {
         token_id: i64,
         tx_id: i64,
         protocol_component_id: i64,
+        valid_to_tx: Option<i64>,
     ) {
         let ts: NaiveDateTime = schema::transaction::table
             .inner_join(schema::block::table)
@@ -985,6 +987,18 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
+        let valid_to_ts: Option<NaiveDateTime> = match &valid_to_tx {
+            Some(tx) => Some(
+                schema::transaction::table
+                    .inner_join(schema::block::table)
+                    .filter(schema::transaction::id.eq(tx))
+                    .select(schema::block::ts)
+                    .first::<NaiveDateTime>(conn)
+                    .await
+                    .expect("setup tx id not found"),
+            ),
+            None => None,
+        };
         diesel::insert_into(schema::component_balance::table)
             .values((
                 schema::component_balance::protocol_component_id.eq(protocol_component_id),
@@ -994,6 +1008,7 @@ pub mod db_fixtures {
                 schema::component_balance::balance_float.eq(balance_float),
                 schema::component_balance::previous_value.eq(previous_balance),
                 schema::component_balance::valid_from.eq(ts),
+                schema::component_balance::valid_to.eq(valid_to_ts),
             ))
             .execute(conn)
             .await
