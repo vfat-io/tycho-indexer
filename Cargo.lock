@@ -5560,6 +5560,8 @@ dependencies = [
  "clap",
  "diesel",
  "diesel-async",
+ "diesel-derive-enum",
+ "diesel_migrations",
  "ethers",
  "futures 0.3.30",
  "hex",

@@ -331,6 +331,10 @@ impl DBCacheWriteExecutor {
             })
             .await;
 
+        if res.is_ok() {
+            info!(block_range=?&new_db_tx.block_range, "Transaction successfully committed to DB!");
+        }
+
         match self.persisted_block.as_ref() {
             None => {
                 self.persisted_block = Some(new_db_tx.block_range.end);
@@ -339,10 +343,6 @@ impl DBCacheWriteExecutor {
                 self.persisted_block = Some(new_db_tx.block_range.end);
             }
             _ => {}
-        }
-
-        if res.is_ok() {
-            info!(block_range=?&new_db_tx.block_range, "Transaction successfully committed to DB!");
         }
 
         // Forward the result to the sender

@@ -368,6 +368,7 @@ impl ExtractorBuilder {
                         } else {
                             None
                         },
+                        128,
                     )
                     .await?,
                 ));
@@ -394,6 +395,7 @@ impl ExtractorBuilder {
                         } else {
                             None
                         },
+                        128,
                     )
                     .await?,
                 ));
