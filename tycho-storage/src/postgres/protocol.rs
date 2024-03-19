@@ -1038,6 +1038,11 @@ impl PostgresGateway {
             )
             .into_boxed();
 
+        // if a version timestamp is provided, we want to filter by valid_from <= version_ts
+        if let Some(ts) = version_ts {
+            q = q.filter(schema::component_balance::valid_from.le(ts));
+        }
+
         if let Some(external_ids) = ids {
             q = q.filter(schema::protocol_component::external_id.eq_any(external_ids))
         }
