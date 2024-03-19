@@ -927,11 +927,8 @@ mod test_serial_db {
     use super::*;
     use crate::postgres::{db_fixtures, testing::run_against_db};
     use ethers::types::U256;
-    use std::{
-        collections::{HashMap, HashSet},
-        str::FromStr,
-    };
-    use tycho_core::{models::ChangeType, Bytes};
+    use std::{collections::HashSet, str::FromStr};
+    use tycho_core::models::ChangeType;
 
     #[tokio::test]
     async fn test_write_and_flush() {

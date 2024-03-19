@@ -409,8 +409,8 @@ impl AccountUpdate {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone())),
         );
-        self.balance = other.balance.clone();
-        self.code = other.code.clone();
+        self.balance.clone_from(&other.balance);
+        self.code.clone_from(&other.code);
         self.change = self.change.merge(&other.change);
     }
 }

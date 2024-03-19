@@ -56,12 +56,12 @@ where
     }
 
     pub fn prefix(mut self, v: &str) -> Self {
-        self.prefix = v.to_owned();
+        v.clone_into(&mut self.prefix);
         self
     }
 
     pub fn bind(mut self, v: &str) -> Self {
-        self.bind = v.to_owned();
+        v.clone_into(&mut self.bind);
         self
     }
 

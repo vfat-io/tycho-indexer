@@ -25,7 +25,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::Mutex;
-use tracing::{debug, info, instrument, trace};
+use tracing::{debug, info, instrument, trace, warn};
 use tycho_core::{
     models,
     models::{Chain, ExtractionState, ExtractorIdentity, ProtocolType},
@@ -371,38 +371,50 @@ where
     ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
-            Err(StorageError::NotFound(_, _)) => VmContractExtractor {
-                gateway,
-                name: name.to_owned(),
-                chain,
-                chain_state,
-                inner: Arc::new(Mutex::new(Inner {
-                    cursor: Vec::new(),
-                    last_processed_block: None,
-                    last_report_ts: chrono::Local::now().naive_utc(),
-                    last_report_block_number: 0,
-                })),
-                protocol_system,
-                protocol_types,
-                post_processor,
-                sync_threshold,
-            },
-            Ok(cursor) => VmContractExtractor {
-                gateway,
-                name: name.to_owned(),
-                chain,
-                chain_state,
-                inner: Arc::new(Mutex::new(Inner {
-                    cursor,
-                    last_processed_block: None,
-                    last_report_ts: chrono::Local::now().naive_utc(),
-                    last_report_block_number: 0,
-                })),
-                protocol_system,
-                protocol_types,
-                post_processor,
-                sync_threshold,
-            },
+            Err(StorageError::NotFound(_, _)) => {
+                warn!(?name, ?chain, "No cursor found, starting from the beginning");
+                VmContractExtractor {
+                    gateway,
+                    name: name.to_owned(),
+                    chain,
+                    chain_state,
+                    inner: Arc::new(Mutex::new(Inner {
+                        cursor: Vec::new(),
+                        last_processed_block: None,
+                        last_report_ts: chrono::Local::now().naive_utc(),
+                        last_report_block_number: 0,
+                    })),
+                    protocol_system,
+                    protocol_types,
+                    post_processor,
+                    sync_threshold,
+                }
+            }
+            Ok(cursor) => {
+                let cursor_hex = hex::encode(&cursor);
+                info!(
+                    ?name,
+                    ?chain,
+                    cursor = &cursor_hex,
+                    "Found existing cursor! Resuming extractor.."
+                );
+                VmContractExtractor {
+                    gateway,
+                    name: name.to_owned(),
+                    chain,
+                    chain_state,
+                    inner: Arc::new(Mutex::new(Inner {
+                        cursor,
+                        last_processed_block: None,
+                        last_report_ts: chrono::Local::now().naive_utc(),
+                        last_report_block_number: 0,
+                    })),
+                    protocol_system,
+                    protocol_types,
+                    post_processor,
+                    sync_threshold,
+                }
+            }
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
         };
 
@@ -740,19 +752,20 @@ mod test {
     }
 }
 
+/// It is notoriously hard to mock postgres here, we would need to have traits and abstractions
+/// for the connection pooling as well as for transaction handling so the easiest way
+/// forward is to just run these tests against a real postgres instance.
+///
+/// The challenge here is to leave the database empty. So we need to initiate a test transaction
+/// and should avoid calling the trait methods which start a transaction of their own. So we do
+/// that by moving the main logic of each trait method into a private method and test this
+/// method instead.
+///
+/// Note that it is ok to use higher level db methods here as there is a layer of abstraction
+/// between this component and the actual db interactions
 #[cfg(test)]
 mod test_serial_db {
-    //! It is notoriously hard to mock postgres here, we would need to have traits and abstractions
-    //! for the connection pooling as well as for transaction handling so the easiest way
-    //! forward is to just run these tests against a real postgres instance.
-    //!
-    //! The challenge here is to leave the database empty. So we need to initiate a test transaction
-    //! and should avoid calling the trait methods which start a transaction of their own. So we do
-    //! that by moving the main logic of each trait method into a private method and test this
-    //! method instead.
-    //!
-    //! Note that it is ok to use higher level db methods here as there is a layer of abstraction
-    //! between this component and the actual db interactions
+
     use crate::extractor::evm::{
         token_pre_processor::MockTokenPreProcessorTrait, AccountUpdate, ComponentBalance,
         ProtocolComponent,

@@ -267,12 +267,12 @@ impl ExtractorBuilder {
 
     #[allow(dead_code)]
     pub fn endpoint_url(mut self, val: &str) -> Self {
-        self.endpoint_url = val.to_owned();
+        val.clone_into(&mut self.endpoint_url);
         self
     }
 
     pub fn module_name(mut self, val: &str) -> Self {
-        self.config.module_name = val.to_owned();
+        val.clone_into(&mut self.config.module_name);
         self
     }
 
@@ -288,7 +288,7 @@ impl ExtractorBuilder {
 
     #[allow(dead_code)]
     pub fn token(mut self, val: &str) -> Self {
-        self.token = val.to_owned();
+        val.clone_into(&mut self.token);
         self
     }
 
