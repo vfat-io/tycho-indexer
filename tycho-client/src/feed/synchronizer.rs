@@ -14,8 +14,8 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::{
     dto::{
-        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolStateRequestBody,
-        ResponseAccount, ResponseProtocolState, StateRequestBody, VersionParam,
+        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ResponseAccount,
+        ResponseProtocolState, StateRequestBody, VersionParam,
     },
     Bytes,
 };
@@ -249,10 +249,12 @@ where
 
             let mut protocol_states = self
                 .rpc_client
-                .get_protocol_states(
+                .get_protocol_states_paginated(
                     self.extractor_id.chain,
-                    &Default::default(),
-                    &ProtocolStateRequestBody::id_filtered(component_ids),
+                    &component_ids,
+                    &version,
+                    50,
+                    4,
                 )
                 .await?
                 .states
@@ -343,7 +345,8 @@ where
             });
 
         let n_components = tracker.components.len();
-        info!(n_components, "Initial snapshot retrieved, starting delta message feed");
+        let n_snapshots = snapshot.snapshots.len();
+        info!(n_components, n_snapshots, "Initial snapshot retrieved, starting delta message feed");
 
         {
             let mut shared = self.shared.lock().await;

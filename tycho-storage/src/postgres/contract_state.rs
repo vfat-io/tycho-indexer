@@ -1264,14 +1264,14 @@ impl PostgresGateway {
     }
 }
 
+/// Tests for PostgresGateway's ContractStateGateway methods
+///
+/// The tests below test the functionality using the concrete EVM types.
 #[cfg(test)]
 mod test {
-    //! Tests for PostgresGateway's ContractStateGateway methods
-    //!
-    //! The tests below test the functionality using the concrete EVM types.
 
     use crate::postgres::db_fixtures;
-    use diesel_async::{AsyncConnection, RunQueryDsl};
+    use diesel_async::AsyncConnection;
     use ethers::types::U256;
     use rstest::rstest;
     use tycho_core::{

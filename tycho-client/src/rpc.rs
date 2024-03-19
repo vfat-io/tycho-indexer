@@ -8,16 +8,21 @@
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
 #[cfg(test)]
 use mockall::automock;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, instrument, trace, warn};
 
 use async_trait::async_trait;
+use futures03::future::try_join_all;
 
 use tycho_core::dto::{
     Chain, ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
-    ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
-    StateRequestBody, StateRequestParameters, StateRequestResponse,
+    ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
+    ProtocolStateRequestResponse, StateRequestBody, StateRequestParameters, StateRequestResponse,
+    VersionParam,
 };
+
+use tokio::sync::Semaphore;
 
 use crate::TYCHO_SERVER_VERSION;
 
@@ -35,6 +40,8 @@ pub enum RPCError {
     /// The response from the server could not be parsed correctly.
     #[error("Failed to parse response: {0}")]
     ParseResponse(String),
+    #[error("Fatal error: {0}")]
+    Fatal(String),
 }
 
 #[cfg_attr(test, automock)]
@@ -61,6 +68,48 @@ pub trait RPCClient {
         filters: &StateRequestParameters,
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError>;
+
+    async fn get_protocol_states_paginated(
+        &self,
+        chain: Chain,
+        ids: &[ProtocolId],
+        version: &VersionParam,
+        chunk_size: usize,
+        concurrency: usize,
+    ) -> Result<ProtocolStateRequestResponse, RPCError> {
+        let semaphore = Arc::new(Semaphore::new(concurrency));
+        let chunked_bodies = ids
+            .chunks(chunk_size)
+            .map(|c| ProtocolStateRequestBody {
+                protocol_ids: Some(c.to_vec()),
+                protocol_system: None,
+                version: version.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        let mut tasks = Vec::new();
+        for body in chunked_bodies.iter() {
+            let sem = semaphore.clone();
+            tasks.push(async move {
+                let _permit = sem
+                    .acquire()
+                    .await
+                    .map_err(|_| RPCError::Fatal("Semaphore dropped".to_string()))?;
+                let filters = StateRequestParameters::default();
+                self.get_protocol_states(chain, &filters, body)
+                    .await
+            });
+        }
+
+        try_join_all(tasks)
+            .await
+            .map(|responses| ProtocolStateRequestResponse {
+                states: responses
+                    .into_iter()
+                    .flat_map(|r| r.states.into_iter())
+                    .collect(),
+            })
+    }
 }
 
 #[derive(Debug, Clone)]

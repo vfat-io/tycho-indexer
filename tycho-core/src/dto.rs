@@ -242,7 +242,7 @@ pub struct Block {
     pub ts: NaiveDateTime,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 pub struct BlockParam {
     #[schema(value_type=Option<String>)]
     #[serde(with = "hex_bytes_option", default)]
@@ -409,8 +409,8 @@ impl AccountUpdate {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone())),
         );
-        self.balance = other.balance.clone();
-        self.code = other.code.clone();
+        self.balance.clone_from(&other.balance);
+        self.code.clone_from(&other.code);
         self.change = self.change.merge(&other.change);
     }
 }
@@ -752,7 +752,7 @@ impl Display for ContractId {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 pub struct VersionParam {
     pub timestamp: Option<NaiveDateTime>,
     pub block: Option<BlockParam>,

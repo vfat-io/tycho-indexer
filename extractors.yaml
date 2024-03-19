@@ -1,6 +1,6 @@
 extractors:
   ambient:
-    name: "ambient"
+    name: "vm:ambient"
     chain: "ethereum"
     implementation_type: "Vm"
     sync_batch_size: 1000

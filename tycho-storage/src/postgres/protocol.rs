@@ -339,7 +339,7 @@ impl PostgresGateway {
                 let key =
                     (component.id.clone(), component.protocol_system.clone(), component.chain);
 
-                protocol_db_id_map.get(&key).is_some()
+                protocol_db_id_map.contains_key(&key)
             })
             .collect();
 
@@ -1310,10 +1310,6 @@ mod test {
     use crate::postgres::db_fixtures;
     use ethers::prelude::H256;
     use std::str::FromStr;
-    use tycho_core::{
-        models,
-        models::{ChangeType, FinancialType, ImplementationType},
-    };
 
     type EVMGateway = PostgresGateway;
 
@@ -1686,7 +1682,9 @@ mod test {
         ]
         .into_iter()
         .collect();
-        new_state1.updated_attributes = attributes1.clone();
+        new_state1
+            .updated_attributes
+            .clone_from(&attributes1);
         new_state1.deleted_attributes = vec!["deletable".to_owned()]
             .into_iter()
             .collect();
@@ -1702,7 +1700,9 @@ mod test {
         ]
         .into_iter()
         .collect();
-        new_state2.updated_attributes = attributes2.clone();
+        new_state2
+            .updated_attributes
+            .clone_from(&attributes2);
         let tx_2: H256 = "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
             .parse()
             .unwrap();
@@ -1730,7 +1730,9 @@ mod test {
             .expect("Failed ");
         let mut expected_state = protocol_state();
         expected_state.attributes = attributes2;
-        expected_state.component_id = new_state1.component_id.clone();
+        expected_state
+            .component_id
+            .clone_from(&new_state1.component_id);
         assert_eq!(db_states[0], expected_state);
 
         // fetch the older state from the db and check it's valid_to is set correctly
@@ -1980,7 +1982,9 @@ mod test {
 
         // expected result
         let mut state_delta = protocol_state_delta();
-        state_delta.component_id = "state1".to_owned();
+        state_delta
+            .component_id
+            .clone_from(&"state1".to_string());
         state_delta.deleted_attributes = vec!["deleted".to_owned()]
             .into_iter()
             .collect();
