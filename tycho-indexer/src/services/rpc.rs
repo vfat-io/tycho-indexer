@@ -7,9 +7,8 @@ use std::collections::HashSet;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 use tycho_core::{
-    dto,
-    dto::{ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
-    models::{Address, Chain},
+    dto::{self, ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
+    models::{Address, Chain, PaginationParams},
     storage::{BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
     Bytes,
 };
@@ -316,9 +315,10 @@ where
         &self,
         chain: &Chain,
         request: &dto::TokensRequestBody,
+        pagination: &dto::PaginationRequest,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
         info!(?chain, ?request, "Getting tokens.");
-        self.get_tokens_inner(chain, request)
+        self.get_tokens_inner(chain, request, pagination)
             .await
     }
 
@@ -326,6 +326,7 @@ where
         &self,
         chain: &Chain,
         request: &dto::TokensRequestBody,
+        pagination: &dto::PaginationRequest,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
         let address_refs: Option<Vec<&Address>> = request
             .token_addresses
@@ -334,9 +335,12 @@ where
         let addresses_slice = address_refs.as_deref();
         debug!(?addresses_slice, "Getting tokens.");
 
+        let converted_params: PaginationParams = pagination.into();
+        let params: Option<&PaginationParams> = Some(&converted_params);
+
         match self
             .db_gateway
-            .get_tokens(*chain, addresses_slice)
+            .get_tokens(*chain, addresses_slice, params)
             .await
         {
             Ok(tokens) => Ok(dto::TokensRequestResponse::new(
@@ -344,6 +348,7 @@ where
                     .into_iter()
                     .map(dto::ResponseToken::from)
                     .collect(),
+                pagination,
             )),
             Err(err) => {
                 error!(error = %err, "Error while getting tokens.");
@@ -531,13 +536,14 @@ pub async fn contract_delta<G: Gateway>(
 )]
 pub async fn tokens<G: Gateway>(
     execution_env: web::Path<Chain>,
+    pagination: web::Path<dto::PaginationRequest>,
     body: web::Json<dto::TokensRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
     // Call the handler to get tokens
     let response = handler
         .into_inner()
-        .get_tokens(&execution_env, &body)
+        .get_tokens(&execution_env, &body, &pagination)
         .await;
 
     match response {
@@ -846,7 +852,7 @@ mod tests {
         let mut gw = MockGateway::new();
         let mock_response = Ok(expected.clone());
         gw.expect_get_tokens()
-            .return_once(|_, _| Box::pin(async move { mock_response }));
+            .return_once(|_, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw);
 
         // request for 2 tokens that are in the DB (WETH and USDC)
@@ -858,7 +864,7 @@ mod tests {
         };
 
         let tokens = req_handler
-            .get_tokens_inner(&Chain::Ethereum, &request)
+            .get_tokens_inner(&Chain::Ethereum, &request, &dto::PaginationRequest::default())
             .await
             .unwrap();
 

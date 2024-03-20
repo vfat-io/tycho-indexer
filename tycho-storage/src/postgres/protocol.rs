@@ -14,7 +14,8 @@ use tracing::{instrument, warn};
 use tycho_core::{
     models,
     models::{
-        Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType, TxHash,
+        Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType,
+        PaginationParams, TxHash,
     },
     storage::{BlockOrTimestamp, StorageError, Version},
     Bytes,
@@ -685,6 +686,7 @@ impl PostgresGateway {
         &self,
         chain: Chain,
         addresses: Option<&[&Address]>,
+        pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::token::CurrencyToken>, StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
@@ -697,6 +699,13 @@ impl PostgresGateway {
 
         if let Some(addrs) = addresses {
             query = query.filter(schema::account::address.eq_any(addrs));
+        }
+
+        if let Some(pagination) = pagination_params {
+            let offset = pagination.page * pagination.page_size;
+            query = query
+                .limit(pagination.page_size)
+                .offset(offset);
         }
 
         let results = query
@@ -2187,26 +2196,38 @@ mod test {
 
         // get all eth tokens (no address filter)
         let tokens = gw
-            .get_tokens(Chain::Ethereum, None, &mut conn)
+            .get_tokens(Chain::Ethereum, None, None, &mut conn)
             .await
             .unwrap();
         assert_eq!(tokens.len(), 4);
 
         // get weth and usdc
         let tokens = gw
-            .get_tokens(Chain::Ethereum, Some(&[&WETH.into(), &USDC.into()]), &mut conn)
+            .get_tokens(Chain::Ethereum, Some(&[&WETH.into(), &USDC.into()]), None, &mut conn)
             .await
             .unwrap();
         assert_eq!(tokens.len(), 2);
 
         // get weth
         let tokens = gw
-            .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), &mut conn)
+            .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), None, &mut conn)
             .await
             .unwrap();
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].symbol, "WETH".to_string());
         assert_eq!(tokens[0].decimals, 18);
+
+        // get tokens with pagination
+        let tokens = gw
+            .get_tokens(
+                Chain::Ethereum,
+                None,
+                Some(&PaginationParams { page: 0, page_size: 1 }),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+        assert_eq!(tokens.len(), 1);
     }
 
     #[tokio::test]
@@ -2216,7 +2237,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let tokens = gw
-            .get_tokens(Chain::ZkSync, None, &mut conn)
+            .get_tokens(Chain::ZkSync, None, None, &mut conn)
             .await
             .unwrap();
 

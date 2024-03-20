@@ -195,3 +195,15 @@ impl Display for ContractId {
         write!(f, "{:?}: 0x{}", self.chain, hex::encode(&self.address))
     }
 }
+
+#[derive(Debug, PartialEq, Clone, Default, Deserialize, Serialize)]
+pub struct PaginationParams {
+    pub page: i64,
+    pub page_size: i64,
+}
+
+impl From<&dto::PaginationRequest> for PaginationParams {
+    fn from(value: &dto::PaginationRequest) -> Self {
+        PaginationParams { page: value.page, page_size: value.page_size }
+    }
+}

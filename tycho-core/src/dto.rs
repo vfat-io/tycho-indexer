@@ -815,11 +815,38 @@ impl TokensRequestBody {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct TokensRequestResponse {
     pub tokens: Vec<ResponseToken>,
+    /// The current page number.
+    pub page: i64,
+    /// The number of items per page.
+    pub page_size: i64,
 }
 
 impl TokensRequestResponse {
-    pub fn new(tokens: Vec<ResponseToken>) -> Self {
-        Self { tokens }
+    pub fn new(tokens: Vec<ResponseToken>, pagination_request: &PaginationRequest) -> Self {
+        Self { tokens, page: pagination_request.page, page_size: pagination_request.page_size }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct PaginationRequest {
+    #[serde(default)]
+    pub page: i64,
+    #[serde(default)]
+    pub page_size: i64,
+}
+
+impl PaginationRequest {
+    pub fn new(page: i64, page_size: i64) -> Self {
+        Self { page, page_size }
+    }
+}
+
+impl Default for PaginationRequest {
+    fn default() -> Self {
+        PaginationRequest {
+            page: 0,       // Default page number
+            page_size: 20, // Default page size
+        }
     }
 }
 
