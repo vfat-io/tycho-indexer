@@ -1013,11 +1013,11 @@ impl PostgresGateway {
         &self,
         chain: &Chain,
         ids: Option<&[&str]>,
-        at: Option<&BlockOrTimestamp>,
+        at: Option<&Version>,
         conn: &mut AsyncPgConnection,
     ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
         let version_ts = match &at {
-            Some(version) => Some(maybe_lookup_block_ts(version, conn).await?),
+            Some(version) => Some(maybe_lookup_version_ts(version, conn).await?),
             None => None,
         };
         let chain_id = self.get_chain_id(chain);
@@ -1037,6 +1037,11 @@ impl PostgresGateway {
                     .or(schema::component_balance::valid_to.is_null()),
             )
             .into_boxed();
+
+        // if a version timestamp is provided, we want to filter by valid_from <= version_ts
+        if let Some(ts) = version_ts {
+            q = q.filter(schema::component_balance::valid_from.le(ts));
+        }
 
         if let Some(external_ids) = ids {
             q = q.filter(schema::protocol_component::external_id.eq_any(external_ids))
@@ -1433,6 +1438,7 @@ mod test {
             weth_id,
             txn[0],
             protocol_component_id,
+            None,
         )
         .await;
         db_fixtures::insert_component_balance(
@@ -1443,6 +1449,7 @@ mod test {
             usdc_id,
             txn[0],
             protocol_component_id,
+            None,
         )
         .await;
         // tvl will be 1.0 cause we miss dai price
@@ -1465,6 +1472,7 @@ mod test {
             weth_id,
             txn[0],
             protocol_component_id2,
+            None,
         )
         .await;
         db_fixtures::insert_component_balance(
@@ -1475,6 +1483,7 @@ mod test {
             dai_id,
             txn[0],
             protocol_component_id2,
+            None,
         )
         .await;
         // tvl will be 1.0 cause we miss lusd price
@@ -1495,8 +1504,9 @@ mod test {
             Bytes::from(U256::zero()),
             1e18,
             lusd_id,
-            txn[0],
+            txn[1],
             protocol_component_id3,
+            None,
         )
         .await;
         db_fixtures::insert_component_balance(
@@ -1505,8 +1515,9 @@ mod test {
             Bytes::from(U256::zero()),
             2000.0 * 1e6,
             usdc_id,
-            txn[0],
+            txn[1],
             protocol_component_id3,
+            None,
         )
         .await;
         // component without balances and thus without tvl
@@ -1815,6 +1826,7 @@ mod test {
             token_id,
             from_txn_id,
             protocol_component_id,
+            Some(to_txn_id),
         )
         .await;
         db_fixtures::insert_component_balance(
@@ -1825,6 +1837,7 @@ mod test {
             token_id,
             to_txn_id,
             protocol_component_id,
+            None,
         )
         .await;
 
@@ -2706,6 +2719,104 @@ mod test {
 
         let res = gw
             .get_balances(&Chain::Ethereum, Some(&["state1"]), None, &mut conn)
+            .await
+            .expect("retrieving balances failed!");
+
+        assert_eq!(res, exp);
+    }
+
+    #[tokio::test]
+    async fn test_get_balances_at() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        // set up changed balances
+        let protocol_component_id = schema::protocol_component::table
+            .filter(schema::protocol_component::external_id.eq("state3"))
+            .select(schema::protocol_component::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol component id");
+        let weth_id = schema::token::table
+            .filter(schema::token::symbol.eq("WETH"))
+            .select(schema::token::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch token id");
+        let dai_id = schema::token::table
+            .filter(schema::token::symbol.eq("DAI"))
+            .select(schema::token::id)
+            .first::<i64>(&mut conn)
+            .await
+            .expect("Failed to fetch token id");
+
+        let tx_hash =
+            H256::from_str("0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7")
+                .expect("valid txhash");
+
+        let (txn_id, ts) = schema::transaction::table
+            .inner_join(schema::block::table)
+            .filter(schema::transaction::hash.eq(tx_hash.clone().as_bytes()))
+            .select((schema::transaction::id, schema::block::ts))
+            .first::<(i64, NaiveDateTime)>(&mut conn)
+            .await
+            .expect("Failed to fetch transaction id");
+
+        diesel::update(
+            schema::component_balance::table
+                .filter(schema::component_balance::protocol_component_id.eq(protocol_component_id)),
+        )
+        .set(schema::component_balance::valid_to.eq(ts))
+        .execute(&mut conn)
+        .await
+        .expect("updating valid_to failed");
+
+        db_fixtures::insert_component_balance(
+            &mut conn,
+            Bytes::from(U256::from(2) * U256::exp10(18)),
+            Bytes::from(U256::exp10(18)),
+            2e18,
+            weth_id,
+            txn_id,
+            protocol_component_id,
+            None,
+        )
+        .await;
+        db_fixtures::insert_component_balance(
+            &mut conn,
+            Bytes::from(U256::from(3000) * U256::exp10(6)),
+            Bytes::from(U256::from(2000) * U256::exp10(18)),
+            3000.0 * 1e6,
+            dai_id,
+            txn_id,
+            protocol_component_id,
+            None,
+        )
+        .await;
+
+        let exp: HashMap<_, _> =
+            [("state3", Bytes::from(WETH), 1e18), ("state3", Bytes::from(DAI), 2000.0 * 1e18)]
+                .into_iter()
+                .group_by(|e| e.0)
+                .into_iter()
+                .map(|(cid, group)| {
+                    (
+                        cid.to_owned(),
+                        group
+                            .map(|(_, addr, bal)| (addr, bal))
+                            .collect::<HashMap<_, _>>(),
+                    )
+                })
+                .collect();
+
+        let res = gw
+            .get_balances(
+                &Chain::Ethereum,
+                Some(&["state3"]),
+                Some(&Version::from_block_number(Chain::Ethereum, 1)),
+                &mut conn,
+            )
             .await
             .expect("retrieving balances failed!");
 

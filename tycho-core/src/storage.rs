@@ -401,7 +401,7 @@ pub trait ProtocolGateway {
         &self,
         chain: &Chain,
         ids: Option<&[&str]>,
-        at: Option<&BlockOrTimestamp>,
+        at: Option<&Version>,
     ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError>;
 
     async fn get_token_prices(&self, chain: &Chain) -> Result<HashMap<Bytes, f64>, StorageError>;
