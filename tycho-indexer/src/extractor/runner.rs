@@ -363,7 +363,7 @@ impl ExtractorBuilder {
                         gw,
                         protocol_types,
                         self.config.name.clone(),
-                        if self.config.name == "ambient" {
+                        if self.config.name == "vm:ambient" {
                             Some(transcode_ambient_balances)
                         } else {
                             None
