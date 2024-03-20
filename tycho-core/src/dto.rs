@@ -204,8 +204,8 @@ impl Deltas {
 
 impl<'de> Deserialize<'de> for Deltas {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+        where
+            D: Deserializer<'de>,
     {
         let json: serde_json::Value = serde_json::Value::deserialize(deserializer)?;
         if json.get("account_updates").is_some() {
@@ -557,6 +557,7 @@ impl From<models::protocol::ProtocolComponentStateDelta> for ProtocolStateDelta 
         }
     }
 }
+
 impl ProtocolStateDelta {
     /// Merges 'other' into 'self'.
     ///
@@ -803,47 +804,45 @@ pub struct TokensRequestBody {
     #[serde(rename = "tokenAddresses")]
     #[schema(value_type=Option<Vec<String>>)]
     pub token_addresses: Option<Vec<Bytes>>,
+
+    // Assuming Chain is defined elsewhere as shown
+    pub chain: Chain,
+
+    #[serde(default)]
+    pub pagination: PaginationParams,
 }
 
-impl TokensRequestBody {
-    pub fn new(token_addresses: Option<Vec<Bytes>>) -> Self {
-        Self { token_addresses }
-    }
-}
 
 /// Response from Tycho server for a tokens request.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct TokensRequestResponse {
     pub tokens: Vec<ResponseToken>,
-    /// The current page number.
-    pub page: i64,
-    /// The number of items per page.
-    pub page_size: i64,
+    pub pagination: PaginationParams,
 }
 
 impl TokensRequestResponse {
-    pub fn new(tokens: Vec<ResponseToken>, pagination_request: &PaginationRequest) -> Self {
-        Self { tokens, page: pagination_request.page, page_size: pagination_request.page_size }
+    pub fn new(tokens: Vec<ResponseToken>, pagination_request: &PaginationParams) -> Self {
+        Self { tokens, pagination: pagination_request.clone() }
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct PaginationRequest {
+pub struct PaginationParams {
     #[serde(default)]
     pub page: i64,
     #[serde(default)]
     pub page_size: i64,
 }
 
-impl PaginationRequest {
+impl PaginationParams {
     pub fn new(page: i64, page_size: i64) -> Self {
         Self { page, page_size }
     }
 }
 
-impl Default for PaginationRequest {
+impl Default for PaginationParams {
     fn default() -> Self {
-        PaginationRequest {
+        PaginationParams {
             page: 0,       // Default page number
             page_size: 20, // Default page size
         }
@@ -1143,7 +1142,7 @@ mod test {
                 "number": 123,
                 "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
                 "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-                "chain": "ethereum",             
+                "chain": "ethereum",
                 "ts": "2023-09-14T00:00:00"
             },
             "revert": false,
@@ -1157,7 +1156,7 @@ mod test {
                     "change": "Update"
                 }
             },
-            "new_protocol_components": 
+            "new_protocol_components":
                 { "protocol_1": {
                         "id": "protocol_1",
                         "protocol_system": "system_1",
@@ -1203,7 +1202,7 @@ mod test {
                 "number": 123,
                 "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
                 "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-                "chain": "ethereum",             
+                "chain": "ethereum",
                 "ts": "2023-09-14T00:00:00"
             },
             "revert": false,

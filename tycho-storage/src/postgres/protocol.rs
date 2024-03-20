@@ -422,8 +422,8 @@ impl PostgresGateway {
                             pc.id, pc.protocol_system, pc.chain
                         )
                     }); //Because we just inserted the protocol systems, there should not be any missing.
-                                                                   // However, trying to handel this via Results is needlessly difficult, because you
-                                                                   // can not use flat_map on a Result.
+                // However, trying to handle this via Results is needlessly difficult, because you
+                // can not use flat_map on a Result.
 
                 pc.contract_addresses
                     .iter()
@@ -2216,6 +2216,13 @@ mod test {
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].symbol, "WETH".to_string());
         assert_eq!(tokens[0].decimals, 18);
+    }
+
+    #[tokio::test]
+    async fn test_get_tokens_with_pagination() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
 
         // get tokens with pagination
         let tokens = gw
@@ -2228,6 +2235,32 @@ mod test {
             .await
             .unwrap();
         assert_eq!(tokens.len(), 1);
+        let first_token_symbol = tokens[0].symbol.clone();
+
+        // get tokens with 0 page_size
+        let tokens = gw
+            .get_tokens(
+                Chain::Ethereum,
+                None,
+                Some(&PaginationParams { page: 0, page_size: 0 }),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+        assert_eq!(tokens.len(), 0);
+
+        // get tokens skipping page
+        let tokens = gw
+            .get_tokens(
+                Chain::Ethereum,
+                None,
+                Some(&PaginationParams { page: 2, page_size: 1 }),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_ne!(tokens[0].symbol, first_token_symbol);
     }
 
     #[tokio::test]

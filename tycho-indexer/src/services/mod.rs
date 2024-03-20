@@ -16,7 +16,7 @@ use tycho_core::{
         ProtocolComponentsRequestBody, ProtocolDeltaRequestBody, ProtocolDeltaRequestResponse,
         ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody, ProtocolStateRequestResponse,
         ResponseAccount, ResponseProtocolState, ResponseToken, StateRequestBody,
-        StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
+        StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam, PaginationParams
     },
     models::{Chain, ContractId},
     storage::Gateway,
@@ -93,6 +93,7 @@ where
                 schemas(ResponseAccount),
                 schemas(TokensRequestBody),
                 schemas(TokensRequestResponse),
+                schemas(PaginationParams),
                 schemas(ResponseToken),
                 schemas(ProtocolComponentsRequestBody),
                 schemas(ProtocolComponentRequestResponse),

@@ -132,6 +132,7 @@ impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
         }
     }
 }
+
 pub struct RpcHandler<G> {
     db_gateway: G,
 }
@@ -313,20 +314,15 @@ where
 
     async fn get_tokens(
         &self,
-        chain: &Chain,
         request: &dto::TokensRequestBody,
-        pagination: &dto::PaginationRequest,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
-        info!(?chain, ?request, "Getting tokens.");
-        self.get_tokens_inner(chain, request, pagination)
-            .await
+        info!(?request, "Getting tokens.");
+        self.get_tokens_inner(request).await
     }
 
     async fn get_tokens_inner(
         &self,
-        chain: &Chain,
         request: &dto::TokensRequestBody,
-        pagination: &dto::PaginationRequest,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
         let address_refs: Option<Vec<&Address>> = request
             .token_addresses
@@ -335,12 +331,13 @@ where
         let addresses_slice = address_refs.as_deref();
         debug!(?addresses_slice, "Getting tokens.");
 
-        let converted_params: PaginationParams = pagination.into();
-        let params: Option<&PaginationParams> = Some(&converted_params);
+        let converted_params: PaginationParams = (&request.pagination).into();
+        let pagination: Option<&PaginationParams> = Some(&converted_params);
 
+        let chain: Chain = request.chain.into();
         match self
             .db_gateway
-            .get_tokens(*chain, addresses_slice, params)
+            .get_tokens(chain, addresses_slice, pagination)
             .await
         {
             Ok(tokens) => Ok(dto::TokensRequestResponse::new(
@@ -348,7 +345,7 @@ where
                     .into_iter()
                     .map(dto::ResponseToken::from)
                     .collect(),
-                pagination,
+                &request.pagination,
             )),
             Err(err) => {
                 error!(error = %err, "Error while getting tokens.");
@@ -530,20 +527,15 @@ pub async fn contract_delta<G: Gateway>(
         (status = 200, description = "OK", body = TokensRequestResponse),
     ),
     request_body = TokensRequestBody,
-    params(
-        ("execution_env" = Chain, description = "Execution environment"),
-    ),
 )]
 pub async fn tokens<G: Gateway>(
-    execution_env: web::Path<Chain>,
-    pagination: web::Path<dto::PaginationRequest>,
     body: web::Json<dto::TokensRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
     // Call the handler to get tokens
     let response = handler
         .into_inner()
-        .get_tokens(&execution_env, &body, &pagination)
+        .get_tokens(&body)
         .await;
 
     match response {
@@ -861,10 +853,12 @@ mod tests {
                 USDC.parse::<Bytes>().unwrap(),
                 WETH.parse::<Bytes>().unwrap(),
             ]),
+            chain: Chain::Ethereum.into(),
+            pagination: dto::PaginationParams::default(),
         };
 
         let tokens = req_handler
-            .get_tokens_inner(&Chain::Ethereum, &request, &dto::PaginationRequest::default())
+            .get_tokens_inner(&request)
             .await
             .unwrap();
 
