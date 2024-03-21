@@ -1028,47 +1028,102 @@ impl PostgresGateway {
         };
         let chain_id = self.get_chain_id(chain);
 
-        let mut q = schema::component_balance::table
-            .inner_join(schema::protocol_component::table)
-            .inner_join(schema::token::table.inner_join(schema::account::table))
-            .select((
-                schema::protocol_component::external_id,
-                schema::account::address,
-                schema::component_balance::balance_float,
-            ))
+        // NOTE: the balances query was split into 3 separate queries to avoid excessive table joins
+        // and improve performance. The queries are as follows:
+
+        // Query 1: component db ids
+        let mut component_query = schema::protocol_component::table
             .filter(schema::protocol_component::chain_id.eq(chain_id))
+            .select((schema::protocol_component::id, schema::protocol_component::external_id))
+            .into_boxed();
+        if let Some(external_ids) = ids {
+            component_query =
+                component_query.filter(schema::protocol_component::external_id.eq_any(external_ids))
+        }
+        let protocol_components: HashMap<i64, String> = component_query
+            .get_results::<(i64, String)>(conn)
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .collect();
+
+        // Query 2: balances
+        let mut balance_query = schema::component_balance::table
+            .filter(
+                schema::component_balance::protocol_component_id.eq_any(protocol_components.keys()),
+            )
             .filter(
                 schema::component_balance::valid_to
                     .gt(version_ts) // if version_ts is None, diesel equates this expression to "False"
                     .or(schema::component_balance::valid_to.is_null()),
             )
             .into_boxed();
-
         // if a version timestamp is provided, we want to filter by valid_from <= version_ts
         if let Some(ts) = version_ts {
-            q = q.filter(schema::component_balance::valid_from.le(ts));
+            balance_query = balance_query.filter(schema::component_balance::valid_from.le(ts));
         }
-
-        if let Some(external_ids) = ids {
-            q = q.filter(schema::protocol_component::external_id.eq_any(external_ids))
-        }
-
-        let balances: HashMap<_, _> = q
-            .get_results::<(String, Bytes, f64)>(conn)
+        let balances_map: HashMap<String, HashMap<i64, f64>> = balance_query
+            .select((
+                schema::component_balance::protocol_component_id,
+                schema::component_balance::token_id,
+                schema::component_balance::balance_float,
+            ))
+            .get_results::<(i64, i64, f64)>(conn)
             .await
             .map_err(PostgresError::from)?
             .into_iter()
-            .group_by(|e| e.0.clone())
+            .group_by(|e| e.0)
             .into_iter()
             .map(|(cid, group)| {
                 (
-                    cid,
+                    protocol_components
+                        .get(&cid)
+                        .expect("Component ID not found")
+                        .clone(),
                     group
-                        .map(|(_, addr, bal)| (addr, bal))
-                        .collect::<HashMap<_, _>>(),
+                        .map(|(_, tid, bal)| (tid, bal))
+                        .collect::<HashMap<i64, f64>>(),
                 )
             })
             .collect();
+
+        // Query 3: token addresses
+        let tokens: HashMap<i64, Address> = schema::token::table
+            .inner_join(schema::account::table)
+            .filter(
+                schema::token::id.eq_any(
+                    balances_map
+                        .values()
+                        .flat_map(|b| b.keys())
+                        .collect::<Vec<_>>(),
+                ),
+            )
+            .select((schema::token::id, schema::account::address))
+            .get_results::<(i64, Address)>(conn)
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .collect();
+
+        // Replace token ids with addresses
+        let mut balances = HashMap::with_capacity(balances_map.len());
+
+        for (component_id, balance_map) in balances_map {
+            let mut new_balance_map = HashMap::new();
+
+            for (tid, bal) in balance_map {
+                match tokens.get(&tid) {
+                    Some(address) => {
+                        new_balance_map.insert(address.clone(), bal);
+                    }
+                    None => {
+                        Err(StorageError::NotFound("Token".to_string(), tid.to_string()))?;
+                    }
+                }
+            }
+
+            balances.insert(component_id.clone(), new_balance_map);
+        }
 
         Ok(balances)
     }
