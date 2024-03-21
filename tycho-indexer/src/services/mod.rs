@@ -12,11 +12,12 @@ use utoipa_swagger_ui::SwaggerUi;
 use tycho_core::{
     dto::{
         AccountUpdate, BlockParam, ChangeType, ContractDeltaRequestBody,
-        ContractDeltaRequestResponse, ProtocolComponent, ProtocolComponentRequestResponse,
-        ProtocolComponentsRequestBody, ProtocolDeltaRequestBody, ProtocolDeltaRequestResponse,
-        ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody, ProtocolStateRequestResponse,
-        ResponseAccount, ResponseProtocolState, ResponseToken, StateRequestBody,
-        StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam, PaginationParams
+        ContractDeltaRequestResponse, PaginationParams, ProtocolComponent,
+        ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolDeltaRequestBody,
+        ProtocolDeltaRequestResponse, ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody,
+        ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState, ResponseToken,
+        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
+        VersionParam,
     },
     models::{Chain, ContractId},
     storage::Gateway,

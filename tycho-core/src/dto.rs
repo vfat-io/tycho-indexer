@@ -204,8 +204,8 @@ impl Deltas {
 
 impl<'de> Deserialize<'de> for Deltas {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         let json: serde_json::Value = serde_json::Value::deserialize(deserializer)?;
         if json.get("account_updates").is_some() {
@@ -811,7 +811,6 @@ pub struct TokensRequestBody {
     #[serde(default)]
     pub pagination: PaginationParams,
 }
-
 
 /// Response from Tycho server for a tokens request.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
