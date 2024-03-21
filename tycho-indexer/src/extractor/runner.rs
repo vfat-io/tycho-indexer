@@ -1,5 +1,7 @@
 use super::{
-    compat::{transcode_ambient_balances, transcode_usv2_balances},
+    compat::{
+        add_default_attributes_uniswapv3, transcode_ambient_balances, transcode_usv2_balances,
+    },
     evm::{
         chain_state::ChainState,
         native::{NativeContractExtractor, NativePgGateway},
@@ -392,6 +394,8 @@ impl ExtractorBuilder {
                         self.config.name.clone(),
                         if self.config.name == "uniswap_v2" {
                             Some(transcode_usv2_balances)
+                        } else if self.config.name == "uniswap_v3" {
+                            Some(add_default_attributes_uniswapv3)
                         } else {
                             None
                         },
