@@ -1080,7 +1080,7 @@ pub struct BlockEntityChangesResult {
 ///
 /// Hold the detailed state changes for a block alongside with protocol
 /// component changes.
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Clone)]
 pub struct BlockEntityChanges {
     extractor: String,
     chain: Chain,
@@ -1090,6 +1090,16 @@ pub struct BlockEntityChanges {
 }
 
 impl BlockEntityChanges {
+    pub fn new(
+        extractor: String,
+        chain: Chain,
+        block: Block,
+        revert: bool,
+        txs_with_update: Vec<ProtocolChangesWithTx>,
+    ) -> Self {
+        BlockEntityChanges { extractor, chain, block, revert, txs_with_update }
+    }
+
     /// Parse from tychos protobuf message
     pub fn try_from_message(
         msg: substreams::BlockEntityChanges,
