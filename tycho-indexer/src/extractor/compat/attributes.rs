@@ -72,7 +72,6 @@ mod test {
 
     use crate::extractor::evm;
 
-    use super::add_default_attributes_uniswapv3;
     const BLOCK_HASH_0: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
     const CREATED_CONTRACT: &str = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc";
 
@@ -135,15 +134,14 @@ mod test {
         let expected = evm::BlockEntityChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            changes.block.clone(),
-            changes.revert.clone(),
+            changes.block,
+            changes.revert,
             vec![ProtocolChangesWithTx {
                 tx: changes
                     .txs_with_update
                     .first()
                     .unwrap()
-                    .tx
-                    .clone(),
+                    .tx,
                 protocol_states: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
                     evm::ProtocolStateDelta {
