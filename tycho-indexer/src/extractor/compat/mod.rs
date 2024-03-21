@@ -6,5 +6,5 @@
 mod attributes;
 mod balances;
 
-pub use attributes::add_default_attributes_uniswapv3;
+pub use attributes::{add_default_attributes_uniswapv2, add_default_attributes_uniswapv3};
 pub use balances::{transcode_ambient_balances, transcode_usv2_balances};

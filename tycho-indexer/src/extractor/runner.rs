@@ -1,6 +1,7 @@
 use super::{
     compat::{
-        add_default_attributes_uniswapv3, transcode_ambient_balances, transcode_usv2_balances,
+        add_default_attributes_uniswapv2, add_default_attributes_uniswapv3,
+        transcode_ambient_balances, transcode_usv2_balances,
     },
     evm::{
         chain_state::ChainState,
@@ -393,7 +394,7 @@ impl ExtractorBuilder {
                         protocol_types,
                         self.config.name.clone(),
                         if self.config.name == "uniswap_v2" {
-                            Some(transcode_usv2_balances)
+                            Some(|b| transcode_usv2_balances(add_default_attributes_uniswapv2(b)))
                         } else if self.config.name == "uniswap_v3" {
                             Some(add_default_attributes_uniswapv3)
                         } else {

@@ -6,17 +6,20 @@ use tycho_core::Bytes;
 use crate::extractor::evm::{BlockEntityChanges, ProtocolStateDelta};
 
 const USV3_MANDATORY_ATTRIBUTES: [&str; 3] = ["liquidity", "tick", "sqrt_price_x96"];
+const USV2_MANDATORY_ATTRIBUTES: [&str; 2] = ["reserve0", "reserve1"];
 
-/// Post processor function that adds missing attributes to all new created uniswapV3 pools.
-pub fn add_default_attributes_uniswapv3(mut changes: BlockEntityChanges) -> BlockEntityChanges {
-    // TODO: Remove it while this is handled directly in the substreams modules.
+/// Post processor function that adds missing attributes to all new created components.
+pub fn add_default_attributes(
+    mut changes: BlockEntityChanges,
+    attributes: &[&str],
+) -> BlockEntityChanges {
     for tx in &mut changes.txs_with_update {
         for c_id in tx.new_protocol_components.keys() {
             if let Some(state) = tx.protocol_states.get_mut(c_id) {
-                for mandatory_attr in USV3_MANDATORY_ATTRIBUTES {
+                for mandatory_attr in attributes {
                     if !state
                         .updated_attributes
-                        .contains_key(mandatory_attr)
+                        .contains_key(mandatory_attr.to_owned())
                     {
                         state
                             .updated_attributes
@@ -25,7 +28,7 @@ pub fn add_default_attributes_uniswapv3(mut changes: BlockEntityChanges) -> Bloc
                 }
             } else {
                 let mut default_attr = HashMap::new();
-                for mandatory_attr in USV3_MANDATORY_ATTRIBUTES {
+                for mandatory_attr in attributes {
                     default_attr.insert(mandatory_attr.to_string(), Bytes::from(U256::zero()));
                 }
                 tx.protocol_states.insert(
@@ -42,9 +45,24 @@ pub fn add_default_attributes_uniswapv3(mut changes: BlockEntityChanges) -> Bloc
     changes
 }
 
+/// Post processor function that adds missing attributes to all new created uniswapV3 pools.
+pub fn add_default_attributes_uniswapv3(changes: BlockEntityChanges) -> BlockEntityChanges {
+    // TODO: Remove it while this is handled directly in the substreams modules.
+    add_default_attributes(changes, &USV3_MANDATORY_ATTRIBUTES)
+}
+
+/// Post processor function that adds missing attributes to all new created uniswapV2 pools.
+pub fn add_default_attributes_uniswapv2(changes: BlockEntityChanges) -> BlockEntityChanges {
+    // TODO: Remove it while this is handled directly in the substreams modules.
+    add_default_attributes(changes, &USV2_MANDATORY_ATTRIBUTES)
+}
+
 #[cfg(test)]
 mod test {
-    use crate::extractor::evm::{ProtocolChangesWithTx, Transaction};
+    use crate::extractor::{
+        compat::attributes::{add_default_attributes, USV3_MANDATORY_ATTRIBUTES},
+        evm::{ProtocolChangesWithTx, Transaction},
+    };
     use ethers::types::{H160, H256};
     use std::{
         collections::{HashMap, HashSet},
@@ -59,7 +77,7 @@ mod test {
     const CREATED_CONTRACT: &str = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc";
 
     #[test]
-    fn test_uniswap_v3_default_attributes() {
+    fn test_add_default_attributes() {
         // Test that uniswap V3 post processor insert mandatory attributes with a default value on
         // new pools detected.
         let changes = evm::BlockEntityChanges::new(
@@ -148,13 +166,13 @@ mod test {
             }],
         );
 
-        let updated_changes = add_default_attributes_uniswapv3(changes);
+        let updated_changes = add_default_attributes(changes, &USV3_MANDATORY_ATTRIBUTES);
 
         assert_eq!(updated_changes, expected);
     }
 
     #[test]
-    fn test_uniswap_v3_default_attributes_no_new_pools() {
+    fn test_add_default_attributes_no_new_pools() {
         // Test that uniswap V3 post processor does nothing when no new pools are detected.
         let changes = evm::BlockEntityChanges::new(
             "native:test".to_owned(),
@@ -191,7 +209,7 @@ mod test {
             }],
         );
 
-        let updated_changes = add_default_attributes_uniswapv3(changes.clone());
+        let updated_changes = add_default_attributes(changes.clone(), &USV3_MANDATORY_ATTRIBUTES);
 
         assert_eq!(updated_changes, changes);
     }
