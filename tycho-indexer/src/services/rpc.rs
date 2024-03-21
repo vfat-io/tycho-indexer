@@ -314,14 +314,17 @@ where
 
     async fn get_tokens(
         &self,
+        chain: &Chain,
         request: &dto::TokensRequestBody,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
-        info!(?request, "Getting tokens.");
-        self.get_tokens_inner(request).await
+        info!(?chain, ?request, "Getting tokens.");
+        self.get_tokens_inner(chain, request)
+            .await
     }
 
     async fn get_tokens_inner(
         &self,
+        chain: &Chain,
         request: &dto::TokensRequestBody,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
         let address_refs: Option<Vec<&Address>> = request
@@ -334,10 +337,9 @@ where
         let converted_params: PaginationParams = (&request.pagination).into();
         let pagination: Option<&PaginationParams> = Some(&converted_params);
 
-        let chain: Chain = request.chain.into();
         match self
             .db_gateway
-            .get_tokens(chain, addresses_slice, pagination)
+            .get_tokens(*chain, addresses_slice, pagination)
             .await
         {
             Ok(tokens) => Ok(dto::TokensRequestResponse::new(
@@ -527,15 +529,19 @@ pub async fn contract_delta<G: Gateway>(
         (status = 200, description = "OK", body = TokensRequestResponse),
     ),
     request_body = TokensRequestBody,
+    params(
+        ("execution_env" = Chain, description = "Execution environment"),
+    ),
 )]
 pub async fn tokens<G: Gateway>(
+    execution_env: web::Path<Chain>,
     body: web::Json<dto::TokensRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
     // Call the handler to get tokens
     let response = handler
         .into_inner()
-        .get_tokens(&body)
+        .get_tokens(&execution_env, &body)
         .await;
 
     match response {
@@ -853,12 +859,11 @@ mod tests {
                 USDC.parse::<Bytes>().unwrap(),
                 WETH.parse::<Bytes>().unwrap(),
             ]),
-            chain: Chain::Ethereum.into(),
             pagination: dto::PaginationParams::default(),
         };
 
         let tokens = req_handler
-            .get_tokens_inner(&request)
+            .get_tokens_inner(&Chain::Ethereum, &request)
             .await
             .unwrap();
 

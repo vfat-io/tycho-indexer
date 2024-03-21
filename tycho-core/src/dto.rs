@@ -805,9 +805,6 @@ pub struct TokensRequestBody {
     #[schema(value_type=Option<Vec<String>>)]
     pub token_addresses: Option<Vec<Bytes>>,
 
-    // Assuming Chain is defined elsewhere as shown
-    pub chain: Chain,
-
     #[serde(default)]
     pub pagination: PaginationParams,
 }
