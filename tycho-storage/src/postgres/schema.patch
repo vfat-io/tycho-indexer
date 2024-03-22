@@ -1,8 +1,8 @@
 diff --git a/tycho-storage/src/postgres/schema.rs b/tycho-storage/src/postgres/schema.rs
-index d71a8300..38b82357 100644
+index d71a8300..178e7a9a 100644
 --- a/tycho-storage/src/postgres/schema.rs
 +++ b/tycho-storage/src/postgres/schema.rs
-@@ -236,21 +236,75 @@ diesel::joinable!(token -> account (account_id));
+@@ -236,21 +236,92 @@ diesel::joinable!(token -> account (account_id));
  diesel::joinable!(token_price -> token (token_id));
  diesel::joinable!(transaction -> block (block_id));
  
@@ -25,7 +25,8 @@ index d71a8300..38b82357 100644
      transaction,
 +    component_balance,
 +    contract_storage,
-+    protocol_state
++    protocol_state,
++    protocol_state_default
  );
 +
 +diesel::table! {
@@ -71,6 +72,20 @@ index d71a8300..38b82357 100644
 +    }
 +}
 +
++diesel::table! {
++    protocol_state_default (protocol_component_id, attribute_name, modify_tx) {
++        modify_tx -> Int8,
++        valid_from -> Timestamptz,
++        valid_to -> Timestamptz,
++        inserted_ts -> Timestamptz,
++        modified_ts -> Timestamptz,
++        protocol_component_id -> Int8,
++        attribute_name -> Varchar,
++        attribute_value -> Bytea,
++        previous_value -> Nullable<Bytea>,
++    }
++}
++
 +diesel::joinable!(component_balance -> protocol_component (protocol_component_id));
 +diesel::joinable!(component_balance -> token (token_id));
 +diesel::joinable!(component_balance -> transaction (modify_tx));
@@ -78,3 +93,5 @@ index d71a8300..38b82357 100644
 +diesel::joinable!(contract_storage -> transaction (modify_tx));
 +diesel::joinable!(protocol_state -> protocol_component (protocol_component_id));
 +diesel::joinable!(protocol_state -> transaction (modify_tx));
++diesel::joinable!(protocol_state_default -> protocol_component (protocol_component_id));
++diesel::joinable!(protocol_state_default -> transaction (modify_tx));
