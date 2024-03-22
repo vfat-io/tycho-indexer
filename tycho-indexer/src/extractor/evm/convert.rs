@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::extractor::{
     evm,
     evm::{ERC20Token, ProtocolStateDelta},
@@ -77,7 +79,8 @@ impl From<&evm::Account> for Contract {
                 .into_iter()
                 .map(|(u, v)| (Bytes::from(u), Bytes::from(v)))
                 .collect(),
-            balance: Bytes::from(value.balance),
+            native_balance: Bytes::from(value.balance),
+            balances: HashMap::new(), // empty balances when converted from Account
             code: value.code.clone(),
             code_hash: Bytes::from(value.code_hash.as_bytes()),
             balance_modify_tx: Bytes::from(value.balance_modify_tx.as_bytes()),

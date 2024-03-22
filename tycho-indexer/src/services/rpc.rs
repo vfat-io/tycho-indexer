@@ -31,27 +31,6 @@ impl From<anyhow::Error> for RpcError {
     }
 }
 
-impl From<evm::Account> for dto::ResponseAccount {
-    fn from(value: evm::Account) -> Self {
-        dto::ResponseAccount::new(
-            value.chain.into(),
-            value.address.into(),
-            value.title.clone(),
-            value
-                .slots
-                .into_iter()
-                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
-                .collect(),
-            Bytes::from(value.balance),
-            value.code,
-            Bytes::from(value.code_hash),
-            Bytes::from(value.balance_modify_tx),
-            Bytes::from(value.code_modify_tx),
-            value.creation_tx.map(Bytes::from),
-        )
-    }
-}
-
 impl From<evm::ProtocolStateDelta> for dto::ProtocolStateDelta {
     fn from(protocol_state: evm::ProtocolStateDelta) -> Self {
         Self {
@@ -762,6 +741,7 @@ mod tests {
             "account0".to_owned(),
             evm_contract_slots([(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
             Bytes::from(U256::from(101)),
+            HashMap::new(),
             Bytes::from("C0C0C0"),
             "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                 .parse()

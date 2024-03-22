@@ -310,7 +310,10 @@ mod tests {
                     "address": "0x0000000000000000000000000000000000000000",
                     "title": "",
                     "slots": {},
-                    "balance": "0x01f4",
+                    "native_balance": "0x01f4",
+                    "balances": {
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": 100000000000
+                    },
                     "code": "0x00",
                     "code_hash": "0x5c06b7c5b3d910fd33bc2229846f9ddaf91d584d9b196e16636901ac3a77077e",
                     "balance_modify_tx": "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -341,12 +344,19 @@ mod tests {
         mocked_server.assert();
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].slots, HashMap::new());
-        assert_eq!(accounts[0].balance, Bytes::from(500u16.to_be_bytes()));
+        assert_eq!(accounts[0].native_balance, Bytes::from(500u16.to_be_bytes()));
         assert_eq!(accounts[0].code, [0].to_vec());
         assert_eq!(
             accounts[0].code_hash,
             hex::decode("5c06b7c5b3d910fd33bc2229846f9ddaf91d584d9b196e16636901ac3a77077e")
                 .unwrap()
+        );
+        assert_eq!(
+            accounts[0].balances.get(
+                &Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .expect("Missing balance!")
+            ),
+            Some(100000000000.0).as_ref()
         );
     }
 

@@ -45,7 +45,8 @@ impl From<models::contract::Contract> for ResponseAccount {
             value.address,
             value.title,
             value.slots,
-            value.balance,
+            value.native_balance,
+            value.balances,
             value.code,
             value.code_hash,
             value.balance_modify_tx,
@@ -664,7 +665,10 @@ pub struct ResponseAccount {
     pub slots: HashMap<Bytes, Bytes>,
     #[schema(value_type=HashMap<String, String>, example="0x00")]
     #[serde(with = "hex_bytes")]
-    pub balance: Bytes,
+    pub native_balance: Bytes,
+    #[schema(value_type=HashMap<String, f64>)]
+    #[serde(with = "hex_hashmap_key")]
+    pub balances: HashMap<Bytes, f64>,
     #[schema(value_type=HashMap<String, String>, example="0xBADBABE")]
     #[serde(with = "hex_bytes")]
     pub code: Bytes,
@@ -689,7 +693,8 @@ impl ResponseAccount {
         address: Bytes,
         title: String,
         slots: HashMap<Bytes, Bytes>,
-        balance: Bytes,
+        native_balance: Bytes,
+        balances: HashMap<Bytes, f64>,
         code: Bytes,
         code_hash: Bytes,
         balance_modify_tx: Bytes,
@@ -701,7 +706,8 @@ impl ResponseAccount {
             address,
             title,
             slots,
-            balance,
+            native_balance,
+            balances,
             code,
             code_hash,
             balance_modify_tx,
@@ -719,7 +725,8 @@ impl std::fmt::Debug for ResponseAccount {
             .field("address", &self.address)
             .field("title", &self.title)
             .field("slots", &self.slots)
-            .field("balance", &self.balance)
+            .field("native_balance", &self.native_balance)
+            .field("balances", &self.balances)
             .field("code", &format!("[{} bytes]", self.code.len()))
             .field("code_hash", &self.code_hash)
             .field("balance_modify_tx", &self.balance_modify_tx)
