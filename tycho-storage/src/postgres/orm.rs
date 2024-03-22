@@ -1,9 +1,9 @@
 use super::{
     schema::{
-        account, account_balance, block, chain, component_balance, component_tvl, contract_code,
-        contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
-        protocol_component_holds_token, protocol_state, protocol_state_default, protocol_system,
-        protocol_type, token, transaction,
+        account, account_balance, block, chain, component_balance, component_balance_default,
+        component_tvl, contract_code, contract_storage, extraction_state, protocol_component,
+        protocol_component_holds_contract, protocol_component_holds_token, protocol_state,
+        protocol_state_default, protocol_system, protocol_type, token, transaction,
     },
     versioning::{DeltaVersionedRow, StoredDeltaVersionedRow, StoredVersionedRow, VersionedRow},
     PostgresError, MAX_TS, MAX_VERSION_TS,
@@ -17,7 +17,7 @@ use diesel::{
     prelude::*,
     query_builder::{BoxedSqlQuery, SqlQuery},
     sql_query,
-    sql_types::{self, BigInt, Bool, Bytea, Double},
+    sql_types::{self, BigInt, Bool, Double},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
@@ -338,7 +338,7 @@ pub struct ProtocolType {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Selectable)]
+#[derive(Identifiable, Queryable, Selectable, Debug)]
 #[diesel(table_name = component_balance)]
 #[diesel(belongs_to(ProtocolComponent))]
 #[diesel(primary_key(protocol_component_id, token_id, modify_tx))]
@@ -354,92 +354,8 @@ pub struct ComponentBalance {
     pub valid_from: NaiveDateTime,
     pub valid_to: NaiveDateTime,
 }
-impl ComponentBalance {
-    pub fn update_many(
-        new_balances_values: &HashMap<i64, (Bytes, Bytes, f64)>,
-    ) -> BoxedSqlQuery<'_, Pg, SqlQuery> {
-        let bind_params = (1..=new_balances_values.len() * 4)
-            .collect::<Vec<_>>()
-            .chunks(4)
-            .map(|chunk| format!("(${}, ${}, ${}, ${})", chunk[0], chunk[1], chunk[2], chunk[3])) // Format each chunk as a tuple
-            .collect::<Vec<_>>()
-            .join(", ");
-        let query_tmpl = format!(
-            r#"
-            UPDATE component_balance
-            SET 
-                new_balance = new_values.new_balance,
-                previous_value = new_values.previous_value,
-                balance_float = new_values.balance_float
-            FROM (VALUES
-                {}
-            ) AS new_values(id, new_balance, previous_value, balance_float)
-            WHERE component_balance.id = new_values.id;
-            "#,
-            bind_params
-        );
-        let mut q = sql_query(query_tmpl).into_boxed();
-        for (k, (b, pb, bf)) in new_balances_values.iter() {
-            q = q.bind::<BigInt, _>(*k);
-            q = q.bind::<Bytea, _>(b);
-            q = q.bind::<Bytea, _>(pb);
-            q = q.bind::<Double, _>(bf);
-        }
-        q
-    }
-}
 
-#[async_trait]
-impl StoredVersionedRow for ComponentBalance {
-    type EntityId = (i64, i64);
-    type PrimaryKey = i64;
-    type Version = NaiveDateTime;
-
-    fn get_pk(&self) -> Self::PrimaryKey {
-        todo!()
-    }
-
-    fn get_entity_id(&self) -> Self::EntityId {
-        (self.protocol_component_id, self.token_id)
-    }
-
-    // Clippy false positive
-    #[allow(clippy::mutable_key_type)]
-    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
-        ids: I,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<Box<Self>>, StorageError> {
-        let (component_ids, token_ids): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
-
-        let tuple_ids = component_ids
-            .iter()
-            .zip(token_ids.iter())
-            .collect::<HashSet<_>>();
-
-        Ok(component_balance::table
-            .select(ComponentBalance::as_select())
-            .into_boxed()
-            .filter(
-                component_balance::protocol_component_id
-                    .eq_any(&component_ids)
-                    .and(component_balance::token_id.eq_any(&token_ids))
-                    .and(component_balance::valid_to.is_null()),
-            )
-            .get_results(conn)
-            .await
-            .map_err(PostgresError::from)?
-            .into_iter()
-            .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.token_id)))
-            .map(Box::new)
-            .collect())
-    }
-
-    fn table_name() -> &'static str {
-        "component_balance"
-    }
-}
-
-#[derive(AsChangeset, Insertable, Debug)]
+#[derive(AsChangeset, Insertable, Clone, Debug)]
 #[diesel(table_name = component_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewComponentBalance {
@@ -476,53 +392,100 @@ impl NewComponentBalance {
     }
 }
 
-impl VersionedRow for NewComponentBalance {
-    type SortKey = (i64, i64, NaiveDateTime);
-    type EntityId = (i64, i64);
-    type Version = NaiveDateTime;
+impl From<ComponentBalance> for NewComponentBalance {
+    fn from(value: ComponentBalance) -> Self {
+        Self {
+            token_id: value.token_id,
+            new_balance: value.new_balance,
+            previous_value: value.previous_value,
+            balance_float: value.balance_float,
+            modify_tx: value.modify_tx,
+            protocol_component_id: value.protocol_component_id,
+            valid_from: value.valid_from,
+            valid_to: Some(value.valid_to),
+        }
+    }
+}
 
-    fn get_entity_id(&self) -> Self::EntityId {
+impl PartitionedVersionedRow for NewComponentBalance {
+    type EntityId = (i64, i64);
+
+    fn get_id(&self) -> Self::EntityId {
         (self.protocol_component_id, self.token_id)
     }
 
-    fn set_valid_to(&mut self, end_version: Self::Version) {
-        self.valid_to = Some(end_version);
+    fn get_valid_to(&self) -> NaiveDateTime {
+        self.valid_to.unwrap()
     }
 
-    fn get_valid_from(&self) -> Self::Version {
-        self.valid_from
+    fn archive(&mut self, next_version: &mut Self) {
+        next_version.previous_value = self.new_balance.clone();
+        self.valid_to = Some(next_version.valid_from);
+    }
+
+    fn delete(&mut self, delete_version: NaiveDateTime) {
+        self.valid_to = Some(delete_version);
+    }
+
+    async fn latest_versions_by_ids(
+        ids: Vec<Self::EntityId>,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Self>, StorageError>
+    where
+        Self: Sized,
+    {
+        let (component_ids, token_ids): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
+
+        let tuple_ids = component_ids
+            .iter()
+            .zip(token_ids.iter())
+            .collect::<HashSet<_>>();
+
+        Ok(component_balance::table
+            .select(ComponentBalance::as_select())
+            .into_boxed()
+            .filter(
+                component_balance::protocol_component_id
+                    .eq_any(&component_ids)
+                    .and(component_balance::token_id.eq_any(&token_ids))
+                    .and(component_balance::valid_to.eq(MAX_TS)),
+            )
+            .get_results(conn)
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.token_id)))
+            .map(NewComponentBalance::from)
+            .collect())
     }
 }
 
-impl DeltaVersionedRow for NewComponentBalance {
-    type Value = Balance;
-
-    fn get_value(&self) -> Self::Value {
-        self.new_balance.clone()
-    }
-
-    fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value
-    }
+#[derive(AsChangeset, Insertable, Debug)]
+#[diesel(table_name = component_balance_default)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewComponentBalanceLatest {
+    pub token_id: i64,
+    pub new_balance: Balance,
+    pub previous_value: Balance,
+    pub balance_float: f64,
+    pub modify_tx: i64,
+    pub protocol_component_id: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: NaiveDateTime,
 }
 
-impl DeltaVersionedRow for ComponentBalance {
-    type Value = Balance;
-
-    fn get_value(&self) -> Self::Value {
-        self.new_balance.clone()
-    }
-
-    fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value
-    }
-}
-
-impl StoredDeltaVersionedRow for ComponentBalance {
-    type Value = Balance;
-
-    fn get_value(&self) -> Self::Value {
-        self.new_balance.clone()
+impl From<NewComponentBalance> for NewComponentBalanceLatest {
+    fn from(value: NewComponentBalance) -> Self {
+        Self {
+            token_id: value.token_id,
+            new_balance: value.new_balance,
+            previous_value: value.previous_value,
+            balance_float: value.balance_float,
+            modify_tx: value.modify_tx,
+            protocol_component_id: value.protocol_component_id,
+            valid_from: value.valid_from,
+            valid_to: value.valid_to.unwrap_or(MAX_TS),
+        }
     }
 }
 
@@ -930,8 +893,8 @@ impl PartitionedVersionedRow for NewProtocolState {
         self.valid_to.unwrap()
     }
 
-    fn archive(&mut self, next_version: &Self) {
-        self.previous_value = next_version.attribute_value.clone();
+    fn archive(&mut self, next_version: &mut Self) {
+        next_version.previous_value = self.attribute_value.clone();
         self.valid_to = Some(next_version.valid_from);
     }
 

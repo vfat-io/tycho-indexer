@@ -308,7 +308,7 @@ pub trait PartitionedVersionedRow: Clone + Send + Sync {
     type EntityId: Clone + Ord + Hash + Debug + Send + Sync;
     fn get_id(&self) -> Self::EntityId;
     fn get_valid_to(&self) -> NaiveDateTime;
-    fn archive(&mut self, next_version: &Self);
+    fn archive(&mut self, next_version: &mut Self);
     fn delete(&mut self, delete_version: NaiveDateTime);
     async fn latest_versions_by_ids(
         ids: Vec<Self::EntityId>,
@@ -336,11 +336,12 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
         }
 
         // Handle updated rows
+        let mut current = data[i].clone();
         if let Some(mut prev) = latest.remove(&id) {
-            prev.archive(&data[i]);
+            prev.archive(&mut current);
             archived.push(prev);
         }
-        latest.insert(id, data[i].clone());
+        latest.insert(id, current);
     }
     (latest.into_values().collect(), archived)
 }

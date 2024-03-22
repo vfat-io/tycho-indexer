@@ -1089,15 +1089,47 @@ impl PostgresGateway {
             ));
         }
 
-        if !new_component_balances.is_empty() {
+        if !component_balances.is_empty() {
+            let deleted_versions = HashMap::new();
             new_component_balances.sort_by_cached_key(|b| b.ordinal);
             let mut sorted = new_component_balances
                 .into_iter()
                 .map(|b| b.entity)
                 .collect::<Vec<_>>();
-            apply_delta_versioning::<_, orm::ComponentBalance>(&mut sorted, conn).await?;
+            let (latest, to_archive) = apply_partitioned_versioning(
+                &sorted,
+                &deleted_versions,
+                NaiveDateTime::default(),
+                conn,
+            )
+            .await?;
+
             diesel::insert_into(schema::component_balance::table)
-                .values(&sorted)
+                .values(&to_archive)
+                .execute(conn)
+                .await
+                .map_err(|err| storage_error_from_diesel(err, "ComponentBalance", "batch", None))?;
+
+            let latest = latest
+                .into_iter()
+                .map(orm::NewComponentBalanceLatest::from)
+                .collect::<Vec<_>>();
+            diesel::insert_into(schema::component_balance_default::table)
+                .values(&latest)
+                .on_conflict(on_constraint("component_balance_default_unique_pk"))
+                .do_update()
+                .set((
+                    schema::component_balance_default::new_balance
+                        .eq(excluded(schema::component_balance_default::new_balance)),
+                    schema::component_balance_default::balance_float
+                        .eq(excluded(schema::component_balance_default::balance_float)),
+                    schema::component_balance_default::previous_value
+                        .eq(excluded(schema::component_balance_default::previous_value)),
+                    schema::component_balance_default::modify_tx
+                        .eq(excluded(schema::component_balance_default::modify_tx)),
+                    schema::component_balance_default::valid_from
+                        .eq(excluded(schema::component_balance_default::valid_from)),
+                ))
                 .execute(conn)
                 .await
                 .map_err(|err| storage_error_from_diesel(err, "ComponentBalance", "batch", None))?;
@@ -1589,13 +1621,13 @@ mod test {
     use std::str::FromStr;
 
     use diesel_async::AsyncConnection;
-    use ethers::{prelude::H256, types::U256};
+    use ethers::prelude::H256;
     use rstest::rstest;
     use serde_json::json;
 
     use tycho_core::storage::BlockIdentifier;
 
-    use crate::postgres::db_fixtures;
+    use crate::postgres::{db_fixtures, MAX_TS};
 
     use super::*;
 
@@ -2194,6 +2226,21 @@ mod test {
             .first::<i64>(&mut conn)
             .await
             .expect("Failed to fetch transaction id");
+
+        diesel::update(schema::component_balance::table)
+            .filter(
+                schema::component_balance::protocol_component_id
+                    .eq(protocol_component_id)
+                    .and(schema::component_balance::token_id.eq(account_id)),
+            )
+            .set(
+                schema::component_balance::valid_to.eq("2024-03-20T01:30:00"
+                    .parse::<NaiveDateTime>()
+                    .unwrap()),
+            )
+            .execute(&mut conn)
+            .await
+            .expect("version update failed");
 
         db_fixtures::insert_component_balance(
             &mut conn,
@@ -2836,6 +2883,7 @@ mod test {
             component_id: component_external_id.clone(),
         };
 
+        dbg!(&component_balance);
         gw.add_component_balances(&[component_balance], &Chain::Starknet, &mut conn)
             .await
             .unwrap();
@@ -2876,24 +2924,29 @@ mod test {
             new_balance: Balance::from(U256::from(2000)),
             balance_float: 2000.0,
             modify_tx: new_tx_hash,
-            component_id: component_external_id,
+            component_id: component_external_id.clone(),
         };
 
         let updated_component_balances = vec![updated_component_balance.clone()];
 
+        dbg!(&updated_component_balances);
         gw.add_component_balances(&updated_component_balances, &Chain::Starknet, &mut conn)
             .await
             .unwrap();
 
         // Obtain newest inserted value
         let new_inserted_data = schema::component_balance::table
+            .inner_join(schema::protocol_component::table)
             .select(orm::ComponentBalance::as_select())
-            .order_by(schema::component_balance::token_id.desc())
+            .filter(
+                schema::component_balance::valid_to
+                    .eq(MAX_TS)
+                    .and(schema::protocol_component::external_id.eq(&component_external_id))
+                    .and(schema::component_balance::token_id.eq(referenced_token.id)),
+            )
             .first::<orm::ComponentBalance>(&mut conn)
-            .await;
-
-        assert!(new_inserted_data.is_ok());
-        let new_inserted_data: orm::ComponentBalance = new_inserted_data.unwrap();
+            .await
+            .expect("retrieving inserted balance failed!");
 
         assert_eq!(new_inserted_data.new_balance, Balance::from(U256::from(2000)));
         assert_eq!(new_inserted_data.previous_value, Balance::from(U256::from(12)));
@@ -3190,7 +3243,7 @@ mod test {
             .into_iter()
             .map(|comp| comp.id)
             .collect::<HashSet<_>>();
-
+        dbg!(NaiveDateTime::MAX);
         assert_eq!(res, exp);
     }
 

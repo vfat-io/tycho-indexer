@@ -1040,7 +1040,6 @@ pub mod db_fixtures {
                 schema::component_balance::balance_float.eq(balance_float),
                 schema::component_balance::previous_value.eq(previous_balance),
                 schema::component_balance::valid_from.eq(ts),
-                schema::component_balance::valid_to.eq(MAX_TS),
                 schema::component_balance::valid_to.eq(valid_to_ts),
             ))
             .execute(conn)
@@ -1277,7 +1276,7 @@ pub mod db_fixtures {
         INNER JOIN
             token ON bal.token_id = token.id
         WHERE 
-            bal.valid_to IS NULL 
+            bal.valid_to = '262142-12-31 23:59:59.999999'
         GROUP BY 
             bal.protocol_component_id
         ON CONFLICT (protocol_component_id) 
