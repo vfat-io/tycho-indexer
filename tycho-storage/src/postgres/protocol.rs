@@ -40,10 +40,11 @@ impl PostgresGateway {
     /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
     fn _decode_protocol_states(
         &self,
-        result: Result<Vec<(orm::ProtocolState, ComponentId)>, diesel::result::Error>,
+        balances: HashMap<ComponentId, HashMap<Address, f64>>,
+        states_result: Result<Vec<(orm::ProtocolState, ComponentId)>, diesel::result::Error>,
         context: &str,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError> {
-        match result {
+        match states_result {
             Ok(data_vec) => {
                 // Decode final state deltas. We can assume result is sorted by component_id.
                 // Therefore we can use slices to iterate over the data in groups of
@@ -63,6 +64,16 @@ impl PostgresGateway {
                     }
 
                     let states_slice = &data_vec[component_start..index];
+                    let protocol_balances = balances
+                        .get(current_component_id)
+                        .ok_or_else(|| {
+                            StorageError::NoRelatedEntity(
+                                "component_balance".to_string(),
+                                "protocol_component".to_string(),
+                                current_component_id.to_string(),
+                            )
+                        })?
+                        .clone();
 
                     let protocol_state = models::protocol::ProtocolComponentState::new(
                         current_component_id,
@@ -70,7 +81,7 @@ impl PostgresGateway {
                             .iter()
                             .map(|x| (x.0.attribute_name.clone(), x.0.attribute_value.clone()))
                             .collect(),
-                        None,
+                        protocol_balances,
                     );
 
                     protocol_states.push(protocol_state);
@@ -550,19 +561,26 @@ impl PostgresGateway {
             None => None,
         };
 
+        let balances = self
+            .get_balances(chain, ids, at.as_ref(), conn)
+            .await?;
+
         match (ids, system) {
             (Some(ids), Some(_)) => {
                 warn!("Both protocol IDs and system were provided. System will be ignored.");
                 self._decode_protocol_states(
+                    balances,
                     orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
                     ids.join(",").as_str(),
                 )
             }
             (Some(ids), _) => self._decode_protocol_states(
+                balances,
                 orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
                 ids.join(",").as_str(),
             ),
             (_, Some(system)) => self._decode_protocol_states(
+                balances,
                 orm::ProtocolState::by_protocol_system(
                     system.clone(),
                     chain_db_id,
@@ -573,6 +591,7 @@ impl PostgresGateway {
                 system.to_string().as_str(),
             ),
             _ => self._decode_protocol_states(
+                balances,
                 orm::ProtocolState::by_chain(chain_db_id, version_ts, conn).await,
                 chain.to_string().as_str(),
             ),
@@ -1021,7 +1040,7 @@ impl PostgresGateway {
         ids: Option<&[&str]>,
         at: Option<&Version>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
+    ) -> Result<HashMap<ComponentId, HashMap<Address, f64>>, StorageError> {
         let version_ts = match &at {
             Some(version) => Some(maybe_lookup_version_ts(version, conn).await?),
             None => None,
@@ -1641,7 +1660,23 @@ mod test {
         ]
         .into_iter()
         .collect();
-        models::protocol::ProtocolComponentState::new("state1", attributes, None)
+        let balances: HashMap<Address, f64> = vec![
+            (
+                "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                    .parse()
+                    .unwrap(),
+                1000000000000000000.0,
+            ),
+            (
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    .parse()
+                    .unwrap(),
+                2000000000.0,
+            ),
+        ]
+        .into_iter()
+        .collect();
+        models::protocol::ProtocolComponentState::new("state1", attributes, balances)
     }
 
     #[rstest]
@@ -1805,6 +1840,22 @@ mod test {
         expected_state
             .component_id
             .clone_from(&new_state1.component_id);
+        expected_state.balances = vec![
+            (
+                "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                    .parse()
+                    .unwrap(),
+                1000000000000000000.0,
+            ),
+            (
+                "0x6b175474e89094c44da98b954eedeac495271d0f"
+                    .parse()
+                    .unwrap(),
+                2000000000000000000000.0,
+            ),
+        ]
+        .into_iter()
+        .collect();
         assert_eq!(db_states[0], expected_state);
 
         // fetch the older state from the db and check it's valid_to is set correctly

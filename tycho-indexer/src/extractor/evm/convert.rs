@@ -1,16 +1,13 @@
 use crate::extractor::{
     evm,
-    evm::{ERC20Token, ProtocolState, ProtocolStateDelta},
+    evm::{ERC20Token, ProtocolStateDelta},
 };
 use ethers::prelude::{H160, H256, U256};
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
         contract::{Contract, ContractDelta},
-        protocol::{
-            ComponentBalance, ProtocolComponent, ProtocolComponentState,
-            ProtocolComponentStateDelta,
-        },
+        protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
         token::CurrencyToken,
     },
     Bytes,
@@ -149,16 +146,6 @@ impl From<&evm::ProtocolComponent> for ProtocolComponent {
             change: value.change,
             creation_tx: value.creation_tx.into(),
             created_at: value.created_at,
-        }
-    }
-}
-
-impl From<&evm::ProtocolState> for ProtocolComponentState {
-    fn from(value: &ProtocolState) -> Self {
-        Self {
-            component_id: value.component_id.clone(),
-            attributes: value.attributes.clone(),
-            modify_tx: Some(Bytes::from(value.modify_tx.as_bytes())),
         }
     }
 }

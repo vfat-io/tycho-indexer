@@ -52,16 +52,6 @@ impl From<evm::Account> for dto::ResponseAccount {
     }
 }
 
-impl From<evm::ProtocolState> for dto::ResponseProtocolState {
-    fn from(protocol_state: evm::ProtocolState) -> Self {
-        Self {
-            component_id: protocol_state.component_id,
-            attributes: protocol_state.attributes,
-            modify_tx: Some(protocol_state.modify_tx.into()),
-        }
-    }
-}
-
 impl From<evm::ProtocolStateDelta> for dto::ProtocolStateDelta {
     fn from(protocol_state: evm::ProtocolStateDelta) -> Self {
         Self {
@@ -877,11 +867,7 @@ mod tests {
         let expected = ProtocolComponentState::new(
             "state1",
             protocol_attributes([("reserve1", 1000), ("reserve2", 500)]),
-            Some(
-                "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
-                    .parse()
-                    .unwrap(),
-            ),
+            HashMap::new(),
         );
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_states()

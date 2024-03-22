@@ -297,7 +297,7 @@ mod tests {
 
     use mockito::Server;
 
-    use std::collections::HashMap;
+    use std::{collections::HashMap, str::FromStr};
 
     #[tokio::test]
     async fn test_get_contract_state() {
@@ -421,7 +421,9 @@ mod tests {
                     "attributes": {
                         "attribute_1": "0xe803000000000000"
                     },
-                    "modify_tx": "0x0000000000000000000000000000000000000000000000000000000000000000"
+                    "balances": {
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": 1000000
+                    }
                 }
             ]
         }
@@ -452,5 +454,14 @@ mod tests {
                 .cloned()
                 .collect::<HashMap<String, Bytes>>();
         assert_eq!(states[0].attributes, expected_attributes);
+        let expected_balances = [(
+            Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                .expect("Unsupported address format"),
+            f64::from(1000000),
+        )]
+        .iter()
+        .cloned()
+        .collect::<HashMap<Bytes, f64>>();
+        assert_eq!(states[0].balances, expected_balances);
     }
 }
