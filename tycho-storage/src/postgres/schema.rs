@@ -254,7 +254,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     token_price,
     transaction,
     component_balance,
+    component_balance_default,
     contract_storage,
+    contract_storage_default,
     protocol_state,
     protocol_state_default
 );
@@ -274,7 +276,36 @@ diesel::table! {
 }
 
 diesel::table! {
+    component_balance_default (protocol_component_id, token_id, modify_tx) {
+        token_id -> Int8,
+        new_balance -> Bytea,
+        previous_value -> Bytea,
+        balance_float -> Float8,
+        modify_tx -> Int8,
+        protocol_component_id -> Int8,
+        inserted_ts -> Timestamptz,
+        valid_from -> Timestamptz,
+        valid_to -> Timestamptz,
+    }
+}
+
+diesel::table! {
     contract_storage (account_id, slot, modify_tx) {
+        slot -> Bytea,
+        value -> Nullable<Bytea>,
+        previous_value -> Nullable<Bytea>,
+        account_id -> Int8,
+        modify_tx -> Int8,
+        ordinal -> Int8,
+        valid_from -> Timestamptz,
+        valid_to -> Timestamptz,
+        inserted_ts -> Timestamptz,
+        modified_ts -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    contract_storage_default (account_id, slot, modify_tx) {
         slot -> Bytea,
         value -> Nullable<Bytea>,
         previous_value -> Nullable<Bytea>,
@@ -319,8 +350,13 @@ diesel::table! {
 diesel::joinable!(component_balance -> protocol_component (protocol_component_id));
 diesel::joinable!(component_balance -> token (token_id));
 diesel::joinable!(component_balance -> transaction (modify_tx));
+diesel::joinable!(component_balance_default -> protocol_component (protocol_component_id));
+diesel::joinable!(component_balance_default -> token (token_id));
+diesel::joinable!(component_balance_default -> transaction (modify_tx));
 diesel::joinable!(contract_storage -> account (account_id));
 diesel::joinable!(contract_storage -> transaction (modify_tx));
+diesel::joinable!(contract_storage_default -> account (account_id));
+diesel::joinable!(contract_storage_default -> transaction (modify_tx));
 diesel::joinable!(protocol_state -> protocol_component (protocol_component_id));
 diesel::joinable!(protocol_state -> transaction (modify_tx));
 diesel::joinable!(protocol_state_default -> protocol_component (protocol_component_id));
