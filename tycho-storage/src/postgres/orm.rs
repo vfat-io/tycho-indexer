@@ -1,17 +1,14 @@
 use super::{
     schema::{
-        account, account_balance, block, chain, component_balance, component_tvl, contract_code,
-        contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
-        protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
-        transaction,
+        self, account, account_balance, block, chain, component_balance, component_tvl,
+        contract_code, contract_storage, extraction_state, protocol_component,
+        protocol_component_holds_contract, protocol_component_holds_token, protocol_state,
+        protocol_system, protocol_type, token, transaction,
     },
     versioning::{DeltaVersionedRow, StoredDeltaVersionedRow, StoredVersionedRow, VersionedRow},
     PostgresError, MAX_TS,
 };
-use crate::postgres::{
-    schema::{component_tvl::protocol_component_id, protocol_state::attribute_name},
-    versioning::PartitionedVersionedRow,
-};
+use crate::postgres::versioning::PartitionedVersionedRow;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
@@ -984,7 +981,7 @@ impl PartitionedVersionedRow for NewProtocolState {
     type EntityId = (i64, String);
 
     fn get_id(&self) -> Self::EntityId {
-        (self.protocol_component_id, self.attribute_name.unwrap().clone())
+        (self.protocol_component_id, self.attribute_name.clone().unwrap())
     }
 
     fn get_valid_to(&self) -> NaiveDateTime {
@@ -1007,26 +1004,7 @@ impl PartitionedVersionedRow for NewProtocolState {
     where
         Self: Sized,
     {
-        let (pc_id, attr_name): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
-        let tuple_ids = pc_id
-            .iter()
-            .zip(attr_name.iter())
-            .collect::<HashSet<_>>();
-        Ok(protocol_state::table
-            .select(ProtocolState::as_select())
-            .into_boxed()
-            .filter(
-                protocol_state::protocol_component_id
-                    .eq_any(&pc_id)
-                    .and(protocol_state::attribute_name.eq_any(&attr_name))
-                    .and(protocol_state::valid_to.eq(MAX_TS)),
-            )
-            .get_results(conn)
-            .await
-            .map_err(PostgresError::from)?
-            .into_iter()
-            .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.attribute_name)))
-            .collect())
+        todo!()
     }
 }
 
