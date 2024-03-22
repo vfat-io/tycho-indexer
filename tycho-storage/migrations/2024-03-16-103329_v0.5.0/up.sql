@@ -39,7 +39,11 @@ DROP TRIGGER IF EXISTS audit_table_token ON token;
 
 DROP TRIGGER IF EXISTS audit_table_token_price ON token_price;
 
-DROP TRIGGER IF EXISTS audit_table_transaction ON TRANSACTION;
+DROP TRIGGER IF EXISTS audit_table_transaction ON transaction;
+
+DROP TRIGGER IF EXISTS audit_table_protocol_component ON protocol_component;
+
+DROP TRIGGER IF EXISTS  invalidate_previous_entry_protocol_calls_contract ON protocol_calls_contract;
 
 -- PROTOCOL STATE
 ALTER TABLE protocol_state RENAME TO protocol_state_old;

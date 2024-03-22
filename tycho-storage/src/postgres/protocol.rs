@@ -1,7 +1,10 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use chrono::{NaiveDateTime, Utc};
-use diesel::prelude::*;
+use diesel::{
+    prelude::*,
+    upsert::{excluded, on_constraint},
+};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use tracing::{error, instrument, trace, warn};
@@ -16,12 +19,13 @@ use tycho_core::{
     Bytes,
 };
 
+use crate::postgres::versioning::apply_partitioned_versioning;
 use super::{
     maybe_lookup_block_ts, maybe_lookup_version_ts,
     orm::{self, Account, ComponentTVL, NewAccount},
     schema, storage_error_from_diesel,
     versioning::apply_delta_versioning,
-    PostgresError, PostgresGateway, WithOrdinal, WithTxHash, MAX_TS
+    PostgresError, PostgresGateway, WithOrdinal, WithTxHash, MAX_VERSION_TS
 };
 
 // Private methods
@@ -714,7 +718,7 @@ impl PostgresGateway {
         .collect();
 
         let mut state_data = Vec::new();
-
+        let mut deleted_attributes = HashMap::new();
         for state in new {
             let tx = state
                 .tx
@@ -751,19 +755,12 @@ impl PostgresGateway {
                     }),
             );
 
-            // TODO: we need to fix this as well for partitioning
-            // invalidated db entities for deleted attributes
-            for attr in &state.deleted_attributes {
-                // PERF: slow but required due to diesel restrictions
-                diesel::update(schema::protocol_state::table)
-                    .filter(schema::protocol_state::protocol_component_id.eq(component_db_id))
-                    .filter(schema::protocol_state::attribute_name.eq(attr))
-                    .filter(schema::protocol_state::valid_to.is_null())
-                    .set(schema::protocol_state::valid_to.eq(tx_ts))
-                    .execute(conn)
-                    .await
-                    .map_err(PostgresError::from)?;
-            }
+            deleted_attributes.extend(
+                state
+                    .deleted_attributes
+                    .iter()
+                    .map(|attr| ((component_db_id, attr.clone()), tx_db.2)),
+            );
         }
 
         // insert the prepared protocol state deltas
@@ -773,10 +770,37 @@ impl PostgresGateway {
                 .into_iter()
                 .map(|b| b.entity)
                 .collect::<Vec<_>>();
-            apply_delta_versioning::<_, orm::ProtocolState>(&mut sorted, conn).await?;
-
+            let (latest, to_archive) = apply_partitioned_versioning(
+                &sorted,
+                &deleted_attributes,
+                NaiveDateTime::default(),
+                conn,
+            )
+            .await?;
             diesel::insert_into(schema::protocol_state::table)
-                .values(&sorted)
+                .values(&to_archive)
+                .execute(conn)
+                .await
+                .map_err(PostgresError::from)?;
+
+            let latest: Vec<orm::NewProtocolStateLatest> = latest
+                .into_iter()
+                .map(Into::into)
+                .collect();
+            diesel::insert_into(schema::protocol_state_default::table)
+                .values(&latest)
+                .on_conflict(on_constraint("protocol_state_default_unique_pk"))
+                .do_update()
+                .set((
+                    schema::protocol_state_default::attribute_value
+                        .eq(excluded(schema::protocol_state_default::attribute_value)),
+                    schema::protocol_state_default::previous_value
+                        .eq(excluded(schema::protocol_state_default::previous_value)),
+                    schema::protocol_state_default::modify_tx
+                        .eq(excluded(schema::protocol_state_default::modify_tx)),
+                    schema::protocol_state_default::valid_from
+                        .eq(excluded(schema::protocol_state_default::valid_from)),
+                ))
                 .execute(conn)
                 .await
                 .map_err(PostgresError::from)?;
@@ -1244,10 +1268,7 @@ impl PostgresGateway {
             .filter(
                 schema::component_balance::protocol_component_id.eq_any(protocol_components.keys()),
             )
-            .filter(
-                schema::component_balance::valid_to
-                    .gt(version_ts.unwrap_or(MAX_TS)) // if version_ts is None, diesel equates this expression to "False"
-            )
+            .filter(schema::component_balance::valid_to.gt(version_ts.unwrap_or(*MAX_VERSION_TS)))
             .into_boxed();
         // if a version timestamp is provided, we want to filter by valid_from <= version_ts
         if let Some(ts) = version_ts {
@@ -3000,11 +3021,10 @@ mod test {
             create_test_protocol_component("state2"),
         ];
 
-        let res = gw
-            .delete_protocol_components(&test_components, Utc::now().naive_utc(), &mut conn)
-            .await;
+        gw.delete_protocol_components(&test_components, Utc::now().naive_utc(), &mut conn)
+            .await
+            .expect("failed to delete protocol components");
 
-        assert!(res.is_ok());
         let pc_ids: Vec<String> = test_components
             .iter()
             .map(|test_pc| test_pc.id.to_string())

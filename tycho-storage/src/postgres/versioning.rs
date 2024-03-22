@@ -45,7 +45,6 @@ use diesel::{
     sql_types::{BigInt, Timestamp},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use itertools::Itertools;
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
 use tycho_core::storage::StorageError;
 
@@ -311,8 +310,8 @@ pub trait PartitionedVersionedRow: Clone + Send + Sync {
     fn get_valid_to(&self) -> NaiveDateTime;
     fn archive(&mut self, next_version: &Self);
     fn delete(&mut self, delete_version: NaiveDateTime);
-    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
-        ids: I,
+    async fn latest_versions_by_ids(
+        ids: Vec<Self::EntityId>,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<Self>, StorageError>
     where
@@ -355,7 +354,7 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
 /// each day. Currently valid rows, are put into a default partition, since their valid_to value is
 /// infinite (usually modeled with a very far in the future date).
 ///
-/// To update a row, we to move it into an archive partition by setting its valid_to column
+/// To update a row, we move it into an archive partition by setting its `valid_to` column
 /// correctly. Since rows are not automatically moved between partitions upon updates, we need to
 /// retrieve the row, update its `valid_to` value and insert it into the partitioned table again
 /// (the routing to which exact partition is then handled by postgres automatically). Next we need
@@ -411,7 +410,7 @@ pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
             .iter()
             .map(|e| e.get_id())
             .chain(delete_versions.keys().cloned())
-            .unique(),
+            .collect(),
         conn,
     )
     .await?
@@ -419,7 +418,7 @@ pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
     .chain(new_data.iter().cloned())
     .collect();
 
-    let (latest, archive) = set_partitioned_versioning_attributes(&db_rows, delete_versions);
+    let (latest, archive) = set_partitioned_versioning_attributes(&db_rows, &delete_versions);
     let filtered_archive: Vec<_> = archive
         .into_iter()
         .filter(|e| e.get_valid_to() > retention_horizon)

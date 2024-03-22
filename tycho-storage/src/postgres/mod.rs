@@ -129,7 +129,7 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-use std::{collections::HashMap, hash::Hash, ops::Deref, str::FromStr, sync::Arc};
+use std::{collections::HashMap, hash::Hash, ops::Deref, str::FromStr, sync::Arc, time::Duration};
 
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -158,6 +158,20 @@ mod versioning;
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
 const MAX_TS: NaiveDateTime = NaiveDateTime::MAX;
+
+lazy_static! {
+    /// Simplifies querying current and historical versions by introducing a special marker version.
+    ///
+    /// By setting `valid_to` to `MAX_TS = max_version_ts + 1s` for the latest versions, this approach
+    /// collapses the query predicates from
+    /// `valid_from <= target_version < valid_to or valid_to is "latest"`
+    /// to a more streamlined
+    /// `valid_from <= target_version < valid_to`.
+    /// This enables `max_version_ts` queries to include `MAX_TS` entries (current versions),
+    /// while excluding them from other version queries, effectively differentiating between
+    /// current and historical data without additional predicates.
+    static ref MAX_VERSION_TS: NaiveDateTime = NaiveDateTime::MAX - Duration::from_secs(1);
+}
 
 pub(crate) struct ValueIdTableCache<E> {
     map_id: HashMap<E, i64>,
@@ -736,7 +750,7 @@ pub mod db_fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(1),
-                schema::block::ts.eq("2020-01-01T00:00:00"
+                schema::block::ts.eq("2024-03-20T00:00:00"
                     .parse::<chrono::NaiveDateTime>()
                     .expect("timestamp")),
                 schema::block::chain_id.eq(chain_id),
@@ -757,7 +771,7 @@ pub mod db_fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(2),
-                schema::block::ts.eq("2020-01-01T01:00:00"
+                schema::block::ts.eq("2024-03-20T01:00:00"
                     .parse::<chrono::NaiveDateTime>()
                     .unwrap()),
                 schema::block::chain_id.eq(chain_id),
@@ -1007,17 +1021,15 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
-        let valid_to_ts: Option<NaiveDateTime> = match &valid_to_tx {
-            Some(tx) => Some(
-                schema::transaction::table
-                    .inner_join(schema::block::table)
-                    .filter(schema::transaction::id.eq(tx))
-                    .select(schema::block::ts)
-                    .first::<NaiveDateTime>(conn)
-                    .await
-                    .expect("setup tx id not found"),
-            ),
-            None => None,
+        let valid_to_ts = match &valid_to_tx {
+            Some(tx) => schema::transaction::table
+                .inner_join(schema::block::table)
+                .filter(schema::transaction::id.eq(tx))
+                .select(schema::block::ts)
+                .first::<NaiveDateTime>(conn)
+                .await
+                .expect("setup tx id not found"),
+            None => MAX_TS,
         };
         diesel::insert_into(schema::component_balance::table)
             .values((
@@ -1028,6 +1040,7 @@ pub mod db_fixtures {
                 schema::component_balance::balance_float.eq(balance_float),
                 schema::component_balance::previous_value.eq(previous_balance),
                 schema::component_balance::valid_from.eq(ts),
+                schema::component_balance::valid_to.eq(MAX_TS),
                 schema::component_balance::valid_to.eq(valid_to_ts),
             ))
             .execute(conn)

@@ -1,12 +1,12 @@
 use super::{
     schema::{
-        self, account, account_balance, block, chain, component_balance, component_tvl,
-        contract_code, contract_storage, extraction_state, protocol_component,
-        protocol_component_holds_contract, protocol_component_holds_token, protocol_state,
-        protocol_system, protocol_type, token, transaction,
+        account, account_balance, block, chain, component_balance, component_tvl, contract_code,
+        contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
+        protocol_component_holds_token, protocol_state, protocol_state_default, protocol_system,
+        protocol_type, token, transaction,
     },
     versioning::{DeltaVersionedRow, StoredDeltaVersionedRow, StoredVersionedRow, VersionedRow},
-    PostgresError, MAX_TS,
+    PostgresError, MAX_TS, MAX_VERSION_TS,
 };
 use crate::postgres::versioning::PartitionedVersionedRow;
 use async_trait::async_trait;
@@ -662,11 +662,7 @@ impl ProtocolState {
             .inner_join(protocol_component::table)
             .filter(protocol_component::external_id.eq_any(component_ids))
             .filter(protocol_component::chain_id.eq(chain_id))
-            .filter(
-                protocol_state::valid_to
-                    .gt(version_ts.unwrap()) // if version_ts is None, diesel equates this expression to "False"
-                    .or(protocol_state::valid_to.is_null()),
-            )
+            .filter(protocol_state::valid_to.gt(version_ts.unwrap_or(*MAX_VERSION_TS)))
             .into_boxed();
 
         // if a version timestamp is provided, we want to filter by valid_from <= version_ts
@@ -704,11 +700,7 @@ impl ProtocolState {
             )
             .filter(protocol_system::name.eq(system.to_string()))
             .filter(protocol_component::chain_id.eq(chain_id))
-            .filter(
-                protocol_state::valid_to
-                    .gt(version_ts.unwrap())
-                    .or(protocol_state::valid_to.is_null()),
-            )
+            .filter(protocol_state::valid_to.gt(version_ts.unwrap_or(*MAX_VERSION_TS)))
             .into_boxed();
 
         // if a version timestamp is provided, we want to filter by valid_from <= version_ts
@@ -739,11 +731,7 @@ impl ProtocolState {
         let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .filter(protocol_component::chain_id.eq(chain_id))
-            .filter(
-                protocol_state::valid_to
-                    .gt(version_ts.unwrap())
-                    .or(protocol_state::valid_to.is_null()),
-            )
+            .filter(protocol_state::valid_to.gt(version_ts.unwrap_or(*MAX_VERSION_TS)))
             .into_boxed();
 
         // if a version timestamp is provided, we want to filter by valid_from <= version_ts
@@ -781,11 +769,7 @@ impl ProtocolState {
             .filter(protocol_state::valid_from.gt(start_ts))
             .filter(protocol_state::valid_from.le(end_ts))
             // only consider attributes that are still valid by end_ts
-            .filter(
-                protocol_state::valid_to
-                    .gt(end_ts)
-                    .or(protocol_state::valid_to.is_null()),
-            )
+            .filter(protocol_state::valid_to.gt(end_ts))
             .order_by(protocol_state::protocol_component_id)
             .select((Self::as_select(), protocol_component::external_id))
             .get_results::<(Self, String)>(conn)
@@ -810,7 +794,7 @@ impl ProtocolState {
                                 WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
                                 AND ps2.attribute_name = protocol_state.attribute_name
                                 AND ps2.valid_from <= '{}'
-                                AND (ps2.valid_to > '{}' OR ps2.valid_to IS NULL)
+                                AND ps2.valid_to > '{}'
                             )", end_ts, end_ts);
 
         // query for all state updates that have a valid_to between start_ts and end_ts (potentially
@@ -879,7 +863,7 @@ impl ProtocolState {
                                 WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
                                 AND ps2.attribute_name = protocol_state.attribute_name
                                 AND ps2.valid_from <= '{}'
-                                AND (ps2.valid_to > '{}' OR ps2.valid_to IS NULL)
+                                AND ps2.valid_to > '{}'
                             )", start_ts, start_ts);
 
         // We query all states that were deleted between the start and target timestamps. Deleted
@@ -908,62 +892,6 @@ impl ProtocolState {
     }
 }
 
-#[async_trait]
-impl StoredVersionedRow for ProtocolState {
-    type EntityId = (i64, String);
-    type PrimaryKey = i64;
-    type Version = NaiveDateTime;
-
-    fn get_pk(&self) -> Self::PrimaryKey {
-        todo!()
-    }
-
-    fn get_entity_id(&self) -> Self::EntityId {
-        (self.protocol_component_id, self.attribute_name.clone())
-    }
-
-    // Clippy false positive
-    #[allow(clippy::mutable_key_type)]
-    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
-        ids: I,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<Box<Self>>, StorageError> {
-        let (pc_id, attr_name): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
-        let tuple_ids = pc_id
-            .iter()
-            .zip(attr_name.iter())
-            .collect::<HashSet<_>>();
-        Ok(protocol_state::table
-            .select(ProtocolState::as_select())
-            .into_boxed()
-            .filter(
-                protocol_state::protocol_component_id
-                    .eq_any(&pc_id)
-                    .and(protocol_state::attribute_name.eq_any(&attr_name))
-                    .and(protocol_state::valid_to.is_null()),
-            )
-            .get_results(conn)
-            .await
-            .map_err(PostgresError::from)?
-            .into_iter()
-            .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.attribute_name)))
-            .map(Box::new)
-            .collect())
-    }
-
-    fn table_name() -> &'static str {
-        "protocol_state"
-    }
-}
-
-impl StoredDeltaVersionedRow for ProtocolState {
-    type Value = Bytes;
-
-    fn get_value(&self) -> Self::Value {
-        self.attribute_value.clone()
-    }
-}
-
 #[derive(Insertable, Clone, Debug)]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -975,6 +903,20 @@ pub struct NewProtocolState {
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
     pub valid_to: Option<NaiveDateTime>,
+}
+
+impl From<ProtocolState> for NewProtocolState {
+    fn from(value: ProtocolState) -> Self {
+        Self {
+            protocol_component_id: value.protocol_component_id,
+            attribute_name: Some(value.attribute_name),
+            attribute_value: Some(value.attribute_value),
+            previous_value: value.previous_value,
+            modify_tx: value.modify_tx,
+            valid_from: value.valid_from,
+            valid_to: Some(value.valid_to),
+        }
+    }
 }
 
 impl PartitionedVersionedRow for NewProtocolState {
@@ -997,14 +939,34 @@ impl PartitionedVersionedRow for NewProtocolState {
         self.valid_to = Some(delete_version);
     }
 
-    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
-        ids: I,
+    async fn latest_versions_by_ids(
+        ids: Vec<Self::EntityId>,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<Self>, StorageError>
     where
         Self: Sized,
     {
-        todo!()
+        let (pc_id, attr_name): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
+        let tuple_ids = pc_id
+            .iter()
+            .zip(attr_name.iter())
+            .collect::<HashSet<_>>();
+        Ok(protocol_state::table
+            .select(ProtocolState::as_select())
+            .into_boxed()
+            .filter(
+                protocol_state::protocol_component_id
+                    .eq_any(&pc_id)
+                    .and(protocol_state::attribute_name.eq_any(&attr_name))
+                    .and(protocol_state::valid_to.eq(MAX_TS)),
+            )
+            .get_results(conn)
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.attribute_name)))
+            .map(NewProtocolState::from)
+            .collect())
     }
 }
 
@@ -1028,40 +990,30 @@ impl NewProtocolState {
     }
 }
 
-impl VersionedRow for NewProtocolState {
-    type SortKey = (i64, String, NaiveDateTime, i64);
-    type EntityId = (i64, String);
-    type Version = NaiveDateTime;
-
-    fn get_entity_id(&self) -> Self::EntityId {
-        (
-            self.protocol_component_id,
-            self.attribute_name
-                .clone()
-                .expect("should have attribute name"),
-        )
-    }
-
-    fn set_valid_to(&mut self, end_version: Self::Version) {
-        self.valid_to = Some(end_version);
-    }
-
-    fn get_valid_from(&self) -> Self::Version {
-        self.valid_from
-    }
+#[derive(Insertable, Clone, Debug)]
+#[diesel(table_name = protocol_state_default)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolStateLatest {
+    pub protocol_component_id: i64,
+    pub attribute_name: Option<String>,
+    pub attribute_value: Option<Bytes>,
+    pub previous_value: Option<Bytes>,
+    pub modify_tx: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: Option<NaiveDateTime>,
 }
 
-impl DeltaVersionedRow for NewProtocolState {
-    type Value = Bytes;
-
-    fn get_value(&self) -> Self::Value {
-        self.attribute_value
-            .clone()
-            .expect("should have attribute value")
-    }
-
-    fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = Some(previous_value)
+impl From<NewProtocolState> for NewProtocolStateLatest {
+    fn from(value: NewProtocolState) -> Self {
+        Self {
+            protocol_component_id: value.protocol_component_id,
+            attribute_name: value.attribute_name,
+            attribute_value: value.attribute_value,
+            previous_value: value.previous_value,
+            modify_tx: value.modify_tx,
+            valid_from: value.valid_from,
+            valid_to: Some(MAX_TS),
+        }
     }
 }
 
