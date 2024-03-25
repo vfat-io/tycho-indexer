@@ -784,6 +784,8 @@ pub struct StateRequestParameters {
     pub tvl_gt: Option<u64>,
     #[param(default = 0)]
     pub inertia_min_gt: Option<u64>,
+    #[param(default = 0)]
+    pub balances_flag: bool,
 }
 
 impl StateRequestParameters {

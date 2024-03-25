@@ -239,7 +239,6 @@ where
             .await
     }
 
-    // params is currently not used.
     #[allow(unused_variables)]
     async fn get_protocol_state_inner(
         &self,
@@ -265,7 +264,13 @@ where
         // Get the protocol states from the database
         match self
             .db_gateway
-            .get_protocol_states(chain, Some(version), request.protocol_system.clone(), ids)
+            .get_protocol_states(
+                chain,
+                Some(version),
+                request.protocol_system.clone(),
+                ids,
+                params.balances_flag,
+            )
             .await
         {
             Ok(accounts) => Ok(dto::ProtocolStateRequestResponse::new(
@@ -851,7 +856,7 @@ mod tests {
         );
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_states()
-            .return_once(|_, _, _, _| Box::pin(async move { mock_response }));
+            .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw);
 
         let request = dto::ProtocolStateRequestBody {
@@ -862,12 +867,10 @@ mod tests {
             protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
+        let params =
+            StateRequestParameters { tvl_gt: None, inertia_min_gt: None, balances_flag: true };
         let res = req_handler
-            .get_protocol_state_inner(
-                &Chain::Ethereum,
-                &request,
-                &StateRequestParameters::default(),
-            )
+            .get_protocol_state_inner(&Chain::Ethereum, &request, &params)
             .await
             .unwrap();
 

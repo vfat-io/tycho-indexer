@@ -235,6 +235,7 @@ mock! {
             at: Option<Version>,
             system: Option<String>,
             id: Option<&'life2 [&'life3 str]>,
+            retrieve_balances: bool,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<

@@ -312,6 +312,7 @@ pub trait ProtocolGateway {
         at: Option<Version>,
         system: Option<String>,
         id: Option<&[&str]>,
+        retrieve_balances: bool,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError>;
 
     async fn update_protocol_states(

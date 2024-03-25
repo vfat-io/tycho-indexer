@@ -66,14 +66,8 @@ impl PostgresGateway {
                     let states_slice = &data_vec[component_start..index];
                     let protocol_balances = balances
                         .get(current_component_id)
-                        .ok_or_else(|| {
-                            StorageError::NoRelatedEntity(
-                                "component_balance".to_string(),
-                                "protocol_component".to_string(),
-                                current_component_id.to_string(),
-                            )
-                        })?
-                        .clone();
+                        .cloned()
+                        .unwrap_or_else(HashMap::new);
 
                     let protocol_state = models::protocol::ProtocolComponentState::new(
                         current_component_id,
@@ -553,6 +547,7 @@ impl PostgresGateway {
         // TODO: change to &str
         system: Option<String>,
         ids: Option<&[&str]>,
+        retrieve_balances: bool,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
@@ -561,9 +556,12 @@ impl PostgresGateway {
             None => None,
         };
 
-        let balances = self
-            .get_balances(chain, ids, at.as_ref(), conn)
-            .await?;
+        let balances = if retrieve_balances {
+            self.get_balances(chain, ids, at.as_ref(), conn)
+                .await?
+        } else {
+            HashMap::new()
+        };
 
         match (ids, system) {
             (Some(ids), Some(_)) => {
@@ -1691,12 +1689,14 @@ mod test {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
 
-        let expected = vec![protocol_state()];
+        let mut protocol_state = protocol_state();
+        protocol_state.balances = HashMap::new();
+        let expected = vec![protocol_state];
 
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
         let result = gateway
-            .get_protocol_states(&Chain::Ethereum, None, system, ids.as_deref(), &mut conn)
+            .get_protocol_states(&Chain::Ethereum, None, system, ids.as_deref(), false, &mut conn)
             .await
             .unwrap();
 
@@ -1726,6 +1726,7 @@ mod test {
                 Some(Version::from_block_number(Chain::Ethereum, 1)),
                 None,
                 None,
+                true,
                 &mut conn,
             )
             .await
@@ -1831,6 +1832,7 @@ mod test {
                 None,
                 None,
                 Some(&[new_state1.component_id.as_str()]),
+                true,
                 &mut conn,
             )
             .await
