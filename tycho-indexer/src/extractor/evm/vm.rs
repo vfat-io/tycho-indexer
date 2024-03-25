@@ -193,7 +193,7 @@ where
 
         let db_tokens = self
             .state_gateway
-            .get_tokens(self.chain, addresses_option)
+            .get_tokens(self.chain, addresses_option, None)
             .await?;
 
         for token in db_tokens {
@@ -1060,7 +1060,7 @@ mod test_serial_db {
             assert_eq!(res, exp);
 
             let tokens = cached_gw
-                .get_tokens(Chain::Ethereum, None)
+                .get_tokens(Chain::Ethereum, None, None)
                 .await
                 .unwrap();
             assert_eq!(tokens.len(), 2);
