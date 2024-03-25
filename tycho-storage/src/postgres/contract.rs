@@ -393,7 +393,7 @@ impl PostgresGateway {
             // Restore full state delta at from target version for accounts that were deleted
             let version = Some(Version::from_ts(*target_version_ts));
             let restored: HashMap<Address, models::contract::ContractDelta> = self
-                .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, conn)
+                .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, false, conn)
                 .await
                 .map_err(PostgresError::from)?
                 .into_iter()
@@ -737,6 +737,7 @@ impl PostgresGateway {
         ids: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
+        retrieve_balances: bool,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::contract::Contract>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
@@ -844,31 +845,41 @@ impl PostgresGateway {
         }
 
         // get token balances
-        // note: balances are retrived by component, not by contract. Therefore, each contract
-        // linked to a component will show all balances for that component.
-        let code_ids = codes
-            .iter()
-            .map(|c| c.id)
-            .collect::<HashSet<_>>();
-        let mut components: HashMap<i64, String> = schema::protocol_component_holds_contract::table
-            .inner_join(schema::protocol_component::table)
-            .filter(schema::protocol_component_holds_contract::contract_code_id.eq_any(code_ids))
-            .select((
-                schema::protocol_component_holds_contract::contract_code_id,
-                schema::protocol_component::external_id,
-            ))
-            .get_results::<(i64, String)>(conn)
-            .await
-            .map_err(PostgresError::from)?
-            .into_iter()
-            .collect();
-        let component_ids: Vec<&str> = components
-            .values_mut()
-            .map(|s| s.as_str())
-            .collect();
-        let token_balances = self
-            .get_balances(chain, Some(&component_ids[..]), version, conn)
-            .await?;
+        let (components, token_balances) = if retrieve_balances {
+            // note: balances are retrived by component, not by contract. Therefore, each contract
+            // linked to a component will show all balances for that component.
+            let code_ids = codes
+                .iter()
+                .map(|c| c.id)
+                .collect::<HashSet<_>>();
+            let mut components: HashMap<i64, String> =
+                schema::protocol_component_holds_contract::table
+                    .inner_join(schema::protocol_component::table)
+                    .filter(
+                        schema::protocol_component_holds_contract::contract_code_id
+                            .eq_any(code_ids),
+                    )
+                    .select((
+                        schema::protocol_component_holds_contract::contract_code_id,
+                        schema::protocol_component::external_id,
+                    ))
+                    .get_results::<(i64, String)>(conn)
+                    .await
+                    .map_err(PostgresError::from)?
+                    .into_iter()
+                    .collect();
+            let component_ids: Vec<&str> = components
+                .values_mut()
+                .map(|s| s.as_str())
+                .collect();
+            let token_balances = self
+                .get_balances(chain, Some(&component_ids[..]), version, conn)
+                .await?;
+
+            (components, token_balances)
+        } else {
+            (HashMap::new(), HashMap::new())
+        };
 
         accounts
             .into_iter()
@@ -887,20 +898,24 @@ impl PostgresGateway {
                 let code_tx = code.tx.clone().unwrap();
                 let creation_tx = account.tx.clone();
 
-                let component_id = components
-                    .get(&code.id)
-                    .ok_or_else(|| {
-                        StorageError::NoRelatedEntity(
-                            "ComponentBalance".to_string(),
-                            "Account".to_string(),
-                            account.title.clone(),
-                        )
-                    })?;
+                let balances = if retrieve_balances {
+                    let component_id = components
+                        .get(&code.id)
+                        .ok_or_else(|| {
+                            StorageError::NoRelatedEntity(
+                                "ComponentBalance".to_string(),
+                                "Account".to_string(),
+                                account.title.clone(),
+                            )
+                        })?;
 
-                let balances = token_balances
-                    .get(component_id)
-                    .unwrap_or(&HashMap::new())
-                    .clone();
+                    token_balances
+                        .get(component_id)
+                        .unwrap_or(&HashMap::new())
+                        .clone()
+                } else {
+                    HashMap::new()
+                };
 
                 let mut contract = models::contract::Contract::new(
                     *chain,
@@ -1686,7 +1701,7 @@ mod test {
         let addresses = ids.as_deref();
 
         let results = gw
-            .get_contracts(&Chain::Ethereum, addresses, version.as_ref(), true, &mut conn)
+            .get_contracts(&Chain::Ethereum, addresses, version.as_ref(), true, false, &mut conn)
             .await
             .unwrap();
 

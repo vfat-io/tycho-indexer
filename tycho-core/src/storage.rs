@@ -463,6 +463,7 @@ pub trait ContractStateGateway {
         addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
+        retrieve_balances: bool,
     ) -> Result<Vec<models::contract::Contract>, StorageError>;
 
     /// Inserts a new contract into the database.

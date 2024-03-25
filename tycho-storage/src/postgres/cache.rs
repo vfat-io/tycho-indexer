@@ -696,13 +696,14 @@ impl ContractStateGateway for CachedGateway {
         addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
+        retrieve_balances: bool,
     ) -> Result<Vec<Contract>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_contracts(chain, addresses, version, include_slots, &mut conn)
+            .get_contracts(chain, addresses, version, include_slots, retrieve_balances, &mut conn)
             .await
     }
 

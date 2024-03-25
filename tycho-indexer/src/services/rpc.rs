@@ -152,7 +152,7 @@ where
         // TODO support additional tvl_gt and intertia_min_gt filters
         match self
             .db_gateway
-            .get_contracts(chain, addresses, Some(&version), true)
+            .get_contracts(chain, addresses, Some(&version), true, params.balances_flag)
             .await
         {
             Ok(accounts) => Ok(dto::StateRequestResponse::new(
@@ -766,7 +766,7 @@ mod tests {
         let mut gw = MockGateway::new();
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_contracts()
-            .return_once(|_, _, _, _| Box::pin(async move { mock_response }));
+            .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw);
 
         let request = dto::StateRequestBody {
