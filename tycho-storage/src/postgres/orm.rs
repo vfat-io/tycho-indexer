@@ -1,11 +1,11 @@
 use super::{
     schema::{
         account, account_balance, block, chain, component_balance, component_balance_default,
-        component_tvl, contract_code, contract_storage, extraction_state, protocol_component,
-        protocol_component_holds_contract, protocol_component_holds_token, protocol_state,
-        protocol_state_default, protocol_system, protocol_type, token, transaction,
+        component_tvl, contract_code, contract_storage, contract_storage_default, extraction_state,
+        protocol_component, protocol_component_holds_contract, protocol_component_holds_token,
+        protocol_state, protocol_state_default, protocol_system, protocol_type, token, transaction,
     },
-    versioning::{DeltaVersionedRow, StoredDeltaVersionedRow, StoredVersionedRow, VersionedRow},
+    versioning::{StoredVersionedRow, VersionedRow},
     PostgresError, MAX_TS, MAX_VERSION_TS,
 };
 use crate::postgres::versioning::PartitionedVersionedRow;
@@ -1422,31 +1422,11 @@ impl StoredVersionedRow for ContractStorage {
     }
 }
 
-impl DeltaVersionedRow for ContractStorage {
-    type Value = Option<Bytes>;
-
-    fn get_value(&self) -> Self::Value {
-        self.value.clone()
-    }
-
-    fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value
-    }
-}
-
-impl StoredDeltaVersionedRow for ContractStorage {
-    type Value = Option<Bytes>;
-
-    fn get_value(&self) -> Self::Value {
-        self.value.clone()
-    }
-}
-
-#[derive(Insertable, Debug)]
+#[derive(Insertable, Debug, Clone)]
 #[diesel(table_name = contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewSlot<'a> {
-    pub slot: &'a Bytes,
+pub struct NewSlot {
+    pub slot: Bytes,
     pub value: Option<Bytes>,
     pub previous_value: Option<Bytes>,
     pub account_id: i64,
@@ -1456,33 +1436,98 @@ pub struct NewSlot<'a> {
     pub valid_to: Option<NaiveDateTime>,
 }
 
-impl<'a> VersionedRow for NewSlot<'a> {
+impl PartitionedVersionedRow for NewSlot {
     type EntityId = (i64, Bytes);
-    type SortKey = ((i64, Bytes), NaiveDateTime, i64);
-    type Version = NaiveDateTime;
 
-    fn get_entity_id(&self) -> Self::EntityId {
+    fn get_id(&self) -> Self::EntityId {
         (self.account_id, self.slot.clone())
     }
 
-    fn set_valid_to(&mut self, end_version: Self::Version) {
-        self.valid_to = Some(end_version);
+    fn get_valid_to(&self) -> NaiveDateTime {
+        self.valid_to.unwrap()
     }
 
-    fn get_valid_from(&self) -> Self::Version {
-        self.valid_from
+    fn archive(&mut self, next_version: &mut Self) {
+        next_version.previous_value = self.value.clone();
+        self.valid_to = Some(next_version.valid_from);
+    }
+
+    fn delete(&mut self, delete_version: NaiveDateTime) {
+        self.valid_to = Some(delete_version)
+    }
+
+    async fn latest_versions_by_ids(
+        ids: Vec<Self::EntityId>,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Self>, StorageError>
+    where
+        Self: Sized,
+    {
+        let (accounts, slots): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
+        let tuple_ids = accounts
+            .iter()
+            .zip(slots.iter())
+            .collect::<HashSet<_>>();
+        Ok(contract_storage::table
+            .select(ContractStorage::as_select())
+            .into_boxed()
+            .filter(
+                contract_storage::account_id
+                    .eq_any(&accounts)
+                    .and(contract_storage::slot.eq_any(&slots))
+                    .and(contract_storage::valid_to.is_null()),
+            )
+            .get_results(conn)
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .filter(|cs| tuple_ids.contains(&(&cs.account_id, &cs.slot)))
+            .map(NewSlot::from)
+            .collect())
     }
 }
 
-impl<'a> DeltaVersionedRow for NewSlot<'a> {
-    type Value = Option<Bytes>;
-
-    fn get_value(&self) -> Self::Value {
-        self.value.clone()
+impl From<ContractStorage> for NewSlot {
+    fn from(value: ContractStorage) -> Self {
+        Self {
+            slot: value.slot,
+            value: value.value,
+            previous_value: value.previous_value,
+            account_id: value.account_id,
+            modify_tx: value.modify_tx,
+            ordinal: value.ordinal,
+            valid_from: value.valid_from,
+            valid_to: Some(value.valid_to),
+        }
     }
+}
 
-    fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value;
+#[derive(Insertable, Debug)]
+#[diesel(table_name = contract_storage_default)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewSlotLatest {
+    pub slot: Bytes,
+    pub value: Option<Bytes>,
+    pub previous_value: Option<Bytes>,
+    pub account_id: i64,
+    pub modify_tx: i64,
+    pub ordinal: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: NaiveDateTime,
+}
+
+impl From<NewSlot> for NewSlotLatest {
+    fn from(value: NewSlot) -> Self {
+        Self {
+            slot: value.slot,
+            value: value.value,
+            previous_value: value.previous_value,
+            account_id: value.account_id,
+            modify_tx: value.modify_tx,
+            ordinal: value.ordinal,
+            valid_from: value.valid_from,
+            valid_to: MAX_TS,
+        }
     }
 }
 

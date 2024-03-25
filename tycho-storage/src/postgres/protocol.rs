@@ -2231,13 +2231,9 @@ mod test {
             .filter(
                 schema::component_balance::protocol_component_id
                     .eq(protocol_component_id)
-                    .and(schema::component_balance::token_id.eq(account_id)),
+                    .and(schema::component_balance::token_id.eq(&token_id)),
             )
-            .set(
-                schema::component_balance::valid_to.eq("2024-03-20T01:30:00"
-                    .parse::<NaiveDateTime>()
-                    .unwrap()),
-            )
+            .set(schema::component_balance::valid_to.eq(db_fixtures::yesterday_one_am()))
             .execute(&mut conn)
             .await
             .expect("version update failed");
@@ -2883,7 +2879,6 @@ mod test {
             component_id: component_external_id.clone(),
         };
 
-        dbg!(&component_balance);
         gw.add_component_balances(&[component_balance], &Chain::Starknet, &mut conn)
             .await
             .unwrap();
@@ -3243,7 +3238,7 @@ mod test {
             .into_iter()
             .map(|comp| comp.id)
             .collect::<HashSet<_>>();
-        dbg!(NaiveDateTime::MAX);
+
         assert_eq!(res, exp);
     }
 

@@ -157,6 +157,7 @@ mod versioning;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
 
+// +262142-12-31T23:59:59.999999999
 const MAX_TS: NaiveDateTime = NaiveDateTime::MAX;
 
 lazy_static! {
@@ -603,7 +604,6 @@ pub mod testing {
             "protocol_system",
             "transaction",
             "chain",
-            "audit_log",
         ];
         for t in tables.iter() {
             sql_query(format!("DELETE FROM {};", t))
@@ -706,7 +706,7 @@ pub mod db_fixtures {
     //! the entries that are crucial to your test case.
     use std::str::FromStr;
 
-    use chrono::NaiveDateTime;
+    use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime};
     use diesel::{prelude::*, sql_query};
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
@@ -731,6 +731,22 @@ pub mod db_fixtures {
             .unwrap()
     }
 
+    pub fn yesterday_midnight() -> NaiveDateTime {
+        let ts = chrono::Local::now().naive_utc() - chrono::Duration::days(1);
+        NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(ts.year(), ts.month(), ts.day()).unwrap(),
+            NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+        )
+    }
+
+    pub fn yesterday_one_am() -> NaiveDateTime {
+        let ts = chrono::Local::now().naive_utc() - chrono::Duration::days(1);
+        NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(ts.year(), ts.month(), ts.day()).unwrap(),
+            NaiveTime::from_hms_opt(1, 0, 0).unwrap(),
+        )
+    }
+
     /// Inserts two sequential blocks
     pub async fn insert_blocks(conn: &mut AsyncPgConnection, chain_id: i64) -> Vec<i64> {
         let block_records = vec![
@@ -750,9 +766,7 @@ pub mod db_fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(1),
-                schema::block::ts.eq("2024-03-20T00:00:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .expect("timestamp")),
+                schema::block::ts.eq(yesterday_midnight()),
                 schema::block::chain_id.eq(chain_id),
             ),
             (
@@ -771,9 +785,7 @@ pub mod db_fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(2),
-                schema::block::ts.eq("2024-03-20T01:00:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .unwrap()),
+                schema::block::ts.eq(yesterday_one_am()),
                 schema::block::chain_id.eq(chain_id),
             ),
         ];
@@ -852,17 +864,10 @@ pub mod db_fixtures {
         conn: &mut AsyncPgConnection,
         contract_id: i64,
         modify_tx: i64,
-        valid_from: &str,
-        valid_to: Option<&str>,
+        valid_from: &NaiveDateTime,
+        valid_to: Option<&NaiveDateTime>,
         slots: &[(u64, u64, Option<u64>)],
     ) {
-        let ts = valid_from
-            .parse::<chrono::NaiveDateTime>()
-            .unwrap();
-        let end_ts = valid_to.map(|s| {
-            s.parse::<chrono::NaiveDateTime>()
-                .unwrap()
-        });
         let data = slots
             .iter()
             .enumerate()
@@ -883,8 +888,8 @@ pub mod db_fixtures {
                     schema::contract_storage::previous_value.eq(previous_value),
                     schema::contract_storage::account_id.eq(contract_id),
                     schema::contract_storage::modify_tx.eq(modify_tx),
-                    schema::contract_storage::valid_from.eq(ts),
-                    schema::contract_storage::valid_to.eq(end_ts.unwrap_or(MAX_TS)),
+                    schema::contract_storage::valid_from.eq(valid_from),
+                    schema::contract_storage::valid_to.eq(valid_to.unwrap_or(&MAX_TS)),
                     schema::contract_storage::ordinal.eq(idx as i64),
                 )
             })
@@ -901,7 +906,7 @@ pub mod db_fixtures {
         conn: &mut AsyncPgConnection,
         new_balance: u64,
         tx_id: i64,
-        valid_to: Option<&str>,
+        end_ts: Option<&NaiveDateTime>,
         account: i64,
     ) {
         let ts = schema::transaction::table
@@ -911,10 +916,6 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
-        let end_ts = valid_to.map(|s| {
-            s.parse::<chrono::NaiveDateTime>()
-                .unwrap()
-        });
         let mut b0 = [0; 32];
         U256::from(new_balance).to_big_endian(&mut b0);
         {
@@ -964,10 +965,7 @@ pub mod db_fixtures {
             .unwrap()
     }
 
-    pub async fn delete_account(conn: &mut AsyncPgConnection, target_id: i64, ts: &str) {
-        let ts = ts
-            .parse::<NaiveDateTime>()
-            .expect("timestamp valid");
+    pub async fn delete_account(conn: &mut AsyncPgConnection, target_id: i64, ts: &NaiveDateTime) {
         {
             use schema::account::dsl::*;
             diesel::update(account.filter(id.eq(target_id)))

@@ -71,20 +71,6 @@ pub trait VersionedRow {
     fn get_valid_from(&self) -> Self::Version;
 }
 
-/// Trait indicating that a struct can be inserted in a delta versioned table.
-///
-/// Delta versioned records require the previous value present in one of their columns. This serves
-/// to build both forward and backward delta changes while avoiding self joins.
-pub trait DeltaVersionedRow {
-    type Value: Clone + Debug;
-
-    /// Exposes the current value.
-    fn get_value(&self) -> Self::Value;
-
-    /// Sets the previous value.
-    fn set_previous_value(&mut self, previous_value: Self::Value);
-}
-
 /// Trait indicating that a struct relates to a stored entry in a versioned table.
 ///
 /// This struct is used to invalidate rows that are currently valid on the db side before inserting
@@ -137,32 +123,6 @@ fn set_versioning_attributes<O: VersionedRow>(
 
         if current.get_entity_id() == next.get_entity_id() {
             current.set_valid_to(next.get_valid_from());
-        } else {
-            db_updates.insert(next.get_entity_id(), next.get_valid_from());
-        }
-    }
-    db_updates
-}
-
-/// Sets end versions and previous values on a collection of new rows.
-///
-/// Same as `set_versioning_attributes` but will also set previous value for delta versioned table
-/// entries.
-fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Debug>(
-    objects: &mut [O],
-) -> HashMap<O::EntityId, O::Version> {
-    let mut db_updates = HashMap::new();
-
-    db_updates.insert(objects[0].get_entity_id(), objects[0].get_valid_from());
-
-    for i in 0..objects.len() - 1 {
-        let (head, tail) = objects.split_at_mut(i + 1);
-        let current = &mut head[head.len() - 1];
-        let next = &mut tail[0];
-
-        if current.get_entity_id() == next.get_entity_id() {
-            current.set_valid_to(next.get_valid_from());
-            next.set_previous_value(current.get_value())
         } else {
             db_updates.insert(next.get_entity_id(), next.get_valid_from());
         }
@@ -241,60 +201,6 @@ where
     let db_rows = S::latest_versions_by_ids(end_versions.keys().cloned(), conn)
         .await
         .map_err(PostgresError::from)?;
-    if !db_rows.is_empty() {
-        build_batch_update_query(&db_rows, S::table_name(), &end_versions)
-            .execute(conn)
-            .await
-            .map_err(PostgresError::from)?;
-    }
-    Ok(())
-}
-
-#[async_trait]
-pub trait StoredDeltaVersionedRow: StoredVersionedRow {
-    type Value: Clone + Debug;
-
-    fn get_value(&self) -> Self::Value;
-}
-
-/// Applies and executes delta versioning logic for a set of new entries.
-///
-/// Same as `apply_versioning` but also takes care of previous value columns.
-///
-/// ## Important note:
-/// This function requires that new_data is sorted by ascending execution order (block, transaction
-/// index) for conflicting entity_id.
-pub async fn apply_delta_versioning<'a, N, S>(
-    new_data: &mut [N],
-    conn: &mut AsyncPgConnection,
-) -> Result<(), StorageError>
-where
-    N: VersionedRow + DeltaVersionedRow + Debug,
-    S: StoredDeltaVersionedRow<EntityId = N::EntityId, Version = N::Version, Value = N::Value>,
-    <N as VersionedRow>::EntityId: Clone,
-{
-    if new_data.is_empty() {
-        return Ok(());
-    }
-    let end_versions = set_delta_versioning_attributes(new_data);
-    let db_rows = S::latest_versions_by_ids(end_versions.keys().cloned(), conn)
-        .await
-        .map_err(PostgresError::from)?;
-
-    // Not terribly efficient but works (using find is very inefficient especially if new data is
-    // big)
-    for r in db_rows.iter() {
-        let current_id = r.get_entity_id();
-        // find the first new entry with this id, we assume new_data is correctly sorted.
-        if let Some(new_entry) = new_data
-            .iter_mut()
-            .find(|new| new.get_entity_id() == current_id)
-        {
-            // set this new entries previous value
-            new_entry.set_previous_value(r.get_value());
-        }
-    }
-
     if !db_rows.is_empty() {
         build_batch_update_query(&db_rows, S::table_name(), &end_versions)
             .execute(conn)
@@ -392,6 +298,10 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
 /// the archive version can simply be inserted into the partitioned table. Actually executing these
 /// operations is left to the caller since the exact implementation may vary based on the table
 /// schema.
+///
+/// ## Important note:
+/// This function requires that new_data is sorted by ascending execution order (block, transaction
+/// index) for conflicting entity_id.
 ///
 /// ## Note
 /// This method may only works for rows that have a primary key know before insert. So e.g.
