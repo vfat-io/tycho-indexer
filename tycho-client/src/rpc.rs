@@ -327,7 +327,7 @@ mod tests {
         serde_json::from_str::<StateRequestResponse>(server_resp).expect("deserialize");
 
         let mocked_server = server
-            .mock("POST", "/v1/ethereum/contract_state")
+            .mock("POST", "/v1/ethereum/contract_state?balances_flag=false")
             .expect(1)
             .with_body(server_resp)
             .create_async()
@@ -442,7 +442,7 @@ mod tests {
         serde_json::from_str::<ProtocolStateRequestResponse>(server_resp).expect("deserialize");
 
         let mocked_server = server
-            .mock("POST", "/v1/ethereum/protocol_state")
+            .mock("POST", "/v1/ethereum/protocol_state?balances_flag=false")
             .expect(1)
             .with_body(server_resp)
             .create_async()

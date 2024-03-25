@@ -789,8 +789,12 @@ pub struct StateRequestParameters {
 }
 
 impl StateRequestParameters {
+    pub fn new(balances_flag: bool) -> Self {
+        Self { tvl_gt: None, inertia_min_gt: None, balances_flag }
+    }
+
     pub fn to_query_string(&self) -> String {
-        let mut parts = vec![];
+        let mut parts = vec![format!("balances_flag={}", self.balances_flag)];
 
         if let Some(tvl_gt) = self.tvl_gt {
             parts.push(format!("tvl_gt={}", tvl_gt));
