@@ -844,6 +844,8 @@ impl PostgresGateway {
         }
 
         // get token balances
+        // note: balances are retrived by component, not by contract. Therefore, each contract
+        // linked to a component will show all balances for that component.
         let code_ids = codes
             .iter()
             .map(|c| c.id)
