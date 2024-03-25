@@ -883,15 +883,15 @@ impl PostgresGateway {
                 // Note: it is safe to call unwrap here, as above we always wrap it into Some
                 let balance_tx = balance.tx.unwrap();
                 let code_tx = code.tx.clone().unwrap();
-                let creation_tx = account.tx;
+                let creation_tx = account.tx.clone();
 
                 let component_id = components
                     .get(&code.id)
                     .ok_or_else(|| {
                         StorageError::NoRelatedEntity(
-                            "protocol_component".to_string(),
-                            "contract_code".to_string(),
-                            code.id.to_string(),
+                            "ComponentBalance".to_string(),
+                            "Account".to_string(),
+                            account.title.clone(),
                         )
                     })?;
 
