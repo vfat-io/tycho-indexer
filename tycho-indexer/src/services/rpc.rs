@@ -335,11 +335,10 @@ where
         debug!(?addresses_slice, "Getting tokens.");
 
         let converted_params: PaginationParams = (&request.pagination).into();
-        let pagination: Option<&PaginationParams> = Some(&converted_params);
 
         match self
             .db_gateway
-            .get_tokens(*chain, addresses_slice, pagination)
+            .get_tokens(*chain, addresses_slice, Some(&converted_params))
             .await
         {
             Ok(tokens) => Ok(dto::TokensRequestResponse::new(
