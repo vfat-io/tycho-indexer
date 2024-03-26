@@ -1017,7 +1017,6 @@ impl PostgresGateway {
         use super::schema::{account::dsl::*, token::dsl::*};
 
         let chain_db_id = self.get_chain_id(chain);
-        let mut new_component_balances = Vec::new();
         let token_addresses: Vec<Address> = component_balances
             .iter()
             .map(|component_balance| component_balance.token.clone())
@@ -1058,6 +1057,7 @@ impl PostgresGateway {
                 .map(|(component_id, external_id)| (external_id, component_id))
                 .collect();
 
+        let mut new_component_balances = Vec::new();
         for component_balance in component_balances.iter() {
             let token_id = token_ids
                 .get(&component_balance.token)
