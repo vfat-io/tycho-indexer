@@ -115,6 +115,17 @@ RUST_LOG=info cargo run -- \
     --stop-block +1000
 ```
 
+#### Quickly run a spkg from our repository:
+Somtimes it is useful to quickly debug the messages from a production spkgs. The command 
+below  will create a presigned url for the spkgs on the fly so it can be fetched by the 
+substreams cli:
+
+```
+substreams gui $(./signed_spkg_url.sh ethereum-uniswap-v3/ethereum-uniswap-v3-v0.1.0.spkg) map_pool_events --start-block 19459803
+```
+
+
+
 The `substreams-api-token` and `database-url` default to their respective environment variables. You can also specify
 them as command line arguments. More info about tycho cli:
 
