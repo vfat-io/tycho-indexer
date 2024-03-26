@@ -1404,7 +1404,7 @@ impl PostgresGateway {
 #[cfg(test)]
 mod test {
 
-   use crate::postgres::{
+    use crate::postgres::{
         db_fixtures,
         db_fixtures::{yesterday_midnight, yesterday_one_am},
     };

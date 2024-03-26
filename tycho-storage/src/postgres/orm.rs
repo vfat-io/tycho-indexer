@@ -1448,7 +1448,9 @@ impl PartitionedVersionedRow for NewSlot {
     }
 
     fn archive(&mut self, next_version: &mut Self) {
-        next_version.previous_value = self.value.clone();
+        next_version
+            .previous_value
+            .clone_from(&self.value);
         self.valid_to = next_version.valid_from;
     }
 
@@ -1464,6 +1466,7 @@ impl PartitionedVersionedRow for NewSlot {
         Self: Sized,
     {
         let (accounts, slots): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
+        #[allow(clippy::mutable_key_type)]
         let tuple_ids = accounts
             .iter()
             .zip(slots.iter())

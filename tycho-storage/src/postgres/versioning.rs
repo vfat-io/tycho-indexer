@@ -230,19 +230,19 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
 ) -> (Vec<N>, Vec<N>) {
     let mut latest = HashMap::<N::EntityId, N>::new();
     let mut archived = Vec::new();
-    for i in 0..data.len() {
-        let id = data[i].get_id();
+    for item in data.iter() {
+        let id = item.get_id();
 
         // Handle deleted rows
         if let Some(delete_version) = delete_version.get(&id) {
-            let mut delete_row = data[i].clone();
+            let mut delete_row = item.clone();
             delete_row.delete(*delete_version);
             archived.push(delete_row);
             continue;
         }
 
         // Handle updated rows
-        let mut current = data[i].clone();
+        let mut current = item.clone();
         if let Some(mut prev) = latest.remove(&id) {
             prev.archive(&mut current);
             archived.push(prev);
