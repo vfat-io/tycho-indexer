@@ -416,11 +416,12 @@ impl PostgresGateway {
     pub fn with_cache(
         cache: Arc<ChainEnumCache>,
         protocol_system_cache: Arc<ProtocolSystemEnumCache>,
+        retention_horizon: NaiveDateTime,
     ) -> Self {
         Self {
             protocol_system_id_cache: protocol_system_cache,
             chain_id_cache: cache,
-            retention_horizon: chrono::Local::now().naive_utc() - chrono::Duration::days(90),
+            retention_horizon,
         }
     }
 
@@ -449,7 +450,7 @@ impl PostgresGateway {
         let cache = Arc::new(ChainEnumCache::from_tuples(chain_id_mapping));
         let protocol_system_cache =
             Arc::new(ProtocolSystemEnumCache::from_tuples(protocol_system_id_mapping));
-        Self::with_cache(cache, protocol_system_cache)
+        Self::with_cache(cache, protocol_system_cache, NaiveDateTime::default())
     }
 
     fn get_chain_id(&self, chain: &Chain) -> i64 {
@@ -471,11 +472,18 @@ impl PostgresGateway {
             .get_value(id)
     }
 
-    pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
+    pub async fn new(
+        pool: Pool<AsyncPgConnection>,
+        retention_horizon: NaiveDateTime,
+    ) -> Result<Self, StorageError> {
         let cache = ChainEnumCache::from_pool(pool.clone()).await?;
         let protocol_system_cache: ValueIdTableCache<String> =
             ProtocolSystemEnumCache::from_pool(pool.clone()).await?;
-        let gw = PostgresGateway::with_cache(Arc::new(cache), Arc::new(protocol_system_cache));
+        let gw = PostgresGateway::with_cache(
+            Arc::new(cache),
+            Arc::new(protocol_system_cache),
+            retention_horizon,
+        );
 
         Ok(gw)
     }
