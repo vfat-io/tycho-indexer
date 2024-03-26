@@ -67,6 +67,7 @@ mock! {
             addresses: Option<&'life2 [Address]>,
             version: Option<&'life3 Version>,
             include_slots: bool,
+            retrieve_balances: bool,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
@@ -235,6 +236,7 @@ mock! {
             at: Option<Version>,
             system: Option<String>,
             id: Option<&'life2 [&'life3 str]>,
+            retrieve_balances: bool,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
