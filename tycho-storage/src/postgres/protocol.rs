@@ -30,10 +30,7 @@ impl PostgresGateway {
     /// linked component id and transaction hash.
     ///
     /// ## Assumptions:
-    /// - It is assumed that the rows in the result are ordered by:
-    ///     1. Component ID,
-    ///     2. Transaction block, and then
-    ///     3. Transaction index.
+    /// - It is assumed that the rows in the result are ordered by component ID
     ///
     /// The function processes these individual `ProtocolState` entities and combines all entities
     /// with matching component IDs into a single `ProtocolState`. The final output is a list
@@ -48,10 +45,10 @@ impl PostgresGateway {
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError> {
         match result {
             Ok(data_vec) => {
-                // Decode final state deltas. We can assume result is sorted by component_id and
-                // transaction index. Therefore we can use slices to iterate over the data in groups
-                // of component_id. The last update for each component will have the latest
-                // transaction hash (modify_tx).
+                // Decode final state deltas. We can assume result is sorted by component_id.
+                // Therefore we can use slices to iterate over the data in groups of
+                // component_id. The last update for each component will have the
+                // latest transaction hash (modify_tx).
 
                 let mut protocol_states = Vec::new();
 
@@ -1126,10 +1123,11 @@ impl PostgresGateway {
             })?;
 
             // Decode final state deltas. We can assume both the deleted_attrs and state_updates
-            // are sorted by component_id and transaction index. Therefore we can use slices to
-            // iterate over the data in groups of component_id. To do this we first need to collect
-            // an ordered set of the component ids, then we can loop through deleted_attrs and
-            // state_updates in parallel, creating a slice for each component_id.
+            // are sorted by component_id. Therefore we can use slices to iterate over the data
+            // in groups of component_id. To do this we first need to collect an ordered set of
+            // the component ids, then we can loop through deleted_attrs and state_updates in
+            // parallel, creating a slice for each component_id. It is assumed only 1 delta per
+            // component attribute is in these slices.
 
             // Get sets of component_ids from state_updates and deleted_attrs
             let state_updates_ids: BTreeSet<_> = state_updates
@@ -1210,9 +1208,8 @@ impl PostgresGateway {
                         )
                     })?;
 
-            // Decode final state deltas. We can assume result is sorted by component_id and
-            // transaction index. Therefore we can use slices to iterate over the data in groups of
-            // component_id.
+            // Decode final state deltas. We can assume result is sorted by component_id. Therefore
+            // we can use slices to iterate over the data in groups of component_id.
 
             let mut deltas = Vec::new();
 
