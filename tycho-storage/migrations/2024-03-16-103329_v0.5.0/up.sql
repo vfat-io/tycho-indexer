@@ -48,6 +48,10 @@ DROP TRIGGER IF EXISTS  invalidate_previous_entry_protocol_calls_contract ON pro
 -- PROTOCOL STATE
 ALTER TABLE protocol_state RENAME TO protocol_state_old;
 
+UPDATE protocol_state_old SET valid_to = '262142-12-31T23:59:59.9999Z' WHERE valid_to IS NULL;
+
+ALTER TABLE protocol_state_old ALTER COLUMN valid_to SET NOT NULL;
+
 ALTER INDEX idx_protocol_state_component_id_attribute_name_valid_to RENAME TO idx_protocol_state_component_id_attribute_name_valid_to_old;
 
 ALTER INDEX idx_protocol_state_valid_protocol_component_id RENAME TO idx_protocol_state_valid_protocol_component_id_old;
@@ -104,6 +108,10 @@ ALTER INDEX idx_contract_storage_account_id RENAME TO idx_contract_storage_accou
 ALTER INDEX idx_contract_storage_account_id_slot_valid_to RENAME TO idx_contract_storage_account_id_slot_valid_to_old;
 ALTER INDEX idx_contract_storage_valid_to RENAME TO idx_contract_storage_valid_to_old;
 
+UPDATE contract_storage_old SET valid_to = '262142-12-31T23:59:59.9999Z' WHERE valid_to IS NULL;
+
+ALTER TABLE contract_storage_old ALTER COLUMN valid_to SET NOT NULL;
+
 CREATE TABLE contract_storage(
     slot bytea NOT NULL,
     value bytea NULL,
@@ -139,6 +147,10 @@ DROP TABLE contract_storage_old;
 
 -- COMPONENT BALANCE
 ALTER TABLE component_balance RENAME TO component_balance_old;
+
+UPDATE component_balance_old SET valid_to = '262142-12-31T23:59:59.9999Z' WHERE valid_to IS NULL;
+
+ALTER TABLE component_balance_old ALTER COLUMN valid_to SET NOT NULL;
 
 ALTER INDEX idx_component_balance_component_id_token_id_valid_to RENAME TO idx_component_balance_component_id_token_id_valid_to_old;
 
