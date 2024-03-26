@@ -540,13 +540,8 @@ impl PostgresGateway {
             .map(|b| b.entity)
             .collect::<Vec<_>>();
         let deleted_versions = HashMap::new();
-        let (latest, to_archive) = apply_partitioned_versioning(
-            &sorted,
-            &deleted_versions,
-            NaiveDateTime::default(),
-            conn,
-        )
-        .await?;
+        let (latest, to_archive) =
+            apply_partitioned_versioning(&sorted, None, self.retention_horizon, conn).await?;
         let latest = latest
             .into_iter()
             .map(orm::NewSlotLatest::from)

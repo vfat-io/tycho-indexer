@@ -772,8 +772,8 @@ impl PostgresGateway {
                 .collect::<Vec<_>>();
             let (latest, to_archive) = apply_partitioned_versioning(
                 &sorted,
-                &deleted_attributes,
-                NaiveDateTime::default(),
+                Some(&deleted_attributes),
+                self.retention_horizon,
                 conn,
             )
             .await?;
@@ -1090,7 +1090,6 @@ impl PostgresGateway {
         }
 
         if !component_balances.is_empty() {
-            let deleted_versions = HashMap::new();
             new_component_balances.sort_by_cached_key(|b| b.ordinal);
             let mut sorted = new_component_balances
                 .into_iter()
@@ -1098,8 +1097,8 @@ impl PostgresGateway {
                 .collect::<Vec<_>>();
             let (latest, to_archive) = apply_partitioned_versioning(
                 &sorted,
-                &deleted_versions,
-                NaiveDateTime::default(),
+                None,
+                self.retention_horizon,
                 conn,
             )
             .await?;

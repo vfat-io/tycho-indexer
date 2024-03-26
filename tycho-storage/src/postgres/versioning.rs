@@ -309,10 +309,13 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
 /// you can't use a `New*` orm models here combined with an already stored orm model type.
 pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
     new_data: &[T],
-    delete_versions: &HashMap<T::EntityId, NaiveDateTime>,
+    delete_versions: Option<&HashMap<T::EntityId, NaiveDateTime>>,
     retention_horizon: NaiveDateTime,
     conn: &mut AsyncPgConnection,
 ) -> Result<(Vec<T>, Vec<T>), StorageError> {
+    let empty_delete_versions = HashMap::new();
+    let delete_versions = delete_versions.unwrap_or(&empty_delete_versions);
+
     if new_data.is_empty() && delete_versions.is_empty() {
         return Ok((Vec::new(), Vec::new()))
     }
@@ -329,7 +332,7 @@ pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
     .chain(new_data.iter().cloned())
     .collect();
 
-    let (latest, archive) = set_partitioned_versioning_attributes(&db_rows, &delete_versions);
+    let (latest, archive) = set_partitioned_versioning_attributes(&db_rows, delete_versions);
     let filtered_archive: Vec<_> = archive
         .into_iter()
         .filter(|e| e.get_valid_to() > retention_horizon)
