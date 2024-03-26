@@ -366,7 +366,7 @@ pub struct NewComponentBalance {
     pub modify_tx: i64,
     pub protocol_component_id: i64,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
 }
 
 impl NewComponentBalance {
@@ -387,7 +387,7 @@ impl NewComponentBalance {
             modify_tx,
             protocol_component_id,
             valid_from,
-            valid_to: None,
+            valid_to: MAX_TS,
         }
     }
 }
@@ -402,7 +402,7 @@ impl From<ComponentBalance> for NewComponentBalance {
             modify_tx: value.modify_tx,
             protocol_component_id: value.protocol_component_id,
             valid_from: value.valid_from,
-            valid_to: Some(value.valid_to),
+            valid_to: value.valid_to,
         }
     }
 }
@@ -415,16 +415,16 @@ impl PartitionedVersionedRow for NewComponentBalance {
     }
 
     fn get_valid_to(&self) -> NaiveDateTime {
-        self.valid_to.unwrap()
+        self.valid_to
     }
 
     fn archive(&mut self, next_version: &mut Self) {
         next_version.previous_value = self.new_balance.clone();
-        self.valid_to = Some(next_version.valid_from);
+        self.valid_to = next_version.valid_from;
     }
 
     fn delete(&mut self, delete_version: NaiveDateTime) {
-        self.valid_to = Some(delete_version);
+        self.valid_to = delete_version;
     }
 
     async fn latest_versions_by_ids(
@@ -484,7 +484,7 @@ impl From<NewComponentBalance> for NewComponentBalanceLatest {
             modify_tx: value.modify_tx,
             protocol_component_id: value.protocol_component_id,
             valid_from: value.valid_from,
-            valid_to: value.valid_to.unwrap_or(MAX_TS),
+            valid_to: MAX_TS,
         }
     }
 }
@@ -860,24 +860,24 @@ impl ProtocolState {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolState {
     pub protocol_component_id: i64,
-    pub attribute_name: Option<String>,
-    pub attribute_value: Option<Bytes>,
+    pub attribute_name: String,
+    pub attribute_value: Bytes,
     pub previous_value: Option<Bytes>,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
 }
 
 impl From<ProtocolState> for NewProtocolState {
     fn from(value: ProtocolState) -> Self {
         Self {
             protocol_component_id: value.protocol_component_id,
-            attribute_name: Some(value.attribute_name),
-            attribute_value: Some(value.attribute_value),
+            attribute_name: value.attribute_name,
+            attribute_value: value.attribute_value,
             previous_value: value.previous_value,
             modify_tx: value.modify_tx,
             valid_from: value.valid_from,
-            valid_to: Some(value.valid_to),
+            valid_to: value.valid_to,
         }
     }
 }
@@ -886,20 +886,20 @@ impl PartitionedVersionedRow for NewProtocolState {
     type EntityId = (i64, String);
 
     fn get_id(&self) -> Self::EntityId {
-        (self.protocol_component_id, self.attribute_name.clone().unwrap())
+        (self.protocol_component_id, self.attribute_name.clone())
     }
 
     fn get_valid_to(&self) -> NaiveDateTime {
-        self.valid_to.unwrap()
+        self.valid_to
     }
 
     fn archive(&mut self, next_version: &mut Self) {
-        next_version.previous_value = self.attribute_value.clone();
-        self.valid_to = Some(next_version.valid_from);
+        next_version.previous_value = Some(self.attribute_value.clone());
+        self.valid_to = next_version.valid_from;
     }
 
     fn delete(&mut self, delete_version: NaiveDateTime) {
-        self.valid_to = Some(delete_version);
+        self.valid_to = delete_version;
     }
 
     async fn latest_versions_by_ids(
@@ -937,18 +937,18 @@ impl NewProtocolState {
     pub fn new(
         protocol_component_id: i64,
         attribute_name: &str,
-        attribute_value: Option<&Bytes>,
+        attribute_value: &Bytes,
         modify_tx: i64,
         valid_from: NaiveDateTime,
     ) -> Self {
         Self {
             protocol_component_id,
-            attribute_name: Some(attribute_name.to_string()),
-            attribute_value: attribute_value.cloned(),
+            attribute_name: attribute_name.to_string(),
+            attribute_value: attribute_value.clone(),
             previous_value: None,
             modify_tx,
             valid_from,
-            valid_to: None,
+            valid_to: MAX_TS,
         }
     }
 }
@@ -958,12 +958,12 @@ impl NewProtocolState {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolStateLatest {
     pub protocol_component_id: i64,
-    pub attribute_name: Option<String>,
-    pub attribute_value: Option<Bytes>,
+    pub attribute_name: String,
+    pub attribute_value: Bytes,
     pub previous_value: Option<Bytes>,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
 }
 
 impl From<NewProtocolState> for NewProtocolStateLatest {
@@ -975,7 +975,7 @@ impl From<NewProtocolState> for NewProtocolStateLatest {
             previous_value: value.previous_value,
             modify_tx: value.modify_tx,
             valid_from: value.valid_from,
-            valid_to: Some(MAX_TS),
+            valid_to: MAX_TS,
         }
     }
 }
@@ -1433,7 +1433,7 @@ pub struct NewSlot {
     pub modify_tx: i64,
     pub ordinal: i64,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
 }
 
 impl PartitionedVersionedRow for NewSlot {
@@ -1444,16 +1444,16 @@ impl PartitionedVersionedRow for NewSlot {
     }
 
     fn get_valid_to(&self) -> NaiveDateTime {
-        self.valid_to.unwrap()
+        self.valid_to
     }
 
     fn archive(&mut self, next_version: &mut Self) {
         next_version.previous_value = self.value.clone();
-        self.valid_to = Some(next_version.valid_from);
+        self.valid_to = next_version.valid_from;
     }
 
     fn delete(&mut self, delete_version: NaiveDateTime) {
-        self.valid_to = Some(delete_version)
+        self.valid_to = delete_version
     }
 
     async fn latest_versions_by_ids(
@@ -1497,7 +1497,7 @@ impl From<ContractStorage> for NewSlot {
             modify_tx: value.modify_tx,
             ordinal: value.ordinal,
             valid_from: value.valid_from,
-            valid_to: Some(value.valid_to),
+            valid_to: value.valid_to,
         }
     }
 }

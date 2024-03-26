@@ -1,7 +1,7 @@
 use super::{
     maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema, storage_error_from_diesel,
     versioning::{apply_partitioned_versioning, apply_versioning},
-    PostgresError, PostgresGateway, WithOrdinal, WithTxHash,
+    PostgresError, PostgresGateway, WithOrdinal, WithTxHash, MAX_TS,
 };
 use chrono::{NaiveDateTime, Utc};
 use diesel::{
@@ -524,9 +524,10 @@ impl PostgresGateway {
                             previous_value: None,
                             account_id: *account_id,
                             modify_tx: *modify_tx,
-                            ordinal: *tx_index, // TODO: check if this is still needed.
+                            // this is still required for delta queries
+                            ordinal: *tx_index,
                             valid_from: *block_ts,
-                            valid_to: None,
+                            valid_to: MAX_TS,
                         },
                         (*account_id, slot, *block_ts, *tx_index),
                     ))
@@ -1406,7 +1407,6 @@ mod test {
    use crate::postgres::{
         db_fixtures,
         db_fixtures::{yesterday_midnight, yesterday_one_am},
-        MAX_TS,
     };
     use diesel_async::AsyncConnection;
     use ethers::types::U256;

@@ -746,7 +746,7 @@ impl PostgresGateway {
                             orm::NewProtocolState::new(
                                 component_db_id,
                                 attribute,
-                                Some(value),
+                                value,
                                 *tx_id,
                                 *tx_ts,
                             ),
