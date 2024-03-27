@@ -54,14 +54,14 @@ impl ProtocolComponent {
 pub struct ProtocolComponentState {
     pub component_id: ComponentId,
     pub attributes: HashMap<AttrStoreKey, StoreVal>,
-    pub balances: HashMap<Address, f64>,
+    pub balances: HashMap<Address, Bytes>,
 }
 
 impl ProtocolComponentState {
     pub fn new(
         component_id: &str,
         attributes: HashMap<AttrStoreKey, StoreVal>,
-        balances: HashMap<Address, f64>,
+        balances: HashMap<Address, Bytes>,
     ) -> Self {
         Self { component_id: component_id.to_string(), attributes, balances }
     }

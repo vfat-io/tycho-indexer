@@ -377,7 +377,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<HashMap<String, HashMap<Bytes, f64>>, StorageError>,
+                    Output = Result<HashMap<String, HashMap<Bytes, Bytes>>, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >

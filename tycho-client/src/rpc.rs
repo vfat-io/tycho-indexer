@@ -312,7 +312,7 @@ mod tests {
                     "slots": {},
                     "native_balance": "0x01f4",
                     "balances": {
-                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": 100000000000
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": "0x01f4"
                     },
                     "code": "0x00",
                     "code_hash": "0x5c06b7c5b3d910fd33bc2229846f9ddaf91d584d9b196e16636901ac3a77077e",
@@ -356,7 +356,7 @@ mod tests {
                 &Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
                     .expect("Missing balance!")
             ),
-            Some(100000000000.0).as_ref()
+            Some(&Bytes::from_str("0x01f4").unwrap())
         );
     }
 
@@ -432,7 +432,7 @@ mod tests {
                         "attribute_1": "0xe803000000000000"
                     },
                     "balances": {
-                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": 1000000
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": "0x01f4"
                     }
                 }
             ]
@@ -467,11 +467,11 @@ mod tests {
         let expected_balances = [(
             Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
                 .expect("Unsupported address format"),
-            f64::from(1000000),
+            Bytes::from_str("0x01f4").unwrap(),
         )]
         .iter()
         .cloned()
-        .collect::<HashMap<Bytes, f64>>();
+        .collect::<HashMap<Bytes, Bytes>>();
         assert_eq!(states[0].balances, expected_balances);
     }
 }

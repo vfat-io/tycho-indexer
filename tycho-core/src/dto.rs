@@ -666,9 +666,9 @@ pub struct ResponseAccount {
     #[schema(value_type=HashMap<String, String>, example="0x00")]
     #[serde(with = "hex_bytes")]
     pub native_balance: Bytes,
-    #[schema(value_type=HashMap<String, f64>)]
-    #[serde(with = "hex_hashmap_key")]
-    pub balances: HashMap<Bytes, f64>,
+    #[schema(value_type=HashMap<String, String>)]
+    #[serde(with = "hex_hashmap_key_value")]
+    pub balances: HashMap<Bytes, Bytes>,
     #[schema(value_type=HashMap<String, String>, example="0xBADBABE")]
     #[serde(with = "hex_bytes")]
     pub code: Bytes,
@@ -694,7 +694,7 @@ impl ResponseAccount {
         title: String,
         slots: HashMap<Bytes, Bytes>,
         native_balance: Bytes,
-        balances: HashMap<Bytes, f64>,
+        balances: HashMap<Bytes, Bytes>,
         code: Bytes,
         code_hash: Bytes,
         balance_modify_tx: Bytes,
@@ -978,8 +978,8 @@ pub struct ResponseProtocolState {
     #[serde(with = "hex_hashmap_value")]
     pub attributes: HashMap<String, Bytes>,
     #[schema(value_type=HashMap<String, String>)]
-    #[serde(with = "hex_hashmap_key")]
-    pub balances: HashMap<Bytes, f64>,
+    #[serde(with = "hex_hashmap_key_value")]
+    pub balances: HashMap<Bytes, Bytes>,
 }
 
 impl From<models::protocol::ProtocolComponentState> for ResponseProtocolState {
