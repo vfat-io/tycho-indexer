@@ -778,13 +778,17 @@ impl Default for VersionParam {
     }
 }
 
+fn default_include_balances_flag() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct StateRequestParameters {
     #[param(default = 0)]
     pub tvl_gt: Option<u64>,
     #[param(default = 0)]
     pub inertia_min_gt: Option<u64>,
-    #[param(default = true)]
+    #[serde(default = "default_include_balances_flag")]
     pub include_balances: bool,
 }
 
