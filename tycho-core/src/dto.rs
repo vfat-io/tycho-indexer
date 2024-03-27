@@ -785,16 +785,16 @@ pub struct StateRequestParameters {
     #[param(default = 0)]
     pub inertia_min_gt: Option<u64>,
     #[param(default = true)]
-    pub balances_flag: bool,
+    pub include_balances: bool,
 }
 
 impl StateRequestParameters {
-    pub fn new(balances_flag: bool) -> Self {
-        Self { tvl_gt: None, inertia_min_gt: None, balances_flag }
+    pub fn new(include_balances: bool) -> Self {
+        Self { tvl_gt: None, inertia_min_gt: None, include_balances }
     }
 
     pub fn to_query_string(&self) -> String {
-        let mut parts = vec![format!("balances_flag={}", self.balances_flag)];
+        let mut parts = vec![format!("include_balances={}", self.include_balances)];
 
         if let Some(tvl_gt) = self.tvl_gt {
             parts.push(format!("tvl_gt={}", tvl_gt));

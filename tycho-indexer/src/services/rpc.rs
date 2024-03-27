@@ -152,7 +152,7 @@ where
         // TODO support additional tvl_gt and intertia_min_gt filters
         match self
             .db_gateway
-            .get_contracts(chain, addresses, Some(&version), true, params.balances_flag)
+            .get_contracts(chain, addresses, Some(&version), true, params.include_balances)
             .await
         {
             Ok(accounts) => Ok(dto::StateRequestResponse::new(
@@ -269,7 +269,7 @@ where
                 Some(version),
                 request.protocol_system.clone(),
                 ids,
-                params.balances_flag,
+                params.include_balances,
             )
             .await
         {
@@ -868,7 +868,7 @@ mod tests {
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
         let params =
-            StateRequestParameters { tvl_gt: None, inertia_min_gt: None, balances_flag: true };
+            StateRequestParameters { tvl_gt: None, inertia_min_gt: None, include_balances: true };
         let res = req_handler
             .get_protocol_state_inner(&Chain::Ethereum, &request, &params)
             .await
