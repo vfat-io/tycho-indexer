@@ -1,10 +1,7 @@
-use crate::{
-    models::{Chain, ChangeType, ContractId},
-    Bytes,
-};
+use crate::models::{Chain, ChangeType, ContractId};
 use std::collections::HashMap;
 
-use super::{Address, Code, CodeHash, StoreKey, StoreVal, TxHash};
+use super::{Address, Balance, Code, CodeHash, StoreKey, StoreVal, TxHash};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Contract {
@@ -12,8 +9,8 @@ pub struct Contract {
     pub address: Address,
     pub title: String,
     pub slots: HashMap<StoreKey, StoreVal>,
-    pub native_balance: Bytes,
-    pub balances: HashMap<Address, Bytes>,
+    pub native_balance: Balance,
+    pub balances: HashMap<Address, Balance>,
     pub code: Code,
     pub code_hash: CodeHash,
     pub balance_modify_tx: TxHash,
@@ -28,8 +25,8 @@ impl Contract {
         address: Address,
         title: String,
         slots: HashMap<StoreKey, StoreVal>,
-        native_balance: Bytes,
-        balances: HashMap<Address, Bytes>,
+        native_balance: Balance,
+        balances: HashMap<Address, Balance>,
         code: Code,
         code_hash: CodeHash,
         balance_modify_tx: TxHash,
@@ -51,7 +48,7 @@ impl Contract {
         }
     }
 
-    pub fn set_balance(&mut self, new_balance: &Bytes, modified_at: &Bytes) {
+    pub fn set_balance(&mut self, new_balance: &Balance, modified_at: &Balance) {
         self.native_balance = new_balance.clone();
         self.balance_modify_tx = modified_at.clone();
     }
@@ -60,15 +57,15 @@ impl Contract {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct ContractDelta {
     pub chain: Chain,
-    pub address: Bytes,
-    pub slots: HashMap<Bytes, Option<Bytes>>,
-    pub balance: Option<Bytes>,
-    pub code: Option<Bytes>,
+    pub address: Address,
+    pub slots: HashMap<StoreKey, Option<StoreVal>>,
+    pub balance: Option<Balance>,
+    pub code: Option<Code>,
     pub change: ChangeType,
 }
 
 impl ContractDelta {
-    pub fn deleted(chain: &Chain, address: &Bytes) -> Self {
+    pub fn deleted(chain: &Chain, address: &Address) -> Self {
         Self {
             chain: *chain,
             address: address.clone(),
@@ -79,10 +76,10 @@ impl ContractDelta {
 
     pub fn new(
         chain: &Chain,
-        address: &Bytes,
-        slots: Option<&HashMap<Bytes, Option<Bytes>>>,
-        balance: Option<&Bytes>,
-        code: Option<&Bytes>,
+        address: &Address,
+        slots: Option<&HashMap<StoreKey, Option<StoreVal>>>,
+        balance: Option<&Balance>,
+        code: Option<&Code>,
         change: ChangeType,
     ) -> Self {
         Self {

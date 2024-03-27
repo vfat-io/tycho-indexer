@@ -12,13 +12,11 @@ use itertools::Itertools;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{instrument, warn};
 use tycho_core::{
-    models,
     models::{
-        Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType,
-        PaginationParams, TxHash,
+        self, Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType,
+        PaginationParams, StoreVal, TxHash,
     },
     storage::{BlockOrTimestamp, StorageError, Version},
-    Bytes,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -40,7 +38,7 @@ impl PostgresGateway {
     /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
     fn _decode_protocol_states(
         &self,
-        balances: HashMap<ComponentId, HashMap<Address, Bytes>>,
+        balances: HashMap<ComponentId, HashMap<Address, Balance>>,
         states_result: Result<Vec<(orm::ProtocolState, ComponentId)>, diesel::result::Error>,
         context: &str,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError> {
@@ -246,7 +244,7 @@ impl PostgresGateway {
                     // We expect all protocol components to have contracts.
                     .unwrap_or_default();
 
-                let static_attributes: HashMap<String, Bytes> = if let Some(v) = pc.attributes {
+                let static_attributes: HashMap<String, StoreVal> = if let Some(v) = pc.attributes {
                     serde_json::from_value(v).map_err(|_| {
                         StorageError::DecodeError("Failed to decode static attributes.".to_string())
                     })?
@@ -608,18 +606,19 @@ impl PostgresGateway {
             .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_owned()) })
             .collect::<Vec<_>>();
 
-        let txns: HashMap<Bytes, (i64, i64, NaiveDateTime)> = orm::Transaction::ids_and_ts_by_hash(
-            new.iter()
-                .filter_map(|u| u.tx.as_ref())
-                .collect::<Vec<&TxHash>>()
-                .as_slice(),
-            conn,
-        )
-        .await
-        .map_err(PostgresError::from)?
-        .into_iter()
-        .map(|(id, hash, index, ts)| (hash, (id, index, ts)))
-        .collect();
+        let txns: HashMap<TxHash, (i64, i64, NaiveDateTime)> =
+            orm::Transaction::ids_and_ts_by_hash(
+                new.iter()
+                    .filter_map(|u| u.tx.as_ref())
+                    .collect::<Vec<&TxHash>>()
+                    .as_slice(),
+                conn,
+            )
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .map(|(id, hash, index, ts)| (hash, (id, index, ts)))
+            .collect();
 
         let components: HashMap<String, i64> = orm::ProtocolComponent::ids_by_external_ids(
             new.iter()
@@ -1038,7 +1037,7 @@ impl PostgresGateway {
         ids: Option<&[&str]>,
         at: Option<&Version>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<HashMap<ComponentId, HashMap<Address, Bytes>>, StorageError> {
+    ) -> Result<HashMap<ComponentId, HashMap<Address, Balance>>, StorageError> {
         let version_ts = match &at {
             Some(version) => Some(maybe_lookup_version_ts(version, conn).await?),
             None => None,
@@ -1079,13 +1078,13 @@ impl PostgresGateway {
         if let Some(ts) = version_ts {
             balance_query = balance_query.filter(schema::component_balance::valid_from.le(ts));
         }
-        let balances_map: HashMap<String, HashMap<i64, Bytes>> = balance_query
+        let balances_map: HashMap<String, HashMap<i64, Balance>> = balance_query
             .select((
                 schema::component_balance::protocol_component_id,
                 schema::component_balance::token_id,
                 schema::component_balance::new_balance,
             ))
-            .get_results::<(i64, i64, Bytes)>(conn)
+            .get_results::<(i64, i64, Balance)>(conn)
             .await
             .map_err(PostgresError::from)?
             .into_iter()
@@ -1099,7 +1098,7 @@ impl PostgresGateway {
                         .clone(),
                     group
                         .map(|(_, tid, bal)| (tid, bal))
-                        .collect::<HashMap<i64, Bytes>>(),
+                        .collect::<HashMap<i64, Balance>>(),
                 )
             })
             .collect();
@@ -1328,14 +1327,14 @@ impl PostgresGateway {
         &self,
         chain: &Chain,
         conn: &mut AsyncPgConnection,
-    ) -> Result<HashMap<Bytes, f64>, StorageError> {
+    ) -> Result<HashMap<Address, f64>, StorageError> {
         use schema::token_price::dsl::*;
         let chain_id = self.get_chain_id(chain);
         Ok(token_price
             .inner_join(schema::token::table.inner_join(schema::account::table))
             .select((schema::account::address, price))
             .filter(schema::account::chain_id.eq(chain_id))
-            .get_results::<(Bytes, f64)>(conn)
+            .get_results::<(Address, f64)>(conn)
             .await
             .map_err(|err| storage_error_from_diesel(err, "TokenPrice", &chain.to_string(), None))?
             .into_iter()
@@ -1383,7 +1382,7 @@ impl PostgresGateway {
 #[cfg(test)]
 mod test {
     use super::*;
-    use tycho_core::storage::BlockIdentifier;
+    use tycho_core::{storage::BlockIdentifier, Bytes};
 
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
