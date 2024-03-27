@@ -1510,8 +1510,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from_str("0x011b").unwrap(),
-            Bytes::from_str("0x0000").unwrap(),
+            Balance::from(U256::exp10(18)),
+            Balance::from(U256::zero()),
             1e18,
             weth_id,
             txn[0],
@@ -1521,8 +1521,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from_str("0x0c72").unwrap(),
-            Bytes::from_str("0x0000").unwrap(),
+            Balance::from(U256::from(2000) * U256::exp10(6)),
+            Balance::from(U256::zero()),
             2000.0 * 1e6,
             usdc_id,
             txn[0],
@@ -1544,8 +1544,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from_str("0x01f4").unwrap(),
-            Bytes::from_str("0x0000").unwrap(),
+            Balance::from(U256::exp10(18)),
+            Balance::from(U256::zero()),
             1e18,
             weth_id,
             txn[0],
@@ -1555,8 +1555,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from_str("0x0f23").unwrap(),
-            Bytes::from_str("0x0000").unwrap(),
+            Balance::from(U256::from(2000) * U256::exp10(18)),
+            Balance::from(U256::zero()),
             2000.0 * 1e18,
             dai_id,
             txn[0],
@@ -1578,8 +1578,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from(U256::from(2000) * U256::exp10(18)),
-            Bytes::from(U256::zero()),
+            Balance::from(U256::from(2000) * U256::exp10(18)),
+            Balance::from(U256::zero()),
             1e18,
             lusd_id,
             txn[1],
@@ -1589,8 +1589,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from(U256::from(2000) * U256::exp10(6)),
-            Bytes::from(U256::zero()),
+            Balance::from(U256::from(2000) * U256::exp10(6)),
+            Balance::from(U256::zero()),
             2000.0 * 1e6,
             usdc_id,
             txn[1],
@@ -1658,18 +1658,18 @@ mod test {
         ]
         .into_iter()
         .collect();
-        let balances: HashMap<Address, Bytes> = vec![
+        let balances: HashMap<Address, Balance> = vec![
             (
                 "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
                     .parse()
                     .unwrap(),
-                "0x01f4".parse().unwrap(),
+                Balance::from(U256::exp10(18)),
             ),
             (
                 "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
                     .parse()
                     .unwrap(),
-                "0x0f23".parse().unwrap(),
+                Balance::from(U256::from(2000) * U256::exp10(6)),
             ),
         ]
         .into_iter()
@@ -1847,13 +1847,13 @@ mod test {
                 "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
                     .parse()
                     .unwrap(),
-                "0x01f4".parse().unwrap(),
+                Balance::from(U256::exp10(18)),
             ),
             (
                 "0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
                     .unwrap(),
-                "0x0f23".parse().unwrap(),
+                Balance::from(U256::from(2000) * U256::exp10(18)),
             ),
         ]
         .into_iter()
@@ -2862,8 +2862,8 @@ mod test {
         let _ = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
         let exp: HashMap<_, _> = [
-            ("state1", Bytes::from(WETH), Bytes::from_str("0x011b").unwrap()),
-            ("state1", Bytes::from(USDC), Bytes::from_str("0x0c72").unwrap()),
+            ("state1", Bytes::from(WETH), Balance::from(U256::exp10(18))),
+            ("state1", Bytes::from(USDC), Balance::from(U256::from(2000) * U256::exp10(6))),
         ]
         .into_iter()
         .group_by(|e| e.0)
@@ -2935,8 +2935,8 @@ mod test {
 
         db_fixtures::insert_component_balance(
             &mut conn,
-            Bytes::from_str("0x01f4").unwrap(),
-            Bytes::from_str("0x0a83").unwrap(),
+            Balance::from(U256::from(2) * U256::exp10(18)),
+            Balance::from(U256::exp10(18)),
             2e18,
             weth_id,
             txn_id,
@@ -2946,8 +2946,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             &mut conn,
-            Bytes::from_str("0x0f23").unwrap(),
-            Bytes::from_str("0x0ee9").unwrap(),
+            Balance::from(U256::from(3000) * U256::exp10(6)),
+            Balance::from(U256::from(2000) * U256::exp10(18)),
             3000.0 * 1e6,
             dai_id,
             txn_id,
@@ -2957,8 +2957,8 @@ mod test {
         .await;
 
         let exp: HashMap<_, _> = [
-            ("state3", Bytes::from(WETH), Bytes::from_str("0x01f4").unwrap()),
-            ("state3", Bytes::from(DAI), Bytes::from_str("0x0f23").unwrap()),
+            ("state3", Bytes::from(WETH), Balance::from(U256::exp10(18))),
+            ("state3", Bytes::from(DAI), Balance::from(U256::from(2000) * U256::exp10(18))),
         ]
         .into_iter()
         .group_by(|e| e.0)
