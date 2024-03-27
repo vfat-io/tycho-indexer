@@ -1,11 +1,8 @@
-use crate::{
-    models::{Chain, ChangeType},
-    Bytes,
-};
+use crate::models::{Chain, ChangeType};
 use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet};
 
-use super::{Address, AttrStoreKey, ComponentId, StoreVal, TxHash};
+use super::{Address, AttrStoreKey, Balance, ComponentId, StoreVal, TxHash};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolComponent {
@@ -54,14 +51,14 @@ impl ProtocolComponent {
 pub struct ProtocolComponentState {
     pub component_id: ComponentId,
     pub attributes: HashMap<AttrStoreKey, StoreVal>,
-    pub balances: HashMap<Address, f64>,
+    pub balances: HashMap<Address, Balance>,
 }
 
 impl ProtocolComponentState {
     pub fn new(
         component_id: &str,
         attributes: HashMap<AttrStoreKey, StoreVal>,
-        balances: HashMap<Address, f64>,
+        balances: HashMap<Address, Balance>,
     ) -> Self {
         Self { component_id: component_id.to_string(), attributes, balances }
     }
@@ -87,18 +84,18 @@ impl ProtocolComponentStateDelta {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComponentBalance {
     pub token: Address,
-    pub new_balance: Bytes,
+    pub new_balance: Balance,
     pub balance_float: f64,
-    pub modify_tx: Bytes,
+    pub modify_tx: TxHash,
     pub component_id: ComponentId,
 }
 
 impl ComponentBalance {
     pub fn new(
         token: Address,
-        new_balance: Bytes,
+        new_balance: Balance,
         balance_float: f64,
-        modify_tx: Bytes,
+        modify_tx: TxHash,
         component_id: &str,
     ) -> Self {
         Self {

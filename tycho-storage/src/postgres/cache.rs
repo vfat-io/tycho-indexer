@@ -887,7 +887,7 @@ impl ProtocolGateway for CachedGateway {
         chain: &Chain,
         ids: Option<&[&str]>,
         at: Option<&Version>,
-    ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
+    ) -> Result<HashMap<String, HashMap<Bytes, Bytes>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))

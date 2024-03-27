@@ -12,13 +12,11 @@ use itertools::Itertools;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{instrument, warn};
 use tycho_core::{
-    models,
     models::{
-        Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType,
-        PaginationParams, TxHash,
+        self, Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType,
+        PaginationParams, StoreVal, TxHash,
     },
     storage::{BlockOrTimestamp, StorageError, Version},
-    Bytes,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -40,7 +38,7 @@ impl PostgresGateway {
     /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
     fn _decode_protocol_states(
         &self,
-        balances: HashMap<ComponentId, HashMap<Address, f64>>,
+        balances: HashMap<ComponentId, HashMap<Address, Balance>>,
         states_result: Result<Vec<(orm::ProtocolState, ComponentId)>, diesel::result::Error>,
         context: &str,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError> {
@@ -246,7 +244,7 @@ impl PostgresGateway {
                     // We expect all protocol components to have contracts.
                     .unwrap_or_default();
 
-                let static_attributes: HashMap<String, Bytes> = if let Some(v) = pc.attributes {
+                let static_attributes: HashMap<String, StoreVal> = if let Some(v) = pc.attributes {
                     serde_json::from_value(v).map_err(|_| {
                         StorageError::DecodeError("Failed to decode static attributes.".to_string())
                     })?
@@ -608,18 +606,19 @@ impl PostgresGateway {
             .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_owned()) })
             .collect::<Vec<_>>();
 
-        let txns: HashMap<Bytes, (i64, i64, NaiveDateTime)> = orm::Transaction::ids_and_ts_by_hash(
-            new.iter()
-                .filter_map(|u| u.tx.as_ref())
-                .collect::<Vec<&TxHash>>()
-                .as_slice(),
-            conn,
-        )
-        .await
-        .map_err(PostgresError::from)?
-        .into_iter()
-        .map(|(id, hash, index, ts)| (hash, (id, index, ts)))
-        .collect();
+        let txns: HashMap<TxHash, (i64, i64, NaiveDateTime)> =
+            orm::Transaction::ids_and_ts_by_hash(
+                new.iter()
+                    .filter_map(|u| u.tx.as_ref())
+                    .collect::<Vec<&TxHash>>()
+                    .as_slice(),
+                conn,
+            )
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .map(|(id, hash, index, ts)| (hash, (id, index, ts)))
+            .collect();
 
         let components: HashMap<String, i64> = orm::ProtocolComponent::ids_by_external_ids(
             new.iter()
@@ -1038,7 +1037,7 @@ impl PostgresGateway {
         ids: Option<&[&str]>,
         at: Option<&Version>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<HashMap<ComponentId, HashMap<Address, f64>>, StorageError> {
+    ) -> Result<HashMap<ComponentId, HashMap<Address, Balance>>, StorageError> {
         let version_ts = match &at {
             Some(version) => Some(maybe_lookup_version_ts(version, conn).await?),
             None => None,
@@ -1079,13 +1078,13 @@ impl PostgresGateway {
         if let Some(ts) = version_ts {
             balance_query = balance_query.filter(schema::component_balance::valid_from.le(ts));
         }
-        let balances_map: HashMap<String, HashMap<i64, f64>> = balance_query
+        let balances_map: HashMap<String, HashMap<i64, Balance>> = balance_query
             .select((
                 schema::component_balance::protocol_component_id,
                 schema::component_balance::token_id,
-                schema::component_balance::balance_float,
+                schema::component_balance::new_balance,
             ))
-            .get_results::<(i64, i64, f64)>(conn)
+            .get_results::<(i64, i64, Balance)>(conn)
             .await
             .map_err(PostgresError::from)?
             .into_iter()
@@ -1099,7 +1098,7 @@ impl PostgresGateway {
                         .clone(),
                     group
                         .map(|(_, tid, bal)| (tid, bal))
-                        .collect::<HashMap<i64, f64>>(),
+                        .collect::<HashMap<i64, Balance>>(),
                 )
             })
             .collect();
@@ -1328,14 +1327,14 @@ impl PostgresGateway {
         &self,
         chain: &Chain,
         conn: &mut AsyncPgConnection,
-    ) -> Result<HashMap<Bytes, f64>, StorageError> {
+    ) -> Result<HashMap<Address, f64>, StorageError> {
         use schema::token_price::dsl::*;
         let chain_id = self.get_chain_id(chain);
         Ok(token_price
             .inner_join(schema::token::table.inner_join(schema::account::table))
             .select((schema::account::address, price))
             .filter(schema::account::chain_id.eq(chain_id))
-            .get_results::<(Bytes, f64)>(conn)
+            .get_results::<(Address, f64)>(conn)
             .await
             .map_err(|err| storage_error_from_diesel(err, "TokenPrice", &chain.to_string(), None))?
             .into_iter()
@@ -1383,7 +1382,7 @@ impl PostgresGateway {
 #[cfg(test)]
 mod test {
     use super::*;
-    use tycho_core::storage::BlockIdentifier;
+    use tycho_core::{storage::BlockIdentifier, Bytes};
 
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
@@ -1510,8 +1509,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from(U256::exp10(18)),
-            Bytes::from(U256::zero()),
+            Balance::from(U256::exp10(18)),
+            Balance::from(U256::zero()),
             1e18,
             weth_id,
             txn[0],
@@ -1521,8 +1520,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from(U256::from(2000) * U256::exp10(6)),
-            Bytes::from(U256::zero()),
+            Balance::from(U256::from(2000) * U256::exp10(6)),
+            Balance::from(U256::zero()),
             2000.0 * 1e6,
             usdc_id,
             txn[0],
@@ -1544,8 +1543,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from(U256::exp10(18)),
-            Bytes::from(U256::zero()),
+            Balance::from(U256::exp10(18)),
+            Balance::from(U256::zero()),
             1e18,
             weth_id,
             txn[0],
@@ -1555,8 +1554,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from(U256::from(2000) * U256::exp10(18)),
-            Bytes::from(U256::zero()),
+            Balance::from(U256::from(2000) * U256::exp10(18)),
+            Balance::from(U256::zero()),
             2000.0 * 1e18,
             dai_id,
             txn[0],
@@ -1578,8 +1577,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from(U256::from(2000) * U256::exp10(18)),
-            Bytes::from(U256::zero()),
+            Balance::from(U256::from(2000) * U256::exp10(18)),
+            Balance::from(U256::zero()),
             1e18,
             lusd_id,
             txn[1],
@@ -1589,8 +1588,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Bytes::from(U256::from(2000) * U256::exp10(6)),
-            Bytes::from(U256::zero()),
+            Balance::from(U256::from(2000) * U256::exp10(6)),
+            Balance::from(U256::zero()),
             2000.0 * 1e6,
             usdc_id,
             txn[1],
@@ -1658,18 +1657,18 @@ mod test {
         ]
         .into_iter()
         .collect();
-        let balances: HashMap<Address, f64> = vec![
+        let balances: HashMap<Address, Balance> = vec![
             (
                 "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
                     .parse()
                     .unwrap(),
-                1000000000000000000.0,
+                Balance::from(U256::exp10(18)),
             ),
             (
                 "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
                     .parse()
                     .unwrap(),
-                2000000000.0,
+                Balance::from(U256::from(2000) * U256::exp10(6)),
             ),
         ]
         .into_iter()
@@ -1847,13 +1846,13 @@ mod test {
                 "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
                     .parse()
                     .unwrap(),
-                1000000000000000000.0,
+                Balance::from(U256::exp10(18)),
             ),
             (
                 "0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
                     .unwrap(),
-                2000000000000000000000.0,
+                Balance::from(U256::from(2000) * U256::exp10(18)),
             ),
         ]
         .into_iter()
@@ -2861,20 +2860,22 @@ mod test {
         let mut conn = setup_db().await;
         let _ = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-        let exp: HashMap<_, _> =
-            [("state1", Bytes::from(WETH), 1e18), ("state1", Bytes::from(USDC), 2000.0 * 1e6)]
-                .into_iter()
-                .group_by(|e| e.0)
-                .into_iter()
-                .map(|(cid, group)| {
-                    (
-                        cid.to_owned(),
-                        group
-                            .map(|(_, addr, bal)| (addr, bal))
-                            .collect::<HashMap<_, _>>(),
-                    )
-                })
-                .collect();
+        let exp: HashMap<_, _> = [
+            ("state1", Bytes::from(WETH), Balance::from(U256::exp10(18))),
+            ("state1", Bytes::from(USDC), Balance::from(U256::from(2000) * U256::exp10(6))),
+        ]
+        .into_iter()
+        .group_by(|e| e.0)
+        .into_iter()
+        .map(|(cid, group)| {
+            (
+                cid.to_owned(),
+                group
+                    .map(|(_, addr, bal)| (addr, bal))
+                    .collect::<HashMap<_, _>>(),
+            )
+        })
+        .collect();
 
         let res = gw
             .get_balances(&Chain::Ethereum, Some(&["state1"]), None, &mut conn)
@@ -2933,8 +2934,8 @@ mod test {
 
         db_fixtures::insert_component_balance(
             &mut conn,
-            Bytes::from(U256::from(2) * U256::exp10(18)),
-            Bytes::from(U256::exp10(18)),
+            Balance::from(U256::from(2) * U256::exp10(18)),
+            Balance::from(U256::exp10(18)),
             2e18,
             weth_id,
             txn_id,
@@ -2944,8 +2945,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             &mut conn,
-            Bytes::from(U256::from(3000) * U256::exp10(6)),
-            Bytes::from(U256::from(2000) * U256::exp10(18)),
+            Balance::from(U256::from(3000) * U256::exp10(6)),
+            Balance::from(U256::from(2000) * U256::exp10(18)),
             3000.0 * 1e6,
             dai_id,
             txn_id,
@@ -2954,20 +2955,22 @@ mod test {
         )
         .await;
 
-        let exp: HashMap<_, _> =
-            [("state3", Bytes::from(WETH), 1e18), ("state3", Bytes::from(DAI), 2000.0 * 1e18)]
-                .into_iter()
-                .group_by(|e| e.0)
-                .into_iter()
-                .map(|(cid, group)| {
-                    (
-                        cid.to_owned(),
-                        group
-                            .map(|(_, addr, bal)| (addr, bal))
-                            .collect::<HashMap<_, _>>(),
-                    )
-                })
-                .collect();
+        let exp: HashMap<_, _> = [
+            ("state3", Bytes::from(WETH), Balance::from(U256::exp10(18))),
+            ("state3", Bytes::from(DAI), Balance::from(U256::from(2000) * U256::exp10(18))),
+        ]
+        .into_iter()
+        .group_by(|e| e.0)
+        .into_iter()
+        .map(|(cid, group)| {
+            (
+                cid.to_owned(),
+                group
+                    .map(|(_, addr, bal)| (addr, bal))
+                    .collect::<HashMap<_, _>>(),
+            )
+        })
+        .collect();
 
         let res = gw
             .get_balances(
