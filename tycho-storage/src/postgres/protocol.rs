@@ -1044,8 +1044,9 @@ impl PostgresGateway {
         HashMap<ComponentId, HashMap<Address, models::protocol::ComponentBalance>>,
         StorageError,
     > {
-        // NOTE: the returned ComponentBalances have default values for balance_float and tx_hash as
-        // it is assumed the callers does not need these values
+        // NOTE: the returned ComponentBalances have a default value for tx_hash as it is assumed
+        // the caller does not need them. It is planned for `modify_tx` to be removed from
+        // the ComponentBalance
 
         let version_ts = match &at {
             Some(version) => Some(maybe_lookup_version_ts(version, conn).await?),
@@ -1087,13 +1088,14 @@ impl PostgresGateway {
         if let Some(ts) = version_ts {
             balance_query = balance_query.filter(schema::component_balance::valid_from.le(ts));
         }
-        let balances_map: HashMap<String, HashMap<i64, Balance>> = balance_query
+        let balances_map: HashMap<String, HashMap<i64, (Balance, f64)>> = balance_query
             .select((
                 schema::component_balance::protocol_component_id,
                 schema::component_balance::token_id,
                 schema::component_balance::new_balance,
+                schema::component_balance::balance_float,
             ))
-            .get_results::<(i64, i64, Balance)>(conn)
+            .get_results::<(i64, i64, Balance, f64)>(conn)
             .await
             .map_err(PostgresError::from)?
             .into_iter()
@@ -1106,8 +1108,8 @@ impl PostgresGateway {
                         .expect("Component ID not found")
                         .clone(),
                     group
-                        .map(|(_, tid, bal)| (tid, bal))
-                        .collect::<HashMap<i64, Balance>>(),
+                        .map(|(_, tid, bal, balf)| (tid, (bal, balf)))
+                        .collect::<HashMap<i64, (Balance, f64)>>(),
                 )
             })
             .collect();
@@ -1136,13 +1138,13 @@ impl PostgresGateway {
         for (component_id, balance_map) in balances_map {
             let mut new_balance_map = HashMap::new();
 
-            for (tid, bal) in balance_map {
+            for (tid, bals) in balance_map {
                 match tokens.get(&tid) {
                     Some(address) => {
                         let balance = models::protocol::ComponentBalance::new(
                             address.clone(),
-                            bal,
-                            f64::NAN,
+                            bals.0,
+                            bals.1,
                             TxHash::default(),
                             component_id.as_str(),
                         );
@@ -2883,7 +2885,7 @@ mod test {
                 models::protocol::ComponentBalance::new(
                     Bytes::from(WETH),
                     Balance::from(U256::exp10(18)),
-                    0.0,
+                    1e18,
                     TxHash::default(),
                     "state1",
                 ),
@@ -2894,7 +2896,7 @@ mod test {
                 models::protocol::ComponentBalance::new(
                     Bytes::from(USDC),
                     Balance::from(U256::from(2000) * U256::exp10(6)),
-                    0.0,
+                    2000000000.0,
                     TxHash::default(),
                     "state1",
                 ),
@@ -2913,18 +2915,11 @@ mod test {
         })
         .collect();
 
-        let mut res = gw
+        let res = gw
             .get_balances(&Chain::Ethereum, Some(&["state1"]), None, &mut conn)
             .await
             .expect("retrieving balances failed!");
 
-        // fix NaN comparison (apparently NaN != NaN)
-        for (_, inner_map) in res.iter_mut() {
-            for (_, bal) in inner_map.iter_mut() {
-                assert!(bal.balance_float.is_nan());
-                bal.balance_float = 0.0;
-            }
-        }
         assert_eq!(res, exp);
     }
 
@@ -3005,7 +3000,7 @@ mod test {
                 models::protocol::ComponentBalance::new(
                     Bytes::from(WETH),
                     Balance::from(U256::exp10(18)),
-                    0.0,
+                    1e18,
                     TxHash::default(),
                     "state3",
                 ),
@@ -3016,7 +3011,7 @@ mod test {
                 models::protocol::ComponentBalance::new(
                     Bytes::from(DAI),
                     Balance::from(U256::from(2000) * U256::exp10(18)),
-                    0.0,
+                    2000e18,
                     TxHash::default(),
                     "state3",
                 ),
@@ -3035,7 +3030,7 @@ mod test {
         })
         .collect();
 
-        let mut res = gw
+        let res = gw
             .get_balances(
                 &Chain::Ethereum,
                 Some(&["state3"]),
@@ -3045,13 +3040,6 @@ mod test {
             .await
             .expect("retrieving balances failed!");
 
-        // fix NaN comparison (apparently NaN != NaN)
-        for (_, inner_map) in res.iter_mut() {
-            for (_, bal) in inner_map.iter_mut() {
-                assert!(bal.balance_float.is_nan());
-                bal.balance_float = 0.0;
-            }
-        }
         assert_eq!(res, exp);
     }
 
