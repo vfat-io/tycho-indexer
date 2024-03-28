@@ -1044,6 +1044,9 @@ impl PostgresGateway {
         HashMap<ComponentId, HashMap<Address, models::protocol::ComponentBalance>>,
         StorageError,
     > {
+        // NOTE: the returned ComponentBalances have default values for balance_float and tx_hash as
+        // it is assumed the callers does not need these values
+
         let version_ts = match &at {
             Some(version) => Some(maybe_lookup_version_ts(version, conn).await?),
             None => None,
@@ -2915,7 +2918,7 @@ mod test {
             .await
             .expect("retrieving balances failed!");
 
-        // fix NaN comparison
+        // fix NaN comparison (apparently NaN != NaN)
         for (_, inner_map) in res.iter_mut() {
             for (_, bal) in inner_map.iter_mut() {
                 assert!(bal.balance_float.is_nan());
@@ -3042,7 +3045,7 @@ mod test {
             .await
             .expect("retrieving balances failed!");
 
-        // fix NaN comparison
+        // fix NaN comparison (apparently NaN != NaN)
         for (_, inner_map) in res.iter_mut() {
             for (_, bal) in inner_map.iter_mut() {
                 assert!(bal.balance_float.is_nan());
