@@ -106,7 +106,7 @@ SELECT
 
 -- Move latest values directly into the parent table - they should end up in default
 -- without this statement we would create a 262142 partition when moving data with
--- `partition_data_proc` below.
+-- `partition_data_proc` later.
 WITH latest_protocol_state AS (
     DELETE FROM protocol_state_old
     WHERE valid_to = '262142-12-31T23:59:59.9999Z'
@@ -130,9 +130,6 @@ FROM
 --- Unfortunately columns need to match to can't keep id column in old table to migrate data...
 ALTER TABLE protocol_state_old
     DROP COLUMN id;
-
-CALL partman.partition_data_proc(p_parent_table := 'public.protocol_state', p_loop_count := 7,
-    p_source_table := 'public.protocol_state_old', p_order := 'DESC');
 
 -- this constraint allows us to to upserts into this table.
 ALTER TABLE protocol_state_default
@@ -216,9 +213,6 @@ FROM
 ALTER TABLE contract_storage_old
     DROP COLUMN id;
 
-CALL partman.partition_data_proc(p_parent_table := 'public.contract_storage', p_loop_count := 7,
-    p_source_table := 'public.contract_storage_old', p_order := 'DESC');
-
 ALTER TABLE contract_storage_default
     ADD CONSTRAINT contract_storage_default_unique_pk UNIQUE (account_id, slot);
 
@@ -296,9 +290,6 @@ FROM
 
 ALTER TABLE component_balance_old
     DROP COLUMN id;
-
-CALL partman.partition_data_proc(p_parent_table := 'public.component_balance', p_loop_count := 7,
-    p_source_table := 'public.component_balance_old', p_order := 'DESC');
 
 ALTER TABLE component_balance_default
     ADD CONSTRAINT component_balance_default_unique_pk UNIQUE (protocol_component_id, token_id);
