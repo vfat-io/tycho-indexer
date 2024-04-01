@@ -58,13 +58,7 @@ where
             final_block_height.to_string()
         );
 
-        let mut target_index = None;
-
-        for (index, block_message) in self.block_messages.iter().enumerate() {
-            if block_message.block().number == final_block_height {
-                target_index = Some(index);
-            }
-        }
+        let target_index = self.get_index_by_height(final_block_height);
 
         if let Some(idx) = target_index {
             // Drain and return every block before the target index.
@@ -75,6 +69,15 @@ where
         } else {
             Err(StorageError::NotFound("block".into(), final_block_height.to_string()))
         }
+    }
+
+    fn get_index_by_height(&self, height: u64) -> Option<usize> {
+        for (index, block_message) in self.block_messages.iter().enumerate() {
+            if block_message.block().number == height {
+                return Some(index);
+            }
+        }
+        None
     }
 
     /// Purges all blocks following the specified block hash from the buffer. Returns the purged
@@ -113,6 +116,43 @@ where
             return Some(block_message.block());
         }
         None
+    }
+
+    /// Retrieves a range of blocks from the buffer.
+    ///
+    /// The retrieved iterator will include both the start and end block of specified range. In case
+    /// either start or end block are None, the iterator will start the range at the oldest / end
+    /// the range at the latest block.
+    pub fn get_block_range(
+        &self,
+        start_height: Option<u64>,
+        end_height: Option<u64>,
+    ) -> Result<impl Iterator<Item = &B>, StorageError> {
+        let start_index = if let Some(height) = start_height {
+            self.get_index_by_height(height)
+                .ok_or_else(|| StorageError::NotFound("Block".to_string(), height.to_string()))?
+        } else {
+            0
+        };
+
+        let end_index = if let Some(height) = end_height {
+            let end_idx = self
+                .get_index_by_height(height)
+                .ok_or_else(|| StorageError::NotFound("Block".to_string(), height.to_string()))?;
+
+            if end_idx < start_index {
+                return Err(StorageError::Unexpected(
+                    "RevertBuffer: Invalid block range".to_string(),
+                ));
+            }
+            end_idx + 1
+        } else {
+            self.block_messages.len()
+        };
+
+        Ok(self
+            .block_messages
+            .range(start_index..end_index))
     }
 }
 
@@ -220,7 +260,8 @@ mod test {
 
     use chrono::NaiveDateTime;
     use ethers::types::{H160, H256};
-    use tycho_core::{models::Chain, Bytes};
+    use rstest::rstest;
+    use tycho_core::{models::Chain, storage::StorageError, Bytes};
 
     use crate::extractor::evm::{
         Block, BlockEntityChanges, ComponentBalance, ProtocolChangesWithTx, ProtocolStateDelta,
@@ -564,5 +605,71 @@ mod test {
         revert_buffer
             .insert_block(get_block_entity(3))
             .unwrap();
+    }
+
+    #[rstest]
+    #[case::complete_range(None, None, vec![1, 2, 3])]
+    #[case::range(Some(1), Some(2), vec![1, 2])]
+    #[case::from_start(None, Some(2), vec![1, 2])]
+    #[case::until_end(Some(2), None, vec![2, 3])]
+    fn test_get_block_range(
+        #[case] start: Option<u64>,
+        #[case] end: Option<u64>,
+        #[case] exp: Vec<u64>,
+    ) {
+        let mut revert_buffer = RevertBuffer::new();
+        revert_buffer
+            .insert_block(get_block_entity(1))
+            .unwrap();
+        revert_buffer
+            .insert_block(get_block_entity(2))
+            .unwrap();
+        revert_buffer
+            .insert_block(get_block_entity(3))
+            .unwrap();
+
+        let blocks = revert_buffer
+            .get_block_range(start, end)
+            .unwrap()
+            .map(|e| e.block.number)
+            .collect::<Vec<_>>();
+
+        assert_eq!(blocks, exp);
+    }
+
+    #[test]
+    fn test_get_block_range_empty() {
+        let revert_buffer = RevertBuffer::<BlockEntityChanges>::new();
+
+        let res = revert_buffer
+            .get_block_range(None, None)
+            .unwrap()
+            .collect::<Vec<_>>();
+
+        assert_eq!(res, Vec::<&BlockEntityChanges>::new());
+    }
+
+    #[rstest]
+    #[case::not_found(Some(100), Some(1), StorageError::NotFound("Block".to_string(), "100".to_string()))]
+    #[case::invalid(Some(2), Some(1), StorageError::Unexpected("RevertBuffer: Invalid block range".to_string()))]
+    fn test_get_block_range_invalid_range(
+        #[case] start: Option<u64>,
+        #[case] end: Option<u64>,
+        #[case] exp: StorageError,
+    ) {
+        let mut revert_buffer = RevertBuffer::new();
+        revert_buffer
+            .insert_block(get_block_entity(1))
+            .unwrap();
+        revert_buffer
+            .insert_block(get_block_entity(2))
+            .unwrap();
+
+        let res = revert_buffer
+            .get_block_range(start, end)
+            .err()
+            .unwrap();
+
+        assert_eq!(res, exp);
     }
 }
