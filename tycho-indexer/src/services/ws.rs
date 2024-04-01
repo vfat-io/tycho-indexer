@@ -383,6 +383,7 @@ mod tests {
         fn source(&self) -> ExtractorIdentity {
             self.extractor_id.clone()
         }
+
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }

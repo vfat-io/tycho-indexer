@@ -361,6 +361,7 @@ impl NormalisedMessage for BlockAccountChanges {
     fn source(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.extractor)
     }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -377,6 +378,7 @@ impl NormalisedMessage for BlockEntityChangesResult {
     fn source(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.extractor)
     }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

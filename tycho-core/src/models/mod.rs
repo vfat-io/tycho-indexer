@@ -129,6 +129,7 @@ pub trait NormalisedMessage:
     std::any::Any + std::fmt::Debug + std::fmt::Display + Send + Sync + 'static
 {
     fn source(&self) -> ExtractorIdentity;
+
     fn as_any(&self) -> &dyn std::any::Any;
 }
 

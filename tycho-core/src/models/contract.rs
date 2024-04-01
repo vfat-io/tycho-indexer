@@ -1,4 +1,4 @@
-use crate::models::{Chain, ChangeType, ContractId};
+use crate::models::{protocol::ComponentBalance, Chain, ChangeType, ContractId};
 use std::collections::HashMap;
 
 use super::{Address, Balance, Code, CodeHash, StoreKey, StoreVal, TxHash};
@@ -51,6 +51,14 @@ impl Contract {
     pub fn set_balance(&mut self, new_balance: &Balance, modified_at: &Balance) {
         self.native_balance = new_balance.clone();
         self.balance_modify_tx = modified_at.clone();
+    }
+
+    pub fn apply_contract_delta(&mut self, _delta: &ContractDelta) {
+        todo!()
+    }
+
+    pub fn apply_balance_delta(&mut self, _delta: &ComponentBalance) {
+        todo!()
     }
 }
 

@@ -1,4 +1,7 @@
-use crate::models::{Chain, ChangeType};
+use crate::{
+    models::{Chain, ChangeType},
+    Bytes,
+};
 use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet};
 
@@ -51,6 +54,7 @@ impl ProtocolComponent {
 pub struct ProtocolComponentState {
     pub component_id: ComponentId,
     pub attributes: HashMap<AttrStoreKey, StoreVal>,
+    // used during snapshots retrieval by the gateway
     pub balances: HashMap<Address, Balance>,
 }
 
@@ -61,6 +65,36 @@ impl ProtocolComponentState {
         balances: HashMap<Address, Balance>,
     ) -> Self {
         Self { component_id: component_id.to_string(), attributes, balances }
+    }
+
+    pub fn apply_state_delta(&mut self, delta: &ProtocolComponentStateDelta) -> anyhow::Result<()> {
+        if self.component_id != delta.component_id {
+            return Err(anyhow::anyhow!("Component id mismatch"));
+        }
+        self.attributes.extend(
+            delta
+                .updated_attributes
+                .clone()
+                .into_iter(),
+        );
+
+        self.attributes
+            .retain(|attr, _| !delta.deleted_attributes.contains(attr));
+
+        Ok(())
+    }
+
+    pub fn apply_balance_delta(
+        &mut self,
+        delta: &HashMap<Bytes, ComponentBalance>,
+    ) -> anyhow::Result<()> {
+        self.balances.extend(
+            delta
+                .iter()
+                .map(|(k, v)| (k.clone(), v.new_balance.clone())),
+        );
+
+        Ok(())
     }
 }
 

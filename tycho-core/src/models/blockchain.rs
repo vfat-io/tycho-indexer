@@ -1,6 +1,7 @@
 use crate::{
     models::{
-        protocol::{ComponentBalance, ProtocolComponent},
+        contract::ContractDelta,
+        protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
         Chain, ComponentId,
     },
     Bytes,
@@ -43,7 +44,8 @@ pub struct TransactionDeltaGroup<T> {
     tx: Transaction,
 }
 
-pub struct BlockAggregatedDeltas<T> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockAggregatedDeltas<T: Clone + std::fmt::Debug + PartialEq> {
     pub extractor: String,
     pub chain: Chain,
     pub block: Block,
@@ -56,6 +58,18 @@ pub struct BlockAggregatedDeltas<T> {
     component_tvl: HashMap<String, f64>,
 }
 
+pub type NativeBlockAggregate = BlockAggregatedDeltas<HashMap<String, ProtocolComponentStateDelta>>;
+pub type VmBlockAggregate = BlockAggregatedDeltas<HashMap<Bytes, ContractDelta>>;
+
 pub trait BlockScoped {
     fn block(&self) -> Block;
+}
+
+impl<T> BlockScoped for BlockAggregatedDeltas<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq,
+{
+    fn block(&self) -> Block {
+        self.block.clone()
+    }
 }

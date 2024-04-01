@@ -23,8 +23,10 @@ use tycho_core::{
     storage::Gateway,
 };
 
+mod deltas_buffer;
 mod rpc;
 mod ws;
+
 pub struct ServicesBuilder<G> {
     prefix: String,
     port: u16,
