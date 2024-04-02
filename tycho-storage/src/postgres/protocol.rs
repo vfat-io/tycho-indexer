@@ -46,8 +46,7 @@ impl PostgresGateway {
             Ok(data_vec) => {
                 // Decode final state deltas. We can assume result is sorted by component_id.
                 // Therefore we can use slices to iterate over the data in groups of
-                // component_id. The last update for each component will have the
-                // latest transaction hash (modify_tx).
+                // component_id.
 
                 let mut protocol_states = Vec::new();
 
