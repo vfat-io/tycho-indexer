@@ -17,27 +17,31 @@ use tycho_core::dto::{Chain, ExtractorIdentity};
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
 #[clap(version = "0.1.0")]
 struct CliArgs {
-    // Tycho server URL, without protocol. Example: localhost:8888
+    /// Tycho server URL, without protocol. Example: localhost:8888
     #[clap(long, default_value = "localhost:8888")]
     tycho_url: String,
 
-    /// Specifies exchanges and their addresses in the format name:address
+    /// Specifies exchanges and optionally a pool address in the format name:address
     #[clap(long, number_of_values = 1)]
     exchange: Vec<String>,
 
-    // Specifies the client's block time
+    /// Specifies the minimum TVL to filter the components
+    #[clap(long, default_value = "10.0")]
+    min_tvl: u32,
+
+    /// Specifies the client's block time
     #[clap(long, default_value = "600")]
     block_time: u64,
 
-    // Especifies the client's timeout
+    /// Specifies the client's timeout
     #[clap(long, default_value = "1")]
     timeout: u64,
 
-    // Logging folder path.
+    /// Logging folder path.
     #[clap(long, default_value = "logs")]
     log_folder: String,
 
-    /// Run example, on a single block with UniswapV2 and UniswapV3.
+    /// Run the example on a single block with UniswapV2 and UniswapV3.
     #[clap(long)]
     example: bool,
 }
@@ -68,34 +72,50 @@ async fn main() {
         // ```
         let tycho_url = "localhost:8888".to_string();
         let exchanges = vec![
-            ("uniswap_v3".to_string(), "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640".to_string()),
-            ("uniswap_v2".to_string(), "0xa478c2975ab1ea89e8196811f51a7b7ade33eb11".to_string()),
+            (
+                "uniswap_v3".to_string(),
+                Some("0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640".to_string()),
+            ),
+            (
+                "uniswap_v2".to_string(),
+                Some("0xa478c2975ab1ea89e8196811f51a7b7ade33eb11".to_string()),
+            ),
         ];
-        run(tycho_url, exchanges, 600, 1).await;
+        run(tycho_url, exchanges, 0.0, 600, 1).await;
         return;
     }
 
     // Parse exchange name and addresses from name:address format.
-    let exchanges: Vec<(String, String)> = args
+    let exchanges: Vec<(String, Option<String>)> = args
         .exchange
         .iter()
         .filter_map(|e| {
-            let parts: Vec<&str> = e.split(':').collect();
-            if parts.len() == 2 {
-                Some((parts[0].to_string(), parts[1].to_string()))
+            if e.contains(':') {
+                let parts: Vec<&str> = e.split(':').collect();
+                if parts.len() == 2 {
+                    Some((parts[0].to_string(), Some(parts[1].to_string())))
+                } else {
+                    tracing::warn!("Ignoring invalid exchange format: {}", e);
+                    None
+                }
             } else {
-                tracing::warn!("Ignoring invalid exchange format: {}", e);
-                None
+                Some((e.to_string(), Some("".to_string())))
             }
         })
         .collect();
 
     tracing::info!("Running with exchanges: {:?}", exchanges);
 
-    run(args.tycho_url, exchanges, args.block_time, args.timeout).await;
+    run(args.tycho_url, exchanges, args.min_tvl.into(), args.block_time, args.timeout).await;
 }
 
-async fn run(tycho_url: String, exchanges: Vec<(String, String)>, block_time: u64, timeout: u64) {
+async fn run(
+    tycho_url: String,
+    exchanges: Vec<(String, Option<String>)>,
+    tvl: f64,
+    block_time: u64,
+    timeout: u64,
+) {
     let tycho_ws_url = format!("ws://{tycho_url}");
     let tycho_rpc_url = format!("http://{tycho_url}");
     let ws_client = WsDeltasClient::new(&tycho_ws_url).unwrap();
@@ -109,11 +129,16 @@ async fn run(tycho_url: String, exchanges: Vec<(String, String)>, block_time: u6
 
     for (name, address) in exchanges {
         let id = ExtractorIdentity { chain: Chain::Ethereum, name };
+        let filter = if address.is_some() {
+            ComponentFilter::Ids(vec![address.unwrap()])
+        } else {
+            ComponentFilter::MinimumTVL(tvl)
+        };
         let sync = ProtocolStateSynchronizer::new(
             id.clone(),
             true,
             true,
-            ComponentFilter::Ids(vec![address]),
+            filter,
             1,
             HttpRPCClient::new(&tycho_rpc_url).unwrap(),
             ws_client.clone(),
@@ -151,7 +176,9 @@ mod cli_tests {
             "--tycho-url",
             "localhost:5000",
             "--exchange",
-            "uniswap_v2:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+            "uniswap_v2",
+            "--min-tvl",
+            "3000",
             "--block-time",
             "50",
             "--timeout",
@@ -160,10 +187,10 @@ mod cli_tests {
             "test_logs",
             "--example",
         ]);
-        let exchanges: Vec<String> =
-            vec!["uniswap_v2:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640".to_string()];
+        let exchanges: Vec<String> = vec!["uniswap_v2".to_string()];
         assert_eq!(args.tycho_url, "localhost:5000");
         assert_eq!(args.exchange, exchanges);
+        assert_eq!(args.min_tvl, 3000);
         assert_eq!(args.block_time, 50);
         assert_eq!(args.timeout, 5);
         assert_eq!(args.log_folder, "test_logs");
