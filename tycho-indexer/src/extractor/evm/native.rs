@@ -651,36 +651,39 @@ where
             .map_err(ExtractionError::Storage)?;
 
         // Then merge the two and cast it to the expected struct
-        let db_states: Result<HashMap<(String, String), Bytes>, ExtractionError> = missing_map
-            .iter()
-            .flat_map(|(component_id, keys)| {
-                keys.iter().map(|key| {
-                    let state = missing_components_states
-                        .iter()
-                        .find(|state| state.component_id == component_id.clone())
-                        .ok_or_else(|| {
-                            ExtractionError::Storage(StorageError::NotFound(
-                                "Component".to_string(),
-                                component_id.to_string(),
-                            ))
-                        })?;
-
-                    let value = state
-                        .attributes
-                        .get(key)
-                        .ok_or_else(|| {
-                            ExtractionError::Storage(StorageError::NotFound(
-                                "Component storage".to_string(),
-                                format!("component: {}, key {}", component_id.clone(), key),
-                            ))
-                        })?;
-
-                    Ok(((component_id.clone(), key.clone()), value.clone()))
-                })
+        let missing_components_states_map = missing_map
+            .into_iter()
+            .map(|(component_id, keys)| {
+                missing_components_states
+                    .iter()
+                    .find(|comp| comp.component_id == component_id)
+                    .map(|state| (state.clone(), keys))
+                    .ok_or(ExtractionError::Storage(StorageError::NotFound(
+                        "Component".to_owned(),
+                        component_id.to_string(),
+                    )))
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let state_updates: HashMap<String, evm::ProtocolStateDelta> = db_states?
+        let mut not_found: HashMap<_, HashSet<_>> = HashMap::new();
+        let mut db_states: HashMap<(String, String), Bytes> = HashMap::new();
+
+        for (state, keys) in missing_components_states_map {
+            for key in keys {
+                if let Some(value) = state.attributes.get(&key) {
+                    db_states.insert((state.component_id.clone(), key.clone()), value.clone());
+                } else {
+                    not_found
+                        .entry(state.component_id.clone())
+                        .or_default()
+                        .insert(key);
+                }
+            }
+        }
+
+        let empty = HashSet::<String>::new();
+
+        let state_updates: HashMap<String, evm::ProtocolStateDelta> = db_states
             .into_iter()
             .chain(buffered_state)
             .fold(HashMap::new(), |mut acc, ((c_id, key), value)| {
@@ -688,7 +691,10 @@ where
                     .or_insert_with(|| evm::ProtocolStateDelta {
                         component_id: c_id.clone(),
                         updated_attributes: HashMap::new(),
-                        deleted_attributes: HashSet::new(),
+                        deleted_attributes: not_found
+                            .get(&c_id)
+                            .unwrap_or(&empty)
+                            .clone(),
                     })
                     .updated_attributes
                     .insert(key.clone(), value);
