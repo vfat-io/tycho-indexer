@@ -14,7 +14,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
 use tycho_core::{
     models::{
         self,
@@ -96,10 +96,6 @@ struct BlockRange {
 impl BlockRange {
     fn new(start: &models::blockchain::Block, end: &models::blockchain::Block) -> Self {
         Self { start: start.clone(), end: end.clone() }
-    }
-
-    fn is_single_block(&self) -> bool {
-        self.start.hash == self.end.hash
     }
 }
 
@@ -280,31 +276,6 @@ impl DBCacheWriteExecutor {
             .get()
             .await
             .expect("pool should be connected");
-
-        // If persisted block is not set we don't have data for this chain yet.
-        if let Some(db_block) = &self.persisted_block {
-            // during sync we insert in batches of blocks.
-            let syncing = !new_db_tx.block_range.is_single_block();
-
-            // if we are not syncing (catching up) we are not allowed to create a separate block
-            // range.
-            if !syncing {
-                let start = &new_db_tx.block_range.start;
-                // if we are advancing a block, while not syncing it must fit on top of the
-                // persisted block.
-                if start.number > db_block.number && start.parent_hash != db_block.hash {
-                    error!(
-                        block_range=?&new_db_tx.block_range,
-                        persisted_block=?&db_block,
-                        "Invalid block range encountered"
-                    );
-                    let _ = new_db_tx
-                        .tx
-                        .send(Err(StorageError::InvalidBlockRange()));
-                    return;
-                }
-            }
-        }
 
         let res = conn
             .build_transaction()
