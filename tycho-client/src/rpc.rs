@@ -95,7 +95,7 @@ pub trait RPCClient {
                     .acquire()
                     .await
                     .map_err(|_| RPCError::Fatal("Semaphore dropped".to_string()))?;
-                let filters = StateRequestParameters::default();
+                let filters = StateRequestParameters::new(true);
                 self.get_protocol_states(chain, &filters, body)
                     .await
             });
