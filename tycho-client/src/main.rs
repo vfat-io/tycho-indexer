@@ -26,7 +26,7 @@ struct CliArgs {
     exchange: Vec<String>,
 
     /// Specifies the minimum TVL to filter the components. Ignored if addresses are provided.
-    #[clap(long, default_value = "10.0")]
+    #[clap(long, default_value = "10")]
     min_tvl: u32,
 
     /// Specifies the client's block time
@@ -99,7 +99,7 @@ async fn main() {
                     None
                 }
             } else {
-                Some((e.to_string(), Some("".to_string())))
+                Some((e.to_string(), None))
             }
         })
         .collect();
