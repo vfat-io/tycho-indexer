@@ -12,8 +12,8 @@ use tracing::log::warn;
 use tycho_core::{
     dto,
     models::{
-        blockchain::BlockScoped, Address, AttrStoreKey, Chain, ChangeType, ComponentId,
-        ExtractorIdentity, NormalisedMessage, ProtocolType, StoreVal,
+        blockchain::BlockScoped, protocol as tycho_core_protocol, Address, AttrStoreKey, Chain,
+        ChangeType, ComponentId, ExtractorIdentity, NormalisedMessage, ProtocolType, StoreVal,
     },
     Bytes,
 };
@@ -529,7 +529,7 @@ impl StateUpdateBufferEntry for BlockContractChanges {
     fn get_filtered_balance_update(
         &self,
         keys: Vec<(&ComponentId, &Address)>,
-    ) -> HashMap<(String, Bytes), tycho_core::models::protocol::ComponentBalance> {
+    ) -> HashMap<(String, Bytes), tycho_core_protocol::ComponentBalance> {
         // Convert keys to a HashSet for faster lookups
         let keys_set: HashSet<(&String, &Bytes)> = keys.into_iter().collect();
 
@@ -1204,7 +1204,7 @@ impl StateUpdateBufferEntry for BlockEntityChanges {
     fn get_filtered_balance_update(
         &self,
         keys: Vec<(&ComponentId, &Address)>,
-    ) -> HashMap<(String, Bytes), tycho_core::models::protocol::ComponentBalance> {
+    ) -> HashMap<(String, Bytes), tycho_core_protocol::ComponentBalance> {
         // Convert keys to a HashSet for faster lookups
         let keys_set: HashSet<(&String, &Bytes)> = keys.into_iter().collect();
 

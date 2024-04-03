@@ -644,7 +644,7 @@ where
             .get_protocol_states(
                 &missing_map
                     .keys()
-                    .map(AsRef::as_ref)
+                    .map(String::as_str)
                     .collect::<Vec<&str>>(),
             )
             .await
@@ -743,7 +743,7 @@ where
             .get_components_balances(
                 &missing_balances_map
                     .keys()
-                    .map(AsRef::as_ref)
+                    .map(String::as_str)
                     .collect::<Vec<&str>>(),
             )
             .await?;
