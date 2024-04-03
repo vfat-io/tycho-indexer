@@ -1,12 +1,15 @@
 use mockall::mock;
 use std::collections::HashMap;
 
+#[cfg(test)]
 use crate::extractor::evm;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
+#[cfg(test)]
 use ethers::prelude::H256;
 #[cfg(test)]
 use ethers::types::U256;
+#[cfg(test)]
 use std::time::Duration;
 use tycho_core::{
     models::{
@@ -437,7 +440,8 @@ pub fn evm_contract_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap
         .collect()
 }
 
-/// Cretes an evm block for testing, version 0 is not allowed and will panic.
+/// Creates an evm block for testing, version 0 is not allowed and will panic.
+#[cfg(test)]
 pub fn evm_block(version: u64) -> evm::Block {
     if version == 0 {
         panic!("Block version 0 doesn't exist. Smallest version is 1");

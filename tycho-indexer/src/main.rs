@@ -171,8 +171,14 @@ async fn main() -> Result<(), ExtractionError> {
         .run()?;
     info!(server_url, "Http and Ws server started");
 
-    let shutdown_task =
-        tokio::spawn(shutdown_handler(server_handle, extractor_handles, gw_writer_thread));
+    let shutdown_task = tokio::spawn(shutdown_handler(
+        server_handle,
+        extractor_handles
+            .into_iter()
+            .map(|h| h.0)
+            .collect::<Vec<_>>(),
+        gw_writer_thread,
+    ));
 
     tasks.extend(vec![server_task, shutdown_task]);
 
@@ -195,7 +201,7 @@ async fn build_all_extractors(
             .run()
             .await?;
 
-        info!("Extractor {} started!", handle.get_id());
+        info!("Extractor {} started!", handle.0.get_id());
         extractor_handles.push((task, handle));
     }
 

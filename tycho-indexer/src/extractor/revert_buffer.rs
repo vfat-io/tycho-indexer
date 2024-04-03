@@ -3,10 +3,48 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use tracing::{debug, trace};
 use tycho_core::{
-    models::{blockchain::BlockScoped, protocol::ComponentBalance, ComponentId},
-    storage::StorageError,
+    models::{
+        blockchain::{Block, BlockScoped},
+        protocol::ComponentBalance,
+        ComponentId,
+    },
+    storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
     Bytes,
 };
+
+#[derive(Clone, Debug, Copy)]
+pub enum BlockNumberOrTimestamp {
+    Number(u64),
+    Timestamp(NaiveDateTime),
+}
+
+impl BlockNumberOrTimestamp {
+    fn greater_then(&self, other: &Block) -> bool {
+        match self {
+            BlockNumberOrTimestamp::Number(n) => n > &other.number,
+            BlockNumberOrTimestamp::Timestamp(ts) => ts > &other.ts,
+        }
+    }
+}
+
+impl TryFrom<BlockOrTimestamp> for BlockNumberOrTimestamp {
+    type Error = StorageError;
+
+    fn try_from(value: BlockOrTimestamp) -> Result<Self, Self::Error> {
+        Ok(match value {
+            BlockOrTimestamp::Block(bid) => match bid {
+                BlockIdentifier::Number((_, no)) => BlockNumberOrTimestamp::Number(no as u64),
+                BlockIdentifier::Hash(_) => {
+                    return Err(StorageError::Unexpected("BlockHash unsupported!".to_string()))
+                }
+                BlockIdentifier::Latest(_) => {
+                    return Err(StorageError::Unexpected("Latest marker unsupported!".to_string()))
+                }
+            },
+            BlockOrTimestamp::Timestamp(ts) => BlockNumberOrTimestamp::Timestamp(ts),
+        })
+    }
+}
 
 /// This buffer temporarily stores blockchain blocks that are not yet finalized. It allows for
 /// efficient handling of block reverts without requiring database rollbacks.
@@ -126,20 +164,24 @@ where
     /// the range at the latest block.
     pub fn get_block_range(
         &self,
-        start_ts: Option<NaiveDateTime>,
-        end_ts: Option<NaiveDateTime>,
+        start_version: Option<BlockNumberOrTimestamp>,
+        end_version: Option<BlockNumberOrTimestamp>,
     ) -> Result<impl Iterator<Item = &B>, StorageError> {
-        let start_index = if let Some(ts) = start_ts {
-            self.find_index(|b| b.block().ts >= ts)
-                .ok_or_else(|| StorageError::NotFound("Block".to_string(), ts.to_string()))?
+        let start_index = if let Some(version) = start_version {
+            self.find_index(|b| !version.greater_then(&b.block()))
+                .ok_or_else(|| {
+                    StorageError::NotFound("Block".to_string(), format!("{:?}", version))
+                })?
         } else {
             0
         };
 
-        let end_index = if let Some(ts) = end_ts {
+        let end_index = if let Some(version) = end_version {
             let end_idx = self
-                .find_index(|b| b.block().ts >= ts)
-                .ok_or_else(|| StorageError::NotFound("Block".to_string(), ts.to_string()))?;
+                .find_index(|b| !version.greater_then(&b.block()))
+                .ok_or_else(|| {
+                    StorageError::NotFound("Block".to_string(), format!("{:?}", version))
+                })?;
 
             if end_idx < start_index {
                 return Err(StorageError::Unexpected(
@@ -272,7 +314,7 @@ mod test {
         testing,
     };
 
-    use super::RevertBuffer;
+    use super::{BlockNumberOrTimestamp, RevertBuffer};
 
     fn transaction() -> Transaction {
         Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10)
@@ -607,6 +649,8 @@ mod test {
         #[case] end: Option<NaiveDateTime>,
         #[case] exp: Vec<u64>,
     ) {
+        let start = start.map(BlockNumberOrTimestamp::Timestamp);
+        let end = end.map(BlockNumberOrTimestamp::Timestamp);
         let mut revert_buffer = RevertBuffer::new();
         revert_buffer
             .insert_block(get_block_entity(1))
@@ -640,13 +684,15 @@ mod test {
     }
 
     #[rstest]
-    #[case::not_found(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:36".parse::<NaiveDateTime>().unwrap()), StorageError::NotFound("Block".to_string(), "2020-01-01 00:00:36".to_string()))]
-    #[case::invalid(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()),Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), StorageError::Unexpected("RevertBuffer: Invalid block range".to_string()))]
+    #[case::not_found(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:36".parse::<NaiveDateTime>().unwrap()), StorageError::NotFound("Block".to_string(), "Timestamp(2020-01-01T00:00:36)".to_string()))]
+    #[case::invalid(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), StorageError::Unexpected("RevertBuffer: Invalid block range".to_string()))]
     fn test_get_block_range_invalid_range(
         #[case] start: Option<NaiveDateTime>,
         #[case] end: Option<NaiveDateTime>,
         #[case] exp: StorageError,
     ) {
+        let start = start.map(BlockNumberOrTimestamp::Timestamp);
+        let end = end.map(BlockNumberOrTimestamp::Timestamp);
         let mut revert_buffer = RevertBuffer::new();
         revert_buffer
             .insert_block(get_block_entity(1))

@@ -1149,6 +1149,7 @@ pub struct BlockEntityChangesResult {
 }
 
 impl BlockEntityChangesResult {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor: &str,
         chain: Chain,

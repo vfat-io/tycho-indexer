@@ -60,7 +60,7 @@ impl Contract {
             return Err(DeltaError::IdMismatch(format!("{:?}", self_id), format!("{:?}", other_id)));
         }
         if let Some(balance) = delta.balance.as_ref() {
-            self.native_balance.clone_from(&balance);
+            self.native_balance.clone_from(balance);
         }
         if let Some(code) = delta.code.as_ref() {
             self.code.clone_from(code);

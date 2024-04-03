@@ -77,12 +77,8 @@ impl ProtocolComponentState {
                 delta.component_id.clone(),
             ));
         }
-        self.attributes.extend(
-            delta
-                .updated_attributes
-                .clone()
-                .into_iter(),
-        );
+        self.attributes
+            .extend(delta.updated_attributes.clone());
 
         self.attributes
             .retain(|attr, _| !delta.deleted_attributes.contains(attr));

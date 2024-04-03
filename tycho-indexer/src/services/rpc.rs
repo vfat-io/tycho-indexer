@@ -5,13 +5,14 @@ use anyhow::Error;
 
 use diesel_async::pooled_connection::deadpool;
 
+use crate::services::deltas_buffer::{PendingDeltas, PendingDeltasError};
 use std::collections::HashSet;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument};
 use tycho_core::{
     dto::{self, ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
     models::{Address, Chain, PaginationParams},
-    storage::{BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
+    storage::{BlockIdentifier, BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
     Bytes,
 };
 
@@ -25,6 +26,9 @@ pub enum RpcError {
 
     #[error("Failed to get database connection: {0}")]
     Connection(#[from] deadpool::PoolError),
+
+    #[error("Failed to apply pending deltas: {0}")]
+    DeltasError(#[from] PendingDeltasError),
 }
 
 impl From<anyhow::Error> for RpcError {
@@ -106,14 +110,15 @@ impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
 
 pub struct RpcHandler<G> {
     db_gateway: G,
+    pending_deltas: PendingDeltas,
 }
 
 impl<G> RpcHandler<G>
 where
     G: Gateway,
 {
-    pub fn new(db_gateway: G) -> Self {
-        Self { db_gateway }
+    pub fn new(db_gateway: G, pending_deltas: PendingDeltas) -> Self {
+        Self { db_gateway, pending_deltas }
     }
 
     #[instrument(skip(self, chain, request, params))]
@@ -135,10 +140,9 @@ where
         params: &dto::StateRequestParameters,
     ) -> Result<dto::StateRequestResponse, RpcError> {
         #![allow(unused_variables)]
-        //TODO: handle when no contract is specified with filters
+        //TODO: set version to latest if we are targeting a version within pending deltas
         let at = BlockOrTimestamp::try_from(&request.version)?;
-
-        let version = Version(at, VersionKind::Last);
+        let version = Version(at.clone(), VersionKind::Last);
 
         // Get the contract IDs from the request
         let contract_ids = request.contract_ids.clone();
@@ -157,12 +161,20 @@ where
             .get_contracts(chain, addresses, Some(&version), true, params.include_balances)
             .await
         {
-            Ok(accounts) => Ok(dto::StateRequestResponse::new(
-                accounts
-                    .into_iter()
-                    .map(dto::ResponseAccount::from)
-                    .collect(),
-            )),
+            Ok(mut accounts) => {
+                let version = match &at {
+                    BlockOrTimestamp::Block(BlockIdentifier::Latest(_)) => None,
+                    _ => Some(at.try_into()?),
+                };
+                self.pending_deltas
+                    .update_vm_states(&mut accounts, version)?;
+                Ok(dto::StateRequestResponse::new(
+                    accounts
+                        .into_iter()
+                        .map(dto::ResponseAccount::from)
+                        .collect(),
+                ))
+            }
             Err(err) => {
                 error!(error = %err, "Error while getting contract states.");
                 Err(err.into())
@@ -250,8 +262,7 @@ where
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
         //TODO: handle when no id is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
-
-        let version = Version(at, VersionKind::Last);
+        let version = Version(at.clone(), VersionKind::Last);
 
         // Get the protocol IDs from the request
         let protocol_ids: Option<Vec<dto::ProtocolId>> = request.protocol_ids.clone();
@@ -275,12 +286,20 @@ where
             )
             .await
         {
-            Ok(accounts) => Ok(dto::ProtocolStateRequestResponse::new(
-                accounts
-                    .into_iter()
-                    .map(dto::ResponseProtocolState::from)
-                    .collect(),
-            )),
+            Ok(mut states) => {
+                let version = match &at {
+                    BlockOrTimestamp::Block(BlockIdentifier::Latest(_)) => None,
+                    _ => Some(at.try_into()?),
+                };
+                self.pending_deltas
+                    .update_native_states(&mut states, version)?;
+                Ok(dto::ProtocolStateRequestResponse::new(
+                    states
+                        .into_iter()
+                        .map(dto::ResponseProtocolState::from)
+                        .collect(),
+                ))
+            }
             Err(err) => {
                 error!(error = %err, "Error while getting protocol states.");
                 Err(err.into())
@@ -633,14 +652,11 @@ mod tests {
     use chrono::{NaiveDateTime, Utc};
     use ethers::types::U256;
     use std::{collections::HashMap, str::FromStr};
-    use tycho_core::{
-        models::{
-            contract::{Contract, ContractDelta},
-            protocol::{ProtocolComponent, ProtocolComponentState, ProtocolComponentStateDelta},
-            token::CurrencyToken,
-            ChangeType,
-        },
-        storage::BlockIdentifier,
+    use tycho_core::models::{
+        contract::{Contract, ContractDelta},
+        protocol::{ProtocolComponent, ProtocolComponentState, ProtocolComponentStateDelta},
+        token::CurrencyToken,
+        ChangeType,
     };
 
     use super::*;
@@ -769,7 +785,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_contracts()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw);
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
 
         let request = dto::StateRequestBody {
             contract_ids: Some(vec![dto::ContractId::new(
@@ -827,7 +843,7 @@ mod tests {
         let mock_response = Ok(expected.clone());
         gw.expect_get_tokens()
             .return_once(|_, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw);
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
 
         // request for 2 tokens that are in the DB (WETH and USDC)
         let request = dto::TokensRequestBody {
@@ -859,7 +875,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_states()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw);
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
 
         let request = dto::ProtocolStateRequestBody {
             protocol_ids: Some(vec![dto::ProtocolId {
@@ -908,7 +924,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_components()
             .return_once(|_, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw);
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
 
         let request = dto::ProtocolComponentsRequestBody {
             protocol_system: Option::from("ambient".to_string()),
@@ -947,7 +963,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_accounts_delta()
             .return_once(|_, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw);
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
         let request = dto::ContractDeltaRequestBody {
             contract_ids: Some(vec![dto::ContractId::new(
                 Chain::Ethereum.into(),
@@ -1008,7 +1024,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_states_delta()
             .return_once(|_, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw);
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
         let request = dto::ProtocolDeltaRequestBody {
             component_ids: Some(vec!["state3".to_owned()]), // Filter to only "state3"
             start: dto::VersionParam {

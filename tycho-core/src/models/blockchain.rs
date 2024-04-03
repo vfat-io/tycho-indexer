@@ -65,6 +65,7 @@ impl<T> BlockAggregatedDeltas<T>
 where
     T: Clone + std::fmt::Debug + PartialEq,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor: &str,
         chain: Chain,

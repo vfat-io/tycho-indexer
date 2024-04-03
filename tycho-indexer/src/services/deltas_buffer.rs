@@ -1,9 +1,8 @@
 use crate::extractor::{
     evm::{BlockAccountChanges, BlockEntityChangesResult},
-    revert_buffer::RevertBuffer,
+    revert_buffer::{BlockNumberOrTimestamp, RevertBuffer},
     runner::MessageSender,
 };
-use chrono::NaiveDateTime;
 use ethers::prelude::StreamExt;
 use futures03::stream;
 use std::{
@@ -25,7 +24,7 @@ use tycho_core::{
 type NativeRevertBuffer = Arc<Mutex<RevertBuffer<NativeBlockDeltas>>>;
 type VmRevertBuffer = Arc<Mutex<RevertBuffer<VmBlockDeltas>>>;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct PendingDeltas {
     native: HashMap<String, NativeRevertBuffer>,
     vm: HashMap<String, VmRevertBuffer>,
@@ -113,7 +112,7 @@ impl PendingDeltas {
     pub fn update_native_states(
         &self,
         db_states: &mut [ProtocolComponentState],
-        version: NaiveDateTime,
+        version: Option<BlockNumberOrTimestamp>,
     ) -> Result<()> {
         for state in db_states {
             self.update_native_state(state, version)?;
@@ -124,7 +123,7 @@ impl PendingDeltas {
     fn update_native_state(
         &self,
         db_state: &mut ProtocolComponentState,
-        version: NaiveDateTime,
+        version: Option<BlockNumberOrTimestamp>,
     ) -> Result<bool> {
         let mut change_found = false;
         for buffer in self.native.values() {
@@ -132,7 +131,7 @@ impl PendingDeltas {
                 .lock()
                 .map_err(|e| PendingDeltasError::LockError("Native".to_string(), e.to_string()))?;
 
-            for entry in guard.get_block_range(None, Some(version))? {
+            for entry in guard.get_block_range(None, version)? {
                 if let Some(delta) = entry.deltas.get(&db_state.component_id) {
                     db_state.apply_state_delta(delta)?;
                     change_found = true;
@@ -155,20 +154,28 @@ impl PendingDeltas {
         Ok(change_found)
     }
 
-    fn update_vm_states(&self, db_states: &mut [Contract], version: NaiveDateTime) -> Result<()> {
+    pub fn update_vm_states(
+        &self,
+        db_states: &mut [Contract],
+        version: Option<BlockNumberOrTimestamp>,
+    ) -> Result<()> {
         for state in db_states {
             self.update_vm_state(state, version)?;
         }
         Ok(())
     }
 
-    fn update_vm_state(&self, db_state: &mut Contract, version: NaiveDateTime) -> Result<bool> {
+    fn update_vm_state(
+        &self,
+        db_state: &mut Contract,
+        version: Option<BlockNumberOrTimestamp>,
+    ) -> Result<bool> {
         let mut change_found = false;
         for buffer in self.vm.values() {
             let guard = buffer
                 .lock()
                 .map_err(|e| PendingDeltasError::LockError("VM".to_string(), e.to_string()))?;
-            for entry in guard.get_block_range(None, Some(version))? {
+            for entry in guard.get_block_range(None, version)? {
                 if let Some(delta) = entry.deltas.get(&db_state.address) {
                     db_state.apply_contract_delta(delta)?;
                     change_found = true;
@@ -187,6 +194,7 @@ impl PendingDeltas {
         Ok(change_found)
     }
 
+    #[allow(dead_code)]
     pub fn get_new_components(&self) -> Result<Vec<ProtocolComponent>> {
         let mut new_components = Vec::new();
         for buffer in self.native.values() {
@@ -219,17 +227,18 @@ impl PendingDeltas {
         Ok(new_components)
     }
 
+    #[allow(dead_code)]
     pub async fn run(
         self,
-        extractors: impl IntoIterator<Item = Arc<dyn MessageSender>>,
+        extractors: impl IntoIterator<Item = Arc<dyn MessageSender + Send + Sync>>,
     ) -> anyhow::Result<()> {
         let mut rxs = Vec::new();
         for extractor in extractors.into_iter() {
-            let res = extractor.subscribe().await?;
+            let res = ReceiverStream::new(extractor.subscribe().await?);
             rxs.push(res);
         }
 
-        let all_messages = stream::select_all(rxs.into_iter().map(ReceiverStream::new));
+        let all_messages = stream::select_all(rxs);
 
         // What happens if an extractor restarts - it might just end here and be dropped?
         // Ideally the Runner should never restart.
@@ -243,13 +252,11 @@ impl PendingDeltas {
     }
 }
 
+#[cfg(test)]
 mod test {
     use super::*;
     use crate::{
-        extractor::{
-            evm,
-            evm::{fixtures::evm_slots, AccountUpdate},
-        },
+        extractor::{evm, evm::AccountUpdate},
         testing::evm_block,
     };
     use ethers::types::{H160, H256, U256};
@@ -264,7 +271,7 @@ mod test {
             Chain::Ethereum,
             Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05"),
             "Contract1".to_string(),
-            evm_slots([(2, 2)])
+            evm::fixtures::evm_slots([(2, 2)])
                 .into_iter()
                 .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
                 .collect::<HashMap<_, _>>(),
@@ -290,7 +297,7 @@ mod test {
                 AccountUpdate::new(
                     address,
                     Chain::Ethereum,
-                    evm_slots([(1, 1), (2, 1)]),
+                    evm::fixtures::evm_slots([(1, 1), (2, 1)]),
                     Some(U256::from(1999)),
                     None,
                     ChangeType::Update,
@@ -450,7 +457,10 @@ mod test {
         );
 
         buffer
-            .update_native_states(&mut state, "2020-01-01T00:00:00".parse().unwrap())
+            .update_native_states(
+                &mut state,
+                Some(BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap())),
+            )
             .unwrap();
 
         assert_eq!(&state[0], &exp);
@@ -467,7 +477,7 @@ mod test {
             Chain::Ethereum,
             Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05"),
             "Contract1".to_string(),
-            evm_slots([(1, 1), (2, 1)])
+            evm::fixtures::evm_slots([(1, 1), (2, 1)])
                 .into_iter()
                 .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
                 .collect::<HashMap<_, _>>(),
@@ -481,7 +491,10 @@ mod test {
         );
 
         buffer
-            .update_vm_states(&mut state, "2020-01-01T00:00:00".parse().unwrap())
+            .update_vm_states(
+                &mut state,
+                Some(BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap())),
+            )
             .unwrap();
 
         assert_eq!(&state[0], &exp);
