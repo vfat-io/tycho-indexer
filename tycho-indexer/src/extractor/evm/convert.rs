@@ -7,9 +7,7 @@ use crate::extractor::{
 use ethers::prelude::{H160, H256, U256};
 use tycho_core::{
     models::{
-        blockchain::{
-            Block, BlockAggregatedDeltas, NativeBlockAggregate, Transaction, VmBlockAggregate,
-        },
+        blockchain::{Block, NativeBlockDeltas, Transaction, VmBlockDeltas},
         contract::{Contract, ContractDelta},
         protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
         token::CurrencyToken,
@@ -203,14 +201,90 @@ impl From<&evm::ERC20Token> for CurrencyToken {
     }
 }
 
-impl From<&evm::BlockEntityChangesResult> for NativeBlockAggregate {
-    fn from(_value: &BlockEntityChangesResult) -> Self {
-        todo!()
+impl From<&evm::BlockEntityChangesResult> for NativeBlockDeltas {
+    fn from(value: &BlockEntityChangesResult) -> Self {
+        let deltas = value
+            .state_updates
+            .iter()
+            .map(|(cid, delta)| (cid.clone(), delta.into()))
+            .collect::<HashMap<_, ProtocolComponentStateDelta>>();
+        let new_components = value
+            .new_protocol_components
+            .iter()
+            .map(|(cid, comp)| (cid.clone(), comp.into()))
+            .collect::<HashMap<_, ProtocolComponent>>();
+        let deleted_components = value
+            .deleted_protocol_components
+            .iter()
+            .map(|(cid, comp)| (cid.clone(), comp.into()))
+            .collect::<HashMap<_, ProtocolComponent>>();
+        let balances = value
+            .component_balances
+            .iter()
+            .map(|(cid, balance_map)| {
+                (
+                    cid.clone(),
+                    balance_map
+                        .iter()
+                        .map(|(addr, balance)| (addr.as_bytes().into(), balance.into()))
+                        .collect::<HashMap<Bytes, ComponentBalance>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        Self::new(
+            &value.extractor,
+            value.chain,
+            (&value.block).into(),
+            value.revert,
+            &deltas,
+            &new_components,
+            &deleted_components,
+            &balances,
+            &value.component_tvl,
+        )
     }
 }
 
-impl From<&evm::BlockAccountChanges> for VmBlockAggregate {
-    fn from(_value: &BlockAccountChanges) -> Self {
-        todo!()
+impl From<&evm::BlockAccountChanges> for VmBlockDeltas {
+    fn from(value: &BlockAccountChanges) -> Self {
+        let deltas = value
+            .account_updates
+            .iter()
+            .map(|(address, delta)| (address.as_bytes().into(), delta.into()))
+            .collect::<HashMap<Bytes, ContractDelta>>();
+        let new_components = value
+            .new_protocol_components
+            .iter()
+            .map(|(cid, comp)| (cid.clone(), comp.into()))
+            .collect::<HashMap<_, ProtocolComponent>>();
+        let deleted_components = value
+            .deleted_protocol_components
+            .iter()
+            .map(|(cid, comp)| (cid.clone(), comp.into()))
+            .collect::<HashMap<_, ProtocolComponent>>();
+        let balances = value
+            .component_balances
+            .iter()
+            .map(|(cid, balance_map)| {
+                (
+                    cid.clone(),
+                    balance_map
+                        .iter()
+                        .map(|(addr, balance)| (addr.as_bytes().into(), balance.into()))
+                        .collect::<HashMap<_, _>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        Self::new(
+            &value.extractor,
+            value.chain,
+            (&value.block).into(),
+            value.revert,
+            &deltas,
+            &new_components,
+            &deleted_components,
+            &balances,
+            &value.component_tvl,
+        )
     }
 }

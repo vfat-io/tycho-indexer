@@ -5,7 +5,7 @@ use crate::{
 use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet};
 
-use super::{Address, AttrStoreKey, Balance, ComponentId, StoreVal, TxHash};
+use super::{Address, AttrStoreKey, Balance, ComponentId, DeltaError, StoreVal, TxHash};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolComponent {
@@ -67,9 +67,15 @@ impl ProtocolComponentState {
         Self { component_id: component_id.to_string(), attributes, balances }
     }
 
-    pub fn apply_state_delta(&mut self, delta: &ProtocolComponentStateDelta) -> anyhow::Result<()> {
+    pub fn apply_state_delta(
+        &mut self,
+        delta: &ProtocolComponentStateDelta,
+    ) -> Result<(), DeltaError> {
         if self.component_id != delta.component_id {
-            return Err(anyhow::anyhow!("Component id mismatch"));
+            return Err(DeltaError::IdMismatch(
+                self.component_id.clone(),
+                delta.component_id.clone(),
+            ));
         }
         self.attributes.extend(
             delta
@@ -87,7 +93,7 @@ impl ProtocolComponentState {
     pub fn apply_balance_delta(
         &mut self,
         delta: &HashMap<Bytes, ComponentBalance>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DeltaError> {
         self.balances.extend(
             delta
                 .iter()

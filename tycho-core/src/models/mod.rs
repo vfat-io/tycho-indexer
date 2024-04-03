@@ -7,6 +7,7 @@ use crate::{dto, Bytes};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 use strum_macros::{Display, EnumString};
+use thiserror::Error;
 use utoipa::ToSchema;
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
@@ -210,4 +211,10 @@ impl From<&dto::PaginationParams> for PaginationParams {
     fn from(value: &dto::PaginationParams) -> Self {
         PaginationParams { page: value.page, page_size: value.page_size }
     }
+}
+
+#[derive(Error, Debug)]
+pub enum DeltaError {
+    #[error("Id mismatch: {0} vs {1}")]
+    IdMismatch(String, String),
 }

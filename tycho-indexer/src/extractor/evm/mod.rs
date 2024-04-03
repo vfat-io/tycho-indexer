@@ -1149,6 +1149,29 @@ pub struct BlockEntityChangesResult {
 }
 
 impl BlockEntityChangesResult {
+    pub fn new(
+        extractor: &str,
+        chain: Chain,
+        block: Block,
+        revert: bool,
+        state_updates: HashMap<String, ProtocolStateDelta>,
+        new_protocol_components: HashMap<String, ProtocolComponent>,
+        deleted_protocol_components: HashMap<String, ProtocolComponent>,
+        component_balances: HashMap<String, HashMap<H160, ComponentBalance>>,
+        component_tvl: HashMap<String, f64>,
+    ) -> Self {
+        Self {
+            extractor: extractor.to_string(),
+            chain,
+            block,
+            revert,
+            state_updates,
+            new_protocol_components,
+            deleted_protocol_components,
+            component_balances,
+            component_tvl,
+        }
+    }
     fn is_empty(&self) -> bool {
         self.state_updates.is_empty() &&
             self.new_protocol_components.is_empty() &&

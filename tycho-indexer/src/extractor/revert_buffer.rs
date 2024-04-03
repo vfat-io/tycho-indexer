@@ -1,3 +1,4 @@
+use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use tracing::{debug, trace};
@@ -58,7 +59,7 @@ where
             final_block_height.to_string()
         );
 
-        let target_index = self.get_index_by_height(final_block_height);
+        let target_index = self.find_index(|b| b.block().number == final_block_height);
 
         if let Some(idx) = target_index {
             // Drain and return every block before the target index.
@@ -71,9 +72,9 @@ where
         }
     }
 
-    fn get_index_by_height(&self, height: u64) -> Option<usize> {
+    fn find_index<F: Fn(&B) -> bool>(&self, predicate: F) -> Option<usize> {
         for (index, block_message) in self.block_messages.iter().enumerate() {
-            if block_message.block().number == height {
+            if predicate(block_message) {
                 return Some(index);
             }
         }
@@ -125,20 +126,20 @@ where
     /// the range at the latest block.
     pub fn get_block_range(
         &self,
-        start_height: Option<u64>,
-        end_height: Option<u64>,
+        start_ts: Option<NaiveDateTime>,
+        end_ts: Option<NaiveDateTime>,
     ) -> Result<impl Iterator<Item = &B>, StorageError> {
-        let start_index = if let Some(height) = start_height {
-            self.get_index_by_height(height)
-                .ok_or_else(|| StorageError::NotFound("Block".to_string(), height.to_string()))?
+        let start_index = if let Some(ts) = start_ts {
+            self.find_index(|b| b.block().ts >= ts)
+                .ok_or_else(|| StorageError::NotFound("Block".to_string(), ts.to_string()))?
         } else {
             0
         };
 
-        let end_index = if let Some(height) = end_height {
+        let end_index = if let Some(ts) = end_ts {
             let end_idx = self
-                .get_index_by_height(height)
-                .ok_or_else(|| StorageError::NotFound("Block".to_string(), height.to_string()))?;
+                .find_index(|b| b.block().ts >= ts)
+                .ok_or_else(|| StorageError::NotFound("Block".to_string(), ts.to_string()))?;
 
             if end_idx < start_index {
                 return Err(StorageError::Unexpected(
@@ -263,29 +264,18 @@ mod test {
     use rstest::rstest;
     use tycho_core::{models::Chain, storage::StorageError, Bytes};
 
-    use crate::extractor::evm::{
-        Block, BlockEntityChanges, ComponentBalance, ProtocolChangesWithTx, ProtocolStateDelta,
-        Transaction,
+    use crate::{
+        extractor::evm::{
+            BlockEntityChanges, ComponentBalance, ProtocolChangesWithTx, ProtocolStateDelta,
+            Transaction,
+        },
+        testing,
     };
 
     use super::RevertBuffer;
 
     fn transaction() -> Transaction {
         Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10)
-    }
-
-    pub fn blocks(version: u64) -> Block {
-        if version == 0 {
-            panic!("Block version 0 doesn't exist. Smallest version is 1");
-        }
-
-        Block {
-            number: version,
-            hash: H256::from_low_u64_be(version),
-            parent_hash: H256::from_low_u64_be(version - 1),
-            chain: Chain::Ethereum,
-            ts: NaiveDateTime::from_timestamp_opt((version as i64) * 1000, 0).unwrap(),
-        }
     }
 
     fn get_block_entity(version: u8) -> BlockEntityChanges {
@@ -342,7 +332,7 @@ mod test {
                 BlockEntityChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    blocks(1),
+                    testing::evm_block(1),
                     false,
                     vec![ProtocolChangesWithTx {
                         protocol_states: state_updates,
@@ -382,7 +372,7 @@ mod test {
                 BlockEntityChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    blocks(2),
+                    testing::evm_block(2),
                     false,
                     vec![ProtocolChangesWithTx {
                         protocol_states: state_updates,
@@ -414,7 +404,7 @@ mod test {
                 BlockEntityChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    blocks(3),
+                    testing::evm_block(3),
                     false,
                     vec![ProtocolChangesWithTx { tx, balance_changes, ..Default::default() }],
                 )
@@ -609,12 +599,12 @@ mod test {
 
     #[rstest]
     #[case::complete_range(None, None, vec![1, 2, 3])]
-    #[case::range(Some(1), Some(2), vec![1, 2])]
-    #[case::from_start(None, Some(2), vec![1, 2])]
-    #[case::until_end(Some(2), None, vec![2, 3])]
+    #[case::range(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), vec![1, 2])]
+    #[case::from_start(None, Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), vec![1, 2])]
+    #[case::until_end(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), None, vec![2, 3])]
     fn test_get_block_range(
-        #[case] start: Option<u64>,
-        #[case] end: Option<u64>,
+        #[case] start: Option<NaiveDateTime>,
+        #[case] end: Option<NaiveDateTime>,
         #[case] exp: Vec<u64>,
     ) {
         let mut revert_buffer = RevertBuffer::new();
@@ -650,11 +640,11 @@ mod test {
     }
 
     #[rstest]
-    #[case::not_found(Some(100), Some(1), StorageError::NotFound("Block".to_string(), "100".to_string()))]
-    #[case::invalid(Some(2), Some(1), StorageError::Unexpected("RevertBuffer: Invalid block range".to_string()))]
+    #[case::not_found(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:36".parse::<NaiveDateTime>().unwrap()), StorageError::NotFound("Block".to_string(), "2020-01-01 00:00:36".to_string()))]
+    #[case::invalid(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()),Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), StorageError::Unexpected("RevertBuffer: Invalid block range".to_string()))]
     fn test_get_block_range_invalid_range(
-        #[case] start: Option<u64>,
-        #[case] end: Option<u64>,
+        #[case] start: Option<NaiveDateTime>,
+        #[case] end: Option<NaiveDateTime>,
         #[case] exp: StorageError,
     ) {
         let mut revert_buffer = RevertBuffer::new();

@@ -58,8 +58,37 @@ pub struct BlockAggregatedDeltas<T: Clone + std::fmt::Debug + PartialEq> {
     component_tvl: HashMap<String, f64>,
 }
 
-pub type NativeBlockAggregate = BlockAggregatedDeltas<HashMap<String, ProtocolComponentStateDelta>>;
-pub type VmBlockAggregate = BlockAggregatedDeltas<HashMap<Bytes, ContractDelta>>;
+pub type NativeBlockDeltas = BlockAggregatedDeltas<HashMap<String, ProtocolComponentStateDelta>>;
+pub type VmBlockDeltas = BlockAggregatedDeltas<HashMap<Bytes, ContractDelta>>;
+
+impl<T> BlockAggregatedDeltas<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq,
+{
+    pub fn new(
+        extractor: &str,
+        chain: Chain,
+        block: Block,
+        revert: bool,
+        deltas: &T,
+        new_components: &HashMap<String, ProtocolComponent>,
+        deleted_components: &HashMap<String, ProtocolComponent>,
+        component_balances: &HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+        component_tvl: &HashMap<String, f64>,
+    ) -> Self {
+        Self {
+            extractor: extractor.to_string(),
+            chain,
+            block,
+            revert,
+            deltas: deltas.clone(),
+            new_components: new_components.clone(),
+            deleted_components: deleted_components.clone(),
+            component_balances: component_balances.clone(),
+            component_tvl: component_tvl.clone(),
+        }
+    }
+}
 
 pub trait BlockScoped {
     fn block(&self) -> Block;

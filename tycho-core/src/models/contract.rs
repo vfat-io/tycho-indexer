@@ -1,4 +1,4 @@
-use crate::models::{protocol::ComponentBalance, Chain, ChangeType, ContractId};
+use crate::models::{Chain, ChangeType, ContractId, DeltaError};
 use std::collections::HashMap;
 
 use super::{Address, Balance, Code, CodeHash, StoreKey, StoreVal, TxHash};
@@ -53,12 +53,27 @@ impl Contract {
         self.balance_modify_tx = modified_at.clone();
     }
 
-    pub fn apply_contract_delta(&mut self, _delta: &ContractDelta) {
-        todo!()
-    }
+    pub fn apply_contract_delta(&mut self, delta: &ContractDelta) -> Result<(), DeltaError> {
+        let self_id = (self.chain, &self.address);
+        let other_id = (delta.chain, &delta.address);
+        if self_id != other_id {
+            return Err(DeltaError::IdMismatch(format!("{:?}", self_id), format!("{:?}", other_id)));
+        }
+        if let Some(balance) = delta.balance.as_ref() {
+            self.native_balance.clone_from(&balance);
+        }
+        if let Some(code) = delta.code.as_ref() {
+            self.code.clone_from(code);
+        }
+        self.slots.extend(
+            delta
+                .slots
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k, v.unwrap_or_default())),
+        );
 
-    pub fn apply_balance_delta(&mut self, _delta: &ComponentBalance) {
-        todo!()
+        Ok(())
     }
 }
 
