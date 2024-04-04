@@ -128,15 +128,16 @@ async fn run(
         BlockSynchronizer::new(Duration::from_secs(block_time), Duration::from_secs(timeout));
 
     for (name, address) in exchanges {
-        let id = ExtractorIdentity { chain: Chain::Ethereum, name };
+        let id = ExtractorIdentity { chain: Chain::Ethereum, name: name.clone() };
         let filter = if address.is_some() {
             ComponentFilter::Ids(vec![address.unwrap()])
         } else {
             ComponentFilter::MinimumTVL(tvl)
         };
+        let is_native: bool = !name.starts_with("vm:");
         let sync = ProtocolStateSynchronizer::new(
             id.clone(),
-            true,
+            is_native,
             true,
             filter,
             1,
