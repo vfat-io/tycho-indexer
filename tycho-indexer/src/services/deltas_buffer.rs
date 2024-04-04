@@ -1,6 +1,6 @@
 use crate::extractor::{
     evm::{BlockAccountChanges, BlockEntityChangesResult},
-    revert_buffer::{BlockNumberOrTimestamp, RevertBuffer},
+    revert_buffer::{BlockNumberOrTimestamp, FinalityStatus, RevertBuffer},
     runner::MessageSender,
 };
 use ethers::prelude::StreamExt;
@@ -225,6 +225,34 @@ impl PendingDeltas {
         }
 
         Ok(new_components)
+    }
+
+    /// Returns finality for any extractor, can error if lock is poisened. Returns None if buffer is
+    /// empty.
+    pub fn get_block_finality(
+        &self,
+        version: BlockNumberOrTimestamp,
+    ) -> Result<Option<FinalityStatus>> {
+        // TODO: This is a temporary hack, since finality status may be different depending on each
+        //  individual extractor.
+        let vm_first = self.vm.values().next();
+        let native_first = self.native.values().next();
+
+        match (native_first, vm_first) {
+            (Some(first), _) => {
+                let guard = first.lock().map_err(|e| {
+                    PendingDeltasError::LockError("Native".to_string(), e.to_string())
+                })?;
+                Ok(guard.get_finality_status(version))
+            }
+            (_, Some(first)) => {
+                let guard = first
+                    .lock()
+                    .map_err(|e| PendingDeltasError::LockError("VM".to_string(), e.to_string()))?;
+                Ok(guard.get_finality_status(version))
+            }
+            _ => Ok(None),
+        }
     }
 
     #[allow(dead_code)]

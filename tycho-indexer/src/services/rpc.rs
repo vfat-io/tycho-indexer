@@ -169,11 +169,8 @@ where
             })?;
 
         if let Some(at) = deltas_version {
-            let version = at
-                .try_into()
-                .expect("deltas version is always ordered");
             self.pending_deltas
-                .update_vm_states(&mut accounts, Some(version))?;
+                .update_vm_states(&mut accounts, Some(at))?;
         }
         Ok(dto::StateRequestResponse::new(
             accounts
@@ -199,23 +196,22 @@ where
         &self,
         request_version: &BlockOrTimestamp,
         chain: Chain,
-    ) -> Result<(Version, Option<BlockOrTimestamp>), RpcError> {
+    ) -> Result<(Version, Option<BlockNumberOrTimestamp>), RpcError> {
         let ordered_version = match request_version {
             BlockOrTimestamp::Block(BlockIdentifier::Number((_, no))) => {
                 BlockNumberOrTimestamp::Number(*no as u64)
             }
             BlockOrTimestamp::Timestamp(ts) => BlockNumberOrTimestamp::Timestamp(*ts),
             BlockOrTimestamp::Block(block_id) => BlockNumberOrTimestamp::Number(
-                *(self
-                    .db_gateway
+                self.db_gateway
                     .get_block(block_id)
                     .await?
-                    .number),
+                    .number,
             ),
         };
         let request_version_finality = self
             .pending_deltas
-            .get_block_finality(ordered_version)
+            .get_block_finality(ordered_version)?
             .unwrap_or_else(|| {
                 warn!(?ordered_version, "No finality found for version.");
                 FinalityStatus::Finalized
@@ -225,12 +221,12 @@ where
                 Ok((Version(request_version.clone(), VersionKind::Last), None))
             }
             FinalityStatus::Unfinalized => Ok((
-                Version(BlockIdentifier::Latest(chain), VersionKind::Last),
+                Version(BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)), VersionKind::Last),
                 Some(ordered_version),
             )),
             FinalityStatus::Unseen => Err(RpcError::Storage(StorageError::NotFound(
-                "Version",
-                format!("{:?}", request_version.to_string()),
+                "Version".to_string(),
+                format!("{:?}", request_version),
             ))),
         }
     }
@@ -346,11 +342,8 @@ where
             })?;
 
         if let Some(at) = deltas_version {
-            let version = at
-                .try_into()
-                .expect("deltas version is always ordered");
             self.pending_deltas
-                .update_native_states(&mut states, Some(version))?;
+                .update_native_states(&mut states, Some(at))?;
         }
         Ok(dto::ProtocolStateRequestResponse::new(
             states

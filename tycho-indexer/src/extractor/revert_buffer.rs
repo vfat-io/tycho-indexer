@@ -209,7 +209,7 @@ where
             .range(start_index..end_index))
     }
 
-    #[allow(dead_code)]
+    // Retrieves FinalityStatus for a block, returns None if the buffer is empty.
     pub fn get_finality_status(&self, version: BlockNumberOrTimestamp) -> Option<FinalityStatus> {
         let first_block = self.block_messages.front();
         let last_block = self.block_messages.back();
