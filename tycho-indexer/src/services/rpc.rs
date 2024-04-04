@@ -350,7 +350,7 @@ where
         let ids_strs: Option<Vec<&str>> = request
             .component_ids
             .as_ref()
-            .map(|vec| vec.iter().map(AsRef::as_ref).collect());
+            .map(|vec| vec.iter().map(String::as_str).collect());
 
         let ids_slice = ids_strs.as_deref();
         match self

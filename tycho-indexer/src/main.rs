@@ -190,7 +190,6 @@ async fn build_all_extractors(
 
     for extractor_config in config.extractors.values() {
         let (task, handle) = ExtractorBuilder::new(extractor_config)
-            .only_final_blocks()
             .build(chain_state, cached_gw, token_pre_processor)
             .await?
             .run()

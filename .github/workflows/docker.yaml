@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - patch/*
+      - fp/plug-revert-buffer-to-extractors
 
 permissions:
   id-token: write
