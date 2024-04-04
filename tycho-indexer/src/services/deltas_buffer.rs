@@ -454,12 +454,12 @@ mod test {
 
         buffer
             .insert(Arc::new(native_block_deltas()))
-            .expect("vm insert failed");
+            .expect("native insert failed");
 
         let native_revert_buffer = buffer
             .native
             .get("native:extractor")
-            .expect("vm:extractor buffer missing");
+            .expect("native:extractor buffer missing");
         let binding = native_revert_buffer.lock().unwrap();
         let res = binding
             .get_block_range(None, None)

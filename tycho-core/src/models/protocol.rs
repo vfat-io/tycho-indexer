@@ -67,6 +67,9 @@ impl ProtocolComponentState {
         Self { component_id: component_id.to_string(), attributes, balances }
     }
 
+    /// Applies state deltas to this state.
+    ///
+    /// This method assumes that the passed delta is "newer" than the current state.
     pub fn apply_state_delta(
         &mut self,
         delta: &ProtocolComponentStateDelta,
@@ -86,6 +89,9 @@ impl ProtocolComponentState {
         Ok(())
     }
 
+    /// Applies balance deltas to this state.
+    ///
+    /// This method assumes that the passed delta is "newer" than the current state.
     pub fn apply_balance_delta(
         &mut self,
         delta: &HashMap<Bytes, ComponentBalance>,

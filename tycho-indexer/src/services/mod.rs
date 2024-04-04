@@ -136,7 +136,7 @@ where
             self.native_extractors
                 .iter()
                 .map(String::as_str),
-            self.native_extractors
+            self.vm_extractors
                 .iter()
                 .map(String::as_str),
         );

@@ -72,7 +72,7 @@ impl Contract {
                 .into_iter()
                 .map(|(k, v)| (k, v.unwrap_or_default())),
         );
-
+        // TODO: Update modify_tx, code_modify_tx and code_hash.
         Ok(())
     }
 }
