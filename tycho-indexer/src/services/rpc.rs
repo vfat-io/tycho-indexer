@@ -5,10 +5,13 @@ use anyhow::Error;
 
 use diesel_async::pooled_connection::deadpool;
 
-use crate::services::deltas_buffer::{PendingDeltas, PendingDeltasError};
+use crate::{
+    extractor::revert_buffer::{BlockNumberOrTimestamp, FinalityStatus},
+    services::deltas_buffer::{PendingDeltas, PendingDeltasError},
+};
 use std::collections::HashSet;
 use thiserror::Error;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 use tycho_core::{
     dto::{self, ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
     models::{Address, Chain, PaginationParams},
@@ -139,10 +142,11 @@ where
         request: &dto::StateRequestBody,
         params: &dto::StateRequestParameters,
     ) -> Result<dto::StateRequestResponse, RpcError> {
-        #![allow(unused_variables)]
         //TODO: set version to latest if we are targeting a version within pending deltas
         let at = BlockOrTimestamp::try_from(&request.version)?;
-        let version = Version(at.clone(), VersionKind::Last);
+        let (db_version, deltas_version) = self
+            .calculate_versions(&at, *chain)
+            .await?;
 
         // Get the contract IDs from the request
         let contract_ids = request.contract_ids.clone();
@@ -155,30 +159,80 @@ where
         let addresses = addresses.as_deref();
 
         // Get the contract states from the database
-        // TODO support additional tvl_gt and intertia_min_gt filters
-        match self
+        let mut accounts = self
             .db_gateway
-            .get_contracts(chain, addresses, Some(&version), true, params.include_balances)
+            .get_contracts(chain, addresses, Some(&db_version), true, params.include_balances)
             .await
-        {
-            Ok(mut accounts) => {
-                let version = match &at {
-                    BlockOrTimestamp::Block(BlockIdentifier::Latest(_)) => None,
-                    _ => Some(at.try_into()?),
-                };
-                self.pending_deltas
-                    .update_vm_states(&mut accounts, version)?;
-                Ok(dto::StateRequestResponse::new(
-                    accounts
-                        .into_iter()
-                        .map(dto::ResponseAccount::from)
-                        .collect(),
-                ))
-            }
-            Err(err) => {
+            .map_err(|err| {
                 error!(error = %err, "Error while getting contract states.");
-                Err(err.into())
+                err
+            })?;
+
+        if let Some(at) = deltas_version {
+            let version = match at {
+                BlockOrTimestamp::Block(BlockIdentifier::Latest(_)) => None,
+                _ => Some(at.try_into()?),
+            };
+            self.pending_deltas
+                .update_vm_states(&mut accounts, version)?;
+        }
+        Ok(dto::StateRequestResponse::new(
+            accounts
+                .into_iter()
+                .map(dto::ResponseAccount::from)
+                .collect(),
+        ))
+    }
+
+    /// Calculates versions for state retrieval.
+    ///
+    /// This method will calculate:
+    /// - The finalized version to be retrieved from the database.
+    /// - An "ordered" version to be retrieved from the pending deltas buffer.
+    ///
+    /// To calculate the finalized version, it queries the pending deltas buffer for the requested
+    /// version's finality. If the version is already finalized, it can be simply passed on to
+    /// the db, no deltas version is required. In case it is an unfinalized version, we downgrade
+    /// the db version to the latest available version and will later apply any pending
+    /// changes from the buffer on top of the retrieved version. We also return a deltas
+    /// version which must be either block number or timestamps based.
+    async fn calculate_versions(
+        &self,
+        request_version: &BlockOrTimestamp,
+        chain: Chain,
+    ) -> Result<(Version, Option<BlockOrTimestamp>), RpcError> {
+        let ordered_version = match request_version {
+            BlockOrTimestamp::Block(BlockIdentifier::Number((_, no))) => {
+                BlockNumberOrTimestamp::Number(*no as u64)
             }
+            BlockOrTimestamp::Timestamp(ts) => BlockNumberOrTimestamp::Timestamp(*ts),
+            BlockOrTimestamp::Block(block_id) => BlockNumberOrTimestamp::Number(
+                *(self
+                    .db_gateway
+                    .get_block(block_id)
+                    .await?
+                    .number),
+            ),
+        };
+        let request_version_finality = self
+            .pending_deltas
+            .get_block_finality(ordered_version)
+            .unwrap_or_else(|| {
+                warn!(?ordered_version, "No finality found for version.");
+                FinalityStatus::Finalized
+            });
+        match request_version_finality {
+            FinalityStatus::Finalized => {
+                Ok((Version(request_version.clone(), VersionKind::Last), None))
+            }
+            FinalityStatus::Unfinalized => Ok((
+                Version(BlockIdentifier::Latest(chain), VersionKind::Last),
+                Some(ordered_version),
+            )),
+            FinalityStatus::Unseen => Err(RpcError::Storage(StorageError::NotFound(
+                "Version",
+                format!("{:?}", request_version.to_string()),
+            ))),
         }
     }
 
