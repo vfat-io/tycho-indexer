@@ -58,6 +58,17 @@ pub(crate) struct RevertBuffer<B: BlockScoped> {
     block_messages: VecDeque<B>,
 }
 
+/// The finality status of a block or block-scoped data.
+#[derive(PartialEq, Clone, Debug, Copy)]
+pub enum FinalityStatus {
+    /// Versions at this status should have been committed to the db.
+    Finalized,
+    /// Versions with this status should be in the revert buffer.
+    Unfinalized,
+    /// We have not seen this version yet.
+    Unseen,
+}
+
 impl<B> RevertBuffer<B>
 where
     B: BlockScoped + std::fmt::Debug,
@@ -197,6 +208,29 @@ where
             .block_messages
             .range(start_index..end_index))
     }
+
+    #[allow(dead_code)]
+    pub fn get_finality_status(&self, version: BlockNumberOrTimestamp) -> Option<FinalityStatus> {
+        let first_block = self.block_messages.front();
+        let last_block = self.block_messages.back();
+        match (first_block, last_block) {
+            (Some(first), Some(last)) => {
+                let first_block = first.block();
+                let last_block = last.block();
+
+                if !version.greater_then(&first_block) {
+                    Some(FinalityStatus::Finalized)
+                } else if (version.greater_then(&first_block)) &
+                    (!version.greater_then(&last_block))
+                {
+                    Some(FinalityStatus::Unfinalized)
+                } else {
+                    Some(FinalityStatus::Unseen)
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 /// A RevertBuffer entry containing state updates.
@@ -314,7 +348,7 @@ mod test {
         testing,
     };
 
-    use super::{BlockNumberOrTimestamp, RevertBuffer};
+    use super::{BlockNumberOrTimestamp, FinalityStatus, RevertBuffer};
 
     fn transaction() -> Transaction {
         Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10)
@@ -707,5 +741,50 @@ mod test {
             .unwrap();
 
         assert_eq!(res, exp);
+    }
+
+    #[rstest]
+    #[case::finalized_no(BlockNumberOrTimestamp::Number(0), FinalityStatus::Finalized)]
+    #[case::finalized_ts(
+        BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap()),
+        FinalityStatus::Finalized
+    )]
+    #[case::unfinalized_no(BlockNumberOrTimestamp::Number(2), FinalityStatus::Unfinalized)]
+    #[case::unfinalized_ts(
+        BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:15".parse().unwrap()), 
+        FinalityStatus::Unfinalized
+    )]
+    #[case::unseen_no(BlockNumberOrTimestamp::Number(5), FinalityStatus::Unseen)]
+    #[case::unseen_ts(
+        BlockNumberOrTimestamp::Timestamp("2020-01-01T01:00:00".parse().unwrap()),
+        FinalityStatus::Unseen
+    )]
+    fn test_get_finality_status(
+        #[case] version: BlockNumberOrTimestamp,
+        #[case] exp: FinalityStatus,
+    ) {
+        let mut buffer = RevertBuffer::new();
+        buffer
+            .insert_block(get_block_entity(1))
+            .unwrap();
+        buffer
+            .insert_block(get_block_entity(2))
+            .unwrap();
+        buffer
+            .insert_block(get_block_entity(3))
+            .unwrap();
+
+        let res = buffer.get_finality_status(version);
+
+        assert_eq!(res, Some(exp));
+    }
+
+    #[test]
+    fn test_get_finality_status_empty() {
+        let buffer = RevertBuffer::<BlockEntityChanges>::new();
+
+        let res = buffer.get_finality_status(BlockNumberOrTimestamp::Number(2));
+
+        assert_eq!(res, None);
     }
 }
