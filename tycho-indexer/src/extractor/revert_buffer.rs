@@ -19,7 +19,7 @@ pub enum BlockNumberOrTimestamp {
 }
 
 impl BlockNumberOrTimestamp {
-    fn greater_then(&self, other: &Block) -> bool {
+    fn greater_than(&self, other: &Block) -> bool {
         match self {
             BlockNumberOrTimestamp::Number(n) => n > &other.number,
             BlockNumberOrTimestamp::Timestamp(ts) => ts > &other.ts,
@@ -179,7 +179,7 @@ where
         end_version: Option<BlockNumberOrTimestamp>,
     ) -> Result<impl Iterator<Item = &B>, StorageError> {
         let start_index = if let Some(version) = start_version {
-            self.find_index(|b| !version.greater_then(&b.block()))
+            self.find_index(|b| !version.greater_than(&b.block()))
                 .ok_or_else(|| {
                     StorageError::NotFound("Block".to_string(), format!("{:?}", version))
                 })?
@@ -189,7 +189,7 @@ where
 
         let end_index = if let Some(version) = end_version {
             let end_idx = self
-                .find_index(|b| !version.greater_then(&b.block()))
+                .find_index(|b| !version.greater_than(&b.block()))
                 .ok_or_else(|| {
                     StorageError::NotFound("Block".to_string(), format!("{:?}", version))
                 })?;
@@ -218,10 +218,10 @@ where
                 let first_block = first.block();
                 let last_block = last.block();
 
-                if !version.greater_then(&first_block) {
+                if !version.greater_than(&first_block) {
                     Some(FinalityStatus::Finalized)
-                } else if (version.greater_then(&first_block)) &
-                    (!version.greater_then(&last_block))
+                } else if (version.greater_than(&first_block)) &
+                    (!version.greater_than(&last_block))
                 {
                     Some(FinalityStatus::Unfinalized)
                 } else {
