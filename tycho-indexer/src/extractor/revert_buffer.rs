@@ -409,6 +409,7 @@ mod test {
                     "test".to_string(),
                     Chain::Ethereum,
                     testing::evm_block(1),
+                    0,
                     false,
                     vec![ProtocolChangesWithTx {
                         protocol_states: state_updates,
@@ -449,6 +450,7 @@ mod test {
                     "test".to_string(),
                     Chain::Ethereum,
                     testing::evm_block(2),
+                    0,
                     false,
                     vec![ProtocolChangesWithTx {
                         protocol_states: state_updates,
@@ -481,6 +483,7 @@ mod test {
                     "test".to_string(),
                     Chain::Ethereum,
                     testing::evm_block(3),
+                    0,
                     false,
                     vec![ProtocolChangesWithTx { tx, balance_changes, ..Default::default() }],
                 )

@@ -82,7 +82,7 @@ impl PendingDeltas {
                         guard.purge(msg.block.hash.clone())?;
                     } else {
                         guard.insert_block(msg.clone())?;
-                        // TODO: remove corresponding final block
+                        guard.drain_new_finalized_blocks(msg.finalised_block_height)?;
                     }
                 } else {
                     return Err(PendingDeltasError::UnknownExtractor(msg.extractor.clone()));
@@ -97,7 +97,7 @@ impl PendingDeltas {
                         guard.purge(msg.block.hash.clone())?;
                     } else {
                         guard.insert_block(msg.clone())?;
-                        // TODO: remove corresponding final block
+                        guard.drain_new_finalized_blocks(msg.finalised_block_height)?;
                     }
                 } else {
                     return Err(PendingDeltasError::UnknownExtractor(msg.extractor.clone()));
@@ -319,6 +319,7 @@ mod test {
             "vm:extractor",
             Chain::Ethereum,
             evm_block(1),
+            1,
             false,
             [(
                 address,
@@ -373,6 +374,7 @@ mod test {
             "native:extractor",
             Chain::Ethereum,
             evm_block(1),
+            1,
             false,
             [evm::ProtocolStateDelta::new(
                 "component1".to_string(),

@@ -307,6 +307,7 @@ pub struct BlockAccountChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
+    pub finalized_block_height: u64,
     pub revert: bool,
     pub account_updates: HashMap<H160, AccountUpdate>,
     pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
@@ -321,6 +322,7 @@ impl BlockAccountChanges {
         extractor: &str,
         chain: Chain,
         block: Block,
+        finalized_block_height: u64,
         revert: bool,
         account_updates: HashMap<H160, AccountUpdate>,
         new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
@@ -331,6 +333,7 @@ impl BlockAccountChanges {
             extractor: extractor.to_owned(),
             chain,
             block,
+            finalized_block_height,
             revert,
             account_updates,
             new_protocol_components,
@@ -494,6 +497,7 @@ pub struct BlockContractChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
+    pub finalized_block_height: u64,
     pub revert: bool,
     /// Vec of updates at this block, aggregated by tx and sorted by tx index in ascending order
     pub tx_updates: Vec<TransactionVMUpdates>,
@@ -780,6 +784,7 @@ impl BlockContractChanges {
         chain: Chain,
         protocol_system: String,
         protocol_types: &HashMap<String, ProtocolType>,
+        finalized_block_height: u64,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
@@ -835,6 +840,7 @@ impl BlockContractChanges {
                 extractor: extractor.to_owned(),
                 chain,
                 block,
+                finalized_block_height,
                 revert: false,
                 tx_updates,
             });
@@ -884,6 +890,7 @@ impl BlockContractChanges {
             &self.extractor,
             self.chain,
             self.block,
+            self.finalized_block_height,
             self.revert,
             account_updates,
             protocol_components,
@@ -1140,6 +1147,7 @@ pub struct BlockEntityChangesResult {
     extractor: String,
     chain: Chain,
     pub block: Block,
+    pub finalized_block_height: u64,
     pub revert: bool,
     pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
@@ -1154,6 +1162,7 @@ impl BlockEntityChangesResult {
         extractor: &str,
         chain: Chain,
         block: Block,
+        finalized_block_height: u64,
         revert: bool,
         state_updates: HashMap<String, ProtocolStateDelta>,
         new_protocol_components: HashMap<String, ProtocolComponent>,
@@ -1165,6 +1174,7 @@ impl BlockEntityChangesResult {
             extractor: extractor.to_string(),
             chain,
             block,
+            finalized_block_height,
             revert,
             state_updates,
             new_protocol_components,
@@ -1192,6 +1202,7 @@ pub struct BlockEntityChanges {
     extractor: String,
     chain: Chain,
     pub block: Block,
+    pub finalized_block_height: u64,
     pub revert: bool,
     /// Vec of updates at this block, aggregated by tx and sorted by tx index in ascending order
     pub txs_with_update: Vec<ProtocolChangesWithTx>,
@@ -1265,10 +1276,18 @@ impl BlockEntityChanges {
         extractor: String,
         chain: Chain,
         block: Block,
+        finalized_block_height: u64,
         revert: bool,
         txs_with_update: Vec<ProtocolChangesWithTx>,
     ) -> Self {
-        BlockEntityChanges { extractor, chain, block, revert, txs_with_update }
+        BlockEntityChanges {
+            extractor,
+            chain,
+            block,
+            finalized_block_height,
+            revert,
+            txs_with_update,
+        }
     }
     /// Parse from tychos protobuf message
     pub fn try_from_message(
@@ -1277,6 +1296,7 @@ impl BlockEntityChanges {
         chain: Chain,
         protocol_system: &str,
         protocol_types: &HashMap<String, ProtocolType>,
+        finalized_block_height: u64,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
             let block = Block::try_from_message(block, chain)?;
@@ -1307,6 +1327,7 @@ impl BlockEntityChanges {
                 extractor: extractor.to_string(),
                 chain,
                 block,
+                finalized_block_height,
                 revert: false,
                 txs_with_update,
             })
@@ -1345,6 +1366,7 @@ impl BlockEntityChanges {
             extractor: self.extractor,
             chain: self.chain,
             block: self.block,
+            finalized_block_height: self.finalized_block_height,
             revert: self.revert,
             state_updates: aggregated_changes.protocol_states,
             new_protocol_components: aggregated_changes.new_protocol_components,
@@ -2517,6 +2539,7 @@ mod test {
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
+            finalized_block_height: 0,
             revert: false,
             tx_updates: vec![
                 TransactionVMUpdates {
@@ -2610,6 +2633,7 @@ mod test {
             Chain::Ethereum,
             "ambient".to_string(),
             &HashMap::from([("WeightedPool".to_string(), ProtocolType::default())]),
+            0,
         )
         .unwrap();
         assert_eq!(res, block_state_changes());
@@ -2680,6 +2704,7 @@ mod test {
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
+            0,
             false,
             vec![(
                 address,
@@ -3080,6 +3105,7 @@ mod test {
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
+            finalized_block_height: 420,
             revert: false,
             txs_with_update: vec![
                 protocol_state_with_tx(),
@@ -3170,6 +3196,7 @@ mod test {
                 ("Pool".to_string(), ProtocolType::default()),
                 ("WeightedPool".to_string(), ProtocolType::default()),
             ]),
+            420,
         )
         .unwrap();
         assert_eq!(res, block_entity_changes());
@@ -3277,6 +3304,7 @@ mod test {
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
+            finalized_block_height: 420,
             revert: false,
             state_updates,
             new_protocol_components,
