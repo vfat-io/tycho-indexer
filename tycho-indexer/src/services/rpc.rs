@@ -169,12 +169,11 @@ where
             })?;
 
         if let Some(at) = deltas_version {
-            let version = match at {
-                BlockOrTimestamp::Block(BlockIdentifier::Latest(_)) => None,
-                _ => Some(at.try_into()?),
-            };
+            let version = at
+                .try_into()
+                .expect("deltas version is always ordered");
             self.pending_deltas
-                .update_vm_states(&mut accounts, version)?;
+                .update_vm_states(&mut accounts, Some(version))?;
         }
         Ok(dto::StateRequestResponse::new(
             accounts
@@ -316,7 +315,9 @@ where
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
         //TODO: handle when no id is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
-        let version = Version(at.clone(), VersionKind::Last);
+        let (db_version, deltas_version) = self
+            .calculate_versions(&at, *chain)
+            .await?;
 
         // Get the protocol IDs from the request
         let protocol_ids: Option<Vec<dto::ProtocolId>> = request.protocol_ids.clone();
@@ -329,36 +330,34 @@ where
         let ids = ids.as_deref();
 
         // Get the protocol states from the database
-        match self
+        let mut states = self
             .db_gateway
             .get_protocol_states(
                 chain,
-                Some(version),
+                Some(db_version),
                 request.protocol_system.clone(),
                 ids,
                 params.include_balances,
             )
             .await
-        {
-            Ok(mut states) => {
-                let version = match &at {
-                    BlockOrTimestamp::Block(BlockIdentifier::Latest(_)) => None,
-                    _ => Some(at.try_into()?),
-                };
-                self.pending_deltas
-                    .update_native_states(&mut states, version)?;
-                Ok(dto::ProtocolStateRequestResponse::new(
-                    states
-                        .into_iter()
-                        .map(dto::ResponseProtocolState::from)
-                        .collect(),
-                ))
-            }
-            Err(err) => {
+            .map_err(|err| {
                 error!(error = %err, "Error while getting protocol states.");
-                Err(err.into())
-            }
+                err
+            })?;
+
+        if let Some(at) = deltas_version {
+            let version = at
+                .try_into()
+                .expect("deltas version is always ordered");
+            self.pending_deltas
+                .update_native_states(&mut states, Some(version))?;
         }
+        Ok(dto::ProtocolStateRequestResponse::new(
+            states
+                .into_iter()
+                .map(dto::ResponseProtocolState::from)
+                .collect(),
+        ))
     }
 
     async fn get_tokens(
