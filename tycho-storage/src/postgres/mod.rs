@@ -136,7 +136,7 @@ use diesel_async::{
     AsyncPgConnection, RunQueryDsl,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use std::{collections::HashMap, hash::Hash, i64, ops::Deref, str::FromStr, sync::Arc};
+use std::{collections::HashMap, hash::Hash, ops::Deref, str::FromStr, sync::Arc};
 use tracing::{debug, info};
 use tycho_core::{
     models::{Chain, TxHash},
