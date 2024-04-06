@@ -216,6 +216,12 @@ where
                 warn!(?ordered_version, "No finality found for version.");
                 FinalityStatus::Finalized
             });
+        debug!(
+            ?request_version_finality,
+            ?request_version,
+            ?ordered_version,
+            "Version finality calculated!"
+        );
         match request_version_finality {
             FinalityStatus::Finalized => {
                 Ok((Version(request_version.clone(), VersionKind::Last), None))

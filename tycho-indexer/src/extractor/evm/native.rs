@@ -465,7 +465,6 @@ where
             .unwrap();
 
         let raw_msg = BlockEntityChanges::decode(data.value.as_slice())?;
-
         trace!(?raw_msg, "Received message");
 
         // Validate protocol_type_id

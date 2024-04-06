@@ -11,6 +11,7 @@ use std::{
 };
 use thiserror::Error;
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::debug;
 use tycho_core::{
     models::{
         blockchain::{NativeBlockDeltas, VmBlockDeltas},
@@ -54,11 +55,17 @@ impl PendingDeltas {
         Self {
             native: native_extractors
                 .into_iter()
-                .map(|e| (e.to_string(), Arc::new(Mutex::new(RevertBuffer::new()))))
+                .map(|e| {
+                    debug!("Creating new NativeRevertBuffer for {}", e);
+                    (e.to_string(), Arc::new(Mutex::new(RevertBuffer::new())))
+                })
                 .collect(),
             vm: vm_extractors
                 .into_iter()
-                .map(|e| (e.to_string(), Arc::new(Mutex::new(RevertBuffer::new()))))
+                .map(|e| {
+                    debug!("Creating new VmRevertBuffer for {}", e);
+                    (e.to_string(), Arc::new(Mutex::new(RevertBuffer::new())))
+                })
                 .collect(),
         }
     }

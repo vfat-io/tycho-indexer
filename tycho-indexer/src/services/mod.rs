@@ -133,10 +133,10 @@ where
 
         let openapi = ApiDoc::openapi();
         let pending_deltas = PendingDeltas::new(
-            self.native_extractors
+            self.vm_extractors
                 .iter()
                 .map(String::as_str),
-            self.vm_extractors
+            self.native_extractors
                 .iter()
                 .map(String::as_str),
         );
