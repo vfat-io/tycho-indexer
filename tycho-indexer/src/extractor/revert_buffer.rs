@@ -1,7 +1,7 @@
 use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 use tycho_core::{
     models::{
         blockchain::{Block, BlockScoped},
@@ -56,6 +56,7 @@ impl TryFrom<BlockOrTimestamp> for BlockNumberOrTimestamp {
 /// In case of revert, we can just purge this buffer.
 pub(crate) struct RevertBuffer<B: BlockScoped> {
     block_messages: VecDeque<B>,
+    strict: bool,
 }
 
 /// The finality status of a block or block-scoped data.
@@ -74,7 +75,7 @@ where
     B: BlockScoped + std::fmt::Debug,
 {
     pub(crate) fn new() -> Self {
-        Self { block_messages: VecDeque::new() }
+        Self { block_messages: VecDeque::new(), strict: false }
     }
 
     /// Inserts a new block into the buffer. Ensures the new block is the expected next block,
@@ -109,6 +110,10 @@ where
         );
 
         let target_index = self.find_index(|b| b.block().number == final_block_height);
+        let first = self
+            .get_block_range(None, None)?
+            .next()
+            .map(|e| e.block().number);
 
         if let Some(idx) = target_index {
             // Drain and return every block before the target index.
@@ -116,6 +121,9 @@ where
             std::mem::swap(&mut self.block_messages, &mut temp);
             trace!(?temp, "RevertBuffer drained blocks");
             Ok(temp.into())
+        } else if !self.strict && first.unwrap_or(0) < final_block_height {
+            warn!(?first, ?final_block_height, "Finalized block not found in RevertBuffer");
+            Ok(Vec::new())
         } else {
             Err(StorageError::NotFound("block".into(), final_block_height.to_string()))
         }
@@ -606,6 +614,7 @@ mod test {
     #[test]
     fn test_drain_finalized_blocks() {
         let mut revert_buffer = RevertBuffer::new();
+        revert_buffer.strict = true;
         revert_buffer
             .insert_block(get_block_entity(1))
             .unwrap();
