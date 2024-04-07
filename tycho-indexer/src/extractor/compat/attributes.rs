@@ -89,6 +89,7 @@ mod test {
                 parent_hash: BLOCK_HASH_0.parse().unwrap(),
                 ts: "2020-01-01T01:00:00".parse().unwrap(),
             },
+            0,
             false,
             vec![ProtocolChangesWithTx {
                 tx: Transaction::new(
@@ -135,6 +136,7 @@ mod test {
             "native:test".to_owned(),
             Chain::Ethereum,
             changes.block,
+            0,
             changes.revert,
             vec![ProtocolChangesWithTx {
                 tx: changes
@@ -182,6 +184,7 @@ mod test {
                 parent_hash: BLOCK_HASH_0.parse().unwrap(),
                 ts: "2020-01-01T01:00:00".parse().unwrap(),
             },
+            0,
             false,
             vec![ProtocolChangesWithTx {
                 tx: Transaction::new(

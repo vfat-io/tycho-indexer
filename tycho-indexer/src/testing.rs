@@ -1,10 +1,16 @@
 use mockall::mock;
 use std::collections::HashMap;
 
+#[cfg(test)]
+use crate::extractor::evm;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 #[cfg(test)]
+use ethers::prelude::H256;
+#[cfg(test)]
 use ethers::types::U256;
+#[cfg(test)]
+use std::time::Duration;
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
@@ -432,4 +438,23 @@ pub fn evm_contract_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap
     data.into_iter()
         .map(|(s, v)| (Bytes::from(U256::from(s)), Bytes::from(U256::from(v))))
         .collect()
+}
+
+/// Creates an evm block for testing, version 0 is not allowed and will panic.
+#[cfg(test)]
+pub fn evm_block(version: u64) -> evm::Block {
+    if version == 0 {
+        panic!("Block version 0 doesn't exist. Smallest version is 1");
+    }
+
+    let ts: NaiveDateTime = "2020-01-01T00:00:00"
+        .parse()
+        .expect("failed parsing block ts");
+    evm::Block {
+        number: version,
+        hash: H256::from_low_u64_be(version),
+        parent_hash: H256::from_low_u64_be(version - 1),
+        chain: Chain::Ethereum,
+        ts: ts + Duration::from_secs(version * 12),
+    }
 }

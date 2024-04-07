@@ -509,6 +509,7 @@ where
             self.chain,
             self.protocol_system.clone(),
             &self.protocol_types,
+            inp.final_block_height,
         ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
@@ -857,6 +858,9 @@ where
                 .get_most_recent_block()
                 .expect("Couldn't find most recent block in buffer during revert")
                 .into(),
+            finalized_block_height: reverted_state[0]
+                .block_update
+                .finalized_block_height,
             revert: true,
             account_updates,
             new_protocol_components: reverted_components_deletions,
@@ -1228,6 +1232,7 @@ mod test_serial_db {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
             block: evm::Block::default(),
+            finalized_block_height: 0,
             revert: false,
             tx_updates: vec![
                 evm::TransactionVMUpdates::new(
@@ -1322,6 +1327,7 @@ mod test_serial_db {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
             block,
+            finalized_block_height: 0,
             revert: false,
             tx_updates: vec![evm::TransactionVMUpdates::new(
                 [(
@@ -1552,6 +1558,7 @@ mod test_serial_db {
                     chain: Chain::Ethereum,
                     ts: NaiveDateTime::parse_from_str("1970-01-01T00:50:00", "%Y-%m-%dT%H:%M:%S").unwrap(),
                 },
+                finalized_block_height: 1,
                 revert: true,
                 account_updates: HashMap::from([
                     (H160::from_str("0x0000000000000000000000000000000000000001").unwrap(), AccountUpdate {

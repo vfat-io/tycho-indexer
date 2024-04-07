@@ -465,7 +465,6 @@ where
             .unwrap();
 
         let raw_msg = BlockEntityChanges::decode(data.value.as_slice())?;
-
         trace!(?raw_msg, "Received message");
 
         // Validate protocol_type_id
@@ -475,6 +474,7 @@ where
             self.chain,
             &self.protocol_system,
             &self.protocol_types,
+            inp.final_block_height,
         ) {
             Ok(changes) => {
                 tracing::Span::current().record("block_number", changes.block.number);
@@ -812,6 +812,9 @@ where
                 .get_most_recent_block()
                 .expect("Couldn't find most recent block in buffer during revert")
                 .into(),
+            finalized_block_height: reverted_state[0]
+                .block_update
+                .finalized_block_height,
             revert: true,
             state_updates,
             new_protocol_components: reverted_components_deletions,
@@ -1125,6 +1128,7 @@ mod test_serial_db {
                 parent_hash: BLOCK_HASH_0.parse().unwrap(),
                 ts: "2020-01-01T01:00:00".parse().unwrap(),
             },
+            finalized_block_height: 0,
             revert: false,
             txs_with_update: vec![ProtocolChangesWithTx {
                 tx: Transaction::new(
@@ -1339,6 +1343,7 @@ mod test_serial_db {
                     chain: Chain::Ethereum,
                     ts: NaiveDateTime::parse_from_str("1970-01-01T00:50:00", "%Y-%m-%dT%H:%M:%S").unwrap()
                 },
+                finalized_block_height: 1,
                 revert: true,
                 state_updates: HashMap::from([
                     ("pc_1".to_string(), evm::ProtocolStateDelta {

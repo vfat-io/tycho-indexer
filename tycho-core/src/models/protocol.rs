@@ -1,8 +1,11 @@
-use crate::models::{Chain, ChangeType};
+use crate::{
+    models::{Chain, ChangeType},
+    Bytes,
+};
 use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet};
 
-use super::{Address, AttrStoreKey, Balance, ComponentId, StoreVal, TxHash};
+use super::{Address, AttrStoreKey, Balance, ComponentId, DeltaError, StoreVal, TxHash};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolComponent {
@@ -51,6 +54,7 @@ impl ProtocolComponent {
 pub struct ProtocolComponentState {
     pub component_id: ComponentId,
     pub attributes: HashMap<AttrStoreKey, StoreVal>,
+    // used during snapshots retrieval by the gateway
     pub balances: HashMap<Address, Balance>,
 }
 
@@ -61,6 +65,44 @@ impl ProtocolComponentState {
         balances: HashMap<Address, Balance>,
     ) -> Self {
         Self { component_id: component_id.to_string(), attributes, balances }
+    }
+
+    /// Applies state deltas to this state.
+    ///
+    /// This method assumes that the passed delta is "newer" than the current state.
+    pub fn apply_state_delta(
+        &mut self,
+        delta: &ProtocolComponentStateDelta,
+    ) -> Result<(), DeltaError> {
+        if self.component_id != delta.component_id {
+            return Err(DeltaError::IdMismatch(
+                self.component_id.clone(),
+                delta.component_id.clone(),
+            ));
+        }
+        self.attributes
+            .extend(delta.updated_attributes.clone());
+
+        self.attributes
+            .retain(|attr, _| !delta.deleted_attributes.contains(attr));
+
+        Ok(())
+    }
+
+    /// Applies balance deltas to this state.
+    ///
+    /// This method assumes that the passed delta is "newer" than the current state.
+    pub fn apply_balance_delta(
+        &mut self,
+        delta: &HashMap<Bytes, ComponentBalance>,
+    ) -> Result<(), DeltaError> {
+        self.balances.extend(
+            delta
+                .iter()
+                .map(|(k, v)| (k.clone(), v.new_balance.clone())),
+        );
+
+        Ok(())
     }
 }
 

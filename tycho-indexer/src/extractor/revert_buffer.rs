@@ -1,11 +1,50 @@
+use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 use tycho_core::{
-    models::{blockchain::BlockScoped, protocol::ComponentBalance, ComponentId},
-    storage::StorageError,
+    models::{
+        blockchain::{Block, BlockScoped},
+        protocol::ComponentBalance,
+        ComponentId,
+    },
+    storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
     Bytes,
 };
+
+#[derive(Clone, Debug, Copy)]
+pub enum BlockNumberOrTimestamp {
+    Number(u64),
+    Timestamp(NaiveDateTime),
+}
+
+impl BlockNumberOrTimestamp {
+    fn greater_than(&self, other: &Block) -> bool {
+        match self {
+            BlockNumberOrTimestamp::Number(n) => n > &other.number,
+            BlockNumberOrTimestamp::Timestamp(ts) => ts > &other.ts,
+        }
+    }
+}
+
+impl TryFrom<BlockOrTimestamp> for BlockNumberOrTimestamp {
+    type Error = StorageError;
+
+    fn try_from(value: BlockOrTimestamp) -> Result<Self, Self::Error> {
+        Ok(match value {
+            BlockOrTimestamp::Block(bid) => match bid {
+                BlockIdentifier::Number((_, no)) => BlockNumberOrTimestamp::Number(no as u64),
+                BlockIdentifier::Hash(_) => {
+                    return Err(StorageError::Unexpected("BlockHash unsupported!".to_string()))
+                }
+                BlockIdentifier::Latest(_) => {
+                    return Err(StorageError::Unexpected("Latest marker unsupported!".to_string()))
+                }
+            },
+            BlockOrTimestamp::Timestamp(ts) => BlockNumberOrTimestamp::Timestamp(ts),
+        })
+    }
+}
 
 /// This buffer temporarily stores blockchain blocks that are not yet finalized. It allows for
 /// efficient handling of block reverts without requiring database rollbacks.
@@ -17,6 +56,18 @@ use tycho_core::{
 /// In case of revert, we can just purge this buffer.
 pub(crate) struct RevertBuffer<B: BlockScoped> {
     block_messages: VecDeque<B>,
+    strict: bool,
+}
+
+/// The finality status of a block or block-scoped data.
+#[derive(PartialEq, Clone, Debug, Copy)]
+pub enum FinalityStatus {
+    /// Versions at this status should have been committed to the db.
+    Finalized,
+    /// Versions with this status should be in the revert buffer.
+    Unfinalized,
+    /// We have not seen this version yet.
+    Unseen,
 }
 
 impl<B> RevertBuffer<B>
@@ -24,7 +75,7 @@ where
     B: BlockScoped + std::fmt::Debug,
 {
     pub(crate) fn new() -> Self {
-        Self { block_messages: VecDeque::new() }
+        Self { block_messages: VecDeque::new(), strict: false }
     }
 
     /// Inserts a new block into the buffer. Ensures the new block is the expected next block,
@@ -58,13 +109,11 @@ where
             final_block_height.to_string()
         );
 
-        let mut target_index = None;
-
-        for (index, block_message) in self.block_messages.iter().enumerate() {
-            if block_message.block().number == final_block_height {
-                target_index = Some(index);
-            }
-        }
+        let target_index = self.find_index(|b| b.block().number == final_block_height);
+        let first = self
+            .get_block_range(None, None)?
+            .next()
+            .map(|e| e.block().number);
 
         if let Some(idx) = target_index {
             // Drain and return every block before the target index.
@@ -72,9 +121,21 @@ where
             std::mem::swap(&mut self.block_messages, &mut temp);
             trace!(?temp, "RevertBuffer drained blocks");
             Ok(temp.into())
+        } else if !self.strict && first.unwrap_or(0) < final_block_height {
+            warn!(?first, ?final_block_height, "Finalized block not found in RevertBuffer");
+            Ok(Vec::new())
         } else {
             Err(StorageError::NotFound("block".into(), final_block_height.to_string()))
         }
+    }
+
+    fn find_index<F: Fn(&B) -> bool>(&self, predicate: F) -> Option<usize> {
+        for (index, block_message) in self.block_messages.iter().enumerate() {
+            if predicate(block_message) {
+                return Some(index);
+            }
+        }
+        None
     }
 
     /// Purges all blocks following the specified block hash from the buffer. Returns the purged
@@ -113,6 +174,70 @@ where
             return Some(block_message.block());
         }
         None
+    }
+
+    /// Retrieves a range of blocks from the buffer.
+    ///
+    /// The retrieved iterator will include both the start and end block of specified range. In case
+    /// either start or end block are None, the iterator will start the range at the oldest / end
+    /// the range at the latest block.
+    pub fn get_block_range(
+        &self,
+        start_version: Option<BlockNumberOrTimestamp>,
+        end_version: Option<BlockNumberOrTimestamp>,
+    ) -> Result<impl Iterator<Item = &B>, StorageError> {
+        let start_index = if let Some(version) = start_version {
+            self.find_index(|b| !version.greater_than(&b.block()))
+                .ok_or_else(|| {
+                    StorageError::NotFound("Block".to_string(), format!("{:?}", version))
+                })?
+        } else {
+            0
+        };
+
+        let end_index = if let Some(version) = end_version {
+            let end_idx = self
+                .find_index(|b| !version.greater_than(&b.block()))
+                .ok_or_else(|| {
+                    StorageError::NotFound("Block".to_string(), format!("{:?}", version))
+                })?;
+
+            if end_idx < start_index {
+                return Err(StorageError::Unexpected(
+                    "RevertBuffer: Invalid block range".to_string(),
+                ));
+            }
+            end_idx + 1
+        } else {
+            self.block_messages.len()
+        };
+
+        Ok(self
+            .block_messages
+            .range(start_index..end_index))
+    }
+
+    // Retrieves FinalityStatus for a block, returns None if the buffer is empty.
+    pub fn get_finality_status(&self, version: BlockNumberOrTimestamp) -> Option<FinalityStatus> {
+        let first_block = self.block_messages.front();
+        let last_block = self.block_messages.back();
+        match (first_block, last_block) {
+            (Some(first), Some(last)) => {
+                let first_block = first.block();
+                let last_block = last.block();
+
+                if !version.greater_than(&first_block) {
+                    Some(FinalityStatus::Finalized)
+                } else if (version.greater_than(&first_block)) &
+                    (!version.greater_than(&last_block))
+                {
+                    Some(FinalityStatus::Unfinalized)
+                } else {
+                    Some(FinalityStatus::Unseen)
+                }
+            }
+            _ => None,
+        }
     }
 }
 
@@ -220,31 +345,21 @@ mod test {
 
     use chrono::NaiveDateTime;
     use ethers::types::{H160, H256};
-    use tycho_core::{models::Chain, Bytes};
+    use rstest::rstest;
+    use tycho_core::{models::Chain, storage::StorageError, Bytes};
 
-    use crate::extractor::evm::{
-        Block, BlockEntityChanges, ComponentBalance, ProtocolChangesWithTx, ProtocolStateDelta,
-        Transaction,
+    use crate::{
+        extractor::evm::{
+            BlockEntityChanges, ComponentBalance, ProtocolChangesWithTx, ProtocolStateDelta,
+            Transaction,
+        },
+        testing,
     };
 
-    use super::RevertBuffer;
+    use super::{BlockNumberOrTimestamp, FinalityStatus, RevertBuffer};
 
     fn transaction() -> Transaction {
         Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10)
-    }
-
-    pub fn blocks(version: u64) -> Block {
-        if version == 0 {
-            panic!("Block version 0 doesn't exist. Smallest version is 1");
-        }
-
-        Block {
-            number: version,
-            hash: H256::from_low_u64_be(version),
-            parent_hash: H256::from_low_u64_be(version - 1),
-            chain: Chain::Ethereum,
-            ts: NaiveDateTime::from_timestamp_opt((version as i64) * 1000, 0).unwrap(),
-        }
     }
 
     fn get_block_entity(version: u8) -> BlockEntityChanges {
@@ -301,7 +416,8 @@ mod test {
                 BlockEntityChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    blocks(1),
+                    testing::evm_block(1),
+                    0,
                     false,
                     vec![ProtocolChangesWithTx {
                         protocol_states: state_updates,
@@ -341,7 +457,8 @@ mod test {
                 BlockEntityChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    blocks(2),
+                    testing::evm_block(2),
+                    0,
                     false,
                     vec![ProtocolChangesWithTx {
                         protocol_states: state_updates,
@@ -373,7 +490,8 @@ mod test {
                 BlockEntityChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    blocks(3),
+                    testing::evm_block(3),
+                    0,
                     false,
                     vec![ProtocolChangesWithTx { tx, balance_changes, ..Default::default() }],
                 )
@@ -496,6 +614,7 @@ mod test {
     #[test]
     fn test_drain_finalized_blocks() {
         let mut revert_buffer = RevertBuffer::new();
+        revert_buffer.strict = true;
         revert_buffer
             .insert_block(get_block_entity(1))
             .unwrap();
@@ -564,5 +683,120 @@ mod test {
         revert_buffer
             .insert_block(get_block_entity(3))
             .unwrap();
+    }
+
+    #[rstest]
+    #[case::complete_range(None, None, vec![1, 2, 3])]
+    #[case::range(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), vec![1, 2])]
+    #[case::from_start(None, Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), vec![1, 2])]
+    #[case::until_end(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), None, vec![2, 3])]
+    fn test_get_block_range(
+        #[case] start: Option<NaiveDateTime>,
+        #[case] end: Option<NaiveDateTime>,
+        #[case] exp: Vec<u64>,
+    ) {
+        let start = start.map(BlockNumberOrTimestamp::Timestamp);
+        let end = end.map(BlockNumberOrTimestamp::Timestamp);
+        let mut revert_buffer = RevertBuffer::new();
+        revert_buffer
+            .insert_block(get_block_entity(1))
+            .unwrap();
+        revert_buffer
+            .insert_block(get_block_entity(2))
+            .unwrap();
+        revert_buffer
+            .insert_block(get_block_entity(3))
+            .unwrap();
+
+        let blocks = revert_buffer
+            .get_block_range(start, end)
+            .unwrap()
+            .map(|e| e.block.number)
+            .collect::<Vec<_>>();
+
+        assert_eq!(blocks, exp);
+    }
+
+    #[test]
+    fn test_get_block_range_empty() {
+        let revert_buffer = RevertBuffer::<BlockEntityChanges>::new();
+
+        let res = revert_buffer
+            .get_block_range(None, None)
+            .unwrap()
+            .collect::<Vec<_>>();
+
+        assert_eq!(res, Vec::<&BlockEntityChanges>::new());
+    }
+
+    #[rstest]
+    #[case::not_found(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:36".parse::<NaiveDateTime>().unwrap()), StorageError::NotFound("Block".to_string(), "Timestamp(2020-01-01T00:00:36)".to_string()))]
+    #[case::invalid(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), StorageError::Unexpected("RevertBuffer: Invalid block range".to_string()))]
+    fn test_get_block_range_invalid_range(
+        #[case] start: Option<NaiveDateTime>,
+        #[case] end: Option<NaiveDateTime>,
+        #[case] exp: StorageError,
+    ) {
+        let start = start.map(BlockNumberOrTimestamp::Timestamp);
+        let end = end.map(BlockNumberOrTimestamp::Timestamp);
+        let mut revert_buffer = RevertBuffer::new();
+        revert_buffer
+            .insert_block(get_block_entity(1))
+            .unwrap();
+        revert_buffer
+            .insert_block(get_block_entity(2))
+            .unwrap();
+
+        let res = revert_buffer
+            .get_block_range(start, end)
+            .err()
+            .unwrap();
+
+        assert_eq!(res, exp);
+    }
+
+    #[rstest]
+    #[case::finalized_no(BlockNumberOrTimestamp::Number(0), FinalityStatus::Finalized)]
+    #[case::finalized_ts(
+        BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap()),
+        FinalityStatus::Finalized
+    )]
+    #[case::unfinalized_no(BlockNumberOrTimestamp::Number(2), FinalityStatus::Unfinalized)]
+    #[case::unfinalized_ts(
+        BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:15".parse().unwrap()), 
+        FinalityStatus::Unfinalized
+    )]
+    #[case::unseen_no(BlockNumberOrTimestamp::Number(5), FinalityStatus::Unseen)]
+    #[case::unseen_ts(
+        BlockNumberOrTimestamp::Timestamp("2020-01-01T01:00:00".parse().unwrap()),
+        FinalityStatus::Unseen
+    )]
+    fn test_get_finality_status(
+        #[case] version: BlockNumberOrTimestamp,
+        #[case] exp: FinalityStatus,
+    ) {
+        let mut buffer = RevertBuffer::new();
+        buffer
+            .insert_block(get_block_entity(1))
+            .unwrap();
+        buffer
+            .insert_block(get_block_entity(2))
+            .unwrap();
+        buffer
+            .insert_block(get_block_entity(3))
+            .unwrap();
+
+        let res = buffer.get_finality_status(version);
+
+        assert_eq!(res, Some(exp));
+    }
+
+    #[test]
+    fn test_get_finality_status_empty() {
+        let buffer = RevertBuffer::<BlockEntityChanges>::new();
+
+        let res = buffer.get_finality_status(BlockNumberOrTimestamp::Number(2));
+
+        assert_eq!(res, None);
     }
 }
