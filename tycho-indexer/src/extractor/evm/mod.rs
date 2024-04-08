@@ -1183,6 +1183,8 @@ impl BlockEntityChangesResult {
             component_tvl,
         }
     }
+
+    #[allow(dead_code)]
     fn is_empty(&self) -> bool {
         self.state_updates.is_empty() &&
             self.new_protocol_components.is_empty() &&

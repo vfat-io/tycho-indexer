@@ -828,9 +828,7 @@ where
         self.update_cursor(inp.last_valid_cursor)
             .await;
 
-        let should_send = !revert_message.is_empty();
-
-        Ok(should_send.then_some(Arc::new(revert_message)))
+        Ok(Some(Arc::new(revert_message)))
     }
 
     async fn handle_progress(&self, _inp: ModulesProgress) -> Result<(), ExtractionError> {
