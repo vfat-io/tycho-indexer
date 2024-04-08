@@ -160,7 +160,11 @@ where
     ) -> SyncResult<StateSyncMessage> {
         let version = VersionParam::new(
             None,
-            Some(BlockParam { chain: None, hash: Some(header.hash.clone()), number: None }),
+            Some(BlockParam {
+                chain: Some(self.extractor_id.chain),
+                hash: None,
+                number: Some(header.number as i64),
+            }),
         );
         // Use given ids or use all if not passed
         let ids = ids
