@@ -33,6 +33,7 @@ pub type SyncResult<T> = anyhow::Result<T>;
 pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
     extractor_id: ExtractorIdentity,
     is_native: bool,
+    #[allow(dead_code)]
     retrieve_balances: bool,
     rpc_client: R,
     deltas_client: D,

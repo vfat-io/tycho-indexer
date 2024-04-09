@@ -63,7 +63,7 @@ impl PostgresGateway {
             let states_slice = &data_vec[component_start..index];
             let protocol_balances: HashMap<Address, Balance> = balances
                 .remove(current_component_id)
-                .unwrap_or_else(HashMap::new)
+                .unwrap_or_default()
                 .into_iter()
                 .map(|(key, balance)| (key, balance.new_balance))
                 .collect();
@@ -1747,7 +1747,28 @@ mod test {
         .into_iter()
         .collect();
         protocol_state.attributes = attributes;
-        let expected = vec![protocol_state];
+
+        let expected = vec![
+            protocol_state,
+            models::protocol::ProtocolComponentState::new(
+                "state3",
+                HashMap::new(),
+                HashMap::from([
+                    (
+                        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                            .parse()
+                            .unwrap(),
+                        Balance::from(U256::exp10(18)),
+                    ),
+                    (
+                        "0x6b175474e89094c44da98b954eedeac495271d0f"
+                            .parse()
+                            .unwrap(),
+                        Balance::from(U256::from(2000) * U256::exp10(18)),
+                    ),
+                ]),
+            ),
+        ];
 
         let result = gateway
             .get_protocol_states(
