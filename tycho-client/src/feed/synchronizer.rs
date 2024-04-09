@@ -244,7 +244,7 @@ where
 
             trace!(states=?&contract_states, "Retrieved ContractState");
 
-            let contract_address_to_component = tracked_components
+            let contract_address_to_components = tracked_components
                 .components
                 .iter()
                 .filter_map(|(id, comp)| {
@@ -259,19 +259,21 @@ where
                     }
                 })
                 .flatten()
-                .collect::<HashMap<_, _>>();
+                .fold(HashMap::<Bytes, Vec<String>>::new(), |mut acc, (addr, c_id)| {
+                    acc.entry(addr).or_default().push(c_id);
+                    acc
+                });
 
             contract_ids
                 .iter()
                 .filter_map(|address| {
                     if let Some(state) = contract_states.get(address) {
                         Some((address.clone(), state.clone()))
-                    } else if contract_ids.contains(address) {
-                        let component_id = contract_address_to_component.get(address);
+                    } else if let Some(ids) = contract_address_to_components.get(address) {
                         // only emit error even if we did actually request this address
                         error!(
                             ?address,
-                            ?component_id,
+                            ?ids,
                             "Component with lacking contract storage encountered!"
                         );
                         None
