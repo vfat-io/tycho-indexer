@@ -38,53 +38,61 @@ impl PostgresGateway {
     /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
     fn _decode_protocol_states(
         &self,
-        balances: HashMap<ComponentId, HashMap<Address, models::protocol::ComponentBalance>>,
+        mut balances: HashMap<ComponentId, HashMap<Address, models::protocol::ComponentBalance>>,
         states_result: Result<Vec<(orm::ProtocolState, ComponentId)>, diesel::result::Error>,
         context: &str,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError> {
-        match states_result {
-            Ok(data_vec) => {
-                // Decode final state deltas. We can assume result is sorted by component_id.
-                // Therefore we can use slices to iterate over the data in groups of
-                // component_id.
+        let data_vec = states_result
+            .map_err(|err| storage_error_from_diesel(err, "ProtocolStates", context, None))?;
 
-                let mut protocol_states = Vec::new();
+        // Decode final state deltas. We can assume result is sorted by component_id.
+        // Therefore we can use slices to iterate over the data in groups of
+        // component_id.
+        let mut protocol_states = Vec::new();
 
-                let mut index = 0;
-                while index < data_vec.len() {
-                    let component_start = index;
-                    let current_component_id = &data_vec[index].1;
+        let mut index = 0;
+        while index < data_vec.len() {
+            let component_start = index;
+            let current_component_id = &data_vec[index].1;
 
-                    // Iterate until the component_id changes
-                    while index < data_vec.len() && &data_vec[index].1 == current_component_id {
-                        index += 1;
-                    }
-
-                    let states_slice = &data_vec[component_start..index];
-                    let protocol_balances: HashMap<Address, Balance> = balances
-                        .get(current_component_id)
-                        .cloned()
-                        .unwrap_or_else(HashMap::new)
-                        .into_iter()
-                        .map(|(key, balance)| (key, balance.new_balance))
-                        .collect();
-
-                    let protocol_state = models::protocol::ProtocolComponentState::new(
-                        current_component_id,
-                        states_slice
-                            .iter()
-                            .map(|x| (x.0.attribute_name.clone(), x.0.attribute_value.clone()))
-                            .collect(),
-                        protocol_balances,
-                    );
-
-                    protocol_states.push(protocol_state);
-                }
-                Ok(protocol_states)
+            // Iterate until the component_id changes
+            while index < data_vec.len() && &data_vec[index].1 == current_component_id {
+                index += 1;
             }
 
-            Err(err) => Err(storage_error_from_diesel(err, "ProtocolStates", context, None).into()),
+            let states_slice = &data_vec[component_start..index];
+            let protocol_balances: HashMap<Address, Balance> = balances
+                .remove(current_component_id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(key, balance)| (key, balance.new_balance))
+                .collect();
+
+            let protocol_state = models::protocol::ProtocolComponentState::new(
+                current_component_id,
+                states_slice
+                    .iter()
+                    .map(|x| (x.0.attribute_name.clone(), x.0.attribute_value.clone()))
+                    .collect(),
+                protocol_balances,
+            );
+
+            protocol_states.push(protocol_state);
         }
+
+        // add remaining balances as states with empty attributes
+        for (component_id, balances) in balances.into_iter() {
+            protocol_states.push(models::protocol::ProtocolComponentState::new(
+                component_id.as_str(),
+                HashMap::new(),
+                balances
+                    .into_iter()
+                    .map(|(key, balance)| (key, balance.new_balance))
+                    .collect(),
+            ))
+        }
+
+        Ok(protocol_states)
     }
 
     async fn _get_or_create_protocol_system_id(
@@ -1739,7 +1747,28 @@ mod test {
         .into_iter()
         .collect();
         protocol_state.attributes = attributes;
-        let expected = vec![protocol_state];
+
+        let expected = vec![
+            protocol_state,
+            models::protocol::ProtocolComponentState::new(
+                "state3",
+                HashMap::new(),
+                HashMap::from([
+                    (
+                        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                            .parse()
+                            .unwrap(),
+                        Balance::from(U256::exp10(18)),
+                    ),
+                    (
+                        "0x6b175474e89094c44da98b954eedeac495271d0f"
+                            .parse()
+                            .unwrap(),
+                        Balance::from(U256::from(2000) * U256::exp10(18)),
+                    ),
+                ]),
+            ),
+        ];
 
         let result = gateway
             .get_protocol_states(
