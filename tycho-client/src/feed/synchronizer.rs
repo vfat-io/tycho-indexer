@@ -49,20 +49,14 @@ struct SharedState {
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize)]
-pub struct VMSnapshot {
-    pub state: HashMap<Bytes, ResponseAccount>,
-    pub component: ProtocolComponent,
-}
-
-#[derive(Clone, PartialEq, Debug, Serialize)]
-pub struct NativeSnapshot {
+pub struct ComponentWithState {
     pub state: ResponseProtocolState,
     pub component: ProtocolComponent,
 }
 
 #[derive(Clone, PartialEq, Debug, Default, Serialize)]
 pub struct Snapshot {
-    states: HashMap<String, NativeSnapshot>,
+    states: HashMap<String, ComponentWithState>,
     vm_storage: HashMap<Bytes, ResponseAccount>,
 }
 
@@ -207,7 +201,7 @@ where
                 if let Some(state) = protocol_states.remove(&component.id) {
                     Some((
                         component.id.clone(),
-                        NativeSnapshot { state, component: component.clone() },
+                        ComponentWithState { state, component: component.clone() },
                     ))
                 } else if ids.contains(&&component.id) {
                     // only emit error event if we requested this component
@@ -511,7 +505,7 @@ mod test {
         feed::{
             component_tracker::{ComponentFilter, ComponentTracker},
             synchronizer::{
-                NativeSnapshot, ProtocolStateSynchronizer, Snapshot, StateSyncMessage,
+                ComponentWithState, ProtocolStateSynchronizer, Snapshot, StateSyncMessage,
                 StateSynchronizer,
             },
             Header,
@@ -682,7 +676,7 @@ mod test {
                     .map(|state| {
                         (
                             state.component_id.clone(),
-                            NativeSnapshot { state, component: component.clone() },
+                            ComponentWithState { state, component: component.clone() },
                         )
                     })
                     .collect(),
@@ -738,7 +732,7 @@ mod test {
             snapshots: Snapshot {
                 states: [(
                     component.id.clone(),
-                    NativeSnapshot {
+                    ComponentWithState {
                         state: ResponseProtocolState {
                             component_id: "Component1".to_string(),
                             ..Default::default()
@@ -961,7 +955,7 @@ mod test {
                 states: [
                     (
                         "Component1".to_string(),
-                        NativeSnapshot {
+                        ComponentWithState {
                             state: ResponseProtocolState {
                                 component_id: "Component1".to_string(),
                                 ..Default::default()
@@ -974,7 +968,7 @@ mod test {
                     ),
                     (
                         "Component2".to_string(),
-                        NativeSnapshot {
+                        ComponentWithState {
                             state: ResponseProtocolState {
                                 component_id: "Component2".to_string(),
                                 ..Default::default()
@@ -1006,7 +1000,7 @@ mod test {
                     // This is the new component we queried once it passed the tvl threshold.
                     (
                         "Component3".to_string(),
-                        NativeSnapshot {
+                        ComponentWithState {
                             state: ResponseProtocolState {
                                 component_id: "Component3".to_string(),
                                 ..Default::default()
