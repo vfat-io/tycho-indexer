@@ -10,7 +10,7 @@ use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use tracing::{instrument, warn};
+use tracing::{error, instrument, warn};
 use tycho_core::{
     models::{
         self, Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType,
@@ -888,6 +888,7 @@ impl PostgresGateway {
             let token_id = token_ids
                 .get(&component_balance.token)
                 .ok_or_else(|| {
+                    error!(?chain, ?component_balance.token, ?component_balance, "Token not found");
                     StorageError::NotFound("Token".to_string(), component_balance.token.to_string())
                 })?;
             let (transaction_id, transaction_ts) =
