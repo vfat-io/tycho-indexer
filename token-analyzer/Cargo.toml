@@ -11,10 +11,11 @@ serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 tokio.workspace = true
+ethers.workspace = true
 
 primitive-types = "0.12"
-contracts = { git = "https://github.com/cowprotocol/services", branch = "main" }
-ethrpc = { git = "https://github.com/cowprotocol/services", branch = "main" }
+contracts = { git = "https://github.com/cowprotocol/services", rev = "f3678428991e055ceb517f184d1b37244f2d8f51" }
+ethrpc = { git = "https://github.com/cowprotocol/services", rev = "f3678428991e055ceb517f184d1b37244f2d8f51" }
 ethcontract = { version = "0.25.4", default-features = false, features = [
     "aws-kms",
 ] }
@@ -22,5 +23,5 @@ web3 = { version = "0.19", default-features = false }
 mockall = "0.11"
 clap = { version = "4", features = ["derive", "env"] }
 humantime = "2.1.0"
-reqwest = "0.11"
-url = "2"
+reqwest.workspace = true
+url.workspace = true

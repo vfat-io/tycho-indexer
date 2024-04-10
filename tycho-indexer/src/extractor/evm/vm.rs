@@ -12,6 +12,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
+use token_analyzer::TokenFinder;
 
 use crate::extractor::BlockUpdateWithCursor;
 use ethers::types::{H160, H256, U256};
@@ -237,9 +238,10 @@ where
             .get_new_tokens(protocol_components)
             .await?;
         if !new_tokens_addresses.is_empty() {
+            let tf = TokenFinder::new(HashMap::new());
             let new_tokens = self
                 .token_pre_processor
-                .get_tokens(new_tokens_addresses)
+                .get_tokens(new_tokens_addresses, Arc::new(tf))
                 .await
                 .iter()
                 .map(Into::into)
@@ -1132,7 +1134,7 @@ mod test_serial_db {
         ];
         mock_processor
             .expect_get_tokens()
-            .returning(move |_| new_tokens.clone());
+            .returning(move |_, _| new_tokens.clone());
 
         mock_processor
     }

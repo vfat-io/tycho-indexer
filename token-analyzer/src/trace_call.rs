@@ -4,9 +4,9 @@ use super::{BadTokenDetecting, TokenQuality};
 use anyhow::{bail, ensure, Context, Result};
 use contracts::ERC20;
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, PrivateKey};
+use ethers::types::{H160, U256};
 use ethrpc::Web3;
-use primitive_types::{H160, U256};
-use std::{cmp, sync::Arc};
+use std::{cmp, fmt::Debug, sync::Arc};
 use web3::{
     signing::keccak256,
     types::{BlockTrace, CallRequest, Res},
@@ -28,7 +28,7 @@ pub struct TraceCallDetector {
 /// To detect bad tokens we need to find some address on the network that owns
 /// the token so that we can use it in our simulations.
 #[async_trait::async_trait]
-pub trait TokenOwnerFinding: Send + Sync {
+pub trait TokenOwnerFinding: Send + Sync + Debug {
     /// Find an addresses with at least `min_balance` of tokens and return it,
     /// along with its actual balance.
     async fn find_owner(&self, token: H160, min_balance: U256) -> Result<Option<(H160, U256)>>;

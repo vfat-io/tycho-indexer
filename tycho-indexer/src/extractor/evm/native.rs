@@ -20,6 +20,7 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
+use token_analyzer::TokenFinder;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace, warn};
 use tycho_core::{
@@ -250,9 +251,11 @@ where
             .get_new_tokens(protocol_tokens)
             .await?;
         if !new_tokens_addresses.is_empty() {
+            let balance_map: HashMap<H160, (H160, U256)> = HashMap::new();
+            let tf = TokenFinder::new(balance_map);
             let new_tokens = self
                 .token_pre_processor
-                .get_tokens(new_tokens_addresses)
+                .get_tokens(new_tokens_addresses, Arc::new(tf))
                 .await
                 .iter()
                 .map(Into::into)
@@ -1042,7 +1045,7 @@ mod test_serial_db {
         ];
         mock_processor
             .expect_get_tokens()
-            .returning(move |_| new_tokens.clone());
+            .returning(move |_, _| new_tokens.clone());
 
         mock_processor
     }

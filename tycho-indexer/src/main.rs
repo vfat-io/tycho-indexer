@@ -1,8 +1,11 @@
 #![doc = include_str!("../../Readme.md")]
 
+use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use futures03::future::select_all;
+use reqwest::Client;
 use serde::Deserialize;
-use std::{env, fs::File, io::Read};
+use std::{env, fs::File, io::Read, str::FromStr};
+use url::Url;
 
 use extractor::{
     evm::token_pre_processor::TokenPreProcessor,
@@ -149,7 +152,17 @@ async fn main() -> Result<(), ExtractionError> {
         .build()
         .await?;
 
-    let token_processor = TokenPreProcessor::new(rpc_client);
+    let transport = Web3Transport::new(HttpTransport::new(
+        Client::new(),
+        Url::from_str(
+            "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac",
+        )
+        .unwrap(),
+        "transport".to_owned(),
+    ));
+    let w3 = Web3::new(transport);
+
+    let token_processor = TokenPreProcessor::new(rpc_client, w3);
 
     let (mut tasks, extractor_handles): (Vec<_>, Vec<_>) =
         build_all_extractors(&extractors_config, chain_state, &cached_gw, &token_processor)

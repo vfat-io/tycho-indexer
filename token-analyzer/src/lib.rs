@@ -3,9 +3,11 @@ pub mod http_client;
 pub mod trace_call;
 pub mod trace_many;
 
+use std::collections::HashMap;
+
 use anyhow::Result;
-use ethcontract::U256;
-use primitive_types::H160;
+use ethers::types::{H160, U256};
+use trace_call::TokenOwnerFinding;
 
 /// How well behaved a token is.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -21,6 +23,24 @@ impl TokenQuality {
 
     pub fn bad(reason: impl ToString) -> Self {
         Self::Bad { reason: reason.to_string() }
+    }
+}
+
+#[derive(Debug)]
+pub struct TokenFinder {
+    values: HashMap<H160, (H160, U256)>,
+}
+
+impl TokenFinder {
+    pub fn new(values: HashMap<H160, (H160, U256)>) -> Self {
+        TokenFinder { values }
+    }
+}
+
+#[async_trait::async_trait]
+impl TokenOwnerFinding for TokenFinder {
+    async fn find_owner(&self, token: H160, _min_balance: U256) -> Result<Option<(H160, U256)>> {
+        Ok(self.values.get(&token).copied())
     }
 }
 

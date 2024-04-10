@@ -1742,7 +1742,7 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 [[package]]
 name = "contracts"
 version = "0.1.0"
-source = "git+https://github.com/cowprotocol/services?branch=main#ed4ef65572f49d06f0c4f4653fc15e5f243a8305"
+source = "git+https://github.com/cowprotocol/services?rev=f3678428991e055ceb517f184d1b37244f2d8f51#f3678428991e055ceb517f184d1b37244f2d8f51"
 dependencies = [
  "ethcontract",
  "ethcontract-generate",
@@ -2658,7 +2658,7 @@ dependencies = [
 [[package]]
 name = "ethrpc"
 version = "0.1.0"
-source = "git+https://github.com/cowprotocol/services?branch=main#ed4ef65572f49d06f0c4f4653fc15e5f243a8305"
+source = "git+https://github.com/cowprotocol/services?rev=f3678428991e055ceb517f184d1b37244f2d8f51#f3678428991e055ceb517f184d1b37244f2d8f51"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3889,7 +3889,7 @@ dependencies = [
 [[package]]
 name = "observe"
 version = "0.1.0"
-source = "git+https://github.com/cowprotocol/services?branch=main#ed4ef65572f49d06f0c4f4653fc15e5f243a8305"
+source = "git+https://github.com/cowprotocol/services?rev=f3678428991e055ceb517f184d1b37244f2d8f51#f3678428991e055ceb517f184d1b37244f2d8f51"
 dependencies = [
  "atty",
  "futures 0.3.30",
@@ -5704,6 +5704,7 @@ dependencies = [
  "clap",
  "contracts",
  "ethcontract",
+ "ethers",
  "ethrpc",
  "humantime",
  "mockall",
@@ -6208,6 +6209,7 @@ dependencies = [
  "clap",
  "diesel-async",
  "ethers",
+ "ethrpc",
  "futures 0.3.30",
  "hex",
  "hex-literal",
@@ -6216,12 +6218,14 @@ dependencies = [
  "pretty_assertions",
  "prost",
  "prost-types",
+ "reqwest",
  "rstest",
  "serde",
  "serde_json",
  "serde_yaml",
  "test-log",
  "thiserror",
+ "token-analyzer",
  "tokio",
  "tokio-retry",
  "tokio-stream",
@@ -6232,6 +6236,7 @@ dependencies = [
  "tycho-core",
  "tycho-storage",
  "typetag",
+ "url",
  "utoipa",
  "utoipa-swagger-ui",
  "uuid 1.7.0",

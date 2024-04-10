@@ -1,26 +1,11 @@
-use std::{str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use anyhow::Result;
-use ethcontract::{H160, U256};
+use ethers::types::{H160, U256};
 use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use reqwest::Client;
-use token_analyzer::{
-    trace_call::{TokenOwnerFinding, TraceCallDetector},
-    BadTokenDetecting,
-};
+use token_analyzer::{trace_call::TraceCallDetector, BadTokenDetecting, TokenFinder};
 use url::Url;
-
-struct TokenFinder {}
-
-#[async_trait::async_trait]
-impl TokenOwnerFinding for TokenFinder {
-    async fn find_owner(&self, _token: H160, _min_balance: U256) -> Result<Option<(H160, U256)>> {
-        Ok(Some((
-            H160::from_str("0x7d766B06e7164Be4196EE62E6036c9FCFF68107d").unwrap(),
-            U256::from_dec_str("11184000000").unwrap(),
-        )))
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
@@ -33,7 +18,14 @@ async fn main() -> Result<(), ()> {
         "transport".to_owned(),
     ));
     let w3 = Web3::new(transport);
-    let tf = TokenFinder {};
+    let tf = TokenFinder::new(HashMap::from([(
+        H160::from_str("0x45804880De22913dAFE09f4980848ECE6EcbAf78").unwrap(),
+        (
+            H160::from_str("0x7d766B06e7164Be4196EE62E6036c9FCFF68107d").unwrap(),
+            U256::from_dec_str("11184000000").unwrap(),
+        ),
+    )]));
+
     let trace_call = TraceCallDetector {
         web3: w3,
         finder: Arc::new(tf),
