@@ -777,6 +777,16 @@ impl From<substreams::ChangeType> for ChangeType {
 }
 
 impl BlockContractChanges {
+    pub fn new(
+        extractor: String,
+        chain: Chain,
+        block: Block,
+        finalized_block_height: u64,
+        revert: bool,
+        tx_updates: Vec<TransactionVMUpdates>,
+    ) -> Self {
+        BlockContractChanges { extractor, chain, block, finalized_block_height, revert, tx_updates }
+    }
     /// Parse from tychos protobuf message
     pub fn try_from_message(
         msg: substreams::BlockContractChanges,

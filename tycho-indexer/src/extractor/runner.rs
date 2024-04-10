@@ -1,6 +1,6 @@
 use super::{
     compat::{
-        add_default_attributes_uniswapv2, add_default_attributes_uniswapv3,
+        add_default_attributes_uniswapv2, add_default_attributes_uniswapv3, ignore_self_balances,
         transcode_ambient_balances, transcode_usv2_balances,
     },
     evm::{
@@ -369,6 +369,8 @@ impl ExtractorBuilder {
                         self.config.name.clone(),
                         if self.config.name == "vm:ambient" {
                             Some(transcode_ambient_balances)
+                        } else if self.config.name == "balancer" {
+                            Some(ignore_self_balances)
                         } else {
                             None
                         },
