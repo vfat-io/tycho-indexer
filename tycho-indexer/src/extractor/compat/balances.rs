@@ -60,13 +60,8 @@ pub fn ignore_self_balances(mut changes: BlockContractChanges) -> BlockContractC
                 .component_balances
                 .iter_mut()
                 .for_each(|(_, balance)| {
-                    balance.retain(|_, value| {
-                        hex::encode(format!("{:#020x}", value.token).as_bytes()) !=
-                            value
-                                .component_id
-                                .strip_prefix("0x")
-                                .unwrap_or(value.component_id.as_str())
-                    });
+                    balance
+                        .retain(|_, value| format!("{:#020x}", value.token) != value.component_id);
                 });
         });
     changes
@@ -127,7 +122,8 @@ mod tests {
 
     #[test]
     fn test_ignore_self_balances() {
-        let txs_with_update = vec![TransactionVMUpdates {
+        let txs_with_update =
+            vec![TransactionVMUpdates {
             account_updates: HashMap::new(),
             protocol_components: HashMap::new(),
             component_balances: HashMap::from([(
@@ -142,7 +138,7 @@ mod tests {
                         modify_tx: H256::from_low_u64_be(
                             0x0000000000000000000000000000000000000000000000000000000011121314,
                         ),
-                        component_id: "0x307864346537633166336461313134346339653263666431623031356564613736353262346134333939".to_string(),
+                        component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
                     },
                 ),(
                     H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
@@ -154,7 +150,7 @@ mod tests {
                         modify_tx: H256::from_low_u64_be(
                             0x0000000000000000000000000000000000000000000000000000000011121314,
                         ),
-                        component_id: "0x307864346537633166336461313134346339653263666431623031356564613736353262346134333939".to_string(),
+                        component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
                     },
                 )]),
             )]),
@@ -191,11 +187,17 @@ mod tests {
                             modify_tx: H256::from_low_u64_be(
                                 0x0000000000000000000000000000000000000000000000000000000011121314,
                             ),
-                            component_id: "0x307864346537633166336461313134346339653263666431623031356564613736353262346134333939".to_string(),
+                            component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
                         },
                     )]),
                 )]),
-                tx: Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10),
+                tx: Transaction::new(
+                    H256::zero(),
+                    H256::zero(),
+                    H160::zero(),
+                    Some(H160::zero()),
+                    10,
+                ),
             }],
         );
 
