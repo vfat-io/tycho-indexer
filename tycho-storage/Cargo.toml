@@ -11,15 +11,10 @@ diesel-async.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
-thiserror.workspace = true
 hex.workspace = true
 serde_json.workspace = true
 diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 diesel_migrations = "2.1.0"
-tracing-subscriber = { version = "0.3.17", default-features = false, features = [
-    "env-filter",
-    "fmt",
-] }
 lru = "0.12.1"
 itertools = "0.12.1"
 unicode-segmentation.workspace = true
@@ -29,4 +24,4 @@ ethers.workspace = true
 [dev-dependencies]
 rstest = "0.18.2"
 pretty_assertions = "1.4.0"
-test-log = { version = "0.2.14", features=["trace"]}
+test-log = { version = "0.2.14", features = ["trace"] }
