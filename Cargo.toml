@@ -3,7 +3,8 @@ members = [
     "tycho-indexer",
     "tycho-client",
     "tycho-core",
-    "tycho-storage"
+    "tycho-storage",
+    "token-analyzer",
 ]
 resolver = "2"
 
