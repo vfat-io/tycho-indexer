@@ -89,7 +89,7 @@ mock! {
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-        fn insert_contract<'life0, 'life1, 'async_trait>(
+        fn upsert_contract<'life0, 'life1, 'async_trait>(
             &'life0 self,
             new: &'life1 Contract,
         ) -> ::core::pin::Pin<

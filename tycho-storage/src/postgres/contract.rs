@@ -952,7 +952,12 @@ impl PostgresGateway {
             .collect()
     }
 
-    pub async fn insert_contract(
+    /// Upsert contract
+    ///
+    /// Inserts a contract or updates it if it already exists. It will not update
+    /// contract balance or contract code if they already exist though. Since a separate
+    /// method exists for updating these related components.
+    pub async fn upsert_contract(
         &self,
         new: &models::contract::Contract,
         db: &mut AsyncPgConnection,
@@ -1791,7 +1796,7 @@ mod test {
             ),
         );
         gateway
-            .insert_contract(&expected, &mut conn)
+            .upsert_contract(&expected, &mut conn)
             .await
             .unwrap();
 
