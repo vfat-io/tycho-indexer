@@ -47,9 +47,9 @@ pub fn transcode_ambient_balances(mut changes: BlockContractChanges) -> BlockCon
     changes
 }
 
-/// This post processor allow us to ignore any balance change if the component id and the token are the same.
-/// We had to add this for Balancer because when a EulerLinearPool is created it returns the minted
-/// pool tokens in the balance changes.
+/// This post processor allow us to ignore any balance change if the component id and the token are
+/// the same. We had to add this for Balancer because when a EulerLinearPool is created it returns
+/// the minted pool tokens in the balance changes.
 /// TODO: look into this and see if we can fix it on the substreams side.
 pub fn ignore_self_balances(mut changes: BlockContractChanges) -> BlockContractChanges {
     changes
@@ -58,7 +58,7 @@ pub fn ignore_self_balances(mut changes: BlockContractChanges) -> BlockContractC
         .for_each(|tx_changes| {
             tx_changes
                 .component_balances
-                .iter_mut()☝️
+                .iter_mut()
                 .for_each(|(_, balance)| {
                     balance.retain(|_, value| {
                         hex::encode(format!("{:#020x}", value.token).as_bytes()) !=
