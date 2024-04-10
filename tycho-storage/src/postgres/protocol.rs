@@ -1,16 +1,12 @@
-use super::{
-    maybe_lookup_block_ts, maybe_lookup_version_ts, orm,
-    orm::{Account, ComponentTVL, NewAccount},
-    schema, storage_error_from_diesel,
-    versioning::apply_delta_versioning,
-    PostgresError, PostgresGateway, WithTxHash,
-};
+use std::collections::{BTreeSet, HashMap, HashSet};
+
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
-use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{error, instrument, warn};
+use unicode_segmentation::UnicodeSegmentation;
+
 use tycho_core::{
     models::{
         self, Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType,
@@ -18,7 +14,14 @@ use tycho_core::{
     },
     storage::{BlockOrTimestamp, StorageError, Version},
 };
-use unicode_segmentation::UnicodeSegmentation;
+
+use super::{
+    maybe_lookup_block_ts, maybe_lookup_version_ts, orm,
+    orm::{Account, ComponentTVL, NewAccount},
+    schema, storage_error_from_diesel,
+    versioning::apply_delta_versioning,
+    PostgresError, PostgresGateway, WithTxHash,
+};
 
 // Private methods
 impl PostgresGateway {
@@ -709,6 +712,7 @@ impl PostgresGateway {
         &self,
         chain: Chain,
         addresses: Option<&[&Address]>,
+        min_quality: Option<i32>,
         pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::token::CurrencyToken>, StorageError> {
@@ -722,6 +726,12 @@ impl PostgresGateway {
 
         if let Some(addrs) = addresses {
             query = query.filter(schema::account::address.eq_any(addrs));
+        }
+
+        if let Some(min_quality) = min_quality {
+            // let min_quality =
+            // diesel::dsl::sql::<diesel::sql_types::BigInt>(&min_quality.to_string());
+            query = query.filter(schema::token::quality.ge(min_quality));
         }
 
         if let Some(pagination) = pagination_params {
@@ -1411,17 +1421,18 @@ impl PostgresGateway {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use tycho_core::{storage::BlockIdentifier, Bytes};
+    use std::str::FromStr;
 
     use diesel_async::AsyncConnection;
-    use ethers::types::U256;
+    use ethers::{prelude::H256, types::U256};
     use rstest::rstest;
     use serde_json::json;
 
+    use tycho_core::{storage::BlockIdentifier, Bytes};
+
     use crate::postgres::db_fixtures;
-    use ethers::prelude::H256;
-    use std::str::FromStr;
+
+    use super::*;
 
     type EVMGateway = PostgresGateway;
 
@@ -1490,18 +1501,42 @@ mod test {
 
         // insert tokens
         // Ethereum
-        let (account_id_weth, weth_id) =
-            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
-                .await;
-        let (_, usdc_id) =
-            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
-                .await;
-        let (_, dai_id) =
-            db_fixtures::insert_token(conn, chain_id, DAI.trim_start_matches("0x"), "DAI", 18)
-                .await;
-        let (_, lusd_id) =
-            db_fixtures::insert_token(conn, chain_id, LUSD.trim_start_matches("0x"), "LUSD", 18)
-                .await;
+        let (account_id_weth, weth_id) = db_fixtures::insert_token(
+            conn,
+            chain_id,
+            WETH.trim_start_matches("0x"),
+            "WETH",
+            18,
+            None,
+        )
+        .await;
+        let (_, usdc_id) = db_fixtures::insert_token(
+            conn,
+            chain_id,
+            USDC.trim_start_matches("0x"),
+            "USDC",
+            6,
+            None,
+        )
+        .await;
+        let (_, dai_id) = db_fixtures::insert_token(
+            conn,
+            chain_id,
+            DAI.trim_start_matches("0x"),
+            "DAI",
+            18,
+            Some(100i32),
+        )
+        .await;
+        let (_, lusd_id) = db_fixtures::insert_token(
+            conn,
+            chain_id,
+            LUSD.trim_start_matches("0x"),
+            "LUSD",
+            18,
+            Some(70i32),
+        )
+        .await;
 
         // ZK Sync
         db_fixtures::insert_token(
@@ -1510,6 +1545,7 @@ mod test {
             ZKSYNC_PEPE.trim_start_matches("0x"),
             "PEPE",
             6,
+            Some(0i32),
         )
         .await;
 
@@ -2351,21 +2387,21 @@ mod test {
 
         // get all eth tokens (no address filter)
         let tokens = gw
-            .get_tokens(Chain::Ethereum, None, None, &mut conn)
+            .get_tokens(Chain::Ethereum, None, None, None, &mut conn)
             .await
             .unwrap();
         assert_eq!(tokens.len(), 4);
 
         // get weth and usdc
         let tokens = gw
-            .get_tokens(Chain::Ethereum, Some(&[&WETH.into(), &USDC.into()]), None, &mut conn)
+            .get_tokens(Chain::Ethereum, Some(&[&WETH.into(), &USDC.into()]), None, None, &mut conn)
             .await
             .unwrap();
         assert_eq!(tokens.len(), 2);
 
         // get weth
         let tokens = gw
-            .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), None, &mut conn)
+            .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), None, None, &mut conn)
             .await
             .unwrap();
         assert_eq!(tokens.len(), 1);
@@ -2384,6 +2420,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 None,
+                None,
                 Some(&PaginationParams { page: 0, page_size: 1 }),
                 &mut conn,
             )
@@ -2397,6 +2434,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 None,
+                None,
                 Some(&PaginationParams { page: 0, page_size: 0 }),
                 &mut conn,
             )
@@ -2408,6 +2446,7 @@ mod test {
         let tokens = gw
             .get_tokens(
                 Chain::Ethereum,
+                None,
                 None,
                 Some(&PaginationParams { page: 2, page_size: 1 }),
                 &mut conn,
@@ -2425,7 +2464,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let tokens = gw
-            .get_tokens(Chain::ZkSync, None, None, &mut conn)
+            .get_tokens(Chain::ZkSync, None, None, None, &mut conn)
             .await
             .unwrap();
 
@@ -2438,6 +2477,32 @@ mod test {
             &[Some(10)],
             Chain::ZkSync,
             0,
+        );
+
+        assert_eq!(tokens[0], expected_token);
+    }
+
+    #[tokio::test]
+    async fn test_get_tokens_with_80_quality() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let tokens = gw
+            .get_tokens(Chain::Ethereum, None, Some(80i32), None, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(tokens.len(), 1);
+
+        let expected_token = models::token::CurrencyToken::new(
+            &DAI.parse().unwrap(),
+            "DAI",
+            18,
+            10,
+            &[Some(10)],
+            Chain::Ethereum,
+            100,
         );
 
         assert_eq!(tokens[0], expected_token);
