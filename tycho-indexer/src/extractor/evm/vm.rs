@@ -263,7 +263,7 @@ where
                     let new: evm::Account = acc_update.ref_into_account(&update.tx);
                     info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
                     self.state_gateway
-                        .insert_contract(&(&new).into())
+                        .upsert_contract(&(&new).into())
                         .await?;
                 }
             }

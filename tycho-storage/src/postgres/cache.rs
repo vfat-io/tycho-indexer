@@ -44,7 +44,7 @@ pub(crate) enum WriteOp {
     // Simply keep last
     SaveExtractionState(ExtractionState),
     // Support saving a batch
-    InsertContract(Vec<models::contract::Contract>),
+    UpsertContract(Vec<models::contract::Contract>),
     // Simply merge
     UpdateContracts(Vec<(TxHash, models::contract::ContractDelta)>),
     // Simply merge
@@ -63,7 +63,7 @@ impl WriteOp {
             WriteOp::UpsertBlock(_) => "UpsertBlock",
             WriteOp::UpsertTx(_) => "UpsertTx",
             WriteOp::SaveExtractionState(_) => "SaveExtractionState",
-            WriteOp::InsertContract(_) => "InsertContract",
+            WriteOp::UpsertContract(_) => "UpsertContract",
             WriteOp::UpdateContracts(_) => "UpdateContracts",
             WriteOp::InsertProtocolComponents(_) => "InsertProtocolComponents",
             WriteOp::InsertTokens(_) => "InsertTokens",
@@ -76,7 +76,7 @@ impl WriteOp {
         match self {
             WriteOp::UpsertBlock(_) => 0,
             WriteOp::UpsertTx(_) => 1,
-            WriteOp::InsertContract(_) => 2,
+            WriteOp::UpsertContract(_) => 2,
             WriteOp::UpdateContracts(_) => 3,
             WriteOp::InsertTokens(_) => 4,
             WriteOp::InsertProtocolComponents(_) => 5,
@@ -132,7 +132,7 @@ impl DBTransaction {
                     l.clone_from(r);
                     return Ok(());
                 }
-                (WriteOp::InsertContract(l), WriteOp::InsertContract(r)) => {
+                (WriteOp::UpsertContract(l), WriteOp::UpsertContract(r)) => {
                     self.size += r.len();
                     l.extend(r.iter().cloned());
                     return Ok(());
@@ -348,10 +348,10 @@ impl DBCacheWriteExecutor {
                     .save_state(state, conn)
                     .await?
             }
-            WriteOp::InsertContract(contracts) => {
+            WriteOp::UpsertContract(contracts) => {
                 for contract in contracts.iter() {
                     self.state_gateway
-                        .insert_contract(contract, conn)
+                        .upsert_contract(contract, conn)
                         .await?
                 }
             }
@@ -678,8 +678,8 @@ impl ContractStateGateway for CachedGateway {
             .await
     }
 
-    async fn insert_contract(&self, new: &Contract) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertContract(vec![new.clone()]))
+    async fn upsert_contract(&self, new: &Contract) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertContract(vec![new.clone()]))
             .await?;
         Ok(())
     }

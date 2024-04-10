@@ -4,7 +4,10 @@ use super::{
     PostgresError, PostgresGateway, WithTxHash,
 };
 use chrono::{NaiveDateTime, Utc};
-use diesel::prelude::*;
+use diesel::{
+    prelude::*,
+    upsert::{excluded, on_constraint},
+};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use ethers::utils::keccak256;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
@@ -949,7 +952,12 @@ impl PostgresGateway {
             .collect()
     }
 
-    pub async fn insert_contract(
+    /// Upsert contract
+    ///
+    /// Inserts a contract or updates it if it already exists. It will not update
+    /// contract balance or contract code if they already exist though. Since a separate
+    /// method exists for updating these related components.
+    pub async fn upsert_contract(
         &self,
         new: &models::contract::Contract,
         db: &mut AsyncPgConnection,
@@ -989,12 +997,22 @@ impl PostgresGateway {
         };
         let hex_addr = hex::encode(&new.address);
 
-        let account_id = diesel::insert_into(schema::account::table)
-            .values(new_contract.new_account())
-            .returning(schema::account::id)
-            .get_result::<i64>(db)
-            .await
-            .map_err(|err| storage_error_from_diesel(err, "Account", &hex_addr, None))?;
+        let account_id = {
+            use schema::account::dsl;
+            diesel::insert_into(schema::account::table)
+                .values(new_contract.new_account())
+                .on_conflict(on_constraint("account_chain_id_address_key"))
+                .do_update()
+                .set((
+                    dsl::title.eq(excluded(dsl::title)),
+                    dsl::creation_tx.eq(excluded(dsl::creation_tx)),
+                    dsl::created_at.eq(excluded(dsl::created_at)),
+                ))
+                .returning(schema::account::id)
+                .get_result::<i64>(db)
+                .await
+                .map_err(|err| storage_error_from_diesel(err, "Account", &hex_addr, None))?
+        };
 
         // we can only insert balance and contract_code if we have a creation transaction.
         if let Some(tx_id) = creation_tx_id {
@@ -1778,7 +1796,7 @@ mod test {
             ),
         );
         gateway
-            .insert_contract(&expected, &mut conn)
+            .upsert_contract(&expected, &mut conn)
             .await
             .unwrap();
 
