@@ -885,18 +885,17 @@ impl PostgresGateway {
                 .collect();
 
         for component_balance in component_balances.iter() {
-            token_ids
+            let token_id = token_ids
                 .get(&component_balance.token)
                 .ok_or_else(|| {
                     StorageError::NotFound("Token".to_string(), component_balance.token.to_string())
                 })?;
-            let token_id = token_ids[&component_balance.token];
             let (transaction_id, transaction_ts) =
                 transaction_ids_and_ts[&component_balance.modify_tx];
             let protocol_component_id = protocol_component_ids[&component_balance.component_id];
 
             let new_component_balance = orm::NewComponentBalance::new(
-                token_id,
+                *token_id,
                 component_balance.new_balance.clone(),
                 component_balance.balance_float,
                 None,
