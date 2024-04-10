@@ -480,7 +480,7 @@ pub trait ContractStateGateway {
     /// - A Result with Ok if the operation was successful, and an Err containing `StorageError` if
     ///   there was an issue inserting the contract into the database. E.g. if the contract already
     ///   existed.
-    async fn insert_contract(&self, new: &models::contract::Contract) -> Result<(), StorageError>;
+    async fn upsert_contract(&self, new: &models::contract::Contract) -> Result<(), StorageError>;
 
     /// Update multiple contracts
     ///
