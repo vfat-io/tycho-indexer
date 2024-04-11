@@ -1,16 +1,15 @@
-use mockall::mock;
 use std::collections::HashMap;
-
 #[cfg(test)]
-use crate::extractor::evm;
+use std::time::Duration;
+
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 #[cfg(test)]
 use ethers::prelude::H256;
 #[cfg(test)]
 use ethers::types::U256;
-#[cfg(test)]
-use std::time::Duration;
+use mockall::mock;
+
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
@@ -28,6 +27,9 @@ use tycho_core::{
     },
     Bytes,
 };
+
+#[cfg(test)]
+use crate::extractor::evm;
 
 mock! {
     pub Gateway {}
@@ -281,6 +283,7 @@ mock! {
             &'life0 self,
             chain: Chain,
             address: Option<&'life1 [&'life2 Address]>,
+            min_quality: Option<i32>,
             pagination_params: Option<&'life3 PaginationParams>,
         ) -> ::core::pin::Pin<
             Box<

@@ -1,11 +1,11 @@
-use super::{PostgresError, PostgresGateway};
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
+
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
 use lru::LruCache;
-use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use tokio::{
     sync::{
         mpsc,
@@ -15,6 +15,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{debug, info, trace};
+
 use tycho_core::{
     models::{
         self,
@@ -33,6 +34,8 @@ use tycho_core::{
     },
     Bytes,
 };
+
+use super::{PostgresError, PostgresGateway};
 
 /// Represents different types of database write operations.
 #[derive(PartialEq, Clone, Debug)]
@@ -797,6 +800,7 @@ impl ProtocolGateway for CachedGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
+        min_quality: Option<i32>,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<Vec<CurrencyToken>, StorageError> {
         let mut conn =
@@ -804,7 +808,7 @@ impl ProtocolGateway for CachedGateway {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_tokens(chain, address, pagination_params, &mut conn)
+            .get_tokens(chain, address, min_quality, pagination_params, &mut conn)
             .await
     }
 
@@ -898,11 +902,15 @@ impl Gateway for CachedGateway {}
 
 #[cfg(test)]
 mod test_serial_db {
-    use super::*;
-    use crate::postgres::{db_fixtures, testing::run_against_db};
-    use ethers::types::U256;
     use std::{collections::HashSet, str::FromStr};
+
+    use ethers::types::U256;
+
     use tycho_core::models::ChangeType;
+
+    use crate::postgres::{db_fixtures, testing::run_against_db};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_write_and_flush() {

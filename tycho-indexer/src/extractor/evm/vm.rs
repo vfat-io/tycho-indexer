@@ -1,29 +1,17 @@
-use super::{utils::format_duration, Block};
-use crate::{
-    extractor::{
-        evm::{self, chain_state::ChainState, token_pre_processor::TokenPreProcessorTrait},
-        revert_buffer::RevertBuffer,
-        ExtractionError, Extractor, ExtractorMsg,
-    },
-    pb::{
-        sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
-        tycho::evm::v1::BlockContractChanges,
-    },
-};
-use async_trait::async_trait;
-use chrono::NaiveDateTime;
-
-use crate::extractor::BlockUpdateWithCursor;
-use ethers::types::{H160, H256, U256};
-use mockall::automock;
-use prost::Message;
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
     sync::Arc,
 };
+
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
+use ethers::types::{H160, H256, U256};
+use mockall::automock;
+use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace, warn};
+
 use tycho_core::{
     models::{
         self, contract::Contract, protocol::ComponentBalance, Address, Chain, ChangeType,
@@ -36,6 +24,20 @@ use tycho_core::{
     Bytes,
 };
 use tycho_storage::postgres::cache::CachedGateway;
+
+use crate::{
+    extractor::{
+        evm::{self, chain_state::ChainState, token_pre_processor::TokenPreProcessorTrait},
+        revert_buffer::RevertBuffer,
+        BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
+    },
+    pb::{
+        sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
+        tycho::evm::v1::BlockContractChanges,
+    },
+};
+
+use super::{utils::format_duration, Block};
 
 struct Inner {
     cursor: Vec<u8>,
@@ -204,7 +206,7 @@ where
 
         let db_tokens = self
             .state_gateway
-            .get_tokens(self.chain, addresses_option, None)
+            .get_tokens(self.chain, addresses_option, None, None)
             .await?;
 
         for token in db_tokens {
@@ -885,10 +887,11 @@ where
 
 #[cfg(test)]
 mod test {
+    use tycho_core::models::{FinancialType, ImplementationType};
+
     use crate::pb::tycho::evm::v1::BlockEntityChanges;
 
     use super::*;
-    use tycho_core::models::{FinancialType, ImplementationType};
 
     fn ambient_protocol_types() -> HashMap<String, ProtocolType> {
         let mut ambient_protocol_types = HashMap::new();
@@ -1051,18 +1054,11 @@ mod test {
 /// between this component and the actual db interactions
 #[cfg(test)]
 mod test_serial_db {
-
-    use crate::{
-        extractor::evm::{
-            token_pre_processor::MockTokenPreProcessorTrait, AccountUpdate, ComponentBalance,
-            ProtocolComponent,
-        },
-        pb::sf::substreams::v1::BlockRef,
-    };
     use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
     use futures03::{stream, StreamExt};
     use hex::ToHex;
     use test_log::test;
+
     use tycho_core::{
         models::{ContractId, FinancialType, ImplementationType},
         storage::BlockOrTimestamp,
@@ -1070,6 +1066,14 @@ mod test_serial_db {
     use tycho_storage::{
         postgres,
         postgres::{builder::GatewayBuilder, db_fixtures, testing::run_against_db},
+    };
+
+    use crate::{
+        extractor::evm::{
+            token_pre_processor::MockTokenPreProcessorTrait, AccountUpdate, ComponentBalance,
+            ProtocolComponent,
+        },
+        pb::sf::substreams::v1::BlockRef,
     };
 
     use super::*;
@@ -1145,8 +1149,8 @@ mod test_serial_db {
 
         postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None).await;
         let chain_id = postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
-        db_fixtures::insert_token(&mut conn, chain_id, WETH_ADDRESS, "WETH", 18).await;
-        db_fixtures::insert_token(&mut conn, chain_id, USDC_ADDRESS, "USDC", 6).await;
+        db_fixtures::insert_token(&mut conn, chain_id, WETH_ADDRESS, "WETH", 18, None).await;
+        db_fixtures::insert_token(&mut conn, chain_id, USDC_ADDRESS, "USDC", 6, None).await;
 
         let db_url = std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
         let (cached_gw, _jh) = GatewayBuilder::new(db_url.as_str())
@@ -1372,7 +1376,7 @@ mod test_serial_db {
             assert_eq!(res, exp);
 
             let tokens = cached_gw
-                .get_tokens(Chain::Ethereum, None, None)
+                .get_tokens(Chain::Ethereum, None, None, None)
                 .await
                 .unwrap();
             assert_eq!(tokens.len(), 2);
@@ -1474,7 +1478,7 @@ mod test_serial_db {
                 None,
                 Some(ImplementationType::Vm),
             )
-            .await;
+                .await;
 
             db_fixtures::insert_protocol_type(
                 &mut conn,
@@ -1483,7 +1487,7 @@ mod test_serial_db {
                 None,
                 Some(ImplementationType::Vm),
             )
-            .await;
+                .await;
 
             let (cached_gw, _gw_writer_thread) = GatewayBuilder::new(database_url.as_str())
                 .set_chains(&[Chain::Ethereum])
@@ -1515,8 +1519,8 @@ mod test_serial_db {
                 None,
                 5,
             )
-            .await
-            .expect("Failed to create extractor");
+                .await
+                .expect("Failed to create extractor");
 
             // Send a sequence of block scoped data.
             stream::iter(get_inp_sequence())
@@ -1627,7 +1631,7 @@ mod test_serial_db {
                 &block_account_expected
             );
         })
-        .await;
+            .await;
     }
 
     fn get_inp_sequence(

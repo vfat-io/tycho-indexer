@@ -4,11 +4,13 @@
 //! be very simple and ideally not contain any business logic.
 //!
 //! Structs in here implement utoipa traits so they can be used to derive an OpenAPI schema.
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::fmt::Display;
 use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -821,7 +823,8 @@ pub struct TokensRequestBody {
     #[serde(rename = "tokenAddresses")]
     #[schema(value_type=Option<Vec<String>>)]
     pub token_addresses: Option<Vec<Bytes>>,
-
+    #[serde(default)]
+    pub min_quality: Option<i32>,
     #[serde(default)]
     pub pagination: PaginationParams,
 }
