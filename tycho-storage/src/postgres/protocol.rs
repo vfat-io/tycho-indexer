@@ -13,6 +13,7 @@ use tycho_core::{
         PaginationParams, StoreVal, TxHash,
     },
     storage::{BlockOrTimestamp, StorageError, Version},
+    Bytes,
 };
 
 use super::{
@@ -181,8 +182,21 @@ impl PostgresGateway {
         let orm_protocol_components = query
             .load::<(orm::ProtocolComponent, TxHash)>(conn)
             .await
-            .map_err(PostgresError::from)?;
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .map(|(pc, txh)| (pc, Some(txh)))
+            .collect();
 
+        self.build_protocol_components(orm_protocol_components, chain, conn)
+            .await
+    }
+
+    async fn build_protocol_components(
+        &self,
+        orm_protocol_components: Vec<(orm::ProtocolComponent, Option<TxHash>)>,
+        chain: &Chain,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError> {
         let protocol_component_ids = orm_protocol_components
             .iter()
             .map(|(pc, _)| pc.id)
@@ -275,11 +289,52 @@ impl PostgresGateway {
                     contracts_by_pc,
                     static_attributes,
                     ChangeType::Creation,
-                    tx_hash,
+                    tx_hash.unwrap_or(Bytes::from(&[0; 32])),
                     pc.created_at,
                 ))
             })
             .collect()
+    }
+
+    pub async fn get_protocol_components_by_tokens(
+        &self,
+        chain: &Chain,
+        tokens: Option<&[Address]>,
+        min_balance: Option<f64>,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError> {
+        let chain_id = self.get_chain_id(chain);
+        let mut query = schema::protocol_component::table
+            .select(orm::ProtocolComponent::as_select())
+            .inner_join(schema::protocol_component_holds_token::table)
+            .inner_join(schema::component_balance::table)
+            .filter(schema::protocol_component::chain_id.eq(chain_id))
+            .filter(schema::component_balance::balance_float.ge(min_balance.unwrap_or(0f64)))
+            .filter(schema::component_balance::valid_to.is_null())
+            .distinct_on(schema::protocol_component::id)
+            .into_boxed();
+
+        if let Some(addresses) = tokens {
+            let token_ids: Vec<i64> = schema::token::table
+                .select(schema::token::id)
+                .inner_join(schema::account::table)
+                .filter(schema::account::address.eq_any(addresses))
+                .get_results(conn)
+                .await
+                .map_err(PostgresError::from)?;
+            query = query.filter(schema::component_balance::token_id.eq_any(token_ids));
+        }
+
+        let orm_components = query
+            .get_results(conn)
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .map(|pc| (pc, None))
+            .collect();
+
+        self.build_protocol_components(orm_components, chain, conn)
+            .await
     }
 
     pub async fn add_protocol_components(
@@ -2950,6 +3005,39 @@ mod test {
             .into_iter()
             .map(|comp| comp.id)
             .collect::<HashSet<_>>();
+
+        assert_eq!(res, exp);
+    }
+
+    #[rstest]
+    #[case::dai(&[DAI], &["state3"])]
+    #[case::weth(&[WETH], &["state1", "state3"])]
+    #[tokio::test]
+    async fn test_get_protocol_components_by_tokens(#[case] tokens: &[&str], #[case] exp: &[&str]) {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp = exp
+            .into_iter()
+            .map(|&s| s.to_owned())
+            .collect::<Vec<_>>();
+        let tokens = tokens
+            .iter()
+            .map(|s| Bytes::from(*s))
+            .collect::<Vec<_>>();
+
+        let res = gw
+            .get_protocol_components_by_tokens(
+                &Chain::Ethereum,
+                Some(&tokens),
+                Some(1.0),
+                &mut conn,
+            )
+            .await
+            .expect("retrieving components failed")
+            .into_iter()
+            .map(|pc| pc.id.clone())
+            .collect::<Vec<_>>();
 
         assert_eq!(res, exp);
     }
