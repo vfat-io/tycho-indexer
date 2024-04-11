@@ -369,7 +369,7 @@ impl ExtractorBuilder {
                         self.config.name.clone(),
                         if self.config.name == "vm:ambient" {
                             Some(transcode_ambient_balances)
-                        } else if self.config.name == "balancer" {
+                        } else if self.config.name == "vm:balancer" {
                             Some(ignore_self_balances)
                         } else {
                             None
