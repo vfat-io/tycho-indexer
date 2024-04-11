@@ -94,15 +94,12 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
                 (Err(_), Err(_)) => (address.to_string(), 18, 0),
             };
 
-            match token_quality {
-                TokenQuality::Bad { reason } => {
-                    warn!("Token quality detected as bad: {} reason: {}", address, reason);
-                    // Flag this token as bad using quality, an external script is responsible for
-                    // analyzing these tokens again.
-                    quality = 10;
-                }
-                _ => {}
-            }
+            if let TokenQuality::Bad { reason } = token_quality {
+                warn!("Token quality detected as bad: {} reason: {}", address, reason);
+                // Flag this token as bad using quality, an external script is responsible for
+                // analyzing these tokens again.
+                quality = 10;
+            };
 
             // If quality is 100 but it's a fee token, set quality to 50
             if quality == 100 && tax.map_or(false, |tax_value| tax_value > U256::zero()) {
@@ -129,7 +126,7 @@ mod tests {
     use super::*;
     use ethrpc::{http::HttpTransport, Web3Transport};
     use reqwest::Client;
-    use std::{collections::HashMap, env, str::FromStr};
+    use std::{collections::HashMap, env};
     use token_analyzer::TokenFinder;
     use url::Url;
 

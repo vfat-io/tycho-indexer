@@ -9,7 +9,6 @@ use chrono::NaiveDateTime;
 
 use token_analyzer::TokenFinder;
 
-use crate::extractor::BlockUpdateWithCursor;
 use ethers::types::{H160, H256, U256};
 use mockall::automock;
 use prost::Message;

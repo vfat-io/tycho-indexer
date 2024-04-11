@@ -10,11 +10,6 @@ use ethers::types::{H160, H256, U256};
 use mockall::automock;
 use prost::Message;
 
-use std::{
-    collections::{HashMap, HashSet},
-    str::FromStr,
-    sync::Arc,
-};
 use token_analyzer::TokenFinder;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace, warn};
