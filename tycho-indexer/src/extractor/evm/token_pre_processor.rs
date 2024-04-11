@@ -14,6 +14,7 @@ use token_analyzer::{
     BadTokenDetecting, TokenQuality,
 };
 use tracing::{instrument, warn};
+use web3::types::BlockNumber;
 
 use ethrpc::Web3;
 use tycho_core::models::Chain;
@@ -31,6 +32,7 @@ pub trait TokenPreProcessorTrait: Send + Sync {
         &self,
         addresses: Vec<H160>,
         token_finder: Arc<dyn TokenOwnerFinding>,
+        block: BlockNumber,
     ) -> Vec<ERC20Token>;
 }
 
@@ -50,6 +52,7 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
         &self,
         addresses: Vec<H160>,
         token_finder: Arc<dyn TokenOwnerFinding>,
+        block: BlockNumber,
     ) -> Vec<ERC20Token> {
         let mut tokens_info = Vec::new();
 
@@ -76,8 +79,8 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
                     .unwrap(),
             };
 
-            let (_quality, gas, tax) = trace_call
-                .detect(address)
+            let (token_quality, gas, tax) = trace_call
+                .detect(address, block)
                 .await
                 .unwrap_or_else(|e| {
                     warn!("Detection failed: {:?}", e);
@@ -90,6 +93,16 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
                 (Err(_), Ok(decimals)) => (address.to_string(), decimals, 0),
                 (Err(_), Err(_)) => (address.to_string(), 18, 0),
             };
+
+            match token_quality {
+                TokenQuality::Bad { reason } => {
+                    warn!("Token quality detected as bad: {} reason: {}", address, reason);
+                    // Flag this token as bad using quality, an external script is responsible for
+                    // analyzing these tokens again.
+                    quality = 10;
+                }
+                _ => {}
+            }
 
             // If quality is 100 but it's a fee token, set quality to 50
             if quality == 100 && tax.map_or(false, |tax_value| tax_value > U256::zero()) {
@@ -149,7 +162,7 @@ mod tests {
         ];
 
         let results = processor
-            .get_tokens(addresses, Arc::new(tf))
+            .get_tokens(addresses, Arc::new(tf), web3::types::BlockNumber::Number(1.into()))
             .await;
         assert_eq!(results.len(), 3);
         let relevant_attrs: Vec<(String, u32, u32)> = results

@@ -238,10 +238,54 @@ where
             .get_new_tokens(protocol_components)
             .await?;
         if !new_tokens_addresses.is_empty() {
-            let tf = TokenFinder::new(HashMap::new());
+            let balance_map: HashMap<H160, (H160, U256)> = changes
+                .tx_updates
+                .iter()
+                .flat_map(|tx| {
+                    tx.protocol_components
+                        .iter()
+                        // Filtering to keep only components with ChangeType::Creation
+                        .filter(|(_, c_change)| c_change.change == ChangeType::Creation)
+                        .filter_map(|(c_id, change)| {
+                            change
+                                .contract_ids
+                                // TODO: Currently, it's assumed that the pool is always the first
+                                // contract in the protocol component. This approach is a temporary
+                                // workaround and needs to be revisited for a more robust solution.
+                                .first()
+                                .map(|addr| (c_id, addr))
+                        })
+                        .filter_map(|(c_id, addr)| {
+                            tx.component_balances
+                                .get(c_id)
+                                .map(|balances| {
+                                    balances
+                                        .iter()
+                                        .map(move |(token, balance)| {
+                                            (
+                                                *token,
+                                                (
+                                                    *addr,
+                                                    U256::from_big_endian(
+                                                        &balance.balance.clone().to_vec(),
+                                                    ),
+                                                ),
+                                            ) // We currently only keep the lastest created pool for
+                                              // a token
+                                        })
+                                })
+                        })
+                        .flatten()
+                })
+                .collect::<HashMap<_, _>>();
+            let tf = TokenFinder::new(balance_map);
             let new_tokens = self
                 .token_pre_processor
-                .get_tokens(new_tokens_addresses, Arc::new(tf))
+                .get_tokens(
+                    new_tokens_addresses,
+                    Arc::new(tf),
+                    web3::types::BlockNumber::Number(changes.block.number.into()),
+                )
                 .await
                 .iter()
                 .map(Into::into)
@@ -1134,7 +1178,7 @@ mod test_serial_db {
         ];
         mock_processor
             .expect_get_tokens()
-            .returning(move |_, _| new_tokens.clone());
+            .returning(move |_, _, _| new_tokens.clone());
 
         mock_processor
     }
