@@ -33,6 +33,7 @@ pub type SyncResult<T> = anyhow::Result<T>;
 pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
     extractor_id: ExtractorIdentity,
     is_native: bool,
+    #[allow(dead_code)]
     retrieve_balances: bool,
     rpc_client: R,
     deltas_client: D,
@@ -48,21 +49,22 @@ struct SharedState {
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize)]
-pub struct VMSnapshot {
-    pub state: HashMap<Bytes, ResponseAccount>,
-    pub component: ProtocolComponent,
-}
-
-#[derive(Clone, PartialEq, Debug, Serialize)]
-pub struct NativeSnapshot {
+pub struct ComponentWithState {
     pub state: ResponseProtocolState,
     pub component: ProtocolComponent,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize)]
-pub enum Snapshot {
-    VMSnapshot(VMSnapshot),
-    NativeSnapshot(NativeSnapshot),
+#[derive(Clone, PartialEq, Debug, Default, Serialize)]
+pub struct Snapshot {
+    states: HashMap<String, ComponentWithState>,
+    vm_storage: HashMap<Bytes, ResponseAccount>,
+}
+
+impl Snapshot {
+    fn extend(&mut self, other: Snapshot) {
+        self.states.extend(other.states);
+        self.vm_storage.extend(other.vm_storage);
+    }
 }
 
 #[derive(Clone, PartialEq, Debug, Default, Serialize)]
@@ -70,7 +72,7 @@ pub struct StateSyncMessage {
     /// The block number for this update.
     pub header: Header,
     /// Snapshot for new components.
-    pub snapshots: HashMap<String, Snapshot>,
+    pub snapshots: Snapshot,
     /// A single delta contains state updates for all tracked components, as well as additional
     /// information about the system components e.g. newly added components (even below tvl), tvl
     /// updates, balance updates.
@@ -83,8 +85,9 @@ impl StateSyncMessage {
     pub fn merge(mut self, other: Self) -> Self {
         // be careful with removed and snapshots attributes here, these can be ambiguous.
         self.removed_components
-            .retain(|k, _| !other.snapshots.contains_key(k));
+            .retain(|k, _| !other.snapshots.states.contains_key(k));
         self.snapshots
+            .states
             .retain(|k, _| !other.removed_components.contains_key(k));
 
         self.snapshots.extend(other.snapshots);
@@ -180,14 +183,44 @@ where
             return Ok(StateSyncMessage { header, ..Default::default() });
         }
 
-        if !self.is_native {
-            let contract_ids = tracked_components.get_contracts_by_component(ids);
+        let component_ids = tracked_components.get_tracked_component_ids();
+        let mut protocol_states = self
+            .rpc_client
+            .get_protocol_states_paginated(self.extractor_id.chain, &component_ids, &version, 50, 4)
+            .await?
+            .states
+            .into_iter()
+            .map(|state| (state.component_id.clone(), state))
+            .collect::<HashMap<_, _>>();
 
+        trace!(states=?&protocol_states, "Retrieved ProtocolStates");
+        let states = tracked_components
+            .components
+            .values()
+            .filter_map(|component| {
+                if let Some(state) = protocol_states.remove(&component.id) {
+                    Some((
+                        component.id.clone(),
+                        ComponentWithState { state, component: component.clone() },
+                    ))
+                } else if ids.contains(&&component.id) {
+                    // only emit error event if we requested this component
+                    let component_id = &component.id;
+                    error!(?component_id, "Missing state for native component!");
+                    None
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let contract_ids = tracked_components.get_contracts_by_component(ids.clone());
+        let vm_storage = if !contract_ids.is_empty() {
             let contract_states = self
                 .rpc_client
                 .get_contract_state(
                     self.extractor_id.chain,
-                    &StateRequestParameters::new(self.retrieve_balances),
+                    &StateRequestParameters::new(false),
                     &StateRequestBody::new(
                         Some(
                             contract_ids
@@ -205,101 +238,55 @@ where
                 .collect::<HashMap<_, _>>();
 
             trace!(states=?&contract_states, "Retrieved ContractState");
-            Ok(StateSyncMessage {
-                header,
-                // iteration over all component is not ideal for performance but reduces the
-                // required state and state updating. Since we e.g. have no mapping from
-                // contract_address to corresponding protocol component. Snapshots should not be
-                // retrieved too frequently, so we are ok for now. This can be optimised should it
-                // be required.
-                snapshots: tracked_components
-                    .components
-                    .values()
-                    .map(|comp| {
-                        let component_id = &comp.id;
-                        let account_snapshots: HashMap<_, _> = comp
-                            .contract_ids
-                            .iter()
-                            .filter_map(|contract_address| {
-                                // Cloning is essential to prevent mistakenly assuming a component
-                                // lacks associated state due to the m2m relationship between
-                                // contracts and components.
-                                if let Some(state) = contract_states.get(contract_address) {
-                                    Some((contract_address.clone(), state.clone()))
-                                } else if contract_ids.contains(contract_address) {
-                                    // only emit error even if we did actually request this address
-                                    error!(
-                                        ?contract_address,
-                                        ?component_id,
-                                        "Component with lacking state encountered!"
-                                    );
-                                    None
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        (
-                            component_id.clone(),
-                            Snapshot::VMSnapshot(VMSnapshot {
-                                component: comp.clone(),
-                                state: account_snapshots,
-                            }),
+
+            let contract_address_to_components = tracked_components
+                .components
+                .iter()
+                .filter_map(|(id, comp)| {
+                    if ids.contains(&id) {
+                        Some(
+                            comp.contract_ids
+                                .iter()
+                                .map(|address| (address.clone(), comp.id.clone())),
                         )
-                    })
-                    .collect(),
-                deltas: None,
-                removed_components: HashMap::new(),
-            })
+                    } else {
+                        None
+                    }
+                })
+                .flatten()
+                .fold(HashMap::<Bytes, Vec<String>>::new(), |mut acc, (addr, c_id)| {
+                    acc.entry(addr).or_default().push(c_id);
+                    acc
+                });
+
+            contract_ids
+                .iter()
+                .filter_map(|address| {
+                    if let Some(state) = contract_states.get(address) {
+                        Some((address.clone(), state.clone()))
+                    } else if let Some(ids) = contract_address_to_components.get(address) {
+                        // only emit error even if we did actually request this address
+                        error!(
+                            ?address,
+                            ?ids,
+                            "Component with lacking contract storage encountered!"
+                        );
+                        None
+                    } else {
+                        None
+                    }
+                })
+                .collect()
         } else {
-            let component_ids = tracked_components.get_tracked_component_ids();
+            HashMap::new()
+        };
 
-            let mut protocol_states = self
-                .rpc_client
-                .get_protocol_states_paginated(
-                    self.extractor_id.chain,
-                    &component_ids,
-                    &version,
-                    50,
-                    4,
-                )
-                .await?
-                .states
-                .into_iter()
-                .map(|state| (state.component_id.clone(), state))
-                .collect::<HashMap<_, _>>();
-
-            trace!(states=?&protocol_states, "Retrieved ProtocolStates");
-            Ok(StateSyncMessage {
-                header,
-                // actually this may be improved by iterating over the requested ids, it is kept
-                // similar to the contract state only for consistency reasons.
-                snapshots: tracked_components
-                    .components
-                    .values()
-                    .filter_map(|component| {
-                        if let Some(state) = protocol_states.remove(&component.id) {
-                            Some((
-                                component.id.clone(),
-                                Snapshot::NativeSnapshot(NativeSnapshot {
-                                    state,
-                                    component: component.clone(),
-                                }),
-                            ))
-                        } else if ids.contains(&&component.id) {
-                            // only emit error event if we requested this component
-                            let component_id = &component.id;
-                            error!(?component_id, "Missing state for native component!");
-                            None
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-                deltas: None,
-                removed_components: HashMap::new(),
-            })
-        }
+        Ok(StateSyncMessage {
+            header,
+            snapshots: Snapshot { states, vm_storage },
+            deltas: None,
+            removed_components: HashMap::new(),
+        })
     }
 
     /// Main method that does all the work.
@@ -352,7 +339,7 @@ where
             });
 
         let n_components = tracker.components.len();
-        let n_snapshots = snapshot.snapshots.len();
+        let n_snapshots = snapshot.snapshots.states.len();
         info!(n_components, n_snapshots, "Initial snapshot retrieved, starting delta message feed");
 
         {
@@ -518,8 +505,8 @@ mod test {
         feed::{
             component_tracker::{ComponentFilter, ComponentTracker},
             synchronizer::{
-                NativeSnapshot, ProtocolStateSynchronizer, Snapshot, StateSyncMessage,
-                StateSynchronizer, VMSnapshot,
+                ComponentWithState, ProtocolStateSynchronizer, Snapshot, StateSyncMessage,
+                StateSynchronizer,
             },
             Header,
         },
@@ -528,7 +515,7 @@ mod test {
     };
     use async_trait::async_trait;
     use mockall::predicate::always;
-    use std::{sync::Arc, time::Duration};
+    use std::{collections::HashMap, sync::Arc, time::Duration};
     use test_log::test;
     use tokio::{
         sync::mpsc::{channel, Receiver, Sender},
@@ -682,19 +669,19 @@ mod test {
         let components_arg = ["Component1".to_string()];
         let exp = StateSyncMessage {
             header: header.clone(),
-            snapshots: state_snapshot_native()
-                .states
-                .into_iter()
-                .map(|state| {
-                    (
-                        state.component_id.clone(),
-                        Snapshot::NativeSnapshot(NativeSnapshot {
-                            state,
-                            component: component.clone(),
-                        }),
-                    )
-                })
-                .collect(),
+            snapshots: Snapshot {
+                states: state_snapshot_native()
+                    .states
+                    .into_iter()
+                    .map(|state| {
+                        (
+                            state.component_id.clone(),
+                            ComponentWithState { state, component: component.clone() },
+                        )
+                    })
+                    .collect(),
+                vm_storage: HashMap::new(),
+            },
             deltas: None,
             removed_components: Default::default(),
         };
@@ -720,6 +707,8 @@ mod test {
     async fn test_get_snapshots_vm() {
         let header = Header::default();
         let mut rpc = MockRPCClient::new();
+        rpc.expect_get_protocol_states()
+            .returning(|_, _, _| Ok(state_snapshot_native()));
         rpc.expect_get_contract_state()
             .returning(|_, _, _| Ok(state_snapshot_vm()));
         let state_sync = with_mocked_clients(false, Some(rpc), None);
@@ -740,19 +729,25 @@ mod test {
         let components_arg = ["Component1".to_string()];
         let exp = StateSyncMessage {
             header: header.clone(),
-            snapshots: [(
-                component.id.clone(),
-                Snapshot::VMSnapshot(VMSnapshot {
-                    state: state_snapshot_vm()
-                        .accounts
-                        .into_iter()
-                        .map(|state| (state.address.clone(), state))
-                        .collect(),
-                    component: component.clone(),
-                }),
-            )]
-            .into_iter()
-            .collect(),
+            snapshots: Snapshot {
+                states: [(
+                    component.id.clone(),
+                    ComponentWithState {
+                        state: ResponseProtocolState {
+                            component_id: "Component1".to_string(),
+                            ..Default::default()
+                        },
+                        component: component.clone(),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+                vm_storage: state_snapshot_vm()
+                    .accounts
+                    .into_iter()
+                    .map(|state| (state.address.clone(), state))
+                    .collect(),
+            },
             deltas: None,
             removed_components: Default::default(),
         };
@@ -956,36 +951,39 @@ mod test {
                 parent_hash: Bytes::from("0x01"),
                 revert: false,
             },
-            snapshots: [
-                (
-                    "Component1".to_string(),
-                    Snapshot::NativeSnapshot(NativeSnapshot {
-                        state: ResponseProtocolState {
-                            component_id: "Component1".to_string(),
-                            ..Default::default()
+            snapshots: Snapshot {
+                states: [
+                    (
+                        "Component1".to_string(),
+                        ComponentWithState {
+                            state: ResponseProtocolState {
+                                component_id: "Component1".to_string(),
+                                ..Default::default()
+                            },
+                            component: ProtocolComponent {
+                                id: "Component1".to_string(),
+                                ..Default::default()
+                            },
                         },
-                        component: ProtocolComponent {
-                            id: "Component1".to_string(),
-                            ..Default::default()
+                    ),
+                    (
+                        "Component2".to_string(),
+                        ComponentWithState {
+                            state: ResponseProtocolState {
+                                component_id: "Component2".to_string(),
+                                ..Default::default()
+                            },
+                            component: ProtocolComponent {
+                                id: "Component2".to_string(),
+                                ..Default::default()
+                            },
                         },
-                    }),
-                ),
-                (
-                    "Component2".to_string(),
-                    Snapshot::NativeSnapshot(NativeSnapshot {
-                        state: ResponseProtocolState {
-                            component_id: "Component2".to_string(),
-                            ..Default::default()
-                        },
-                        component: ProtocolComponent {
-                            id: "Component2".to_string(),
-                            ..Default::default()
-                        },
-                    }),
-                ),
-            ]
-            .into_iter()
-            .collect(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+                vm_storage: HashMap::new(),
+            },
             deltas: Some(deltas[1].clone()),
             removed_components: Default::default(),
         };
@@ -997,24 +995,27 @@ mod test {
                 parent_hash: Bytes::from("0x02"),
                 revert: false,
             },
-            snapshots: [
-                // This is the new component we queried once it passed the tvl threshold.
-                (
-                    "Component3".to_string(),
-                    Snapshot::NativeSnapshot(NativeSnapshot {
-                        state: ResponseProtocolState {
-                            component_id: "Component3".to_string(),
-                            ..Default::default()
+            snapshots: Snapshot {
+                states: [
+                    // This is the new component we queried once it passed the tvl threshold.
+                    (
+                        "Component3".to_string(),
+                        ComponentWithState {
+                            state: ResponseProtocolState {
+                                component_id: "Component3".to_string(),
+                                ..Default::default()
+                            },
+                            component: ProtocolComponent {
+                                id: "Component3".to_string(),
+                                ..Default::default()
+                            },
                         },
-                        component: ProtocolComponent {
-                            id: "Component3".to_string(),
-                            ..Default::default()
-                        },
-                    }),
-                ),
-            ]
-            .into_iter()
-            .collect(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+                vm_storage: HashMap::new(),
+            },
             // Our deltas are empty and since merge methods are
             // tested in tycho-core we don't have much to do here.
             deltas: Some(Deltas::Native(BlockEntityChangesResult {

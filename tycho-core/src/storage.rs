@@ -1,4 +1,10 @@
 //! Storage traits used by Tycho
+use std::{collections::HashMap, fmt::Display};
+
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
+use thiserror::Error;
+
 use crate::{
     dto,
     models::{
@@ -9,10 +15,6 @@ use crate::{
     },
     Bytes,
 };
-use async_trait::async_trait;
-use chrono::NaiveDateTime;
-use std::{collections::HashMap, fmt::Display};
-use thiserror::Error;
 
 /// Identifies a block in storage.
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
@@ -333,6 +335,7 @@ pub trait ProtocolGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
+        min_quality: Option<i32>,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<Vec<models::token::CurrencyToken>, StorageError>;
 
@@ -480,7 +483,7 @@ pub trait ContractStateGateway {
     /// - A Result with Ok if the operation was successful, and an Err containing `StorageError` if
     ///   there was an issue inserting the contract into the database. E.g. if the contract already
     ///   existed.
-    async fn insert_contract(&self, new: &models::contract::Contract) -> Result<(), StorageError>;
+    async fn upsert_contract(&self, new: &models::contract::Contract) -> Result<(), StorageError>;
 
     /// Update multiple contracts
     ///

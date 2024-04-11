@@ -1,22 +1,25 @@
 //! This module contains Tycho RPC implementation
-use crate::extractor::evm;
+use std::collections::HashSet;
+
 use actix_web::{web, HttpResponse};
 use anyhow::Error;
-
 use diesel_async::pooled_connection::deadpool;
-
-use crate::{
-    extractor::revert_buffer::{BlockNumberOrTimestamp, FinalityStatus},
-    services::deltas_buffer::{PendingDeltas, PendingDeltasError},
-};
-use std::collections::HashSet;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, warn};
+
 use tycho_core::{
     dto::{self, ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
     models::{Address, Chain, PaginationParams},
     storage::{BlockIdentifier, BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
     Bytes,
+};
+
+use crate::{
+    extractor::{
+        evm,
+        revert_buffer::{BlockNumberOrTimestamp, FinalityStatus},
+    },
+    services::deltas_buffer::{PendingDeltas, PendingDeltasError},
 };
 
 #[derive(Error, Debug)]
@@ -382,10 +385,11 @@ where
         debug!(?addresses_slice, "Getting tokens.");
 
         let converted_params: PaginationParams = (&request.pagination).into();
+        let min_quality = request.min_quality;
 
         match self
             .db_gateway
-            .get_tokens(*chain, addresses_slice, Some(&converted_params))
+            .get_tokens(*chain, addresses_slice, min_quality, Some(&converted_params))
             .await
         {
             Ok(tokens) => Ok(dto::TokensRequestResponse::new(
@@ -699,17 +703,20 @@ pub async fn protocol_delta<G: Gateway>(
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{evm_contract_slots, MockGateway};
+    use std::{collections::HashMap, str::FromStr};
+
     use actix_web::test;
     use chrono::{NaiveDateTime, Utc};
     use ethers::types::U256;
-    use std::{collections::HashMap, str::FromStr};
+
     use tycho_core::models::{
         contract::{Contract, ContractDelta},
         protocol::{ProtocolComponent, ProtocolComponentState, ProtocolComponentStateDelta},
         token::CurrencyToken,
         ChangeType,
     };
+
+    use crate::testing::{evm_contract_slots, MockGateway};
 
     use super::*;
 
@@ -894,7 +901,7 @@ mod tests {
         let mut gw = MockGateway::new();
         let mock_response = Ok(expected.clone());
         gw.expect_get_tokens()
-            .return_once(|_, _, _| Box::pin(async move { mock_response }));
+            .return_once(|_, _, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
 
         // request for 2 tokens that are in the DB (WETH and USDC)
@@ -903,6 +910,7 @@ mod tests {
                 USDC.parse::<Bytes>().unwrap(),
                 WETH.parse::<Bytes>().unwrap(),
             ]),
+            min_quality: None,
             pagination: dto::PaginationParams::default(),
         };
 

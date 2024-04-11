@@ -1,20 +1,15 @@
-use super::{token_pre_processor::TokenPreProcessorTrait, utils::format_duration};
-use crate::{
-    extractor::{
-        evm::{self, chain_state::ChainState, Block},
-        revert_buffer::RevertBuffer,
-        BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
-    },
-    pb::{
-        sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
-        tycho::evm::v1::BlockEntityChanges,
-    },
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::Arc,
 };
+
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use ethers::types::{H160, H256, U256};
 use mockall::automock;
 use prost::Message;
+
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
@@ -23,6 +18,7 @@ use std::{
 use token_analyzer::TokenFinder;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace, warn};
+
 use tycho_core::{
     models::{
         self,
@@ -35,6 +31,20 @@ use tycho_core::{
     Bytes,
 };
 use tycho_storage::postgres::cache::CachedGateway;
+
+use crate::{
+    extractor::{
+        evm::{self, chain_state::ChainState, Block},
+        revert_buffer::RevertBuffer,
+        BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
+    },
+    pb::{
+        sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
+        tycho::evm::v1::BlockEntityChanges,
+    },
+};
+
+use super::{token_pre_processor::TokenPreProcessorTrait, utils::format_duration};
 
 pub struct Inner {
     cursor: Vec<u8>,
@@ -185,7 +195,7 @@ where
 
         let db_tokens = self
             .state_gateway
-            .get_tokens(self.chain, Some(address_refs.as_slice()), None)
+            .get_tokens(self.chain, Some(address_refs.as_slice()), None, None)
             .await?;
 
         let db_token_addresses: HashSet<_> = db_tokens
@@ -993,21 +1003,21 @@ mod test {
 /// between this component and the actual db interactions
 #[cfg(test)]
 mod test_serial_db {
+    use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
+    use ethers::abi::AbiEncode;
+    use futures03::{stream, StreamExt};
+
+    use test_serial_db::evm::ProtocolChangesWithTx;
+    use tycho_core::models::{FinancialType, ImplementationType};
+    use tycho_storage::postgres::{
+        self, builder::GatewayBuilder, db_fixtures, testing::run_against_db,
+    };
 
     use crate::{
         extractor::evm::{
             token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, Transaction,
         },
         pb::sf::substreams::v1::BlockRef,
-    };
-    use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-    use ethers::abi::AbiEncode;
-    use futures03::{stream, StreamExt};
-    use test_serial_db::evm::ProtocolChangesWithTx;
-
-    use tycho_core::models::{FinancialType, ImplementationType};
-    use tycho_storage::postgres::{
-        self, builder::GatewayBuilder, db_fixtures, testing::run_against_db,
     };
 
     use super::*;
@@ -1239,8 +1249,10 @@ mod test_serial_db {
             let usdc_addr = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
             let usdt_addr = "dAC17F958D2ee523a2206206994597C13D831ec7";
 
-            postgres::db_fixtures::insert_token(&mut conn, chain_id, weth_addr, "WETH", 18).await;
-            postgres::db_fixtures::insert_token(&mut conn, chain_id, usdc_addr, "USDC", 6).await;
+            postgres::db_fixtures::insert_token(&mut conn, chain_id, weth_addr, "WETH", 18, None)
+                .await;
+            postgres::db_fixtures::insert_token(&mut conn, chain_id, usdc_addr, "USDC", 6, None)
+                .await;
 
             let tokens = HashSet::from([
                 H160::from_str(weth_addr).unwrap(), // WETH
@@ -1278,7 +1290,7 @@ mod test_serial_db {
                 None,
                 Some(ImplementationType::Custom),
             )
-            .await;
+                .await;
 
             db_fixtures::insert_protocol_type(
                 &mut conn,
@@ -1287,7 +1299,7 @@ mod test_serial_db {
                 None,
                 Some(ImplementationType::Custom),
             )
-            .await;
+                .await;
 
             let (cached_gw, _gw_writer_thread) = GatewayBuilder::new(database_url.as_str())
                 .set_chains(&[Chain::Ethereum])
@@ -1319,8 +1331,8 @@ mod test_serial_db {
                 None,
                 5,
             )
-            .await
-            .expect("Failed to create extractor");
+                .await
+                .expect("Failed to create extractor");
 
             // Send a sequence of block scoped data.
             stream::iter(get_inp_sequence())
@@ -1358,7 +1370,7 @@ mod test_serial_db {
                     hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
                     parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
                     chain: Chain::Ethereum,
-                    ts: NaiveDateTime::parse_from_str("1970-01-01T00:50:00", "%Y-%m-%dT%H:%M:%S").unwrap()
+                    ts: NaiveDateTime::parse_from_str("1970-01-01T00:50:00", "%Y-%m-%dT%H:%M:%S").unwrap(),
                 },
                 finalized_block_height: 1,
                 revert: true,
@@ -1386,7 +1398,7 @@ mod test_serial_db {
                         static_attributes: HashMap::new(),
                         change: ChangeType::Creation,
                         creation_tx: H256::from_str("0x000000000000000000000000000000000000000000000000000000000000c351").unwrap(),
-                        created_at: NaiveDateTime::parse_from_str("1970-01-01T01:23:20", "%Y-%m-%dT%H:%M:%S").unwrap()
+                        created_at: NaiveDateTime::parse_from_str("1970-01-01T01:23:20", "%Y-%m-%dT%H:%M:%S").unwrap(),
                     }),
                 ]),
                 deleted_protocol_components: HashMap::from([
@@ -1403,7 +1415,7 @@ mod test_serial_db {
                         static_attributes: HashMap::new(),
                         change: ChangeType::Deletion,
                         creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
-                        created_at: NaiveDateTime::parse_from_str("1970-01-01T01:06:40", "%Y-%m-%dT%H:%M:%S").unwrap()
+                        created_at: NaiveDateTime::parse_from_str("1970-01-01T01:06:40", "%Y-%m-%dT%H:%M:%S").unwrap(),
                     }),
                 ]),
                 component_balances: HashMap::from([
@@ -1432,7 +1444,7 @@ mod test_serial_db {
                 &block_entity_changes_result
             );
         })
-        .await;
+            .await;
     }
 
     fn get_inp_sequence(

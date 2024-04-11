@@ -1,16 +1,12 @@
-use super::{
-    maybe_lookup_block_ts, maybe_lookup_version_ts, orm,
-    orm::{Account, ComponentTVL, NewAccount},
-    schema, storage_error_from_diesel,
-    versioning::apply_delta_versioning,
-    PostgresError, PostgresGateway, WithTxHash,
-};
+use std::collections::{BTreeSet, HashMap, HashSet};
+
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
-use std::collections::{BTreeSet, HashMap, HashSet};
-use tracing::{instrument, warn};
+use tracing::{error, instrument, warn};
+use unicode_segmentation::UnicodeSegmentation;
+
 use tycho_core::{
     models::{
         self, Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType,
@@ -18,7 +14,14 @@ use tycho_core::{
     },
     storage::{BlockOrTimestamp, StorageError, Version},
 };
-use unicode_segmentation::UnicodeSegmentation;
+
+use super::{
+    maybe_lookup_block_ts, maybe_lookup_version_ts, orm,
+    orm::{Account, ComponentTVL, NewAccount},
+    schema, storage_error_from_diesel,
+    versioning::apply_delta_versioning,
+    PostgresError, PostgresGateway, WithTxHash,
+};
 
 // Private methods
 impl PostgresGateway {
@@ -38,53 +41,61 @@ impl PostgresGateway {
     /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
     fn _decode_protocol_states(
         &self,
-        balances: HashMap<ComponentId, HashMap<Address, models::protocol::ComponentBalance>>,
+        mut balances: HashMap<ComponentId, HashMap<Address, models::protocol::ComponentBalance>>,
         states_result: Result<Vec<(orm::ProtocolState, ComponentId)>, diesel::result::Error>,
         context: &str,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError> {
-        match states_result {
-            Ok(data_vec) => {
-                // Decode final state deltas. We can assume result is sorted by component_id.
-                // Therefore we can use slices to iterate over the data in groups of
-                // component_id.
+        let data_vec = states_result
+            .map_err(|err| storage_error_from_diesel(err, "ProtocolStates", context, None))?;
 
-                let mut protocol_states = Vec::new();
+        // Decode final state deltas. We can assume result is sorted by component_id.
+        // Therefore we can use slices to iterate over the data in groups of
+        // component_id.
+        let mut protocol_states = Vec::new();
 
-                let mut index = 0;
-                while index < data_vec.len() {
-                    let component_start = index;
-                    let current_component_id = &data_vec[index].1;
+        let mut index = 0;
+        while index < data_vec.len() {
+            let component_start = index;
+            let current_component_id = &data_vec[index].1;
 
-                    // Iterate until the component_id changes
-                    while index < data_vec.len() && &data_vec[index].1 == current_component_id {
-                        index += 1;
-                    }
-
-                    let states_slice = &data_vec[component_start..index];
-                    let protocol_balances: HashMap<Address, Balance> = balances
-                        .get(current_component_id)
-                        .cloned()
-                        .unwrap_or_else(HashMap::new)
-                        .into_iter()
-                        .map(|(key, balance)| (key, balance.new_balance))
-                        .collect();
-
-                    let protocol_state = models::protocol::ProtocolComponentState::new(
-                        current_component_id,
-                        states_slice
-                            .iter()
-                            .map(|x| (x.0.attribute_name.clone(), x.0.attribute_value.clone()))
-                            .collect(),
-                        protocol_balances,
-                    );
-
-                    protocol_states.push(protocol_state);
-                }
-                Ok(protocol_states)
+            // Iterate until the component_id changes
+            while index < data_vec.len() && &data_vec[index].1 == current_component_id {
+                index += 1;
             }
 
-            Err(err) => Err(storage_error_from_diesel(err, "ProtocolStates", context, None).into()),
+            let states_slice = &data_vec[component_start..index];
+            let protocol_balances: HashMap<Address, Balance> = balances
+                .remove(current_component_id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(key, balance)| (key, balance.new_balance))
+                .collect();
+
+            let protocol_state = models::protocol::ProtocolComponentState::new(
+                current_component_id,
+                states_slice
+                    .iter()
+                    .map(|x| (x.0.attribute_name.clone(), x.0.attribute_value.clone()))
+                    .collect(),
+                protocol_balances,
+            );
+
+            protocol_states.push(protocol_state);
         }
+
+        // add remaining balances as states with empty attributes
+        for (component_id, balances) in balances.into_iter() {
+            protocol_states.push(models::protocol::ProtocolComponentState::new(
+                component_id.as_str(),
+                HashMap::new(),
+                balances
+                    .into_iter()
+                    .map(|(key, balance)| (key, balance.new_balance))
+                    .collect(),
+            ))
+        }
+
+        Ok(protocol_states)
     }
 
     async fn _get_or_create_protocol_system_id(
@@ -701,6 +712,7 @@ impl PostgresGateway {
         &self,
         chain: Chain,
         addresses: Option<&[&Address]>,
+        min_quality: Option<i32>,
         pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::token::CurrencyToken>, StorageError> {
@@ -714,6 +726,12 @@ impl PostgresGateway {
 
         if let Some(addrs) = addresses {
             query = query.filter(schema::account::address.eq_any(addrs));
+        }
+
+        if let Some(min_quality) = min_quality {
+            // let min_quality =
+            // diesel::dsl::sql::<diesel::sql_types::BigInt>(&min_quality.to_string());
+            query = query.filter(schema::token::quality.ge(min_quality));
         }
 
         if let Some(pagination) = pagination_params {
@@ -885,13 +903,18 @@ impl PostgresGateway {
                 .collect();
 
         for component_balance in component_balances.iter() {
-            let token_id = token_ids[&component_balance.token];
+            let token_id = token_ids
+                .get(&component_balance.token)
+                .ok_or_else(|| {
+                    error!(?chain, ?component_balance.token, ?component_balance, "Token not found");
+                    StorageError::NotFound("Token".to_string(), component_balance.token.to_string())
+                })?;
             let (transaction_id, transaction_ts) =
                 transaction_ids_and_ts[&component_balance.modify_tx];
             let protocol_component_id = protocol_component_ids[&component_balance.component_id];
 
             let new_component_balance = orm::NewComponentBalance::new(
-                token_id,
+                *token_id,
                 component_balance.new_balance.clone(),
                 component_balance.balance_float,
                 None,
@@ -1398,17 +1421,18 @@ impl PostgresGateway {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use tycho_core::{storage::BlockIdentifier, Bytes};
+    use std::str::FromStr;
 
     use diesel_async::AsyncConnection;
-    use ethers::types::U256;
+    use ethers::{prelude::H256, types::U256};
     use rstest::rstest;
     use serde_json::json;
 
+    use tycho_core::{storage::BlockIdentifier, Bytes};
+
     use crate::postgres::db_fixtures;
-    use ethers::prelude::H256;
-    use std::str::FromStr;
+
+    use super::*;
 
     type EVMGateway = PostgresGateway;
 
@@ -1477,18 +1501,42 @@ mod test {
 
         // insert tokens
         // Ethereum
-        let (account_id_weth, weth_id) =
-            db_fixtures::insert_token(conn, chain_id, WETH.trim_start_matches("0x"), "WETH", 18)
-                .await;
-        let (_, usdc_id) =
-            db_fixtures::insert_token(conn, chain_id, USDC.trim_start_matches("0x"), "USDC", 6)
-                .await;
-        let (_, dai_id) =
-            db_fixtures::insert_token(conn, chain_id, DAI.trim_start_matches("0x"), "DAI", 18)
-                .await;
-        let (_, lusd_id) =
-            db_fixtures::insert_token(conn, chain_id, LUSD.trim_start_matches("0x"), "LUSD", 18)
-                .await;
+        let (account_id_weth, weth_id) = db_fixtures::insert_token(
+            conn,
+            chain_id,
+            WETH.trim_start_matches("0x"),
+            "WETH",
+            18,
+            None,
+        )
+        .await;
+        let (_, usdc_id) = db_fixtures::insert_token(
+            conn,
+            chain_id,
+            USDC.trim_start_matches("0x"),
+            "USDC",
+            6,
+            None,
+        )
+        .await;
+        let (_, dai_id) = db_fixtures::insert_token(
+            conn,
+            chain_id,
+            DAI.trim_start_matches("0x"),
+            "DAI",
+            18,
+            Some(100i32),
+        )
+        .await;
+        let (_, lusd_id) = db_fixtures::insert_token(
+            conn,
+            chain_id,
+            LUSD.trim_start_matches("0x"),
+            "LUSD",
+            18,
+            Some(70i32),
+        )
+        .await;
 
         // ZK Sync
         db_fixtures::insert_token(
@@ -1497,6 +1545,7 @@ mod test {
             ZKSYNC_PEPE.trim_start_matches("0x"),
             "PEPE",
             6,
+            Some(0i32),
         )
         .await;
 
@@ -1734,7 +1783,28 @@ mod test {
         .into_iter()
         .collect();
         protocol_state.attributes = attributes;
-        let expected = vec![protocol_state];
+
+        let expected = vec![
+            protocol_state,
+            models::protocol::ProtocolComponentState::new(
+                "state3",
+                HashMap::new(),
+                HashMap::from([
+                    (
+                        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                            .parse()
+                            .unwrap(),
+                        Balance::from(U256::exp10(18)),
+                    ),
+                    (
+                        "0x6b175474e89094c44da98b954eedeac495271d0f"
+                            .parse()
+                            .unwrap(),
+                        Balance::from(U256::from(2000) * U256::exp10(18)),
+                    ),
+                ]),
+            ),
+        ];
 
         let result = gateway
             .get_protocol_states(
@@ -2317,21 +2387,21 @@ mod test {
 
         // get all eth tokens (no address filter)
         let tokens = gw
-            .get_tokens(Chain::Ethereum, None, None, &mut conn)
+            .get_tokens(Chain::Ethereum, None, None, None, &mut conn)
             .await
             .unwrap();
         assert_eq!(tokens.len(), 4);
 
         // get weth and usdc
         let tokens = gw
-            .get_tokens(Chain::Ethereum, Some(&[&WETH.into(), &USDC.into()]), None, &mut conn)
+            .get_tokens(Chain::Ethereum, Some(&[&WETH.into(), &USDC.into()]), None, None, &mut conn)
             .await
             .unwrap();
         assert_eq!(tokens.len(), 2);
 
         // get weth
         let tokens = gw
-            .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), None, &mut conn)
+            .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), None, None, &mut conn)
             .await
             .unwrap();
         assert_eq!(tokens.len(), 1);
@@ -2350,6 +2420,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 None,
+                None,
                 Some(&PaginationParams { page: 0, page_size: 1 }),
                 &mut conn,
             )
@@ -2363,6 +2434,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 None,
+                None,
                 Some(&PaginationParams { page: 0, page_size: 0 }),
                 &mut conn,
             )
@@ -2374,6 +2446,7 @@ mod test {
         let tokens = gw
             .get_tokens(
                 Chain::Ethereum,
+                None,
                 None,
                 Some(&PaginationParams { page: 2, page_size: 1 }),
                 &mut conn,
@@ -2391,7 +2464,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let tokens = gw
-            .get_tokens(Chain::ZkSync, None, None, &mut conn)
+            .get_tokens(Chain::ZkSync, None, None, None, &mut conn)
             .await
             .unwrap();
 
@@ -2404,6 +2477,32 @@ mod test {
             &[Some(10)],
             Chain::ZkSync,
             0,
+        );
+
+        assert_eq!(tokens[0], expected_token);
+    }
+
+    #[tokio::test]
+    async fn test_get_tokens_with_80_quality() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let tokens = gw
+            .get_tokens(Chain::Ethereum, None, Some(80i32), None, &mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!(tokens.len(), 1);
+
+        let expected_token = models::token::CurrencyToken::new(
+            &DAI.parse().unwrap(),
+            "DAI",
+            18,
+            10,
+            &[Some(10)],
+            Chain::Ethereum,
+            100,
         );
 
         assert_eq!(tokens[0], expected_token);

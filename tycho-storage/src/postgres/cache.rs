@@ -1,11 +1,11 @@
-use super::{PostgresError, PostgresGateway};
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
+
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel_async::{
     pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
 };
 use lru::LruCache;
-use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use tokio::{
     sync::{
         mpsc,
@@ -15,6 +15,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{debug, info, trace};
+
 use tycho_core::{
     models::{
         self,
@@ -34,6 +35,8 @@ use tycho_core::{
     Bytes,
 };
 
+use super::{PostgresError, PostgresGateway};
+
 /// Represents different types of database write operations.
 #[derive(PartialEq, Clone, Debug)]
 pub(crate) enum WriteOp {
@@ -44,7 +47,7 @@ pub(crate) enum WriteOp {
     // Simply keep last
     SaveExtractionState(ExtractionState),
     // Support saving a batch
-    InsertContract(Vec<models::contract::Contract>),
+    UpsertContract(Vec<models::contract::Contract>),
     // Simply merge
     UpdateContracts(Vec<(TxHash, models::contract::ContractDelta)>),
     // Simply merge
@@ -63,7 +66,7 @@ impl WriteOp {
             WriteOp::UpsertBlock(_) => "UpsertBlock",
             WriteOp::UpsertTx(_) => "UpsertTx",
             WriteOp::SaveExtractionState(_) => "SaveExtractionState",
-            WriteOp::InsertContract(_) => "InsertContract",
+            WriteOp::UpsertContract(_) => "UpsertContract",
             WriteOp::UpdateContracts(_) => "UpdateContracts",
             WriteOp::InsertProtocolComponents(_) => "InsertProtocolComponents",
             WriteOp::InsertTokens(_) => "InsertTokens",
@@ -76,7 +79,7 @@ impl WriteOp {
         match self {
             WriteOp::UpsertBlock(_) => 0,
             WriteOp::UpsertTx(_) => 1,
-            WriteOp::InsertContract(_) => 2,
+            WriteOp::UpsertContract(_) => 2,
             WriteOp::UpdateContracts(_) => 3,
             WriteOp::InsertTokens(_) => 4,
             WriteOp::InsertProtocolComponents(_) => 5,
@@ -132,7 +135,7 @@ impl DBTransaction {
                     l.clone_from(r);
                     return Ok(());
                 }
-                (WriteOp::InsertContract(l), WriteOp::InsertContract(r)) => {
+                (WriteOp::UpsertContract(l), WriteOp::UpsertContract(r)) => {
                     self.size += r.len();
                     l.extend(r.iter().cloned());
                     return Ok(());
@@ -348,10 +351,10 @@ impl DBCacheWriteExecutor {
                     .save_state(state, conn)
                     .await?
             }
-            WriteOp::InsertContract(contracts) => {
+            WriteOp::UpsertContract(contracts) => {
                 for contract in contracts.iter() {
                     self.state_gateway
-                        .insert_contract(contract, conn)
+                        .upsert_contract(contract, conn)
                         .await?
                 }
             }
@@ -678,8 +681,8 @@ impl ContractStateGateway for CachedGateway {
             .await
     }
 
-    async fn insert_contract(&self, new: &Contract) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertContract(vec![new.clone()]))
+    async fn upsert_contract(&self, new: &Contract) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertContract(vec![new.clone()]))
             .await?;
         Ok(())
     }
@@ -797,6 +800,7 @@ impl ProtocolGateway for CachedGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
+        min_quality: Option<i32>,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<Vec<CurrencyToken>, StorageError> {
         let mut conn =
@@ -804,7 +808,7 @@ impl ProtocolGateway for CachedGateway {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_tokens(chain, address, pagination_params, &mut conn)
+            .get_tokens(chain, address, min_quality, pagination_params, &mut conn)
             .await
     }
 
@@ -898,11 +902,15 @@ impl Gateway for CachedGateway {}
 
 #[cfg(test)]
 mod test_serial_db {
-    use super::*;
-    use crate::postgres::{db_fixtures, testing::run_against_db};
-    use ethers::types::U256;
     use std::{collections::HashSet, str::FromStr};
+
+    use ethers::types::U256;
+
     use tycho_core::models::ChangeType;
+
+    use crate::postgres::{db_fixtures, testing::run_against_db};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_write_and_flush() {
