@@ -36,7 +36,7 @@ extractors:
     module_name: "map_pool_events"
 
   balancer:
-    name: "balancer"
+    name: "vm:balancer"
     chain: "ethereum"
     implementation_type: "Vm"
     sync_batch_size: 1000
