@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use ethers::types::{H160, U256};
 use trace_call::TokenOwnerFinding;
-
+use web3::types::BlockNumber;
 /// How well behaved a token is.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TokenQuality {
@@ -48,5 +48,9 @@ impl TokenOwnerFinding for TokenFinder {
 #[mockall::automock]
 #[async_trait::async_trait]
 pub trait BadTokenDetecting: Send + Sync {
-    async fn detect(&self, token: H160) -> Result<(TokenQuality, Option<U256>, Option<U256>)>;
+    async fn detect(
+        &self,
+        token: H160,
+        block: BlockNumber,
+    ) -> Result<(TokenQuality, Option<U256>, Option<U256>)>;
 }

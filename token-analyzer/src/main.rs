@@ -6,6 +6,7 @@ use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use reqwest::Client;
 use token_analyzer::{trace_call::TraceCallDetector, BadTokenDetecting, TokenFinder};
 use url::Url;
+use web3::types::BlockNumber;
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
@@ -19,10 +20,10 @@ async fn main() -> Result<(), ()> {
     ));
     let w3 = Web3::new(transport);
     let tf = TokenFinder::new(HashMap::from([(
-        H160::from_str("0x45804880De22913dAFE09f4980848ECE6EcbAf78").unwrap(),
+        H160::from_str("0x3A9FfF453d50D4Ac52A6890647b823379ba36B9E").unwrap(),
         (
-            H160::from_str("0x7d766B06e7164Be4196EE62E6036c9FCFF68107d").unwrap(),
-            U256::from_dec_str("11184000000").unwrap(),
+            H160::from_str("0x260E069deAd76baAC587B5141bB606Ef8b9Bab6c").unwrap(),
+            U256::from_dec_str("13042252617814040589").unwrap(),
         ),
     )]));
 
@@ -33,7 +34,10 @@ async fn main() -> Result<(), ()> {
     };
 
     let quality = trace_call
-        .detect(H160::from_str("0x45804880De22913dAFE09f4980848ECE6EcbAf78").unwrap())
+        .detect(
+            H160::from_str("0x3A9FfF453d50D4Ac52A6890647b823379ba36B9E").unwrap(),
+            BlockNumber::Latest,
+        )
         .await
         .unwrap();
 

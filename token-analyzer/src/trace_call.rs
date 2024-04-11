@@ -9,7 +9,7 @@ use ethrpc::Web3;
 use std::{cmp, fmt::Debug, sync::Arc};
 use web3::{
     signing::keccak256,
-    types::{BlockTrace, CallRequest, Res},
+    types::{BlockNumber, BlockTrace, CallRequest, Res},
 };
 
 /// Detects whether a token is "bad" (works in unexpected ways that are
@@ -36,8 +36,12 @@ pub trait TokenOwnerFinding: Send + Sync + Debug {
 
 #[async_trait::async_trait]
 impl BadTokenDetecting for TraceCallDetector {
-    async fn detect(&self, token: H160) -> Result<(TokenQuality, Option<U256>, Option<U256>)> {
-        let quality = self.detect_impl(token).await?;
+    async fn detect(
+        &self,
+        token: H160,
+        block: BlockNumber,
+    ) -> Result<(TokenQuality, Option<U256>, Option<U256>)> {
+        let quality = self.detect_impl(token, block).await?;
         tracing::debug!(?token, ?quality, "determined token quality");
         Ok(quality)
     }
@@ -52,6 +56,7 @@ impl TraceCallDetector {
     pub async fn detect_impl(
         &self,
         token: H160,
+        block: BlockNumber,
     ) -> Result<(TokenQuality, Option<U256>, Option<U256>)> {
         // Arbitrary amount that is large enough that small relative fees should be
         // visible.
@@ -95,7 +100,7 @@ impl TraceCallDetector {
         // yet (implicitly 0) causes an allocation.
         let request =
             self.create_trace_request(token, amount, take_from, TraceRequestType::SimpleTransfer);
-        let traces = trace_many::trace_many(request, &self.web3)
+        let traces = trace_many::trace_many(request, &self.web3, block)
             .await
             .context("trace_many")?;
 
@@ -118,7 +123,7 @@ impl TraceCallDetector {
             take_from,
             TraceRequestType::DoubleTransfer(middle_balance),
         );
-        let traces = trace_many::trace_many(request, &self.web3)
+        let traces = trace_many::trace_many(request, &self.web3, block)
             .await
             .context("trace_many")?;
         Self::handle_response(&traces, amount, middle_balance, take_from)

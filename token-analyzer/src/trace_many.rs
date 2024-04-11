@@ -8,7 +8,11 @@ use web3::{
 // Use the trace_callMany api https://openethereum.github.io/JSONRPC-trace-module#trace_callmany
 // api to simulate these call requests applied together one after another.
 // Err if communication with the node failed.
-pub async fn trace_many(requests: Vec<CallRequest>, web3: &Web3) -> Result<Vec<BlockTrace>> {
+pub async fn trace_many(
+    requests: Vec<CallRequest>,
+    web3: &Web3,
+    block: BlockNumber,
+) -> Result<Vec<BlockTrace>> {
     let transport = web3.transport();
     let requests = requests
         .into_iter()
@@ -16,7 +20,6 @@ pub async fn trace_many(requests: Vec<CallRequest>, web3: &Web3) -> Result<Vec<B
             Ok(vec![serde_json::to_value(request)?, serde_json::to_value(vec![TraceType::Trace])?])
         })
         .collect::<Result<Vec<_>>>()?;
-    let block = BlockNumber::Latest;
     let params = vec![serde_json::to_value(requests)?, serde_json::to_value(block)?];
     let response = transport
         .execute("trace_callMany", params)
