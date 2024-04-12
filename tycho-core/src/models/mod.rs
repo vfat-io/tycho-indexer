@@ -207,6 +207,12 @@ pub struct PaginationParams {
     pub page_size: i64,
 }
 
+impl PaginationParams {
+    pub fn new(page: i64, page_size: i64) -> Self {
+        Self { page, page_size }
+    }
+}
+
 impl From<&dto::PaginationParams> for PaginationParams {
     fn from(value: &dto::PaginationParams) -> Self {
         PaginationParams { page: value.page, page_size: value.page_size }

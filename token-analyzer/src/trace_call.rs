@@ -5,8 +5,10 @@ use anyhow::{bail, ensure, Context, Result};
 use contracts::ERC20;
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, PrivateKey};
 use ethers::types::{H160, U256};
-use ethrpc::Web3;
-use std::{cmp, fmt::Debug, sync::Arc};
+use ethrpc::{http::HttpTransport, Web3, Web3Transport};
+use reqwest::Client;
+use std::{cmp, fmt::Debug, str::FromStr, sync::Arc};
+use url::Url;
 use web3::{
     signing::keccak256,
     types::{BlockNumber, BlockTrace, CallRequest, Res},
@@ -36,6 +38,10 @@ pub trait TokenOwnerFinding: Send + Sync + Debug {
 
 #[async_trait::async_trait]
 impl BadTokenDetecting for TraceCallDetector {
+    /// Detects token quality
+    ///
+    /// # Returns
+    /// (quality, tax, gas)
     async fn detect(
         &self,
         token: H160,
@@ -53,6 +59,19 @@ enum TraceRequestType {
 }
 
 impl TraceCallDetector {
+    pub fn new(url: &str, finder: Arc<dyn TokenOwnerFinding>) -> Self {
+        Self {
+            web3: Web3::new(Web3Transport::new(HttpTransport::new(
+                Client::new(),
+                Url::from_str(url).unwrap(),
+                "transport".to_owned(),
+            ))),
+            finder,
+            // middle contract used to check for fees, set to cowswap settlement
+            settlement_contract: H160::from_str("0xc9f2e6ea1637E499406986ac50ddC92401ce1f58")
+                .unwrap(),
+        }
+    }
     pub async fn detect_impl(
         &self,
         token: H160,
