@@ -742,7 +742,7 @@ impl PostgresGateway {
         }
 
         let results = query
-            .order(schema::token::symbol.asc())
+            .order(schema::token::id.asc())
             .load::<(orm::Token, Address)>(conn)
             .await
             .map_err(|err| storage_error_from_diesel(err, "Token", &chain.to_string(), None))?;
