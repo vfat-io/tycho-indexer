@@ -907,6 +907,54 @@ impl PostgresGateway {
         Ok(())
     }
 
+    pub async fn update_tokens(
+        &self,
+        tokens: &[models::token::CurrencyToken],
+        conn: &mut AsyncPgConnection,
+    ) -> Result<(), StorageError> {
+        let address_to_db_id = {
+            let token_addresses: Vec<Address> = tokens
+                .iter()
+                .map(|t| t.address.clone())
+                .collect();
+            schema::account::table
+                .inner_join(schema::token::table)
+                .select((schema::account::address, schema::token::id))
+                .filter(schema::account::address.eq_any(token_addresses))
+                .get_results(conn)
+                .await
+                .map_err(PostgresError::from)?
+                .into_iter()
+                .collect::<HashMap<Bytes, i64>>()
+        };
+        use schema::token::dsl::*;
+        for t in tokens.iter() {
+            if let Some(db_id) = address_to_db_id.get(&t.address) {
+                let gas_val = t
+                    .gas
+                    .iter()
+                    .map(|v| v.map(|g| g as i64))
+                    .collect::<Vec<_>>();
+                diesel::update(schema::token::table)
+                    .set((
+                        symbol.eq(&t.symbol),
+                        decimals.eq(t.decimals as i32),
+                        tax.eq(t.tax as i64),
+                        quality.eq(t.quality as i32),
+                        gas.eq(gas_val),
+                    ))
+                    .filter(id.eq(db_id))
+                    .execute(conn)
+                    .await
+                    .map_err(PostgresError::from)?;
+            } else {
+                // TODO: add address as attribute
+                warn!(address=?&t.address, "Tried to update non existing token! Consider inserting it first!");
+            }
+        }
+        Ok(())
+    }
+
     pub async fn add_component_balances(
         &self,
         component_balances: &[models::protocol::ComponentBalance],
@@ -2628,6 +2676,31 @@ mod test {
         .unwrap()[0];
         assert_eq!(updated_weth_account, old_weth_account);
         assert!(inserted_account.id > updated_weth_account.id);
+    }
+
+    #[tokio::test]
+    async fn test_update_tokens() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let dai_address = Bytes::from(DAI);
+        let mut prev = gw
+            .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, &mut conn)
+            .await
+            .expect("failed to get old token")
+            .remove(0);
+        prev.gas = vec![Some(20000)];
+
+        gw.update_tokens(&[prev.clone()], &mut conn)
+            .await
+            .expect("failed to update tokens");
+        let updated = gw
+            .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, &mut conn)
+            .await
+            .expect("failed to get updated token")
+            .remove(0);
+
+        assert_eq!(updated, prev);
     }
 
     #[tokio::test]
