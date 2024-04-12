@@ -1531,7 +1531,7 @@ mod test {
     use rstest::rstest;
     use serde_json::json;
 
-    use tycho_core::{storage::BlockIdentifier, Bytes};
+    use tycho_core::storage::BlockIdentifier;
 
     use crate::postgres::db_fixtures;
 
@@ -2685,7 +2685,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
         let dai_address = Bytes::from(DAI);
         let mut prev = gw
-            .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, &mut conn)
+            .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, None, &mut conn)
             .await
             .expect("failed to get old token")
             .remove(0);
@@ -2695,7 +2695,7 @@ mod test {
             .await
             .expect("failed to update tokens");
         let updated = gw
-            .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, &mut conn)
+            .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, None, &mut conn)
             .await
             .expect("failed to get updated token")
             .remove(0);

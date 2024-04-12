@@ -55,6 +55,8 @@ pub(crate) enum WriteOp {
     // Simply merge
     InsertTokens(Vec<models::token::CurrencyToken>),
     // Simply merge
+    UpdateTokens(Vec<models::token::CurrencyToken>),
+    // Simply merge
     InsertComponentBalances(Vec<models::protocol::ComponentBalance>),
     // Simply merge
     UpsertProtocolState(Vec<(TxHash, models::protocol::ProtocolComponentStateDelta)>),
@@ -70,6 +72,7 @@ impl WriteOp {
             WriteOp::UpdateContracts(_) => "UpdateContracts",
             WriteOp::InsertProtocolComponents(_) => "InsertProtocolComponents",
             WriteOp::InsertTokens(_) => "InsertTokens",
+            WriteOp::UpdateTokens(_) => "UpdateTokens",
             WriteOp::InsertComponentBalances(_) => "InsertComponentBalances",
             WriteOp::UpsertProtocolState(_) => "UpsertProtocolState",
         }
@@ -82,10 +85,11 @@ impl WriteOp {
             WriteOp::UpsertContract(_) => 2,
             WriteOp::UpdateContracts(_) => 3,
             WriteOp::InsertTokens(_) => 4,
-            WriteOp::InsertProtocolComponents(_) => 5,
-            WriteOp::InsertComponentBalances(_) => 6,
-            WriteOp::UpsertProtocolState(_) => 7,
-            WriteOp::SaveExtractionState(_) => 8,
+            WriteOp::UpdateTokens(_) => 5,
+            WriteOp::InsertProtocolComponents(_) => 6,
+            WriteOp::InsertComponentBalances(_) => 7,
+            WriteOp::UpsertProtocolState(_) => 8,
+            WriteOp::SaveExtractionState(_) => 9,
         }
     }
 }
@@ -151,6 +155,11 @@ impl DBTransaction {
                     return Ok(());
                 }
                 (WriteOp::InsertTokens(l), WriteOp::InsertTokens(r)) => {
+                    self.size += r.len();
+                    l.extend(r.iter().cloned());
+                    return Ok(());
+                }
+                (WriteOp::UpdateTokens(l), WriteOp::InsertTokens(r)) => {
                     self.size += r.len();
                     l.extend(r.iter().cloned());
                     return Ok(());
@@ -376,6 +385,11 @@ impl DBCacheWriteExecutor {
             WriteOp::InsertTokens(tokens) => {
                 self.state_gateway
                     .add_tokens(tokens.as_slice(), conn)
+                    .await?
+            }
+            WriteOp::UpdateTokens(tokens) => {
+                self.state_gateway
+                    .update_tokens(tokens.as_slice(), conn)
                     .await?
             }
             WriteOp::InsertComponentBalances(balances) => {
@@ -737,6 +751,21 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    async fn get_protocol_components_by_tokens(
+        &self,
+        chain: &Chain,
+        tokens: Option<&[Address]>,
+        min_balance: Option<f64>,
+    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_protocol_components_by_tokens(chain, tokens, min_balance, &mut conn)
+            .await
+    }
+
     async fn add_protocol_components(&self, new: &[ProtocolComponent]) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertProtocolComponents(new.to_vec()))
             .await?;
@@ -823,6 +852,12 @@ impl ProtocolGateway for CachedGateway {
 
     async fn add_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertTokens(tokens.to_vec()))
+            .await?;
+        Ok(())
+    }
+
+    async fn update_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpdateTokens(tokens.to_vec()))
             .await?;
         Ok(())
     }

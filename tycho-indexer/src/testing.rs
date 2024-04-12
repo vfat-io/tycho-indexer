@@ -189,6 +189,28 @@ mock! {
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        fn get_protocol_components_by_tokens<'life0, 'life1, 'life2, 'async_trait>(
+            &'life0 self,
+            chain: &'life1 Chain,
+            tokens: Option<&'life2 [Address]>,
+            min_balance: Option<f64>,
+        ) -> ::core::pin::Pin<
+            Box<
+                dyn ::core::future::Future<
+                    Output = Result<
+                        Vec<ProtocolComponent>,
+                        StorageError,
+                    >,
+                > + ::core::marker::Send + 'async_trait,
+            >,
+        >
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            'life2: 'async_trait,
+            Self: 'async_trait;
+
+        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn add_protocol_components<'life0, 'life1, 'async_trait>(
             &'life0 self,
             new: &'life1 [ProtocolComponent],
@@ -317,6 +339,22 @@ mock! {
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn add_tokens<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            tokens: &'life1 [CurrencyToken],
+        ) -> ::core::pin::Pin<
+            Box<
+                dyn ::core::future::Future<
+                    Output = Result<(), StorageError>,
+                > + ::core::marker::Send + 'async_trait,
+            >,
+        >
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait;
+
+        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        fn update_tokens<'life0, 'life1, 'async_trait>(
             &'life0 self,
             tokens: &'life1 [CurrencyToken],
         ) -> ::core::pin::Pin<
