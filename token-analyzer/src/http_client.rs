@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-const USER_AGENT: &str = "cowprotocol-services/2.0.0";
+const USER_AGENT: &str = "propeller-token-analyzer";
 
 /// An HTTP client factory.
 ///

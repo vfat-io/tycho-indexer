@@ -1,3 +1,4 @@
+/// To run: cargo run --example run-analysis
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use anyhow::Result;
