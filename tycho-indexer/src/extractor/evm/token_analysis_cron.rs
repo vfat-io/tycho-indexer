@@ -139,6 +139,7 @@ async fn analyze_batch(
     Ok(())
 }
 
+#[cfg(test)]
 mod test {
     use crate::{
         extractor::evm::token_analysis_cron::{analyze_tokens, AnalyzeTokenArgs},
