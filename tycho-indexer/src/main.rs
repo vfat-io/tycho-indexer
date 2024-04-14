@@ -4,7 +4,7 @@ use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use futures03::future::select_all;
 use reqwest::Client;
 use serde::Deserialize;
-use std::{fs::File, io::Read, str::FromStr};
+use std::{fs::File, io::Read, str::FromStr, sync::Arc};
 use url::Url;
 
 use extractor::{
@@ -18,15 +18,16 @@ use ethers::{
     prelude::{Http, Provider},
     providers::Middleware,
 };
-use tokio::task::JoinHandle;
+use tokio::{select, task::JoinHandle};
 use tracing::info;
+use tycho_core::models::blockchain::Block;
 
 use tycho_core::models::Chain;
 use tycho_indexer::{
-    cli::{Cli, Command, GlobalArgs, IndexArgs},
+    cli::{AnalyzeTokenArgs, Cli, Command, GlobalArgs, IndexArgs},
     extractor::{
         self,
-        evm::chain_state::ChainState,
+        evm::{chain_state::ChainState, token_analysis_cron::analyze_tokens},
         runner::{ExtractorConfig, HandleResult},
         ExtractionError,
     },
@@ -54,7 +55,7 @@ impl ExtractorConfigs {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), ExtractionError> {
+async fn main() -> Result<(), anyhow::Error> {
     // Set up the subscriber
     tracing_subscriber::fmt::init();
 
@@ -65,11 +66,14 @@ async fn main() -> Result<(), ExtractionError> {
         Command::Run(_) => {
             todo!();
         }
-        Command::Index(indexer_args) => run_indexer(global_args, indexer_args).await,
-        Command::AnalyzeTokens => {
-            todo!();
+        Command::Index(indexer_args) => {
+            run_indexer(global_args, indexer_args).await?;
+        }
+        Command::AnalyzeTokens(analyze_args) => {
+            run_token_analyzer(global_args, analyze_args).await?;
         }
     }
+    Ok(())
 }
 
 async fn run_indexer(
@@ -183,5 +187,32 @@ async fn shutdown_handler(
     }
     server_handle.stop(true).await;
     db_write_executor_handle.abort();
+    Ok(())
+}
+
+async fn run_token_analyzer(
+    global_args: GlobalArgs,
+    analyzer_args: AnalyzeTokenArgs,
+) -> Result<(), anyhow::Error> {
+    let (cached_gw, gw_writer_thread) = GatewayBuilder::new(&global_args.database_url)
+        .set_chains(&[analyzer_args.chain])
+        .build()
+        .await?;
+    let cached_gw = Arc::new(cached_gw);
+    cached_gw
+        .start_transaction(&Block::default())
+        .await;
+    let analyze_thread = analyze_tokens(analyzer_args, &global_args.rpc_url, cached_gw.clone());
+    select! {
+         res = analyze_thread => {
+            res?;
+         },
+         res = gw_writer_thread => {
+            res?;
+        }
+    }
+    info!("Committing transaction...");
+    cached_gw.commit_transaction(1).await?;
+    info!("Token analysis finished!");
     Ok(())
 }

@@ -1,3 +1,4 @@
+use crate::cli::AnalyzeTokenArgs;
 use ethers::prelude::{H160, U256};
 use futures03::{future::try_join_all, FutureExt};
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::Instant};
@@ -10,36 +11,28 @@ use tycho_core::{
 };
 use web3::types::BlockNumber;
 
-#[derive(Debug, Clone, Default)]
-pub struct AnalyzeTokenArgs {
-    rpc_url: String,
-    chain: Chain,
-    concurrency: usize,
-    update_batch_size: usize,
-    fetch_batch_size: usize,
-}
-
 pub async fn analyze_tokens(
-    args: AnalyzeTokenArgs,
+    analyze_args: AnalyzeTokenArgs,
+    rpc_url: &str,
     gw: Arc<dyn ProtocolGateway + Send + Sync>,
 ) -> anyhow::Result<()> {
     let mut tokens = Vec::new();
     let mut page = 0;
     loop {
         let start = Instant::now();
-        let pagination_params = PaginationParams::new(page, args.fetch_batch_size as i64);
+        let pagination_params = PaginationParams::new(page, analyze_args.fetch_batch_size as i64);
         tokens.clone_from(
-            &(gw.get_tokens(args.chain, None, None, Some(&pagination_params))
+            &(gw.get_tokens(analyze_args.chain, None, None, Some(&pagination_params))
                 .await?),
         );
-        let sem = Arc::new(Semaphore::new(args.concurrency));
+        let sem = Arc::new(Semaphore::new(analyze_args.concurrency));
         let tasks = tokens
-            .chunks(args.update_batch_size)
+            .chunks(analyze_args.update_batch_size)
             .into_iter()
             .map(|chunk| {
                 analyze_batch(
-                    args.chain,
-                    args.rpc_url.clone(),
+                    analyze_args.chain,
+                    rpc_url.to_string(),
                     chunk.to_vec(),
                     sem.clone(),
                     gw.clone(),
@@ -108,6 +101,7 @@ async fn analyze_batch(
         }
 
         let address = H160::from_slice(&t.address);
+        debug!(?address, "Analyzing token");
         let (token_quality, gas, tax) = match analyzer
             .detect(address, BlockNumber::Latest)
             .await

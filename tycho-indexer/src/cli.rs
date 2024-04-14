@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use tycho_core::models::Chain;
 
 /// Tycho Indexer using Substreams
 ///
@@ -30,7 +31,7 @@ pub enum Command {
     /// Runs a single substream, intended for testing.
     Run(RunSpkgArgs),
     /// Starts a job to analyze stored tokens for tax and gas cost.
-    AnalyzeTokens,
+    AnalyzeTokens(AnalyzeTokenArgs),
 }
 
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
@@ -106,6 +107,18 @@ impl RunSpkgArgs {
             None
         }
     }
+}
+
+#[derive(Args, Debug, Clone, PartialEq, Eq)]
+pub struct AnalyzeTokenArgs {
+    #[clap(long)]
+    pub chain: Chain,
+    #[clap(long)]
+    pub concurrency: usize,
+    #[clap(long)]
+    pub update_batch_size: usize,
+    #[clap(long)]
+    pub fetch_batch_size: usize,
 }
 
 #[cfg(test)]
