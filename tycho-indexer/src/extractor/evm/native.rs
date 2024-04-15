@@ -6,9 +6,11 @@ use std::{
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use ethers::types::{H160, H256};
+use ethers::types::{H160, H256, U256};
 use mockall::automock;
 use prost::Message;
+
+use token_analyzer::TokenFinder;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, trace, warn};
 
@@ -254,9 +256,27 @@ where
             .get_new_tokens(protocol_tokens)
             .await?;
         if !new_tokens_addresses.is_empty() {
+            let balance_map: HashMap<H160, (H160, U256)> = balance_changes
+                .iter()
+                .filter_map(|bc| match H160::from_str(bc.component_id.as_str()) {
+                    Ok(address) => Some((
+                        bc.token.clone().into(),
+                        (address, U256::from_big_endian(&bc.new_balance.clone().to_vec())),
+                    )),
+                    Err(e) => {
+                        warn!("Error parsing component_id to H160: {}", e);
+                        None
+                    }
+                })
+                .collect();
+            let tf = TokenFinder::new(balance_map);
             let new_tokens = self
                 .token_pre_processor
-                .get_tokens(new_tokens_addresses)
+                .get_tokens(
+                    new_tokens_addresses,
+                    Arc::new(tf),
+                    web3::types::BlockNumber::Number(changes.block.number.into()),
+                )
                 .await
                 .iter()
                 .map(Into::into)
@@ -1046,7 +1066,7 @@ mod test_serial_db {
         ];
         mock_processor
             .expect_get_tokens()
-            .returning(move |_| new_tokens.clone());
+            .returning(move |_, _, _| new_tokens.clone());
 
         mock_processor
     }
