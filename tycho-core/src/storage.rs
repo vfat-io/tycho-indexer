@@ -354,6 +354,7 @@ pub trait ProtocolGateway {
         chain: Chain,
         address: Option<&[&Address]>,
         min_quality: Option<i32>,
+        traded_n_days_ago: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<Vec<models::token::CurrencyToken>, StorageError>;
 

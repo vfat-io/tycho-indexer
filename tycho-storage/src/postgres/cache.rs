@@ -832,6 +832,7 @@ impl ProtocolGateway for CachedGateway {
         chain: Chain,
         address: Option<&[&Address]>,
         min_quality: Option<i32>,
+        traded_n_days_ago: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<Vec<CurrencyToken>, StorageError> {
         let mut conn =
@@ -839,7 +840,14 @@ impl ProtocolGateway for CachedGateway {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_tokens(chain, address, min_quality, pagination_params, &mut conn)
+            .get_tokens(
+                chain,
+                address,
+                min_quality,
+                traded_n_days_ago,
+                pagination_params,
+                &mut conn,
+            )
             .await
     }
 

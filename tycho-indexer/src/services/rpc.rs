@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use actix_web::{web, HttpResponse};
 use anyhow::Error;
+use chrono::{Duration, Utc};
 use diesel_async::pooled_connection::deadpool;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, warn};
@@ -387,9 +388,19 @@ where
         let converted_params: PaginationParams = (&request.pagination).into();
         let min_quality = request.min_quality;
 
+        let traded_n_days_ago = request.traded_n_days_ago;
+
+        let n_days_ago = if let Some(days) = traded_n_days_ago {
+            i64::try_from(days)
+                .map(|days| Some(Utc::now().naive_utc() - Duration::days(days)))
+                .map_err(|_| RpcError::Parse("traded_n_days_ago is too big.".to_string()))?
+        } else {
+            None
+        };
+
         match self
             .db_gateway
-            .get_tokens(*chain, addresses_slice, min_quality, Some(&converted_params))
+            .get_tokens(*chain, addresses_slice, min_quality, n_days_ago, Some(&converted_params))
             .await
         {
             Ok(tokens) => Ok(dto::TokensRequestResponse::new(
@@ -706,7 +717,7 @@ mod tests {
     use std::{collections::HashMap, str::FromStr};
 
     use actix_web::test;
-    use chrono::{NaiveDateTime, Utc};
+    use chrono::NaiveDateTime;
     use ethers::types::U256;
 
     use tycho_core::models::{
@@ -901,7 +912,7 @@ mod tests {
         let mut gw = MockGateway::new();
         let mock_response = Ok(expected.clone());
         gw.expect_get_tokens()
-            .return_once(|_, _, _, _| Box::pin(async move { mock_response }));
+            .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
 
         // request for 2 tokens that are in the DB (WETH and USDC)
@@ -911,6 +922,7 @@ mod tests {
                 WETH.parse::<Bytes>().unwrap(),
             ]),
             min_quality: None,
+            traded_n_days_ago: None,
             pagination: dto::PaginationParams::default(),
         };
 
