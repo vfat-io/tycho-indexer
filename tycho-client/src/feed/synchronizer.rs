@@ -65,6 +65,10 @@ impl Snapshot {
         self.states.extend(other.states);
         self.vm_storage.extend(other.vm_storage);
     }
+
+    pub fn get_states(&self) -> &HashMap<String, ComponentWithState> {
+        &self.states
+    }
 }
 
 #[derive(Clone, PartialEq, Debug, Default, Serialize)]
