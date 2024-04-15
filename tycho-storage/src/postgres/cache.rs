@@ -3,7 +3,8 @@ use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel_async::{
-    pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
+    pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
+    AsyncPgConnection,
 };
 use lru::LruCache;
 use tokio::{
@@ -54,7 +55,8 @@ pub(crate) enum WriteOp {
     InsertProtocolComponents(Vec<models::protocol::ProtocolComponent>),
     // Simply merge
     InsertTokens(Vec<models::token::CurrencyToken>),
-    // Simply merge
+    // Currently unused but supported, please see `CacheGateway.update_tokens` docs.
+    #[allow(dead_code)]
     UpdateTokens(Vec<models::token::CurrencyToken>),
     // Simply merge
     InsertComponentBalances(Vec<models::protocol::ComponentBalance>),
@@ -856,10 +858,32 @@ impl ProtocolGateway for CachedGateway {
         Ok(())
     }
 
+    /// Updates tokens without using the write cache.
+    ///
+    /// This method is currently only used by the token-analyzer job and therefore does
+    /// not use the write cache. It creates a single transaction and executes all
+    /// updates immediately.
+    ///
+    /// ## Note
+    /// This is a short term solution. Ideally we should have a simple gateway version
+    /// for these use cases that creates a single transactions and emits them immediately.
     async fn update_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError> {
-        self.add_op(WriteOp::UpdateTokens(tokens.to_vec()))
-            .await?;
-        Ok(())
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+
+        conn.transaction(|conn| {
+            async {
+                self.state_gateway
+                    .update_tokens(tokens, conn)
+                    .await?;
+                Result::<(), PostgresError>::Ok(())
+            }
+            .scope_boxed()
+        })
+        .await
+        .map_err(|e| StorageError::Unexpected(format!("Failed to update tokens: {}", e.0)))
     }
 
     async fn get_protocol_states_delta(

@@ -20,7 +20,6 @@ use ethers::{
 };
 use tokio::{select, task::JoinHandle};
 use tracing::info;
-use tycho_core::models::blockchain::Block;
 
 use tycho_core::models::Chain;
 use tycho_indexer::{
@@ -35,6 +34,8 @@ use tycho_indexer::{
 };
 use tycho_storage::postgres::{builder::GatewayBuilder, cache::CachedGateway};
 
+// TODO: We need to use `use pretty_assertions::{assert_eq, assert_ne}` per test module.
+#[allow(unused_imports)]
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;
@@ -199,9 +200,6 @@ async fn run_token_analyzer(
         .build()
         .await?;
     let cached_gw = Arc::new(cached_gw);
-    cached_gw
-        .start_transaction(&Block::default())
-        .await;
     let analyze_thread = analyze_tokens(analyzer_args, &global_args.rpc_url, cached_gw.clone());
     select! {
          res = analyze_thread => {
@@ -211,8 +209,5 @@ async fn run_token_analyzer(
             res?;
         }
     }
-    info!("Committing transaction...");
-    cached_gw.commit_transaction(0).await?;
-    info!("Token analysis finished!");
     Ok(())
 }

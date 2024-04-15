@@ -29,7 +29,6 @@ pub async fn analyze_tokens(
         let sem = Arc::new(Semaphore::new(analyze_args.concurrency));
         let tasks = tokens
             .chunks(analyze_args.update_batch_size)
-            .into_iter()
             .map(|chunk| {
                 analyze_batch(
                     analyze_args.chain,
@@ -97,7 +96,8 @@ async fn analyze_batch(
     let tf = Arc::new(TokenFinder::new(liquidity_token_owners));
     let analyzer = TraceCallDetector::new(eth_rpc_url.as_str(), tf);
     for t in tokens.iter_mut() {
-        if t.quality <= 5 {
+        // Skip tokens that failed previously and ones we already analyzed successfully.
+        if t.quality <= 5 || !t.gas.is_empty() {
             continue;
         }
 
@@ -129,8 +129,9 @@ async fn analyze_batch(
         t.gas = gas.map_or_else(Vec::new, |g| vec![Some(g.as_u64())]);
     }
 
-    gw.update_tokens(&tokens).await?;
-
+    if !tokens.is_empty() {
+        gw.update_tokens(&tokens).await?;
+    }
     Ok(())
 }
 
@@ -152,9 +153,6 @@ mod test {
     #[test_log::test(tokio::test)]
     async fn test_analyze_tokens() {
         let args = AnalyzeTokenArgs {
-            rpc_url:
-                "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac"
-                    .to_string(),
             chain: Chain::Ethereum,
             concurrency: 10,
             update_batch_size: 100,
@@ -208,8 +206,12 @@ mod test {
                 Box::pin(async { Ok(()) })
             });
 
-        analyze_tokens(args, Arc::new(gw))
-            .await
-            .expect("analyze tokens failed");
+        analyze_tokens(
+            args,
+            "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac",
+            Arc::new(gw),
+        )
+        .await
+        .expect("analyze tokens failed");
     }
 }

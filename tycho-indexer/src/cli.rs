@@ -111,12 +111,17 @@ impl RunSpkgArgs {
 
 #[derive(Args, Debug, Clone, PartialEq, Eq)]
 pub struct AnalyzeTokenArgs {
+    /// Blockchain to execute analysis for.
     #[clap(long)]
     pub chain: Chain,
+    /// How many concurrent threads to use for token analysis.
     #[clap(long)]
     pub concurrency: usize,
+    /// How many tokens to update in a batch per thread.
     #[clap(long)]
     pub update_batch_size: usize,
+    /// How many tokens to fetch from the db to distribute to threads (page size). This
+    /// should be at least `concurrency * update_batch_size`.
     #[clap(long)]
     pub fetch_batch_size: usize,
 }

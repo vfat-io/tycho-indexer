@@ -3092,7 +3092,7 @@ mod test {
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
         let exp = exp
-            .into_iter()
+            .iter()
             .map(|&s| s.to_owned())
             .collect::<Vec<_>>();
         let tokens = tokens

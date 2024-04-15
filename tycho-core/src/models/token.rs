@@ -12,7 +12,9 @@ pub struct CurrencyToken {
     ///  - 100: Normal token
     ///  - 75: Rebase token
     ///  - 50: Fee token
-    ///  - 0: Scam token that we shouldn't use
+    ///  - 10: Token analysis failed at creation
+    ///  - 5: Token analysis failed on cronjob (after creation).
+    ///  - 0: Failed to extract decimals onchain
     pub quality: u32,
 }
 
