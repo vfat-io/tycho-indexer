@@ -190,7 +190,7 @@ where
 
         let db_tokens = self
             .state_gateway
-            .get_tokens(self.chain, Some(address_refs.as_slice()), None, None)
+            .get_tokens(self.chain, Some(address_refs.as_slice()), None, None, None)
             .await?;
 
         let db_token_addresses: HashSet<_> = db_tokens

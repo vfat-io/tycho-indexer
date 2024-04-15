@@ -306,6 +306,7 @@ mock! {
             chain: Chain,
             address: Option<&'life1 [&'life2 Address]>,
             min_quality: Option<i32>,
+            traded_n_days_ago: Option<NaiveDateTime>,
             pagination_params: Option<&'life3 PaginationParams>,
         ) -> ::core::pin::Pin<
             Box<

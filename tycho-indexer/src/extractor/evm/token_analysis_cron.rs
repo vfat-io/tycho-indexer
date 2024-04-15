@@ -23,7 +23,7 @@ pub async fn analyze_tokens(
         let start = Instant::now();
         let pagination_params = PaginationParams::new(page, page_size);
         tokens.clone_from(
-            &(gw.get_tokens(analyze_args.chain, None, None, Some(&pagination_params))
+            &(gw.get_tokens(analyze_args.chain, None, None, None, Some(&pagination_params))
                 .await?),
         );
         let sem = Arc::new(Semaphore::new(analyze_args.concurrency));
@@ -160,7 +160,7 @@ mod test {
         };
         let mut gw = testing::MockGateway::new();
         gw.expect_get_tokens()
-            .returning(|_, _, _, _| {
+            .returning(|_, _, _, _, _| {
                 Box::pin(async {
                     Ok(vec![CurrencyToken::new(
                         &Bytes::from("0x45804880de22913dafe09f4980848ece6ecbaf78"),
