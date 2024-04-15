@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod extractor;
 pub mod pb;
 pub mod services;

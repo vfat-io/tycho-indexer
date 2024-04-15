@@ -22,6 +22,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 pub mod chain_state;
 mod convert;
 pub mod native;
+pub mod token_analysis_cron;
 pub mod token_pre_processor;
 mod utils;
 pub mod vm;

@@ -4,7 +4,7 @@ use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
-use tracing::{error, instrument, warn};
+use tracing::{error, instrument, trace, warn};
 use unicode_segmentation::UnicodeSegmentation;
 
 use tycho_core::{
@@ -13,6 +13,7 @@ use tycho_core::{
         PaginationParams, StoreVal, TxHash,
     },
     storage::{BlockOrTimestamp, StorageError, Version},
+    Bytes,
 };
 
 use super::{
@@ -181,8 +182,21 @@ impl PostgresGateway {
         let orm_protocol_components = query
             .load::<(orm::ProtocolComponent, TxHash)>(conn)
             .await
-            .map_err(PostgresError::from)?;
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .map(|(pc, txh)| (pc, Some(txh)))
+            .collect();
 
+        self.build_protocol_components(orm_protocol_components, chain, conn)
+            .await
+    }
+
+    async fn build_protocol_components(
+        &self,
+        orm_protocol_components: Vec<(orm::ProtocolComponent, Option<TxHash>)>,
+        chain: &Chain,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError> {
         let protocol_component_ids = orm_protocol_components
             .iter()
             .map(|(pc, _)| pc.id)
@@ -275,11 +289,52 @@ impl PostgresGateway {
                     contracts_by_pc,
                     static_attributes,
                     ChangeType::Creation,
-                    tx_hash,
+                    tx_hash.unwrap_or(Bytes::from(&[0; 32])),
                     pc.created_at,
                 ))
             })
             .collect()
+    }
+
+    pub async fn get_protocol_components_by_tokens(
+        &self,
+        chain: &Chain,
+        tokens: Option<&[Address]>,
+        min_balance: Option<f64>,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError> {
+        let chain_id = self.get_chain_id(chain);
+        let mut query = schema::protocol_component::table
+            .select(orm::ProtocolComponent::as_select())
+            .inner_join(schema::protocol_component_holds_token::table)
+            .inner_join(schema::component_balance::table)
+            .filter(schema::protocol_component::chain_id.eq(chain_id))
+            .filter(schema::component_balance::balance_float.ge(min_balance.unwrap_or(0f64)))
+            .filter(schema::component_balance::valid_to.is_null())
+            .distinct_on(schema::protocol_component::id)
+            .into_boxed();
+
+        if let Some(addresses) = tokens {
+            let token_ids: Vec<i64> = schema::token::table
+                .select(schema::token::id)
+                .inner_join(schema::account::table)
+                .filter(schema::account::address.eq_any(addresses))
+                .get_results(conn)
+                .await
+                .map_err(PostgresError::from)?;
+            query = query.filter(schema::component_balance::token_id.eq_any(token_ids));
+        }
+
+        let orm_components = query
+            .get_results(conn)
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .map(|pc| (pc, None))
+            .collect();
+
+        self.build_protocol_components(orm_components, chain, conn)
+            .await
     }
 
     pub async fn add_protocol_components(
@@ -849,6 +904,55 @@ impl PostgresGateway {
             .await
             .map_err(|err| storage_error_from_diesel(err, "Token", "batch", None))?;
 
+        Ok(())
+    }
+
+    pub async fn update_tokens(
+        &self,
+        tokens: &[models::token::CurrencyToken],
+        conn: &mut AsyncPgConnection,
+    ) -> Result<(), StorageError> {
+        trace!(addresses=?tokens.iter().map(|t| &t.address).collect::<Vec<_>>(), "Updating tokens");
+        let address_to_db_id = {
+            let token_addresses: Vec<Address> = tokens
+                .iter()
+                .map(|t| t.address.clone())
+                .collect();
+            schema::account::table
+                .inner_join(schema::token::table)
+                .select((schema::account::address, schema::token::id))
+                .filter(schema::account::address.eq_any(token_addresses))
+                .get_results(conn)
+                .await
+                .map_err(PostgresError::from)?
+                .into_iter()
+                .collect::<HashMap<Bytes, i64>>()
+        };
+        use schema::token::dsl::*;
+        for t in tokens.iter() {
+            if let Some(db_id) = address_to_db_id.get(&t.address) {
+                let gas_val = t
+                    .gas
+                    .iter()
+                    .map(|v| v.map(|g| g as i64))
+                    .collect::<Vec<_>>();
+                diesel::update(schema::token::table)
+                    .set((
+                        symbol.eq(&t.symbol),
+                        decimals.eq(t.decimals as i32),
+                        tax.eq(t.tax as i64),
+                        quality.eq(t.quality as i32),
+                        gas.eq(gas_val),
+                    ))
+                    .filter(id.eq(db_id))
+                    .execute(conn)
+                    .await
+                    .map_err(PostgresError::from)?;
+            } else {
+                // TODO: add address as attribute
+                warn!(address=?&t.address, "Tried to update non existing token! Consider inserting it first!");
+            }
+        }
         Ok(())
     }
 
@@ -1428,7 +1532,7 @@ mod test {
     use rstest::rstest;
     use serde_json::json;
 
-    use tycho_core::{storage::BlockIdentifier, Bytes};
+    use tycho_core::storage::BlockIdentifier;
 
     use crate::postgres::db_fixtures;
 
@@ -2576,6 +2680,31 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_update_tokens() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let dai_address = Bytes::from(DAI);
+        let mut prev = gw
+            .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, None, &mut conn)
+            .await
+            .expect("failed to get old token")
+            .remove(0);
+        prev.gas = vec![Some(20000)];
+
+        gw.update_tokens(&[prev.clone()], &mut conn)
+            .await
+            .expect("failed to update tokens");
+        let updated = gw
+            .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, None, &mut conn)
+            .await
+            .expect("failed to get updated token")
+            .remove(0);
+
+        assert_eq!(updated, prev);
+    }
+
+    #[tokio::test]
     async fn test_add_component_balances() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2950,6 +3079,39 @@ mod test {
             .into_iter()
             .map(|comp| comp.id)
             .collect::<HashSet<_>>();
+
+        assert_eq!(res, exp);
+    }
+
+    #[rstest]
+    #[case::dai(&[DAI], &["state3"])]
+    #[case::weth(&[WETH], &["state1", "state3"])]
+    #[tokio::test]
+    async fn test_get_protocol_components_by_tokens(#[case] tokens: &[&str], #[case] exp: &[&str]) {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp = exp
+            .iter()
+            .map(|&s| s.to_owned())
+            .collect::<Vec<_>>();
+        let tokens = tokens
+            .iter()
+            .map(|s| Bytes::from(*s))
+            .collect::<Vec<_>>();
+
+        let res = gw
+            .get_protocol_components_by_tokens(
+                &Chain::Ethereum,
+                Some(&tokens),
+                Some(1.0),
+                &mut conn,
+            )
+            .await
+            .expect("retrieving components failed")
+            .into_iter()
+            .map(|pc| pc.id.clone())
+            .collect::<Vec<_>>();
 
         assert_eq!(res, exp);
     }

@@ -271,6 +271,24 @@ pub trait ProtocolGateway {
         min_tvl: Option<f64>,
     ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError>;
 
+    /// Retrieves components by tokens
+    ///
+    /// Allows querying components by the tokens that they support, as well as by a
+    /// minimum balance.
+    ///
+    /// # Parameters
+    /// - `chain` The chain of the component
+    /// - `tokens` The tokens to query for, any component with at least one of these tokens is
+    ///   returned.
+    /// - `min_balance` A minimum balance we expect the component to have on any of the tokens
+    ///   mentioned in `tokens`.
+    async fn get_protocol_components_by_tokens(
+        &self,
+        chain: &Chain,
+        tokens: Option<&[Address]>,
+        min_balance: Option<f64>,
+    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError>;
+
     async fn add_protocol_components(
         &self,
         new: &[models::protocol::ProtocolComponent],
@@ -367,6 +385,23 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_tokens(&self, tokens: &[models::token::CurrencyToken])
         -> Result<(), StorageError>;
+
+    /// Updates multiple tokens in storage.
+    ///
+    /// Updates token in storage. Will warn if one of the tokens does not exist in the
+    /// database. Currently assumes that token addresses are unique across chains.
+    /// -
+    ///
+    /// # Parameters
+    /// - `token` The tokens to update.
+    ///
+    /// # Return
+    /// Ok if all tokens could be inserted, Err if at least one token failed to
+    /// insert.
+    async fn update_tokens(
+        &self,
+        tokens: &[models::token::CurrencyToken],
+    ) -> Result<(), StorageError>;
 
     /// Retrieve protocol state changes
     ///
