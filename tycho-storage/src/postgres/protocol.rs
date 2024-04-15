@@ -4,7 +4,7 @@ use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
-use tracing::{error, instrument, warn};
+use tracing::{error, instrument, trace, warn};
 use unicode_segmentation::UnicodeSegmentation;
 
 use tycho_core::{
@@ -912,6 +912,7 @@ impl PostgresGateway {
         tokens: &[models::token::CurrencyToken],
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
+        trace!(addresses=?tokens.iter().map(|t| &t.address).collect::<Vec<_>>(), "Updating tokens");
         let address_to_db_id = {
             let token_addresses: Vec<Address> = tokens
                 .iter()

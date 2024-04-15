@@ -212,7 +212,7 @@ async fn run_token_analyzer(
         }
     }
     info!("Committing transaction...");
-    cached_gw.commit_transaction(1).await?;
+    cached_gw.commit_transaction(0).await?;
     info!("Token analysis finished!");
     Ok(())
 }

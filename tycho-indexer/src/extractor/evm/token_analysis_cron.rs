@@ -18,9 +18,10 @@ pub async fn analyze_tokens(
 ) -> anyhow::Result<()> {
     let mut tokens = Vec::new();
     let mut page = 0;
+    let page_size = analyze_args.fetch_batch_size as i64;
     loop {
         let start = Instant::now();
-        let pagination_params = PaginationParams::new(page, analyze_args.fetch_batch_size as i64);
+        let pagination_params = PaginationParams::new(page, page_size);
         tokens.clone_from(
             &(gw.get_tokens(analyze_args.chain, None, None, Some(&pagination_params))
                 .await?),
@@ -46,7 +47,7 @@ pub async fn analyze_tokens(
         info!(processed = tokens.len(), page = page, duration = duration.as_secs(), "Progress");
 
         page += 1;
-        if tokens.len() < 10000 {
+        if tokens.len() < (page_size as usize) {
             break;
         }
     }

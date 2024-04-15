@@ -286,34 +286,33 @@ impl TraceCallDetector {
             None => return Ok((bad, Some(gas_per_transfer), None)),
         };
 
-        let fees = match (
-            balance_after_in != balance_before_in + amount,
-            balance_recipient_after != balance_recipient_before + middle_amount,
-        ) {
-            (true, true) => {
-                let first_transfer_fees =
-                    (balance_before_in + amount - balance_after_in) * 10_000 / amount;
-                let second_transfer_fees =
-                    (balance_recipient_before + middle_amount - balance_recipient_after) * 10_000 /
-                        middle_amount;
-                if first_transfer_fees >= second_transfer_fees {
-                    first_transfer_fees
-                } else {
-                    second_transfer_fees
-                }
-            }
-            (true, false) => (balance_before_in + amount - balance_after_in) * 10_000 / amount,
-            (false, true) => {
-                (balance_recipient_before + middle_amount - balance_recipient_after) * 10_000 /
-                    middle_amount
-            }
-            (false, false) => U256::zero(),
-        };
+        let fees = Self::calculate_fee(
+            amount,
+            middle_amount,
+            balance_before_in,
+            balance_after_in,
+            balance_recipient_before,
+            balance_recipient_after,
+        );
 
         tracing::debug!(%amount, %balance_before_in, %balance_after_in, %balance_after_out);
 
         // todo: Maybe do >= checks in case token transfer for whatever reason grants
         // user more than an amount transferred like an anti fee.
+
+        let fees = match fees {
+            Ok(f) => f,
+            Err(e) => {
+                return Ok((
+                    TokenQuality::bad(format!(
+                        "Failed to calculate fees for token transfer: {}",
+                        e
+                    )),
+                    None,
+                    None,
+                ))
+            }
+        };
 
         let computed_balance_after_in = match balance_before_in.checked_add(amount) {
             Some(amount) => amount,
@@ -386,6 +385,85 @@ impl TraceCallDetector {
 
         Ok((TokenQuality::Good, Some(gas_per_transfer), Some(fees)))
     }
+
+    fn calculate_fee(
+        amount: U256,
+        middle_amount: U256,
+        balance_before_in: U256,
+        balance_after_in: U256,
+        balance_recipient_before: U256,
+        balance_recipient_after: U256,
+    ) -> Result<U256, anyhow::Error> {
+        Ok(
+            match (
+                balance_after_in != error_add(balance_before_in, amount)?,
+                balance_recipient_after != error_add(balance_recipient_before, middle_amount)?,
+            ) {
+                (true, true) => {
+                    let first_transfer_fees = error_div(
+                        error_mul(
+                            error_add(balance_before_in, error_sub(amount, balance_after_in)?)?,
+                            U256::from(10_000),
+                        )?,
+                        amount,
+                    )?;
+                    let second_transfer_fees = error_div(
+                        error_mul(
+                            error_add(
+                                balance_recipient_before,
+                                error_sub(middle_amount, balance_recipient_after)?,
+                            )?,
+                            U256::from(10_000),
+                        )?,
+                        middle_amount,
+                    )?;
+                    if first_transfer_fees >= second_transfer_fees {
+                        first_transfer_fees
+                    } else {
+                        second_transfer_fees
+                    }
+                }
+                (true, false) => error_div(
+                    error_mul(
+                        error_add(balance_before_in, error_sub(amount, balance_after_in)?)?,
+                        U256::from(10_000),
+                    )?,
+                    amount,
+                )?,
+                (false, true) => error_div(
+                    error_mul(
+                        error_add(
+                            balance_recipient_before,
+                            error_sub(middle_amount, balance_recipient_after)?,
+                        )?,
+                        U256::from(10_000),
+                    )?,
+                    middle_amount,
+                )?,
+                (false, false) => U256::zero(),
+            },
+        )
+    }
+}
+
+fn error_add(a: U256, b: U256) -> Result<U256, anyhow::Error> {
+    a.checked_add(b)
+        .ok_or_else(|| anyhow::format_err!("overflow"))
+}
+
+fn error_sub(a: U256, b: U256) -> Result<U256, anyhow::Error> {
+    a.checked_sub(b)
+        .ok_or_else(|| anyhow::format_err!("overflow"))
+}
+
+fn error_div(a: U256, b: U256) -> Result<U256, anyhow::Error> {
+    a.checked_div(b)
+        .ok_or_else(|| anyhow::format_err!("overflow"))
+}
+
+fn error_mul(a: U256, b: U256) -> Result<U256, anyhow::Error> {
+    a.checked_mul(b)
+        .ok_or_else(|| anyhow::format_err!("overflow"))
 }
 
 fn call_request(
