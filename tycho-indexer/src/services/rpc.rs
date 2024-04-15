@@ -390,9 +390,13 @@ where
 
         let traded_n_days_ago = request.traded_n_days_ago;
 
-        let n_days_ago = traded_n_days_ago
-            .filter(|&days| days >= 0)
-            .map(|days| Utc::now().naive_utc() - Duration::days(days));
+        let n_days_ago = if let Some(days) = traded_n_days_ago {
+            i64::try_from(days)
+                .map(|days| Some(Utc::now().naive_utc() - Duration::days(days)))
+                .map_err(|_| RpcError::Parse("traded_n_days_ago is too big.".to_string()))?
+        } else {
+            None
+        };
 
         match self
             .db_gateway

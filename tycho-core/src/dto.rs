@@ -826,7 +826,7 @@ pub struct TokensRequestBody {
     #[serde(default)]
     pub min_quality: Option<i32>,
     #[serde(default)]
-    pub traded_n_days_ago: Option<i64>,
+    pub traded_n_days_ago: Option<u64>,
     #[serde(default)]
     pub pagination: PaginationParams,
 }

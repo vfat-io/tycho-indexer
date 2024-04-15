@@ -788,10 +788,10 @@ impl PostgresGateway {
             query = query.filter(schema::token::quality.ge(min_quality));
         }
 
-        if let Some(traded_n_days_ago) = last_traded_ts_threshold {
+        if let Some(last_traded_ts_threshold) = last_traded_ts_threshold {
             let active_tokens_subquery = schema::component_balance::table
                 .select(schema::component_balance::token_id)
-                .filter(schema::component_balance::valid_from.gt(traded_n_days_ago))
+                .filter(schema::component_balance::valid_from.gt(last_traded_ts_threshold))
                 .distinct();
             query = query.filter(schema::token::id.eq_any(active_tokens_subquery));
         }
