@@ -110,8 +110,11 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
                 address,
                 symbol: symbol.replace('\0', ""),
                 decimals: decimals.into(),
-                tax: tax.unwrap_or(U256::zero()).as_u64(),
-                gas: gas.map_or_else(Vec::new, |g| vec![Some(g.as_u64())]),
+                tax: tax
+                    .unwrap_or(U256::zero())
+                    .try_into()
+                    .unwrap_or(10_000),
+                gas: gas.map_or_else(Vec::new, |g| vec![Some(g.try_into().unwrap_or(8_000_000))]),
                 chain: Chain::Ethereum,
                 quality,
             });
