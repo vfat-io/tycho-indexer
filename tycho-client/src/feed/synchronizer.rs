@@ -532,7 +532,7 @@ mod test {
             ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
             ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
             ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState, StateRequestBody,
-            StateRequestParameters, StateRequestResponse,
+            StateRequestParameters, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
         },
         Bytes,
     };
@@ -553,6 +553,14 @@ mod test {
     where
         T: RPCClient + Sync + Send + 'static,
     {
+        async fn get_tokens(
+            &self,
+            chain: &Chain,
+            request: &TokensRequestBody,
+        ) -> Result<TokensRequestResponse, RPCError> {
+            self.0.get_tokens(chain, request).await
+        }
+
         async fn get_contract_state(
             &self,
             chain: Chain,
