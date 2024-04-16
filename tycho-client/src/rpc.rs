@@ -16,10 +16,10 @@ use async_trait::async_trait;
 use futures03::future::try_join_all;
 
 use tycho_core::dto::{
-    Chain, ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
+    Chain, PaginationParams, ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
     ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
-    ProtocolStateRequestResponse, StateRequestBody, StateRequestParameters, StateRequestResponse,
-    TokensRequestBody, TokensRequestResponse, VersionParam,
+    ProtocolStateRequestResponse, ResponseToken, StateRequestBody, StateRequestParameters,
+    StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
 };
 
 use tokio::sync::Semaphore;
@@ -116,6 +116,46 @@ pub trait RPCClient {
         chain: &Chain,
         request: &TokensRequestBody,
     ) -> Result<TokensRequestResponse, RPCError>;
+
+    async fn get_all_tokens(
+        &self,
+        chain: Chain,
+        min_quality: Option<i32>,
+        traded_n_days_ago: Option<u64>,
+        chunk_size: usize,
+    ) -> Result<Vec<ResponseToken>, RPCError> {
+        let mut request_page = 0;
+        let mut all_tokens = Vec::new();
+        loop {
+            let mut response = self
+                .get_tokens(
+                    &chain,
+                    &TokensRequestBody {
+                        token_addresses: None,
+                        min_quality,
+                        traded_n_days_ago,
+                        pagination: PaginationParams {
+                            page: request_page,
+                            page_size: chunk_size.try_into().map_err(|_| {
+                                RPCError::FormatRequest(
+                                    "Failed to convert chunk_size into i64".to_string(),
+                                )
+                            })?,
+                        },
+                    },
+                )
+                .await?;
+
+            let num_tokens = response.tokens.len();
+            all_tokens.append(&mut response.tokens);
+            request_page += 1;
+
+            if num_tokens < chunk_size {
+                break;
+            }
+        }
+        Ok(all_tokens)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -340,10 +380,7 @@ impl RPCClient for HttpRPCClient {
 
 #[cfg(test)]
 mod tests {
-    use tycho_core::{
-        dto::{PaginationParams, ResponseToken},
-        Bytes,
-    };
+    use tycho_core::Bytes;
 
     use super::*;
 
