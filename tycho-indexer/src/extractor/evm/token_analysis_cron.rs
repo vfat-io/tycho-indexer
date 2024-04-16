@@ -125,8 +125,11 @@ async fn analyze_batch(
             t.quality = 50;
         }
 
-        t.tax = tax.unwrap_or(U256::zero()).as_u64();
-        t.gas = gas.map_or_else(Vec::new, |g| vec![Some(g.as_u64())]);
+        t.tax = tax
+            .unwrap_or(U256::zero())
+            .try_into()
+            .unwrap_or(10_000);
+        t.gas = gas.map_or_else(Vec::new, |g| vec![Some(g.try_into().unwrap_or(8_000_000))]);
     }
 
     if !tokens.is_empty() {
