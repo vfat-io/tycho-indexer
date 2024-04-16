@@ -19,7 +19,7 @@ use tycho_core::dto::{
     Chain, ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
     ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
     ProtocolStateRequestResponse, StateRequestBody, StateRequestParameters, StateRequestResponse,
-    VersionParam,
+    TokensRequestBody, TokensRequestResponse, VersionParam,
 };
 
 use tokio::sync::Semaphore;
@@ -110,6 +110,12 @@ pub trait RPCClient {
                     .collect(),
             })
     }
+
+    async fn get_tokens(
+        &self,
+        chain: &Chain,
+        request: &TokensRequestBody,
+    ) -> Result<TokensRequestResponse, RPCError>;
 }
 
 #[derive(Debug, Clone)]
@@ -287,11 +293,57 @@ impl RPCClient for HttpRPCClient {
 
         Ok(states)
     }
+
+    async fn get_tokens(
+        &self,
+        chain: &Chain,
+        request: &TokensRequestBody,
+    ) -> Result<TokensRequestResponse, RPCError> {
+        let uri = format!(
+            "{}/{}/{}/tokens",
+            self.uri
+                .to_string()
+                .trim_end_matches('/'),
+            TYCHO_SERVER_VERSION,
+            chain,
+        );
+        debug!(%uri, "Sending token request to Tycho server");
+
+        let body =
+            serde_json::to_string(&request).map_err(|e| RPCError::FormatRequest(e.to_string()))?;
+        let header = hyper::header::HeaderValue::from_str("application/json")
+            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
+
+        let req = Request::post(uri)
+            .header(hyper::header::CONTENT_TYPE, header)
+            .body(Body::from(body))
+            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
+        trace!(?req, "Sending request to Tycho server");
+
+        let response = self
+            .http_client
+            .request(req)
+            .await
+            .map_err(|e| RPCError::HttpClient(e.to_string()))?;
+        trace!(?response, "Received response from Tycho server");
+
+        let body = hyper::body::to_bytes(response.into_body())
+            .await
+            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        let states: TokensRequestResponse =
+            serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        trace!(?states, "Received tokens response from Tycho server");
+
+        Ok(states)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use tycho_core::Bytes;
+    use tycho_core::{
+        dto::{PaginationParams, ResponseToken},
+        Bytes,
+    };
 
     use super::*;
 
@@ -473,5 +525,78 @@ mod tests {
         .cloned()
         .collect::<HashMap<Bytes, Bytes>>();
         assert_eq!(states[0].balances, expected_balances);
+    }
+
+    #[tokio::test]
+    async fn test_get_tokens() {
+        let mut server = Server::new_async().await;
+        let server_resp = r#"
+        {
+            "tokens": [
+              {
+                "chain": "ethereum",
+                "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                "symbol": "WETH",
+                "decimals": 18,
+                "tax": 0,
+                "gas": [
+                  29962
+                ]
+              },
+              {
+                "chain": "ethereum",
+                "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                "symbol": "USDC",
+                "decimals": 6,
+                "tax": 0,
+                "gas": [
+                  40652
+                ]
+              }
+            ],
+            "pagination": {
+              "page": 0,
+              "page_size": 2
+            }
+          }
+        "#;
+        // test that the response is deserialized correctly
+        serde_json::from_str::<TokensRequestResponse>(server_resp).expect("deserialize");
+
+        let mocked_server = server
+            .mock("POST", "/v1/ethereum/tokens")
+            .expect(1)
+            .with_body(server_resp)
+            .create_async()
+            .await;
+        let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
+
+        let response = client
+            .get_tokens(&Chain::Ethereum, &Default::default())
+            .await
+            .expect("get state");
+
+        let expected = vec![
+            ResponseToken {
+                chain: Chain::Ethereum,
+                address: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                symbol: "WETH".to_string(),
+                decimals: 18,
+                tax: 0,
+                gas: vec![Some(29962)],
+            },
+            ResponseToken {
+                chain: Chain::Ethereum,
+                address: Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+                symbol: "USDC".to_string(),
+                decimals: 6,
+                tax: 0,
+                gas: vec![Some(40652)],
+            },
+        ];
+
+        mocked_server.assert();
+        assert_eq!(response.tokens, expected);
+        assert_eq!(response.pagination, PaginationParams { page: 0, page_size: 2 });
     }
 }
