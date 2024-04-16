@@ -111,6 +111,8 @@ pub trait RPCClient {
             })
     }
 
+    /// This function returns only one chunk of tokens. To get all tokens please call
+    /// get_all_tokens.
     async fn get_tokens(
         &self,
         chain: &Chain,
