@@ -712,6 +712,17 @@ pub async fn protocol_delta<G: Gateway>(
     }
 }
 
+#[utoipa::path(
+    get,
+    path="/v1/health",
+    responses(
+        (status = 200, description = "OK", body=Health),
+    ),
+)]
+pub async fn health() -> HttpResponse {
+    HttpResponse::Ok().json(dto::Health::Ready)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, str::FromStr};
