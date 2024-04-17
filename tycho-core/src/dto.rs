@@ -1056,6 +1056,15 @@ pub struct ProtocolComponentId {
     pub id: String,
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(tag = "status", content = "message")]
+#[schema(example=json!({"status": "NotReady", "message": "No db connection"}))]
+pub enum Health {
+    Ready,
+    Starting(String),
+    NotReady(String),
+}
+
 #[cfg(test)]
 mod test {
     use maplit::hashmap;

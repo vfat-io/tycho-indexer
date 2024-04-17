@@ -14,7 +14,7 @@ use crate::services::deltas_buffer::PendingDeltas;
 use tycho_core::{
     dto::{
         AccountUpdate, BlockParam, ChangeType, ContractDeltaRequestBody,
-        ContractDeltaRequestResponse, PaginationParams, ProtocolComponent,
+        ContractDeltaRequestResponse, Health, PaginationParams, ProtocolComponent,
         ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolDeltaRequestBody,
         ProtocolDeltaRequestResponse, ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody,
         ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState, ResponseToken,
@@ -99,7 +99,8 @@ where
                 rpc::protocol_components,
                 rpc::contract_delta,
                 rpc::protocol_state,
-                rpc::protocol_delta
+                rpc::protocol_delta,
+                rpc::health,
             ),
             components(
                 schemas(VersionParam),
@@ -127,6 +128,7 @@ where
                 schemas(ProtocolDeltaRequestBody),
                 schemas(ProtocolDeltaRequestResponse),
                 schemas(ProtocolStateDelta),
+                schemas(Health),
             )
         )]
         struct ApiDoc;
@@ -181,6 +183,10 @@ where
                         self.prefix
                     ))
                     .route(web::post().to(rpc::protocol_components::<G>)),
+                )
+                .service(
+                    web::resource(format!("/{}/health", self.prefix))
+                        .route(web::get().to(rpc::health)),
                 )
                 .app_data(ws_data.clone())
                 .service(
