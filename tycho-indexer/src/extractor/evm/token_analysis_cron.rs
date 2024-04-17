@@ -11,6 +11,8 @@ use tycho_core::{
 };
 use web3::types::BlockNumber;
 
+use super::token_pre_processor::map_vault;
+
 pub async fn analyze_tokens(
     analyze_args: AnalyzeTokenArgs,
     rpc_url: &str,
@@ -74,18 +76,22 @@ async fn analyze_batch(
     let liquidity_token_owners = component
         .into_iter()
         .filter_map(|pc| {
-            let pool = if !pc.contract_addresses.is_empty() {
-                Some(H160::from_slice(&pc.contract_addresses[0]))
-            } else {
-                H160::from_str(&pc.id).ok()
-            };
+            let liq_owner = map_vault(&pc.protocol_system).or_else(|| {
+                pc.contract_addresses
+                    // TODO: Currently, it's assumed that the pool is always the first
+                    // contract in the protocol component. This approach is a temporary
+                    // workaround and needs to be revisited for a more robust solution.
+                    .first()
+                    .map(|addr| H160::from_slice(addr))
+                    .or_else(|| H160::from_str(&pc.id).ok())
+            });
 
-            if let Some(pool) = pool {
+            if let Some(liq_owner) = liq_owner {
                 let entries = pc
                     .tokens
                     .clone()
                     .into_iter()
-                    .map(move |t| (H160::from_slice(&t), (pool, U256::from(100_000))));
+                    .map(move |t| (H160::from_slice(&t), (liq_owner, U256::from(100_000))));
                 Some(entries)
             } else {
                 None

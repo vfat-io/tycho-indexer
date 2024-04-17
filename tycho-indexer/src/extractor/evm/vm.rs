@@ -30,7 +30,11 @@ use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{
     extractor::{
-        evm::{self, chain_state::ChainState, token_pre_processor::TokenPreProcessorTrait},
+        evm::{
+            self,
+            chain_state::ChainState,
+            token_pre_processor::{map_vault, TokenPreProcessorTrait},
+        },
         revert_buffer::RevertBuffer,
         BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
     },
@@ -251,13 +255,20 @@ where
                         // Filtering to keep only components with ChangeType::Creation
                         .filter(|(_, c_change)| c_change.change == ChangeType::Creation)
                         .filter_map(|(c_id, change)| {
-                            change
-                                .contract_ids
-                                // TODO: Currently, it's assumed that the pool is always the first
-                                // contract in the protocol component. This approach is a temporary
-                                // workaround and needs to be revisited for a more robust solution.
-                                .first()
-                                .map(|addr| (c_id, addr))
+                            map_vault(&change.protocol_system)
+                                .or_else(|| {
+                                    change
+                                        .contract_ids
+                                        // TODO: Currently, it's assumed that the pool is always the
+                                        // first contract in the
+                                        // protocol component. This approach is a temporary
+                                        // workaround and needs to be revisited for a more robust
+                                        // solution.
+                                        .first()
+                                        .copied()
+                                        .or_else(|| H160::from_str(&change.id).ok())
+                                })
+                                .map(|owner| (c_id, owner))
                         })
                         .filter_map(|(c_id, addr)| {
                             tx.component_balances
@@ -269,7 +280,7 @@ where
                                             (
                                                 *token,
                                                 (
-                                                    *addr,
+                                                    addr,
                                                     U256::from_big_endian(
                                                         &balance.balance.clone().to_vec(),
                                                     ),
