@@ -58,7 +58,12 @@ impl ExtractorConfigs {
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     // Set up the subscriber
-    tracing_subscriber::fmt::init();
+    let console_flag = std::env::var("ENABLE_CONSOLE").unwrap_or_else(|_| "false".to_string());
+    if console_flag == "true" {
+        console_subscriber::init();
+    } else {
+        tracing_subscriber::fmt::init();
+    }
 
     let cli: Cli = Cli::parse();
     let global_args = cli.args();

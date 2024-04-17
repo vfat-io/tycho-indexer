@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - patch/*
+      - ah/debug-deadlock
 
 permissions:
   id-token: write
@@ -14,7 +15,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out Repo
         uses: actions/checkout@v4
