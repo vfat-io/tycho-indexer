@@ -11,6 +11,8 @@ use tycho_core::{
 };
 use web3::types::BlockNumber;
 
+use super::token_pre_processor::map_vault;
+
 pub async fn analyze_tokens(
     analyze_args: AnalyzeTokenArgs,
     rpc_url: &str,
@@ -74,8 +76,11 @@ async fn analyze_batch(
     let liquidity_token_owners = component
         .into_iter()
         .filter_map(|pc| {
-            let liq_owner = map_vault(pc.protocol_system).or_else(|| {
+            let liq_owner = map_vault(&pc.protocol_system).or_else(|| {
                 pc.contract_addresses
+                    // TODO: Currently, it's assumed that the pool is always the first
+                    // contract in the protocol component. This approach is a temporary
+                    // workaround and needs to be revisited for a more robust solution.
                     .first()
                     .map(|addr| H160::from_slice(addr))
                     .or_else(|| H160::from_str(&pc.id).ok())
@@ -137,20 +142,6 @@ async fn analyze_batch(
         gw.update_tokens(&tokens).await?;
     }
     Ok(())
-}
-
-fn map_vault(input: String) -> Option<H160> {
-    match input.as_str() {
-        "vm:balancer" => Some(
-            H160::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8")
-                .expect("Unable to convert vault address into H160"),
-        ),
-        "vm:ambient" => Some(
-            H160::from_str("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688")
-                .expect("Unable to convert vault address into H160"),
-        ),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
