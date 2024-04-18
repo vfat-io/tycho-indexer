@@ -82,7 +82,7 @@ impl ExtractorHandle {
 impl MessageSender for ExtractorHandle {
     #[instrument(skip(self))]
     async fn subscribe(&self) -> Result<Receiver<ExtractorMsg>, SendError<ControlMessage>> {
-        let (tx, rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::channel(16);
         // Define a timeout duration
         let timeout_duration = std::time::Duration::from_secs(5); // 5 seconds timeout
 
