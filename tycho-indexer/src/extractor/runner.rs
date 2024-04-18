@@ -82,12 +82,24 @@ impl ExtractorHandle {
 impl MessageSender for ExtractorHandle {
     #[instrument(skip(self))]
     async fn subscribe(&self) -> Result<Receiver<ExtractorMsg>, SendError<ControlMessage>> {
-        let (tx, rx) = mpsc::channel(1);
-        self.control_tx
-            .send(ControlMessage::Subscribe(tx))
-            .await?;
+        let (tx, rx) = mpsc::channel(16);
+        // Define a timeout duration
+        let timeout_duration = std::time::Duration::from_secs(5); // 5 seconds timeout
 
-        Ok(rx)
+        // Wrap the send operation with a timeout
+        let send_result = tokio::time::timeout(
+            timeout_duration,
+            self.control_tx
+                .send(ControlMessage::Subscribe(tx)),
+        )
+        .await;
+
+        match send_result {
+            Ok(Ok(())) => Ok(rx),
+            Ok(Err(e)) => Err(e),
+            // TODO: use a better error type that let's us return this as an error.
+            Err(_) => panic!("Subscription timed out!"),
+        }
     }
 }
 
@@ -445,7 +457,7 @@ impl ExtractorBuilder {
         );
 
         let id = extractor.get_id();
-        let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
+        let (ctrl_tx, ctrl_rx) = mpsc::channel(128);
         let runner =
             ExtractorRunner::new(extractor, stream, Arc::new(Mutex::new(HashMap::new())), ctrl_rx);
 

@@ -3,4 +3,4 @@ WORKDIR=$(pwd)
 TYCHO_INDEXER=tycho-indexer
 
 echo "Building tycho: $TYCHO_INDEXER"
-cargo build --package $TYCHO_INDEXER --release
+RUSTFLAGS="--cfg tokio_unstable" cargo build --package $TYCHO_INDEXER --release

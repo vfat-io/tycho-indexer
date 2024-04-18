@@ -130,6 +130,7 @@ impl WsActor {
         extractor_id: &ExtractorIdentity,
     ) {
         {
+            debug!(extractor=?extractor_id, "Acquire lock for subscribing..");
             let extractors_guard = self
                 .app_state
                 .subscribers
