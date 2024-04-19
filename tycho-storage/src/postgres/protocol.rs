@@ -296,45 +296,56 @@ impl PostgresGateway {
             .collect()
     }
 
-    pub async fn get_protocol_components_by_tokens(
+    pub async fn get_token_owners(
         &self,
         chain: &Chain,
-        tokens: Option<&[Address]>,
+        tokens: &[Address],
         min_balance: Option<f64>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError> {
+    ) -> Result<HashMap<Address, (ComponentId, Bytes)>, StorageError> {
         let chain_id = self.get_chain_id(chain);
-        let mut query = schema::protocol_component::table
-            .select(orm::ProtocolComponent::as_select())
-            .inner_join(schema::protocol_component_holds_token::table)
-            .inner_join(schema::component_balance::table)
-            .filter(schema::protocol_component::chain_id.eq(chain_id))
-            .filter(schema::component_balance::balance_float.ge(min_balance.unwrap_or(0f64)))
-            .filter(schema::component_balance::valid_to.is_null())
-            .distinct_on(schema::protocol_component::id)
-            .into_boxed();
-
-        if let Some(addresses) = tokens {
-            let token_ids: Vec<i64> = schema::token::table
-                .select(schema::token::id)
-                .inner_join(schema::account::table)
-                .filter(schema::account::address.eq_any(addresses))
-                .get_results(conn)
-                .await
-                .map_err(PostgresError::from)?;
-            query = query.filter(schema::component_balance::token_id.eq_any(token_ids));
-        }
-
-        let orm_components = query
+        let token_ids: HashMap<i64, Address> = schema::token::table
+            .inner_join(schema::account::table)
+            .select((schema::token::id, schema::account::address))
+            .filter(schema::account::address.eq_any(tokens))
             .get_results(conn)
             .await
             .map_err(PostgresError::from)?
             .into_iter()
-            .map(|pc| (pc, None))
             .collect();
 
-        self.build_protocol_components(orm_components, chain, conn)
+        let mut res: HashMap<Address, (String, Bytes)> = HashMap::new();
+        schema::protocol_component::table
+            .inner_join(schema::protocol_component_holds_token::table)
+            .inner_join(schema::component_balance::table)
+            .select((
+                schema::component_balance::token_id,
+                schema::protocol_component::external_id,
+                schema::component_balance::new_balance,
+            ))
+            .filter(schema::protocol_component::chain_id.eq(chain_id))
+            .filter(schema::component_balance::balance_float.ge(min_balance.unwrap_or(0f64)))
+            .filter(schema::component_balance::valid_to.is_null())
+            .filter(schema::component_balance::token_id.eq_any(token_ids.keys()))
+            .get_results::<(i64, String, Bytes)>(conn)
             .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .for_each(|(tid, cid, bal)| {
+                if let Some(address) = token_ids.get(&tid) {
+                    res.entry(address.clone())
+                        .and_modify(|v| {
+                            // Bytes uses lexicographical order which in case lengths
+                            // are equal, is equivalent to big-endian numerical order.
+                            if v.1.len() == bal.len() && v.1 < bal {
+                                *v = (cid.clone(), bal.clone());
+                            }
+                        })
+                        .or_insert_with(|| (cid, bal));
+                }
+            });
+
+        Ok(res)
     }
 
     pub async fn add_protocol_components(
@@ -3142,34 +3153,33 @@ mod test {
     }
 
     #[rstest]
-    #[case::dai(&[DAI], &["state3"])]
-    #[case::weth(&[WETH], &["state1", "state3"])]
+    #[case::dai(&[DAI], HashMap::from([
+        (Bytes::from("0x6b175474e89094c44da98b954eedeac495271d0f"), (
+            "state3".to_string(),
+            Bytes::from("0x00000000000000000000000000000000000000000000006c6b935b8bbd400000")
+        ))]))]
+    #[case::weth(&[WETH], HashMap::from([
+        (Bytes::from("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"), (
+            "state1".to_string(),
+            Bytes::from("0x0000000000000000000000000000000000000000000000000de0b6b3a7640000")
+        ))]))]
     #[tokio::test]
-    async fn test_get_protocol_components_by_tokens(#[case] tokens: &[&str], #[case] exp: &[&str]) {
+    async fn test_get_protocol_components_by_tokens(
+        #[case] tokens: &[&str],
+        #[case] exp: HashMap<Address, (String, Bytes)>,
+    ) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-        let exp = exp
-            .iter()
-            .map(|&s| s.to_owned())
-            .collect::<Vec<_>>();
         let tokens = tokens
             .iter()
             .map(|s| Bytes::from(*s))
             .collect::<Vec<_>>();
 
         let res = gw
-            .get_protocol_components_by_tokens(
-                &Chain::Ethereum,
-                Some(&tokens),
-                Some(1.0),
-                &mut conn,
-            )
+            .get_token_owners(&Chain::Ethereum, &tokens, Some(1.0), &mut conn)
             .await
-            .expect("retrieving components failed")
-            .into_iter()
-            .map(|pc| pc.id.clone())
-            .collect::<Vec<_>>();
+            .expect("retrieving components failed");
 
         assert_eq!(res, exp);
     }

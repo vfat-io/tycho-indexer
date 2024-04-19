@@ -261,7 +261,7 @@ where
                 .filter_map(|bc| match H160::from_str(bc.component_id.as_str()) {
                     Ok(address) => Some((
                         bc.token.clone().into(),
-                        (address, U256::from_big_endian(&bc.new_balance.clone().to_vec())),
+                        (address, U256::from_big_endian(&bc.new_balance)),
                     )),
                     Err(e) => {
                         warn!("Error parsing component_id to H160: {}", e);

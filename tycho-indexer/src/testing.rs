@@ -19,7 +19,8 @@ use tycho_core::{
             ProtocolComponentStateDelta,
         },
         token::CurrencyToken,
-        Address, Chain, ContractId, ExtractionState, PaginationParams, ProtocolType, TxHash,
+        Address, Chain, ComponentId, ContractId, ExtractionState, PaginationParams, ProtocolType,
+        TxHash,
     },
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
@@ -189,16 +190,16 @@ mock! {
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-        fn get_protocol_components_by_tokens<'life0, 'life1, 'life2, 'async_trait>(
+        fn get_token_owners<'life0, 'life1, 'life2, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
-            tokens: Option<&'life2 [Address]>,
+            tokens: &'life2 [Address],
             min_balance: Option<f64>,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
                     Output = Result<
-                        Vec<ProtocolComponent>,
+                        HashMap<Address, (ComponentId, Bytes)>,
                         StorageError,
                     >,
                 > + ::core::marker::Send + 'async_trait,

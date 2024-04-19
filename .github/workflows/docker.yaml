@@ -5,7 +5,9 @@ on:
     branches:
       - main
       - patch/*
-      - ah/debug-deadlock
+      - ah/fix-token-owner-detection
+  workflow_dispatch: { }
+
 
 permissions:
   id-token: write
