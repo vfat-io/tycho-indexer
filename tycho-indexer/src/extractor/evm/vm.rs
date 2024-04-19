@@ -279,12 +279,7 @@ where
                                         .map(move |(token, balance)| {
                                             (
                                                 *token,
-                                                (
-                                                    addr,
-                                                    U256::from_big_endian(
-                                                        &balance.balance.clone().to_vec(),
-                                                    ),
-                                                ),
+                                                (addr, U256::from_big_endian(&balance.balance)),
                                             ) // We currently only keep the lastest created pool for
                                               // a token
                                         })
@@ -773,9 +768,9 @@ where
                                             (
                                                 (
                                                     state.address.clone().into(),
-                                                    U256::from_big_endian(&key.clone().to_vec()),
+                                                    U256::from_big_endian(key),
                                                 ),
-                                                U256::from_big_endian(&value.clone().to_vec()),
+                                                U256::from_big_endian(value),
                                             )
                                         },
                                     )

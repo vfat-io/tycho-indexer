@@ -96,8 +96,9 @@ async fn analyze_batch(
                         .or_else(|| H160::from_str(&pc.id).ok())
                 });
 
-                liq_owner
-                    .map(|liq_owner| (H160::from_slice(&address), (liq_owner, U256::from(balance))))
+                liq_owner.map(|liq_owner| {
+                    (H160::from_slice(&address), (liq_owner, U256::from_big_endian(&balance)))
+                })
             } else {
                 warn!(component_id=?cid, "Failed to find component for id!");
                 None
