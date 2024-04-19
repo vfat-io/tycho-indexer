@@ -296,7 +296,7 @@ impl PostgresGateway {
             .collect()
     }
 
-    pub async fn get_protocol_components_by_tokens(
+    pub async fn get_token_owners(
         &self,
         chain: &Chain,
         tokens: &[Address],
@@ -3177,7 +3177,7 @@ mod test {
             .collect::<Vec<_>>();
 
         let res = gw
-            .get_protocol_components_by_tokens(&Chain::Ethereum, &tokens, Some(1.0), &mut conn)
+            .get_token_owners(&Chain::Ethereum, &tokens, Some(1.0), &mut conn)
             .await
             .expect("retrieving components failed");
 

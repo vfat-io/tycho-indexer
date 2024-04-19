@@ -69,7 +69,7 @@ async fn analyze_batch(
         .map(|t| t.address.clone())
         .collect::<Vec<_>>();
     let token_owner = gw
-        .get_protocol_components_by_tokens(&chain, &addresses, Some(100_000f64))
+        .get_token_owners(&chain, &addresses, Some(100_000f64))
         .await?;
     let component_ids = token_owner
         .values()
@@ -196,7 +196,7 @@ mod test {
             Chain::Ethereum,
             50,
         )];
-        gw.expect_get_protocol_components_by_tokens()
+        gw.expect_get_token_owners()
             .returning(|_, _, _| {
                 Box::pin(async move {
                     Ok(HashMap::from([(

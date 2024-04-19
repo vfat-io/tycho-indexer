@@ -190,7 +190,7 @@ mock! {
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-        fn get_protocol_components_by_tokens<'life0, 'life1, 'life2, 'async_trait>(
+        fn get_token_owners<'life0, 'life1, 'life2, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
             tokens: &'life2 [Address],

@@ -754,7 +754,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
-    async fn get_protocol_components_by_tokens(
+    async fn get_token_owners(
         &self,
         chain: &Chain,
         tokens: &[Address],
@@ -765,7 +765,7 @@ impl ProtocolGateway for CachedGateway {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_protocol_components_by_tokens(chain, tokens, min_balance, &mut conn)
+            .get_token_owners(chain, tokens, min_balance, &mut conn)
             .await
     }
 

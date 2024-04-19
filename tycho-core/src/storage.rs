@@ -272,10 +272,11 @@ pub trait ProtocolGateway {
         min_tvl: Option<f64>,
     ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError>;
 
-    /// Retrieves components by tokens
+    /// Retrieves owners of tokens
     ///
-    /// Allows querying components by the tokens that they support, as well as by a
-    /// minimum balance.
+    /// Queries for owners (protocol components) of tokens that have a certain minimum
+    /// balance and returns a maximum aggregate of those in case there are multiple
+    /// owners.
     ///
     /// # Parameters
     /// - `chain` The chain of the component
@@ -283,7 +284,7 @@ pub trait ProtocolGateway {
     ///   returned.
     /// - `min_balance` A minimum balance we expect the component to have on any of the tokens
     ///   mentioned in `tokens`.
-    async fn get_protocol_components_by_tokens(
+    async fn get_token_owners(
         &self,
         chain: &Chain,
         tokens: &[Address],
