@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - patch/*
+      - ah/fix-token-owner-detection
   workflow_dispatch: { }
 
 
