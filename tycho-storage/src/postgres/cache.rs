@@ -27,7 +27,8 @@ use tycho_core::{
             ProtocolComponentStateDelta,
         },
         token::CurrencyToken,
-        Address, Chain, ContractId, ExtractionState, PaginationParams, ProtocolType, TxHash,
+        Address, Chain, ComponentId, ContractId, ExtractionState, PaginationParams, ProtocolType,
+        TxHash,
     },
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
@@ -756,9 +757,9 @@ impl ProtocolGateway for CachedGateway {
     async fn get_protocol_components_by_tokens(
         &self,
         chain: &Chain,
-        tokens: Option<&[Address]>,
+        tokens: &[Address],
         min_balance: Option<f64>,
-    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError> {
+    ) -> Result<HashMap<Address, (ComponentId, Bytes)>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))

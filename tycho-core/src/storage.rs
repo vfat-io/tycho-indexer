@@ -11,7 +11,8 @@ use crate::{
         self,
         blockchain::{Block, Transaction},
         protocol::ComponentBalance,
-        Address, BlockHash, Chain, ContractId, ExtractionState, PaginationParams, TxHash,
+        Address, BlockHash, Chain, ComponentId, ContractId, ExtractionState, PaginationParams,
+        TxHash,
     },
     Bytes,
 };
@@ -285,9 +286,9 @@ pub trait ProtocolGateway {
     async fn get_protocol_components_by_tokens(
         &self,
         chain: &Chain,
-        tokens: Option<&[Address]>,
+        tokens: &[Address],
         min_balance: Option<f64>,
-    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError>;
+    ) -> Result<HashMap<Address, (ComponentId, Bytes)>, StorageError>;
 
     async fn add_protocol_components(
         &self,

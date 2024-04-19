@@ -68,36 +68,41 @@ async fn analyze_batch(
         .iter()
         .map(|t| t.address.clone())
         .collect::<Vec<_>>();
-
-    let component = gw
-        .get_protocol_components_by_tokens(&chain, Some(&addresses), Some(100_000f64))
+    let token_owner = gw
+        .get_protocol_components_by_tokens(&chain, &addresses, Some(100_000f64))
         .await?;
-
-    let liquidity_token_owners = component
+    let component_ids = token_owner
+        .values()
+        .map(|(cid, _)| cid.as_str())
+        .collect::<Vec<_>>();
+    let components = gw
+        .get_protocol_components(&chain, None, Some(&component_ids), None)
+        .await?
         .into_iter()
-        .filter_map(|pc| {
-            let liq_owner = map_vault(&pc.protocol_system).or_else(|| {
-                pc.contract_addresses
-                    // TODO: Currently, it's assumed that the pool is always the first
-                    // contract in the protocol component. This approach is a temporary
-                    // workaround and needs to be revisited for a more robust solution.
-                    .first()
-                    .map(|addr| H160::from_slice(addr))
-                    .or_else(|| H160::from_str(&pc.id).ok())
-            });
+        .map(|pc| (pc.id.clone(), pc))
+        .collect::<HashMap<_, _>>();
 
-            if let Some(liq_owner) = liq_owner {
-                let entries = pc
-                    .tokens
-                    .clone()
-                    .into_iter()
-                    .map(move |t| (H160::from_slice(&t), (liq_owner, U256::from(100_000))));
-                Some(entries)
+    let liquidity_token_owners = token_owner
+        .into_iter()
+        .filter_map(|(address, (cid, balance))| {
+            if let Some(pc) = components.get(&cid) {
+                let liq_owner = map_vault(&pc.protocol_system).or_else(|| {
+                    pc.contract_addresses
+                        // TODO: Currently, it's assumed that the pool is always the first
+                        // contract in the protocol component. This approach is a temporary
+                        // workaround and needs to be revisited for a more robust solution.
+                        .first()
+                        .map(|addr| H160::from_slice(addr))
+                        .or_else(|| H160::from_str(&pc.id).ok())
+                });
+
+                liq_owner
+                    .map(|liq_owner| (H160::from_slice(&address), (liq_owner, U256::from(balance))))
             } else {
+                warn!(component_id=?cid, "Failed to find component for id!");
                 None
             }
         })
-        .flatten()
         .collect::<HashMap<_, _>>();
     let tf = Arc::new(TokenFinder::new(liquidity_token_owners));
     let analyzer = TraceCallDetector::new(eth_rpc_url.as_str(), tf);
@@ -186,13 +191,25 @@ mod test {
             &Bytes::from("0x45804880de22913dafe09f4980848ece6ecbaf78"),
             "PAXG",
             18,
-            2,
+            1,
             &[Some(59_264)],
             Chain::Ethereum,
             50,
         )];
         gw.expect_get_protocol_components_by_tokens()
             .returning(|_, _, _| {
+                Box::pin(async move {
+                    Ok(HashMap::from([(
+                        Bytes::from("0x45804880de22913dafe09f4980848ece6ecbaf78"),
+                        (
+                            "0xe25a329d385f77df5d4ed56265babe2b99a5436e".to_string(),
+                            Bytes::from("0x0186a0"),
+                        ),
+                    )]))
+                })
+            });
+        gw.expect_get_protocol_components()
+            .returning(|_, _, _, _| {
                 Box::pin(async move {
                     Ok(vec![ProtocolComponent::new(
                         "0xe25a329d385f77df5d4ed56265babe2b99a5436e",
