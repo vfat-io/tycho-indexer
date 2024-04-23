@@ -1239,6 +1239,7 @@ impl PostgresGateway {
                 schema::component_balance::new_balance,
                 schema::component_balance::balance_float,
             ))
+            .order(schema::component_balance::protocol_component_id.asc())
             .get_results::<(i64, i64, Balance, f64)>(conn)
             .await
             .map_err(PostgresError::from)?
