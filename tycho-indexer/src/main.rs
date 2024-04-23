@@ -1,8 +1,11 @@
 #![doc = include_str!("../../Readme.md")]
 
+use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use futures03::future::select_all;
+use reqwest::Client;
 use serde::Deserialize;
-use std::{env, fs::File, io::Read};
+use std::{fs::File, io::Read, str::FromStr, sync::Arc};
+use url::Url;
 
 use extractor::{
     evm::token_pre_processor::TokenPreProcessor,
@@ -15,14 +18,15 @@ use ethers::{
     prelude::{Http, Provider},
     providers::Middleware,
 };
-use tokio::task::JoinHandle;
+use tokio::{select, task::JoinHandle};
 use tracing::info;
 
 use tycho_core::models::Chain;
 use tycho_indexer::{
+    cli::{AnalyzeTokenArgs, Cli, Command, GlobalArgs, IndexArgs},
     extractor::{
         self,
-        evm::chain_state::ChainState,
+        evm::{chain_state::ChainState, token_analysis_cron::analyze_tokens},
         runner::{ExtractorConfig, HandleResult},
         ExtractionError,
     },
@@ -30,73 +34,11 @@ use tycho_indexer::{
 };
 use tycho_storage::postgres::{builder::GatewayBuilder, cache::CachedGateway};
 
+// TODO: We need to use `use pretty_assertions::{assert_eq, assert_ne}` per test module.
+#[allow(unused_imports)]
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;
-
-/// Tycho Indexer using Substreams
-///
-/// Extracts state from the Ethereum blockchain and stores it in a Postgres database.
-#[derive(Parser, Debug, Clone, PartialEq, Eq)]
-#[clap(version = "0.1.0")]
-struct CliArgs {
-    /// Substreams API endpoint URL
-    #[clap(name = "endpoint", long)]
-    endpoint_url: String,
-
-    /// Substreams API token
-    ///
-    /// Defaults to SUBSTREAMS_API_TOKEN env var.
-    #[clap(long, env, hide_env_values = true, alias = "api_token")]
-    substreams_api_token: String,
-
-    /// DB Connection Url
-    ///
-    /// Defaults to DATABASE_URL env var.
-    #[clap(long, env, hide_env_values = true, alias = "db_url")]
-    database_url: String,
-
-    /// Substreams Package file
-    #[clap(long)]
-    spkg: String,
-
-    /// Substreams Module name
-    #[clap(long)]
-    module: String,
-
-    /// Substreams start block
-    /// Defaults to START_BLOCK env var or default_value below.
-    #[clap(long, env, default_value = "17361664")]
-    start_block: i64,
-
-    /// Substreams stop block
-    ///
-    /// Optional. If not provided, the extractor will run until the latest block.
-    /// If prefixed with a `+` the value is interpreted as an increment to the start block.
-    /// Defaults to STOP_BLOCK env var or None.
-    #[clap(long, env)]
-    stop_block: Option<String>,
-}
-
-impl CliArgs {
-    #[allow(dead_code)]
-    fn stop_block(&self) -> Option<i64> {
-        if let Some(s) = &self.stop_block {
-            if s.starts_with('+') {
-                let increment: i64 = s
-                    .strip_prefix('+')
-                    .expect("stripped stop block value")
-                    .parse()
-                    .expect("stop block value");
-                Some(self.start_block + increment)
-            } else {
-                Some(s.parse().expect("stop block value"))
-            }
-        } else {
-            None
-        }
-    }
-}
 
 #[derive(Debug, Deserialize)]
 struct ExtractorConfigs {
@@ -114,17 +56,39 @@ impl ExtractorConfigs {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), ExtractionError> {
+async fn main() -> Result<(), anyhow::Error> {
     // Set up the subscriber
-    tracing_subscriber::fmt::init();
+    let console_flag = std::env::var("ENABLE_CONSOLE").unwrap_or_else(|_| "false".to_string());
+    if console_flag == "true" {
+        console_subscriber::init();
+    } else {
+        tracing_subscriber::fmt::init();
+    }
 
-    let args: CliArgs = CliArgs::parse();
+    let cli: Cli = Cli::parse();
+    let global_args = cli.args();
 
+    match cli.command() {
+        Command::Run(_) => {
+            todo!();
+        }
+        Command::Index(indexer_args) => {
+            run_indexer(global_args, indexer_args).await?;
+        }
+        Command::AnalyzeTokens(analyze_args) => {
+            run_token_analyzer(global_args, analyze_args).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn run_indexer(
+    global_args: GlobalArgs,
+    index_args: IndexArgs,
+) -> Result<(), ExtractionError> {
     info!("Starting Tycho");
-
-    let rpc_url = env::var("ETH_RPC_URL").expect("ETH_RPC_URL is not set");
     let rpc_client: Provider<Http> =
-        Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
+        Provider::<Http>::try_from(&global_args.rpc_url).expect("Error creating HTTP provider");
     let block_number = rpc_client
         .get_block_number()
         .await
@@ -132,8 +96,7 @@ async fn main() -> Result<(), ExtractionError> {
         .as_u64();
 
     let chain_state = ChainState::new(chrono::Local::now().naive_utc(), block_number);
-
-    let extractors_config = ExtractorConfigs::from_yaml("./tycho-indexer/extractors.yaml")
+    let extractors_config = ExtractorConfigs::from_yaml(&index_args.extractors_config)
         .map_err(|e| ExtractionError::Setup(format!("Failed to load extractors.yaml. {}", e)))?;
 
     let protocol_systems: Vec<String> = extractors_config
@@ -142,22 +105,33 @@ async fn main() -> Result<(), ExtractionError> {
         .cloned()
         .collect();
 
-    let (cached_gw, gw_writer_thread) = GatewayBuilder::new(&args.database_url)
+    let (cached_gw, gw_writer_thread) = GatewayBuilder::new(&global_args.database_url)
         .set_chains(&[Chain::Ethereum])
         .set_protocol_systems(&protocol_systems)
         .build()
         .await?;
 
-    let token_processor = TokenPreProcessor::new(rpc_client);
+    let transport = Web3Transport::new(HttpTransport::new(
+        Client::new(),
+        Url::from_str(
+            "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac",
+        )
+        .unwrap(),
+        "transport".to_owned(),
+    ));
+    let w3 = Web3::new(transport);
+
+    let token_processor = TokenPreProcessor::new(rpc_client, w3);
 
     let (mut tasks, extractor_handles): (Vec<_>, Vec<_>) =
+        // TODO: accept substreams configuration from cli.
         build_all_extractors(&extractors_config, chain_state, &cached_gw, &token_processor)
             .await
             .map_err(|e| ExtractionError::Setup(format!("Failed to create extractors: {}", e)))?
             .into_iter()
             .unzip();
 
-    // TODO: read from env variable
+    // TODO: add configurations to cli for these values
     let server_addr = "0.0.0.0";
     let server_port = 4242;
     let server_version_prefix = "v1";
@@ -170,8 +144,14 @@ async fn main() -> Result<(), ExtractionError> {
         .run()?;
     info!(server_url, "Http and Ws server started");
 
-    let shutdown_task =
-        tokio::spawn(shutdown_handler(server_handle, extractor_handles, gw_writer_thread));
+    let shutdown_task = tokio::spawn(shutdown_handler(
+        server_handle,
+        extractor_handles
+            .into_iter()
+            .map(|h| h.0)
+            .collect::<Vec<_>>(),
+        gw_writer_thread,
+    ));
 
     tasks.extend(vec![server_task, shutdown_task]);
 
@@ -189,13 +169,12 @@ async fn build_all_extractors(
 
     for extractor_config in config.extractors.values() {
         let (task, handle) = ExtractorBuilder::new(extractor_config)
-            .only_final_blocks()
             .build(chain_state, cached_gw, token_pre_processor)
             .await?
             .run()
             .await?;
 
-        info!("Extractor {} started!", handle.get_id());
+        info!("Extractor {} started!", handle.0.get_id());
         extractor_handles.push((task, handle));
     }
 
@@ -217,102 +196,23 @@ async fn shutdown_handler(
     Ok(())
 }
 
-#[cfg(test)]
-mod cli_tests {
-    use std::env;
-
-    use clap::Parser;
-
-    use super::CliArgs;
-
-    #[tokio::test]
-    #[ignore]
-    // This test needs to be run independently because it temporarily changes env variables.
-    async fn test_arg_parsing_long_from_env() {
-        // Save previous values of the environment variables.
-        let prev_api_token = env::var("SUBSTREAMS_API_TOKEN");
-        let prev_db_url = env::var("DATABASE_URL");
-        // Set the SUBSTREAMS_API_TOKEN environment variable for testing.
-        env::set_var("SUBSTREAMS_API_TOKEN", "your_api_token");
-        env::set_var("DATABASE_URL", "my_db");
-        let args = CliArgs::try_parse_from(vec![
-            "tycho-indexer",
-            "--endpoint",
-            "http://example.com",
-            "--spkg",
-            "package.spkg",
-            "--module",
-            "module_name",
-        ]);
-
-        // Restore the environment variables.
-        if let Ok(val) = prev_api_token {
-            env::set_var("SUBSTREAMS_API_TOKEN", val);
-        } else {
-            env::remove_var("SUBSTREAMS_API_TOKEN");
+async fn run_token_analyzer(
+    global_args: GlobalArgs,
+    analyzer_args: AnalyzeTokenArgs,
+) -> Result<(), anyhow::Error> {
+    let (cached_gw, gw_writer_thread) = GatewayBuilder::new(&global_args.database_url)
+        .set_chains(&[analyzer_args.chain])
+        .build()
+        .await?;
+    let cached_gw = Arc::new(cached_gw);
+    let analyze_thread = analyze_tokens(analyzer_args, &global_args.rpc_url, cached_gw.clone());
+    select! {
+         res = analyze_thread => {
+            res?;
+         },
+         res = gw_writer_thread => {
+            res?;
         }
-        if let Ok(val) = prev_db_url {
-            env::set_var("DATABASE_URL", val);
-        } else {
-            env::remove_var("DATABASE_URL");
-        }
-
-        assert!(args.is_ok());
-        let args = args.unwrap();
-        let expected_args = CliArgs {
-            endpoint_url: "http://example.com".to_string(),
-            substreams_api_token: "your_api_token".to_string(),
-            database_url: "my_db".to_string(),
-            spkg: "package.spkg".to_string(),
-            module: "module_name".to_string(),
-            start_block: 17361664,
-            stop_block: None,
-        };
-
-        assert_eq!(args, expected_args);
     }
-
-    #[tokio::test]
-    async fn test_arg_parsing_long() {
-        let args = CliArgs::try_parse_from(vec![
-            "tycho-indexer",
-            "--endpoint",
-            "http://example.com",
-            "--api_token",
-            "your_api_token",
-            "--db_url",
-            "my_db",
-            "--spkg",
-            "package.spkg",
-            "--module",
-            "module_name",
-        ]);
-
-        assert!(args.is_ok());
-        let args = args.unwrap();
-        let expected_args = CliArgs {
-            endpoint_url: "http://example.com".to_string(),
-            substreams_api_token: "your_api_token".to_string(),
-            database_url: "my_db".to_string(),
-            spkg: "package.spkg".to_string(),
-            module: "module_name".to_string(),
-            start_block: 17361664,
-            stop_block: None,
-        };
-
-        assert_eq!(args, expected_args);
-    }
-
-    #[tokio::test]
-    async fn test_arg_parsing_missing_val() {
-        let args = CliArgs::try_parse_from(vec![
-            "tycho-indexer",
-            "--spkg",
-            "package.spkg",
-            "--module",
-            "module_name",
-        ]);
-
-        assert!(args.is_err());
-    }
+    Ok(())
 }

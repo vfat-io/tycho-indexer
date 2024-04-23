@@ -1,10 +1,15 @@
-use mockall::mock;
 use std::collections::HashMap;
+#[cfg(test)]
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 #[cfg(test)]
+use ethers::prelude::H256;
+#[cfg(test)]
 use ethers::types::U256;
+use mockall::mock;
+
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
@@ -14,7 +19,8 @@ use tycho_core::{
             ProtocolComponentStateDelta,
         },
         token::CurrencyToken,
-        Address, Chain, ContractId, ExtractionState, ProtocolType, TxHash,
+        Address, Chain, ComponentId, ContractId, ExtractionState, PaginationParams, ProtocolType,
+        TxHash,
     },
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
@@ -22,6 +28,9 @@ use tycho_core::{
     },
     Bytes,
 };
+
+#[cfg(test)]
+use crate::extractor::evm;
 
 mock! {
     pub Gateway {}
@@ -67,6 +76,7 @@ mock! {
             addresses: Option<&'life2 [Address]>,
             version: Option<&'life3 Version>,
             include_slots: bool,
+            retrieve_balances: bool,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
@@ -82,7 +92,7 @@ mock! {
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-        fn insert_contract<'life0, 'life1, 'async_trait>(
+        fn upsert_contract<'life0, 'life1, 'async_trait>(
             &'life0 self,
             new: &'life1 Contract,
         ) -> ::core::pin::Pin<
@@ -180,6 +190,28 @@ mock! {
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        fn get_token_owners<'life0, 'life1, 'life2, 'async_trait>(
+            &'life0 self,
+            chain: &'life1 Chain,
+            tokens: &'life2 [Address],
+            min_balance: Option<f64>,
+        ) -> ::core::pin::Pin<
+            Box<
+                dyn ::core::future::Future<
+                    Output = Result<
+                        HashMap<Address, (ComponentId, Bytes)>,
+                        StorageError,
+                    >,
+                > + ::core::marker::Send + 'async_trait,
+            >,
+        >
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            'life2: 'async_trait,
+            Self: 'async_trait;
+
+        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn add_protocol_components<'life0, 'life1, 'async_trait>(
             &'life0 self,
             new: &'life1 [ProtocolComponent],
@@ -235,6 +267,7 @@ mock! {
             at: Option<Version>,
             system: Option<String>,
             id: Option<&'life2 [&'life3 str]>,
+            retrieve_balances: bool,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
@@ -269,10 +302,13 @@ mock! {
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-        fn get_tokens<'life0, 'life1, 'life2, 'async_trait>(
+        fn get_tokens<'life0, 'life1, 'life2, 'life3, 'async_trait>(
             &'life0 self,
             chain: Chain,
             address: Option<&'life1 [&'life2 Address]>,
+            min_quality: Option<i32>,
+            traded_n_days_ago: Option<NaiveDateTime>,
+            pagination_params: Option<&'life3 PaginationParams>,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
@@ -284,6 +320,7 @@ mock! {
             'life0: 'async_trait,
             'life1: 'async_trait,
             'life2: 'async_trait,
+            'life3: 'async_trait,
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
@@ -304,6 +341,22 @@ mock! {
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn add_tokens<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            tokens: &'life1 [CurrencyToken],
+        ) -> ::core::pin::Pin<
+            Box<
+                dyn ::core::future::Future<
+                    Output = Result<(), StorageError>,
+                > + ::core::marker::Send + 'async_trait,
+            >,
+        >
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait;
+
+        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        fn update_tokens<'life0, 'life1, 'async_trait>(
             &'life0 self,
             tokens: &'life1 [CurrencyToken],
         ) -> ::core::pin::Pin<
@@ -369,11 +422,11 @@ mock! {
             &'life0 self,
             chain: &'life1 Chain,
             ids: Option<&'life2 [&'life3 str]>,
-            at: Option<&'life4 BlockOrTimestamp>,
+            at: Option<&'life4 Version>,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<HashMap<String, HashMap<Bytes, f64>>, StorageError>,
+                    Output = Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >
@@ -428,4 +481,23 @@ pub fn evm_contract_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap
     data.into_iter()
         .map(|(s, v)| (Bytes::from(U256::from(s)), Bytes::from(U256::from(v))))
         .collect()
+}
+
+/// Creates an evm block for testing, version 0 is not allowed and will panic.
+#[cfg(test)]
+pub fn evm_block(version: u64) -> evm::Block {
+    if version == 0 {
+        panic!("Block version 0 doesn't exist. Smallest version is 1");
+    }
+
+    let ts: NaiveDateTime = "2020-01-01T00:00:00"
+        .parse()
+        .expect("failed parsing block ts");
+    evm::Block {
+        number: version,
+        hash: H256::from_low_u64_be(version),
+        parent_hash: H256::from_low_u64_be(version - 1),
+        chain: Chain::Ethereum,
+        ts: ts + Duration::from_secs(version * 12),
+    }
 }

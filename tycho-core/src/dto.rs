@@ -4,11 +4,13 @@
 //! be very simple and ideally not contain any business logic.
 //!
 //! Structs in here implement utoipa traits so they can be used to derive an OpenAPI schema.
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::fmt::Display;
 use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -45,7 +47,8 @@ impl From<models::contract::Contract> for ResponseAccount {
             value.address,
             value.title,
             value.slots,
-            value.balance,
+            value.native_balance,
+            value.balances,
             value.code,
             value.code_hash,
             value.balance_modify_tx,
@@ -242,7 +245,7 @@ pub struct Block {
     pub ts: NaiveDateTime,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 pub struct BlockParam {
     #[schema(value_type=Option<String>)]
     #[serde(with = "hex_bytes_option", default)]
@@ -301,7 +304,7 @@ pub struct BlockAccountChanges {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
-pub struct TokenBalances(#[serde(with = "hex_hashmap_key")] HashMap<Bytes, ComponentBalance>);
+pub struct TokenBalances(#[serde(with = "hex_hashmap_key")] pub HashMap<Bytes, ComponentBalance>);
 
 impl From<HashMap<Bytes, ComponentBalance>> for TokenBalances {
     fn from(value: HashMap<Bytes, ComponentBalance>) -> Self {
@@ -409,8 +412,8 @@ impl AccountUpdate {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone())),
         );
-        self.balance = other.balance.clone();
-        self.code = other.code.clone();
+        self.balance.clone_from(&other.balance);
+        self.code.clone_from(&other.code);
         self.change = self.change.merge(&other.change);
     }
 }
@@ -557,6 +560,7 @@ impl From<models::protocol::ProtocolComponentStateDelta> for ProtocolStateDelta 
         }
     }
 }
+
 impl ProtocolStateDelta {
     /// Merges 'other' into 'self'.
     ///
@@ -663,7 +667,10 @@ pub struct ResponseAccount {
     pub slots: HashMap<Bytes, Bytes>,
     #[schema(value_type=HashMap<String, String>, example="0x00")]
     #[serde(with = "hex_bytes")]
-    pub balance: Bytes,
+    pub native_balance: Bytes,
+    #[schema(value_type=HashMap<String, String>)]
+    #[serde(with = "hex_hashmap_key_value")]
+    pub balances: HashMap<Bytes, Bytes>,
     #[schema(value_type=HashMap<String, String>, example="0xBADBABE")]
     #[serde(with = "hex_bytes")]
     pub code: Bytes,
@@ -688,7 +695,8 @@ impl ResponseAccount {
         address: Bytes,
         title: String,
         slots: HashMap<Bytes, Bytes>,
-        balance: Bytes,
+        native_balance: Bytes,
+        balances: HashMap<Bytes, Bytes>,
         code: Bytes,
         code_hash: Bytes,
         balance_modify_tx: Bytes,
@@ -700,7 +708,8 @@ impl ResponseAccount {
             address,
             title,
             slots,
-            balance,
+            native_balance,
+            balances,
             code,
             code_hash,
             balance_modify_tx,
@@ -718,7 +727,8 @@ impl std::fmt::Debug for ResponseAccount {
             .field("address", &self.address)
             .field("title", &self.title)
             .field("slots", &self.slots)
-            .field("balance", &self.balance)
+            .field("native_balance", &self.native_balance)
+            .field("balances", &self.balances)
             .field("code", &format!("[{} bytes]", self.code.len()))
             .field("code_hash", &self.code_hash)
             .field("balance_modify_tx", &self.balance_modify_tx)
@@ -752,7 +762,7 @@ impl Display for ContractId {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 pub struct VersionParam {
     pub timestamp: Option<NaiveDateTime>,
     pub block: Option<BlockParam>,
@@ -770,17 +780,27 @@ impl Default for VersionParam {
     }
 }
 
+fn default_include_balances_flag() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct StateRequestParameters {
     #[param(default = 0)]
     pub tvl_gt: Option<u64>,
     #[param(default = 0)]
     pub inertia_min_gt: Option<u64>,
+    #[serde(default = "default_include_balances_flag")]
+    pub include_balances: bool,
 }
 
 impl StateRequestParameters {
+    pub fn new(include_balances: bool) -> Self {
+        Self { tvl_gt: None, inertia_min_gt: None, include_balances }
+    }
+
     pub fn to_query_string(&self) -> String {
-        let mut parts = vec![];
+        let mut parts = vec![format!("include_balances={}", self.include_balances)];
 
         if let Some(tvl_gt) = self.tvl_gt {
             parts.push(format!("tvl_gt={}", tvl_gt));
@@ -803,23 +823,47 @@ pub struct TokensRequestBody {
     #[serde(rename = "tokenAddresses")]
     #[schema(value_type=Option<Vec<String>>)]
     pub token_addresses: Option<Vec<Bytes>>,
-}
-
-impl TokensRequestBody {
-    pub fn new(token_addresses: Option<Vec<Bytes>>) -> Self {
-        Self { token_addresses }
-    }
+    #[serde(default)]
+    pub min_quality: Option<i32>,
+    #[serde(default)]
+    pub traded_n_days_ago: Option<u64>,
+    #[serde(default)]
+    pub pagination: PaginationParams,
 }
 
 /// Response from Tycho server for a tokens request.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct TokensRequestResponse {
     pub tokens: Vec<ResponseToken>,
+    pub pagination: PaginationParams,
 }
 
 impl TokensRequestResponse {
-    pub fn new(tokens: Vec<ResponseToken>) -> Self {
-        Self { tokens }
+    pub fn new(tokens: Vec<ResponseToken>, pagination_request: &PaginationParams) -> Self {
+        Self { tokens, pagination: pagination_request.clone() }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct PaginationParams {
+    #[serde(default)]
+    pub page: i64,
+    #[serde(default)]
+    pub page_size: i64,
+}
+
+impl PaginationParams {
+    pub fn new(page: i64, page_size: i64) -> Self {
+        Self { page, page_size }
+    }
+}
+
+impl Default for PaginationParams {
+    fn default() -> Self {
+        PaginationParams {
+            page: 0,       // Default page number
+            page_size: 20, // Default page size
+        }
     }
 }
 
@@ -942,9 +986,9 @@ pub struct ResponseProtocolState {
     #[schema(value_type=HashMap<String, String>)]
     #[serde(with = "hex_hashmap_value")]
     pub attributes: HashMap<String, Bytes>,
-    #[schema(value_type=String)]
-    #[serde(with = "hex_bytes_option")]
-    pub modify_tx: Option<Bytes>,
+    #[schema(value_type=HashMap<String, String>)]
+    #[serde(with = "hex_hashmap_key_value")]
+    pub balances: HashMap<Bytes, Bytes>,
 }
 
 impl From<models::protocol::ProtocolComponentState> for ResponseProtocolState {
@@ -952,7 +996,7 @@ impl From<models::protocol::ProtocolComponentState> for ResponseProtocolState {
         Self {
             component_id: value.component_id,
             attributes: value.attributes,
-            modify_tx: value.modify_tx,
+            balances: value.balances,
         }
     }
 }
@@ -1010,6 +1054,15 @@ pub struct ProtocolComponentId {
     pub chain: Chain,
     pub system: String,
     pub id: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(tag = "status", content = "message")]
+#[schema(example=json!({"status": "NotReady", "message": "No db connection"}))]
+pub enum Health {
+    Ready,
+    Starting(String),
+    NotReady(String),
 }
 
 #[cfg(test)]
@@ -1116,7 +1169,7 @@ mod test {
                 "number": 123,
                 "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
                 "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-                "chain": "ethereum",             
+                "chain": "ethereum",
                 "ts": "2023-09-14T00:00:00"
             },
             "revert": false,
@@ -1130,7 +1183,7 @@ mod test {
                     "change": "Update"
                 }
             },
-            "new_protocol_components": 
+            "new_protocol_components":
                 { "protocol_1": {
                         "id": "protocol_1",
                         "protocol_system": "system_1",
@@ -1176,7 +1229,7 @@ mod test {
                 "number": 123,
                 "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
                 "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-                "chain": "ethereum",             
+                "chain": "ethereum",
                 "ts": "2023-09-14T00:00:00"
             },
             "revert": false,

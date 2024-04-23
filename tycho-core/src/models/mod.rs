@@ -7,6 +7,7 @@ use crate::{dto, Bytes};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 use strum_macros::{Display, EnumString};
+use thiserror::Error;
 use utoipa::ToSchema;
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
@@ -125,8 +126,12 @@ impl ExtractionState {
 
 // TODO: replace with types from dto on extractor
 #[typetag::serde(tag = "type")]
-pub trait NormalisedMessage: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static {
+pub trait NormalisedMessage:
+    std::any::Any + std::fmt::Debug + std::fmt::Display + Send + Sync + 'static
+{
     fn source(&self) -> ExtractorIdentity;
+
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 #[derive(PartialEq, Debug, Clone, Default, Deserialize, Serialize)]
@@ -194,4 +199,28 @@ impl Display for ContractId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}: 0x{}", self.chain, hex::encode(&self.address))
     }
+}
+
+#[derive(Debug, PartialEq, Clone, Default, Deserialize, Serialize)]
+pub struct PaginationParams {
+    pub page: i64,
+    pub page_size: i64,
+}
+
+impl PaginationParams {
+    pub fn new(page: i64, page_size: i64) -> Self {
+        Self { page, page_size }
+    }
+}
+
+impl From<&dto::PaginationParams> for PaginationParams {
+    fn from(value: &dto::PaginationParams) -> Self {
+        PaginationParams { page: value.page, page_size: value.page_size }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum DeltaError {
+    #[error("Id mismatch: {0} vs {1}")]
+    IdMismatch(String, String),
 }

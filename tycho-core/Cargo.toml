@@ -33,3 +33,6 @@ maplit = "1.0.2"
 
 [features]
 diesel = ["dep:diesel"]
+
+[package.metadata.cargo-machete]
+ignored = ["strum"]

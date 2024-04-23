@@ -130,6 +130,7 @@ impl WsActor {
         extractor_id: &ExtractorIdentity,
     ) {
         {
+            debug!(extractor=?extractor_id, "Acquire lock for subscribing..");
             let extractors_guard = self
                 .app_state
                 .subscribers
@@ -382,6 +383,10 @@ mod tests {
     impl NormalisedMessage for DummyMessage {
         fn source(&self) -> ExtractorIdentity {
             self.extractor_id.clone()
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 

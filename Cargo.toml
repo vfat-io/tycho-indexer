@@ -3,7 +3,8 @@ members = [
     "tycho-indexer",
     "tycho-client",
     "tycho-core",
-    "tycho-storage"
+    "tycho-storage",
+    "token-analyzer",
 ]
 resolver = "2"
 
@@ -13,6 +14,11 @@ inherits = "release"
 lto = true
 opt-level = 'z'
 strip = "debuginfo"
+
+[profile.dev]
+# Disabling debug info speeds up builds a bunch,
+# and we don't rely on it for debugging that much.
+debug = 0
 
 [workspace.dependencies]
 chrono = { version = "0.4.26", features = ["serde"] }
@@ -30,6 +36,7 @@ uuid = { version = "1.4.1", features = [
 hex = "0.4.3"
 tycho-core = { path = "tycho-core" }
 tycho-storage = { path = "./tycho-storage" }
+token-analyzer = { path = "./token-analyzer" }
 futures03 = { version = "0.3.1", package = "futures", features = ["compat"] }
 thiserror = "1"
 tracing = "0.1.37"
@@ -42,7 +49,9 @@ tokio = { version = "1.27", features = [
     "test-util",
     "rt-multi-thread",
     "parking_lot",
+    "tracing",
 ] }
+console-subscriber = "0.2.0"
 tokio-tungstenite = "0.20.0"
 utoipa = { version = "4.2.0", features = ["chrono"] }
 ethers = "^2.0.2"
@@ -60,3 +69,5 @@ anyhow = "1.0.75"
 unicode-segmentation = "1.11.0"
 clap = "4.4.2"
 tracing-appender = "0.2"
+reqwest = "0.11"
+url = "2"

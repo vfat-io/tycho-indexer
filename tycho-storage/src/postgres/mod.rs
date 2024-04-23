@@ -129,6 +129,8 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
+use std::{collections::HashMap, hash::Hash, ops::Deref, str::FromStr, sync::Arc};
+
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_async::{
@@ -136,8 +138,8 @@ use diesel_async::{
     AsyncPgConnection, RunQueryDsl,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use std::{collections::HashMap, hash::Hash, i64, ops::Deref, str::FromStr, sync::Arc};
 use tracing::{debug, info};
+
 use tycho_core::{
     models::{Chain, TxHash},
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError, Version, VersionKind},
@@ -146,7 +148,7 @@ use tycho_core::{
 pub mod builder;
 pub mod cache;
 mod chain;
-mod contract_state;
+mod contract;
 mod extraction_state;
 mod orm;
 mod protocol;
@@ -536,12 +538,13 @@ fn run_migrations(db_url: &str) {
 // TODO: add cfg(test) once we have better mocks to be used in indexer crate
 pub mod testing {
     //! # Reusable components to write tests against the DB.
+    use std::future::Future;
+
     use diesel::sql_query;
     use diesel_async::{
         pooled_connection::{deadpool::Pool, AsyncDieselConnectionManager},
         AsyncPgConnection, RunQueryDsl,
     };
-    use std::future::Future;
 
     async fn setup_pool() -> Pool<AsyncPgConnection> {
         let database_url =
@@ -672,19 +675,22 @@ pub mod db_fixtures {
     //! local copy might serve your needs better. For instance, if the complete
     //! shared setup isn't necessary for your test case, copy it and keep only
     //! the entries that are crucial to your test case.
+    use std::str::FromStr;
+
     use chrono::NaiveDateTime;
     use diesel::{prelude::*, sql_query};
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
     use serde_json::Value;
-    use std::str::FromStr;
+
     use tycho_core::{
         models::{Balance, Code, FinancialType, ImplementationType},
         Bytes,
     };
 
-    use super::schema;
     use crate::postgres::orm;
+
+    use super::schema;
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -969,6 +975,7 @@ pub mod db_fixtures {
     }
 
     // Insert a new Component Balance
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_component_balance(
         conn: &mut AsyncPgConnection,
         balance: Balance,
@@ -977,6 +984,7 @@ pub mod db_fixtures {
         token_id: i64,
         tx_id: i64,
         protocol_component_id: i64,
+        valid_to_tx: Option<i64>,
     ) {
         let ts: NaiveDateTime = schema::transaction::table
             .inner_join(schema::block::table)
@@ -985,6 +993,18 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
+        let valid_to_ts: Option<NaiveDateTime> = match &valid_to_tx {
+            Some(tx) => Some(
+                schema::transaction::table
+                    .inner_join(schema::block::table)
+                    .filter(schema::transaction::id.eq(tx))
+                    .select(schema::block::ts)
+                    .first::<NaiveDateTime>(conn)
+                    .await
+                    .expect("setup tx id not found"),
+            ),
+            None => None,
+        };
         diesel::insert_into(schema::component_balance::table)
             .values((
                 schema::component_balance::protocol_component_id.eq(protocol_component_id),
@@ -994,6 +1014,7 @@ pub mod db_fixtures {
                 schema::component_balance::balance_float.eq(balance_float),
                 schema::component_balance::previous_value.eq(previous_balance),
                 schema::component_balance::valid_from.eq(ts),
+                schema::component_balance::valid_to.eq(valid_to_ts),
             ))
             .execute(conn)
             .await
@@ -1164,9 +1185,12 @@ pub mod db_fixtures {
         address: &str,
         symbol: &str,
         decimals: i32,
+        quality: Option<i32>,
     ) -> (i64, i64) {
         let title = &format!("token_{}", symbol);
         let account_id = insert_account(conn, address, title, chain_id, None).await;
+
+        let quality = quality.unwrap_or(0);
 
         let query = diesel::insert_into(schema::token::table).values((
             schema::token::account_id.eq(account_id),
@@ -1174,6 +1198,7 @@ pub mod db_fixtures {
             schema::token::decimals.eq(decimals),
             schema::token::tax.eq(10),
             schema::token::gas.eq(vec![10]),
+            schema::token::quality.eq(quality),
         ));
         (
             account_id,

@@ -1,5 +1,8 @@
 use super::{
-    compat::{transcode_ambient_balances, transcode_usv2_balances},
+    compat::{
+        add_default_attributes_uniswapv2, add_default_attributes_uniswapv3, ignore_self_balances,
+        transcode_ambient_balances, transcode_usv2_balances,
+    },
     evm::{
         chain_state::ChainState,
         native::{NativeContractExtractor, NativePgGateway},
@@ -79,12 +82,24 @@ impl ExtractorHandle {
 impl MessageSender for ExtractorHandle {
     #[instrument(skip(self))]
     async fn subscribe(&self) -> Result<Receiver<ExtractorMsg>, SendError<ControlMessage>> {
-        let (tx, rx) = mpsc::channel(1);
-        self.control_tx
-            .send(ControlMessage::Subscribe(tx))
-            .await?;
+        let (tx, rx) = mpsc::channel(16);
+        // Define a timeout duration
+        let timeout_duration = std::time::Duration::from_secs(5); // 5 seconds timeout
 
-        Ok(rx)
+        // Wrap the send operation with a timeout
+        let send_result = tokio::time::timeout(
+            timeout_duration,
+            self.control_tx
+                .send(ControlMessage::Subscribe(tx)),
+        )
+        .await;
+
+        match send_result {
+            Ok(Ok(())) => Ok(rx),
+            Ok(Err(e)) => Err(e),
+            // TODO: use a better error type that let's us return this as an error.
+            Err(_) => panic!("Subscription timed out!"),
+        }
     }
 }
 
@@ -251,7 +266,8 @@ pub struct ExtractorBuilder {
     final_block_only: bool,
 }
 
-pub type HandleResult = (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle);
+pub type HandleResult =
+    (JoinHandle<Result<(), ExtractionError>>, (ExtractorHandle, ImplementationType));
 
 impl ExtractorBuilder {
     pub fn new(config: &ExtractorConfig) -> Self {
@@ -267,12 +283,12 @@ impl ExtractorBuilder {
 
     #[allow(dead_code)]
     pub fn endpoint_url(mut self, val: &str) -> Self {
-        self.endpoint_url = val.to_owned();
+        val.clone_into(&mut self.endpoint_url);
         self
     }
 
     pub fn module_name(mut self, val: &str) -> Self {
-        self.config.module_name = val.to_owned();
+        val.clone_into(&mut self.config.module_name);
         self
     }
 
@@ -288,7 +304,7 @@ impl ExtractorBuilder {
 
     #[allow(dead_code)]
     pub fn token(mut self, val: &str) -> Self {
-        self.token = val.to_owned();
+        val.clone_into(&mut self.token);
         self
     }
 
@@ -363,11 +379,14 @@ impl ExtractorBuilder {
                         gw,
                         protocol_types,
                         self.config.name.clone(),
-                        if self.config.name == "ambient" {
+                        if self.config.name == "vm:ambient" {
                             Some(transcode_ambient_balances)
+                        } else if self.config.name == "vm:balancer" {
+                            Some(ignore_self_balances)
                         } else {
                             None
                         },
+                        128,
                     )
                     .await?,
                 ));
@@ -390,10 +409,13 @@ impl ExtractorBuilder {
                         protocol_types,
                         self.config.name.clone(),
                         if self.config.name == "uniswap_v2" {
-                            Some(transcode_usv2_balances)
+                            Some(|b| transcode_usv2_balances(add_default_attributes_uniswapv2(b)))
+                        } else if self.config.name == "uniswap_v3" {
+                            Some(add_default_attributes_uniswapv3)
                         } else {
                             None
                         },
+                        128,
                     )
                     .await?,
                 ));
@@ -435,12 +457,12 @@ impl ExtractorBuilder {
         );
 
         let id = extractor.get_id();
-        let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
+        let (ctrl_tx, ctrl_rx) = mpsc::channel(128);
         let runner =
             ExtractorRunner::new(extractor, stream, Arc::new(Mutex::new(HashMap::new())), ctrl_rx);
 
         let handle = runner.run();
-        Ok((handle, ExtractorHandle::new(id, ctrl_tx)))
+        Ok((handle, (ExtractorHandle::new(id, ctrl_tx), self.config.implementation_type)))
     }
 }
 
@@ -468,6 +490,12 @@ async fn download_file_from_s3(
         .await?;
 
     let data = resp.body.collect().await.unwrap();
+
+    // Ensure the directory exists
+    if let Some(parent) = download_path.parent() {
+        std::fs::create_dir_all(parent)
+            .context(format!("Failed to create directories for {:?}", parent))?;
+    }
 
     std::fs::write(download_path, data.into_bytes()).unwrap();
 
@@ -503,6 +531,10 @@ mod test {
     impl NormalisedMessage for DummyMessage {
         fn source(&self) -> ExtractorIdentity {
             self.extractor_id.clone()
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 

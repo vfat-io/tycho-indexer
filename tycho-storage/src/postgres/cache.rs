@@ -1,11 +1,12 @@
-use super::{PostgresError, PostgresGateway};
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
+
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel_async::{
-    pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncPgConnection,
+    pooled_connection::deadpool::Pool, scoped_futures::ScopedFutureExt, AsyncConnection,
+    AsyncPgConnection,
 };
 use lru::LruCache;
-use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use tokio::{
     sync::{
         mpsc,
@@ -14,10 +15,11 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
+
 use tycho_core::{
-    models,
     models::{
+        self,
         blockchain::{Block, Transaction},
         contract::{Contract, ContractDelta},
         protocol::{
@@ -25,7 +27,8 @@ use tycho_core::{
             ProtocolComponentStateDelta,
         },
         token::CurrencyToken,
-        Address, Chain, ContractId, ExtractionState, ProtocolType, TxHash,
+        Address, Chain, ComponentId, ContractId, ExtractionState, PaginationParams, ProtocolType,
+        TxHash,
     },
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
@@ -33,6 +36,8 @@ use tycho_core::{
     },
     Bytes,
 };
+
+use super::{PostgresError, PostgresGateway};
 
 /// Represents different types of database write operations.
 #[derive(PartialEq, Clone, Debug)]
@@ -44,13 +49,16 @@ pub(crate) enum WriteOp {
     // Simply keep last
     SaveExtractionState(ExtractionState),
     // Support saving a batch
-    InsertContract(Vec<models::contract::Contract>),
+    UpsertContract(Vec<models::contract::Contract>),
     // Simply merge
     UpdateContracts(Vec<(TxHash, models::contract::ContractDelta)>),
     // Simply merge
     InsertProtocolComponents(Vec<models::protocol::ProtocolComponent>),
     // Simply merge
     InsertTokens(Vec<models::token::CurrencyToken>),
+    // Currently unused but supported, please see `CacheGateway.update_tokens` docs.
+    #[allow(dead_code)]
+    UpdateTokens(Vec<models::token::CurrencyToken>),
     // Simply merge
     InsertComponentBalances(Vec<models::protocol::ComponentBalance>),
     // Simply merge
@@ -63,10 +71,11 @@ impl WriteOp {
             WriteOp::UpsertBlock(_) => "UpsertBlock",
             WriteOp::UpsertTx(_) => "UpsertTx",
             WriteOp::SaveExtractionState(_) => "SaveExtractionState",
-            WriteOp::InsertContract(_) => "InsertContract",
+            WriteOp::UpsertContract(_) => "UpsertContract",
             WriteOp::UpdateContracts(_) => "UpdateContracts",
             WriteOp::InsertProtocolComponents(_) => "InsertProtocolComponents",
             WriteOp::InsertTokens(_) => "InsertTokens",
+            WriteOp::UpdateTokens(_) => "UpdateTokens",
             WriteOp::InsertComponentBalances(_) => "InsertComponentBalances",
             WriteOp::UpsertProtocolState(_) => "UpsertProtocolState",
         }
@@ -76,13 +85,14 @@ impl WriteOp {
         match self {
             WriteOp::UpsertBlock(_) => 0,
             WriteOp::UpsertTx(_) => 1,
-            WriteOp::InsertContract(_) => 2,
+            WriteOp::UpsertContract(_) => 2,
             WriteOp::UpdateContracts(_) => 3,
             WriteOp::InsertTokens(_) => 4,
-            WriteOp::InsertProtocolComponents(_) => 5,
-            WriteOp::InsertComponentBalances(_) => 6,
-            WriteOp::UpsertProtocolState(_) => 7,
-            WriteOp::SaveExtractionState(_) => 8,
+            WriteOp::UpdateTokens(_) => 5,
+            WriteOp::InsertProtocolComponents(_) => 6,
+            WriteOp::InsertComponentBalances(_) => 7,
+            WriteOp::UpsertProtocolState(_) => 8,
+            WriteOp::SaveExtractionState(_) => 9,
         }
     }
 }
@@ -96,10 +106,6 @@ struct BlockRange {
 impl BlockRange {
     fn new(start: &models::blockchain::Block, end: &models::blockchain::Block) -> Self {
         Self { start: start.clone(), end: end.clone() }
-    }
-
-    fn is_single_block(&self) -> bool {
-        self.start.hash == self.end.hash
     }
 }
 
@@ -136,7 +142,7 @@ impl DBTransaction {
                     l.clone_from(r);
                     return Ok(());
                 }
-                (WriteOp::InsertContract(l), WriteOp::InsertContract(r)) => {
+                (WriteOp::UpsertContract(l), WriteOp::UpsertContract(r)) => {
                     self.size += r.len();
                     l.extend(r.iter().cloned());
                     return Ok(());
@@ -152,6 +158,11 @@ impl DBTransaction {
                     return Ok(());
                 }
                 (WriteOp::InsertTokens(l), WriteOp::InsertTokens(r)) => {
+                    self.size += r.len();
+                    l.extend(r.iter().cloned());
+                    return Ok(());
+                }
+                (WriteOp::UpdateTokens(l), WriteOp::InsertTokens(r)) => {
                     self.size += r.len();
                     l.extend(r.iter().cloned());
                     return Ok(());
@@ -281,30 +292,6 @@ impl DBCacheWriteExecutor {
             .await
             .expect("pool should be connected");
 
-        // If persisted block is not set we don't have data for this chain yet.
-        if let Some(db_block) = &self.persisted_block {
-            // during sync we insert in batches of blocks.
-            let syncing = !new_db_tx.block_range.is_single_block();
-
-            // if we are not syncing we are not allowed to create a separate block range.
-            if !syncing {
-                let start = &new_db_tx.block_range.start;
-                // if we are advancing a block, while not syncing it must fit on top of the
-                // persisted block.
-                if start.number > db_block.number && start.parent_hash != db_block.hash {
-                    error!(
-                        block_range=?&new_db_tx.block_range,
-                        persisted_block=?&db_block,
-                        "Invalid block range encountered"
-                    );
-                    let _ = new_db_tx
-                        .tx
-                        .send(Err(StorageError::InvalidBlockRange()));
-                    return;
-                }
-            }
-        }
-
         let res = conn
             .build_transaction()
             .repeatable_read()
@@ -332,6 +319,16 @@ impl DBCacheWriteExecutor {
 
         if res.is_ok() {
             info!(block_range=?&new_db_tx.block_range, "Transaction successfully committed to DB!");
+        }
+
+        match self.persisted_block.as_ref() {
+            None => {
+                self.persisted_block = Some(new_db_tx.block_range.end);
+            }
+            Some(db_block) if db_block.number < new_db_tx.block_range.start.number => {
+                self.persisted_block = Some(new_db_tx.block_range.end);
+            }
+            _ => {}
         }
 
         // Forward the result to the sender
@@ -366,10 +363,10 @@ impl DBCacheWriteExecutor {
                     .save_state(state, conn)
                     .await?
             }
-            WriteOp::InsertContract(contracts) => {
+            WriteOp::UpsertContract(contracts) => {
                 for contract in contracts.iter() {
                     self.state_gateway
-                        .insert_contract(contract, conn)
+                        .upsert_contract(contract, conn)
                         .await?
                 }
             }
@@ -391,6 +388,11 @@ impl DBCacheWriteExecutor {
             WriteOp::InsertTokens(tokens) => {
                 self.state_gateway
                     .add_tokens(tokens.as_slice(), conn)
+                    .await?
+            }
+            WriteOp::UpdateTokens(tokens) => {
+                self.state_gateway
+                    .update_tokens(tokens.as_slice(), conn)
                     .await?
             }
             WriteOp::InsertComponentBalances(balances) => {
@@ -685,18 +687,19 @@ impl ContractStateGateway for CachedGateway {
         addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
+        retrieve_balances: bool,
     ) -> Result<Vec<Contract>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_contracts(chain, addresses, version, include_slots, &mut conn)
+            .get_contracts(chain, addresses, version, include_slots, retrieve_balances, &mut conn)
             .await
     }
 
-    async fn insert_contract(&self, new: &Contract) -> Result<(), StorageError> {
-        self.add_op(WriteOp::InsertContract(vec![new.clone()]))
+    async fn upsert_contract(&self, new: &Contract) -> Result<(), StorageError> {
+        self.add_op(WriteOp::UpsertContract(vec![new.clone()]))
             .await?;
         Ok(())
     }
@@ -751,6 +754,21 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    async fn get_token_owners(
+        &self,
+        chain: &Chain,
+        tokens: &[Address],
+        min_balance: Option<f64>,
+    ) -> Result<HashMap<Address, (ComponentId, Bytes)>, StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+        self.state_gateway
+            .get_token_owners(chain, tokens, min_balance, &mut conn)
+            .await
+    }
+
     async fn add_protocol_components(&self, new: &[ProtocolComponent]) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertProtocolComponents(new.to_vec()))
             .await?;
@@ -790,13 +808,14 @@ impl ProtocolGateway for CachedGateway {
         at: Option<Version>,
         system: Option<String>,
         id: Option<&[&str]>,
+        retrieve_balances: bool,
     ) -> Result<Vec<ProtocolComponentState>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_protocol_states(chain, at, system, id, &mut conn)
+            .get_protocol_states(chain, at, system, id, retrieve_balances, &mut conn)
             .await
     }
 
@@ -813,13 +832,23 @@ impl ProtocolGateway for CachedGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
+        min_quality: Option<i32>,
+        traded_n_days_ago: Option<NaiveDateTime>,
+        pagination_params: Option<&PaginationParams>,
     ) -> Result<Vec<CurrencyToken>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_tokens(chain, address, &mut conn)
+            .get_tokens(
+                chain,
+                address,
+                min_quality,
+                traded_n_days_ago,
+                pagination_params,
+                &mut conn,
+            )
             .await
     }
 
@@ -836,6 +865,34 @@ impl ProtocolGateway for CachedGateway {
         self.add_op(WriteOp::InsertTokens(tokens.to_vec()))
             .await?;
         Ok(())
+    }
+
+    /// Updates tokens without using the write cache.
+    ///
+    /// This method is currently only used by the token-analyzer job and therefore does
+    /// not use the write cache. It creates a single transaction and executes all
+    /// updates immediately.
+    ///
+    /// ## Note
+    /// This is a short term solution. Ideally we should have a simple gateway version
+    /// for these use cases that creates a single transactions and emits them immediately.
+    async fn update_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError> {
+        let mut conn =
+            self.pool.get().await.map_err(|e| {
+                StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
+            })?;
+
+        conn.transaction(|conn| {
+            async {
+                self.state_gateway
+                    .update_tokens(tokens, conn)
+                    .await?;
+                Result::<(), PostgresError>::Ok(())
+            }
+            .scope_boxed()
+        })
+        .await
+        .map_err(|e| StorageError::Unexpected(format!("Failed to update tokens: {}", e.0)))
     }
 
     async fn get_protocol_states_delta(
@@ -872,8 +929,8 @@ impl ProtocolGateway for CachedGateway {
         &self,
         chain: &Chain,
         ids: Option<&[&str]>,
-        at: Option<&BlockOrTimestamp>,
-    ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError> {
+        at: Option<&Version>,
+    ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
@@ -913,14 +970,15 @@ impl Gateway for CachedGateway {}
 
 #[cfg(test)]
 mod test_serial_db {
-    use super::*;
-    use crate::postgres::{db_fixtures, testing::run_against_db};
+    use std::{collections::HashSet, str::FromStr};
+
     use ethers::types::U256;
-    use std::{
-        collections::{HashMap, HashSet},
-        str::FromStr,
-    };
-    use tycho_core::{models::ChangeType, Bytes};
+
+    use tycho_core::models::ChangeType;
+
+    use crate::postgres::{db_fixtures, testing::run_against_db};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_write_and_flush() {

@@ -1,16 +1,21 @@
 //! Storage traits used by Tycho
+use std::{collections::HashMap, fmt::Display};
+
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
+use thiserror::Error;
+
 use crate::{
-    dto, models,
+    dto,
     models::{
+        self,
         blockchain::{Block, Transaction},
-        Address, BlockHash, Chain, ContractId, ExtractionState, TxHash,
+        protocol::ComponentBalance,
+        Address, BlockHash, Chain, ComponentId, ContractId, ExtractionState, PaginationParams,
+        TxHash,
     },
     Bytes,
 };
-use async_trait::async_trait;
-use chrono::NaiveDateTime;
-use std::{collections::HashMap, fmt::Display};
-use thiserror::Error;
 
 /// Identifies a block in storage.
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
@@ -267,6 +272,25 @@ pub trait ProtocolGateway {
         min_tvl: Option<f64>,
     ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError>;
 
+    /// Retrieves owners of tokens
+    ///
+    /// Queries for owners (protocol components) of tokens that have a certain minimum
+    /// balance and returns a maximum aggregate of those in case there are multiple
+    /// owners.
+    ///
+    /// # Parameters
+    /// - `chain` The chain of the component
+    /// - `tokens` The tokens to query for, any component with at least one of these tokens is
+    ///   returned.
+    /// - `min_balance` A minimum balance we expect the component to have on any of the tokens
+    ///   mentioned in `tokens`.
+    async fn get_token_owners(
+        &self,
+        chain: &Chain,
+        tokens: &[Address],
+        min_balance: Option<f64>,
+    ) -> Result<HashMap<Address, (ComponentId, Bytes)>, StorageError>;
+
     async fn add_protocol_components(
         &self,
         new: &[models::protocol::ProtocolComponent],
@@ -311,6 +335,7 @@ pub trait ProtocolGateway {
         at: Option<Version>,
         system: Option<String>,
         id: Option<&[&str]>,
+        retrieve_balances: bool,
     ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError>;
 
     async fn update_protocol_states(
@@ -330,6 +355,9 @@ pub trait ProtocolGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
+        min_quality: Option<i32>,
+        traded_n_days_ago: Option<NaiveDateTime>,
+        pagination_params: Option<&PaginationParams>,
     ) -> Result<Vec<models::token::CurrencyToken>, StorageError>;
 
     /// Saves multiple component balances to storage.
@@ -360,6 +388,23 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_tokens(&self, tokens: &[models::token::CurrencyToken])
         -> Result<(), StorageError>;
+
+    /// Updates multiple tokens in storage.
+    ///
+    /// Updates token in storage. Will warn if one of the tokens does not exist in the
+    /// database. Currently assumes that token addresses are unique across chains.
+    /// -
+    ///
+    /// # Parameters
+    /// - `token` The tokens to update.
+    ///
+    /// # Return
+    /// Ok if all tokens could be inserted, Err if at least one token failed to
+    /// insert.
+    async fn update_tokens(
+        &self,
+        tokens: &[models::token::CurrencyToken],
+    ) -> Result<(), StorageError>;
 
     /// Retrieve protocol state changes
     ///
@@ -401,8 +446,8 @@ pub trait ProtocolGateway {
         &self,
         chain: &Chain,
         ids: Option<&[&str]>,
-        at: Option<&BlockOrTimestamp>,
-    ) -> Result<HashMap<String, HashMap<Bytes, f64>>, StorageError>;
+        at: Option<&Version>,
+    ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, StorageError>;
 
     async fn get_token_prices(&self, chain: &Chain) -> Result<HashMap<Bytes, f64>, StorageError>;
 
@@ -460,6 +505,7 @@ pub trait ContractStateGateway {
         addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
+        retrieve_balances: bool,
     ) -> Result<Vec<models::contract::Contract>, StorageError>;
 
     /// Inserts a new contract into the database.
@@ -475,7 +521,7 @@ pub trait ContractStateGateway {
     /// - A Result with Ok if the operation was successful, and an Err containing `StorageError` if
     ///   there was an issue inserting the contract into the database. E.g. if the contract already
     ///   existed.
-    async fn insert_contract(&self, new: &models::contract::Contract) -> Result<(), StorageError>;
+    async fn upsert_contract(&self, new: &models::contract::Contract) -> Result<(), StorageError>;
 
     /// Update multiple contracts
     ///

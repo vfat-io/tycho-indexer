@@ -1,6 +1,7 @@
 use crate::{
     models::{
-        protocol::{ComponentBalance, ProtocolComponent},
+        contract::ContractDelta,
+        protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
         Chain, ComponentId,
     },
     Bytes,
@@ -43,10 +44,12 @@ pub struct TransactionDeltaGroup<T> {
     tx: Transaction,
 }
 
-pub struct BlockAggregatedDeltas<T> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockAggregatedDeltas<T: Clone + std::fmt::Debug + PartialEq> {
     pub extractor: String,
     pub chain: Chain,
     pub block: Block,
+    pub finalised_block_height: u64,
     pub revert: bool,
     pub deltas: T,
     pub new_components: HashMap<String, ProtocolComponent>,
@@ -54,4 +57,52 @@ pub struct BlockAggregatedDeltas<T> {
     pub component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
     #[allow(dead_code)]
     component_tvl: HashMap<String, f64>,
+}
+
+pub type NativeBlockDeltas = BlockAggregatedDeltas<HashMap<String, ProtocolComponentStateDelta>>;
+pub type VmBlockDeltas = BlockAggregatedDeltas<HashMap<Bytes, ContractDelta>>;
+
+impl<T> BlockAggregatedDeltas<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq,
+{
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        extractor: &str,
+        chain: Chain,
+        block: Block,
+        finalised_block_height: u64,
+        revert: bool,
+        deltas: &T,
+        new_components: &HashMap<String, ProtocolComponent>,
+        deleted_components: &HashMap<String, ProtocolComponent>,
+        component_balances: &HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+        component_tvl: &HashMap<String, f64>,
+    ) -> Self {
+        Self {
+            extractor: extractor.to_string(),
+            chain,
+            block,
+            finalised_block_height,
+            revert,
+            deltas: deltas.clone(),
+            new_components: new_components.clone(),
+            deleted_components: deleted_components.clone(),
+            component_balances: component_balances.clone(),
+            component_tvl: component_tvl.clone(),
+        }
+    }
+}
+
+pub trait BlockScoped {
+    fn block(&self) -> Block;
+}
+
+impl<T> BlockScoped for BlockAggregatedDeltas<T>
+where
+    T: Clone + std::fmt::Debug + PartialEq,
+{
+    fn block(&self) -> Block {
+        self.block.clone()
+    }
 }

@@ -5,30 +5,37 @@ use std::{collections::HashMap, sync::Arc};
 use crate::extractor::{runner::ExtractorHandle, ExtractionError};
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
+use futures03::future::try_join_all;
 use tokio::task::JoinHandle;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::services::deltas_buffer::PendingDeltas;
 use tycho_core::{
     dto::{
         AccountUpdate, BlockParam, ChangeType, ContractDeltaRequestBody,
-        ContractDeltaRequestResponse, ProtocolComponent, ProtocolComponentRequestResponse,
-        ProtocolComponentsRequestBody, ProtocolDeltaRequestBody, ProtocolDeltaRequestResponse,
-        ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody, ProtocolStateRequestResponse,
-        ResponseAccount, ResponseProtocolState, ResponseToken, StateRequestBody,
-        StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
+        ContractDeltaRequestResponse, Health, PaginationParams, ProtocolComponent,
+        ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolDeltaRequestBody,
+        ProtocolDeltaRequestResponse, ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody,
+        ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState, ResponseToken,
+        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
+        VersionParam,
     },
-    models::{Chain, ContractId},
+    models::{Chain, ContractId, ImplementationType},
     storage::Gateway,
 };
 
+mod deltas_buffer;
 mod rpc;
 mod ws;
+
 pub struct ServicesBuilder<G> {
     prefix: String,
     port: u16,
     bind: String,
     extractor_handles: ws::MessageSenderMap,
+    native_extractors: Vec<String>,
+    vm_extractors: Vec<String>,
     db_gateway: G,
 }
 
@@ -42,13 +49,24 @@ where
             port: 4242,
             bind: "0.0.0.0".to_owned(),
             extractor_handles: HashMap::new(),
+            native_extractors: Vec::new(),
+            vm_extractors: Vec::new(),
             db_gateway,
         }
     }
 
-    pub fn register_extractors(mut self, handle: Vec<ExtractorHandle>) -> Self {
-        for e in handle {
+    pub fn register_extractors(
+        mut self,
+        handle: Vec<(ExtractorHandle, ImplementationType)>,
+    ) -> Self {
+        for (e, impl_type) in handle {
             let id = e.get_id();
+            match impl_type {
+                ImplementationType::Vm => self.vm_extractors.push(id.name.clone()),
+                ImplementationType::Custom => self
+                    .native_extractors
+                    .push(id.name.clone()),
+            }
             self.extractor_handles
                 .insert(id, Arc::new(e));
         }
@@ -56,12 +74,12 @@ where
     }
 
     pub fn prefix(mut self, v: &str) -> Self {
-        self.prefix = v.to_owned();
+        v.clone_into(&mut self.prefix);
         self
     }
 
     pub fn bind(mut self, v: &str) -> Self {
-        self.bind = v.to_owned();
+        v.clone_into(&mut self.bind);
         self
     }
 
@@ -81,7 +99,8 @@ where
                 rpc::protocol_components,
                 rpc::contract_delta,
                 rpc::protocol_state,
-                rpc::protocol_delta
+                rpc::protocol_delta,
+                rpc::health,
             ),
             components(
                 schemas(VersionParam),
@@ -93,6 +112,7 @@ where
                 schemas(ResponseAccount),
                 schemas(TokensRequestBody),
                 schemas(TokensRequestResponse),
+                schemas(PaginationParams),
                 schemas(ResponseToken),
                 schemas(ProtocolComponentsRequestBody),
                 schemas(ProtocolComponentRequestResponse),
@@ -108,13 +128,32 @@ where
                 schemas(ProtocolDeltaRequestBody),
                 schemas(ProtocolDeltaRequestResponse),
                 schemas(ProtocolStateDelta),
+                schemas(Health),
             )
         )]
         struct ApiDoc;
 
         let openapi = ApiDoc::openapi();
+        let pending_deltas = PendingDeltas::new(
+            self.vm_extractors
+                .iter()
+                .map(String::as_str),
+            self.native_extractors
+                .iter()
+                .map(String::as_str),
+        );
+        let deltas_task = tokio::spawn({
+            let pending_deltas = pending_deltas.clone();
+            let extractor_handles = self.extractor_handles.clone();
+            async move {
+                pending_deltas
+                    .run(extractor_handles.into_values())
+                    .await
+                    .map_err(|err| ExtractionError::Unknown(err.to_string()))
+            }
+        });
         let ws_data = web::Data::new(ws::WsData::new(self.extractor_handles));
-        let rpc_data = web::Data::new(rpc::RpcHandler::new(self.db_gateway));
+        let rpc_data = web::Data::new(rpc::RpcHandler::new(self.db_gateway, pending_deltas));
         let server = HttpServer::new(move || {
             App::new()
                 .app_data(rpc_data.clone())
@@ -145,6 +184,10 @@ where
                     ))
                     .route(web::post().to(rpc::protocol_components::<G>)),
                 )
+                .service(
+                    web::resource(format!("/{}/health", self.prefix))
+                        .route(web::get().to(rpc::health)),
+                )
                 .app_data(ws_data.clone())
                 .service(
                     web::resource(format!("/{}/ws", self.prefix))
@@ -160,11 +203,16 @@ where
         .map_err(|err| ExtractionError::ServiceError(err.to_string()))?
         .run();
         let handle = server.handle();
-        let server = async move {
+        let server_task = tokio::spawn(async move {
             let res = server.await;
             res.map_err(|err| ExtractionError::Unknown(err.to_string()))
-        };
-        let task = tokio::spawn(server);
+        });
+        let task = tokio::spawn(async move {
+            try_join_all(vec![deltas_task, server_task])
+                .await
+                .map_err(|err| ExtractionError::Unknown(err.to_string()))?;
+            Ok(())
+        });
         Ok((handle, task))
     }
 }

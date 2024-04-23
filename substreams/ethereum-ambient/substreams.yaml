@@ -23,12 +23,12 @@ modules:
     inputs:
       - source: sf.ethereum.type.v2.Block
     output:
-      type: proto:tycho.evm.state.v1.BlockPoolChanges
+      type: proto:tycho.evm.v1.BlockPoolChanges
   - name: store_pools
     kind: store
     initialBlock: 17361664
     updatePolicy: set
-    valueType: proto:tycho.evm.state.v1.ProtocolComponent
+    valueType: proto:tycho.evm.v1.ProtocolComponent
     inputs:
       - map: map_pool_changes
   - name: store_pool_balances
@@ -48,5 +48,4 @@ modules:
         mode: deltas
       - store: store_pools
     output:
-      type: proto:tycho.evm.state.v1.BlockContractChanges
-
+      type: proto:tycho.evm.v1.BlockContractChanges
