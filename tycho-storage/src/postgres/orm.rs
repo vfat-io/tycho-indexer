@@ -484,10 +484,6 @@ impl VersionedRow for NewComponentBalance {
         (self.protocol_component_id, self.token_id)
     }
 
-    fn get_sort_key(&self) -> Self::SortKey {
-        (self.protocol_component_id, self.token_id, self.valid_from)
-    }
-
     fn set_valid_to(&mut self, end_version: Self::Version) {
         self.valid_to = Some(end_version);
     }
@@ -1014,15 +1010,6 @@ impl VersionedRow for NewProtocolState {
         )
     }
 
-    fn get_sort_key(&self) -> Self::SortKey {
-        (
-            self.protocol_component_id,
-            self.attribute_name.clone().unwrap(),
-            self.valid_from,
-            self.modify_tx,
-        )
-    }
-
     fn set_valid_to(&mut self, end_version: Self::Version) {
         self.valid_to = Some(end_version);
     }
@@ -1255,10 +1242,6 @@ impl VersionedRow for NewAccountBalance {
         self.account_id
     }
 
-    fn get_sort_key(&self) -> Self::SortKey {
-        (self.account_id, self.valid_from, self.modify_tx)
-    }
-
     fn set_valid_to(&mut self, end_version: Self::Version) {
         self.valid_to = Some(end_version);
     }
@@ -1356,10 +1339,6 @@ impl<'a> VersionedRow for NewContractCode<'a> {
 
     fn get_entity_id(&self) -> Self::EntityId {
         self.account_id
-    }
-
-    fn get_sort_key(&self) -> Self::SortKey {
-        (self.account_id, self.valid_from, self.modify_tx)
     }
 
     fn set_valid_to(&mut self, end_version: Self::Version) {
@@ -1537,10 +1516,6 @@ impl<'a> VersionedRow for NewSlot<'a> {
 
     fn get_entity_id(&self) -> Self::EntityId {
         (self.account_id, self.slot.clone())
-    }
-
-    fn get_sort_key(&self) -> Self::SortKey {
-        (self.get_entity_id(), self.valid_from, self.ordinal)
     }
 
     fn set_valid_to(&mut self, end_version: Self::Version) {
