@@ -12,7 +12,7 @@ use super::{
     Extractor, ExtractorMsg,
 };
 use crate::{
-    extractor::ExtractionError,
+    extractor::{evm::protocol_cache::ProtocolMemoryCache, ExtractionError},
     pb::sf::substreams::v1::Package,
     substreams::{
         stream::{BlockResponse, SubstreamsStream},
@@ -361,6 +361,12 @@ impl ExtractorBuilder {
             })
             .collect();
 
+        let protocol_cache = ProtocolMemoryCache::new(
+            Chain::Ethereum,
+            chrono::Duration::seconds(900),
+            Arc::new(cached_gw.clone()),
+        );
+
         match self.config.implementation_type {
             ImplementationType::Vm => {
                 let gw = VmPgGateway::new(
@@ -379,6 +385,7 @@ impl ExtractorBuilder {
                         gw,
                         protocol_types,
                         self.config.name.clone(),
+                        protocol_cache.clone(),
                         if self.config.name == "vm:ambient" {
                             Some(transcode_ambient_balances)
                         } else if self.config.name == "vm:balancer" {

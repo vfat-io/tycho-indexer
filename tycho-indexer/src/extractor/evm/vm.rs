@@ -33,6 +33,7 @@ use crate::{
         evm::{
             self,
             chain_state::ChainState,
+            protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
             token_pre_processor::{map_vault, TokenPreProcessorTrait},
         },
         revert_buffer::RevertBuffer,
@@ -60,6 +61,7 @@ pub struct VmContractExtractor<G> {
     chain: Chain,
     chain_state: ChainState,
     protocol_system: String,
+    protocol_cache: ProtocolMemoryCache,
     // TODO: There is not reason this needs to be shared
     // try removing the Mutex
     inner: Arc<Mutex<Inner>>,
@@ -450,6 +452,7 @@ where
         gateway: G,
         protocol_types: HashMap<String, ProtocolType>,
         protocol_system: String,
+        protocol_cache: ProtocolMemoryCache,
         post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
         sync_threshold: u64,
     ) -> Result<Self, ExtractionError> {
@@ -462,6 +465,7 @@ where
                     name: name.to_owned(),
                     chain,
                     chain_state,
+                    protocol_cache,
                     inner: Arc::new(Mutex::new(Inner {
                         cursor: Vec::new(),
                         last_processed_block: None,
@@ -488,6 +492,7 @@ where
                     name: name.to_owned(),
                     chain,
                     chain_state,
+                    protocol_cache,
                     inner: Arc::new(Mutex::new(Inner {
                         cursor,
                         last_processed_block: None,
@@ -506,6 +511,177 @@ where
 
         res.ensure_protocol_types().await;
         Ok(res)
+    }
+
+    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % msg.block.number))]
+    #[allow(clippy::mutable_key_type)]
+    async fn handle_tvl_changes(
+        &self,
+        msg: &mut evm::BlockAccountChanges,
+    ) -> Result<(), ExtractionError> {
+        trace!("Calculating tvl changes");
+        if msg.component_balances.is_empty() {
+            return Ok(());
+        }
+
+        let component_ids = msg
+            .component_balances
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let components = self
+            .protocol_cache
+            .get_protocol_components(self.protocol_system.as_str(), &component_ids)
+            .await?;
+
+        let balance_request = components
+            .values()
+            .flat_map(|pc| pc.tokens.iter().map(|t| (&pc.id, t)))
+            .collect::<Vec<_>>();
+
+        let balances = {
+            let rb = self.revert_buffer.lock().await;
+            self.get_balances(&rb, &balance_request)
+                .await?
+        };
+
+        // collect token decimals and prices to calculate tvl in the next step
+        // most of this data should be in the cache.
+        let addresses = balances
+            .values()
+            .flat_map(|b| b.keys())
+            .map(|addr| Bytes::from(addr.as_bytes()))
+            .collect::<Vec<_>>();
+        let prices = self
+            .protocol_cache
+            .get_token_prices(&addresses)
+            .await?
+            .into_iter()
+            .zip(addresses.iter())
+            .filter_map(|(price, address)| {
+                if let Some(p) = price {
+                    Some((address.clone(), p))
+                } else {
+                    trace!(?address, "Missing token price!");
+                    None
+                }
+            })
+            .collect::<HashMap<_, _>>();
+        let token_decimals = self
+            .protocol_cache
+            .get_tokens(&addresses)
+            .await?
+            .into_iter()
+            .filter_map(|t| t.map(|t| (t.address.clone(), t.decimals)))
+            .collect::<HashMap<_, _>>();
+
+        // calculate new tvl values
+        let tvl_updates = balances
+            .iter()
+            .map(|(cid, bal)| {
+                let component_tvl: f64 = bal
+                    .iter()
+                    .filter_map(|(addr, bal)| {
+                        let addr = Bytes::from(addr.as_bytes());
+                        let decimals = token_decimals.get(&addr).copied()? as i32;
+                        Some(prices.get(&addr)? * bal.balance_float / 10.0_f64.powi(decimals))
+                    })
+                    .sum();
+                (cid.clone(), component_tvl)
+            })
+            .collect::<HashMap<_, _>>();
+
+        // TODO: Store new values in component_tvl table
+        msg.component_tvl = tvl_updates;
+
+        Ok(())
+    }
+
+    /// Returns balances at the tip of the revert buffer.
+    ///
+    /// Will return the requested balances at the tip of the revert buffer. Might need
+    /// to go to storage to retrieve balances that are not stored within the buffer.
+    async fn get_balances(
+        &self,
+        revert_buffer: &RevertBuffer<BlockUpdateWithCursor<evm::BlockContractChanges>>,
+        reverted_balances_keys: &[(&String, &Bytes)],
+    ) -> Result<HashMap<String, HashMap<H160, evm::ComponentBalance>>, ExtractionError> {
+        // First search in the buffer
+        let (buffered_balances, missing_balances_keys) =
+            revert_buffer.lookup_balances(reverted_balances_keys);
+
+        let missing_balances_map: HashMap<String, Vec<Bytes>> = missing_balances_keys
+            .into_iter()
+            .fold(HashMap::new(), |mut map, (c_id, token)| {
+                map.entry(c_id).or_default().push(token);
+                map
+            });
+
+        trace!(?missing_balances_map, "Missing balance keys after buffer lookup");
+
+        // Then get the missing balances from db
+        let missing_balances: HashMap<String, HashMap<Bytes, ComponentBalance>> = self
+            .gateway
+            .get_components_balances(
+                &missing_balances_map
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<&str>>(),
+            )
+            .await?;
+
+        let empty = HashMap::<Bytes, ComponentBalance>::new();
+
+        let combined_balances: HashMap<
+            String,
+            HashMap<H160, crate::extractor::evm::ComponentBalance>,
+        > = missing_balances_map
+            .iter()
+            .map(|(id, tokens)| {
+                let balances_for_id = missing_balances
+                    .get(id)
+                    .unwrap_or(&empty);
+                let filtered_balances: HashMap<_, _> = tokens
+                    .iter()
+                    .map(|token| {
+                        let balance = balances_for_id
+                            .get(token)
+                            .cloned()
+                            .unwrap_or_else(|| ComponentBalance {
+                                token: token.clone(),
+                                new_balance: Bytes::from(H256::zero()),
+                                balance_float: 0.0,
+                                modify_tx: H256::zero().into(),
+                                component_id: id.to_string(),
+                            });
+                        (token.clone(), balance)
+                    })
+                    .collect();
+                (id.clone(), filtered_balances)
+            })
+            .chain(buffered_balances)
+            .map(|(id, balances)| {
+                (
+                    id,
+                    balances
+                        .into_iter()
+                        .map(|(token, value)| {
+                            (
+                                H160::from(token),
+                                crate::extractor::evm::ComponentBalance::from(&value),
+                            )
+                        })
+                        .collect::<HashMap<_, _>>(),
+                )
+            })
+            .fold(HashMap::new(), |mut acc, (c_id, b_changes)| {
+                acc.entry(c_id)
+                    .or_default()
+                    .extend(b_changes);
+                acc
+            });
+        Ok(combined_balances)
     }
 }
 
@@ -583,18 +759,21 @@ where
         // Depending on how Substreams handle them, this condition could be problematic for single
         // block finality blockchains.
         let is_syncing = inp.final_block_height >= msg.block.number;
-
-        let mut revert_buffer = self.revert_buffer.lock().await;
-        revert_buffer
-            .insert_block(BlockUpdateWithCursor::new(msg.clone(), inp.cursor.clone()))
-            .expect("Error while inserting a block into revert buffer");
-        for msg in revert_buffer
-            .drain_new_finalized_blocks(inp.final_block_height)
-            .expect("Final block height not found in revert buffer")
         {
-            self.gateway
-                .upsert_contract(msg.block_update(), msg.cursor(), is_syncing)
-                .await?;
+            // keep revert buffer guard within a limited scope
+
+            let mut revert_buffer = self.revert_buffer.lock().await;
+            revert_buffer
+                .insert_block(BlockUpdateWithCursor::new(msg.clone(), inp.cursor.clone()))
+                .expect("Error while inserting a block into revert buffer");
+            for msg in revert_buffer
+                .drain_new_finalized_blocks(inp.final_block_height)
+                .expect("Final block height not found in revert buffer")
+            {
+                self.gateway
+                    .upsert_contract(msg.block_update(), msg.cursor(), is_syncing)
+                    .await?;
+            }
         }
 
         self.update_last_processed_block(msg.block)
@@ -604,7 +783,10 @@ where
 
         self.update_cursor(inp.cursor).await;
 
-        return Ok(Some(Arc::new(msg.aggregate_updates()?)));
+        let mut changes = msg.aggregate_updates()?;
+        self.handle_tvl_changes(&mut changes)
+            .await?;
+        return Ok(Some(Arc::new(changes)));
     }
 
     // Clippy thinks that tuple with Bytes are a mutable type.
@@ -834,80 +1016,9 @@ where
 
         trace!(?reverted_balances_keys_vec, "Reverted balance keys");
 
-        // First search in the buffer
-        let (buffered_balances, missing_balances_keys) =
-            revert_buffer.lookup_balances(&reverted_balances_keys_vec);
-
-        let missing_balances_map: HashMap<String, Vec<Bytes>> = missing_balances_keys
-            .into_iter()
-            .fold(HashMap::new(), |mut map, (c_id, token)| {
-                map.entry(c_id).or_default().push(token);
-                map
-            });
-
-        trace!(?missing_balances_map, "Missing balance keys after buffer lookup");
-
-        // Then get the missing balances from db
-        let missing_balances: HashMap<String, HashMap<Bytes, ComponentBalance>> = self
-            .gateway
-            .get_components_balances(
-                &missing_balances_map
-                    .keys()
-                    .map(String::as_str)
-                    .collect::<Vec<&str>>(),
-            )
+        let combined_balances = self
+            .get_balances(&revert_buffer, &reverted_balances_keys_vec)
             .await?;
-
-        let empty = HashMap::<Bytes, ComponentBalance>::new();
-
-        let combined_balances: HashMap<
-            String,
-            HashMap<H160, crate::extractor::evm::ComponentBalance>,
-        > = missing_balances_map
-            .iter()
-            .map(|(id, tokens)| {
-                let balances_for_id = missing_balances
-                    .get(id)
-                    .unwrap_or(&empty);
-                let filtered_balances: HashMap<_, _> = tokens
-                    .iter()
-                    .map(|token| {
-                        let balance = balances_for_id
-                            .get(token)
-                            .cloned()
-                            .unwrap_or_else(|| ComponentBalance {
-                                token: token.clone(),
-                                new_balance: Bytes::from(H256::zero()),
-                                balance_float: 0.0,
-                                modify_tx: H256::zero().into(),
-                                component_id: id.to_string(),
-                            });
-                        (token.clone(), balance)
-                    })
-                    .collect();
-                (id.clone(), filtered_balances)
-            })
-            .chain(buffered_balances)
-            .map(|(id, balances)| {
-                (
-                    id,
-                    balances
-                        .into_iter()
-                        .map(|(token, value)| {
-                            (
-                                H160::from(token),
-                                crate::extractor::evm::ComponentBalance::from(&value),
-                            )
-                        })
-                        .collect::<HashMap<_, _>>(),
-                )
-            })
-            .fold(HashMap::new(), |mut acc, (c_id, b_changes)| {
-                acc.entry(c_id)
-                    .or_default()
-                    .extend(b_changes);
-                acc
-            });
 
         let revert_message = evm::BlockAccountChanges {
             extractor: self.name.clone(),
@@ -927,7 +1038,7 @@ where
             component_tvl: HashMap::new(),
         };
 
-        debug!("Succesfully retrieved all previous states during revert!");
+        debug!("Successfully retrieved all previous states during revert!");
 
         self.update_cursor(inp.last_valid_cursor)
             .await;
@@ -945,7 +1056,7 @@ where
 mod test {
     use tycho_core::models::{FinancialType, ImplementationType};
 
-    use crate::pb::tycho::evm::v1::BlockEntityChanges;
+    use crate::{pb::tycho::evm::v1::BlockEntityChanges, testing::MockGateway};
 
     use super::*;
 
@@ -972,6 +1083,11 @@ mod test {
         gw.expect_get_cursor()
             .times(1)
             .returning(|| Ok("cursor".into()));
+        let protocol_cache = ProtocolMemoryCache::new(
+            Chain::Ethereum,
+            chrono::Duration::seconds(900),
+            Arc::new(MockGateway::new()),
+        );
 
         let extractor = VmContractExtractor::new(
             "vm:ambient",
@@ -980,6 +1096,7 @@ mod test {
             gw,
             ambient_protocol_types(),
             "ambient".into(),
+            protocol_cache,
             None,
             5,
         )
@@ -1003,6 +1120,11 @@ mod test {
         gw.expect_upsert_contract()
             .times(1)
             .returning(|_, _, _| Ok(()));
+        let protocol_cache = ProtocolMemoryCache::new(
+            Chain::Ethereum,
+            chrono::Duration::seconds(900),
+            Arc::new(MockGateway::new()),
+        );
         let extractor = VmContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
@@ -1010,6 +1132,7 @@ mod test {
             gw,
             ambient_protocol_types(),
             "ambient".to_owned(),
+            protocol_cache,
             None,
             5,
         )
@@ -1069,6 +1192,11 @@ mod test {
         gw.expect_upsert_contract()
             .times(0)
             .returning(|_, _, _| Ok(()));
+        let protocol_cache = ProtocolMemoryCache::new(
+            Chain::Ethereum,
+            chrono::Duration::seconds(900),
+            Arc::new(MockGateway::new()),
+        );
         let extractor = VmContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
@@ -1076,6 +1204,7 @@ mod test {
             gw,
             ambient_protocol_types(),
             "ambient".to_owned(),
+            protocol_cache,
             None,
             5,
         )
@@ -1519,7 +1648,7 @@ mod test_serial_db {
         .await;
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn test_handle_revert() {
         run_against_db(|pool| async move {
             let mut conn = pool
@@ -1559,14 +1688,18 @@ mod test_serial_db {
                 "vm_name",
                 Chain::Ethereum,
                 0,
-                cached_gw,
+                cached_gw.clone(),
                 get_mocked_token_pre_processor(),
             );
-
             let protocol_types = HashMap::from([
                 ("pt_1".to_string(), ProtocolType::default()),
                 ("pt_2".to_string(), ProtocolType::default()),
             ]);
+            let protocol_cache = ProtocolMemoryCache::new(
+                Chain::Ethereum,
+                chrono::Duration::seconds(900),
+                Arc::new(cached_gw),
+            );
 
             let extractor = VmContractExtractor::new(
                 "vm_name",
@@ -1575,12 +1708,14 @@ mod test_serial_db {
                 gw,
                 protocol_types,
                 "vm_protocol_system".to_string(),
+                protocol_cache,
                 None,
                 5,
             )
                 .await
                 .expect("Failed to create extractor");
 
+            dbg!("starting input seq");
             // Send a sequence of block scoped data.
             stream::iter(get_inp_sequence())
                 .for_each(|inp| async {
