@@ -220,6 +220,10 @@ fn build_batch_update_query<'a, O: StoredVersionedRow>(
 /// - Set end versions on a collection of new entries
 /// - Given the new entries query the table currently valid versions
 /// - Execute and update query to invalidate the previously retrieved entries
+///
+/// ## Important note:
+/// This function requires that new_data is sorted by ascending execution order (block, transaction
+/// index) for conflicting entity_id.
 pub async fn apply_versioning<'a, N, S>(
     new_data: &mut [N],
     conn: &mut AsyncPgConnection,
@@ -256,6 +260,10 @@ pub trait StoredDeltaVersionedRow: StoredVersionedRow {
 /// Applies and executes delta versioning logic for a set of new entries.
 ///
 /// Same as `apply_versioning` but also takes care of previous value columns.
+///
+/// ## Important note:
+/// This function requires that new_data is sorted by ascending execution order (block, transaction
+/// index) for conflicting entity_id.
 pub async fn apply_delta_versioning<'a, N, S>(
     new_data: &mut [N],
     conn: &mut AsyncPgConnection,

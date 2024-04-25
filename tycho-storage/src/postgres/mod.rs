@@ -287,14 +287,6 @@ struct WithOrdinal<T, O> {
     ordinal: O,
 }
 
-impl<T, O> Deref for WithOrdinal<T, O> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.entity
-    }
-}
-
 impl<T, O> WithOrdinal<T, O> {
     pub fn new(entity: T, ordinal: O) -> Self {
         Self { entity, ordinal }

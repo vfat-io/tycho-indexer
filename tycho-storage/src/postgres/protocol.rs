@@ -746,7 +746,7 @@ impl PostgresGateway {
                                 *tx_id,
                                 *tx_ts,
                             ),
-                            ((component_db_id, attribute), tx_ts, tx_index),
+                            (component_db_id, attribute, tx_ts, tx_index),
                         )
                     }),
             );
@@ -1040,8 +1040,13 @@ impl PostgresGateway {
                     error!(?chain, ?component_balance.token, ?component_balance, "Token not found");
                     StorageError::NotFound("Token".to_string(), component_balance.token.to_string())
                 })?;
-            let (transaction_id, transaction_index, transaction_ts) =
-                transaction_ids_and_ts[&component_balance.modify_tx];
+            let (transaction_id, transaction_index, transaction_ts) = transaction_ids_and_ts
+                .get(&component_balance.modify_tx)
+                .ok_or_else(|| {
+                    error!(?chain, ?component_balance.modify_tx, ?component_balance, "Transaction not found");
+                    StorageError::NotFound("Transaction".to_string(), component_balance.modify_tx.to_string())
+                })?;
+
             let protocol_component_id = protocol_component_ids[&component_balance.component_id];
 
             let new_component_balance = orm::NewComponentBalance::new(
@@ -1049,13 +1054,13 @@ impl PostgresGateway {
                 component_balance.new_balance.clone(),
                 component_balance.balance_float,
                 None,
-                transaction_id,
+                *transaction_id,
                 protocol_component_id,
-                transaction_ts,
+                *transaction_ts,
             );
             new_component_balances.push(WithOrdinal::new(
                 new_component_balance,
-                ((protocol_component_id, *token_id), transaction_ts, transaction_index),
+                (protocol_component_id, *token_id, transaction_ts, transaction_index),
             ));
         }
 

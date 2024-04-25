@@ -527,7 +527,7 @@ impl PostgresGateway {
                             valid_from: *block_ts,
                             valid_to: None,
                         },
-                        ((*account_id, slot), *block_ts, *tx_index),
+                        (*account_id, slot, *block_ts, *tx_index),
                     ))
                 }
             }
