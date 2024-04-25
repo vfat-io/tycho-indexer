@@ -366,6 +366,7 @@ impl ExtractorBuilder {
             chrono::Duration::seconds(900),
             Arc::new(cached_gw.clone()),
         );
+        protocol_cache.populate().await?;
 
         match self.config.implementation_type {
             ImplementationType::Vm => {
@@ -374,7 +375,6 @@ impl ExtractorBuilder {
                     self.config.chain,
                     self.config.sync_batch_size,
                     cached_gw.clone(),
-                    token_pre_processor.clone(),
                 );
 
                 self.extractor = Some(Arc::new(
@@ -386,6 +386,7 @@ impl ExtractorBuilder {
                         protocol_types,
                         self.config.name.clone(),
                         protocol_cache.clone(),
+                        token_pre_processor.clone(),
                         if self.config.name == "vm:ambient" {
                             Some(transcode_ambient_balances)
                         } else if self.config.name == "vm:balancer" {

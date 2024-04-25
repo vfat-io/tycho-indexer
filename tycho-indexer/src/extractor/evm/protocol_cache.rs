@@ -2,9 +2,10 @@ use async_trait::async_trait;
 use chrono::{Local, NaiveDateTime};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
+use tracing::{debug, instrument};
 
 use tycho_core::{
-    models::{protocol::ProtocolComponent, token::CurrencyToken, Chain, ComponentId},
+    models::{protocol::ProtocolComponent, token::CurrencyToken, Address, Chain, ComponentId},
     storage::{ProtocolGateway, StorageError},
     Bytes,
 };
@@ -20,6 +21,8 @@ pub trait ProtocolDataCache: Send + Sync {
         &'a self,
         addresses: &'a [Bytes],
     ) -> Result<Vec<Option<CurrencyToken>>, StorageError>;
+
+    async fn has_token(&self, addresses: &[Address]) -> Vec<bool>;
 
     async fn add_tokens(
         &self,
@@ -72,16 +75,51 @@ impl ProtocolMemoryCache {
         }
     }
 
-    pub async fn load_all_tokens(&self) -> Result<(), StorageError> {
-        let mut cached_tokens = self.tokens.write().await;
-        self.gateway
-            .get_tokens(self.chain, None, None, None, None)
-            .await?
-            .into_iter()
-            .for_each(|t| {
-                cached_tokens.insert(t.address.clone(), t);
-            });
+    #[instrument(skip_all)]
+    pub async fn populate(&self) -> Result<(), StorageError> {
+        let mut n_tokens = 0;
+        let mut n_components = 0;
+        {
+            let mut cached_tokens = self.tokens.write().await;
+            self.gateway
+                .get_tokens(self.chain, None, None, None, None)
+                .await?
+                .into_iter()
+                .for_each(|t| {
+                    n_tokens += 1;
+                    cached_tokens.insert(t.address.clone(), t);
+                });
+        }
+        {
+            let mut cached_components = self.components.write().await;
+            self.gateway
+                .get_protocol_components(&self.chain, None, None, None)
+                .await?
+                .into_iter()
+                .for_each(|pc| {
+                    n_components += 1;
+                    cached_components
+                        .entry(pc.protocol_system.clone())
+                        .or_default()
+                        .insert(pc.id.clone(), pc);
+                });
+        }
+        let n_prices = self.update_prices_cache().await?;
+        debug!(?n_tokens, ?n_components, ?n_prices, "protocol cache populated");
         Ok(())
+    }
+
+    #[instrument(skip_all)]
+    async fn update_prices_cache(&self) -> Result<usize, StorageError> {
+        let mut token_prices = self.token_prices.write().await;
+        token_prices.prices = self
+            .gateway
+            .get_token_prices(&self.chain)
+            .await?;
+        token_prices.last_price_update = Local::now().naive_utc();
+        let n_prices = token_prices.prices.len();
+        debug!(?n_prices, "updated prices");
+        Ok(n_prices)
     }
 }
 
@@ -99,12 +137,7 @@ impl ProtocolDataCache for ProtocolMemoryCache {
 
         let now = Local::now().naive_utc();
         if now.signed_duration_since(last_update) > self.max_price_age {
-            let mut token_prices = self.token_prices.write().await;
-            token_prices.prices = self
-                .gateway
-                .get_token_prices(&self.chain)
-                .await?;
-            token_prices.last_price_update = now;
+            self.update_prices_cache().await?;
         }
         let mut res = Vec::with_capacity(addresses.len());
         let inner = self.token_prices.read().await;
@@ -140,6 +173,14 @@ impl ProtocolDataCache for ProtocolMemoryCache {
             .iter()
             .map(|addr| cached_tokens.get(addr).cloned())
             .collect::<Vec<_>>())
+    }
+
+    async fn has_token(&self, addresses: &[Address]) -> Vec<bool> {
+        let guard = self.tokens.read().await;
+        addresses
+            .iter()
+            .map(|address| guard.contains_key(address))
+            .collect()
     }
 
     async fn add_tokens(
@@ -230,7 +271,7 @@ mod tests {
         let max_price_age = Duration::seconds(60);
         let mut gateway = MockGateway::new();
 
-        let token_prices = HashMap::from([(Bytes::from("0x01"), 1.0), (Bytes::from("0x02"), 2.0)]);
+        let token_prices = prices();
         gateway
             .expect_get_token_prices()
             .with(eq(chain))
@@ -246,6 +287,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(prices, vec![Some(1.0), Some(2.0)]);
+    }
+
+    fn prices() -> HashMap<Bytes, f64> {
+        HashMap::from([(Bytes::from("0x01"), 1.0), (Bytes::from("0x02"), 2.0)])
     }
 
     #[tokio::test]
@@ -294,13 +339,8 @@ mod tests {
         ]
     }
 
-    #[tokio::test]
-    async fn test_get_protocol_components() {
-        let chain = Chain::Ethereum;
-        let max_price_age = Duration::seconds(60);
-        let mut gateway = MockGateway::new();
-
-        let components = vec![
+    fn components() -> Vec<ProtocolComponent> {
+        vec![
             ProtocolComponent::new(
                 "component1",
                 "sys1",
@@ -325,7 +365,16 @@ mod tests {
                 Bytes::default(),
                 NaiveDateTime::default(),
             ),
-        ];
+        ]
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_components() {
+        let chain = Chain::Ethereum;
+        let max_price_age = Duration::seconds(60);
+        let mut gateway = MockGateway::new();
+
+        let components = components();
         let ret_components = components.clone();
         gateway
             .expect_get_protocol_components()
@@ -347,25 +396,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_all_tokens() {
+    async fn test_populate() {
         let chain = Chain::Ethereum;
         let max_price_age = Duration::seconds(60);
         let mut gateway = MockGateway::new();
-
-        let tokens = tokens();
-        let ret_tokens = tokens.clone();
-
         gateway
             .expect_get_tokens()
-            .return_once(move |_, _, _, _, _| Box::pin(async { Ok(ret_tokens) }));
-
+            .return_once(|_, _, _, _, _| Box::pin(async { Ok(tokens()) }));
+        gateway
+            .expect_get_protocol_components()
+            .return_once(|_, _, _, _| Box::pin(async { Ok(components()) }));
+        gateway
+            .expect_get_token_prices()
+            .with(eq(chain))
+            .times(1)
+            .return_once(|_| Box::pin(async { Ok(prices()) }));
+        let exp_tokens = tokens()
+            .into_iter()
+            .map(|t| (t.address.clone(), t))
+            .collect();
+        let exp_prices = prices();
+        let mut exp_components: ProtocolComponentStore = HashMap::new();
+        components().into_iter().for_each(|pc| {
+            exp_components
+                .entry(pc.protocol_system.clone())
+                .or_default()
+                .insert(pc.id.clone(), pc);
+        });
         let cache = ProtocolMemoryCache::new(chain, max_price_age, Arc::new(gateway));
 
-        cache.load_all_tokens().await.unwrap();
+        cache.populate().await.unwrap();
 
-        let cached_tokens = cache.tokens.read().await;
-        assert_eq!(cached_tokens.len(), 2);
-        assert!(cached_tokens.contains_key(&Bytes::from("0x01")));
-        assert!(cached_tokens.contains_key(&Bytes::from("0x02")));
+        let cached_tokens = cache.tokens.read().await.clone();
+        assert_eq!(cached_tokens, exp_tokens);
+        let cached_prices = cache
+            .token_prices
+            .read()
+            .await
+            .prices
+            .clone();
+        assert_eq!(cached_prices, exp_prices);
+        let cached_components = cache.components.read().await.clone();
+        assert_eq!(cached_components, exp_components);
     }
 }

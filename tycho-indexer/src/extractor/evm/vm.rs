@@ -17,12 +17,11 @@ use tracing::{debug, info, instrument, trace, warn};
 
 use tycho_core::{
     models::{
-        self, contract::Contract, protocol::ComponentBalance, Address, Chain, ChangeType,
-        ExtractionState, ExtractorIdentity, ProtocolType,
+        self, contract::Contract, protocol::ComponentBalance, token::CurrencyToken, Address, Chain,
+        ChangeType, ExtractionState, ExtractorIdentity, ProtocolType,
     },
     storage::{
-        BlockIdentifier, ChainGateway, ContractStateGateway, ExtractionStateGateway,
-        ProtocolGateway, StorageError,
+        ChainGateway, ContractStateGateway, ExtractionStateGateway, ProtocolGateway, StorageError,
     },
     Bytes,
 };
@@ -55,15 +54,16 @@ struct Inner {
     last_report_block_number: u64,
 }
 
-pub struct VmContractExtractor<G> {
+pub struct VmContractExtractor<G, T> {
     gateway: G,
     name: String,
     chain: Chain,
     chain_state: ChainState,
     protocol_system: String,
+    token_pre_processor: T,
     protocol_cache: ProtocolMemoryCache,
     // TODO: There is not reason this needs to be shared
-    // try removing the Mutex
+    //  try removing the Mutex
     inner: Arc<Mutex<Inner>>,
     protocol_types: HashMap<String, ProtocolType>,
     /// Allows to attach some custom logic, e.g. to fix encoding bugs without re-sync.
@@ -73,7 +73,83 @@ pub struct VmContractExtractor<G> {
     revert_buffer: Mutex<RevertBuffer<BlockUpdateWithCursor<evm::BlockContractChanges>>>,
 }
 
-impl<DB> VmContractExtractor<DB> {
+impl<G, T> VmContractExtractor<G, T>
+where
+    G: VmGateway,
+    T: TokenPreProcessorTrait,
+{
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new(
+        name: &str,
+        chain: Chain,
+        chain_state: ChainState,
+        gateway: G,
+        protocol_types: HashMap<String, ProtocolType>,
+        protocol_system: String,
+        protocol_cache: ProtocolMemoryCache,
+        token_pre_processor: T,
+        post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
+        sync_threshold: u64,
+    ) -> Result<Self, ExtractionError> {
+        // check if this extractor has state
+        let res = match gateway.get_cursor().await {
+            Err(StorageError::NotFound(_, _)) => {
+                warn!(?name, ?chain, "No cursor found, starting from the beginning");
+                VmContractExtractor {
+                    gateway,
+                    name: name.to_owned(),
+                    chain,
+                    chain_state,
+                    protocol_cache,
+                    token_pre_processor,
+                    inner: Arc::new(Mutex::new(Inner {
+                        cursor: Vec::new(),
+                        last_processed_block: None,
+                        last_report_ts: chrono::Local::now().naive_utc(),
+                        last_report_block_number: 0,
+                    })),
+                    protocol_system,
+                    protocol_types,
+                    post_processor,
+                    sync_threshold,
+                    revert_buffer: Mutex::new(RevertBuffer::new()),
+                }
+            }
+            Ok(cursor) => {
+                let cursor_hex = hex::encode(&cursor);
+                info!(
+                    ?name,
+                    ?chain,
+                    cursor = &cursor_hex,
+                    "Found existing cursor! Resuming extractor.."
+                );
+                VmContractExtractor {
+                    gateway,
+                    name: name.to_owned(),
+                    chain,
+                    chain_state,
+                    protocol_cache,
+                    token_pre_processor,
+                    inner: Arc::new(Mutex::new(Inner {
+                        cursor,
+                        last_processed_block: None,
+                        last_report_ts: chrono::Local::now().naive_utc(),
+                        last_report_block_number: 0,
+                    })),
+                    protocol_system,
+                    protocol_types,
+                    post_processor,
+                    sync_threshold,
+                    revert_buffer: Mutex::new(RevertBuffer::new()),
+                }
+            }
+            Err(err) => return Err(ExtractionError::Setup(err.to_string())),
+        };
+
+        res.ensure_protocol_types().await;
+        Ok(res)
+    }
+
     async fn update_cursor(&self, cursor: String) {
         let cursor_bytes: Vec<u8> = cursor.into();
         let mut state = self.inner.lock().await;
@@ -120,397 +196,6 @@ impl<DB> VmContractExtractor<DB> {
         } else {
             false
         }
-    }
-}
-
-pub struct VmPgGateway<T>
-where
-    T: TokenPreProcessorTrait,
-{
-    name: String,
-    chain: Chain,
-    sync_batch_size: usize,
-    state_gateway: CachedGateway,
-    token_pre_processor: T,
-}
-
-#[automock]
-#[async_trait]
-pub trait VmGateway: Send + Sync {
-    async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
-
-    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]);
-
-    async fn upsert_contract(
-        &self,
-        changes: &evm::BlockContractChanges,
-        new_cursor: &str,
-        syncing: bool,
-    ) -> Result<(), StorageError>;
-
-    async fn revert(
-        &self,
-        current: Option<BlockIdentifier>,
-        to: &BlockIdentifier,
-        new_cursor: &str,
-    ) -> Result<evm::BlockAccountChanges, StorageError>;
-
-    async fn get_contracts(
-        &self,
-        component_ids: &[models::Address],
-    ) -> Result<Vec<Contract>, StorageError>;
-
-    async fn get_components_balances<'a>(
-        &self,
-        component_ids: &[&'a str],
-    ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, StorageError>;
-}
-
-impl<T> VmPgGateway<T>
-where
-    T: TokenPreProcessorTrait,
-{
-    pub fn new(
-        name: &str,
-        chain: Chain,
-        sync_batch_size: usize,
-        gw: CachedGateway,
-        token_pre_processor: T,
-    ) -> Self {
-        VmPgGateway {
-            name: name.to_owned(),
-            chain,
-            sync_batch_size,
-            state_gateway: gw,
-            token_pre_processor,
-        }
-    }
-
-    #[instrument(skip_all)]
-    async fn save_cursor(&self, new_cursor: &str) -> Result<(), StorageError> {
-        let state =
-            ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
-        self.state_gateway
-            .save_state(&state)
-            .await?;
-        Ok(())
-    }
-
-    async fn get_new_tokens(
-        &self,
-        protocol_components: Vec<evm::ProtocolComponent>,
-    ) -> Result<Vec<H160>, StorageError> {
-        let mut tokens_set = HashSet::new();
-        let mut addresses = HashSet::new();
-        for component in protocol_components {
-            for token in &component.tokens {
-                tokens_set.insert(*token);
-                let byte_slice = token.as_bytes();
-                addresses.insert(Bytes::from(byte_slice.to_vec()));
-            }
-        }
-
-        let address_refs: Vec<&Bytes> = addresses.iter().collect();
-        let addresses_option = Some(address_refs.as_slice());
-
-        let db_tokens = self
-            .state_gateway
-            .get_tokens(self.chain, addresses_option, None, None, None)
-            .await?;
-
-        for token in db_tokens {
-            tokens_set.remove(&H160::from_slice(token.address.as_ref()));
-        }
-        Ok(tokens_set.into_iter().collect())
-    }
-
-    async fn forward(
-        &self,
-        changes: &evm::BlockContractChanges,
-        new_cursor: &str,
-        syncing: bool,
-    ) -> Result<(), StorageError> {
-        debug!("Upserting block");
-        self.state_gateway
-            .start_transaction(&(&changes.block).into())
-            .await;
-        let protocol_components = changes
-            .tx_updates
-            .iter()
-            .flat_map(|tx_u| {
-                tx_u.protocol_components
-                    .values()
-                    .cloned()
-            })
-            .collect();
-        let new_tokens_addresses = self
-            .get_new_tokens(protocol_components)
-            .await?;
-        if !new_tokens_addresses.is_empty() {
-            let balance_map: HashMap<H160, (H160, U256)> = changes
-                .tx_updates
-                .iter()
-                .flat_map(|tx| {
-                    tx.protocol_components
-                        .iter()
-                        // Filtering to keep only components with ChangeType::Creation
-                        .filter(|(_, c_change)| c_change.change == ChangeType::Creation)
-                        .filter_map(|(c_id, change)| {
-                            map_vault(&change.protocol_system)
-                                .or_else(|| {
-                                    change
-                                        .contract_ids
-                                        // TODO: Currently, it's assumed that the pool is always the
-                                        // first contract in the
-                                        // protocol component. This approach is a temporary
-                                        // workaround and needs to be revisited for a more robust
-                                        // solution.
-                                        .first()
-                                        .copied()
-                                        .or_else(|| H160::from_str(&change.id).ok())
-                                })
-                                .map(|owner| (c_id, owner))
-                        })
-                        .filter_map(|(c_id, addr)| {
-                            tx.component_balances
-                                .get(c_id)
-                                .map(|balances| {
-                                    balances
-                                        .iter()
-                                        .map(move |(token, balance)| {
-                                            (
-                                                *token,
-                                                (addr, U256::from_big_endian(&balance.balance)),
-                                            ) // We currently only keep the lastest created pool for
-                                              // a token
-                                        })
-                                })
-                        })
-                        .flatten()
-                })
-                .collect::<HashMap<_, _>>();
-            let tf = TokenFinder::new(balance_map);
-            let new_tokens = self
-                .token_pre_processor
-                .get_tokens(
-                    new_tokens_addresses,
-                    Arc::new(tf),
-                    web3::types::BlockNumber::Number(changes.block.number.into()),
-                )
-                .await
-                .iter()
-                .map(Into::into)
-                .collect::<Vec<_>>();
-
-            self.state_gateway
-                .add_tokens(&new_tokens)
-                .await?;
-        }
-
-        self.state_gateway
-            .upsert_block(&[(&changes.block).into()])
-            .await?;
-        for update in changes.tx_updates.iter() {
-            debug!(tx_hash = ?update.tx.hash, "Processing transaction");
-            self.state_gateway
-                .upsert_tx(&[(&update.tx).into()])
-                .await?;
-            for (_, acc_update) in update.account_updates.iter() {
-                if acc_update.is_creation() {
-                    let new: evm::Account = acc_update.ref_into_account(&update.tx);
-                    info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
-                    self.state_gateway
-                        .upsert_contract(&(&new).into())
-                        .await?;
-                }
-            }
-            if !update.protocol_components.is_empty() {
-                let protocol_components: Vec<models::protocol::ProtocolComponent> = update
-                    .protocol_components
-                    .values()
-                    .map(Into::into)
-                    .collect();
-                self.state_gateway
-                    .add_protocol_components(&protocol_components)
-                    .await?;
-            }
-            if !update.component_balances.is_empty() {
-                let mut component_balances_vec: Vec<models::protocol::ComponentBalance> =
-                    Vec::new();
-                for inner_map in update.component_balances.values() {
-                    for balance in inner_map.values() {
-                        component_balances_vec.push(balance.into());
-                    }
-                }
-                self.state_gateway
-                    .add_component_balances(&component_balances_vec)
-                    .await?;
-            }
-        }
-        let collected_changes: Vec<(Bytes, models::contract::ContractDelta)> = changes
-            .tx_updates
-            .iter()
-            .flat_map(|u| {
-                let a: Vec<(Bytes, models::contract::ContractDelta)> = u
-                    .account_updates
-                    .clone()
-                    .into_iter()
-                    .filter(|(_, acc_u)| acc_u.is_update())
-                    .map(|(_, acc_u)| (tycho_core::Bytes::from(u.tx.hash), (&acc_u).into()))
-                    .collect();
-                a
-            })
-            .collect();
-
-        let changes_slice: &[(Bytes, models::contract::ContractDelta)] =
-            collected_changes.as_slice();
-
-        self.state_gateway
-            .update_contracts(changes_slice)
-            .await?;
-        self.save_cursor(new_cursor).await?;
-
-        let batch_size: usize = if syncing { self.sync_batch_size } else { 0 };
-        self.state_gateway
-            .commit_transaction(batch_size)
-            .await
-    }
-
-    async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
-        let state = self
-            .state_gateway
-            .get_state(&self.name, &self.chain)
-            .await?;
-        Ok(state.cursor)
-    }
-}
-
-#[async_trait]
-impl<T: TokenPreProcessorTrait> VmGateway for VmPgGateway<T> {
-    async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
-        self.get_last_cursor().await
-    }
-
-    async fn get_contracts(
-        &self,
-        component_ids: &[Address],
-    ) -> Result<Vec<Contract>, StorageError> {
-        self.state_gateway
-            .get_contracts(&self.chain, Some(component_ids), None, true, false)
-            .await
-    }
-
-    async fn get_components_balances<'a>(
-        &self,
-        component_ids: &[&'a str],
-    ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, StorageError> {
-        self.state_gateway
-            .get_balances(&self.chain, Some(component_ids), None)
-            .await
-    }
-
-    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
-        self.state_gateway
-            .add_protocol_types(new_protocol_types)
-            .await
-            .expect("Couldn't insert protocol types");
-    }
-
-    #[instrument(skip_all)]
-    async fn upsert_contract(
-        &self,
-        changes: &evm::BlockContractChanges,
-        new_cursor: &str,
-        syncing: bool,
-    ) -> Result<(), StorageError> {
-        self.forward(changes, new_cursor, syncing)
-            .await?;
-        Ok(())
-    }
-
-    #[allow(unused_variables)]
-    #[instrument(skip_all)]
-    async fn revert(
-        &self,
-        current: Option<BlockIdentifier>,
-        to: &BlockIdentifier,
-        new_cursor: &str,
-    ) -> Result<evm::BlockAccountChanges, StorageError> {
-        panic!("Not implemented!");
-    }
-}
-
-impl<G> VmContractExtractor<G>
-where
-    G: VmGateway,
-{
-    #[allow(clippy::too_many_arguments)]
-    pub async fn new(
-        name: &str,
-        chain: Chain,
-        chain_state: ChainState,
-        gateway: G,
-        protocol_types: HashMap<String, ProtocolType>,
-        protocol_system: String,
-        protocol_cache: ProtocolMemoryCache,
-        post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
-        sync_threshold: u64,
-    ) -> Result<Self, ExtractionError> {
-        // check if this extractor has state
-        let res = match gateway.get_cursor().await {
-            Err(StorageError::NotFound(_, _)) => {
-                warn!(?name, ?chain, "No cursor found, starting from the beginning");
-                VmContractExtractor {
-                    gateway,
-                    name: name.to_owned(),
-                    chain,
-                    chain_state,
-                    protocol_cache,
-                    inner: Arc::new(Mutex::new(Inner {
-                        cursor: Vec::new(),
-                        last_processed_block: None,
-                        last_report_ts: chrono::Local::now().naive_utc(),
-                        last_report_block_number: 0,
-                    })),
-                    protocol_system,
-                    protocol_types,
-                    post_processor,
-                    sync_threshold,
-                    revert_buffer: Mutex::new(RevertBuffer::new()),
-                }
-            }
-            Ok(cursor) => {
-                let cursor_hex = hex::encode(&cursor);
-                info!(
-                    ?name,
-                    ?chain,
-                    cursor = &cursor_hex,
-                    "Found existing cursor! Resuming extractor.."
-                );
-                VmContractExtractor {
-                    gateway,
-                    name: name.to_owned(),
-                    chain,
-                    chain_state,
-                    protocol_cache,
-                    inner: Arc::new(Mutex::new(Inner {
-                        cursor,
-                        last_processed_block: None,
-                        last_report_ts: chrono::Local::now().naive_utc(),
-                        last_report_block_number: 0,
-                    })),
-                    protocol_system,
-                    protocol_types,
-                    post_processor,
-                    sync_threshold,
-                    revert_buffer: Mutex::new(RevertBuffer::new()),
-                }
-            }
-            Err(err) => return Err(ExtractionError::Setup(err.to_string())),
-        };
-
-        res.ensure_protocol_types().await;
-        Ok(res)
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % msg.block.number))]
@@ -683,12 +368,88 @@ where
             });
         Ok(combined_balances)
     }
+
+    async fn process_tokens(
+        &self,
+        msg: &evm::BlockContractChanges,
+    ) -> HashMap<Address, CurrencyToken> {
+        let new_token_addresses = msg
+            .protocol_components()
+            .into_iter()
+            .flat_map(|pc| pc.tokens.clone().into_iter())
+            .map(|addr| Bytes::from(addr.as_bytes()))
+            .collect::<Vec<_>>();
+        let is_token_known = self
+            .protocol_cache
+            .has_token(&new_token_addresses)
+            .await;
+        let unknown_tokens = new_token_addresses
+            .into_iter()
+            .zip(is_token_known.into_iter())
+            .filter_map(|(addr, token_is_known)| (!token_is_known).then_some(H160::from(addr)))
+            .collect::<Vec<_>>();
+
+        let balance_map: HashMap<H160, (H160, U256)> = msg
+            .tx_updates
+            .iter()
+            .flat_map(|tx| {
+                tx.protocol_components
+                    .iter()
+                    // Filtering to keep only components with ChangeType::Creation
+                    .filter(|(_, c_change)| c_change.change == ChangeType::Creation)
+                    .filter_map(|(c_id, change)| {
+                        map_vault(&change.protocol_system)
+                            .or_else(|| {
+                                change
+                                    .contract_ids
+                                    // TODO: Currently, it's assumed that the pool is always the
+                                    // first contract in the
+                                    // protocol component. This approach is a temporary
+                                    // workaround and needs to be revisited for a more robust
+                                    // solution.
+                                    .first()
+                                    .copied()
+                                    .or_else(|| H160::from_str(&change.id).ok())
+                            })
+                            .map(|owner| (c_id, owner))
+                    })
+                    .filter_map(|(c_id, addr)| {
+                        tx.component_balances
+                            .get(c_id)
+                            .map(|balances| {
+                                balances
+                                    .iter()
+                                    // We currently only keep the latest created pool for
+                                    // it's token
+                                    .map(move |(token, balance)| {
+                                        (*token, (addr, U256::from_big_endian(&balance.balance)))
+                                    })
+                            })
+                    })
+                    .flatten()
+            })
+            .collect::<HashMap<_, _>>();
+        let tf = TokenFinder::new(balance_map);
+        let new_tokens: HashMap<Address, CurrencyToken> = self
+            .token_pre_processor
+            .get_tokens(
+                unknown_tokens,
+                Arc::new(tf),
+                web3::types::BlockNumber::Number(msg.block.number.into()),
+            )
+            .await
+            .iter()
+            .map(|t| (Bytes::from(t.address.as_bytes()), t.into()))
+            .collect();
+        new_tokens
+    }
 }
 
 #[async_trait]
-impl<G> Extractor for VmContractExtractor<G>
+impl<G, T> Extractor for VmContractExtractor<G, T>
 where
     G: VmGateway,
+    T: TokenPreProcessorTrait,
 {
     fn get_id(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.name)
@@ -753,8 +514,20 @@ where
             Err(e) => return Err(e),
         };
 
-        let msg =
+        let mut msg =
             if let Some(post_process_f) = self.post_processor { post_process_f(msg) } else { msg };
+
+        msg.new_tokens = self.process_tokens(&msg).await;
+        self.protocol_cache
+            .add_tokens(msg.new_tokens.values().cloned())
+            .await?;
+        self.protocol_cache
+            .add_components(
+                msg.protocol_components()
+                    .iter()
+                    .map(Into::into),
+            )
+            .await?;
 
         // Depending on how Substreams handle them, this condition could be problematic for single
         // block finality blockchains.
@@ -863,7 +636,7 @@ where
 
         trace!(?reverted_components_creations, "Reverted components creations");
         // TODO: For these reverted deletions we need to fetch the whole state (so get it from the
-        // db and apply buffer update)
+        //  db and apply buffer update)
         trace!(?reverted_components_deletions, "Reverted components deletions");
 
         // Handle reverted state
@@ -1052,11 +825,204 @@ where
     }
 }
 
+pub struct VmPgGateway {
+    name: String,
+    chain: Chain,
+    sync_batch_size: usize,
+    state_gateway: CachedGateway,
+}
+
+#[automock]
+#[async_trait]
+pub trait VmGateway: Send + Sync {
+    async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
+
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]);
+
+    async fn upsert_contract(
+        &self,
+        changes: &evm::BlockContractChanges,
+        new_cursor: &str,
+        syncing: bool,
+    ) -> Result<(), StorageError>;
+
+    async fn get_contracts(
+        &self,
+        component_ids: &[models::Address],
+    ) -> Result<Vec<Contract>, StorageError>;
+
+    async fn get_components_balances<'a>(
+        &self,
+        component_ids: &[&'a str],
+    ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, StorageError>;
+}
+
+impl VmPgGateway {
+    pub fn new(name: &str, chain: Chain, sync_batch_size: usize, gw: CachedGateway) -> Self {
+        VmPgGateway { name: name.to_owned(), chain, sync_batch_size, state_gateway: gw }
+    }
+
+    #[instrument(skip_all)]
+    async fn save_cursor(&self, new_cursor: &str) -> Result<(), StorageError> {
+        let state =
+            ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
+        self.state_gateway
+            .save_state(&state)
+            .await?;
+        Ok(())
+    }
+
+    async fn forward(
+        &self,
+        changes: &evm::BlockContractChanges,
+        new_cursor: &str,
+        syncing: bool,
+    ) -> Result<(), StorageError> {
+        debug!("Upserting block");
+        self.state_gateway
+            .start_transaction(&(&changes.block).into())
+            .await;
+        if !changes.new_tokens.is_empty() {
+            let new_tokens = changes
+                .new_tokens
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            self.state_gateway
+                .add_tokens(&new_tokens)
+                .await?;
+        }
+
+        self.state_gateway
+            .upsert_block(&[(&changes.block).into()])
+            .await?;
+        for update in changes.tx_updates.iter() {
+            debug!(tx_hash = ?update.tx.hash, "Processing transaction");
+            self.state_gateway
+                .upsert_tx(&[(&update.tx).into()])
+                .await?;
+            for (_, acc_update) in update.account_updates.iter() {
+                if acc_update.is_creation() {
+                    let new: evm::Account = acc_update.ref_into_account(&update.tx);
+                    info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
+                    self.state_gateway
+                        .upsert_contract(&(&new).into())
+                        .await?;
+                }
+            }
+            if !update.protocol_components.is_empty() {
+                let protocol_components: Vec<models::protocol::ProtocolComponent> = update
+                    .protocol_components
+                    .values()
+                    .map(Into::into)
+                    .collect();
+                self.state_gateway
+                    .add_protocol_components(&protocol_components)
+                    .await?;
+            }
+            if !update.component_balances.is_empty() {
+                let mut component_balances_vec: Vec<models::protocol::ComponentBalance> =
+                    Vec::new();
+                for inner_map in update.component_balances.values() {
+                    for balance in inner_map.values() {
+                        component_balances_vec.push(balance.into());
+                    }
+                }
+                self.state_gateway
+                    .add_component_balances(&component_balances_vec)
+                    .await?;
+            }
+        }
+        let collected_changes: Vec<(Bytes, models::contract::ContractDelta)> = changes
+            .tx_updates
+            .iter()
+            .flat_map(|u| {
+                let a: Vec<(Bytes, models::contract::ContractDelta)> = u
+                    .account_updates
+                    .clone()
+                    .into_iter()
+                    .filter(|(_, acc_u)| acc_u.is_update())
+                    .map(|(_, acc_u)| (tycho_core::Bytes::from(u.tx.hash), (&acc_u).into()))
+                    .collect();
+                a
+            })
+            .collect();
+
+        let changes_slice: &[(Bytes, models::contract::ContractDelta)] =
+            collected_changes.as_slice();
+
+        self.state_gateway
+            .update_contracts(changes_slice)
+            .await?;
+        self.save_cursor(new_cursor).await?;
+
+        let batch_size: usize = if syncing { self.sync_batch_size } else { 0 };
+        self.state_gateway
+            .commit_transaction(batch_size)
+            .await
+    }
+
+    async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
+        let state = self
+            .state_gateway
+            .get_state(&self.name, &self.chain)
+            .await?;
+        Ok(state.cursor)
+    }
+}
+
+#[async_trait]
+impl VmGateway for VmPgGateway {
+    async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
+        self.get_last_cursor().await
+    }
+
+    async fn get_contracts(
+        &self,
+        component_ids: &[Address],
+    ) -> Result<Vec<Contract>, StorageError> {
+        self.state_gateway
+            .get_contracts(&self.chain, Some(component_ids), None, true, false)
+            .await
+    }
+
+    async fn get_components_balances<'a>(
+        &self,
+        component_ids: &[&'a str],
+    ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, StorageError> {
+        self.state_gateway
+            .get_balances(&self.chain, Some(component_ids), None)
+            .await
+    }
+
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
+        self.state_gateway
+            .add_protocol_types(new_protocol_types)
+            .await
+            .expect("Couldn't insert protocol types");
+    }
+
+    #[instrument(skip_all)]
+    async fn upsert_contract(
+        &self,
+        changes: &evm::BlockContractChanges,
+        new_cursor: &str,
+        syncing: bool,
+    ) -> Result<(), StorageError> {
+        self.forward(changes, new_cursor, syncing)
+            .await?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use tycho_core::models::{FinancialType, ImplementationType};
 
-    use crate::{pb::tycho::evm::v1::BlockEntityChanges, testing::MockGateway};
+    use crate::{
+        extractor::evm::token_pre_processor::MockTokenPreProcessorTrait,
+        pb::tycho::evm::v1::BlockEntityChanges, testing::MockGateway,
+    };
 
     use super::*;
 
@@ -1088,7 +1054,6 @@ mod test {
             chrono::Duration::seconds(900),
             Arc::new(MockGateway::new()),
         );
-
         let extractor = VmContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
@@ -1097,6 +1062,7 @@ mod test {
             ambient_protocol_types(),
             "ambient".into(),
             protocol_cache,
+            MockTokenPreProcessorTrait::new(),
             None,
             5,
         )
@@ -1125,6 +1091,10 @@ mod test {
             chrono::Duration::seconds(900),
             Arc::new(MockGateway::new()),
         );
+        let mut preprocessor = MockTokenPreProcessorTrait::new();
+        preprocessor
+            .expect_get_tokens()
+            .returning(|_, _, _| Vec::new());
         let extractor = VmContractExtractor::new(
             "vm:ambient",
             Chain::Ethereum,
@@ -1133,6 +1103,7 @@ mod test {
             ambient_protocol_types(),
             "ambient".to_owned(),
             protocol_cache,
+            preprocessor,
             None,
             5,
         )
@@ -1205,6 +1176,7 @@ mod test {
             ambient_protocol_types(),
             "ambient".to_owned(),
             protocol_cache,
+            MockTokenPreProcessorTrait::new(),
             None,
             5,
         )
@@ -1246,7 +1218,7 @@ mod test_serial_db {
 
     use tycho_core::{
         models::{ContractId, FinancialType, ImplementationType},
-        storage::BlockOrTimestamp,
+        storage::{BlockIdentifier, BlockOrTimestamp},
     };
     use tycho_storage::{
         postgres,
@@ -1273,7 +1245,6 @@ mod test_serial_db {
 
     const WETH_ADDRESS: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC_ADDRESS: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
-    const USDT_ADDRESS: &str = "dAC17F958D2ee523a2206206994597C13D831ec7";
 
     const AMBIENT_CONTRACT: [u8; 20] =
         hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
@@ -1329,7 +1300,7 @@ mod test_serial_db {
         mock_processor
     }
 
-    async fn setup_gw(pool: Pool<AsyncPgConnection>) -> VmPgGateway<MockTokenPreProcessorTrait> {
+    async fn setup_gw(pool: Pool<AsyncPgConnection>) -> VmPgGateway {
         let mut conn = pool
             .get()
             .await
@@ -1347,13 +1318,7 @@ mod test_serial_db {
             .build()
             .await
             .expect("failed to build postgres gateway");
-        VmPgGateway::new(
-            "vm:ambient",
-            Chain::Ethereum,
-            1000,
-            cached_gw,
-            get_mocked_token_pre_processor(),
-        )
+        VmPgGateway::new("vm:ambient", Chain::Ethereum, 1000, cached_gw)
     }
 
     #[tokio::test]
@@ -1424,6 +1389,7 @@ mod test_serial_db {
             block: evm::Block::default(),
             finalized_block_height: 0,
             revert: false,
+            new_tokens: HashMap::new(),
             tx_updates: vec![
                 evm::TransactionVMUpdates::new(
                     [(
@@ -1519,6 +1485,7 @@ mod test_serial_db {
             block,
             finalized_block_height: 0,
             revert: false,
+            new_tokens: HashMap::new(),
             tx_updates: vec![evm::TransactionVMUpdates::new(
                 [(
                     H160(AMBIENT_CONTRACT),
@@ -1595,59 +1562,6 @@ mod test_serial_db {
         .await;
     }
 
-    #[tokio::test]
-    async fn test_get_new_tokens() {
-        run_against_db(|pool| async move {
-            let gw = setup_gw(pool.clone()).await;
-
-            let component_1 = evm::ProtocolComponent {
-                id: "ambient_USDC_WETH".to_owned(),
-                protocol_system: "ambient".to_string(),
-                protocol_type_name: "vm:pool".to_string(),
-                chain: Default::default(),
-                tokens: vec![
-                    H160::from_str(WETH_ADDRESS).expect("Invalid H160 address"),
-                    H160::from_str(USDC_ADDRESS).expect("Invalid H160 address"),
-                ],
-                contract_ids: vec![],
-                creation_tx: Default::default(),
-                static_attributes: Default::default(),
-                created_at: Default::default(),
-                change: Default::default(),
-            };
-            let component_2 = evm::ProtocolComponent {
-                id: "ambient_USDT_WETH".to_owned(),
-                protocol_system: "ambient".to_string(),
-                protocol_type_name: "vm:pool".to_string(),
-                chain: Default::default(),
-                tokens: vec![
-                    H160::from_str(WETH_ADDRESS).expect("Invalid H160 address"),
-                    H160::from_str(USDT_ADDRESS).expect("Invalid H160 address"),
-                ],
-                contract_ids: vec![],
-                creation_tx: Default::default(),
-                static_attributes: Default::default(),
-                created_at: Default::default(),
-                change: Default::default(),
-            };
-            // get no new tokens
-            let new_tokens = gw
-                .get_new_tokens(vec![component_1.clone()])
-                .await
-                .unwrap();
-            assert_eq!(new_tokens.len(), 0);
-
-            // get one new token
-            let new_tokens = gw
-                .get_new_tokens(vec![component_1, component_2])
-                .await
-                .unwrap();
-            assert_eq!(new_tokens.len(), 1);
-            assert_eq!(new_tokens[0], H160::from_str(USDT_ADDRESS).expect("Invalid H160 address"));
-        })
-        .await;
-    }
-
     #[test_log::test(tokio::test)]
     async fn test_handle_revert() {
         run_against_db(|pool| async move {
@@ -1688,8 +1602,7 @@ mod test_serial_db {
                 "vm_name",
                 Chain::Ethereum,
                 0,
-                cached_gw.clone(),
-                get_mocked_token_pre_processor(),
+                cached_gw.clone()
             );
             let protocol_types = HashMap::from([
                 ("pt_1".to_string(), ProtocolType::default()),
@@ -1700,7 +1613,7 @@ mod test_serial_db {
                 chrono::Duration::seconds(900),
                 Arc::new(cached_gw),
             );
-
+            let preprocessor = get_mocked_token_pre_processor();
             let extractor = VmContractExtractor::new(
                 "vm_name",
                 Chain::Ethereum,
@@ -1709,6 +1622,7 @@ mod test_serial_db {
                 protocol_types,
                 "vm_protocol_system".to_string(),
                 protocol_cache,
+                preprocessor,
                 None,
                 5,
             )

@@ -12,8 +12,9 @@ use tracing::log::warn;
 use tycho_core::{
     dto,
     models::{
-        blockchain::BlockScoped, protocol as tycho_core_protocol, Address, AttrStoreKey, Chain,
-        ChangeType, ComponentId, ExtractorIdentity, NormalisedMessage, ProtocolType, StoreVal,
+        blockchain::BlockScoped, protocol as tycho_core_protocol, token::CurrencyToken, Address,
+        AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity, NormalisedMessage,
+        ProtocolType, StoreVal,
     },
     Bytes,
 };
@@ -501,6 +502,8 @@ pub struct BlockContractChanges {
     pub block: Block,
     pub finalized_block_height: u64,
     pub revert: bool,
+    /// Required here, so it is part of the revert buffer and thus inserted in finalisation.
+    pub new_tokens: HashMap<Address, CurrencyToken>,
     /// Vec of updates at this block, aggregated by tx and sorted by tx index in ascending order
     pub tx_updates: Vec<TransactionVMUpdates>,
 }
@@ -787,7 +790,15 @@ impl BlockContractChanges {
         revert: bool,
         tx_updates: Vec<TransactionVMUpdates>,
     ) -> Self {
-        BlockContractChanges { extractor, chain, block, finalized_block_height, revert, tx_updates }
+        BlockContractChanges {
+            extractor,
+            chain,
+            block,
+            finalized_block_height,
+            revert,
+            new_tokens: HashMap::new(),
+            tx_updates,
+        }
     }
     /// Parse from tychos protobuf message
     pub fn try_from_message(
@@ -854,6 +865,7 @@ impl BlockContractChanges {
                 block,
                 finalized_block_height,
                 revert: false,
+                new_tokens: HashMap::new(),
                 tx_updates,
             });
         }
@@ -909,6 +921,17 @@ impl BlockContractChanges {
             HashMap::new(),
             component_balances,
         ))
+    }
+
+    pub fn protocol_components(&self) -> Vec<ProtocolComponent> {
+        self.tx_updates
+            .iter()
+            .flat_map(|tx_u| {
+                tx_u.protocol_components
+                    .values()
+                    .cloned()
+            })
+            .collect()
     }
 }
 
@@ -2558,6 +2581,7 @@ mod test {
             },
             finalized_block_height: 0,
             revert: false,
+            new_tokens: HashMap::new(),
             tx_updates: vec![
                 TransactionVMUpdates {
                     account_updates: [(
