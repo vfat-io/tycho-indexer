@@ -280,6 +280,19 @@ impl<T> Deref for WithTxHash<T> {
     }
 }
 
+// Helper type to wrap entities with their associated ordinal.
+#[derive(Debug)]
+struct WithOrdinal<T, O> {
+    entity: T,
+    ordinal: O,
+}
+
+impl<T, O> WithOrdinal<T, O> {
+    pub fn new(entity: T, ordinal: O) -> Self {
+        Self { entity, ordinal }
+    }
+}
+
 struct PostgresError(StorageError);
 
 impl From<diesel::result::Error> for PostgresError {

@@ -17,11 +17,11 @@ use tycho_core::{
 };
 
 use super::{
-    maybe_lookup_block_ts, maybe_lookup_version_ts, orm,
-    orm::{Account, ComponentTVL, NewAccount},
+    maybe_lookup_block_ts, maybe_lookup_version_ts,
+    orm::{self, Account, ComponentTVL, NewAccount},
     schema, storage_error_from_diesel,
     versioning::apply_delta_versioning,
-    PostgresError, PostgresGateway, WithTxHash,
+    PostgresError, PostgresGateway, WithOrdinal, WithTxHash,
 };
 
 // Private methods
@@ -713,7 +713,7 @@ impl PostgresGateway {
         .map(|(id, external_id)| (external_id, id))
         .collect();
 
-        let mut state_data: Vec<orm::NewProtocolState> = Vec::new();
+        let mut state_data = Vec::new();
 
         for state in new {
             let tx = state
@@ -722,7 +722,7 @@ impl PostgresGateway {
                 .ok_or(StorageError::Unexpected(
                     "Could not reference tx in ProtocolStateDelta object".to_string(),
                 ))?;
-            let tx_db = txns
+            let (tx_id, tx_index, tx_ts) = txns
                 .get(tx)
                 .ok_or(StorageError::NotFound("Tx id".to_string(), tx.to_string()))?;
 
@@ -738,12 +738,15 @@ impl PostgresGateway {
                     .updated_attributes
                     .iter()
                     .map(|(attribute, value)| {
-                        orm::NewProtocolState::new(
-                            component_db_id,
-                            attribute,
-                            Some(value),
-                            tx_db.0,
-                            tx_db.2,
+                        WithOrdinal::new(
+                            orm::NewProtocolState::new(
+                                component_db_id,
+                                attribute,
+                                Some(value),
+                                *tx_id,
+                                *tx_ts,
+                            ),
+                            (component_db_id, attribute, tx_ts, tx_index),
                         )
                     }),
             );
@@ -755,7 +758,7 @@ impl PostgresGateway {
                     .filter(schema::protocol_state::protocol_component_id.eq(component_db_id))
                     .filter(schema::protocol_state::attribute_name.eq(attr))
                     .filter(schema::protocol_state::valid_to.is_null())
-                    .set(schema::protocol_state::valid_to.eq(tx_db.2))
+                    .set(schema::protocol_state::valid_to.eq(tx_ts))
                     .execute(conn)
                     .await
                     .map_err(PostgresError::from)?;
@@ -764,9 +767,15 @@ impl PostgresGateway {
 
         // insert the prepared protocol state deltas
         if !state_data.is_empty() {
-            apply_delta_versioning::<_, orm::ProtocolState>(&mut state_data, conn).await?;
+            state_data.sort_by_cached_key(|b| b.ordinal);
+            let mut sorted = state_data
+                .into_iter()
+                .map(|b| b.entity)
+                .collect::<Vec<_>>();
+            apply_delta_versioning::<_, orm::ProtocolState>(&mut sorted, conn).await?;
+
             diesel::insert_into(schema::protocol_state::table)
-                .values(&state_data)
+                .values(&sorted)
                 .execute(conn)
                 .await
                 .map_err(PostgresError::from)?;
@@ -1003,12 +1012,12 @@ impl PostgresGateway {
             .map(|component_balance| component_balance.modify_tx.clone())
             .collect::<Vec<TxHash>>();
         let txn_hashes = modify_txs.iter().collect::<Vec<_>>();
-        let transaction_ids_and_ts: HashMap<TxHash, (i64, NaiveDateTime)> =
+        let transaction_ids_and_ts: HashMap<TxHash, (i64, i64, NaiveDateTime)> =
             orm::Transaction::ids_and_ts_by_hash(txn_hashes.as_ref(), conn)
                 .await
                 .map_err(PostgresError::from)?
                 .into_iter()
-                .map(|(db_id, hash, _, ts)| (hash, (db_id, ts)))
+                .map(|(db_id, hash, index, ts)| (hash, (db_id, index, ts)))
                 .collect();
 
         let external_ids: Vec<&str> = component_balances
@@ -1031,8 +1040,13 @@ impl PostgresGateway {
                     error!(?chain, ?component_balance.token, ?component_balance, "Token not found");
                     StorageError::NotFound("Token".to_string(), component_balance.token.to_string())
                 })?;
-            let (transaction_id, transaction_ts) =
-                transaction_ids_and_ts[&component_balance.modify_tx];
+            let (transaction_id, transaction_index, transaction_ts) = transaction_ids_and_ts
+                .get(&component_balance.modify_tx)
+                .ok_or_else(|| {
+                    error!(?chain, ?component_balance.modify_tx, ?component_balance, "Transaction not found");
+                    StorageError::NotFound("Transaction".to_string(), component_balance.modify_tx.to_string())
+                })?;
+
             let protocol_component_id = protocol_component_ids[&component_balance.component_id];
 
             let new_component_balance = orm::NewComponentBalance::new(
@@ -1040,18 +1054,25 @@ impl PostgresGateway {
                 component_balance.new_balance.clone(),
                 component_balance.balance_float,
                 None,
-                transaction_id,
+                *transaction_id,
                 protocol_component_id,
-                transaction_ts,
+                *transaction_ts,
             );
-            new_component_balances.push(new_component_balance);
+            new_component_balances.push(WithOrdinal::new(
+                new_component_balance,
+                (protocol_component_id, *token_id, transaction_ts, transaction_index),
+            ));
         }
 
-        if !component_balances.is_empty() {
-            apply_delta_versioning::<_, orm::ComponentBalance>(&mut new_component_balances, conn)
-                .await?;
+        if !new_component_balances.is_empty() {
+            new_component_balances.sort_by_cached_key(|b| b.ordinal);
+            let mut sorted = new_component_balances
+                .into_iter()
+                .map(|b| b.entity)
+                .collect::<Vec<_>>();
+            apply_delta_versioning::<_, orm::ComponentBalance>(&mut sorted, conn).await?;
             diesel::insert_into(schema::component_balance::table)
-                .values(&new_component_balances)
+                .values(&sorted)
                 .execute(conn)
                 .await
                 .map_err(|err| storage_error_from_diesel(err, "ComponentBalance", "batch", None))?;

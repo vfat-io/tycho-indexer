@@ -64,9 +64,6 @@ pub trait VersionedRow {
     /// Exposes the entity identifier.
     fn get_entity_id(&self) -> Self::EntityId;
 
-    /// Exposes the sorting key.
-    fn get_sort_key(&self) -> Self::SortKey;
-
     /// Allows setting `valid_to`` column, thereby invalidating this version.
     fn set_valid_to(&mut self, end_version: Self::Version);
 
@@ -130,7 +127,6 @@ fn set_versioning_attributes<O: VersionedRow>(
     objects: &mut [O],
 ) -> HashMap<O::EntityId, O::Version> {
     let mut db_updates = HashMap::new();
-    objects.sort_by_cached_key(|e| e.get_sort_key());
 
     db_updates.insert(objects[0].get_entity_id(), objects[0].get_valid_from());
 
@@ -156,8 +152,6 @@ fn set_delta_versioning_attributes<O: VersionedRow + DeltaVersionedRow + Debug>(
     objects: &mut [O],
 ) -> HashMap<O::EntityId, O::Version> {
     let mut db_updates = HashMap::new();
-
-    objects.sort_by_cached_key(|e| e.get_sort_key());
 
     db_updates.insert(objects[0].get_entity_id(), objects[0].get_valid_from());
 
@@ -226,6 +220,10 @@ fn build_batch_update_query<'a, O: StoredVersionedRow>(
 /// - Set end versions on a collection of new entries
 /// - Given the new entries query the table currently valid versions
 /// - Execute and update query to invalidate the previously retrieved entries
+///
+/// ## Important note:
+/// This function requires that new_data is sorted by ascending execution order (block, transaction
+/// index) for conflicting entity_id.
 pub async fn apply_versioning<'a, N, S>(
     new_data: &mut [N],
     conn: &mut AsyncPgConnection,
@@ -262,6 +260,10 @@ pub trait StoredDeltaVersionedRow: StoredVersionedRow {
 /// Applies and executes delta versioning logic for a set of new entries.
 ///
 /// Same as `apply_versioning` but also takes care of previous value columns.
+///
+/// ## Important note:
+/// This function requires that new_data is sorted by ascending execution order (block, transaction
+/// index) for conflicting entity_id.
 pub async fn apply_delta_versioning<'a, N, S>(
     new_data: &mut [N],
     conn: &mut AsyncPgConnection,

@@ -1,7 +1,7 @@
 use super::{
     maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema, storage_error_from_diesel,
     versioning::{apply_delta_versioning, apply_versioning},
-    PostgresError, PostgresGateway, WithTxHash,
+    PostgresError, PostgresGateway, WithOrdinal, WithTxHash,
 };
 use chrono::{NaiveDateTime, Utc};
 use diesel::{
@@ -516,22 +516,30 @@ impl PostgresGateway {
                         )
                     })?;
                 for (slot, value) in storage.iter() {
-                    new_entries.push(orm::NewSlot {
-                        slot,
-                        value: value.clone(),
-                        previous_value: None,
-                        account_id: *account_id,
-                        modify_tx: *modify_tx,
-                        ordinal: *tx_index,
-                        valid_from: *block_ts,
-                        valid_to: None,
-                    })
+                    new_entries.push(WithOrdinal::new(
+                        orm::NewSlot {
+                            slot,
+                            value: value.clone(),
+                            previous_value: None,
+                            account_id: *account_id,
+                            modify_tx: *modify_tx,
+                            ordinal: *tx_index, // TODO: check if this is still needed.
+                            valid_from: *block_ts,
+                            valid_to: None,
+                        },
+                        (*account_id, slot, *block_ts, *tx_index),
+                    ))
                 }
             }
         }
-        apply_delta_versioning::<_, orm::ContractStorage>(&mut new_entries, conn).await?;
+        new_entries.sort_by_cached_key(|b| b.ordinal);
+        let mut sorted = new_entries
+            .into_iter()
+            .map(|b| b.entity)
+            .collect::<Vec<_>>();
+        apply_delta_versioning::<_, orm::ContractStorage>(&mut sorted, conn).await?;
         diesel::insert_into(schema::contract_storage::table)
-            .values(&new_entries)
+            .values(&sorted)
             .execute(conn)
             .await
             .map_err(PostgresError::from)?;
@@ -1060,11 +1068,14 @@ impl PostgresGateway {
             .map(|(tx, delta)| WithTxHash { entity: delta, tx: Some(tx.to_owned()) })
             .collect::<Vec<_>>();
 
-        let txns: HashMap<Bytes, (i64, NaiveDateTime)> = schema::transaction::table
+        let txns: HashMap<Bytes, (i64, NaiveDateTime, i64)> = schema::transaction::table
             .inner_join(schema::block::table)
             .filter(schema::transaction::hash.eq_any(new.iter().filter_map(|u| u.tx.as_ref())))
-            .select((schema::transaction::hash, (schema::transaction::id, schema::block::ts)))
-            .get_results::<(Bytes, (i64, NaiveDateTime))>(conn)
+            .select((
+                schema::transaction::hash,
+                (schema::transaction::id, schema::block::ts, schema::transaction::index),
+            ))
+            .get_results::<(Bytes, (i64, NaiveDateTime, i64))>(conn)
             .await
             .map_err(PostgresError::from)?
             .into_iter()
@@ -1108,7 +1119,7 @@ impl PostgresGateway {
                 })?;
 
             let tx_hash = delta.tx.as_ref().unwrap();
-            let (tx_id, ts) = *txns.get(tx_hash).ok_or_else(|| {
+            let (tx_id, ts, index) = *txns.get(tx_hash).ok_or_else(|| {
                 StorageError::NoRelatedEntity(
                     "Transaction".to_owned(),
                     "Account".to_owned(),
@@ -1124,7 +1135,7 @@ impl PostgresGateway {
                     valid_from: ts,
                     valid_to: None,
                 };
-                balance_data.push(new);
+                balance_data.push(WithOrdinal::new(new, (account_id, ts, index)));
             }
 
             if let Some(new_code) = delta.code.as_ref() {
@@ -1137,7 +1148,7 @@ impl PostgresGateway {
                     valid_from: ts,
                     valid_to: None,
                 };
-                code_data.push(new);
+                code_data.push(WithOrdinal::new(new, (account_id, ts, index)));
             }
 
             let slots = delta.slots.clone();
@@ -1162,17 +1173,27 @@ impl PostgresGateway {
         }
 
         if !balance_data.is_empty() {
-            apply_versioning::<_, orm::AccountBalance>(&mut balance_data, conn).await?;
+            balance_data.sort_by_cached_key(|b| b.ordinal);
+            let mut sorted = balance_data
+                .into_iter()
+                .map(|b| b.entity)
+                .collect::<Vec<_>>();
+            apply_versioning::<_, orm::AccountBalance>(&mut sorted, conn).await?;
             diesel::insert_into(schema::account_balance::table)
-                .values(&balance_data)
+                .values(&sorted)
                 .execute(conn)
                 .await
                 .map_err(PostgresError::from)?;
         }
         if !code_data.is_empty() {
-            apply_versioning::<_, orm::ContractCode>(&mut code_data, conn).await?;
+            code_data.sort_by_cached_key(|b| b.ordinal);
+            let mut sorted = code_data
+                .into_iter()
+                .map(|b| b.entity)
+                .collect::<Vec<_>>();
+            apply_versioning::<_, orm::ContractCode>(&mut sorted, conn).await?;
             diesel::insert_into(schema::contract_code::table)
-                .values(&code_data)
+                .values(&sorted)
                 .execute(conn)
                 .await
                 .map_err(PostgresError::from)?;
