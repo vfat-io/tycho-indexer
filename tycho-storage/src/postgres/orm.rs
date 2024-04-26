@@ -1374,54 +1374,6 @@ pub struct ContractStorage {
     pub modified_ts: NaiveDateTime,
 }
 
-#[async_trait]
-impl StoredVersionedRow for ContractStorage {
-    type EntityId = (i64, Bytes);
-    type PrimaryKey = i64;
-    type Version = NaiveDateTime;
-
-    fn get_pk(&self) -> Self::PrimaryKey {
-        todo!()
-    }
-
-    fn get_entity_id(&self) -> Self::EntityId {
-        (self.account_id, self.slot.clone())
-    }
-
-    // Clippy false positive
-    #[allow(clippy::mutable_key_type)]
-    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
-        ids: I,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<Box<Self>>, StorageError> {
-        let (accounts, slots): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
-        let tuple_ids = accounts
-            .iter()
-            .zip(slots.iter())
-            .collect::<HashSet<_>>();
-        Ok(contract_storage::table
-            .select(ContractStorage::as_select())
-            .into_boxed()
-            .filter(
-                contract_storage::account_id
-                    .eq_any(&accounts)
-                    .and(contract_storage::slot.eq_any(&slots))
-                    .and(contract_storage::valid_to.is_null()),
-            )
-            .get_results(conn)
-            .await
-            .map_err(PostgresError::from)?
-            .into_iter()
-            .filter(|cs| tuple_ids.contains(&(&cs.account_id, &cs.slot)))
-            .map(Box::new)
-            .collect())
-    }
-
-    fn table_name() -> &'static str {
-        "contract_storage"
-    }
-}
-
 #[derive(Insertable, Debug, Clone)]
 #[diesel(table_name = contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -1478,7 +1430,7 @@ impl PartitionedVersionedRow for NewSlot {
                 contract_storage::account_id
                     .eq_any(&accounts)
                     .and(contract_storage::slot.eq_any(&slots))
-                    .and(contract_storage::valid_to.is_null()),
+                    .and(contract_storage::valid_to.eq(MAX_TS)),
             )
             .get_results(conn)
             .await
