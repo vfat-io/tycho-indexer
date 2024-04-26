@@ -756,6 +756,14 @@ pub mod db_fixtures {
         )
     }
 
+    pub fn yesterday_half_past_midnight() -> NaiveDateTime {
+        let ts = chrono::Local::now().naive_utc() - chrono::Duration::days(1);
+        NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(ts.year(), ts.month(), ts.day()).unwrap(),
+            NaiveTime::from_hms_opt(0, 30, 0).unwrap(),
+        )
+    }
+
     pub fn yesterday_one_am() -> NaiveDateTime {
         let ts = chrono::Local::now().naive_utc() - chrono::Duration::days(1);
         NaiveDateTime::new(
@@ -1059,7 +1067,10 @@ pub mod db_fixtures {
             ))
             .execute(conn)
             .await
-            .expect("component balance insert failed");
+            .expect(&format!(
+                "component balance insert failed {} {} {}",
+                token_id, protocol_component_id, balance_float
+            ));
     }
 
     // Insert a new Protocol System

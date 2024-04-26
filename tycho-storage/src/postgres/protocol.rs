@@ -23,7 +23,7 @@ use super::{
     maybe_lookup_block_ts, maybe_lookup_version_ts,
     orm::{self, Account, ComponentTVL, NewAccount},
     schema, storage_error_from_diesel, PostgresError, PostgresGateway, WithOrdinal, WithTxHash,
-    MAX_VERSION_TS,
+    MAX_TS, MAX_VERSION_TS,
 };
 use crate::postgres::versioning::apply_partitioned_versioning;
 
@@ -328,7 +328,7 @@ impl PostgresGateway {
             ))
             .filter(schema::protocol_component::chain_id.eq(chain_id))
             .filter(schema::component_balance::balance_float.ge(min_balance.unwrap_or(0f64)))
-            .filter(schema::component_balance::valid_to.is_null())
+            .filter(schema::component_balance::valid_to.eq(MAX_TS))
             .filter(schema::component_balance::token_id.eq_any(token_ids.keys()))
             .get_results::<(i64, String, Bytes)>(conn)
             .await
@@ -1620,7 +1620,7 @@ mod test {
 
     use tycho_core::storage::BlockIdentifier;
 
-    use crate::postgres::{db_fixtures, MAX_TS};
+    use crate::postgres::{db_fixtures, db_fixtures::yesterday_half_past_midnight, MAX_TS};
 
     use super::*;
 
@@ -1907,13 +1907,12 @@ mod test {
             Balance::from(U256::from(2000) * U256::exp10(18)),
             Balance::from(U256::zero()),
             2100.0 * 1e18,
-            usdc_id,
+            dai_id,
             txn[2],
             protocol_component_id3,
             None,
         )
         .await;
-
         db_fixtures::calculate_component_tvl(conn).await;
         tx_hashes.to_vec()
     }
@@ -2737,9 +2736,7 @@ mod test {
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
-        let days_cutoff: Option<NaiveDateTime> = Some(
-            NaiveDateTime::parse_from_str("2020-01-01 00:30:00", "%Y-%m-%d %H:%M:%S").unwrap(),
-        );
+        let days_cutoff: Option<NaiveDateTime> = Some(yesterday_half_past_midnight());
 
         let tokens = gw
             .get_tokens(Chain::Ethereum, None, None, days_cutoff, None, &mut conn)
@@ -2748,13 +2745,13 @@ mod test {
 
         assert_eq!(tokens.len(), 1);
         let expected_token = models::token::CurrencyToken::new(
-            &USDC.parse().unwrap(),
-            "USDC",
-            6,
+            &DAI.parse().unwrap(),
+            "DAI",
+            18,
             10,
             &[Some(10)],
             Chain::Ethereum,
-            0,
+            100,
         );
 
         assert_eq!(tokens[0], expected_token);
@@ -3247,7 +3244,7 @@ mod test {
             Bytes::from("0x0000000000000000000000000000000000000000000000000de0b6b3a7640000")
         ))]))]
     #[tokio::test]
-    async fn test_get_protocol_components_by_tokens(
+    async fn test_get_token_owners(
         #[case] tokens: &[&str],
         #[case] exp: HashMap<Address, (String, Bytes)>,
     ) {
