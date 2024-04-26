@@ -106,7 +106,7 @@ async fn run_indexer(
         .cloned()
         .collect();
 
-    let retention_horizon: NaiveDateTime = args
+    let retention_horizon: NaiveDateTime = index_args
         .retention_horizon
         .parse()
         .expect("Failed to parse retention horizon");

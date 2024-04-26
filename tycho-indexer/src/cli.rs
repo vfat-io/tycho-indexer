@@ -64,6 +64,12 @@ pub struct IndexArgs {
     /// Extractors configuration file
     #[clap(long, env, default_value = "./extractors.yaml")]
     pub extractors_config: String,
+
+    /// Retention horizon date
+    ///
+    /// Any data before this date is not kept in storage.
+    #[clap(long, env, default_value = "2024-01-01T00:00:00")]
+    pub retention_horizon: String,
 }
 
 #[derive(Args, Debug, Clone, PartialEq, Eq)]
@@ -197,6 +203,7 @@ mod cli_tests {
             },
             command: Command::Index(IndexArgs {
                 extractors_config: "/opt/extractors.yaml".to_string(),
+                retention_horizon: "2024-01-01T00:00:00".to_string(),
             }),
         };
 
