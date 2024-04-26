@@ -536,11 +536,10 @@ impl PostgresGateway {
         }
 
         new_entries.sort_by_cached_key(|b| b.ordinal);
-        let mut sorted = new_entries
+        let sorted = new_entries
             .into_iter()
             .map(|b| b.entity)
             .collect::<Vec<_>>();
-        let deleted_versions = HashMap::new();
         let (latest, to_archive) =
             apply_partitioned_versioning(&sorted, None, self.retention_horizon, conn).await?;
         let latest = latest

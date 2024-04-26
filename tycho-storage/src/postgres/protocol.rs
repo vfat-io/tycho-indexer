@@ -19,14 +19,13 @@ use tycho_core::{
     Bytes,
 };
 
-use crate::postgres::versioning::apply_partitioned_versioning;
 use super::{
     maybe_lookup_block_ts, maybe_lookup_version_ts,
     orm::{self, Account, ComponentTVL, NewAccount},
-    schema, storage_error_from_diesel,
-    versioning::apply_delta_versioning,
-    PostgresError, PostgresGateway, WithOrdinal, WithTxHash, MAX_VERSION_TS
+    schema, storage_error_from_diesel, PostgresError, PostgresGateway, WithOrdinal, WithTxHash,
+    MAX_VERSION_TS,
 };
+use crate::postgres::versioning::apply_partitioned_versioning;
 
 // Private methods
 impl PostgresGateway {
@@ -759,14 +758,14 @@ impl PostgresGateway {
                 state
                     .deleted_attributes
                     .iter()
-                    .map(|attr| ((component_db_id, attr.clone()), tx_db.2)),
+                    .map(|attr| ((component_db_id, attr.clone()), *tx_ts)),
             );
         }
 
         // insert the prepared protocol state deltas
         if !state_data.is_empty() {
             state_data.sort_by_cached_key(|b| b.ordinal);
-            let mut sorted = state_data
+            let sorted = state_data
                 .into_iter()
                 .map(|b| b.entity)
                 .collect::<Vec<_>>();
@@ -1091,17 +1090,12 @@ impl PostgresGateway {
 
         if !component_balances.is_empty() {
             new_component_balances.sort_by_cached_key(|b| b.ordinal);
-            let mut sorted = new_component_balances
+            let sorted = new_component_balances
                 .into_iter()
                 .map(|b| b.entity)
                 .collect::<Vec<_>>();
-            let (latest, to_archive) = apply_partitioned_versioning(
-                &sorted,
-                None,
-                self.retention_horizon,
-                conn,
-            )
-            .await?;
+            let (latest, to_archive) =
+                apply_partitioned_versioning(&sorted, None, self.retention_horizon, conn).await?;
 
             diesel::insert_into(schema::component_balance::table)
                 .values(&to_archive)
@@ -1620,7 +1614,7 @@ mod test {
     use std::str::FromStr;
 
     use diesel_async::AsyncConnection;
-    use ethers::prelude::H256;
+    use ethers::prelude::{H256, U256};
     use rstest::rstest;
     use serde_json::json;
 
