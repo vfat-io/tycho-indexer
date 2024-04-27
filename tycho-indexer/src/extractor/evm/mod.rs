@@ -1394,6 +1394,7 @@ impl BlockEntityChanges {
 pub mod fixtures {
     use prost::Message;
     use std::str::FromStr;
+    use tycho_storage::postgres::db_fixtures::yesterday_midnight;
 
     use super::*;
 
@@ -1874,6 +1875,7 @@ pub mod fixtures {
         if version == 0 {
             panic!("Block version 0 doesn't exist. It starts at 1");
         }
+        let base_ts = yesterday_midnight().timestamp() as u64;
 
         crate::pb::tycho::evm::v1::Block {
             number: version,
@@ -1883,7 +1885,7 @@ pub mod fixtures {
             parent_hash: H256::from_low_u64_be(version - 1)
                 .as_bytes()
                 .to_vec(),
-            ts: version * 1000,
+            ts: base_ts + version * 1000,
         }
     }
 
@@ -1923,7 +1925,7 @@ pub mod fixtures {
                     hash: vec![0x0, 0x0, 0x0, 0x0],
                     parent_hash: vec![0x21, 0x22, 0x23, 0x24],
                     number: 1,
-                    ts: 1000,
+                    ts: yesterday_midnight().timestamp() as u64,
                 }),
                 changes: vec![
                     TransactionEntityChanges {

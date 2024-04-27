@@ -1119,7 +1119,10 @@ mod test_serial_db {
     };
     use tycho_storage::{
         postgres,
-        postgres::{builder::GatewayBuilder, db_fixtures, testing::run_against_db},
+        postgres::{
+            builder::GatewayBuilder, db_fixtures, db_fixtures::yesterday_midnight,
+            testing::run_against_db,
+        },
     };
 
     use crate::{
@@ -1603,7 +1606,7 @@ mod test_serial_db {
                 .downcast_ref::<evm::BlockAccountChanges>()
                 .expect("not good type");
 
-
+            let base_ts = yesterday_midnight().timestamp();
             let block_account_expected = evm::BlockAccountChanges {
                 extractor: "vm_name".to_string(),
                 chain: Chain::Ethereum,
@@ -1612,7 +1615,7 @@ mod test_serial_db {
                     hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
                     parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
                     chain: Chain::Ethereum,
-                    ts: NaiveDateTime::parse_from_str("1970-01-01T00:50:00", "%Y-%m-%dT%H:%M:%S").unwrap(),
+                    ts: NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
                 },
                 finalized_block_height: 1,
                 revert: true,
@@ -1656,7 +1659,7 @@ mod test_serial_db {
                         static_attributes: HashMap::new(),
                         change: ChangeType::Deletion,
                         creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
-                        created_at: NaiveDateTime::parse_from_str("1970-01-01T01:06:40", "%Y-%m-%dT%H:%M:%S").unwrap(),
+                        created_at: NaiveDateTime::from_timestamp_opt(base_ts + 4000, 0).unwrap(),
                     }),
                 ]),
                 component_balances: HashMap::from([

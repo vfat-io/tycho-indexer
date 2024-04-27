@@ -769,6 +769,7 @@ impl PostgresGateway {
                 .into_iter()
                 .map(|b| b.entity)
                 .collect::<Vec<_>>();
+            trace!(entries=?&sorted, "protocol state entries ready for versioning.");
             let (latest, to_archive) = apply_partitioned_versioning(
                 &sorted,
                 Some(&deleted_attributes),
@@ -776,16 +777,17 @@ impl PostgresGateway {
                 conn,
             )
             .await?;
+            trace!(records=?&to_archive, "Inserting archival records!");
             diesel::insert_into(schema::protocol_state::table)
                 .values(&to_archive)
                 .execute(conn)
                 .await
                 .map_err(PostgresError::from)?;
-
             let latest: Vec<orm::NewProtocolStateLatest> = latest
                 .into_iter()
                 .map(Into::into)
                 .collect();
+            trace!(new_state=?&latest, "Updating active state!");
             diesel::insert_into(schema::protocol_state_default::table)
                 .values(&latest)
                 .on_conflict(on_constraint("protocol_state_default_unique_pk"))
