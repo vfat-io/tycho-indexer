@@ -1622,7 +1622,7 @@ mod test {
 
     use tycho_core::storage::BlockIdentifier;
 
-    use crate::postgres::{db_fixtures, db_fixtures::yesterday_half_past_midnight, MAX_TS};
+    use crate::postgres::{db_fixtures, db_fixtures::yesterday_half_past_midnight};
 
     use super::*;
 

@@ -1067,10 +1067,12 @@ pub mod db_fixtures {
             ))
             .execute(conn)
             .await
-            .expect(&format!(
-                "component balance insert failed {} {} {}",
-                token_id, protocol_component_id, balance_float
-            ));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "component balance insert failed {} {} {}",
+                    token_id, protocol_component_id, balance_float
+                )
+            });
     }
 
     // Insert a new Protocol System
