@@ -2343,6 +2343,7 @@ mod test {
     use prost::Message;
 
     use rstest::rstest;
+    use tycho_storage::postgres::db_fixtures::yesterday_midnight;
 
     use crate::extractor::evm::fixtures::transaction01;
 
@@ -3085,7 +3086,7 @@ mod test {
                 ],
                 change: ChangeType::Creation,
                 creation_tx: tx.hash,
-                created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+                created_at: yesterday_midnight(),
             },
         )]
         .into_iter()
@@ -3105,7 +3106,6 @@ mod test {
             .into_iter()
             .collect(),
         )]);
-
         BlockEntityChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
@@ -3118,7 +3118,7 @@ mod test {
                     0x0000000000000000000000000000000000000000000000000000000021222324,
                 ),
                 chain: Chain::Ethereum,
-                ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+                ts: yesterday_midnight(),
             },
             finalized_block_height: 420,
             revert: false,
@@ -3283,7 +3283,7 @@ mod test {
                 ],
                 change: ChangeType::Creation,
                 creation_tx: tx.hash,
-                created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+                created_at: yesterday_midnight(),
             },
         )]
         .into_iter()
@@ -3317,7 +3317,7 @@ mod test {
                     0x0000000000000000000000000000000000000000000000000000000021222324,
                 ),
                 chain: Chain::Ethereum,
-                ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+                ts: yesterday_midnight(),
             },
             finalized_block_height: 420,
             revert: false,
