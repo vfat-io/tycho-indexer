@@ -82,11 +82,9 @@ impl<'a> EventHandler<'a> {
     /// Will run all registered handlers for all events present on the block that match the given
     /// filters. You'll likely want to run this just once.
     pub fn handle_events(&mut self) {
+        // Here we don't need to filter out failed transactions because logs only exist for
+        // successful ones.
         for log in self.block.logs() {
-            if is_log_from_reverted_call(log.log) {
-                continue;
-            }
-
             if self.addresses.is_some() &&
                 !&self
                     .addresses
@@ -102,8 +100,4 @@ impl<'a> EventHandler<'a> {
             }
         }
     }
-}
-
-fn is_log_from_reverted_call(log: &eth::Log) -> bool {
-    log.block_index == 0
 }
