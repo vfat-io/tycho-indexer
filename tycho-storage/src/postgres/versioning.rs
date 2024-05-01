@@ -210,12 +210,28 @@ where
     Ok(())
 }
 
+/// Trait allows a struct to be inserted into a partitioned table with versioning
 pub trait PartitionedVersionedRow: Clone + Send + Sync {
+    /// The entity identifier this version belongs to.
     type EntityId: Clone + Ord + Hash + Debug + Send + Sync;
+    /// Getter for the entity id.
     fn get_id(&self) -> Self::EntityId;
+    /// Getter for the end version, uses `MAX_TS` if version is currently active.
     fn get_valid_to(&self) -> NaiveDateTime;
+    /// Archives this struct given the next valid versions struct.
+    ///
+    /// Any attribute changes that need to happen to archive a row should happen in here
+    /// such as setting valid_to attribute but also potentially setting `previous_*`
+    /// attributes on next_version.
     fn archive(&mut self, next_version: &mut Self);
+    /// Marks this row as deleted.
+    ///
+    /// Any attribute changes when deleting a struct need to happen in this method.
     fn delete(&mut self, delete_version: NaiveDateTime);
+    /// Retrieves the currently active rows by entity ids.
+    ///
+    /// This method is used to provide the latest stored version of an entity id
+    /// during application side versioning.
     async fn latest_versions_by_ids(
         ids: Vec<Self::EntityId>,
         conn: &mut AsyncPgConnection,

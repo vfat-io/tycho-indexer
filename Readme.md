@@ -15,7 +15,7 @@ Here's how a typical connection with Tycho works:
 - Clients connect to Tycho's real-time delta messages and start buffering them.
 - Next, they will request a historical state.
 - Once the historical state has been fully retrieved, the buffered changes are applied on top of that state.
-- Now the client possess the latest state of all protocols it is interested in.
+- Now the client possesses the latest state of all protocols it is interested in.
 - New incoming messages can now be applied directly to the existing state.
 
 With Tycho, clients stay updated with the latest state of **all** protocols they are interested in. If they can handle

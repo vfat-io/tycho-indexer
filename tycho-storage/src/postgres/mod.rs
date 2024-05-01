@@ -405,10 +405,11 @@ async fn maybe_lookup_version_ts(
 pub(crate) struct PostgresGateway {
     protocol_system_id_cache: Arc<ProtocolSystemEnumCache>,
     chain_id_cache: Arc<ChainEnumCache>,
-    /// Any versions dated before this date will be discarded and never be inserted into
-    /// the db. We supply this as an absolute date since updating it must be done carefully. To
-    /// avoid gaps in versions this can't be updated once an extractor has crossed it, but has not
-    /// yet crossed the new horizon (aka it should never move faster than an extractor).
+    /// Any versions dated before this date, as per their `valid_to` column, will be
+    /// discarded and never be inserted into the db. We supply this as an absolute date
+    /// since updating it must be done carefully. To avoid gaps in versions this can't
+    /// be updated once an extractor has crossed it, but has not yet crossed the new
+    /// horizon (aka it should never move faster than an extractor).
     retention_horizon: NaiveDateTime,
 }
 
