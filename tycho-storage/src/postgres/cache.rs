@@ -970,13 +970,13 @@ impl Gateway for CachedGateway {}
 
 #[cfg(test)]
 mod test_serial_db {
-    use std::{collections::HashSet, str::FromStr};
+    use std::{collections::HashSet, str::FromStr, time::Duration};
 
     use ethers::types::U256;
 
     use tycho_core::models::ChangeType;
 
-    use crate::postgres::{db_fixtures, testing::run_against_db};
+    use crate::postgres::{db_fixtures, db_fixtures::yesterday_one_am, testing::run_against_db};
 
     use super::*;
 
@@ -1292,6 +1292,9 @@ mod test_serial_db {
     }
 
     fn get_sample_block(version: usize) -> models::blockchain::Block {
+        let ts1 = yesterday_one_am();
+        let ts2 = ts1 + Duration::from_secs(3600);
+        let ts3 = ts2 + Duration::from_secs(3600);
         match version {
             1 => models::blockchain::Block {
                 number: 1,
@@ -1300,9 +1303,7 @@ mod test_serial_db {
                     .parse()
                     .expect("Invalid hash"),
                 parent_hash: Bytes::default(),
-                ts: "2020-01-01T01:00:00"
-                    .parse()
-                    .expect("Invalid timestamp"),
+                ts: ts1,
             },
             2 => models::blockchain::Block {
                 number: 2,
@@ -1313,9 +1314,7 @@ mod test_serial_db {
                 parent_hash: "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
                     .parse()
                     .expect("Invalid hash"),
-                ts: "2020-01-01T02:00:00"
-                    .parse()
-                    .expect("Invalid timestamp"),
+                ts: ts2,
             },
             3 => models::blockchain::Block {
                 number: 3,
@@ -1326,9 +1325,7 @@ mod test_serial_db {
                 parent_hash: "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
                     .parse()
                     .expect("Invalid hash"),
-                ts: "2020-01-01T03:00:00"
-                    .parse()
-                    .expect("Invalid timestamp"),
+                ts: ts3,
             },
             _ => panic!("Block version not found"),
         }
@@ -1388,6 +1385,7 @@ mod test_serial_db {
         // set up blocks and txns
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let ts = chrono::Local::now().naive_utc() - Duration::from_secs(3600);
         let tx_hashes = [
             "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945".to_string(),
             "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54".to_string(),
@@ -1417,19 +1415,24 @@ mod test_serial_db {
             Some(txn[0]),
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 0, txn[0], Some("2020-01-01T00:00:00"), c0).await;
+        db_fixtures::insert_account_balance(conn, 0, txn[0], Some(&ts), c0).await;
         db_fixtures::insert_contract_code(conn, c0, txn[0], Bytes::from_str("C0C0C0").unwrap())
             .await;
-        db_fixtures::insert_account_balance(conn, 100, txn[1], Some("2020-01-01T01:00:00"), c0)
-            .await;
-        db_fixtures::insert_slots(conn, c0, txn[1], "2020-01-01T00:00:00", None, &[(2, 1, None)])
-            .await;
+        db_fixtures::insert_account_balance(
+            conn,
+            100,
+            txn[1],
+            Some(&(ts + Duration::from_secs(3600))),
+            c0,
+        )
+        .await;
+        db_fixtures::insert_slots(conn, c0, txn[1], &ts, None, &[(2, 1, None)]).await;
         db_fixtures::insert_slots(
             conn,
             c0,
             txn[1],
-            "2020-01-01T00:00:00",
-            Some("2020-01-01T01:00:00"),
+            &ts,
+            Some(&(ts + Duration::from_secs(3600))),
             &[(0, 1, None), (1, 5, None)],
         )
         .await;
@@ -1438,7 +1441,7 @@ mod test_serial_db {
             conn,
             c0,
             txn[3],
-            "2020-01-01T01:00:00",
+            &(ts + Duration::from_secs(3600)),
             None,
             &[(0, 2, Some(1)), (1, 3, Some(5)), (5, 25, None), (6, 30, None)],
         )
@@ -1459,7 +1462,7 @@ mod test_serial_db {
             conn,
             c1,
             txn[3],
-            "2020-01-01T01:00:00",
+            &(ts + Duration::from_secs(3600)),
             None,
             &[(0, 128, None), (1, 255, None)],
         )
@@ -1480,12 +1483,12 @@ mod test_serial_db {
             conn,
             c2,
             txn[1],
-            "2020-01-01T00:00:00",
+            &(ts + Duration::from_secs(3600)),
             None,
             &[(1, 2, None), (2, 4, None)],
         )
         .await;
-        db_fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
+        db_fixtures::delete_account(conn, c2, &(ts + Duration::from_secs(3600))).await;
 
         // set up protocol state data
         let protocol_system_id =

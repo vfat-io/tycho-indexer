@@ -12,11 +12,11 @@ state as quickly as possible.
 
 Here's how a typical connection with Tycho works:
 
--   Clients connect to Tycho's real-time delta messages and start buffering them.
--   Next, they will request a historical state.
--   Once the historical state has been fully retrieved, the buffered changes are applied on top of that state.
--   Now the client possess the latest state of all protocols it is interested in.
--   New incoming messages can now be applied directly to the existing state.
+- Clients connect to Tycho's real-time delta messages and start buffering them.
+- Next, they will request a historical state.
+- Once the historical state has been fully retrieved, the buffered changes are applied on top of that state.
+- Now the client possesses the latest state of all protocols it is interested in.
+- New incoming messages can now be applied directly to the existing state.
 
 With Tycho, clients stay updated with the latest state of **all** protocols they are interested in. If they can handle
 all, they can get all.
@@ -25,12 +25,12 @@ all, they can get all.
 
 Tycho supports two major types of protocol implementation strategies:
 
--   **Custom Protocol implementations:** A custom struct is defined that represents the onchain state. Typically, this
-    struct is more closely aligned with the state layout within smart contract languages, such as Solidity. State
-    transitions have to be handled by processing events or method calls.
--   **Virtual Machine (VM) implementations:** In this strategy, state representation aligns more closely with the
-    underlying VM. For instance, we extract and update the storage and other attributes associated with a smart contract.
-    This state is then passed to a VM instance for further functionality.
+- **Custom Protocol implementations:** A custom struct is defined that represents the onchain state. Typically, this
+  struct is more closely aligned with the state layout within smart contract languages, such as Solidity. State
+  transitions have to be handled by processing events or method calls.
+- **Virtual Machine (VM) implementations:** In this strategy, state representation aligns more closely with the
+  underlying VM. For instance, we extract and update the storage and other attributes associated with a smart contract.
+  This state is then passed to a VM instance for further functionality.
 
 For both strategies, Tycho ensures seamless execution and integration with the overall system.
 
@@ -52,12 +52,12 @@ added and indexed upon their creation/detection.
 
 To achieve the previously mentioned functionalities, Tycho uses the following message types:
 
--   **EntityChange:** This message type is emitted for protocols that use a custom implementation. It describes how to
-    change the attributes of an entity.
--   **ContractChange:** This message type is emitted for protocols that use a VM (Virtual Machine) implementation. It
-    contains changes to a contract's code, balances, and storage.
--   **ComponentChange:** This message type is emitted whenever a new protocol component is added or removed. This allows
-    clients to update their state as required.
+- **EntityChange:** This message type is emitted for protocols that use a custom implementation. It describes how to
+  change the attributes of an entity.
+- **ContractChange:** This message type is emitted for protocols that use a VM (Virtual Machine) implementation. It
+  contains changes to a contract's code, balances, and storage.
+- **ComponentChange:** This message type is emitted whenever a new protocol component is added or removed. This allows
+  clients to update their state as required.
 
 # Development
 
@@ -113,6 +113,16 @@ RUST_LOG=info cargo run -- \
     --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg \
     --start-block 17361664 \
     --stop-block +1000
+```
+
+#### Quickly run a spkg from our repository:
+
+Sometimes it is useful to quickly debug the messages from a production spkgs. The command
+below will create a presigned url for the spkgs on the fly so it can be fetched by the
+substreams cli:
+
+```
+substreams gui $(./signed_spkg_url.sh ethereum-uniswap-v3/ethereum-uniswap-v3-v0.1.0.spkg) map_pool_events --start-block 19459803
 ```
 
 The `substreams-api-token` and `database-url` default to their respective environment variables. You can also specify
@@ -281,7 +291,6 @@ and use the following VSCode user settings:
 }
 ```
 
-
 #### Setup pgFormatter with RustRover
 
 1. First make sure you have pgFormatter installed: `brew install pgformatter`
@@ -289,10 +298,10 @@ and use the following VSCode user settings:
 3. Check where the path of pgformatter installation: `which pg_format`
 4. The path should go under "Program", usually sth like: ``
 5. The arguments should be: `--no-space-function -i $FilePath$`
-6. Leave working directory empty. 
+6. Leave working directory empty.
 7. Save the tool under pgFormat and add a shortcut to it if you'd like.
 
-In case this works, but you get warning about your LOCALE settings, you can use 
+In case this works, but you get warning about your LOCALE settings, you can use
 `/usr/bin/env` to set the locale and then invoke pgformat as an argument to env:
 
 Program: `/usr/bin/env`
@@ -302,9 +311,13 @@ Arguments: `LC_CTYPE=UTF-8 /opt/homebrew/bin/pg_format --no-space-function -i $F
 
 Currently Tycho exposes a single special [test-group](https://nexte.st/book/test-groups.html) via nextest:
 
-1. `test(serial-db)`: These are tests against the database that need to commit data. To not intefere with other test that require a empty db but do not commit, we run these tests separately. Most of these tests use the `run_against_db` test harness. Test within that group are run sequentially, the remaining tests run in parallel. To add a test to this group simply ensure its name or its test package name includes the string `serial_db`.
+1. `test(serial-db)`: These are tests against the database that need to commit data. To not intefere with other test
+   that require a empty db but do not commit, we run these tests separately. Most of these tests use
+   the `run_against_db` test harness. Test within that group are run sequentially, the remaining tests run in parallel.
+   To add a test to this group simply ensure its name or its test package name includes the string `serial_db`.
 
-If your test does not require committing to the database there is no any other special resources there is nothing special to take care of.
+If your test does not require committing to the database there is no any other special resources there is nothing
+special to take care of.
 
 ### Migrations
 
@@ -314,7 +327,8 @@ If you have to change the database schema, please make sure the down migration i
 diesel migration redo --migration-dir ./tycho-storage/migrations
 ```
 
-If the schema.rs file does not automatically update after you've run a migration with table changes, you can trigger the update by executing:
+If the schema.rs file does not automatically update after you've run a migration with table changes, you can trigger the
+update by executing:
 
 ```bash
 diesel print-schema > ./tycho-indexer/src/storage/postgres/schema.rs
@@ -331,7 +345,8 @@ In your terminal, run the following command to create a postgres client pod.
 kubectl run postgres-client --image=postgres:latest --rm -i -t -- bash
 ```
 
-It will open a terminal inside the postgres pod. From there you can connect to the databases using one of the following commands:
+It will open a terminal inside the postgres pod. From there you can connect to the databases using one of the following
+commands:
 
 For dev:
 
@@ -405,7 +420,6 @@ project:
 
 This ER diagram includes only the most significant attributes for each entity. Triggers support much of the versioning
 logic. For precise details, please ensure to look at the actual [create.sql](./migrations_/create.sql) file.
-
 
 # Other Chains
 

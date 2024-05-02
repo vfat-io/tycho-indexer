@@ -6383,6 +6383,7 @@ dependencies = [
  "ethers",
  "hex",
  "itertools 0.12.1",
+ "lazy_static",
  "lru",
  "pretty_assertions",
  "rstest",

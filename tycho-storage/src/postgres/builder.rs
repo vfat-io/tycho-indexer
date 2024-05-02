@@ -2,6 +2,7 @@ use crate::{
     postgres,
     postgres::{cache::CachedGateway, PostgresGateway},
 };
+use chrono::NaiveDateTime;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tycho_core::{models::Chain, storage::StorageError};
 
@@ -9,6 +10,7 @@ use tycho_core::{models::Chain, storage::StorageError};
 pub struct GatewayBuilder {
     database_url: String,
     protocol_systems: Vec<String>,
+    retention_horizon: NaiveDateTime,
     chains: Vec<Chain>,
 }
 
@@ -27,12 +29,17 @@ impl GatewayBuilder {
         self
     }
 
+    pub fn set_retention_horizon(mut self, horizon: NaiveDateTime) -> Self {
+        self.retention_horizon = horizon;
+        self
+    }
+
     pub async fn build(self) -> Result<(CachedGateway, JoinHandle<()>), StorageError> {
         let pool = postgres::connect(&self.database_url).await?;
         postgres::ensure_chains(&self.chains, pool.clone()).await;
         postgres::ensure_protocol_systems(&self.protocol_systems, pool.clone()).await;
 
-        let inner_gw = PostgresGateway::new(pool.clone()).await?;
+        let inner_gw = PostgresGateway::new(pool.clone(), self.retention_horizon).await?;
         let (tx, rx) = mpsc::channel(10);
         let write_executor = postgres::cache::DBCacheWriteExecutor::new(
             "ethereum".to_owned(),

@@ -1005,7 +1005,8 @@ mod test_serial_db {
     use test_serial_db::evm::ProtocolChangesWithTx;
     use tycho_core::models::{FinancialType, ImplementationType};
     use tycho_storage::postgres::{
-        self, builder::GatewayBuilder, db_fixtures, testing::run_against_db,
+        self, builder::GatewayBuilder, db_fixtures, db_fixtures::yesterday_midnight,
+        testing::run_against_db,
     };
 
     use crate::{
@@ -1267,7 +1268,7 @@ mod test_serial_db {
         .await;
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn test_handle_revert() {
         run_against_db(|pool| async move {
             let mut conn = pool
@@ -1336,6 +1337,7 @@ mod test_serial_db {
                         .handle_tick_scoped_data(inp)
                         .await
                         .unwrap();
+                    dbg!("+++");
                 })
                 .await;
 
@@ -1356,7 +1358,7 @@ mod test_serial_db {
                 .as_any()
                 .downcast_ref::<evm::BlockEntityChangesResult>()
                 .expect("not good type");
-
+            let base_ts = yesterday_midnight().timestamp();
             let block_entity_changes_result = evm::BlockEntityChangesResult {
                 extractor: "native_name".to_string(),
                 chain: Chain::Ethereum,
@@ -1365,7 +1367,7 @@ mod test_serial_db {
                     hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
                     parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
                     chain: Chain::Ethereum,
-                    ts: NaiveDateTime::parse_from_str("1970-01-01T00:50:00", "%Y-%m-%dT%H:%M:%S").unwrap(),
+                    ts: NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
                 },
                 finalized_block_height: 1,
                 revert: true,
@@ -1393,7 +1395,7 @@ mod test_serial_db {
                         static_attributes: HashMap::new(),
                         change: ChangeType::Creation,
                         creation_tx: H256::from_str("0x000000000000000000000000000000000000000000000000000000000000c351").unwrap(),
-                        created_at: NaiveDateTime::parse_from_str("1970-01-01T01:23:20", "%Y-%m-%dT%H:%M:%S").unwrap(),
+                        created_at: NaiveDateTime::from_timestamp_opt(base_ts + 5000, 0).unwrap(),
                     }),
                 ]),
                 deleted_protocol_components: HashMap::from([
@@ -1410,7 +1412,7 @@ mod test_serial_db {
                         static_attributes: HashMap::new(),
                         change: ChangeType::Deletion,
                         creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
-                        created_at: NaiveDateTime::parse_from_str("1970-01-01T01:06:40", "%Y-%m-%dT%H:%M:%S").unwrap(),
+                        created_at: NaiveDateTime::from_timestamp_opt(base_ts + 4000, 0).unwrap(),
                     }),
                 ]),
                 component_balances: HashMap::from([

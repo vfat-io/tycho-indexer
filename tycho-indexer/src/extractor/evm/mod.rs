@@ -1394,6 +1394,7 @@ impl BlockEntityChanges {
 pub mod fixtures {
     use prost::Message;
     use std::str::FromStr;
+    use tycho_storage::postgres::db_fixtures::yesterday_midnight;
 
     use super::*;
 
@@ -1874,6 +1875,7 @@ pub mod fixtures {
         if version == 0 {
             panic!("Block version 0 doesn't exist. It starts at 1");
         }
+        let base_ts = yesterday_midnight().timestamp() as u64;
 
         crate::pb::tycho::evm::v1::Block {
             number: version,
@@ -1883,7 +1885,7 @@ pub mod fixtures {
             parent_hash: H256::from_low_u64_be(version - 1)
                 .as_bytes()
                 .to_vec(),
-            ts: version * 1000,
+            ts: base_ts + version * 1000,
         }
     }
 
@@ -1923,7 +1925,7 @@ pub mod fixtures {
                     hash: vec![0x0, 0x0, 0x0, 0x0],
                     parent_hash: vec![0x21, 0x22, 0x23, 0x24],
                     number: 1,
-                    ts: 1000,
+                    ts: yesterday_midnight().timestamp() as u64,
                 }),
                 changes: vec![
                     TransactionEntityChanges {
@@ -2341,6 +2343,7 @@ mod test {
     use prost::Message;
 
     use rstest::rstest;
+    use tycho_storage::postgres::db_fixtures::yesterday_midnight;
 
     use crate::extractor::evm::fixtures::transaction01;
 
@@ -3083,7 +3086,7 @@ mod test {
                 ],
                 change: ChangeType::Creation,
                 creation_tx: tx.hash,
-                created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+                created_at: yesterday_midnight(),
             },
         )]
         .into_iter()
@@ -3103,7 +3106,6 @@ mod test {
             .into_iter()
             .collect(),
         )]);
-
         BlockEntityChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
@@ -3116,7 +3118,7 @@ mod test {
                     0x0000000000000000000000000000000000000000000000000000000021222324,
                 ),
                 chain: Chain::Ethereum,
-                ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+                ts: yesterday_midnight(),
             },
             finalized_block_height: 420,
             revert: false,
@@ -3281,7 +3283,7 @@ mod test {
                 ],
                 change: ChangeType::Creation,
                 creation_tx: tx.hash,
-                created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+                created_at: yesterday_midnight(),
             },
         )]
         .into_iter()
@@ -3315,7 +3317,7 @@ mod test {
                     0x0000000000000000000000000000000000000000000000000000000021222324,
                 ),
                 chain: Chain::Ethereum,
-                ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+                ts: yesterday_midnight(),
             },
             finalized_block_height: 420,
             revert: false,

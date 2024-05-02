@@ -13,6 +13,7 @@ use extractor::{
 };
 
 use actix_web::dev::ServerHandle;
+use chrono::NaiveDateTime;
 use clap::Parser;
 use ethers::{
     prelude::{Http, Provider},
@@ -105,9 +106,15 @@ async fn run_indexer(
         .cloned()
         .collect();
 
+    let retention_horizon: NaiveDateTime = index_args
+        .retention_horizon
+        .parse()
+        .expect("Failed to parse retention horizon");
+
     let (cached_gw, gw_writer_thread) = GatewayBuilder::new(&global_args.database_url)
         .set_chains(&[Chain::Ethereum])
         .set_protocol_systems(&protocol_systems)
+        .set_retention_horizon(retention_horizon)
         .build()
         .await?;
 

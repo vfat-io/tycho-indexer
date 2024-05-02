@@ -1,7 +1,7 @@
 use super::{
     maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema, storage_error_from_diesel,
-    versioning::{apply_delta_versioning, apply_versioning},
-    PostgresError, PostgresGateway, WithOrdinal, WithTxHash,
+    versioning::{apply_partitioned_versioning, apply_versioning},
+    PostgresError, PostgresGateway, WithOrdinal, WithTxHash, MAX_TS,
 };
 use chrono::{NaiveDateTime, Utc};
 use diesel::{
@@ -206,9 +206,9 @@ impl PostgresGateway {
             // -----------------|--------------------------|
             //                start                     target
             // We query for changes between start and target version. Then sort
-            // these by account and slot by change time in a desending matter
+            // these by account and slot by change time in a descending manner
             // (latest change first). Next we deduplicate by account and slot.
-            // Finally we select the value column to give us the latest value
+            // Finally, we select the value column to give us the latest value
             // within the version range.
             schema::contract_storage::table
                 .inner_join(schema::account::table.inner_join(schema::chain::table))
@@ -262,6 +262,7 @@ impl PostgresGateway {
                 .await
                 .map_err(PostgresError::from)?
         };
+
         let mut result: HashMap<i64, ContractStore> = HashMap::new();
         for (cid, raw_key, raw_val) in changed_values.into_iter() {
             match result.entry(cid) {
@@ -518,28 +519,60 @@ impl PostgresGateway {
                 for (slot, value) in storage.iter() {
                     new_entries.push(WithOrdinal::new(
                         orm::NewSlot {
-                            slot,
+                            slot: slot.clone(),
                             value: value.clone(),
                             previous_value: None,
                             account_id: *account_id,
                             modify_tx: *modify_tx,
-                            ordinal: *tx_index, // TODO: check if this is still needed.
+                            // this is still required for delta queries
+                            ordinal: *tx_index,
                             valid_from: *block_ts,
-                            valid_to: None,
+                            valid_to: MAX_TS,
                         },
                         (*account_id, slot, *block_ts, *tx_index),
                     ))
                 }
             }
         }
+
         new_entries.sort_by_cached_key(|b| b.ordinal);
-        let mut sorted = new_entries
+        let sorted = new_entries
             .into_iter()
             .map(|b| b.entity)
             .collect::<Vec<_>>();
-        apply_delta_versioning::<_, orm::ContractStorage>(&mut sorted, conn).await?;
+        let (latest, to_archive) =
+            apply_partitioned_versioning(&sorted, None, self.retention_horizon, conn).await?;
+        let latest = latest
+            .into_iter()
+            .map(orm::NewSlotLatest::from)
+            .collect::<Vec<_>>();
+
+        diesel::insert_into(schema::contract_storage_default::table)
+            .values(&latest)
+            .on_conflict(on_constraint("contract_storage_default_unique_pk"))
+            .do_update()
+            .set((
+                schema::contract_storage_default::slot
+                    .eq(excluded(schema::contract_storage_default::slot)),
+                schema::contract_storage_default::value
+                    .eq(excluded(schema::contract_storage_default::value)),
+                schema::contract_storage_default::previous_value
+                    .eq(excluded(schema::contract_storage_default::previous_value)),
+                schema::contract_storage_default::account_id
+                    .eq(excluded(schema::contract_storage_default::account_id)),
+                schema::contract_storage_default::modify_tx
+                    .eq(excluded(schema::contract_storage_default::modify_tx)),
+                schema::contract_storage_default::ordinal
+                    .eq(excluded(schema::contract_storage_default::ordinal)),
+                schema::contract_storage_default::valid_from
+                    .eq(excluded(schema::contract_storage_default::valid_from)),
+            ))
+            .execute(conn)
+            .await
+            .map_err(PostgresError::from)?;
+
         diesel::insert_into(schema::contract_storage::table)
-            .values(&sorted)
+            .values(&to_archive)
             .execute(conn)
             .await
             .map_err(PostgresError::from)?;
@@ -1370,10 +1403,14 @@ impl PostgresGateway {
 #[cfg(test)]
 mod test {
 
-    use crate::postgres::db_fixtures;
+    use crate::postgres::{
+        db_fixtures,
+        db_fixtures::{yesterday_midnight, yesterday_one_am},
+    };
     use diesel_async::AsyncConnection;
     use ethers::types::U256;
     use rstest::rstest;
+    use std::time::Duration;
     use tycho_core::{
         storage::{BlockIdentifier, VersionKind},
         Bytes,
@@ -1402,6 +1439,8 @@ mod test {
     async fn setup_data(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let ts = db_fixtures::yesterday_midnight();
+        let ts_p1 = db_fixtures::yesterday_one_am();
         let tx_hashes = [
             "0xbb7e16d797a9e2fbc537e30f91ed3d27a254dd9578aa4c3af3e5f0d3e8130945".to_string(),
             "0x794f7df7a3fe973f1583fbb92536f9a8def3a89902439289315326c04068de54".to_string(),
@@ -1434,21 +1473,19 @@ mod test {
             Some(txn[0]),
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 0, txn[0], Some("2020-01-01T00:00:00"), c0).await;
+        db_fixtures::insert_account_balance(conn, 0, txn[0], Some(&ts), c0).await;
         let c0_code =
             db_fixtures::insert_contract_code(conn, c0, txn[0], Bytes::from("C0C0C0")).await;
-        db_fixtures::insert_account_balance(conn, 100, txn[1], Some("2020-01-01T01:00:00"), c0)
-            .await;
+        db_fixtures::insert_account_balance(conn, 100, txn[1], Some(&ts_p1), c0).await;
         // Slot 2 is never modified again
-        db_fixtures::insert_slots(conn, c0, txn[1], "2020-01-01T00:00:00", None, &[(2, 1, None)])
-            .await;
+        db_fixtures::insert_slots(conn, c0, txn[1], &ts, None, &[(2, 1, None)]).await;
         // First version for slots 0 and 1.
         db_fixtures::insert_slots(
             conn,
             c0,
             txn[1],
-            "2020-01-01T00:00:00",
-            Some("2020-01-01T01:00:00"),
+            &ts,
+            Some(&ts_p1),
             &[(0, 1, None), (1, 5, None)],
         )
         .await;
@@ -1458,7 +1495,7 @@ mod test {
             conn,
             c0,
             txn[3],
-            "2020-01-01T01:00:00",
+            &ts_p1,
             None,
             &[(0, 2, Some(1)), (1, 3, Some(5)), (5, 25, None), (6, 30, None)],
         )
@@ -1480,7 +1517,7 @@ mod test {
             conn,
             c1,
             txn[3],
-            "2020-01-01T01:00:00",
+            &ts_p1,
             None,
             &[(0, 128, None), (1, 255, None)],
         )
@@ -1498,16 +1535,8 @@ mod test {
         db_fixtures::insert_account_balance(conn, 25, txn[1], None, c2).await;
         let c2_code =
             db_fixtures::insert_contract_code(conn, c2, txn[1], Bytes::from("C2C2C2")).await;
-        db_fixtures::insert_slots(
-            conn,
-            c2,
-            txn[1],
-            "2020-01-01T00:00:00",
-            None,
-            &[(1, 2, None), (2, 4, None)],
-        )
-        .await;
-        db_fixtures::delete_account(conn, c2, "2020-01-01T01:00:00").await;
+        db_fixtures::insert_slots(conn, c2, txn[1], &ts, None, &[(1, 2, None), (2, 4, None)]).await;
+        db_fixtures::delete_account(conn, c2, &ts_p1).await;
 
         // linked protocol components
         let protocol_system_id =
@@ -2025,7 +2054,6 @@ mod test {
     }
 
     #[tokio::test]
-
     async fn test_upsert_slots_against_empty_db() {
         let mut conn = setup_db().await;
         let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
@@ -2099,21 +2127,21 @@ mod test {
         // Query the stored slots from the database
         let fetched_slot_data: ContractStore = schema::contract_storage::table
             .select((schema::contract_storage::slot, schema::contract_storage::value))
-            .filter(schema::contract_storage::valid_to.is_null())
+            .filter(schema::contract_storage::valid_to.eq(MAX_TS))
             .get_results(&mut conn)
             .await
             .unwrap()
             .into_iter()
             .collect();
-        assert!(slot_data_tx_1 == fetched_slot_data);
+        assert_eq!(fetched_slot_data, slot_data_tx_1);
     }
 
     #[tokio::test]
-
     async fn test_upsert_slots_invalidate_db_side_records() {
         let mut conn = setup_db().await;
         let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(&mut conn, chain_id).await;
+        let ts = db_fixtures::yesterday_midnight();
         let txn = db_fixtures::insert_txns(
             &mut conn,
             &[
@@ -2142,7 +2170,7 @@ mod test {
             &mut conn,
             c0,
             txn[0],
-            "2020-01-01T00:00:00",
+            &ts,
             None,
             &[(1, 10, None), (2, 20, None), (3, 30, None)],
         )
@@ -2169,13 +2197,13 @@ mod test {
         // Query the stored slots from the database
         let fetched_slot_data: ContractStore = schema::contract_storage::table
             .select((schema::contract_storage::slot, schema::contract_storage::value))
-            .filter(schema::contract_storage::valid_to.is_null())
+            .filter(schema::contract_storage::valid_to.eq(MAX_TS))
             .get_results(&mut conn)
             .await
             .unwrap()
             .into_iter()
             .collect();
-        assert!(slot_data_tx_1 == fetched_slot_data);
+        assert_eq!(fetched_slot_data, slot_data_tx_1);
     }
 
     fn int_to_b256(s: u64) -> Bytes {
@@ -2185,6 +2213,8 @@ mod test {
     async fn setup_slots_delta(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let ts = db_fixtures::yesterday_midnight();
+        let ts_p1 = db_fixtures::yesterday_one_am();
         let txn = db_fixtures::insert_txns(
             conn,
             &[
@@ -2209,14 +2239,13 @@ mod test {
             Some(txn[0]),
         )
         .await;
-        db_fixtures::insert_slots(conn, c0, txn[0], "2020-01-01T00:00:00", None, &[(2, 1, None)])
-            .await;
+        db_fixtures::insert_slots(conn, c0, txn[0], &ts, None, &[(2, 1, None)]).await;
         db_fixtures::insert_slots(
             conn,
             c0,
             txn[0],
-            "2020-01-01T00:00:00",
-            Some("2020-01-01T01:00:00"),
+            &ts,
+            Some(&ts_p1),
             &[(0, 1, None), (1, 5, None)],
         )
         .await;
@@ -2224,7 +2253,7 @@ mod test {
             conn,
             c0,
             txn[1],
-            "2020-01-01T01:00:00",
+            &ts_p1,
             None,
             &[(0, 2, Some(1)), (1, 3, Some(5)), (5, 25, None), (6, 30, None)],
         )
@@ -2259,18 +2288,11 @@ mod test {
             .await
             .unwrap();
         exp.insert(account_id, storage);
+        let end_ts = yesterday_one_am() + Duration::from_secs(3600);
+        let start_ts = yesterday_midnight();
 
         let res = gw
-            .get_slots_delta(
-                chain_id,
-                &"2020-01-01T00:00:00"
-                    .parse::<NaiveDateTime>()
-                    .unwrap(),
-                &"2020-01-01T02:00:00"
-                    .parse::<NaiveDateTime>()
-                    .unwrap(),
-                &mut conn,
-            )
+            .get_slots_delta(chain_id, &start_ts, &end_ts, &mut conn)
             .await
             .unwrap();
 
@@ -2293,18 +2315,11 @@ mod test {
             .await
             .unwrap();
         exp.insert(account_id, storage);
+        let start_ts = yesterday_one_am() + Duration::from_secs(3600);
+        let end_ts = yesterday_midnight();
 
         let res = gw
-            .get_slots_delta(
-                chain_id,
-                &"2020-01-01T02:00:00"
-                    .parse::<NaiveDateTime>()
-                    .unwrap(),
-                &"2020-01-01T00:00:00"
-                    .parse::<NaiveDateTime>()
-                    .unwrap(),
-                &mut conn,
-            )
+            .get_slots_delta(chain_id, &start_ts, &end_ts, &mut conn)
             .await
             .unwrap();
 
@@ -2427,12 +2442,21 @@ mod test {
     }
 
     #[rstest]
-    #[case::forward("2020-01-01T00:00:00", "2020-01-01T01:00:00")]
-    #[case::backward("2020-01-01T01:00:00", "2020-01-01T00:00:00")]
+    #[case::forward("forward")]
+    #[case::backward("backward")]
     #[tokio::test]
-
-    async fn get_accounts_delta_fail(#[case] start: &str, #[case] end: &str) {
+    async fn get_accounts_delta_fail(#[case] direction: &str) {
         let mut conn = setup_db().await;
+        let ts = db_fixtures::yesterday_midnight();
+        let ts_p1 = db_fixtures::yesterday_one_am();
+
+        let (start_ts, end_ts) = match direction {
+            "forward" => (ts, ts_p1),
+            "backward" => (ts_p1, ts),
+            _ => {
+                panic!("Must use forward or backward")
+            }
+        };
         setup_data(&mut conn).await;
         let c1 = &orm::Account::by_address(
             &Bytes::from("73BcE791c239c8010Cd3C857d96580037CCdd0EE"),
@@ -2440,11 +2464,9 @@ mod test {
         )
         .await
         .unwrap()[0];
-        db_fixtures::delete_account(&mut conn, c1.id, "2020-01-01T01:00:00").await;
+        db_fixtures::delete_account(&mut conn, c1.id, &ts_p1).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
-        let start_ts = start.parse().unwrap();
         let start_version = BlockOrTimestamp::Timestamp(start_ts);
-        let end_ts = end.parse().unwrap();
         let end_version = BlockOrTimestamp::Timestamp(end_ts);
         let exp = Err(StorageError::Unexpected(format!(
             "Found account that was deleted and created within range {} - {}!",
