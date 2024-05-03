@@ -502,7 +502,8 @@ pub struct BlockContractChanges {
     pub block: Block,
     pub finalized_block_height: u64,
     pub revert: bool,
-    /// Required here, so it is part of the revert buffer and thus inserted in finalisation.
+    /// Required here, so it is part of the revert buffer and thus inserted into storage once
+    /// finalized.
     pub new_tokens: HashMap<Address, CurrencyToken>,
     /// Vec of updates at this block, aggregated by tx and sorted by tx index in ascending order
     pub tx_updates: Vec<TransactionVMUpdates>,
@@ -1241,6 +1242,9 @@ pub struct BlockEntityChanges {
     pub block: Block,
     pub finalized_block_height: u64,
     pub revert: bool,
+    /// Required here, so it is part of the revert buffer and thus inserted into storage once
+    /// finalized.
+    pub new_tokens: HashMap<Address, CurrencyToken>,
     /// Vec of updates at this block, aggregated by tx and sorted by tx index in ascending order
     pub txs_with_update: Vec<ProtocolChangesWithTx>,
 }
@@ -1323,6 +1327,7 @@ impl BlockEntityChanges {
             block,
             finalized_block_height,
             revert,
+            new_tokens: HashMap::new(),
             txs_with_update,
         }
     }
@@ -1366,6 +1371,7 @@ impl BlockEntityChanges {
                 block,
                 finalized_block_height,
                 revert: false,
+                new_tokens: HashMap::new(),
                 txs_with_update,
             })
         } else {
@@ -1411,6 +1417,17 @@ impl BlockEntityChanges {
             component_balances: aggregated_changes.balance_changes,
             component_tvl: HashMap::new(),
         })
+    }
+
+    pub fn protocol_components(&self) -> Vec<ProtocolComponent> {
+        self.txs_with_update
+            .iter()
+            .flat_map(|tx_u| {
+                tx_u.new_protocol_components
+                    .values()
+                    .cloned()
+            })
+            .collect()
     }
 }
 
@@ -3147,6 +3164,7 @@ mod test {
             },
             finalized_block_height: 420,
             revert: false,
+            new_tokens: HashMap::new(),
             txs_with_update: vec![
                 protocol_state_with_tx(),
                 ProtocolChangesWithTx {

@@ -240,7 +240,7 @@ where
                         msg.component_balances
                             .get(k)
                             .cloned()
-                            .unwrap_or_else(|| HashMap::new())
+                            .unwrap_or_else(HashMap::new)
                             .into_iter(),
                     )
                 });

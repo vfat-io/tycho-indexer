@@ -405,7 +405,6 @@ impl ExtractorBuilder {
                     self.config.chain,
                     self.config.sync_batch_size,
                     cached_gw.clone(),
-                    token_pre_processor.clone(),
                 );
 
                 self.extractor = Some(Arc::new(
@@ -416,6 +415,8 @@ impl ExtractorBuilder {
                         gw,
                         protocol_types,
                         self.config.name.clone(),
+                        protocol_cache.clone(),
+                        token_pre_processor.clone(),
                         if self.config.name == "uniswap_v2" {
                             Some(|b| transcode_usv2_balances(add_default_attributes_uniswapv2(b)))
                         } else if self.config.name == "uniswap_v3" {
