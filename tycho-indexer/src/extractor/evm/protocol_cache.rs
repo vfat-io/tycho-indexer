@@ -24,9 +24,9 @@ pub trait ProtocolDataCache: Send + Sync {
 
     async fn has_token(&self, addresses: &[Address]) -> Vec<bool>;
 
-    async fn add_tokens(
+    async fn add_tokens<T: IntoIterator<Item = CurrencyToken> + Send + Sync>(
         &self,
-        tokens: impl IntoIterator<Item = CurrencyToken> + Send + Sync,
+        tokens: T,
     ) -> Result<(), StorageError>;
 
     async fn get_protocol_components<'a>(
@@ -35,9 +35,9 @@ pub trait ProtocolDataCache: Send + Sync {
         component_ids: &'a [ComponentId],
     ) -> Result<HashMap<ComponentId, ProtocolComponent>, StorageError>;
 
-    async fn add_components(
+    async fn add_components<T: IntoIterator<Item = ProtocolComponent> + Send + Sync>(
         &self,
-        components: impl IntoIterator<Item = ProtocolComponent> + Send + Sync,
+        components: T,
     ) -> Result<(), StorageError>;
 }
 
@@ -116,10 +116,10 @@ impl ProtocolMemoryCache {
             .gateway
             .get_token_prices(&self.chain)
             .await?;
+        let n_fetched = token_prices.prices.len();
+        debug!(last_price_update = ?token_prices.last_price_update, ?n_fetched, resource = "prices", "CacheMiss");
         token_prices.last_price_update = Local::now().naive_utc();
-        let n_prices = token_prices.prices.len();
-        debug!(?n_prices, "updated prices");
-        Ok(n_prices)
+        Ok(n_fetched)
     }
 }
 
@@ -147,6 +147,7 @@ impl ProtocolDataCache for ProtocolMemoryCache {
         Ok(res)
     }
 
+    #[instrument(skip_all, fields(n_addresses=addresses.len()))]
     async fn get_tokens<'a>(
         &'a self,
         addresses: &'a [Bytes],
@@ -160,13 +161,16 @@ impl ProtocolDataCache for ProtocolMemoryCache {
         };
         if !missing.is_empty() {
             let mut cached_tokens = self.tokens.write().await;
+            let mut n_fetched = 0;
             self.gateway
                 .get_tokens(self.chain, Some(&missing), None, None, None)
                 .await?
                 .into_iter()
                 .for_each(|t| {
+                    n_fetched += 1;
                     cached_tokens.insert(t.address.clone(), t);
                 });
+            debug!(n_missing = missing.len(), n_fetched, resource = "token", "CacheMiss");
         }
         let cached_tokens = self.tokens.read().await;
         Ok(addresses
@@ -183,9 +187,9 @@ impl ProtocolDataCache for ProtocolMemoryCache {
             .collect()
     }
 
-    async fn add_tokens(
+    async fn add_tokens<T: IntoIterator<Item = CurrencyToken> + Send + Sync>(
         &self,
-        tokens: impl IntoIterator<Item = CurrencyToken> + Send + Sync,
+        tokens: T,
     ) -> Result<(), StorageError> {
         let mut guard = self.tokens.write().await;
         guard.extend(
@@ -196,6 +200,7 @@ impl ProtocolDataCache for ProtocolMemoryCache {
         Ok(())
     }
 
+    #[instrument(skip_all, fields(n_component_ids=component_ids.len()))]
     async fn get_protocol_components<'a>(
         &'a self,
         system: &'a str,
@@ -215,6 +220,7 @@ impl ProtocolDataCache for ProtocolMemoryCache {
             let cached_components = guard
                 .entry(system.to_string())
                 .or_default();
+            let mut n_fetched = 0;
             self.gateway
                 .get_protocol_components(
                     &self.chain,
@@ -230,8 +236,10 @@ impl ProtocolDataCache for ProtocolMemoryCache {
                 .await?
                 .into_iter()
                 .for_each(|c| {
+                    n_fetched += 1;
                     cached_components.insert(c.id.clone(), c);
                 });
+            debug!(n_missing = missing.len(), n_fetched, resource = "component", "CacheMiss");
         }
         let guard = self.components.read().await;
         let cached_components = guard.get(system).unwrap_or(&empty);
@@ -242,9 +250,9 @@ impl ProtocolDataCache for ProtocolMemoryCache {
             .collect())
     }
 
-    async fn add_components(
+    async fn add_components<T: IntoIterator<Item = ProtocolComponent> + Send + Sync>(
         &self,
-        components: impl IntoIterator<Item = ProtocolComponent> + Send + Sync,
+        components: T,
     ) -> Result<(), StorageError> {
         let mut guard = self.components.write().await;
         components.into_iter().for_each(|pc| {

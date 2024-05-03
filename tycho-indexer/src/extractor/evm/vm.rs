@@ -44,7 +44,7 @@ use crate::{
     },
 };
 
-use super::{utils::format_duration, Block};
+use super::{utils::format_duration, Block, BlockAccountChanges};
 
 struct Inner {
     cursor: Vec<u8>,
@@ -202,7 +202,7 @@ where
     #[allow(clippy::mutable_key_type)]
     async fn handle_tvl_changes(
         &self,
-        msg: &mut evm::BlockAccountChanges,
+        msg: &mut BlockAccountChanges,
     ) -> Result<(), ExtractionError> {
         trace!("Calculating tvl changes");
         if msg.component_balances.is_empty() {
@@ -225,10 +225,26 @@ where
             .flat_map(|pc| pc.tokens.iter().map(|t| (&pc.id, t)))
             .collect::<Vec<_>>();
 
+        // Merge stored balances with new ones
         let balances = {
             let rb = self.revert_buffer.lock().await;
-            self.get_balances(&rb, &balance_request)
-                .await?
+            let mut balances = self
+                .get_balances(&rb, &balance_request)
+                .await?;
+            // we assume the retrieved balances contain all tokens of the component
+            // here, doing this merge the other way around would not be safe.
+            balances
+                .iter_mut()
+                .for_each(|(k, bal)| {
+                    bal.extend(
+                        msg.component_balances
+                            .get(k)
+                            .cloned()
+                            .unwrap_or_else(|| HashMap::new())
+                            .into_iter(),
+                    )
+                });
+            balances
         };
 
         // collect token decimals and prices to calculate tvl in the next step
@@ -277,7 +293,6 @@ where
             })
             .collect::<HashMap<_, _>>();
 
-        // TODO: Store new values in component_tvl table
         msg.component_tvl = tvl_updates;
 
         Ok(())
@@ -1017,7 +1032,7 @@ impl VmGateway for VmPgGateway {
 
 #[cfg(test)]
 mod test {
-    use tycho_core::models::{FinancialType, ImplementationType};
+    use tycho_core::models::{protocol::ProtocolComponent, FinancialType, ImplementationType};
 
     use crate::{
         extractor::evm::token_pre_processor::MockTokenPreProcessorTrait,
@@ -1195,6 +1210,123 @@ mod test {
         }
 
         assert_eq!(extractor.get_cursor().await, "cursor@420");
+    }
+
+    fn token_prices() -> HashMap<Bytes, f64> {
+        HashMap::from([
+            (Bytes::from("0x0000000000000000000000000000000000000001"), 1.0),
+            (Bytes::from("0x0000000000000000000000000000000000000002"), 2.0),
+        ])
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_handle_tvl_changes() {
+        let mut msg = BlockAccountChanges {
+            component_balances: HashMap::from([(
+                "comp1".to_string(),
+                HashMap::from([(
+                    H160::from_str("0x0000000000000000000000000000000000000001").unwrap(),
+                    evm::ComponentBalance {
+                        token: H160::from_str("0x0000000000000000000000000000000000000001")
+                            .unwrap(),
+                        balance: Bytes::from(
+                            "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
+                        ),
+                        balance_float: 1000e18,
+                        modify_tx: H256::default(),
+                        component_id: "comp1".to_string(),
+                    },
+                )]),
+            )]),
+            ..Default::default()
+        };
+
+        let mut protocol_gw = MockGateway::new();
+        protocol_gw
+            .expect_get_token_prices()
+            .return_once(|_| Box::pin(async { Ok(token_prices()) }));
+        let protocol_cache = ProtocolMemoryCache::new(
+            Chain::Ethereum,
+            chrono::Duration::seconds(1),
+            Arc::new(protocol_gw),
+        );
+        protocol_cache
+            .add_components([ProtocolComponent::new(
+                "comp1",
+                "system1",
+                "pt_1",
+                Chain::Ethereum,
+                vec![
+                    Bytes::from("0x0000000000000000000000000000000000000001"),
+                    Bytes::from("0x0000000000000000000000000000000000000002"),
+                ],
+                Vec::new(),
+                HashMap::new(),
+                ChangeType::Creation,
+                Bytes::default(),
+                NaiveDateTime::default(),
+            )])
+            .await
+            .expect("adding components failed");
+        protocol_cache
+            .add_tokens([
+                CurrencyToken::new(
+                    &Bytes::from("0x0000000000000000000000000000000000000001"),
+                    "TOK1",
+                    18,
+                    0,
+                    &[],
+                    Chain::Ethereum,
+                    100,
+                ),
+                CurrencyToken::new(
+                    &Bytes::from("0x0000000000000000000000000000000000000002"),
+                    "TOK2",
+                    18,
+                    0,
+                    &[],
+                    Chain::Ethereum,
+                    100,
+                ),
+            ])
+            .await
+            .expect("adding tokens failed");
+
+        let preprocessor = MockTokenPreProcessorTrait::new();
+        let mut extractor_gw = MockVmGateway::new();
+        extractor_gw
+            .expect_ensure_protocol_types()
+            .times(1)
+            .returning(|_| ());
+        extractor_gw
+            .expect_get_cursor()
+            .times(1)
+            .returning(|| Ok("cursor".into()));
+        extractor_gw
+            .expect_get_components_balances()
+            .return_once(|_| Ok(HashMap::new()));
+        let extractor = VmContractExtractor::new(
+            "vm_name",
+            Chain::Ethereum,
+            ChainState::default(),
+            extractor_gw,
+            HashMap::from([("pt_1".to_string(), ProtocolType::default())]),
+            "system1".to_string(),
+            protocol_cache,
+            preprocessor,
+            None,
+            5,
+        )
+        .await
+        .expect("extractor init failed");
+        let exp_tvl = HashMap::from([("comp1".to_string(), 1000.0)]);
+
+        extractor
+            .handle_tvl_changes(&mut msg)
+            .await
+            .expect("handle_tvl_call failed");
+
+        assert_eq!(&msg.component_tvl, &exp_tvl);
     }
 }
 
