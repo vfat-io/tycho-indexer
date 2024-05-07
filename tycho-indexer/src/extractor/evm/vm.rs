@@ -384,7 +384,11 @@ where
         Ok(combined_balances)
     }
 
-    async fn process_tokens(
+    /// Constructs any newly witnessed currency tokens in this block.
+    ///
+    /// Fetches token metadata such as symbol and decimals, then proceeds to analyze
+    /// the token to add additional metadata such as gas usage any transfer fees etc.
+    async fn construct_currency_tokens(
         &self,
         msg: &evm::BlockContractChanges,
     ) -> HashMap<Address, CurrencyToken> {
@@ -532,7 +536,9 @@ where
         let mut msg =
             if let Some(post_process_f) = self.post_processor { post_process_f(msg) } else { msg };
 
-        msg.new_tokens = self.process_tokens(&msg).await;
+        msg.new_tokens = self
+            .construct_currency_tokens(&msg)
+            .await;
         self.protocol_cache
             .add_tokens(msg.new_tokens.values().cloned())
             .await?;
