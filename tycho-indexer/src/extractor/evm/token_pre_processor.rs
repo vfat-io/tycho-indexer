@@ -62,7 +62,7 @@ pub fn map_vault(protocol_system: &str) -> Option<H160> {
 
 #[async_trait]
 impl TokenPreProcessorTrait for TokenPreProcessor {
-    #[instrument]
+    #[instrument(skip_all)]
     async fn get_tokens(
         &self,
         addresses: Vec<H160>,

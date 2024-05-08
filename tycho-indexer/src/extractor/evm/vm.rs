@@ -222,7 +222,6 @@ where
         Ok(tokens_set.into_iter().collect())
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn forward(
         &self,
         changes: &evm::BlockContractChanges,
@@ -415,7 +414,7 @@ impl<T: TokenPreProcessorTrait> VmGateway for VmPgGateway<T> {
             .expect("Couldn't insert protocol types");
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
+    #[instrument(skip_all)]
     async fn upsert_contract(
         &self,
         changes: &evm::BlockContractChanges,
@@ -428,7 +427,7 @@ impl<T: TokenPreProcessorTrait> VmGateway for VmPgGateway<T> {
     }
 
     #[allow(unused_variables)]
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % to))]
+    #[instrument(skip_all)]
     async fn revert(
         &self,
         current: Option<BlockIdentifier>,
@@ -542,7 +541,7 @@ where
             .last_processed_block
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name))]
+    #[instrument(skip_all, fields(block_number))]
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
@@ -608,9 +607,9 @@ where
         return Ok(Some(Arc::new(msg.aggregate_updates()?)));
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % inp.last_valid_block.as_ref().unwrap().number))]
-    #[allow(clippy::mutable_key_type)]
     // Clippy thinks that tuple with Bytes are a mutable type.
+    #[instrument(skip_all, fields(target_hash, target_number))]
+    #[allow(clippy::mutable_key_type)]
     async fn handle_revert(
         &self,
         inp: BlockUndoSignal,
@@ -625,6 +624,9 @@ where
                 block_ref.id, err
             ))
         })?;
+
+        tracing::Span::current().record("target_hash", format!("{:x}", block_hash));
+        tracing::Span::current().record("target_number", block_ref.number);
 
         let mut revert_buffer = self.revert_buffer.lock().await;
 

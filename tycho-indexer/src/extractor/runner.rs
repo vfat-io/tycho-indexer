@@ -124,8 +124,6 @@ impl ExtractorRunner {
         ExtractorRunner { extractor, substreams, subscriptions, next_subscriber_id: 0, control_rx }
     }
     pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
-        let id = self.extractor.get_id().clone();
-
         tokio::spawn(async move {
             let id = self.extractor.get_id();
             loop {
@@ -190,7 +188,9 @@ impl ExtractorRunner {
                 }
             }
         }
-        .instrument(tracing::info_span!("extractor_runner::run", id = %id)))
+            // Additional inner debug span with substreams information
+            // trace_id is set later on in process_substreams_response
+        .instrument(tracing::debug_span!("loop", trace_id = tracing::field::Empty)))
     }
 
     #[instrument(skip_all)]
@@ -208,7 +208,7 @@ impl ExtractorRunner {
     // TODO: add message tracing_id to the log
     #[instrument(skip_all)]
     async fn propagate_msg(subscribers: &Arc<Mutex<SubscriptionsMap>>, message: ExtractorMsg) {
-        debug!(msg = %message, "Propagating message to subscribers.");
+        trace!(msg = %message, "Propagating message to subscribers.");
         // TODO: rename variable here instead
         let arced_message = message;
 
@@ -221,7 +221,7 @@ impl ExtractorRunner {
             match sender.send(arced_message.clone()).await {
                 Ok(_) => {
                     // Message sent successfully
-                    debug!(subscriber_id = %counter, "Message sent successfully.");
+                    trace!(subscriber_id = %counter, "Message sent successfully.");
                 }
                 Err(err) => {
                     // Receiver has been dropped, mark for removal
@@ -424,12 +424,14 @@ impl ExtractorBuilder {
         Ok(self)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(name = "extractor", skip(self), fields(id))] // this is the main info lvl span of the extractor
     pub async fn run(self) -> Result<HandleResult, ExtractionError> {
         let extractor = self
             .extractor
             .clone()
             .expect("Extractor not set");
+
+        tracing::Span::current().record("id", format!("{}", extractor.get_id()));
 
         self.ensure_spkg().await?;
 

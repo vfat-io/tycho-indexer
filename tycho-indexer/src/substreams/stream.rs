@@ -10,7 +10,7 @@ use std::{
 };
 use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
-use tracing::{error, info, info_span, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::pb::sf::substreams::{
     rpc::v2::{response::Message, BlockScopedData, BlockUndoSignal, Request, Response},
@@ -69,9 +69,6 @@ fn stream_blocks(
     let mut retry_count = 0;
     let mut backoff = DEFAULT_BACKOFF.clone();
 
-    let span =
-        info_span!("substreams_stream", %endpoint, %start_block_num, %latest_cursor, %retry_count);
-    let _enter = span.enter();
     try_stream! {
         'retry_loop: loop {
             if retry_count > 0 {
@@ -95,8 +92,6 @@ fn stream_blocks(
 
             match result {
                 Ok(stream) => {
-                    info!("Blockstreams connected");
-
                     for await response in stream {
                         match process_substreams_response(response).await {
                             BlockProcessedResult::BlockScopedData(block_scoped_data) => {
@@ -172,6 +167,17 @@ async fn process_substreams_response(
     };
 
     match response.message {
+        Some(Message::Session(session)) => {
+            tracing::Span::current().record("trace_id", &session.trace_id);
+            info!(
+                ?session.resolved_start_block,
+                ?session.linear_handoff_block,
+                ?session.max_parallel_workers,
+                ?session.trace_id,
+                "SubstreamSessionInit"
+            );
+            BlockProcessedResult::Skip()
+        }
         Some(Message::BlockScopedData(block_scoped_data)) => {
             BlockProcessedResult::BlockScopedData(block_scoped_data)
         }
