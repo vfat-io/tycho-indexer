@@ -205,7 +205,6 @@ where
         Ok(filtered_tokens)
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
     async fn forward(
         &self,
         changes: &evm::BlockEntityChanges,
@@ -352,7 +351,7 @@ impl<T: TokenPreProcessorTrait> NativeGateway for NativePgGateway<T> {
             .expect("Couldn't insert protocol types");
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % changes.block.number))]
+    #[instrument(skip_all)]
     async fn advance(
         &self,
         changes: &evm::BlockEntityChanges,
@@ -475,7 +474,7 @@ where
             .last_processed_block
     }
 
-    #[instrument(skip_all, fields(chain = % self.chain, name = % self.name))]
+    #[instrument(skip_all, fields(block_number))]
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,
@@ -546,6 +545,7 @@ where
     }
 
     // Clippy thinks that tuple with Bytes are a mutable type.
+    #[instrument(skip_all, fields(target_hash, target_number))]
     #[allow(clippy::mutable_key_type)]
     async fn handle_revert(
         &self,
@@ -561,6 +561,9 @@ where
                 block_ref.id, err
             ))
         })?;
+
+        tracing::Span::current().record("target_hash", format!("{:x}", block_hash));
+        tracing::Span::current().record("target_number", block_ref.number);
 
         let mut revert_buffer = self.revert_buffer.lock().await;
 
