@@ -12,8 +12,9 @@ use tracing::log::warn;
 use tycho_core::{
     dto,
     models::{
-        blockchain::BlockScoped, protocol as tycho_core_protocol, Address, AttrStoreKey, Chain,
-        ChangeType, ComponentId, ExtractorIdentity, NormalisedMessage, ProtocolType, StoreVal,
+        blockchain::BlockScoped, protocol as tycho_core_protocol, token::CurrencyToken, Address,
+        AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity, NormalisedMessage,
+        ProtocolType, StoreVal,
     },
     Bytes,
 };
@@ -22,6 +23,7 @@ use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 pub mod chain_state;
 mod convert;
 pub mod native;
+pub mod protocol_cache;
 pub mod token_analysis_cron;
 pub mod token_pre_processor;
 mod utils;
@@ -311,10 +313,11 @@ pub struct BlockAccountChanges {
     pub finalized_block_height: u64,
     pub revert: bool,
     pub account_updates: HashMap<H160, AccountUpdate>,
+    pub new_tokens: HashMap<Address, CurrencyToken>,
     pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
     pub component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-    pub component_tvl: HashMap<String, f64>,
+    pub component_tvl: HashMap<ComponentId, f64>,
 }
 
 impl BlockAccountChanges {
@@ -326,6 +329,7 @@ impl BlockAccountChanges {
         finalized_block_height: u64,
         revert: bool,
         account_updates: HashMap<H160, AccountUpdate>,
+        new_tokens: HashMap<Address, CurrencyToken>,
         new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
         deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
         component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
@@ -337,6 +341,7 @@ impl BlockAccountChanges {
             finalized_block_height,
             revert,
             account_updates,
+            new_tokens,
             new_protocol_components,
             deleted_protocol_components,
             component_balances,
@@ -500,6 +505,9 @@ pub struct BlockContractChanges {
     pub block: Block,
     pub finalized_block_height: u64,
     pub revert: bool,
+    /// Required here, so it is part of the revert buffer and thus inserted into storage once
+    /// finalized.
+    pub new_tokens: HashMap<Address, CurrencyToken>,
     /// Vec of updates at this block, aggregated by tx and sorted by tx index in ascending order
     pub tx_updates: Vec<TransactionVMUpdates>,
 }
@@ -786,7 +794,15 @@ impl BlockContractChanges {
         revert: bool,
         tx_updates: Vec<TransactionVMUpdates>,
     ) -> Self {
-        BlockContractChanges { extractor, chain, block, finalized_block_height, revert, tx_updates }
+        BlockContractChanges {
+            extractor,
+            chain,
+            block,
+            finalized_block_height,
+            revert,
+            new_tokens: HashMap::new(),
+            tx_updates,
+        }
     }
     /// Parse from tychos protobuf message
     pub fn try_from_message(
@@ -853,6 +869,7 @@ impl BlockContractChanges {
                 block,
                 finalized_block_height,
                 revert: false,
+                new_tokens: HashMap::new(),
                 tx_updates,
             });
         }
@@ -904,10 +921,22 @@ impl BlockContractChanges {
             self.finalized_block_height,
             self.revert,
             account_updates,
+            self.new_tokens,
             protocol_components,
             HashMap::new(),
             component_balances,
         ))
+    }
+
+    pub fn protocol_components(&self) -> Vec<ProtocolComponent> {
+        self.tx_updates
+            .iter()
+            .flat_map(|tx_u| {
+                tx_u.protocol_components
+                    .values()
+                    .cloned()
+            })
+            .collect()
     }
 }
 
@@ -1161,6 +1190,7 @@ pub struct BlockEntityChangesResult {
     pub finalized_block_height: u64,
     pub revert: bool,
     pub state_updates: HashMap<String, ProtocolStateDelta>,
+    pub new_tokens: HashMap<Address, CurrencyToken>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
     pub component_balances: HashMap<String, HashMap<H160, ComponentBalance>>,
@@ -1176,6 +1206,7 @@ impl BlockEntityChangesResult {
         finalized_block_height: u64,
         revert: bool,
         state_updates: HashMap<String, ProtocolStateDelta>,
+        new_tokens: HashMap<Address, CurrencyToken>,
         new_protocol_components: HashMap<String, ProtocolComponent>,
         deleted_protocol_components: HashMap<String, ProtocolComponent>,
         component_balances: HashMap<String, HashMap<H160, ComponentBalance>>,
@@ -1188,6 +1219,7 @@ impl BlockEntityChangesResult {
             finalized_block_height,
             revert,
             state_updates,
+            new_tokens,
             new_protocol_components,
             deleted_protocol_components,
             component_balances,
@@ -1217,6 +1249,9 @@ pub struct BlockEntityChanges {
     pub block: Block,
     pub finalized_block_height: u64,
     pub revert: bool,
+    /// Required here, so it is part of the revert buffer and thus inserted into storage once
+    /// finalized.
+    pub new_tokens: HashMap<Address, CurrencyToken>,
     /// Vec of updates at this block, aggregated by tx and sorted by tx index in ascending order
     pub txs_with_update: Vec<ProtocolChangesWithTx>,
 }
@@ -1299,6 +1334,7 @@ impl BlockEntityChanges {
             block,
             finalized_block_height,
             revert,
+            new_tokens: HashMap::new(),
             txs_with_update,
         }
     }
@@ -1342,6 +1378,7 @@ impl BlockEntityChanges {
                 block,
                 finalized_block_height,
                 revert: false,
+                new_tokens: HashMap::new(),
                 txs_with_update,
             })
         } else {
@@ -1382,11 +1419,23 @@ impl BlockEntityChanges {
             finalized_block_height: self.finalized_block_height,
             revert: self.revert,
             state_updates: aggregated_changes.protocol_states,
+            new_tokens: self.new_tokens,
             new_protocol_components: aggregated_changes.new_protocol_components,
             deleted_protocol_components: HashMap::new(),
             component_balances: aggregated_changes.balance_changes,
             component_tvl: HashMap::new(),
         })
+    }
+
+    pub fn protocol_components(&self) -> Vec<ProtocolComponent> {
+        self.txs_with_update
+            .iter()
+            .flat_map(|tx_u| {
+                tx_u.new_protocol_components
+                    .values()
+                    .cloned()
+            })
+            .collect()
     }
 }
 
@@ -2557,6 +2606,7 @@ mod test {
             },
             finalized_block_height: 0,
             revert: false,
+            new_tokens: HashMap::new(),
             tx_updates: vec![
                 TransactionVMUpdates {
                     account_updates: [(
@@ -2740,6 +2790,7 @@ mod test {
             )]
             .into_iter()
             .collect(),
+            HashMap::new(),
             [(protocol_component.id.clone(), protocol_component)]
                 .into_iter()
                 .collect(),
@@ -3122,6 +3173,7 @@ mod test {
             },
             finalized_block_height: 420,
             revert: false,
+            new_tokens: HashMap::new(),
             txs_with_update: vec![
                 protocol_state_with_tx(),
                 ProtocolChangesWithTx {
@@ -3322,6 +3374,7 @@ mod test {
             finalized_block_height: 420,
             revert: false,
             state_updates,
+            new_tokens: HashMap::new(),
             new_protocol_components,
             deleted_protocol_components: HashMap::new(),
             component_balances: new_balances,

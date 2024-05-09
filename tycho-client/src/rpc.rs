@@ -580,7 +580,8 @@ mod tests {
                 "tax": 0,
                 "gas": [
                   29962
-                ]
+                ],
+                "quality": 100
               },
               {
                 "chain": "ethereum",
@@ -590,7 +591,8 @@ mod tests {
                 "tax": 0,
                 "gas": [
                   40652
-                ]
+                ],
+                "quality": 100
               }
             ],
             "pagination": {
@@ -623,6 +625,7 @@ mod tests {
                 decimals: 18,
                 tax: 0,
                 gas: vec![Some(29962)],
+                quality: 100,
             },
             ResponseToken {
                 chain: Chain::Ethereum,
@@ -631,6 +634,7 @@ mod tests {
                 decimals: 6,
                 tax: 0,
                 gas: vec![Some(40652)],
+                quality: 100,
             },
         ];
 

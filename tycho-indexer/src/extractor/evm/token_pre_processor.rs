@@ -62,7 +62,7 @@ pub fn map_vault(protocol_system: &str) -> Option<H160> {
 
 #[async_trait]
 impl TokenPreProcessorTrait for TokenPreProcessor {
-    #[instrument(skip_all)]
+    #[instrument(skip_all, fields(n_addresses=addresses.len(), block = ?block))]
     async fn get_tokens(
         &self,
         addresses: Vec<H160>,
@@ -98,7 +98,7 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
                 .detect(address, block)
                 .await
                 .unwrap_or_else(|e| {
-                    warn!("Detection failed: {:?}", e);
+                    warn!(error=?e, "TokenDetectionFailure");
                     (TokenQuality::bad("Detection failed"), None, None)
                 });
 
@@ -110,7 +110,7 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
             };
 
             if let TokenQuality::Bad { reason } = token_quality {
-                warn!("Token quality detected as bad: {} reason: {}", address, reason);
+                warn!(address=?address, ?reason, "BadToken");
                 // Flag this token as bad using quality, an external script is responsible for
                 // analyzing these tokens again.
                 quality = 10;

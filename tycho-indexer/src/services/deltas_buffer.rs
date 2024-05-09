@@ -341,6 +341,7 @@ mod test {
             )]
             .into_iter()
             .collect::<HashMap<_, _>>(),
+            HashMap::new(),
             [(
                 "component2".to_string(),
                 evm::ProtocolComponent {
@@ -393,6 +394,7 @@ mod test {
             .into_iter()
             .map(|v| (v.component_id.clone(), v))
             .collect(),
+            HashMap::new(),
             [(
                 "component3".to_string(),
                 evm::ProtocolComponent {
