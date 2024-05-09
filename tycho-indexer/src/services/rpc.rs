@@ -80,6 +80,7 @@ impl From<evm::ERC20Token> for ResponseToken {
             tax: token.tax,
             chain: token.chain.into(),
             gas: token.gas,
+            quality: token.quality,
         }
     }
 }

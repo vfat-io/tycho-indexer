@@ -974,6 +974,7 @@ where
                 .finalized_block_height,
             revert: true,
             state_updates,
+            new_tokens: HashMap::new(),
             new_protocol_components: reverted_components_deletions,
             deleted_protocol_components: reverted_components_creations,
             component_balances: combined_balances,
@@ -1515,6 +1516,7 @@ mod test_serial_db {
                         deleted_attributes: HashSet::new(),
                     }),
                 ]),
+                new_tokens: HashMap::new(),
                 new_protocol_components: HashMap::from([
                     ("pc_2".to_string(), ProtocolComponent {
                         id: "pc_2".to_string(),

@@ -1,6 +1,7 @@
 use crate::{models::Chain, Bytes};
+use serde::{Deserialize, Serialize};
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
 pub struct CurrencyToken {
     pub address: Bytes,
     pub symbol: String,

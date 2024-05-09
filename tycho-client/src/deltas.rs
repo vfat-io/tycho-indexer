@@ -715,6 +715,7 @@ mod tests {
                             "ts": "2023-09-14T00:00:00"
                         },
                         "revert": false,
+                        "new_tokens": {},
                         "account_updates": {
                             "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
                                 "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
@@ -774,6 +775,7 @@ mod tests {
                             "ts": "2023-09-14T00:00:00"
                         },
                         "revert": false,
+                        "new_tokens": {},
                         "state_updates": {
                             "component_1": {
                                 "component_id": "component_1",
@@ -1046,6 +1048,7 @@ mod tests {
                             "ts": "2023-09-14T00:00:00"
                         },
                         "revert": false,
+                        "new_tokens": {},
                         "account_updates": {
                             "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
                                 "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
@@ -1109,7 +1112,7 @@ mod tests {
 
             let _ = timeout(Duration::from_millis(100), rx.recv())
                 .await
-                .expect("awaiting message timeout out")
+                .expect("awaiting message timeout ou    t")
                 .expect("receiving message failed");
 
             // wait for the connection to drop

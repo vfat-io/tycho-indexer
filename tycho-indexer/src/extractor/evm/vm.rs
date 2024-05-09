@@ -826,6 +826,7 @@ where
                 .finalized_block_height,
             revert: true,
             account_updates,
+            new_tokens: HashMap::new(),
             new_protocol_components: reverted_components_deletions,
             deleted_protocol_components: reverted_components_creations,
             component_balances: combined_balances,
@@ -1831,6 +1832,7 @@ mod test_serial_db {
                         change: ChangeType::Update,
                     }),
                 ]),
+                new_tokens: HashMap::new(),
                 new_protocol_components: HashMap::new(),
                 deleted_protocol_components: HashMap::from([
                     ("pc_3".to_string(), ProtocolComponent {
