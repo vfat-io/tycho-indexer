@@ -27,7 +27,7 @@ use tycho_core::{
 
 use super::Header;
 use crate::{
-    deltas::DeltasClient,
+    deltas::{DeltasClient, SubscriptionOptions},
     feed::component_tracker::{ComponentFilter, ComponentTracker},
     rpc::RPCClient,
 };
@@ -43,6 +43,7 @@ pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
     rpc_client: R,
     deltas_client: D,
     max_retries: u64,
+    include_snapshots: bool,
     component_filter: ComponentFilter,
     shared: Arc<Mutex<SharedState>>,
     end_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
@@ -141,12 +142,14 @@ where
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
     /// Creates a new state synchronizer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor_id: ExtractorIdentity,
         is_native: bool,
         retrieve_balances: bool,
         component_filter: ComponentFilter,
         max_retries: u64,
+        include_snapshots: bool,
         rpc_client: R,
         deltas_client: D,
     ) -> Self {
@@ -155,6 +158,7 @@ where
             is_native,
             retrieve_balances,
             rpc_client,
+            include_snapshots,
             deltas_client,
             component_filter,
             max_retries,
@@ -170,6 +174,9 @@ where
         tracked_components: &ComponentTracker<R>,
         ids: Option<I>,
     ) -> SyncResult<StateSyncMessage> {
+        if !self.include_snapshots {
+            return Ok(StateSyncMessage { header, ..Default::default() });
+        }
         let version = VersionParam::new(
             None,
             Some(BlockParam {
@@ -320,9 +327,10 @@ where
             n_contracts = tracker.contracts.len(),
             "Finished retrieving components",
         );
+        let subscription_options = SubscriptionOptions::new().with_state(self.include_snapshots);
         let (_, mut msg_rx) = self
             .deltas_client
-            .subscribe(self.extractor_id.clone())
+            .subscribe(self.extractor_id.clone(), subscription_options)
             .await?;
 
         info!("Waiting for deltas...");
@@ -515,7 +523,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        deltas::{DeltasClient, MockDeltasClient},
+        deltas::{DeltasClient, MockDeltasClient, SubscriptionOptions},
         feed::{
             component_tracker::{ComponentFilter, ComponentTracker},
             synchronizer::{
@@ -623,8 +631,11 @@ mod test {
         async fn subscribe(
             &self,
             extractor_id: ExtractorIdentity,
+            options: SubscriptionOptions,
         ) -> Result<(Uuid, Receiver<Deltas>), DeltasError> {
-            self.0.subscribe(extractor_id).await
+            self.0
+                .subscribe(extractor_id, options)
+                .await
         }
 
         async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), DeltasError> {
@@ -657,6 +668,7 @@ mod test {
             false,
             ComponentFilter::MinimumTVL(50.0),
             1,
+            true,
             rpc_client,
             deltas_client,
         )
@@ -872,7 +884,7 @@ mod test {
         let (tx, rx) = channel(1);
         deltas_client
             .expect_subscribe()
-            .return_once(move |_| {
+            .return_once(move |_, _| {
                 // Return subscriber id and a channel
                 Ok((Uuid::default(), rx))
             });

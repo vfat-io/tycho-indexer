@@ -119,7 +119,7 @@ impl std::fmt::Display for ExtractorIdentity {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "lowercase")]
 pub enum Command {
-    Subscribe { extractor_id: ExtractorIdentity },
+    Subscribe { extractor_id: ExtractorIdentity, include_state: bool },
     Unsubscribe { subscription_id: Uuid },
 }
 

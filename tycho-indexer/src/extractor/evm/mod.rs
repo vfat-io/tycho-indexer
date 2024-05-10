@@ -7,7 +7,10 @@ use ethers::{
     utils::keccak256,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    sync::Arc,
+};
 use tracing::log::warn;
 use tycho_core::{
     dto,
@@ -371,6 +374,22 @@ impl NormalisedMessage for BlockAccountChanges {
         ExtractorIdentity::new(self.chain, &self.extractor)
     }
 
+    fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
+        Arc::new(Self {
+            extractor: self.extractor.clone(),
+            chain: self.chain,
+            block: self.block,
+            finalized_block_height: self.finalized_block_height,
+            revert: self.revert,
+            account_updates: HashMap::new(),
+            new_tokens: self.new_tokens.clone(),
+            new_protocol_components: self.new_protocol_components.clone(),
+            deleted_protocol_components: self.deleted_protocol_components.clone(),
+            component_balances: self.component_balances.clone(),
+            component_tvl: self.component_tvl.clone(),
+        })
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -386,6 +405,22 @@ impl std::fmt::Display for BlockEntityChangesResult {
 impl NormalisedMessage for BlockEntityChangesResult {
     fn source(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.extractor)
+    }
+
+    fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
+        Arc::new(Self::new(
+            &self.extractor,
+            self.chain,
+            self.block,
+            self.finalized_block_height,
+            self.revert,
+            HashMap::new(),
+            self.new_tokens.clone(),
+            self.new_protocol_components.clone(),
+            self.deleted_protocol_components.clone(),
+            self.component_balances.clone(),
+            self.component_tvl.clone(),
+        ))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

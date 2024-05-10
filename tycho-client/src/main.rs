@@ -43,6 +43,11 @@ struct CliArgs {
     /// Run the example on a single block with UniswapV2 and UniswapV3.
     #[clap(long)]
     example: bool,
+
+    /// If set, only component and tokens are streamed, any snapshots or state updates
+    /// are omitted from the stream.
+    #[clap(long)]
+    no_state: bool,
 }
 
 #[tokio::main]
@@ -83,7 +88,7 @@ async fn main() {
                 Some("0xa478c2975ab1ea89e8196811f51a7b7ade33eb11".to_string()),
             ),
         ];
-        run(tycho_url, exchanges, 0.0, 600, 1).await;
+        run(tycho_url, exchanges, 0.0, 600, 1, true).await;
         return;
     }
 
@@ -108,7 +113,15 @@ async fn main() {
 
     tracing::info!("Running with exchanges: {:?}", exchanges);
 
-    run(args.tycho_url, exchanges, args.min_tvl.into(), args.block_time, args.timeout).await;
+    run(
+        args.tycho_url,
+        exchanges,
+        args.min_tvl.into(),
+        args.block_time,
+        args.timeout,
+        !args.no_state,
+    )
+    .await;
 }
 
 async fn run(
@@ -117,6 +130,7 @@ async fn run(
     tvl: f64,
     block_time: u64,
     timeout: u64,
+    include_state: bool,
 ) {
     let tycho_ws_url = format!("ws://{tycho_url}");
     let tycho_rpc_url = format!("http://{tycho_url}");
@@ -143,6 +157,7 @@ async fn run(
             true,
             filter,
             1,
+            include_state,
             HttpRPCClient::new(&tycho_rpc_url).unwrap(),
             ws_client.clone(),
         );
