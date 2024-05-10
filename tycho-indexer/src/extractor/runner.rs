@@ -190,7 +190,7 @@ impl ExtractorRunner {
         }
             // Additional inner debug span with substreams information
             // trace_id is set later on in process_substreams_response
-        .instrument(tracing::debug_span!("loop", trace_id = tracing::field::Empty)))
+        .instrument(tracing::info_span!("loop", trace_id = tracing::field::Empty)))
     }
 
     #[instrument(skip_all)]
@@ -343,6 +343,7 @@ impl ExtractorBuilder {
         chain_state: ChainState,
         cached_gw: &CachedGateway,
         token_pre_processor: &TokenPreProcessor,
+        protocol_cache: &ProtocolMemoryCache,
     ) -> Result<Self, ExtractionError> {
         let protocol_types = self
             .config
@@ -360,13 +361,6 @@ impl ExtractorBuilder {
                 )
             })
             .collect();
-
-        let protocol_cache = ProtocolMemoryCache::new(
-            Chain::Ethereum,
-            chrono::Duration::seconds(900),
-            Arc::new(cached_gw.clone()),
-        );
-        protocol_cache.populate().await?;
 
         match self.config.implementation_type {
             ImplementationType::Vm => {
