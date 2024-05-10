@@ -391,23 +391,33 @@ where
     async fn construct_currency_tokens(
         &self,
         msg: &evm::BlockContractChanges,
-    ) -> HashMap<Address, CurrencyToken> {
+    ) -> Result<HashMap<Address, CurrencyToken>, StorageError> {
         let new_token_addresses = msg
             .protocol_components()
             .into_iter()
             .flat_map(|pc| pc.tokens.clone().into_iter())
             .map(|addr| Bytes::from(addr.as_bytes()))
             .collect::<Vec<_>>();
+
+        // Separate between known and unkown tokens
         let is_token_known = self
             .protocol_cache
             .has_token(&new_token_addresses)
             .await;
-        let unknown_tokens = new_token_addresses
+        let (unknown_tokens, known_tokens) = new_token_addresses
             .into_iter()
             .zip(is_token_known.into_iter())
-            .filter_map(|(addr, token_is_known)| (!token_is_known).then_some(H160::from(addr)))
+            .partition::<Vec<_>, _>(|(_, known)| !*known);
+        let known_tokens = known_tokens
+            .into_iter()
+            .map(|(addr, _)| addr)
+            .collect::<Vec<_>>();
+        let unkown_tokens_h160 = unknown_tokens
+            .into_iter()
+            .map(|(addr, _)| H160::from(addr))
             .collect::<Vec<_>>();
 
+        // Construct unkown tokens using rpc
         let balance_map: HashMap<H160, (H160, U256)> = msg
             .tx_updates
             .iter()
@@ -449,18 +459,26 @@ where
             })
             .collect::<HashMap<_, _>>();
         let tf = TokenFinder::new(balance_map);
+        let existing_tokens = self
+            .protocol_cache
+            .get_tokens(&known_tokens)
+            .await?
+            .into_iter()
+            .flatten()
+            .map(|t| (t.address.clone(), t));
         let new_tokens: HashMap<Address, CurrencyToken> = self
             .token_pre_processor
             .get_tokens(
-                unknown_tokens,
+                unkown_tokens_h160,
                 Arc::new(tf),
                 web3::types::BlockNumber::Number(msg.block.number.into()),
             )
             .await
             .iter()
             .map(|t| (Bytes::from(t.address.as_bytes()), t.into()))
+            .chain(existing_tokens)
             .collect();
-        new_tokens
+        Ok(new_tokens)
     }
 }
 
@@ -538,7 +556,7 @@ where
 
         msg.new_tokens = self
             .construct_currency_tokens(&msg)
-            .await;
+            .await?;
         self.protocol_cache
             .add_tokens(msg.new_tokens.values().cloned())
             .await?;
@@ -569,7 +587,6 @@ where
                     .await?;
             }
         }
-
         self.update_last_processed_block(msg.block)
             .await;
 
@@ -580,6 +597,16 @@ where
         let mut changes = msg.aggregate_updates()?;
         self.handle_tvl_changes(&mut changes)
             .await?;
+
+        if !is_syncing {
+            debug!(
+                new_components = changes.new_protocol_components.len(),
+                new_tokens = changes.new_tokens.len(),
+                update = changes.account_updates.len(),
+                tvl_changes = changes.component_tvl.len(),
+                "ProcessedMessage"
+            );
+        }
         return Ok(Some(Arc::new(changes)));
     }
 
@@ -900,7 +927,6 @@ impl VmPgGateway {
         new_cursor: &str,
         syncing: bool,
     ) -> Result<(), StorageError> {
-        debug!("Upserting block");
         self.state_gateway
             .start_transaction(&(&changes.block).into())
             .await;
@@ -919,14 +945,14 @@ impl VmPgGateway {
             .upsert_block(&[(&changes.block).into()])
             .await?;
         for update in changes.tx_updates.iter() {
-            debug!(tx_hash = ?update.tx.hash, "Processing transaction");
+            trace!(tx_hash = ?update.tx.hash, "Processing transaction");
             self.state_gateway
                 .upsert_tx(&[(&update.tx).into()])
                 .await?;
             for (_, acc_update) in update.account_updates.iter() {
                 if acc_update.is_creation() {
                     let new: evm::Account = acc_update.ref_into_account(&update.tx);
-                    info!(block_number = ?changes.block.number, contract_address = ?new.address, "New contract found at {:#020x}", &new.address);
+                    info!(block_number = ?changes.block.number, contract_address = ?new.address, "NewContract");
                     self.state_gateway
                         .upsert_contract(&(&new).into())
                         .await?;
@@ -1224,6 +1250,108 @@ mod test {
             (Bytes::from("0x0000000000000000000000000000000000000001"), 1.0),
             (Bytes::from("0x0000000000000000000000000000000000000002"), 2.0),
         ])
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_construct_tokens() {
+        let msg = evm::BlockContractChanges {
+            extractor: "ex".to_string(),
+            block: evm::Block::default(),
+            chain: Chain::Ethereum,
+            finalized_block_height: 0,
+            revert: false,
+            new_tokens: HashMap::new(),
+            tx_updates: vec![evm::TransactionVMUpdates {
+                account_updates: HashMap::new(),
+                protocol_components: HashMap::from([(
+                    "comp1".to_string(),
+                    evm::ProtocolComponent {
+                        tokens: vec![
+                            "0x0000000000000000000000000000000000000001"
+                                .parse()
+                                .unwrap(),
+                            "0x0000000000000000000000000000000000000003"
+                                .parse()
+                                .unwrap(),
+                        ],
+                        ..Default::default()
+                    },
+                )]),
+                component_balances: HashMap::new(),
+                tx: evm::Transaction::default(),
+            }],
+        };
+
+        let protocol_gw = MockGateway::new();
+        let protocol_cache = ProtocolMemoryCache::new(
+            Chain::Ethereum,
+            chrono::Duration::seconds(1),
+            Arc::new(protocol_gw),
+        );
+        let t1 = CurrencyToken::new(
+            &Bytes::from("0x0000000000000000000000000000000000000001"),
+            "TOK1",
+            18,
+            0,
+            &[],
+            Chain::Ethereum,
+            100,
+        );
+        protocol_cache
+            .add_tokens([t1.clone()])
+            .await
+            .expect("adding tokens failed");
+
+        let mut preprocessor = MockTokenPreProcessorTrait::new();
+        let t3 = evm::ERC20Token::new(
+            "0x0000000000000000000000000000000000000003"
+                .parse()
+                .unwrap(),
+            "TOK3".to_string(),
+            18,
+            0,
+            Vec::new(),
+            Chain::Ethereum,
+            100,
+        );
+        let ret = vec![t3.clone()];
+        preprocessor
+            .expect_get_tokens()
+            .return_once(|_, _, _| ret);
+        let mut extractor_gw = MockVmGateway::new();
+        extractor_gw
+            .expect_ensure_protocol_types()
+            .times(1)
+            .returning(|_| ());
+        extractor_gw
+            .expect_get_cursor()
+            .times(1)
+            .returning(|| Ok("cursor".into()));
+        let extractor = VmContractExtractor::new(
+            "vm_name",
+            Chain::Ethereum,
+            ChainState::default(),
+            extractor_gw,
+            HashMap::from([("pt_1".to_string(), ProtocolType::default())]),
+            "system1".to_string(),
+            protocol_cache,
+            preprocessor,
+            None,
+            5,
+        )
+        .await
+        .expect("extractor init failed");
+        let exp = HashMap::from([
+            (t1.address.clone(), t1),
+            (Bytes::from(t3.address.as_bytes()), (&t3).into()),
+        ]);
+
+        let res = extractor
+            .construct_currency_tokens(&msg)
+            .await
+            .expect("construct_currency_tokens failed");
+
+        assert_eq!(res, exp);
     }
 
     #[test_log::test(tokio::test)]

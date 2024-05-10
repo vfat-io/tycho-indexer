@@ -147,7 +147,6 @@ impl ExtractorRunner {
                             Some(Ok(BlockResponse::New(data))) => {
                                 let block_number = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 tracing::Span::current().record("block_number", block_number);
-                                debug!("New block data received.");
                                 // TODO: change interface to take a reference to avoid this clone
                                 match self.extractor.handle_tick_scoped_data(data.clone()).await {
                                     Ok(Some(msg)) => {
