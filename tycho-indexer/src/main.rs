@@ -200,7 +200,8 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
         "test_protocol".to_string(),
         Chain::from_str(&global_args.chain).unwrap(),
         ImplementationType::Vm,
-        1,
+        1, /* TODO: if we want to increase this, we need to commit the cache when we reached
+            * `end_block` */
         run_args.start_block,
         run_args
             .protocol_type_names

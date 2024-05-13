@@ -106,13 +106,25 @@ substreams pack substreams/ethereum-ambient/substreams.yaml
 
 7. Run `tycho-indexer` locally using cli:
 
+We currently support 4 commands:
+
+- `index` : Run every extractor set in `./extractors.yaml`
+- `run` : Run a single extractor
+- `analyze-tokens` : Run token analyzer cronjob
+- `rpc` : Run only the server part of Tycho
+
+Each command can be used with the following:
+
 ```bash
-RUST_LOG=info cargo run -- \
-    --endpoint https://mainnet.eth.streamingfast.io:443 \
-    --module map_changes \
-    --spkg substreams/ethereum-ambient/substreams-ethereum-ambient-v0.3.0.spkg \
-    --start-block 17361664 \
-    --stop-block +1000
+RUST_LOG=info cargo run --bin tycho-indexer -- \
+    {your-command}
+```
+
+For more informations about flags can run
+
+```bash
+RUST_LOG=info cargo run --bin tycho-indexer -- \
+    {your-command} --help
 ```
 
 #### Quickly run a spkg from our repository:
@@ -427,4 +439,4 @@ Before moving to other chains the following things should be taken care of:
 
 - Correctly implement ChainState struct to return the latest block by querying the chains rpc.
 - Potentially fix assumption about fixed block times in the `tycho_client::feed`.
-- 
+-
