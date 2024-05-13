@@ -473,7 +473,7 @@ impl PostgresGateway {
             .map(|(pc_id, t_address)| {
                 let t_id = token_add_by_id
                     .get(t_address)
-                    .ok_or(StorageError::NotFound("Token id".to_string(), t_address.to_string()))?;
+                    .ok_or(StorageError::NotFound("Token".to_string(), t_address.to_string()))?;
                 Ok(orm::NewProtocolComponentHoldsToken {
                     protocol_component_id: *pc_id,
                     token_id: *t_id,

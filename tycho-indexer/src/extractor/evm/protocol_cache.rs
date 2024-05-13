@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::{Local, NaiveDateTime};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument};
 
 use tycho_core::{
     models::{protocol::ProtocolComponent, token::CurrencyToken, Address, Chain, ComponentId},
@@ -105,7 +105,7 @@ impl ProtocolMemoryCache {
                 });
         }
         let n_prices = self.update_prices_cache().await?;
-        debug!(?n_tokens, ?n_components, ?n_prices, "protocol cache populated");
+        info!(?n_tokens, ?n_components, ?n_prices, "ProtocolCachePopulated");
         Ok(())
     }
 

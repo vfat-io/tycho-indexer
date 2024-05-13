@@ -104,11 +104,6 @@ where
         &mut self,
         final_block_height: u64,
     ) -> Result<Vec<B>, StorageError> {
-        debug!(
-            "Draining new finalized blocks from RevertBuffer... New chain height {}",
-            final_block_height.to_string()
-        );
-
         let target_index = self.find_index(|b| b.block().number == final_block_height);
         let first = self
             .get_block_range(None, None)?

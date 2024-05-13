@@ -1,6 +1,10 @@
 use async_trait::async_trait;
 use serde::Serialize;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use tokio::{
     select,
@@ -14,8 +18,9 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::{
     dto::{
-        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ResponseAccount,
-        ResponseProtocolState, StateRequestBody, StateRequestParameters, VersionParam,
+        BlockParam, Chain, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolId,
+        ResponseAccount, ResponseProtocolState, StateRequestBody, StateRequestParameters,
+        VersionParam,
     },
     Bytes,
 };
@@ -173,24 +178,28 @@ where
                 number: Some(header.number as i64),
             }),
         );
-        // Use given ids or use all if not passed
-        let ids = ids
-            .map(|it| it.into_iter().collect::<Vec<_>>())
-            .unwrap_or_else(|| {
-                tracked_components
-                    .components
-                    .keys()
-                    .collect::<Vec<_>>()
-            });
 
-        if ids.is_empty() {
+        // Use given ids or use all if not passed
+        let request_ids = ids
+            .map(|it| {
+                it.into_iter()
+                    .map(|id| ProtocolId { id: id.clone(), chain: Chain::Ethereum })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| tracked_components.get_tracked_component_ids());
+
+        let component_ids = request_ids
+            .iter()
+            .map(|protocol_id| &protocol_id.id)
+            .collect::<HashSet<_>>();
+
+        if component_ids.is_empty() {
             return Ok(StateSyncMessage { header, ..Default::default() });
         }
 
-        let component_ids = tracked_components.get_tracked_component_ids();
         let mut protocol_states = self
             .rpc_client
-            .get_protocol_states_paginated(self.extractor_id.chain, &component_ids, &version, 50, 4)
+            .get_protocol_states_paginated(self.extractor_id.chain, &request_ids, &version, 50, 4)
             .await?
             .states
             .into_iter()
@@ -207,7 +216,7 @@ where
                         component.id.clone(),
                         ComponentWithState { state, component: component.clone() },
                     ))
-                } else if ids.contains(&&component.id) {
+                } else if component_ids.contains(&&component.id) {
                     // only emit error event if we requested this component
                     let component_id = &component.id;
                     error!(?component_id, "Missing state for native component!");
@@ -218,7 +227,7 @@ where
             })
             .collect();
 
-        let contract_ids = tracked_components.get_contracts_by_component(ids.clone());
+        let contract_ids = tracked_components.get_contracts_by_component(component_ids.clone());
         let vm_storage = if !contract_ids.is_empty() {
             let contract_states = self
                 .rpc_client
@@ -247,7 +256,7 @@ where
                 .components
                 .iter()
                 .filter_map(|(id, comp)| {
-                    if ids.contains(&id) {
+                    if component_ids.contains(&id) {
                         Some(
                             comp.contract_ids
                                 .iter()
@@ -378,6 +387,7 @@ where
                                     }
                                 })
                                 .collect::<Vec<_>>();
+                            debug!(components=?requiring_snapshot, "SnapshotRequest");
                             tracker
                                 .start_tracking(&requiring_snapshot)
                                 .await?;

@@ -128,7 +128,6 @@ impl NativePgGateway {
         new_cursor: &str,
         syncing: bool,
     ) -> Result<(), StorageError> {
-        debug!("Upserting block");
         self.state_gateway
             .start_transaction(&(&changes.block).into())
             .await;
@@ -138,6 +137,7 @@ impl NativePgGateway {
                 .values()
                 .cloned()
                 .collect::<Vec<_>>();
+            debug!(new_tokens=?new_tokens.iter().map(|t| &t.address).collect::<Vec<_>>(), "NewTokens");
             self.state_gateway
                 .add_tokens(&new_tokens)
                 .await?;
@@ -180,6 +180,13 @@ impl NativePgGateway {
         }
 
         if !new_protocol_components.is_empty() {
+            debug!(
+                protocol_components = ?new_protocol_components
+                    .iter()
+                    .map(|pc| &pc.id)
+                    .collect::<Vec<_>>(),
+                "NewProtocolComponents"
+            );
             self.state_gateway
                 .add_protocol_components(new_protocol_components.as_slice())
                 .await?;
@@ -447,14 +454,6 @@ where
                 }
             })
             .collect::<HashMap<_, _>>();
-        let token_decimals = self
-            .protocol_cache
-            .get_tokens(&addresses)
-            .await?
-            .into_iter()
-            .filter_map(|t| t.map(|t| (t.address.clone(), t.decimals)))
-            .collect::<HashMap<_, _>>();
-
         // calculate new tvl values
         let tvl_updates = balances
             .iter()
@@ -463,8 +462,9 @@ where
                     .iter()
                     .filter_map(|(addr, bal)| {
                         let addr = Bytes::from(addr.as_bytes());
-                        let decimals = token_decimals.get(&addr).copied()? as i32;
-                        Some(prices.get(&addr)? * bal.balance_float / 10.0_f64.powi(decimals))
+                        let price = *prices.get(&addr)?;
+                        let tvl = bal.balance_float / price;
+                        Some(tvl)
                     })
                     .sum();
                 (cid.clone(), component_tvl)
@@ -569,21 +569,30 @@ where
     async fn construct_currency_tokens(
         &self,
         msg: &evm::BlockEntityChanges,
-    ) -> HashMap<Address, CurrencyToken> {
+    ) -> Result<HashMap<Address, CurrencyToken>, StorageError> {
         let new_token_addresses = msg
             .protocol_components()
             .into_iter()
             .flat_map(|pc| pc.tokens.clone().into_iter())
             .map(|addr| Bytes::from(addr.as_bytes()))
             .collect::<Vec<_>>();
+
+        // Separate between known and unkown tokens
         let is_token_known = self
             .protocol_cache
             .has_token(&new_token_addresses)
             .await;
-        let unknown_tokens = new_token_addresses
+        let (unknown_tokens, known_tokens) = new_token_addresses
             .into_iter()
             .zip(is_token_known.into_iter())
-            .filter_map(|(addr, token_is_known)| (!token_is_known).then_some(H160::from(addr)))
+            .partition::<Vec<_>, _>(|(_, known)| !*known);
+        let known_tokens = known_tokens
+            .into_iter()
+            .map(|(addr, _)| addr)
+            .collect::<Vec<_>>();
+        let unkown_tokens_h160 = unknown_tokens
+            .into_iter()
+            .map(|(addr, _)| H160::from(addr))
             .collect::<Vec<_>>();
 
         let balance_map: HashMap<H160, (H160, U256)> = msg
@@ -609,18 +618,26 @@ where
             })
             .collect();
         let tf = TokenFinder::new(balance_map);
+        let existing_tokens = self
+            .protocol_cache
+            .get_tokens(&known_tokens)
+            .await?
+            .into_iter()
+            .flatten()
+            .map(|t| (t.address.clone(), t));
         let new_tokens: HashMap<Address, CurrencyToken> = self
             .token_pre_processor
             .get_tokens(
-                unknown_tokens,
+                unkown_tokens_h160,
                 Arc::new(tf),
                 web3::types::BlockNumber::Number(msg.block.number.into()),
             )
             .await
             .iter()
             .map(|t| (Bytes::from(t.address.as_bytes()), t.into()))
+            .chain(existing_tokens)
             .collect();
-        new_tokens
+        Ok(new_tokens)
     }
 }
 
@@ -697,7 +714,7 @@ where
 
         msg.new_tokens = self
             .construct_currency_tokens(&msg)
-            .await;
+            .await?;
         self.protocol_cache
             .add_tokens(msg.new_tokens.values().cloned())
             .await?;
@@ -742,6 +759,15 @@ where
         let mut changes = msg.aggregate_updates()?;
         self.handle_tvl_changes(&mut changes)
             .await?;
+        if !is_syncing {
+            debug!(
+                new_components = changes.new_protocol_components.len(),
+                new_tokens = changes.new_tokens.len(),
+                update = changes.state_updates.len(),
+                tvl_changes = changes.component_tvl.len(),
+                "ProcessedMessage"
+            );
+        }
         return Ok(Some(Arc::new(changes)));
     }
 
