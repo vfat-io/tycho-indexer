@@ -240,9 +240,15 @@ impl ExtractorRunner {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct ProtocolTypeConfig {
+pub struct ProtocolTypeConfig {
     name: String,
     financial_type: FinancialType,
+}
+
+impl ProtocolTypeConfig {
+    pub fn new(name: String, financial_type: FinancialType) -> Self {
+        Self { name, financial_type }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -255,6 +261,30 @@ pub struct ExtractorConfig {
     protocol_types: Vec<ProtocolTypeConfig>,
     spkg: String,
     module_name: String,
+}
+
+impl ExtractorConfig {
+    pub fn new(
+        name: String,
+        chain: Chain,
+        implementation_type: ImplementationType,
+        sync_batch_size: usize,
+        start_block: i64,
+        protocol_types: Vec<ProtocolTypeConfig>,
+        spkg: String,
+        module_name: String,
+    ) -> Self {
+        Self {
+            name,
+            chain,
+            implementation_type,
+            sync_batch_size,
+            start_block,
+            protocol_types,
+            spkg,
+            module_name,
+        }
+    }
 }
 
 pub struct ExtractorBuilder {
@@ -297,8 +327,8 @@ impl ExtractorBuilder {
         self
     }
 
-    pub fn end_block(mut self, val: i64) -> Self {
-        self.end_block = val;
+    pub fn end_block(mut self, val: Option<i64>) -> Self {
+        self.end_block = val.unwrap_or(0);
         self
     }
 
@@ -614,7 +644,7 @@ mod test {
             spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
             module_name: "test_module".to_owned(),
         })
-        .end_block(10)
+        .end_block(Some(10))
         .token("test_token")
         .set_extractor(extractor);
 
