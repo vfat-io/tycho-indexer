@@ -454,14 +454,6 @@ where
                 }
             })
             .collect::<HashMap<_, _>>();
-        let token_decimals = self
-            .protocol_cache
-            .get_tokens(&addresses)
-            .await?
-            .into_iter()
-            .filter_map(|t| t.map(|t| (t.address.clone(), t.decimals)))
-            .collect::<HashMap<_, _>>();
-
         // calculate new tvl values
         let tvl_updates = balances
             .iter()
@@ -470,8 +462,9 @@ where
                     .iter()
                     .filter_map(|(addr, bal)| {
                         let addr = Bytes::from(addr.as_bytes());
-                        let decimals = token_decimals.get(&addr).copied()? as i32;
-                        Some(prices.get(&addr)? * bal.balance_float / 10.0_f64.powi(decimals))
+                        let price = *prices.get(&addr)?;
+                        let tvl = bal.balance_float / price;
+                        Some(tvl)
                     })
                     .sum();
                 (cid.clone(), component_tvl)

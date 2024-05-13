@@ -269,13 +269,6 @@ where
                 }
             })
             .collect::<HashMap<_, _>>();
-        let token_decimals = self
-            .protocol_cache
-            .get_tokens(&addresses)
-            .await?
-            .into_iter()
-            .filter_map(|t| t.map(|t| (t.address.clone(), t.decimals)))
-            .collect::<HashMap<_, _>>();
 
         // calculate new tvl values
         let tvl_updates = balances
@@ -285,8 +278,9 @@ where
                     .iter()
                     .filter_map(|(addr, bal)| {
                         let addr = Bytes::from(addr.as_bytes());
-                        let decimals = token_decimals.get(&addr).copied()? as i32;
-                        Some(prices.get(&addr)? * bal.balance_float / 10.0_f64.powi(decimals))
+                        let price = *prices.get(&addr)?;
+                        let tvl = bal.balance_float / price;
+                        Some(tvl)
                     })
                     .sum();
                 (cid.clone(), component_tvl)
@@ -1065,6 +1059,7 @@ impl VmGateway for VmPgGateway {
 
 #[cfg(test)]
 mod test {
+    use float_eq::assert_float_eq;
     use tycho_core::models::{protocol::ProtocolComponent, FinancialType, ImplementationType};
 
     use crate::{
@@ -1247,8 +1242,11 @@ mod test {
 
     fn token_prices() -> HashMap<Bytes, f64> {
         HashMap::from([
-            (Bytes::from("0x0000000000000000000000000000000000000001"), 1.0),
-            (Bytes::from("0x0000000000000000000000000000000000000002"), 2.0),
+            (
+                Bytes::from("0x0000000000000000000000000000000000000001"),
+                344101538937875300000000000.0,
+            ),
+            (Bytes::from("0x0000000000000000000000000000000000000002"), 2980881444.0),
         ])
     }
 
@@ -1367,11 +1365,26 @@ mod test {
                         balance: Bytes::from(
                             "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
                         ),
-                        balance_float: 1000e18,
+                        balance_float: 11_304_207_639.4e18,
                         modify_tx: H256::default(),
                         component_id: "comp1".to_string(),
                     },
-                )]),
+                ),
+                    (
+                        H160::from_str("0x0000000000000000000000000000000000000002").unwrap(),
+                        evm::ComponentBalance {
+                            token: H160::from_str("0x0000000000000000000000000000000000000002")
+                                .unwrap(),
+                            balance: Bytes::from(
+                                "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
+                            ),
+                            balance_float: 100_000e6,
+                            modify_tx: H256::default(),
+                            component_id: "comp1".to_string(),
+                        },
+                    )
+
+                ]),
             )]),
             ..Default::default()
         };
@@ -1407,7 +1420,7 @@ mod test {
             .add_tokens([
                 CurrencyToken::new(
                     &Bytes::from("0x0000000000000000000000000000000000000001"),
-                    "TOK1",
+                    "PEPE",
                     18,
                     0,
                     &[],
@@ -1416,8 +1429,8 @@ mod test {
                 ),
                 CurrencyToken::new(
                     &Bytes::from("0x0000000000000000000000000000000000000002"),
-                    "TOK2",
-                    18,
+                    "USDC",
+                    6,
                     0,
                     &[],
                     Chain::Ethereum,
@@ -1454,14 +1467,19 @@ mod test {
         )
         .await
         .expect("extractor init failed");
-        let exp_tvl = HashMap::from([("comp1".to_string(), 1000.0)]);
+        let exp_tvl = 66.39849612683253;
 
         extractor
             .handle_tvl_changes(&mut msg)
             .await
             .expect("handle_tvl_call failed");
+        let res = msg
+            .component_tvl
+            .get("comp1")
+            .expect("comp1 tvl not present");
 
-        assert_eq!(&msg.component_tvl, &exp_tvl);
+        assert_eq!(msg.component_tvl.len(), 1);
+        assert_float_eq!(*res, exp_tvl, rmax <= 0.000_001);
     }
 }
 
