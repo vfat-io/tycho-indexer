@@ -187,7 +187,7 @@ impl ExtractorRunner {
                 }
             }
         }
-            // Additional inner debug span with substreams information
+            // Additional inner info span with substreams information
             // trace_id is set later on in process_substreams_response
         .instrument(tracing::info_span!("loop", trace_id = tracing::field::Empty)))
     }

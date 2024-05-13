@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use clap::Parser;
 use tracing_appender::rolling::{self};
-use tracing_subscriber::layer::SubscriberExt;
 
 use tycho_client::{
     deltas::DeltasClient,
@@ -55,9 +54,12 @@ async fn main() {
     let (non_blocking, _guard) =
         tracing_appender::non_blocking(rolling::never(args.log_folder, "dev_logs.log"));
     let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().expect("Bad env filter"),
+        )
         .with_writer(non_blocking)
-        .finish()
-        .with(tracing_subscriber::EnvFilter::new("info"));
+        .finish();
+
     tracing::subscriber::set_global_default(subscriber)
         .expect("Failed to set up logging subscriber");
 
