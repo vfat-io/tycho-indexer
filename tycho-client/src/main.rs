@@ -17,8 +17,8 @@ use tycho_core::dto::{Chain, ExtractorIdentity};
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
 #[clap(version = "0.1.0")]
 struct CliArgs {
-    /// Tycho server URL, without protocol. Example: localhost:8888
-    #[clap(long, default_value = "localhost:8888")]
+    /// Tycho server URL, without protocol. Example: localhost:4242
+    #[clap(long, default_value = "localhost:4242")]
     tycho_url: String,
 
     /// The blockchain to index on
