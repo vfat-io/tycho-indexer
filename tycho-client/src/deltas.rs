@@ -83,6 +83,27 @@ pub enum DeltasError {
     Fatal(String),
 }
 
+#[derive(Clone, Debug)]
+pub struct SubscriptionOptions {
+    include_state: bool,
+}
+
+impl Default for SubscriptionOptions {
+    fn default() -> Self {
+        Self { include_state: true }
+    }
+}
+
+impl SubscriptionOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_state(mut self, val: bool) -> Self {
+        self.include_state = val;
+        self
+    }
+}
+
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub trait DeltasClient {
@@ -95,6 +116,7 @@ pub trait DeltasClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
+        options: SubscriptionOptions,
     ) -> Result<(Uuid, Receiver<Deltas>), DeltasError>;
 
     /// Unsubscribe from an subscription
@@ -483,6 +505,7 @@ impl DeltasClient for WsDeltasClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
+        options: SubscriptionOptions,
     ) -> Result<(Uuid, Receiver<Deltas>), DeltasError> {
         trace!("Starting subscribe");
         self.ensure_connection().await;
@@ -494,7 +517,7 @@ impl DeltasClient for WsDeltasClient {
                 .expect("ws not connected");
             trace!("Sending subscribe command");
             inner.new_subscription(&extractor_id, ready_tx)?;
-            let cmd = Command::Subscribe { extractor_id };
+            let cmd = Command::Subscribe { extractor_id, include_state: options.include_state };
             inner
                 .ws_send(tungstenite::protocol::Message::Text(
                     serde_json::to_string(&cmd).expect("serialize cmd encode error"),
@@ -685,9 +708,10 @@ mod tests {
                 {
                     "method":"subscribe",
                     "extractor_id":{
-                    "chain":"ethereum",
-                    "name":"vm:ambient"
-                    }
+                        "chain":"ethereum",
+                        "name":"vm:ambient"
+                    },
+                    "include_state": true
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
@@ -826,7 +850,10 @@ mod tests {
             .expect("connect failed");
         let (_, mut rx) = timeout(
             Duration::from_millis(100),
-            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+            client.subscribe(
+                ExtractorIdentity::new(Chain::Ethereum, "vm:ambient"),
+                SubscriptionOptions::new(),
+            ),
         )
         .await
         .expect("subscription timed out")
@@ -861,7 +888,8 @@ mod tests {
                     "extractor_id":{
                         "chain": "ethereum",
                         "name": "vm:ambient"
-                    }
+                    },
+                    "include_state": true
                 }"#
                     .to_owned()
                     .replace(|c: char| c.is_whitespace(), ""),
@@ -913,7 +941,10 @@ mod tests {
             .expect("connect failed");
         let (sub_id, mut rx) = timeout(
             Duration::from_millis(100),
-            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+            client.subscribe(
+                ExtractorIdentity::new(Chain::Ethereum, "vm:ambient"),
+                SubscriptionOptions::new(),
+            ),
         )
         .await
         .expect("subscription timed out")
@@ -950,9 +981,10 @@ mod tests {
                 {
                     "method":"subscribe",
                     "extractor_id":{
-                    "chain":"ethereum",
-                    "name":"vm:ambient"
-                    }
+                        "chain":"ethereum",
+                        "name":"vm:ambient"
+                    },
+                    "include_state": true
                 }"#
                     .to_owned()
                     .replace(|c: char| c.is_whitespace(), ""),
@@ -990,7 +1022,10 @@ mod tests {
             .expect("connect failed");
         let (_, mut rx) = timeout(
             Duration::from_millis(100),
-            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+            client.subscribe(
+                ExtractorIdentity::new(Chain::Ethereum, "vm:ambient"),
+                SubscriptionOptions::new(),
+            ),
         )
         .await
         .expect("subscription timed out")
@@ -1019,9 +1054,10 @@ mod tests {
                 {
                     "method":"subscribe",
                     "extractor_id":{
-                    "chain":"ethereum",
-                    "name":"vm:ambient"
-                    }
+                        "chain":"ethereum",
+                        "name":"vm:ambient"
+                    },
+                    "include_state": true
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
@@ -1104,7 +1140,10 @@ mod tests {
         for _ in 0..2 {
             let (_, mut rx) = timeout(
                 Duration::from_millis(100),
-                client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+                client.subscribe(
+                    ExtractorIdentity::new(Chain::Ethereum, "vm:ambient"),
+                    SubscriptionOptions::new(),
+                ),
             )
             .await
             .expect("subscription timed out")

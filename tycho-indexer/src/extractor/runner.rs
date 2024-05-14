@@ -537,6 +537,10 @@ mod test {
             self.extractor_id.clone()
         }
 
+        fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
+            Arc::new(self.clone())
+        }
+
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }

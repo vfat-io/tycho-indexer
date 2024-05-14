@@ -128,6 +128,7 @@ impl WsActor {
         &mut self,
         ctx: &mut ws::WebsocketContext<Self>,
         extractor_id: &ExtractorIdentity,
+        include_state: bool,
     ) {
         {
             debug!(extractor=?extractor_id, "Acquire lock for subscribing..");
@@ -152,7 +153,12 @@ impl WsActor {
                         // The `rx` variable is a `Result<String, String>`.
                         let stream = async_stream::stream! {
                             while let Some(item) = rx.recv().await {
-                                yield Ok((subscription_id, item));
+                                if !include_state {
+                                    let light = item.drop_state();
+                                    yield Ok((subscription_id, light));
+                                } else {
+                                    yield Ok((subscription_id, item));
+                                }
                             }
                         };
 
@@ -238,7 +244,7 @@ impl Actor for WsActor {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "lowercase")]
 pub enum Command {
-    Subscribe { extractor_id: ExtractorIdentity },
+    Subscribe { extractor_id: ExtractorIdentity, include_state: bool },
     Unsubscribe { subscription_id: Uuid },
 }
 
@@ -301,9 +307,9 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsActor {
                     Ok(message) => {
                         // Handle the message based on its variant
                         match message {
-                            Command::Subscribe { extractor_id } => {
+                            Command::Subscribe { extractor_id, include_state } => {
                                 debug!(%extractor_id, "Subscribing to extractor");
-                                self.subscribe(ctx, &extractor_id);
+                                self.subscribe(ctx, &extractor_id, include_state);
                             }
                             Command::Unsubscribe { subscription_id } => {
                                 debug!(%subscription_id, "Unsubscribing from subscription");
@@ -383,6 +389,10 @@ mod tests {
     impl NormalisedMessage for DummyMessage {
         fn source(&self) -> ExtractorIdentity {
             self.extractor_id.clone()
+        }
+
+        fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
+            Arc::new(self.clone())
         }
 
         fn as_any(&self) -> &dyn std::any::Any {
@@ -627,7 +637,7 @@ mod tests {
         debug!("Connected to test server");
 
         // Create and send a subscribe message from the client
-        let action = Command::Subscribe { extractor_id: extractor_id.clone() };
+        let action = Command::Subscribe { extractor_id: extractor_id.clone(), include_state: true };
         connection
             .send(Message::Text(serde_json::to_string(&action).unwrap()))
             .await
@@ -656,7 +666,8 @@ mod tests {
         debug!("Received DummyMessage from server");
 
         // Create and send a second subscribe message from the client
-        let action = Command::Subscribe { extractor_id: extractor_id2.clone() };
+        let action =
+            Command::Subscribe { extractor_id: extractor_id2.clone(), include_state: true };
         connection
             .send(Message::Text(serde_json::to_string(&action).unwrap()))
             .await
@@ -728,7 +739,7 @@ mod tests {
         // Create and send a subscribe message from the client
         let extractor_id =
             ExtractorIdentity { chain: Chain::Ethereum, name: "vm:ambient".to_owned() };
-        let action = Command::Subscribe { extractor_id };
+        let action = Command::Subscribe { extractor_id, include_state: true };
         let res = serde_json::to_string(&action).unwrap();
         println!("{}", res);
     }
