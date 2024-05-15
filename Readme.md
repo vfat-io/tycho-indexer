@@ -111,7 +111,7 @@ We currently support 4 commands:
 - `index` : Run every extractor set in `./extractors.yaml`
 - `run` : Run a single extractor
 - `analyze-tokens` : Run token analyzer cronjob
-- `rpc` : Run only the server part of Tycho
+- `rpc` : Run only the http rpc server
 
 Each command can be used with the following:
 
