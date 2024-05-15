@@ -5,7 +5,7 @@ pub mod token;
 
 use crate::{dto, Bytes};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -130,6 +130,8 @@ pub trait NormalisedMessage:
     std::any::Any + std::fmt::Debug + std::fmt::Display + Send + Sync + 'static
 {
     fn source(&self) -> ExtractorIdentity;
+
+    fn drop_state(&self) -> Arc<dyn NormalisedMessage>;
 
     fn as_any(&self) -> &dyn std::any::Any;
 }

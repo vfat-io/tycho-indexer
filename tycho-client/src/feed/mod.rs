@@ -98,6 +98,7 @@ pub struct BlockSynchronizer<S> {
     synchronizers: Option<HashMap<ExtractorIdentity, S>>,
     block_time: std::time::Duration,
     max_wait: std::time::Duration,
+    max_messages: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -321,7 +322,11 @@ where
     S: StateSynchronizer,
 {
     pub fn new(block_time: std::time::Duration, max_wait: std::time::Duration) -> Self {
-        Self { synchronizers: None, block_time, max_wait }
+        Self { synchronizers: None, max_messages: None, block_time, max_wait }
+    }
+
+    pub fn max_messages(&mut self, val: usize) {
+        self.max_messages = Some(val);
     }
 
     pub fn register_synchronizer(mut self, id: ExtractorIdentity, synchronizer: S) -> Self {
@@ -411,6 +416,7 @@ where
         let mut block_history = BlockHistory::new(vec![start_header], 15);
         let (sync_tx, sync_rx) = mpsc::channel(30);
         let main_loop_jh: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let mut n_iter = 1;
             loop {
                 // Send retrieved data to receivers.
                 sync_tx
@@ -422,6 +428,15 @@ where
                             .collect(),
                     ))
                     .await?;
+
+                // Check if we have reached the max messages
+                if let Some(max_messages) = self.max_messages {
+                    if n_iter >= max_messages {
+                        info!(max_messages, "StreamEnd");
+                        return Ok(())
+                    }
+                }
+                n_iter += 1;
 
                 // Here we simply wait block_time + max_wait. This will not work for chains with
                 // unknown block times but is simple enough for now.

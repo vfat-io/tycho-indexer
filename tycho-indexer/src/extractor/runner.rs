@@ -147,7 +147,6 @@ impl ExtractorRunner {
                             Some(Ok(BlockResponse::New(data))) => {
                                 let block_number = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 tracing::Span::current().record("block_number", block_number);
-                                debug!("New block data received.");
                                 // TODO: change interface to take a reference to avoid this clone
                                 match self.extractor.handle_tick_scoped_data(data.clone()).await {
                                     Ok(Some(msg)) => {
@@ -188,9 +187,9 @@ impl ExtractorRunner {
                 }
             }
         }
-            // Additional inner debug span with substreams information
+            // Additional inner info span with substreams information
             // trace_id is set later on in process_substreams_response
-        .instrument(tracing::debug_span!("loop", trace_id = tracing::field::Empty)))
+        .instrument(tracing::info_span!("loop", trace_id = tracing::field::Empty)))
     }
 
     #[instrument(skip_all)]
@@ -370,6 +369,7 @@ impl ExtractorBuilder {
         chain_state: ChainState,
         cached_gw: &CachedGateway,
         token_pre_processor: &TokenPreProcessor,
+        protocol_cache: &ProtocolMemoryCache,
     ) -> Result<Self, ExtractionError> {
         let protocol_types = self
             .config
@@ -387,13 +387,6 @@ impl ExtractorBuilder {
                 )
             })
             .collect();
-
-        let protocol_cache = ProtocolMemoryCache::new(
-            Chain::Ethereum,
-            chrono::Duration::seconds(900),
-            Arc::new(cached_gw.clone()),
-        );
-        protocol_cache.populate().await?;
 
         match self.config.implementation_type {
             ImplementationType::Vm => {
@@ -569,6 +562,10 @@ mod test {
     impl NormalisedMessage for DummyMessage {
         fn source(&self) -> ExtractorIdentity {
             self.extractor_id.clone()
+        }
+
+        fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
+            Arc::new(self.clone())
         }
 
         fn as_any(&self) -> &dyn std::any::Any {

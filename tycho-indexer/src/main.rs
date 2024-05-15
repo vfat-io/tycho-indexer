@@ -27,7 +27,10 @@ use tycho_indexer::{
     cli::{AnalyzeTokenArgs, Cli, Command, GlobalArgs, IndexArgs, RunSpkgArgs},
     extractor::{
         self,
-        evm::{chain_state::ChainState, token_analysis_cron::analyze_tokens},
+        evm::{
+            chain_state::ChainState, protocol_cache::ProtocolMemoryCache,
+            token_analysis_cron::analyze_tokens,
+        },
         runner::{ExtractorConfig, HandleResult, ProtocolTypeConfig},
         ExtractionError,
     },
@@ -252,9 +255,17 @@ async fn build_all_extractors(
 ) -> Result<Vec<HandleResult>, ExtractionError> {
     let mut extractor_handles = Vec::new();
 
+    info!("Building protocol cache");
+    let protocol_cache = ProtocolMemoryCache::new(
+        Chain::Ethereum,
+        chrono::Duration::seconds(900),
+        Arc::new(cached_gw.clone()),
+    );
+    protocol_cache.populate().await?;
+
     for extractor_config in config.extractors.values() {
         let (task, handle) = ExtractorBuilder::new(extractor_config)
-            .build(chain_state, cached_gw, token_pre_processor)
+            .build(chain_state, cached_gw, token_pre_processor, &protocol_cache)
             .await?
             .run()
             .await?;

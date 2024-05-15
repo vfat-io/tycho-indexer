@@ -119,7 +119,7 @@ impl std::fmt::Display for ExtractorIdentity {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "lowercase")]
 pub enum Command {
-    Subscribe { extractor_id: ExtractorIdentity },
+    Subscribe { extractor_id: ExtractorIdentity, include_state: bool },
     Unsubscribe { subscription_id: Uuid },
 }
 
@@ -295,7 +295,7 @@ pub struct BlockAccountChanges {
     chain: Chain,
     pub block: Block,
     pub revert: bool,
-    #[serde(with = "hex_hashmap_key")]
+    #[serde(with = "hex_hashmap_key", default)]
     pub new_tokens: HashMap<Bytes, ResponseToken>,
     #[serde(with = "hex_hashmap_key")]
     pub account_updates: HashMap<Bytes, AccountUpdate>,
@@ -501,7 +501,7 @@ pub struct BlockEntityChangesResult {
     pub chain: Chain,
     pub block: Block,
     pub revert: bool,
-    #[serde(with = "hex_hashmap_key")]
+    #[serde(with = "hex_hashmap_key", default)]
     pub new_tokens: HashMap<Bytes, ResponseToken>,
     pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,

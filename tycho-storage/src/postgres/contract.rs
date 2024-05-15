@@ -11,7 +11,7 @@ use diesel::{
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use ethers::utils::keccak256;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
-use tracing::instrument;
+use tracing::{error, instrument};
 use tycho_core::{
     models,
     models::{
@@ -1052,7 +1052,10 @@ impl PostgresGateway {
                 .returning(schema::account::id)
                 .get_result::<i64>(db)
                 .await
-                .map_err(|err| storage_error_from_diesel(err, "Account", &hex_addr, None))?
+                .map_err(|err| {
+                    error!("Failed inserting account");
+                    storage_error_from_diesel(err, "Account", &hex_addr, None)
+                })?
         };
 
         // we can only insert balance and contract_code if we have a creation transaction.
@@ -1148,6 +1151,7 @@ impl PostgresGateway {
             let account_id = *accounts
                 .get(&contract_id.address)
                 .ok_or_else(|| {
+                    error!("Failed to get account while updating slots!");
                     StorageError::NotFound("Account".to_owned(), hex::encode(&contract_id.address))
                 })?;
 
