@@ -258,18 +258,21 @@ pub struct ExtractorConfig {
     implementation_type: ImplementationType,
     sync_batch_size: usize,
     start_block: i64,
+    stop_block: Option<i64>,
     protocol_types: Vec<ProtocolTypeConfig>,
     spkg: String,
     module_name: String,
 }
 
 impl ExtractorConfig {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         chain: Chain,
         implementation_type: ImplementationType,
         sync_batch_size: usize,
         start_block: i64,
+        stop_block: Option<i64>,
         protocol_types: Vec<ProtocolTypeConfig>,
         spkg: String,
         module_name: String,
@@ -280,6 +283,7 @@ impl ExtractorConfig {
             implementation_type,
             sync_batch_size,
             start_block,
+            stop_block,
             protocol_types,
             spkg,
             module_name,
@@ -290,7 +294,6 @@ impl ExtractorConfig {
 pub struct ExtractorBuilder {
     config: ExtractorConfig,
     endpoint_url: String,
-    end_block: i64,
     token: String,
     extractor: Option<Arc<dyn Extractor>>,
     final_block_only: bool,
@@ -304,7 +307,6 @@ impl ExtractorBuilder {
         Self {
             config: config.clone(),
             endpoint_url: "https://mainnet.eth.streamingfast.io:443".to_owned(),
-            end_block: 0,
             token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
             extractor: None,
             final_block_only: false,
@@ -324,11 +326,6 @@ impl ExtractorBuilder {
 
     pub fn start_block(mut self, val: i64) -> Self {
         self.config.start_block = val;
-        self
-    }
-
-    pub fn end_block(mut self, val: Option<i64>) -> Self {
-        self.end_block = val.unwrap_or(0);
         self
     }
 
@@ -493,7 +490,7 @@ impl ExtractorBuilder {
             spkg.modules.clone(),
             self.config.module_name,
             self.config.start_block,
-            self.end_block as u64,
+            self.config.stop_block.unwrap_or(0) as u64,
             self.final_block_only,
         );
 
@@ -637,6 +634,7 @@ mod test {
             implementation_type: ImplementationType::Vm,
             sync_batch_size: 0,
             start_block: 0,
+            stop_block: None,
             protocol_types: vec![ProtocolTypeConfig {
                 name: "test_module_pool".to_owned(),
                 financial_type: FinancialType::Swap,
@@ -644,7 +642,6 @@ mod test {
             spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
             module_name: "test_module".to_owned(),
         })
-        .end_block(Some(10))
         .token("test_token")
         .set_extractor(extractor);
 

@@ -1,11 +1,10 @@
 #![doc = include_str!("../../Readme.md")]
 
-use anyhow::Context;
 use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use futures03::future::select_all;
 use reqwest::Client;
 use serde::Deserialize;
-use std::{fs::File, io::Read, str::FromStr, sync::Arc};
+use std::{collections::HashMap, fs::File, io::Read, str::FromStr, sync::Arc};
 use url::Url;
 
 use extractor::{
@@ -48,6 +47,10 @@ struct ExtractorConfigs {
 }
 
 impl ExtractorConfigs {
+    fn new(extractors: std::collections::HashMap<String, ExtractorConfig>) -> Self {
+        Self { extractors }
+    }
+
     fn from_yaml(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let mut file = File::open(path)?;
         let mut contents = String::new();
@@ -88,8 +91,98 @@ async fn run_indexer(
     index_args: IndexArgs,
 ) -> Result<(), ExtractionError> {
     info!("Starting Tycho");
+    let extractors_config = ExtractorConfigs::from_yaml(&index_args.extractors_config)
+        .map_err(|e| ExtractionError::Setup(format!("Failed to load extractors.yaml. {}", e)))?;
+
+    let retention_horizon: NaiveDateTime = index_args
+        .retention_horizon
+        .parse()
+        .expect("Failed to parse retention horizon");
+
+    let tasks = create_indexing_tasks(
+        &global_args,
+        &index_args.substreams_args.rpc_url,
+        &index_args
+            .chains
+            .iter()
+            .map(|chain_str| {
+                Chain::from_str(chain_str).unwrap_or_else(|_| panic!("Unknown chain {}", chain_str))
+            })
+            .collect::<Vec<_>>(),
+        retention_horizon,
+        extractors_config,
+    )
+    .await?;
+
+    let (res, _, _) = select_all(tasks).await;
+    res.expect("Extractor- nor ServiceTasks should panic!")
+}
+
+async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), ExtractionError> {
+    info!("Starting Tycho");
+
+    let config = ExtractorConfigs::new(HashMap::from([(
+        "test_module".to_string(),
+        ExtractorConfig::new(
+            "test_protocol".to_string(),
+            Chain::from_str(&run_args.chain).unwrap(),
+            ImplementationType::Vm,
+            1, /* TODO: if we want to increase this, we need to commit the cache when we reached
+                * `end_block` */
+            run_args.start_block,
+            run_args.stop_block(),
+            run_args
+                .protocol_type_names
+                .into_iter()
+                .map(|name| ProtocolTypeConfig::new(name, tycho_core::models::FinancialType::Swap))
+                .collect::<Vec<_>>(),
+            run_args.spkg,
+            run_args.module,
+        ),
+    )]));
+
+    let tasks = create_indexing_tasks(
+        &global_args,
+        &run_args.substreams_args.rpc_url,
+        &[Chain::from_str(&run_args.chain).unwrap()],
+        NaiveDateTime::from_str("2024-01-01T00:00:00").unwrap(),
+        config,
+    )
+    .await?;
+
+    let (res, _, _) = select_all(tasks).await;
+    res.expect("Extractor- nor ServiceTasks should panic!")
+}
+
+async fn run_rpc(global_args: GlobalArgs) -> Result<(), ExtractionError> {
+    let (cached_gw, _jh) = GatewayBuilder::new(&global_args.database_url)
+        .build()
+        .await?;
+
+    info!("Starting Tycho RPC");
+    let server_url = format!("http://{}:{}", global_args.server_ip, global_args.server_port);
+    let (server_handle, server_task) = ServicesBuilder::new(cached_gw)
+        .prefix(&global_args.server_version_prefix)
+        .bind(&global_args.server_ip)
+        .port(global_args.server_port)
+        .register_extractors(vec![])
+        .run()?;
+    info!(server_url, "Http and Ws server started");
+    let shutdown_task = tokio::spawn(shutdown_handler(server_handle, vec![], None));
+    let (res, _, _) = select_all([server_task, shutdown_task]).await;
+    res.expect("ServiceTasks shouldn't panic!")
+}
+
+/// Creates extraction and server tasks.
+async fn create_indexing_tasks(
+    global_args: &GlobalArgs,
+    rpc_url: &str,
+    chains: &[Chain],
+    retention_horizon: NaiveDateTime,
+    extractors_config: ExtractorConfigs,
+) -> Result<Vec<JoinHandle<Result<(), ExtractionError>>>, ExtractionError> {
     let rpc_client: Provider<Http> =
-        Provider::<Http>::try_from(&index_args.rpc_url).expect("Error creating HTTP provider");
+        Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
     let block_number = rpc_client
         .get_block_number()
         .await
@@ -97,8 +190,6 @@ async fn run_indexer(
         .as_u64();
 
     let chain_state = ChainState::new(chrono::Local::now().naive_utc(), block_number);
-    let extractors_config = ExtractorConfigs::from_yaml(&index_args.extractors_config)
-        .map_err(|e| ExtractionError::Setup(format!("Failed to load extractors.yaml. {}", e)))?;
 
     let protocol_systems: Vec<String> = extractors_config
         .extractors
@@ -106,20 +197,12 @@ async fn run_indexer(
         .cloned()
         .collect();
 
-    let retention_horizon: NaiveDateTime = index_args
-        .retention_horizon
-        .parse()
-        .expect("Failed to parse retention horizon");
-
     let (cached_gw, gw_writer_thread) = GatewayBuilder::new(&global_args.database_url)
-        .set_chains(&[Chain::from_str(&global_args.chain)
-            .with_context(|| format!("Unknown chain {}", &global_args.chain))
-            .unwrap()])
+        .set_chains(chains)
         .set_protocol_systems(&protocol_systems)
         .set_retention_horizon(retention_horizon)
         .build()
         .await?;
-
     let transport = Web3Transport::new(HttpTransport::new(
         Client::new(),
         Url::from_str(
@@ -129,9 +212,7 @@ async fn run_indexer(
         "transport".to_owned(),
     ));
     let w3 = Web3::new(transport);
-
     let token_processor = TokenPreProcessor::new(rpc_client, w3);
-
     let (mut tasks, extractor_handles): (Vec<_>, Vec<_>) =
         // TODO: accept substreams configuration from cli.
         build_all_extractors(&extractors_config, chain_state, &cached_gw, &token_processor)
@@ -160,100 +241,7 @@ async fn run_indexer(
 
     tasks.extend(vec![server_task, shutdown_task]);
 
-    let (res, _, _) = select_all(tasks).await;
-    res.expect("Extractor- nor ServiceTasks should panic!")
-}
-
-async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), ExtractionError> {
-    info!("Starting Tycho");
-    let rpc_client: Provider<Http> =
-        Provider::<Http>::try_from(&run_args.rpc_url).expect("Error creating HTTP provider");
-    let block_number = rpc_client
-        .get_block_number()
-        .await
-        .expect("Error getting block number")
-        .as_u64();
-
-    let chain_state = ChainState::new(chrono::Local::now().naive_utc(), block_number);
-
-    let (cached_gw, gw_writer_thread) = GatewayBuilder::new(&global_args.database_url)
-        .set_chains(&[Chain::Ethereum])
-        .set_protocol_systems(&vec!["test_protocol".to_string()])
-        .set_retention_horizon(NaiveDateTime::from_str("2024-01-01T00:00:00").unwrap())
-        .build()
-        .await?;
-
-    let transport = Web3Transport::new(HttpTransport::new(
-        Client::new(),
-        Url::from_str(
-            "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac",
-        )
-        .unwrap(),
-        "transport".to_owned(),
-    ));
-    let w3 = Web3::new(transport);
-
-    let token_processor = TokenPreProcessor::new(rpc_client, w3);
-
-    let maybe_end_block = run_args.stop_block();
-    let config = ExtractorConfig::new(
-        "test_protocol".to_string(),
-        Chain::from_str(&global_args.chain).unwrap(),
-        ImplementationType::Vm,
-        1, /* TODO: if we want to increase this, we need to commit the cache when we reached
-            * `end_block` */
-        run_args.start_block,
-        run_args
-            .protocol_type_names
-            .into_iter()
-            .map(|name| ProtocolTypeConfig::new(name, tycho_core::models::FinancialType::Swap))
-            .collect::<Vec<_>>(),
-        run_args.spkg,
-        run_args.module,
-    );
-
-    let (task, handle) = ExtractorBuilder::new(&config)
-        .end_block(maybe_end_block)
-        .build(chain_state, &cached_gw, &token_processor)
-        .await?
-        .run()
-        .await?;
-
-    info!("Extractor {} started!", handle.0.get_id());
-
-    let server_url = format!("http://{}:{}", global_args.server_ip, global_args.server_port);
-    let (server_handle, server_task) = ServicesBuilder::new(cached_gw.clone())
-        .prefix(&global_args.server_version_prefix)
-        .bind(&global_args.server_ip)
-        .port(global_args.server_port)
-        .register_extractors(vec![handle.clone()])
-        .run()?;
-    info!(server_url, "Http and Ws server started");
-
-    let shutdown_task =
-        tokio::spawn(shutdown_handler(server_handle, vec![handle.0], Some(gw_writer_thread)));
-
-    let (res, _, _) = select_all(vec![server_task, shutdown_task, task]).await;
-    res.expect("Extractor- nor ServiceTasks should panic!")
-}
-
-async fn run_rpc(global_args: GlobalArgs) -> Result<(), ExtractionError> {
-    let (cached_gw, _jh) = GatewayBuilder::new(&global_args.database_url)
-        .build()
-        .await?;
-
-    info!("Starting Tycho RPC");
-    let server_url = format!("http://{}:{}", global_args.server_ip, global_args.server_port);
-    let (server_handle, server_task) = ServicesBuilder::new(cached_gw)
-        .prefix(&global_args.server_version_prefix)
-        .bind(&global_args.server_ip)
-        .port(global_args.server_port)
-        .register_extractors(vec![])
-        .run()?;
-    info!(server_url, "Http and Ws server started");
-    let shutdown_task = tokio::spawn(shutdown_handler(server_handle, vec![], None));
-    let (res, _, _) = select_all([server_task, shutdown_task]).await;
-    res.expect("ServiceTasks shouldn't panic!")
+    Ok(tasks)
 }
 
 async fn build_all_extractors(
