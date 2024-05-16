@@ -125,7 +125,7 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
     info!("Starting Tycho");
 
     let config = ExtractorConfigs::new(HashMap::from([(
-        "test_module".to_string(),
+        "test_protocol".to_string(),
         ExtractorConfig::new(
             "test_protocol".to_string(),
             Chain::from_str(&run_args.chain).unwrap(),
