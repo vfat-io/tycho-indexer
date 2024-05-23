@@ -140,7 +140,7 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     }
 
     for (name, address) in exchanges {
-        let id = ExtractorIdentity { chain: Chain::Ethereum, name: name.clone() };
+        let id = ExtractorIdentity { chain: Chain::Ethereum, name: name.clone() }; //TODO: remove chain assumption
         let filter = if address.is_some() {
             ComponentFilter::Ids(vec![address.unwrap()])
         } else {

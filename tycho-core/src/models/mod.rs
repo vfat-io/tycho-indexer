@@ -70,6 +70,7 @@ pub enum Chain {
     Ethereum,
     Starknet,
     ZkSync,
+    Arbitrum,
 }
 
 impl From<dto::Chain> for Chain {
@@ -78,6 +79,7 @@ impl From<dto::Chain> for Chain {
             dto::Chain::Ethereum => Chain::Ethereum,
             dto::Chain::Starknet => Chain::Starknet,
             dto::Chain::ZkSync => Chain::ZkSync,
+            dto::Chain::Arbitrum => Chain::Arbitrum,
         }
     }
 }

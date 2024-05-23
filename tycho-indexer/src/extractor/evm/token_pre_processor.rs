@@ -24,6 +24,7 @@ pub struct TokenPreProcessor {
     ethers_client: Arc<Provider<Http>>,
     erc20_abi: Abi,
     web3_client: Web3,
+    chain: Chain,
 }
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
@@ -39,9 +40,14 @@ pub trait TokenPreProcessorTrait: Send + Sync {
 const ABI_STR: &str = include_str!("./abi/erc20.json");
 
 impl TokenPreProcessor {
-    pub fn new(ethers_client: Provider<Http>, web3_client: Web3) -> Self {
+    pub fn new(ethers_client: Provider<Http>, web3_client: Web3, chain: Chain) -> Self {
         let abi = from_str::<Abi>(ABI_STR).expect("Unable to parse ABI");
-        TokenPreProcessor { ethers_client: Arc::new(ethers_client), erc20_abi: abi, web3_client }
+        TokenPreProcessor {
+            ethers_client: Arc::new(ethers_client),
+            erc20_abi: abi,
+            web3_client,
+            chain,
+        }
     }
 }
 
@@ -130,7 +136,7 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
                     .try_into()
                     .unwrap_or(10_000),
                 gas: gas.map_or_else(Vec::new, |g| vec![Some(g.try_into().unwrap_or(8_000_000))]),
-                chain: Chain::Ethereum,
+                chain: self.chain,
                 quality,
             });
         }
@@ -163,7 +169,7 @@ mod tests {
         ));
         let w3 = Web3::new(transport);
 
-        let processor = TokenPreProcessor::new(client, w3);
+        let processor = TokenPreProcessor::new(client, w3, Chain::Ethereum);
 
         let tf = TokenFinder::new(HashMap::new());
 

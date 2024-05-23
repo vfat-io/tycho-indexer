@@ -302,10 +302,10 @@ pub type HandleResult =
     (JoinHandle<Result<(), ExtractionError>>, (ExtractorHandle, ImplementationType));
 
 impl ExtractorBuilder {
-    pub fn new(config: &ExtractorConfig) -> Self {
+    pub fn new(config: &ExtractorConfig, endpoint_url: &str) -> Self {
         Self {
             config: config.clone(),
-            endpoint_url: "https://mainnet.eth.streamingfast.io:443".to_owned(),
+            endpoint_url: endpoint_url.to_owned(),
             token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
             extractor: None,
             final_block_only: false,
@@ -625,20 +625,23 @@ mod test {
 
         // Build the ExtractorRunnerBuilder
         let extractor = Arc::new(mock_extractor);
-        let builder = ExtractorBuilder::new(&ExtractorConfig {
-            name: "test_module".to_owned(),
-            chain: Chain::Ethereum,
-            implementation_type: ImplementationType::Vm,
-            sync_batch_size: 0,
-            start_block: 0,
-            stop_block: None,
-            protocol_types: vec![ProtocolTypeConfig {
-                name: "test_module_pool".to_owned(),
-                financial_type: FinancialType::Swap,
-            }],
-            spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
-            module_name: "test_module".to_owned(),
-        })
+        let builder = ExtractorBuilder::new(
+            &ExtractorConfig {
+                name: "test_module".to_owned(),
+                chain: Chain::Ethereum,
+                implementation_type: ImplementationType::Vm,
+                sync_batch_size: 0,
+                start_block: 0,
+                stop_block: None,
+                protocol_types: vec![ProtocolTypeConfig {
+                    name: "test_module_pool".to_owned(),
+                    financial_type: FinancialType::Swap,
+                }],
+                spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
+                module_name: "test_module".to_owned(),
+            },
+            "https://mainnet.eth.streamingfast.io",
+        )
         .token("test_token")
         .set_extractor(extractor);
 

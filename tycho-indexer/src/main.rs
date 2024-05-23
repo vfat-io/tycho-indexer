@@ -208,17 +208,20 @@ async fn create_indexing_tasks(
         .await?;
     let transport = Web3Transport::new(HttpTransport::new(
         Client::new(),
-        Url::from_str(
-            "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac",
-        )
-        .unwrap(),
+        Url::from_str(rpc_url).unwrap(),
         "transport".to_owned(),
     ));
     let w3 = Web3::new(transport);
-    let token_processor = TokenPreProcessor::new(rpc_client, w3);
+    let token_processor = TokenPreProcessor::new(
+        rpc_client,
+        w3,
+        *chains
+            .first()
+            .expect("No chain provided"), //TODO: handle multichain?
+    );
     let (mut tasks, extractor_handles): (Vec<_>, Vec<_>) =
         // TODO: accept substreams configuration from cli.
-        build_all_extractors(&extractors_config, chain_state, &cached_gw, &token_processor)
+        build_all_extractors(&extractors_config, chain_state, chains, &global_args.endpoint_url, &cached_gw, &token_processor)
             .await
             .map_err(|e| ExtractionError::Setup(format!("Failed to create extractors: {}", e)))?
             .into_iter()
@@ -250,6 +253,8 @@ async fn create_indexing_tasks(
 async fn build_all_extractors(
     config: &ExtractorConfigs,
     chain_state: ChainState,
+    chains: &[Chain],
+    endpoint_url: &str,
     cached_gw: &CachedGateway,
     token_pre_processor: &TokenPreProcessor,
 ) -> Result<Vec<HandleResult>, ExtractionError> {
@@ -257,14 +262,16 @@ async fn build_all_extractors(
 
     info!("Building protocol cache");
     let protocol_cache = ProtocolMemoryCache::new(
-        Chain::Ethereum,
+        *chains
+            .first()
+            .expect("No chain provided"), //TODO: handle multichain?
         chrono::Duration::seconds(900),
         Arc::new(cached_gw.clone()),
     );
     protocol_cache.populate().await?;
 
     for extractor_config in config.extractors.values() {
-        let (task, handle) = ExtractorBuilder::new(extractor_config)
+        let (task, handle) = ExtractorBuilder::new(extractor_config, endpoint_url)
             .build(chain_state, cached_gw, token_pre_processor, &protocol_cache)
             .await?
             .run()

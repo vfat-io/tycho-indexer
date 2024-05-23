@@ -190,7 +190,7 @@ where
         let request_ids = ids
             .map(|it| {
                 it.into_iter()
-                    .map(|id| ProtocolId { id: id.clone(), chain: Chain::Ethereum })
+                    .map(|id| ProtocolId { id: id.clone(), chain: Chain::Ethereum }) //TODO: remove chain assumption
                     .collect::<Vec<_>>()
             })
             .unwrap_or_else(|| tracked_components.get_tracked_component_ids());
