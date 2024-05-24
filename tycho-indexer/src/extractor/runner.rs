@@ -239,9 +239,15 @@ impl ExtractorRunner {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct ProtocolTypeConfig {
+pub struct ProtocolTypeConfig {
     name: String,
     financial_type: FinancialType,
+}
+
+impl ProtocolTypeConfig {
+    pub fn new(name: String, financial_type: FinancialType) -> Self {
+        Self { name, financial_type }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -251,15 +257,42 @@ pub struct ExtractorConfig {
     implementation_type: ImplementationType,
     sync_batch_size: usize,
     start_block: i64,
+    stop_block: Option<i64>,
     protocol_types: Vec<ProtocolTypeConfig>,
     spkg: String,
     module_name: String,
 }
 
+impl ExtractorConfig {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: String,
+        chain: Chain,
+        implementation_type: ImplementationType,
+        sync_batch_size: usize,
+        start_block: i64,
+        stop_block: Option<i64>,
+        protocol_types: Vec<ProtocolTypeConfig>,
+        spkg: String,
+        module_name: String,
+    ) -> Self {
+        Self {
+            name,
+            chain,
+            implementation_type,
+            sync_batch_size,
+            start_block,
+            stop_block,
+            protocol_types,
+            spkg,
+            module_name,
+        }
+    }
+}
+
 pub struct ExtractorBuilder {
     config: ExtractorConfig,
     endpoint_url: String,
-    end_block: i64,
     token: String,
     extractor: Option<Arc<dyn Extractor>>,
     final_block_only: bool,
@@ -269,11 +302,10 @@ pub type HandleResult =
     (JoinHandle<Result<(), ExtractionError>>, (ExtractorHandle, ImplementationType));
 
 impl ExtractorBuilder {
-    pub fn new(config: &ExtractorConfig) -> Self {
+    pub fn new(config: &ExtractorConfig, endpoint_url: &str) -> Self {
         Self {
             config: config.clone(),
-            endpoint_url: "https://mainnet.eth.streamingfast.io:443".to_owned(),
-            end_block: 0,
+            endpoint_url: endpoint_url.to_owned(),
             token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
             extractor: None,
             final_block_only: false,
@@ -293,11 +325,6 @@ impl ExtractorBuilder {
 
     pub fn start_block(mut self, val: i64) -> Self {
         self.config.start_block = val;
-        self
-    }
-
-    pub fn end_block(mut self, val: i64) -> Self {
-        self.end_block = val;
         self
     }
 
@@ -456,7 +483,7 @@ impl ExtractorBuilder {
             spkg.modules.clone(),
             self.config.module_name,
             self.config.start_block,
-            self.end_block as u64,
+            self.config.stop_block.unwrap_or(0) as u64,
             self.final_block_only,
         );
 
@@ -598,20 +625,23 @@ mod test {
 
         // Build the ExtractorRunnerBuilder
         let extractor = Arc::new(mock_extractor);
-        let builder = ExtractorBuilder::new(&ExtractorConfig {
-            name: "test_module".to_owned(),
-            chain: Chain::Ethereum,
-            implementation_type: ImplementationType::Vm,
-            sync_batch_size: 0,
-            start_block: 0,
-            protocol_types: vec![ProtocolTypeConfig {
-                name: "test_module_pool".to_owned(),
-                financial_type: FinancialType::Swap,
-            }],
-            spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
-            module_name: "test_module".to_owned(),
-        })
-        .end_block(10)
+        let builder = ExtractorBuilder::new(
+            &ExtractorConfig {
+                name: "test_module".to_owned(),
+                chain: Chain::Ethereum,
+                implementation_type: ImplementationType::Vm,
+                sync_batch_size: 0,
+                start_block: 0,
+                stop_block: None,
+                protocol_types: vec![ProtocolTypeConfig {
+                    name: "test_module_pool".to_owned(),
+                    financial_type: FinancialType::Swap,
+                }],
+                spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
+                module_name: "test_module".to_owned(),
+            },
+            "https://mainnet.eth.streamingfast.io",
+        )
         .token("test_token")
         .set_extractor(extractor);
 

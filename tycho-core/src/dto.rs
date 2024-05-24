@@ -38,6 +38,7 @@ pub enum Chain {
     Ethereum,
     Starknet,
     ZkSync,
+    Arbitrum,
 }
 
 impl From<models::contract::Contract> for ResponseAccount {
@@ -64,6 +65,7 @@ impl From<models::Chain> for Chain {
             models::Chain::Ethereum => Chain::Ethereum,
             models::Chain::Starknet => Chain::Starknet,
             models::Chain::ZkSync => Chain::ZkSync,
+            models::Chain::Arbitrum => Chain::Arbitrum,
         }
     }
 }
@@ -624,7 +626,7 @@ impl StateRequestBody {
         Self {
             contract_ids: contract_ids.map(|ids| {
                 ids.into_iter()
-                    .map(|id| ContractId::new(Chain::Ethereum, id))
+                    .map(|id| ContractId::new(Chain::Ethereum, id)) //TODO: remove chain assumption
                     .collect()
             }),
             version,
