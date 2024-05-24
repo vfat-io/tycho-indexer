@@ -44,7 +44,7 @@ pub struct GlobalArgs {
         long,
         env,
         hide_env_values = true,
-        default_value = "postgres://postgres:mypassword@localhost:5432/tycho_indexer_0"
+        default_value = "postgres://postgres:mypassword@localhost:5431/tycho_indexer_0"
     )]
     pub database_url: String,
 
