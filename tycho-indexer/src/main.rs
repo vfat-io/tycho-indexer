@@ -158,8 +158,8 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
 }
 
 async fn run_rpc(global_args: GlobalArgs) -> Result<(), ExtractionError> {
-    let (cached_gw, _jh) = GatewayBuilder::new(&global_args.database_url)
-        .build()
+    let cached_gw = GatewayBuilder::new(&global_args.database_url)
+        .build_gw()
         .await?;
 
     info!("Starting Tycho RPC");

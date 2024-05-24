@@ -58,4 +58,14 @@ impl GatewayBuilder {
         let cached_gw = CachedGateway::new(tx, pool.clone(), inner_gw.clone());
         Ok((cached_gw, handle))
     }
+
+    pub async fn build_gw(self) -> Result<CachedGateway, StorageError> {
+        let pool = postgres::connect(&self.database_url).await?;
+
+        let inner_gw = PostgresGateway::new(pool.clone(), self.retention_horizon).await?;
+        let (tx, _) = mpsc::channel(10);
+
+        let cached_gw = CachedGateway::new(tx, pool.clone(), inner_gw.clone());
+        Ok(cached_gw)
+    }
 }
