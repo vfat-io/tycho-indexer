@@ -67,7 +67,7 @@ pub struct GlobalArgs {
 
 #[derive(Args, Debug, Clone, PartialEq)]
 pub struct SubstreamsArgs {
-    /// Ethereum node rpc url
+    /// Node rpc url
     #[clap(env, long)]
     pub rpc_url: String,
 
