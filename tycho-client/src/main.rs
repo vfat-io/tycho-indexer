@@ -152,7 +152,7 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
             is_native,
             true,
             filter,
-            1,
+            3,
             !args.no_state,
             HttpRPCClient::new(&tycho_rpc_url).unwrap(),
             ws_client.clone(),
