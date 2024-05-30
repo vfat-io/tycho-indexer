@@ -81,7 +81,7 @@ async fn main() {
         // You need to port-forward tycho before running this:
         //
         // ```bash
-        // kubectl port-forward deploy/tycho-indexer 4242:80
+        // kubectl port-forward -n dev-tycho deploy/tycho-indexer 4242:4242
         // ```
         let exchanges = vec![
             (
