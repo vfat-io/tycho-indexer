@@ -576,7 +576,18 @@ impl DeltasClient for WsDeltasClient {
                 let mut msg_rx = if let Some(stream) = ws_rx.take() {
                     stream.boxed()
                 } else {
-                    let (conn, _) = connect_async(&ws_uri).await?;
+                    let (conn, _) = match connect_async(&ws_uri).await {
+                        Ok(conn) => conn,
+                        Err(e) => {
+                            // Prepare for reconnection
+                            retry_count += 1;
+                            let mut guard = this.inner.as_ref().lock().await;
+                            *guard = None;
+
+                            warn!(?e, "Failed to connect to WebSocket server; Reconnecting");
+                            continue 'retry;
+                        }
+                    };
                     let (ws_tx_new, ws_rx_new) = conn.split();
                     let mut guard = this.inner.as_ref().lock().await;
                     *guard =
