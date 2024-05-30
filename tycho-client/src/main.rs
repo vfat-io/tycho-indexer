@@ -16,8 +16,8 @@ use tycho_core::dto::{Chain, ExtractorIdentity};
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
 #[clap(version = "0.1.0")]
 struct CliArgs {
-    /// Tycho server URL, without protocol. Example: localhost:8888
-    #[clap(long, default_value = "localhost:8888")]
+    /// Tycho server URL, without protocol. Example: localhost:4242
+    #[clap(long, default_value = "localhost:4242")]
     tycho_url: String,
 
     /// Specifies exchanges and optionally a pool address in the format name:address
@@ -81,7 +81,7 @@ async fn main() {
         // You need to port-forward tycho before running this:
         //
         // ```bash
-        // kubectl port-forward deploy/tycho-indexer 8888:4242
+        // kubectl port-forward deploy/tycho-indexer 4242:80
         // ```
         let exchanges = vec![
             (
