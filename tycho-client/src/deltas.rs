@@ -666,11 +666,8 @@ mod tests {
 
     use super::*;
 
-    use std::{net::SocketAddr, time::Duration};
-    use tokio::{
-        net::TcpListener,
-        time::{sleep, timeout},
-    };
+    use std::net::SocketAddr;
+    use tokio::{net::TcpListener, time::timeout};
 
     #[derive(Clone)]
     enum ExpectedComm {
