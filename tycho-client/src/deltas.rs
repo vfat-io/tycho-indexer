@@ -629,6 +629,12 @@ impl DeltasClient for WsDeltasClient {
                     }
                 }
             }
+
+            // Check if max retries has been reached.
+            if retry_count >= this.max_reconnects {
+                return Err(DeltasError::NotConnected);
+            }
+
             // clean up before exiting
             let mut guard = this.inner.as_ref().lock().await;
             *guard = None;
@@ -1166,7 +1172,7 @@ mod tests {
 
             let _ = timeout(Duration::from_millis(100), rx.recv())
                 .await
-                .expect("awaiting message timeout ou    t")
+                .expect("awaiting message timeout out")
                 .expect("receiving message failed");
 
             // wait for the connection to drop
@@ -1176,7 +1182,7 @@ mod tests {
             assert!(res.is_none());
         }
         let res = jh.await.expect("ws client join failed");
-        // 3rd client reconnect attempt should fail
+        // 5th client reconnect attempt should fail
         assert!(res.is_err());
         server_thread
             .await
