@@ -27,6 +27,7 @@ use mockall::automock;
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::Arc,
+    time::Duration,
 };
 use thiserror::Error;
 use tokio::{
@@ -36,6 +37,7 @@ use tokio::{
         oneshot, Mutex, Notify,
     },
     task::JoinHandle,
+    time::sleep,
 };
 use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -585,6 +587,8 @@ impl DeltasClient for WsDeltasClient {
                             *guard = None;
 
                             warn!(?e, "Failed to connect to WebSocket server; Reconnecting");
+                            sleep(Duration::from_secs(1)).await;
+
                             continue 'retry;
                         }
                     };
