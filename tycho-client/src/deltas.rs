@@ -27,6 +27,7 @@ use mockall::automock;
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::Arc,
+    time::Duration,
 };
 use thiserror::Error;
 use tokio::{
@@ -36,6 +37,7 @@ use tokio::{
         oneshot, Mutex, Notify,
     },
     task::JoinHandle,
+    time::sleep,
 };
 use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -576,7 +578,20 @@ impl DeltasClient for WsDeltasClient {
                 let mut msg_rx = if let Some(stream) = ws_rx.take() {
                     stream.boxed()
                 } else {
-                    let (conn, _) = connect_async(&ws_uri).await?;
+                    let (conn, _) = match connect_async(&ws_uri).await {
+                        Ok(conn) => conn,
+                        Err(e) => {
+                            // Prepare for reconnection
+                            retry_count += 1;
+                            let mut guard = this.inner.as_ref().lock().await;
+                            *guard = None;
+
+                            warn!(?e, "Failed to connect to WebSocket server; Reconnecting");
+                            sleep(Duration::from_millis(500)).await;
+
+                            continue 'retry;
+                        }
+                    };
                     let (ws_tx_new, ws_rx_new) = conn.split();
                     let mut guard = this.inner.as_ref().lock().await;
                     *guard =
@@ -614,6 +629,12 @@ impl DeltasClient for WsDeltasClient {
                     }
                 }
             }
+
+            // Check if max retries has been reached.
+            if retry_count >= this.max_reconnects {
+                return Err(DeltasError::NotConnected);
+            }
+
             // clean up before exiting
             let mut guard = this.inner.as_ref().lock().await;
             *guard = None;
@@ -645,11 +666,8 @@ mod tests {
 
     use super::*;
 
-    use std::{net::SocketAddr, time::Duration};
-    use tokio::{
-        net::TcpListener,
-        time::{sleep, timeout},
-    };
+    use std::net::SocketAddr;
+    use tokio::{net::TcpListener, time::timeout};
 
     #[derive(Clone)]
     enum ExpectedComm {
@@ -1151,7 +1169,7 @@ mod tests {
 
             let _ = timeout(Duration::from_millis(100), rx.recv())
                 .await
-                .expect("awaiting message timeout ou    t")
+                .expect("awaiting message timeout out")
                 .expect("receiving message failed");
 
             // wait for the connection to drop
@@ -1161,7 +1179,7 @@ mod tests {
             assert!(res.is_none());
         }
         let res = jh.await.expect("ws client join failed");
-        // 3rd client reconnect attempt should fail
+        // 5th client reconnect attempt should fail
         assert!(res.is_err());
         server_thread
             .await
