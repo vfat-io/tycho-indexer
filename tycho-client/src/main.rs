@@ -16,7 +16,7 @@ use tycho_core::dto::{Chain, ExtractorIdentity};
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
 #[clap(version = "0.1.0")]
 struct CliArgs {
-    /// Tycho server URL, without protocol. Example: localhost:4242
+    /// Tycho server URL, without protocol. Example: localhost:8888
     #[clap(long, default_value = "localhost:8888")]
     tycho_url: String,
 
@@ -125,7 +125,7 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     let tycho_ws_url = format!("ws://{}", &args.tycho_url);
     let tycho_rpc_url = format!("http://{}", &args.tycho_url);
     let ws_client = WsDeltasClient::new(&tycho_ws_url).unwrap();
-    ws_client
+    let ws_jh = ws_client
         .connect()
         .await
         .expect("ws client connection error");
@@ -160,21 +160,35 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
         block_sync = block_sync.register_synchronizer(id, sync);
     }
 
-    let (jh, mut rx) = block_sync
+    let (sync_jh, mut rx) = block_sync
         .run()
         .await
         .expect("block sync start error");
 
-    while let Some(msg) = rx.recv().await {
-        if let Ok(msg_json) = serde_json::to_string(&msg) {
-            println!("{}", msg_json);
-        } else {
-            tracing::error!("Failed to serialize FeedMessage");
+    let msg_printer = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if let Ok(msg_json) = serde_json::to_string(&msg) {
+                println!("{}", msg_json);
+            } else {
+                tracing::error!("Failed to serialize FeedMessage");
+            }
+        }
+    });
+
+    // Monitor the WebSocket, BlockSynchronizer and message printer futures.
+    tokio::select! {
+        res = ws_jh => {
+            let _ = res.expect("WebSocket connection dropped unexpectedly");
+        }
+        res = sync_jh => {
+            res.expect("BlockSynchronizer stopped unexpectedly");
+        }
+        res = msg_printer => {
+            res.expect("Message printer stopped unexpectedly");
         }
     }
 
     tracing::debug!("RX closed");
-    jh.await.unwrap();
 }
 
 #[cfg(test)]
