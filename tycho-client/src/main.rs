@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use clap::Parser;
+use tracing::trace;
 use tracing_appender::rolling::{self};
 
 use tycho_client::{
@@ -140,6 +141,7 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     }
 
     for (name, address) in exchanges {
+        trace!("Registering exchange: {}", name);
         let id = ExtractorIdentity { chain: Chain::Ethereum, name: name.clone() }; //TODO: remove chain assumption
         let filter = if address.is_some() {
             ComponentFilter::Ids(vec![address.unwrap()])

@@ -10,7 +10,7 @@ use tokio::{
     task::JoinHandle,
     time::timeout,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use tycho_core::{
     dto::{Block, ExtractorIdentity},
     Bytes,
@@ -336,6 +336,7 @@ where
         self
     }
     pub async fn run(mut self) -> BlockSyncResult<(JoinHandle<()>, Receiver<FeedMessage>)> {
+        trace!("Starting BlockSynchronizer...");
         let mut state_sync_tasks = FuturesUnordered::new();
         let mut synchronizers = self
             .synchronizers
@@ -433,7 +434,7 @@ where
                 if let Some(max_messages) = self.max_messages {
                     if n_iter >= max_messages {
                         info!(max_messages, "StreamEnd");
-                        return Ok(())
+                        return Ok(());
                     }
                 }
                 n_iter += 1;
