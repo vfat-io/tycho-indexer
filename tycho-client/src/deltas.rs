@@ -632,6 +632,7 @@ impl DeltasClient for WsDeltasClient {
 
             // Check if max retries has been reached.
             if retry_count >= this.max_reconnects {
+                error!("Max reconnection attempts reached; Exiting");
                 return Err(DeltasError::NotConnected);
             }
 
@@ -642,11 +643,14 @@ impl DeltasClient for WsDeltasClient {
             Ok(())
         });
         self.conn_notify.notified().await;
+
+        info!("Connection successful: TychoWebsocketClient started");
         Ok(jh)
     }
 
     #[instrument(skip(self))]
     async fn close(&self) -> Result<(), DeltasError> {
+        info!("Closing TychoWebsocketClient");
         let mut guard = self.inner.lock().await;
         let inner = guard
             .as_mut()
