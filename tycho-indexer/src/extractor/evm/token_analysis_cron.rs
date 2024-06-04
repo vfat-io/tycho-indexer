@@ -15,7 +15,6 @@ use super::token_pre_processor::map_vault;
 
 pub async fn analyze_tokens(
     analyze_args: AnalyzeTokenArgs,
-    rpc_url: &str,
     gw: Arc<dyn ProtocolGateway + Send + Sync>,
 ) -> anyhow::Result<()> {
     let mut tokens = Vec::new();
@@ -34,7 +33,7 @@ pub async fn analyze_tokens(
             .map(|chunk| {
                 analyze_batch(
                     analyze_args.chain,
-                    rpc_url.to_string(),
+                    analyze_args.rpc_url.clone(),
                     chunk.to_vec(),
                     sem.clone(),
                     gw.clone(),
@@ -172,6 +171,9 @@ mod test {
             concurrency: 10,
             update_batch_size: 100,
             fetch_batch_size: 100,
+            rpc_url:
+                "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac"
+                    .to_string(),
         };
         let mut gw = testing::MockGateway::new();
         gw.expect_get_tokens()
@@ -233,12 +235,8 @@ mod test {
                 Box::pin(async { Ok(()) })
             });
 
-        analyze_tokens(
-            args,
-            "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac",
-            Arc::new(gw),
-        )
-        .await
-        .expect("analyze tokens failed");
+        analyze_tokens(args, Arc::new(gw))
+            .await
+            .expect("analyze tokens failed");
     }
 }

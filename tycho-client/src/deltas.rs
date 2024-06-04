@@ -27,6 +27,7 @@ use mockall::automock;
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::Arc,
+    time::Duration,
 };
 use thiserror::Error;
 use tokio::{
@@ -36,6 +37,7 @@ use tokio::{
         oneshot, Mutex, Notify,
     },
     task::JoinHandle,
+    time::sleep,
 };
 use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -83,6 +85,27 @@ pub enum DeltasError {
     Fatal(String),
 }
 
+#[derive(Clone, Debug)]
+pub struct SubscriptionOptions {
+    include_state: bool,
+}
+
+impl Default for SubscriptionOptions {
+    fn default() -> Self {
+        Self { include_state: true }
+    }
+}
+
+impl SubscriptionOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_state(mut self, val: bool) -> Self {
+        self.include_state = val;
+        self
+    }
+}
+
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub trait DeltasClient {
@@ -95,6 +118,7 @@ pub trait DeltasClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
+        options: SubscriptionOptions,
     ) -> Result<(Uuid, Receiver<Deltas>), DeltasError>;
 
     /// Unsubscribe from an subscription
@@ -483,6 +507,7 @@ impl DeltasClient for WsDeltasClient {
     async fn subscribe(
         &self,
         extractor_id: ExtractorIdentity,
+        options: SubscriptionOptions,
     ) -> Result<(Uuid, Receiver<Deltas>), DeltasError> {
         trace!("Starting subscribe");
         self.ensure_connection().await;
@@ -494,7 +519,7 @@ impl DeltasClient for WsDeltasClient {
                 .expect("ws not connected");
             trace!("Sending subscribe command");
             inner.new_subscription(&extractor_id, ready_tx)?;
-            let cmd = Command::Subscribe { extractor_id };
+            let cmd = Command::Subscribe { extractor_id, include_state: options.include_state };
             inner
                 .ws_send(tungstenite::protocol::Message::Text(
                     serde_json::to_string(&cmd).expect("serialize cmd encode error"),
@@ -553,7 +578,20 @@ impl DeltasClient for WsDeltasClient {
                 let mut msg_rx = if let Some(stream) = ws_rx.take() {
                     stream.boxed()
                 } else {
-                    let (conn, _) = connect_async(&ws_uri).await?;
+                    let (conn, _) = match connect_async(&ws_uri).await {
+                        Ok(conn) => conn,
+                        Err(e) => {
+                            // Prepare for reconnection
+                            retry_count += 1;
+                            let mut guard = this.inner.as_ref().lock().await;
+                            *guard = None;
+
+                            warn!(?e, "Failed to connect to WebSocket server; Reconnecting");
+                            sleep(Duration::from_millis(500)).await;
+
+                            continue 'retry;
+                        }
+                    };
                     let (ws_tx_new, ws_rx_new) = conn.split();
                     let mut guard = this.inner.as_ref().lock().await;
                     *guard =
@@ -591,6 +629,13 @@ impl DeltasClient for WsDeltasClient {
                     }
                 }
             }
+
+            // Check if max retries has been reached.
+            if retry_count >= this.max_reconnects {
+                error!("Max reconnection attempts reached; Exiting");
+                return Err(DeltasError::NotConnected);
+            }
+
             // clean up before exiting
             let mut guard = this.inner.as_ref().lock().await;
             *guard = None;
@@ -598,11 +643,14 @@ impl DeltasClient for WsDeltasClient {
             Ok(())
         });
         self.conn_notify.notified().await;
+
+        info!("Connection successful: TychoWebsocketClient started");
         Ok(jh)
     }
 
     #[instrument(skip(self))]
     async fn close(&self) -> Result<(), DeltasError> {
+        info!("Closing TychoWebsocketClient");
         let mut guard = self.inner.lock().await;
         let inner = guard
             .as_mut()
@@ -622,11 +670,8 @@ mod tests {
 
     use super::*;
 
-    use std::{net::SocketAddr, time::Duration};
-    use tokio::{
-        net::TcpListener,
-        time::{sleep, timeout},
-    };
+    use std::net::SocketAddr;
+    use tokio::{net::TcpListener, time::timeout};
 
     #[derive(Clone)]
     enum ExpectedComm {
@@ -685,9 +730,10 @@ mod tests {
                 {
                     "method":"subscribe",
                     "extractor_id":{
-                    "chain":"ethereum",
-                    "name":"vm:ambient"
-                    }
+                        "chain":"ethereum",
+                        "name":"vm:ambient"
+                    },
+                    "include_state": true
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
@@ -715,6 +761,7 @@ mod tests {
                             "ts": "2023-09-14T00:00:00"
                         },
                         "revert": false,
+                        "new_tokens": {},
                         "account_updates": {
                             "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
                                 "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
@@ -774,6 +821,7 @@ mod tests {
                             "ts": "2023-09-14T00:00:00"
                         },
                         "revert": false,
+                        "new_tokens": {},
                         "state_updates": {
                             "component_1": {
                                 "component_id": "component_1",
@@ -824,7 +872,10 @@ mod tests {
             .expect("connect failed");
         let (_, mut rx) = timeout(
             Duration::from_millis(100),
-            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+            client.subscribe(
+                ExtractorIdentity::new(Chain::Ethereum, "vm:ambient"),
+                SubscriptionOptions::new(),
+            ),
         )
         .await
         .expect("subscription timed out")
@@ -859,7 +910,8 @@ mod tests {
                     "extractor_id":{
                         "chain": "ethereum",
                         "name": "vm:ambient"
-                    }
+                    },
+                    "include_state": true
                 }"#
                     .to_owned()
                     .replace(|c: char| c.is_whitespace(), ""),
@@ -911,7 +963,10 @@ mod tests {
             .expect("connect failed");
         let (sub_id, mut rx) = timeout(
             Duration::from_millis(100),
-            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+            client.subscribe(
+                ExtractorIdentity::new(Chain::Ethereum, "vm:ambient"),
+                SubscriptionOptions::new(),
+            ),
         )
         .await
         .expect("subscription timed out")
@@ -948,9 +1003,10 @@ mod tests {
                 {
                     "method":"subscribe",
                     "extractor_id":{
-                    "chain":"ethereum",
-                    "name":"vm:ambient"
-                    }
+                        "chain":"ethereum",
+                        "name":"vm:ambient"
+                    },
+                    "include_state": true
                 }"#
                     .to_owned()
                     .replace(|c: char| c.is_whitespace(), ""),
@@ -988,7 +1044,10 @@ mod tests {
             .expect("connect failed");
         let (_, mut rx) = timeout(
             Duration::from_millis(100),
-            client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+            client.subscribe(
+                ExtractorIdentity::new(Chain::Ethereum, "vm:ambient"),
+                SubscriptionOptions::new(),
+            ),
         )
         .await
         .expect("subscription timed out")
@@ -1017,9 +1076,10 @@ mod tests {
                 {
                     "method":"subscribe",
                     "extractor_id":{
-                    "chain":"ethereum",
-                    "name":"vm:ambient"
-                    }
+                        "chain":"ethereum",
+                        "name":"vm:ambient"
+                    },
+                    "include_state": true
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
@@ -1046,6 +1106,7 @@ mod tests {
                             "ts": "2023-09-14T00:00:00"
                         },
                         "revert": false,
+                        "new_tokens": {},
                         "account_updates": {
                             "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
                                 "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
@@ -1101,7 +1162,10 @@ mod tests {
         for _ in 0..2 {
             let (_, mut rx) = timeout(
                 Duration::from_millis(100),
-                client.subscribe(ExtractorIdentity::new(Chain::Ethereum, "vm:ambient")),
+                client.subscribe(
+                    ExtractorIdentity::new(Chain::Ethereum, "vm:ambient"),
+                    SubscriptionOptions::new(),
+                ),
             )
             .await
             .expect("subscription timed out")
@@ -1119,7 +1183,7 @@ mod tests {
             assert!(res.is_none());
         }
         let res = jh.await.expect("ws client join failed");
-        // 3rd client reconnect attempt should fail
+        // 5th client reconnect attempt should fail
         assert!(res.is_err());
         server_thread
             .await

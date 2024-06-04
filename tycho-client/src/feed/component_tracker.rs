@@ -77,7 +77,7 @@ where
     }
 
     /// Add a new component to be tracked
-    #[instrument(skip(self))]
+    #[instrument(skip(self, new_components))]
     pub async fn start_tracking(&mut self, new_components: &[&String]) -> Result<(), RPCError> {
         if new_components.is_empty() {
             return Ok(());
@@ -99,31 +99,31 @@ where
                 .map(|pc| (pc.id.clone(), pc)),
         );
         self.update_contracts();
-        debug!("Sucessfully started tracking new components");
+        debug!(n_components = new_components.len(), "StartedTracking");
         Ok(())
     }
 
     /// Stop tracking components
-    #[instrument(skip(self))]
+    #[instrument(skip(self, to_remove))]
     pub fn stop_tracking<'a, I: IntoIterator<Item = &'a String> + std::fmt::Debug>(
         &mut self,
         to_remove: I,
     ) -> HashMap<String, ProtocolComponent> {
+        let mut n_components = 0;
         let res = to_remove
             .into_iter()
             .filter_map(|k| {
                 let comp = self.components.remove(k);
                 if let Some(component) = &comp {
+                    n_components += 1;
                     for contract in component.contract_ids.iter() {
                         self.contracts.remove(contract);
                     }
-                } else {
-                    warn!(component_id = k, "Tried to remove component that was not present!");
                 }
                 comp.map(|c| (k.clone(), c))
             })
             .collect();
-        debug!("Sucessfully stopped tracking components");
+        debug!(n_components, "StoppedTracking");
         res
     }
 
@@ -136,7 +136,7 @@ where
                 let comp = self
                     .components
                     .get(cid)
-                    .expect("requested component that is not present");
+                    .unwrap_or_else(|| panic!("requested component that is not present: {cid}"));
                 comp.contract_ids.iter().cloned()
             })
             .collect()

@@ -38,6 +38,7 @@ pub enum Chain {
     Ethereum,
     Starknet,
     ZkSync,
+    Arbitrum,
 }
 
 impl From<models::contract::Contract> for ResponseAccount {
@@ -64,6 +65,7 @@ impl From<models::Chain> for Chain {
             models::Chain::Ethereum => Chain::Ethereum,
             models::Chain::Starknet => Chain::Starknet,
             models::Chain::ZkSync => Chain::ZkSync,
+            models::Chain::Arbitrum => Chain::Arbitrum,
         }
     }
 }
@@ -119,7 +121,7 @@ impl std::fmt::Display for ExtractorIdentity {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "lowercase")]
 pub enum Command {
-    Subscribe { extractor_id: ExtractorIdentity },
+    Subscribe { extractor_id: ExtractorIdentity, include_state: bool },
     Unsubscribe { subscription_id: Uuid },
 }
 
@@ -295,6 +297,8 @@ pub struct BlockAccountChanges {
     chain: Chain,
     pub block: Block,
     pub revert: bool,
+    #[serde(with = "hex_hashmap_key", default)]
+    pub new_tokens: HashMap<Bytes, ResponseToken>,
     #[serde(with = "hex_hashmap_key")]
     pub account_updates: HashMap<Bytes, AccountUpdate>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
@@ -329,6 +333,7 @@ impl BlockAccountChanges {
             chain,
             block,
             revert,
+            new_tokens: HashMap::new(),
             account_updates,
             new_protocol_components,
             deleted_protocol_components,
@@ -498,6 +503,8 @@ pub struct BlockEntityChangesResult {
     pub chain: Chain,
     pub block: Block,
     pub revert: bool,
+    #[serde(with = "hex_hashmap_key", default)]
+    pub new_tokens: HashMap<Bytes, ResponseToken>,
     pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
@@ -619,7 +626,7 @@ impl StateRequestBody {
         Self {
             contract_ids: contract_ids.map(|ids| {
                 ids.into_iter()
-                    .map(|id| ContractId::new(Chain::Ethereum, id))
+                    .map(|id| ContractId::new(Chain::Ethereum, id)) //TODO: remove chain assumption
                     .collect()
             }),
             version,
@@ -880,6 +887,7 @@ pub struct ResponseToken {
     pub decimals: u32,
     pub tax: u64,
     pub gas: Vec<Option<u64>>,
+    pub quality: u32,
 }
 
 impl From<models::token::CurrencyToken> for ResponseToken {
@@ -891,6 +899,7 @@ impl From<models::token::CurrencyToken> for ResponseToken {
             decimals: value.decimals,
             tax: value.tax,
             gas: value.gas,
+            quality: value.quality,
         }
     }
 }
@@ -1173,6 +1182,7 @@ mod test {
                 "ts": "2023-09-14T00:00:00"
             },
             "revert": false,
+            "new_tokens": {},
             "account_updates": {
                 "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
                     "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
@@ -1233,6 +1243,7 @@ mod test {
                 "ts": "2023-09-14T00:00:00"
             },
             "revert": false,
+            "new_tokens": {},
             "state_updates": {
                 "component_1": {
                     "component_id": "component_1",
@@ -1292,6 +1303,7 @@ mod test {
                 "ts": "2024-02-23T16:35:35"
                 },
                 "revert": false,
+                "new_tokens": {},
                 "state_updates": {
                     "0xde6faedbcae38eec6d33ad61473a04a6dd7f6e28": {
                         "component_id": "0xde6faedbcae38eec6d33ad61473a04a6dd7f6e28",
@@ -1558,6 +1570,7 @@ mod test {
             chain: Chain::Ethereum,
             block: Block::default(),
             revert: false,
+            new_tokens: HashMap::new(),
             state_updates: hashmap! { "state1".to_string() => ProtocolStateDelta::default() },
             new_protocol_components: hashmap! { "component1".to_string() => ProtocolComponent::default() },
             deleted_protocol_components: HashMap::new(),
@@ -1587,6 +1600,7 @@ mod test {
             chain: Chain::Ethereum,
             block: Block::default(),
             revert: true,
+            new_tokens: HashMap::new(),
             state_updates: hashmap! { "state2".to_string() => ProtocolStateDelta::default() },
             new_protocol_components: hashmap! { "component2".to_string() => ProtocolComponent::default() },
             deleted_protocol_components: hashmap! { "component3".to_string() => ProtocolComponent::default() },
@@ -1604,6 +1618,7 @@ mod test {
             chain: Chain::Ethereum,
             block: Block::default(),
             revert: true,
+            new_tokens: HashMap::new(),
             state_updates: hashmap! {
                 "state1".to_string() => ProtocolStateDelta::default(),
                 "state2".to_string() => ProtocolStateDelta::default(),

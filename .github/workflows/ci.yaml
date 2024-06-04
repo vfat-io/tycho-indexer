@@ -23,13 +23,13 @@ jobs:
           - stable
     services:
       postgres:
-        image: postgres
+        image: ghcr.io/dbsystel/postgresql-partman:15-5
         env:
-          POSTGRES_PASSWORD: mypassword
-          POSTGRES_DB: tycho_indexer_0
-          POSTGRES_USER: postgres
+          POSTGRESQL_PASSWORD: mypassword
+          POSTGRESQL_DATABASE: tycho_indexer_0
+          POSTGRESQL_USERNAME: postgres
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5

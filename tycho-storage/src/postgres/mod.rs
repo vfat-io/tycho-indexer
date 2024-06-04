@@ -129,7 +129,7 @@
 //! into a single transaction. This guarantees preservation of valid state
 //! throughout the application lifetime, even if the process panics during
 //! database operations.
-use std::{collections::HashMap, hash::Hash, ops::Deref, str::FromStr, sync::Arc};
+use std::{collections::HashMap, hash::Hash, ops::Deref, str::FromStr, sync::Arc, time::Duration};
 
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
@@ -156,6 +156,23 @@ mod schema;
 mod versioning;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations/");
+
+// +262142-12-31T23:59:59.999999999
+const MAX_TS: NaiveDateTime = NaiveDateTime::MAX;
+
+lazy_static! {
+    /// Simplifies querying current and historical versions by introducing a special marker version.
+    ///
+    /// By setting `valid_to` to `MAX_TS = max_version_ts + 1s` for the latest versions, this approach
+    /// collapses the query predicates from
+    /// `valid_from <= target_version < valid_to or valid_to is "latest"`
+    /// to a more streamlined
+    /// `valid_from <= target_version < valid_to`.
+    /// This enables `max_version_ts` queries to include `MAX_TS` entries (current versions),
+    /// while excluding them from other version queries, effectively differentiating between
+    /// current and historical data without additional predicates.
+    static ref MAX_VERSION_TS: NaiveDateTime = NaiveDateTime::MAX - Duration::from_secs(1);
+}
 
 pub(crate) struct ValueIdTableCache<E> {
     map_id: HashMap<E, i64>,
@@ -280,6 +297,19 @@ impl<T> Deref for WithTxHash<T> {
     }
 }
 
+// Helper type to wrap entities with their associated ordinal.
+#[derive(Debug)]
+struct WithOrdinal<T, O> {
+    entity: T,
+    ordinal: O,
+}
+
+impl<T, O> WithOrdinal<T, O> {
+    pub fn new(entity: T, ordinal: O) -> Self {
+        Self { entity, ordinal }
+    }
+}
+
 struct PostgresError(StorageError);
 
 impl From<diesel::result::Error> for PostgresError {
@@ -375,14 +405,25 @@ async fn maybe_lookup_version_ts(
 pub(crate) struct PostgresGateway {
     protocol_system_id_cache: Arc<ProtocolSystemEnumCache>,
     chain_id_cache: Arc<ChainEnumCache>,
+    /// Any versions dated before this date, as per their `valid_to` column, will be
+    /// discarded and never be inserted into the db. We supply this as an absolute date
+    /// since updating it must be done carefully. To avoid gaps in versions this can't
+    /// be updated once an extractor has crossed it, but has not yet crossed the new
+    /// horizon (aka it should never move faster than an extractor).
+    retention_horizon: NaiveDateTime,
 }
 
 impl PostgresGateway {
     pub fn with_cache(
         cache: Arc<ChainEnumCache>,
         protocol_system_cache: Arc<ProtocolSystemEnumCache>,
+        retention_horizon: NaiveDateTime,
     ) -> Self {
-        Self { protocol_system_id_cache: protocol_system_cache, chain_id_cache: cache }
+        Self {
+            protocol_system_id_cache: protocol_system_cache,
+            chain_id_cache: cache,
+            retention_horizon,
+        }
     }
 
     #[allow(dead_code)]
@@ -410,7 +451,7 @@ impl PostgresGateway {
         let cache = Arc::new(ChainEnumCache::from_tuples(chain_id_mapping));
         let protocol_system_cache =
             Arc::new(ProtocolSystemEnumCache::from_tuples(protocol_system_id_mapping));
-        Self::with_cache(cache, protocol_system_cache)
+        Self::with_cache(cache, protocol_system_cache, NaiveDateTime::default())
     }
 
     fn get_chain_id(&self, chain: &Chain) -> i64 {
@@ -432,11 +473,18 @@ impl PostgresGateway {
             .get_value(id)
     }
 
-    pub async fn new(pool: Pool<AsyncPgConnection>) -> Result<Self, StorageError> {
+    pub async fn new(
+        pool: Pool<AsyncPgConnection>,
+        retention_horizon: NaiveDateTime,
+    ) -> Result<Self, StorageError> {
         let cache = ChainEnumCache::from_pool(pool.clone()).await?;
         let protocol_system_cache: ValueIdTableCache<String> =
             ProtocolSystemEnumCache::from_pool(pool.clone()).await?;
-        let gw = PostgresGateway::with_cache(Arc::new(cache), Arc::new(protocol_system_cache));
+        let gw = PostgresGateway::with_cache(
+            Arc::new(cache),
+            Arc::new(protocol_system_cache),
+            retention_horizon,
+        );
 
         Ok(gw)
     }
@@ -574,7 +622,6 @@ pub mod testing {
             "protocol_system",
             "transaction",
             "chain",
-            "audit_log",
         ];
         for t in tables.iter() {
             sql_query(format!("DELETE FROM {};", t))
@@ -677,7 +724,7 @@ pub mod db_fixtures {
     //! the entries that are crucial to your test case.
     use std::str::FromStr;
 
-    use chrono::NaiveDateTime;
+    use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime};
     use diesel::{prelude::*, sql_query};
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use ethers::types::{H160, H256, U256};
@@ -690,7 +737,7 @@ pub mod db_fixtures {
 
     use crate::postgres::orm;
 
-    use super::schema;
+    use super::{schema, MAX_TS};
 
     // Insert a new chain
     pub async fn insert_chain(conn: &mut AsyncPgConnection, name: &str) -> i64 {
@@ -700,6 +747,30 @@ pub mod db_fixtures {
             .get_result(conn)
             .await
             .unwrap()
+    }
+
+    pub fn yesterday_midnight() -> NaiveDateTime {
+        let ts = chrono::Local::now().naive_utc() - chrono::Duration::days(1);
+        NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(ts.year(), ts.month(), ts.day()).unwrap(),
+            NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+        )
+    }
+
+    pub fn yesterday_half_past_midnight() -> NaiveDateTime {
+        let ts = chrono::Local::now().naive_utc() - chrono::Duration::days(1);
+        NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(ts.year(), ts.month(), ts.day()).unwrap(),
+            NaiveTime::from_hms_opt(0, 30, 0).unwrap(),
+        )
+    }
+
+    pub fn yesterday_one_am() -> NaiveDateTime {
+        let ts = chrono::Local::now().naive_utc() - chrono::Duration::days(1);
+        NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(ts.year(), ts.month(), ts.day()).unwrap(),
+            NaiveTime::from_hms_opt(1, 0, 0).unwrap(),
+        )
     }
 
     /// Inserts two sequential blocks
@@ -721,9 +792,7 @@ pub mod db_fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(1),
-                schema::block::ts.eq("2020-01-01T00:00:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .expect("timestamp")),
+                schema::block::ts.eq(yesterday_midnight()),
                 schema::block::chain_id.eq(chain_id),
             ),
             (
@@ -742,9 +811,7 @@ pub mod db_fixtures {
                     .as_bytes(),
                 )),
                 schema::block::number.eq(2),
-                schema::block::ts.eq("2020-01-01T01:00:00"
-                    .parse::<chrono::NaiveDateTime>()
-                    .unwrap()),
+                schema::block::ts.eq(yesterday_one_am()),
                 schema::block::chain_id.eq(chain_id),
             ),
         ];
@@ -823,17 +890,10 @@ pub mod db_fixtures {
         conn: &mut AsyncPgConnection,
         contract_id: i64,
         modify_tx: i64,
-        valid_from: &str,
-        valid_to: Option<&str>,
+        valid_from: &NaiveDateTime,
+        valid_to: Option<&NaiveDateTime>,
         slots: &[(u64, u64, Option<u64>)],
-    ) -> Vec<i64> {
-        let ts = valid_from
-            .parse::<chrono::NaiveDateTime>()
-            .unwrap();
-        let end_ts = valid_to.map(|s| {
-            s.parse::<chrono::NaiveDateTime>()
-                .unwrap()
-        });
+    ) {
         let data = slots
             .iter()
             .enumerate()
@@ -854,8 +914,8 @@ pub mod db_fixtures {
                     schema::contract_storage::previous_value.eq(previous_value),
                     schema::contract_storage::account_id.eq(contract_id),
                     schema::contract_storage::modify_tx.eq(modify_tx),
-                    schema::contract_storage::valid_from.eq(ts),
-                    schema::contract_storage::valid_to.eq(end_ts),
+                    schema::contract_storage::valid_from.eq(valid_from),
+                    schema::contract_storage::valid_to.eq(valid_to.unwrap_or(&MAX_TS)),
                     schema::contract_storage::ordinal.eq(idx as i64),
                 )
             })
@@ -863,17 +923,16 @@ pub mod db_fixtures {
 
         diesel::insert_into(schema::contract_storage::table)
             .values(&data)
-            .returning(schema::contract_storage::id)
-            .get_results(conn)
+            .execute(conn)
             .await
-            .unwrap()
+            .unwrap();
     }
 
     pub async fn insert_account_balance(
         conn: &mut AsyncPgConnection,
         new_balance: u64,
         tx_id: i64,
-        valid_to: Option<&str>,
+        end_ts: Option<&NaiveDateTime>,
         account: i64,
     ) {
         let ts = schema::transaction::table
@@ -883,10 +942,6 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
-        let end_ts = valid_to.map(|s| {
-            s.parse::<chrono::NaiveDateTime>()
-                .unwrap()
-        });
         let mut b0 = [0; 32];
         U256::from(new_balance).to_big_endian(&mut b0);
         {
@@ -936,10 +991,7 @@ pub mod db_fixtures {
             .unwrap()
     }
 
-    pub async fn delete_account(conn: &mut AsyncPgConnection, target_id: i64, ts: &str) {
-        let ts = ts
-            .parse::<NaiveDateTime>()
-            .expect("timestamp valid");
+    pub async fn delete_account(conn: &mut AsyncPgConnection, target_id: i64, ts: &NaiveDateTime) {
         {
             use schema::account::dsl::*;
             diesel::update(account.filter(id.eq(target_id)))
@@ -993,17 +1045,15 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
-        let valid_to_ts: Option<NaiveDateTime> = match &valid_to_tx {
-            Some(tx) => Some(
-                schema::transaction::table
-                    .inner_join(schema::block::table)
-                    .filter(schema::transaction::id.eq(tx))
-                    .select(schema::block::ts)
-                    .first::<NaiveDateTime>(conn)
-                    .await
-                    .expect("setup tx id not found"),
-            ),
-            None => None,
+        let valid_to_ts = match &valid_to_tx {
+            Some(tx) => schema::transaction::table
+                .inner_join(schema::block::table)
+                .filter(schema::transaction::id.eq(tx))
+                .select(schema::block::ts)
+                .first::<NaiveDateTime>(conn)
+                .await
+                .expect("setup tx id not found"),
+            None => MAX_TS,
         };
         diesel::insert_into(schema::component_balance::table)
             .values((
@@ -1018,7 +1068,12 @@ pub mod db_fixtures {
             ))
             .execute(conn)
             .await
-            .expect("component balance insert failed");
+            .unwrap_or_else(|_| {
+                panic!(
+                    "component balance insert failed {} {} {}",
+                    token_id, protocol_component_id, balance_float
+                )
+            });
     }
 
     // Insert a new Protocol System
@@ -1168,7 +1223,7 @@ pub mod db_fixtures {
             schema::protocol_state::modify_tx.eq(tx_id),
             schema::protocol_state::modified_ts.eq(ts),
             schema::protocol_state::valid_from.eq(ts),
-            schema::protocol_state::valid_to.eq(valid_to_ts),
+            schema::protocol_state::valid_to.eq(valid_to_ts.unwrap_or(MAX_TS)),
             schema::protocol_state::attribute_name.eq(attribute_name),
             schema::protocol_state::attribute_value.eq(attribute_value),
             schema::protocol_state::previous_value.eq(previous_value),
@@ -1250,7 +1305,7 @@ pub mod db_fixtures {
         INNER JOIN
             token ON bal.token_id = token.id
         WHERE 
-            bal.valid_to IS NULL 
+            bal.valid_to = '262142-12-31 23:59:59.999999'
         GROUP BY 
             bal.protocol_component_id
         ON CONFLICT (protocol_component_id) 

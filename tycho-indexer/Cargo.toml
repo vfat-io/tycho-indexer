@@ -1,6 +1,6 @@
 [package]
 name = "tycho-indexer"
-version = "0.3.0"
+version = "0.5.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -64,3 +64,4 @@ rstest = "0.18.2"
 tokio-tungstenite.workspace = true
 pretty_assertions = "1.4.0"
 test-log = { version = "0.2.14", features = ["trace"] }
+float_eq = "1.0.1"

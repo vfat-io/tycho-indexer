@@ -1,6 +1,10 @@
 use async_trait::async_trait;
 use serde::Serialize;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use tokio::{
     select,
@@ -14,15 +18,16 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::{
     dto::{
-        BlockParam, Deltas, ExtractorIdentity, ProtocolComponent, ResponseAccount,
-        ResponseProtocolState, StateRequestBody, StateRequestParameters, VersionParam,
+        BlockParam, Chain, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolId,
+        ResponseAccount, ResponseProtocolState, StateRequestBody, StateRequestParameters,
+        VersionParam,
     },
     Bytes,
 };
 
 use super::Header;
 use crate::{
-    deltas::DeltasClient,
+    deltas::{DeltasClient, SubscriptionOptions},
     feed::component_tracker::{ComponentFilter, ComponentTracker},
     rpc::RPCClient,
 };
@@ -38,6 +43,7 @@ pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
     rpc_client: R,
     deltas_client: D,
     max_retries: u64,
+    include_snapshots: bool,
     component_filter: ComponentFilter,
     shared: Arc<Mutex<SharedState>>,
     end_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
@@ -136,12 +142,14 @@ where
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
     /// Creates a new state synchronizer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor_id: ExtractorIdentity,
         is_native: bool,
         retrieve_balances: bool,
         component_filter: ComponentFilter,
         max_retries: u64,
+        include_snapshots: bool,
         rpc_client: R,
         deltas_client: D,
     ) -> Self {
@@ -150,6 +158,7 @@ where
             is_native,
             retrieve_balances,
             rpc_client,
+            include_snapshots,
             deltas_client,
             component_filter,
             max_retries,
@@ -165,6 +174,9 @@ where
         tracked_components: &ComponentTracker<R>,
         ids: Option<I>,
     ) -> SyncResult<StateSyncMessage> {
+        if !self.include_snapshots {
+            return Ok(StateSyncMessage { header, ..Default::default() });
+        }
         let version = VersionParam::new(
             None,
             Some(BlockParam {
@@ -173,24 +185,28 @@ where
                 number: Some(header.number as i64),
             }),
         );
-        // Use given ids or use all if not passed
-        let ids = ids
-            .map(|it| it.into_iter().collect::<Vec<_>>())
-            .unwrap_or_else(|| {
-                tracked_components
-                    .components
-                    .keys()
-                    .collect::<Vec<_>>()
-            });
 
-        if ids.is_empty() {
+        // Use given ids or use all if not passed
+        let request_ids = ids
+            .map(|it| {
+                it.into_iter()
+                    .map(|id| ProtocolId { id: id.clone(), chain: Chain::Ethereum }) //TODO: remove chain assumption
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| tracked_components.get_tracked_component_ids());
+
+        let component_ids = request_ids
+            .iter()
+            .map(|protocol_id| &protocol_id.id)
+            .collect::<HashSet<_>>();
+
+        if component_ids.is_empty() {
             return Ok(StateSyncMessage { header, ..Default::default() });
         }
 
-        let component_ids = tracked_components.get_tracked_component_ids();
         let mut protocol_states = self
             .rpc_client
-            .get_protocol_states_paginated(self.extractor_id.chain, &component_ids, &version, 50, 4)
+            .get_protocol_states_paginated(self.extractor_id.chain, &request_ids, &version, 50, 4)
             .await?
             .states
             .into_iter()
@@ -207,7 +223,7 @@ where
                         component.id.clone(),
                         ComponentWithState { state, component: component.clone() },
                     ))
-                } else if ids.contains(&&component.id) {
+                } else if component_ids.contains(&&component.id) {
                     // only emit error event if we requested this component
                     let component_id = &component.id;
                     error!(?component_id, "Missing state for native component!");
@@ -218,7 +234,7 @@ where
             })
             .collect();
 
-        let contract_ids = tracked_components.get_contracts_by_component(ids.clone());
+        let contract_ids = tracked_components.get_contracts_by_component(component_ids.clone());
         let vm_storage = if !contract_ids.is_empty() {
             let contract_states = self
                 .rpc_client
@@ -247,7 +263,7 @@ where
                 .components
                 .iter()
                 .filter_map(|(id, comp)| {
-                    if ids.contains(&id) {
+                    if component_ids.contains(&id) {
                         Some(
                             comp.contract_ids
                                 .iter()
@@ -311,9 +327,10 @@ where
             n_contracts = tracker.contracts.len(),
             "Finished retrieving components",
         );
+        let subscription_options = SubscriptionOptions::new().with_state(self.include_snapshots);
         let (_, mut msg_rx) = self
             .deltas_client
-            .subscribe(self.extractor_id.clone())
+            .subscribe(self.extractor_id.clone(), subscription_options)
             .await?;
 
         info!("Waiting for deltas...");
@@ -378,6 +395,7 @@ where
                                     }
                                 })
                                 .collect::<Vec<_>>();
+                            debug!(components=?requiring_snapshot, "SnapshotRequest");
                             tracker
                                 .start_tracking(&requiring_snapshot)
                                 .await?;
@@ -505,7 +523,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        deltas::{DeltasClient, MockDeltasClient},
+        deltas::{DeltasClient, MockDeltasClient, SubscriptionOptions},
         feed::{
             component_tracker::{ComponentFilter, ComponentTracker},
             synchronizer::{
@@ -613,8 +631,11 @@ mod test {
         async fn subscribe(
             &self,
             extractor_id: ExtractorIdentity,
+            options: SubscriptionOptions,
         ) -> Result<(Uuid, Receiver<Deltas>), DeltasError> {
-            self.0.subscribe(extractor_id).await
+            self.0
+                .subscribe(extractor_id, options)
+                .await
         }
 
         async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), DeltasError> {
@@ -647,6 +668,7 @@ mod test {
             false,
             ComponentFilter::MinimumTVL(50.0),
             1,
+            true,
             rpc_client,
             deltas_client,
         )
@@ -862,7 +884,7 @@ mod test {
         let (tx, rx) = channel(1);
         deltas_client
             .expect_subscribe()
-            .return_once(move |_| {
+            .return_once(move |_, _| {
                 // Return subscriber id and a channel
                 Ok((Uuid::default(), rx))
             });

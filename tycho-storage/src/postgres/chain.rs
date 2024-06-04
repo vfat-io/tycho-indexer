@@ -1,5 +1,4 @@
-use super::{orm, schema, storage_error_from_diesel, PostgresError, PostgresGateway};
-use chrono::NaiveDateTime;
+use super::{orm, schema, storage_error_from_diesel, PostgresError, PostgresGateway, MAX_TS};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
@@ -211,7 +210,7 @@ impl PostgresGateway {
         diesel::update(
             schema::contract_storage::table.filter(schema::contract_storage::valid_to.gt(block.ts)),
         )
-        .set(schema::contract_storage::valid_to.eq(Option::<NaiveDateTime>::None))
+        .set(schema::contract_storage::valid_to.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -219,7 +218,7 @@ impl PostgresGateway {
         diesel::update(
             schema::account_balance::table.filter(schema::account_balance::valid_to.gt(block.ts)),
         )
-        .set(schema::account_balance::valid_to.eq(Option::<NaiveDateTime>::None))
+        .set(schema::account_balance::valid_to.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -227,7 +226,7 @@ impl PostgresGateway {
         diesel::update(
             schema::contract_code::table.filter(schema::contract_code::valid_to.gt(block.ts)),
         )
-        .set(schema::contract_code::valid_to.eq(Option::<NaiveDateTime>::None))
+        .set(schema::contract_code::valid_to.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -235,7 +234,7 @@ impl PostgresGateway {
         diesel::update(
             schema::protocol_state::table.filter(schema::protocol_state::valid_to.gt(block.ts)),
         )
-        .set(schema::protocol_state::valid_to.eq(Option::<NaiveDateTime>::None))
+        .set(schema::protocol_state::valid_to.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -244,7 +243,7 @@ impl PostgresGateway {
             schema::protocol_calls_contract::table
                 .filter(schema::protocol_calls_contract::valid_to.gt(block.ts)),
         )
-        .set(schema::protocol_calls_contract::valid_to.eq(Option::<NaiveDateTime>::None))
+        .set(schema::protocol_calls_contract::valid_to.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -252,7 +251,7 @@ impl PostgresGateway {
         // Any versioned table's rows, which have `deleted_at` set to "> block.ts"
         // need, to be updated to be valid again (thus, deleted_at = NULL).
         diesel::update(schema::account::table.filter(schema::account::deleted_at.gt(block.ts)))
-            .set(schema::account::deleted_at.eq(Option::<NaiveDateTime>::None))
+            .set(schema::account::deleted_at.eq(MAX_TS))
             .execute(conn)
             .await
             .map_err(PostgresError::from)?;
@@ -261,7 +260,7 @@ impl PostgresGateway {
             schema::protocol_component::table
                 .filter(schema::protocol_component::deleted_at.gt(block.ts)),
         )
-        .set(schema::protocol_component::deleted_at.eq(Option::<NaiveDateTime>::None))
+        .set(schema::protocol_component::deleted_at.eq(MAX_TS))
         .execute(conn)
         .await
         .map_err(PostgresError::from)?;
@@ -272,10 +271,13 @@ impl PostgresGateway {
 
 #[cfg(test)]
 mod test {
-    use crate::postgres::db_fixtures;
+    use crate::postgres::{
+        db_fixtures,
+        db_fixtures::{yesterday_midnight, yesterday_one_am},
+    };
     use diesel_async::AsyncConnection;
     use ethers::types::{H256, U256};
-    use std::str::FromStr;
+    use std::{str::FromStr, time::Duration};
     use tycho_core::models::Chain;
 
     use super::*;
@@ -315,7 +317,7 @@ mod test {
                 "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
             ),
             chain: Chain::Ethereum,
-            ts: "2020-01-01T01:00:00".parse().unwrap(),
+            ts: yesterday_one_am(),
         }
     }
 
@@ -381,7 +383,7 @@ mod test {
                 "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
             ),
             chain: Chain::Ethereum,
-            ts: "2020-01-01T00:00:00".parse().unwrap(),
+            ts: yesterday_midnight(),
         };
 
         gw.upsert_block(&[block.clone()], &mut conn)
@@ -472,6 +474,7 @@ mod test {
     async fn setup_revert_data(conn: &mut AsyncPgConnection) {
         let chain_id = db_fixtures::insert_chain(conn, "ethereum").await;
         let blk = db_fixtures::insert_blocks(conn, chain_id).await;
+        let ts = chrono::Local::now().naive_utc();
         let txn = db_fixtures::insert_txns(
             conn,
             &[
@@ -514,21 +517,26 @@ mod test {
             Some(txn[0]),
         )
         .await;
-        db_fixtures::insert_account_balance(conn, 0, txn[0], Some("2020-01-01T00:00:00"), c0).await;
+        db_fixtures::insert_account_balance(conn, 0, txn[0], Some(&ts), c0).await;
         db_fixtures::insert_contract_code(conn, c0, txn[0], Bytes::from_str("C0C0C0").unwrap())
             .await;
-        db_fixtures::insert_account_balance(conn, 100, txn[1], Some("2020-01-01T01:00:00"), c0)
-            .await;
+        db_fixtures::insert_account_balance(
+            conn,
+            100,
+            txn[1],
+            Some(&(ts + Duration::from_secs(3600))),
+            c0,
+        )
+        .await;
         // Slot 2 is never modified again
-        db_fixtures::insert_slots(conn, c0, txn[1], "2020-01-01T00:00:00", None, &[(2, 1, None)])
-            .await;
+        db_fixtures::insert_slots(conn, c0, txn[1], &ts, None, &[(2, 1, None)]).await;
         // First version for slots 0 and 1.
         db_fixtures::insert_slots(
             conn,
             c0,
             txn[1],
-            "2020-01-01T00:00:00",
-            Some("2020-01-01T01:00:00"),
+            &ts,
+            Some(&(ts + Duration::from_secs(3600))),
             &[(0, 1, None), (1, 5, None)],
         )
         .await;
@@ -538,7 +546,7 @@ mod test {
             conn,
             c0,
             txn[3],
-            "2020-01-01T01:00:00",
+            &(ts + Duration::from_secs(3600)),
             None,
             &[(0, 2, Some(1)), (1, 3, Some(5)), (5, 25, None), (6, 30, None)],
         )
@@ -560,7 +568,7 @@ mod test {
             conn,
             c1,
             txn[3],
-            "2020-01-01T01:00:00",
+            &(ts + Duration::from_secs(3600)),
             None,
             &[(0, 128, None), (1, 255, None)],
         )

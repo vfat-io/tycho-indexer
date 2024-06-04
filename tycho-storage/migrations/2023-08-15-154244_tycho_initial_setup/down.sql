@@ -53,4 +53,3 @@ DROP FUNCTION invalidate_previous_entry_protocol_state;
 DROP FUNCTION invalidate_previous_entry_account_balance;
 
 DROP FUNCTION invalidate_previous_entry_contract_code;
-

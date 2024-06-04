@@ -1,9 +1,7 @@
-# When a release is created, this workflow will build and upload the tycho-client binary to the release.
+# When a tag is created, this workflow will build and upload the tycho-client binary to the release.
 name: Release
 
 on:
-  release:
-    types: [ created ]
   push:
     tags:
       - '[0-9]+.*'
@@ -41,6 +39,11 @@ jobs:
       - name: Determine Tag Name
         id: get_tag
         run: echo "TAG_NAME=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_ENV
+      - name: Install PostgreSQL Client on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install libpq
+          brew link --force libpq
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           # (required) Comma-separated list of binary names (non-extension portion of filename) to build and upload.

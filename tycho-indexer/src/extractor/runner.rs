@@ -12,7 +12,7 @@ use super::{
     Extractor, ExtractorMsg,
 };
 use crate::{
-    extractor::ExtractionError,
+    extractor::{evm::protocol_cache::ProtocolMemoryCache, ExtractionError},
     pb::sf::substreams::v1::Package,
     substreams::{
         stream::{BlockResponse, SubstreamsStream},
@@ -124,8 +124,6 @@ impl ExtractorRunner {
         ExtractorRunner { extractor, substreams, subscriptions, next_subscriber_id: 0, control_rx }
     }
     pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
-        let id = self.extractor.get_id().clone();
-
         tokio::spawn(async move {
             let id = self.extractor.get_id();
             loop {
@@ -149,7 +147,6 @@ impl ExtractorRunner {
                             Some(Ok(BlockResponse::New(data))) => {
                                 let block_number = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 tracing::Span::current().record("block_number", block_number);
-                                debug!("New block data received.");
                                 // TODO: change interface to take a reference to avoid this clone
                                 match self.extractor.handle_tick_scoped_data(data.clone()).await {
                                     Ok(Some(msg)) => {
@@ -190,7 +187,9 @@ impl ExtractorRunner {
                 }
             }
         }
-        .instrument(tracing::info_span!("extractor_runner::run", id = %id)))
+            // Additional inner info span with substreams information
+            // trace_id is set later on in process_substreams_response
+        .instrument(tracing::info_span!("loop", trace_id = tracing::field::Empty)))
     }
 
     #[instrument(skip_all)]
@@ -208,7 +207,7 @@ impl ExtractorRunner {
     // TODO: add message tracing_id to the log
     #[instrument(skip_all)]
     async fn propagate_msg(subscribers: &Arc<Mutex<SubscriptionsMap>>, message: ExtractorMsg) {
-        debug!(msg = %message, "Propagating message to subscribers.");
+        trace!(msg = %message, "Propagating message to subscribers.");
         // TODO: rename variable here instead
         let arced_message = message;
 
@@ -221,7 +220,7 @@ impl ExtractorRunner {
             match sender.send(arced_message.clone()).await {
                 Ok(_) => {
                     // Message sent successfully
-                    debug!(subscriber_id = %counter, "Message sent successfully.");
+                    trace!(subscriber_id = %counter, "Message sent successfully.");
                 }
                 Err(err) => {
                     // Receiver has been dropped, mark for removal
@@ -240,9 +239,15 @@ impl ExtractorRunner {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct ProtocolTypeConfig {
+pub struct ProtocolTypeConfig {
     name: String,
     financial_type: FinancialType,
+}
+
+impl ProtocolTypeConfig {
+    pub fn new(name: String, financial_type: FinancialType) -> Self {
+        Self { name, financial_type }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -252,15 +257,42 @@ pub struct ExtractorConfig {
     implementation_type: ImplementationType,
     sync_batch_size: usize,
     start_block: i64,
+    stop_block: Option<i64>,
     protocol_types: Vec<ProtocolTypeConfig>,
     spkg: String,
     module_name: String,
 }
 
+impl ExtractorConfig {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: String,
+        chain: Chain,
+        implementation_type: ImplementationType,
+        sync_batch_size: usize,
+        start_block: i64,
+        stop_block: Option<i64>,
+        protocol_types: Vec<ProtocolTypeConfig>,
+        spkg: String,
+        module_name: String,
+    ) -> Self {
+        Self {
+            name,
+            chain,
+            implementation_type,
+            sync_batch_size,
+            start_block,
+            stop_block,
+            protocol_types,
+            spkg,
+            module_name,
+        }
+    }
+}
+
 pub struct ExtractorBuilder {
     config: ExtractorConfig,
     endpoint_url: String,
-    end_block: i64,
     token: String,
     extractor: Option<Arc<dyn Extractor>>,
     final_block_only: bool,
@@ -270,11 +302,10 @@ pub type HandleResult =
     (JoinHandle<Result<(), ExtractionError>>, (ExtractorHandle, ImplementationType));
 
 impl ExtractorBuilder {
-    pub fn new(config: &ExtractorConfig) -> Self {
+    pub fn new(config: &ExtractorConfig, endpoint_url: &str) -> Self {
         Self {
             config: config.clone(),
-            endpoint_url: "https://mainnet.eth.streamingfast.io:443".to_owned(),
-            end_block: 0,
+            endpoint_url: endpoint_url.to_owned(),
             token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
             extractor: None,
             final_block_only: false,
@@ -294,11 +325,6 @@ impl ExtractorBuilder {
 
     pub fn start_block(mut self, val: i64) -> Self {
         self.config.start_block = val;
-        self
-    }
-
-    pub fn end_block(mut self, val: i64) -> Self {
-        self.end_block = val;
         self
     }
 
@@ -343,6 +369,7 @@ impl ExtractorBuilder {
         chain_state: ChainState,
         cached_gw: &CachedGateway,
         token_pre_processor: &TokenPreProcessor,
+        protocol_cache: &ProtocolMemoryCache,
     ) -> Result<Self, ExtractionError> {
         let protocol_types = self
             .config
@@ -368,7 +395,6 @@ impl ExtractorBuilder {
                     self.config.chain,
                     self.config.sync_batch_size,
                     cached_gw.clone(),
-                    token_pre_processor.clone(),
                 );
 
                 self.extractor = Some(Arc::new(
@@ -379,6 +405,8 @@ impl ExtractorBuilder {
                         gw,
                         protocol_types,
                         self.config.name.clone(),
+                        protocol_cache.clone(),
+                        token_pre_processor.clone(),
                         if self.config.name == "vm:ambient" {
                             Some(transcode_ambient_balances)
                         } else if self.config.name == "vm:balancer" {
@@ -397,7 +425,6 @@ impl ExtractorBuilder {
                     self.config.chain,
                     self.config.sync_batch_size,
                     cached_gw.clone(),
-                    token_pre_processor.clone(),
                 );
 
                 self.extractor = Some(Arc::new(
@@ -408,6 +435,8 @@ impl ExtractorBuilder {
                         gw,
                         protocol_types,
                         self.config.name.clone(),
+                        protocol_cache.clone(),
+                        token_pre_processor.clone(),
                         if self.config.name == "uniswap_v2" {
                             Some(|b| transcode_usv2_balances(add_default_attributes_uniswapv2(b)))
                         } else if self.config.name == "uniswap_v3" {
@@ -424,12 +453,14 @@ impl ExtractorBuilder {
         Ok(self)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(name = "extractor", skip(self), fields(id))] // this is the main info lvl span of the extractor
     pub async fn run(self) -> Result<HandleResult, ExtractionError> {
         let extractor = self
             .extractor
             .clone()
             .expect("Extractor not set");
+
+        tracing::Span::current().record("id", format!("{}", extractor.get_id()));
 
         self.ensure_spkg().await?;
 
@@ -452,7 +483,7 @@ impl ExtractorBuilder {
             spkg.modules.clone(),
             self.config.module_name,
             self.config.start_block,
-            self.end_block as u64,
+            self.config.stop_block.unwrap_or(0) as u64,
             self.final_block_only,
         );
 
@@ -533,6 +564,10 @@ mod test {
             self.extractor_id.clone()
         }
 
+        fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
+            Arc::new(self.clone())
+        }
+
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -590,20 +625,23 @@ mod test {
 
         // Build the ExtractorRunnerBuilder
         let extractor = Arc::new(mock_extractor);
-        let builder = ExtractorBuilder::new(&ExtractorConfig {
-            name: "test_module".to_owned(),
-            chain: Chain::Ethereum,
-            implementation_type: ImplementationType::Vm,
-            sync_batch_size: 0,
-            start_block: 0,
-            protocol_types: vec![ProtocolTypeConfig {
-                name: "test_module_pool".to_owned(),
-                financial_type: FinancialType::Swap,
-            }],
-            spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
-            module_name: "test_module".to_owned(),
-        })
-        .end_block(10)
+        let builder = ExtractorBuilder::new(
+            &ExtractorConfig {
+                name: "test_module".to_owned(),
+                chain: Chain::Ethereum,
+                implementation_type: ImplementationType::Vm,
+                sync_batch_size: 0,
+                start_block: 0,
+                stop_block: None,
+                protocol_types: vec![ProtocolTypeConfig {
+                    name: "test_module_pool".to_owned(),
+                    financial_type: FinancialType::Swap,
+                }],
+                spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
+                module_name: "test_module".to_owned(),
+            },
+            "https://mainnet.eth.streamingfast.io",
+        )
         .token("test_token")
         .set_extractor(extractor);
 

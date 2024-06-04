@@ -1,13 +1,14 @@
 use super::{
     schema::{
-        account, account_balance, block, chain, component_balance, component_tvl, contract_code,
-        contract_storage, extraction_state, protocol_component, protocol_component_holds_contract,
-        protocol_component_holds_token, protocol_state, protocol_system, protocol_type, token,
-        transaction,
+        account, account_balance, block, chain, component_balance, component_balance_default,
+        component_tvl, contract_code, contract_storage, contract_storage_default, extraction_state,
+        protocol_component, protocol_component_holds_contract, protocol_component_holds_token,
+        protocol_state, protocol_state_default, protocol_system, protocol_type, token, transaction,
     },
-    versioning::{DeltaVersionedRow, StoredDeltaVersionedRow, StoredVersionedRow, VersionedRow},
-    PostgresError,
+    versioning::{StoredVersionedRow, VersionedRow},
+    PostgresError, MAX_TS, MAX_VERSION_TS,
 };
+use crate::postgres::versioning::PartitionedVersionedRow;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::{
@@ -16,7 +17,7 @@ use diesel::{
     prelude::*,
     query_builder::{BoxedSqlQuery, SqlQuery},
     sql_query,
-    sql_types::{self, BigInt, Bool, Bytea, Double},
+    sql_types::{self, BigInt, Bool, Double},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
@@ -337,12 +338,12 @@ pub struct ProtocolType {
     pub modified_ts: NaiveDateTime,
 }
 
-#[derive(Identifiable, Queryable, Selectable)]
+#[derive(Identifiable, Queryable, Selectable, Debug)]
 #[diesel(table_name = component_balance)]
 #[diesel(belongs_to(ProtocolComponent))]
+#[diesel(primary_key(protocol_component_id, token_id, modify_tx))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ComponentBalance {
-    pub id: i64,
     pub token_id: i64,
     pub new_balance: Balance,
     pub balance_float: f64,
@@ -351,94 +352,10 @@ pub struct ComponentBalance {
     pub protocol_component_id: i64,
     pub inserted_ts: NaiveDateTime,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
-}
-impl ComponentBalance {
-    pub fn update_many(
-        new_balances_values: &HashMap<i64, (Bytes, Bytes, f64)>,
-    ) -> BoxedSqlQuery<'_, Pg, SqlQuery> {
-        let bind_params = (1..=new_balances_values.len() * 4)
-            .collect::<Vec<_>>()
-            .chunks(4)
-            .map(|chunk| format!("(${}, ${}, ${}, ${})", chunk[0], chunk[1], chunk[2], chunk[3])) // Format each chunk as a tuple
-            .collect::<Vec<_>>()
-            .join(", ");
-        let query_tmpl = format!(
-            r#"
-            UPDATE component_balance
-            SET 
-                new_balance = new_values.new_balance,
-                previous_value = new_values.previous_value,
-                balance_float = new_values.balance_float
-            FROM (VALUES
-                {}
-            ) AS new_values(id, new_balance, previous_value, balance_float)
-            WHERE component_balance.id = new_values.id;
-            "#,
-            bind_params
-        );
-        let mut q = sql_query(query_tmpl).into_boxed();
-        for (k, (b, pb, bf)) in new_balances_values.iter() {
-            q = q.bind::<BigInt, _>(*k);
-            q = q.bind::<Bytea, _>(b);
-            q = q.bind::<Bytea, _>(pb);
-            q = q.bind::<Double, _>(bf);
-        }
-        q
-    }
+    pub valid_to: NaiveDateTime,
 }
 
-#[async_trait]
-impl StoredVersionedRow for ComponentBalance {
-    type EntityId = (i64, i64);
-    type PrimaryKey = i64;
-    type Version = NaiveDateTime;
-
-    fn get_pk(&self) -> Self::PrimaryKey {
-        self.id
-    }
-
-    fn get_entity_id(&self) -> Self::EntityId {
-        (self.protocol_component_id, self.token_id)
-    }
-
-    // Clippy false positive
-    #[allow(clippy::mutable_key_type)]
-    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
-        ids: I,
-        conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<Box<Self>>, StorageError> {
-        let (component_ids, token_ids): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
-
-        let tuple_ids = component_ids
-            .iter()
-            .zip(token_ids.iter())
-            .collect::<HashSet<_>>();
-
-        Ok(component_balance::table
-            .select(ComponentBalance::as_select())
-            .into_boxed()
-            .filter(
-                component_balance::protocol_component_id
-                    .eq_any(&component_ids)
-                    .and(component_balance::token_id.eq_any(&token_ids))
-                    .and(component_balance::valid_to.is_null()),
-            )
-            .get_results(conn)
-            .await
-            .map_err(PostgresError::from)?
-            .into_iter()
-            .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.token_id)))
-            .map(Box::new)
-            .collect())
-    }
-
-    fn table_name() -> &'static str {
-        "component_balance"
-    }
-}
-
-#[derive(AsChangeset, Insertable, Debug)]
+#[derive(AsChangeset, Insertable, Clone, Debug)]
 #[diesel(table_name = component_balance)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewComponentBalance {
@@ -449,7 +366,7 @@ pub struct NewComponentBalance {
     pub modify_tx: i64,
     pub protocol_component_id: i64,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
 }
 
 impl NewComponentBalance {
@@ -470,62 +387,105 @@ impl NewComponentBalance {
             modify_tx,
             protocol_component_id,
             valid_from,
-            valid_to: None,
+            valid_to: MAX_TS,
         }
     }
 }
 
-impl VersionedRow for NewComponentBalance {
-    type SortKey = (i64, i64, NaiveDateTime);
-    type EntityId = (i64, i64);
-    type Version = NaiveDateTime;
+impl From<ComponentBalance> for NewComponentBalance {
+    fn from(value: ComponentBalance) -> Self {
+        Self {
+            token_id: value.token_id,
+            new_balance: value.new_balance,
+            previous_value: value.previous_value,
+            balance_float: value.balance_float,
+            modify_tx: value.modify_tx,
+            protocol_component_id: value.protocol_component_id,
+            valid_from: value.valid_from,
+            valid_to: value.valid_to,
+        }
+    }
+}
 
-    fn get_entity_id(&self) -> Self::EntityId {
+impl PartitionedVersionedRow for NewComponentBalance {
+    type EntityId = (i64, i64);
+
+    fn get_id(&self) -> Self::EntityId {
         (self.protocol_component_id, self.token_id)
     }
 
-    fn get_sort_key(&self) -> Self::SortKey {
-        (self.protocol_component_id, self.token_id, self.valid_from)
+    fn get_valid_to(&self) -> NaiveDateTime {
+        self.valid_to
     }
 
-    fn set_valid_to(&mut self, end_version: Self::Version) {
-        self.valid_to = Some(end_version);
+    fn archive(&mut self, next_version: &mut Self) {
+        next_version.previous_value = self.new_balance.clone();
+        self.valid_to = next_version.valid_from;
     }
 
-    fn get_valid_from(&self) -> Self::Version {
-        self.valid_from
+    fn delete(&mut self, delete_version: NaiveDateTime) {
+        self.valid_to = delete_version;
+    }
+
+    async fn latest_versions_by_ids(
+        ids: Vec<Self::EntityId>,
+        conn: &mut AsyncPgConnection,
+    ) -> Result<Vec<Self>, StorageError>
+    where
+        Self: Sized,
+    {
+        let (component_ids, token_ids): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
+
+        let tuple_ids = component_ids
+            .iter()
+            .zip(token_ids.iter())
+            .collect::<HashSet<_>>();
+
+        Ok(component_balance::table
+            .select(ComponentBalance::as_select())
+            .into_boxed()
+            .filter(
+                component_balance::protocol_component_id
+                    .eq_any(&component_ids)
+                    .and(component_balance::token_id.eq_any(&token_ids))
+                    .and(component_balance::valid_to.eq(MAX_TS)),
+            )
+            .get_results(conn)
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.token_id)))
+            .map(NewComponentBalance::from)
+            .collect())
     }
 }
 
-impl DeltaVersionedRow for NewComponentBalance {
-    type Value = Balance;
-
-    fn get_value(&self) -> Self::Value {
-        self.new_balance.clone()
-    }
-
-    fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value
-    }
+#[derive(AsChangeset, Insertable, Debug)]
+#[diesel(table_name = component_balance_default)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewComponentBalanceLatest {
+    pub token_id: i64,
+    pub new_balance: Balance,
+    pub previous_value: Balance,
+    pub balance_float: f64,
+    pub modify_tx: i64,
+    pub protocol_component_id: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: NaiveDateTime,
 }
 
-impl DeltaVersionedRow for ComponentBalance {
-    type Value = Balance;
-
-    fn get_value(&self) -> Self::Value {
-        self.new_balance.clone()
-    }
-
-    fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value
-    }
-}
-
-impl StoredDeltaVersionedRow for ComponentBalance {
-    type Value = Balance;
-
-    fn get_value(&self) -> Self::Value {
-        self.new_balance.clone()
+impl From<NewComponentBalance> for NewComponentBalanceLatest {
+    fn from(value: NewComponentBalance) -> Self {
+        Self {
+            token_id: value.token_id,
+            new_balance: value.new_balance,
+            previous_value: value.previous_value,
+            balance_float: value.balance_float,
+            modify_tx: value.modify_tx,
+            protocol_component_id: value.protocol_component_id,
+            valid_from: value.valid_from,
+            valid_to: MAX_TS,
+        }
     }
 }
 
@@ -635,15 +595,15 @@ pub struct NewProtocolComponentHoldsContract {
 #[diesel(belongs_to(ProtocolComponent))]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(primary_key(protocol_component_id, attribute_name, modify_tx))]
 pub struct ProtocolState {
-    pub id: i64,
     pub protocol_component_id: i64,
     pub attribute_name: String,
     pub attribute_value: Bytes,
     pub previous_value: Option<Bytes>,
     pub modify_tx: i64,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
@@ -665,11 +625,7 @@ impl ProtocolState {
             .inner_join(protocol_component::table)
             .filter(protocol_component::external_id.eq_any(component_ids))
             .filter(protocol_component::chain_id.eq(chain_id))
-            .filter(
-                protocol_state::valid_to
-                    .gt(version_ts) // if version_ts is None, diesel equates this expression to "False"
-                    .or(protocol_state::valid_to.is_null()),
-            )
+            .filter(protocol_state::valid_to.gt(version_ts.unwrap_or(*MAX_VERSION_TS)))
             .into_boxed();
 
         // if a version timestamp is provided, we want to filter by valid_from <= version_ts
@@ -707,11 +663,7 @@ impl ProtocolState {
             )
             .filter(protocol_system::name.eq(system.to_string()))
             .filter(protocol_component::chain_id.eq(chain_id))
-            .filter(
-                protocol_state::valid_to
-                    .gt(version_ts)
-                    .or(protocol_state::valid_to.is_null()),
-            )
+            .filter(protocol_state::valid_to.gt(version_ts.unwrap_or(*MAX_VERSION_TS)))
             .into_boxed();
 
         // if a version timestamp is provided, we want to filter by valid_from <= version_ts
@@ -742,11 +694,7 @@ impl ProtocolState {
         let mut query = protocol_state::table
             .inner_join(protocol_component::table)
             .filter(protocol_component::chain_id.eq(chain_id))
-            .filter(
-                protocol_state::valid_to
-                    .gt(version_ts)
-                    .or(protocol_state::valid_to.is_null()),
-            )
+            .filter(protocol_state::valid_to.gt(version_ts.unwrap_or(*MAX_VERSION_TS)))
             .into_boxed();
 
         // if a version timestamp is provided, we want to filter by valid_from <= version_ts
@@ -784,11 +732,7 @@ impl ProtocolState {
             .filter(protocol_state::valid_from.gt(start_ts))
             .filter(protocol_state::valid_from.le(end_ts))
             // only consider attributes that are still valid by end_ts
-            .filter(
-                protocol_state::valid_to
-                    .gt(end_ts)
-                    .or(protocol_state::valid_to.is_null()),
-            )
+            .filter(protocol_state::valid_to.gt(end_ts))
             .order_by(protocol_state::protocol_component_id)
             .select((Self::as_select(), protocol_component::external_id))
             .get_results::<(Self, String)>(conn)
@@ -813,7 +757,7 @@ impl ProtocolState {
                                 WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
                                 AND ps2.attribute_name = protocol_state.attribute_name
                                 AND ps2.valid_from <= '{}'
-                                AND (ps2.valid_to > '{}' OR ps2.valid_to IS NULL)
+                                AND ps2.valid_to > '{}'
                             )", end_ts, end_ts);
 
         // query for all state updates that have a valid_to between start_ts and end_ts (potentially
@@ -882,7 +826,7 @@ impl ProtocolState {
                                 WHERE ps2.protocol_component_id = protocol_state.protocol_component_id
                                 AND ps2.attribute_name = protocol_state.attribute_name
                                 AND ps2.valid_from <= '{}'
-                                AND (ps2.valid_to > '{}' OR ps2.valid_to IS NULL)
+                                AND ps2.valid_to > '{}'
                             )", start_ts, start_ts);
 
         // We query all states that were deleted between the start and target timestamps. Deleted
@@ -911,26 +855,60 @@ impl ProtocolState {
     }
 }
 
-#[async_trait]
-impl StoredVersionedRow for ProtocolState {
-    type EntityId = (i64, String);
-    type PrimaryKey = i64;
-    type Version = NaiveDateTime;
+#[derive(Insertable, Clone, Debug)]
+#[diesel(table_name = protocol_state)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolState {
+    pub protocol_component_id: i64,
+    pub attribute_name: String,
+    pub attribute_value: Bytes,
+    pub previous_value: Option<Bytes>,
+    pub modify_tx: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: NaiveDateTime,
+}
 
-    fn get_pk(&self) -> Self::PrimaryKey {
-        self.id
+impl From<ProtocolState> for NewProtocolState {
+    fn from(value: ProtocolState) -> Self {
+        Self {
+            protocol_component_id: value.protocol_component_id,
+            attribute_name: value.attribute_name,
+            attribute_value: value.attribute_value,
+            previous_value: value.previous_value,
+            modify_tx: value.modify_tx,
+            valid_from: value.valid_from,
+            valid_to: value.valid_to,
+        }
     }
+}
 
-    fn get_entity_id(&self) -> Self::EntityId {
+impl PartitionedVersionedRow for NewProtocolState {
+    type EntityId = (i64, String);
+
+    fn get_id(&self) -> Self::EntityId {
         (self.protocol_component_id, self.attribute_name.clone())
     }
 
-    // Clippy false positive
-    #[allow(clippy::mutable_key_type)]
-    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
-        ids: I,
+    fn get_valid_to(&self) -> NaiveDateTime {
+        self.valid_to
+    }
+
+    fn archive(&mut self, next_version: &mut Self) {
+        next_version.previous_value = Some(self.attribute_value.clone());
+        self.valid_to = next_version.valid_from;
+    }
+
+    fn delete(&mut self, delete_version: NaiveDateTime) {
+        self.valid_to = delete_version;
+    }
+
+    async fn latest_versions_by_ids(
+        ids: Vec<Self::EntityId>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<Box<Self>>, StorageError> {
+    ) -> Result<Vec<Self>, StorageError>
+    where
+        Self: Sized,
+    {
         let (pc_id, attr_name): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
         let tuple_ids = pc_id
             .iter()
@@ -943,106 +921,62 @@ impl StoredVersionedRow for ProtocolState {
                 protocol_state::protocol_component_id
                     .eq_any(&pc_id)
                     .and(protocol_state::attribute_name.eq_any(&attr_name))
-                    .and(protocol_state::valid_to.is_null()),
+                    .and(protocol_state::valid_to.eq(MAX_TS)),
             )
             .get_results(conn)
             .await
             .map_err(PostgresError::from)?
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(&cs.protocol_component_id, &cs.attribute_name)))
-            .map(Box::new)
+            .map(NewProtocolState::from)
             .collect())
     }
-
-    fn table_name() -> &'static str {
-        "protocol_state"
-    }
-}
-
-impl StoredDeltaVersionedRow for ProtocolState {
-    type Value = Bytes;
-
-    fn get_value(&self) -> Self::Value {
-        self.attribute_value.clone()
-    }
-}
-
-#[derive(Insertable, Clone, Debug)]
-#[diesel(table_name = protocol_state)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewProtocolState {
-    pub protocol_component_id: i64,
-    pub attribute_name: Option<String>,
-    pub attribute_value: Option<Bytes>,
-    pub previous_value: Option<Bytes>,
-    pub modify_tx: i64,
-    pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
 }
 
 impl NewProtocolState {
     pub fn new(
         protocol_component_id: i64,
         attribute_name: &str,
-        attribute_value: Option<&Bytes>,
+        attribute_value: &Bytes,
         modify_tx: i64,
         valid_from: NaiveDateTime,
     ) -> Self {
         Self {
             protocol_component_id,
-            attribute_name: Some(attribute_name.to_string()),
-            attribute_value: attribute_value.cloned(),
+            attribute_name: attribute_name.to_string(),
+            attribute_value: attribute_value.clone(),
             previous_value: None,
             modify_tx,
             valid_from,
-            valid_to: None,
+            valid_to: MAX_TS,
         }
     }
 }
 
-impl VersionedRow for NewProtocolState {
-    type SortKey = (i64, String, NaiveDateTime, i64);
-    type EntityId = (i64, String);
-    type Version = NaiveDateTime;
-
-    fn get_entity_id(&self) -> Self::EntityId {
-        (
-            self.protocol_component_id,
-            self.attribute_name
-                .clone()
-                .expect("should have attribute name"),
-        )
-    }
-
-    fn get_sort_key(&self) -> Self::SortKey {
-        (
-            self.protocol_component_id,
-            self.attribute_name.clone().unwrap(),
-            self.valid_from,
-            self.modify_tx,
-        )
-    }
-
-    fn set_valid_to(&mut self, end_version: Self::Version) {
-        self.valid_to = Some(end_version);
-    }
-
-    fn get_valid_from(&self) -> Self::Version {
-        self.valid_from
-    }
+#[derive(Insertable, Clone, Debug)]
+#[diesel(table_name = protocol_state_default)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewProtocolStateLatest {
+    pub protocol_component_id: i64,
+    pub attribute_name: String,
+    pub attribute_value: Bytes,
+    pub previous_value: Option<Bytes>,
+    pub modify_tx: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: NaiveDateTime,
 }
 
-impl DeltaVersionedRow for NewProtocolState {
-    type Value = Bytes;
-
-    fn get_value(&self) -> Self::Value {
-        self.attribute_value
-            .clone()
-            .expect("should have attribute value")
-    }
-
-    fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = Some(previous_value)
+impl From<NewProtocolState> for NewProtocolStateLatest {
+    fn from(value: NewProtocolState) -> Self {
+        Self {
+            protocol_component_id: value.protocol_component_id,
+            attribute_name: value.attribute_name,
+            attribute_value: value.attribute_value,
+            previous_value: value.previous_value,
+            modify_tx: value.modify_tx,
+            valid_from: value.valid_from,
+            valid_to: MAX_TS,
+        }
     }
 }
 
@@ -1255,10 +1189,6 @@ impl VersionedRow for NewAccountBalance {
         self.account_id
     }
 
-    fn get_sort_key(&self) -> Self::SortKey {
-        (self.account_id, self.valid_from, self.modify_tx)
-    }
-
     fn set_valid_to(&mut self, end_version: Self::Version) {
         self.valid_to = Some(end_version);
     }
@@ -1358,10 +1288,6 @@ impl<'a> VersionedRow for NewContractCode<'a> {
         self.account_id
     }
 
-    fn get_sort_key(&self) -> Self::SortKey {
-        (self.account_id, self.valid_from, self.modify_tx)
-    }
-
     fn set_valid_to(&mut self, end_version: Self::Version) {
         self.valid_to = Some(end_version);
     }
@@ -1434,8 +1360,8 @@ impl NewContract {
 #[diesel(belongs_to(Account))]
 #[diesel(table_name = contract_storage)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(primary_key(account_id, slot, modify_tx))]
 pub struct ContractStorage {
-    pub id: i64,
     pub slot: Bytes,
     pub value: Option<Bytes>,
     pub previous_value: Option<Bytes>,
@@ -1443,32 +1369,56 @@ pub struct ContractStorage {
     pub modify_tx: i64,
     pub ordinal: i64,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
     pub inserted_ts: NaiveDateTime,
     pub modified_ts: NaiveDateTime,
 }
 
-#[async_trait]
-impl StoredVersionedRow for ContractStorage {
+#[derive(Insertable, Debug, Clone)]
+#[diesel(table_name = contract_storage)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewSlot {
+    pub slot: Bytes,
+    pub value: Option<Bytes>,
+    pub previous_value: Option<Bytes>,
+    pub account_id: i64,
+    pub modify_tx: i64,
+    pub ordinal: i64,
+    pub valid_from: NaiveDateTime,
+    pub valid_to: NaiveDateTime,
+}
+
+impl PartitionedVersionedRow for NewSlot {
     type EntityId = (i64, Bytes);
-    type PrimaryKey = i64;
-    type Version = NaiveDateTime;
 
-    fn get_pk(&self) -> Self::PrimaryKey {
-        self.id
-    }
-
-    fn get_entity_id(&self) -> Self::EntityId {
+    fn get_id(&self) -> Self::EntityId {
         (self.account_id, self.slot.clone())
     }
 
-    // Clippy false positive
-    #[allow(clippy::mutable_key_type)]
-    async fn latest_versions_by_ids<I: IntoIterator<Item = Self::EntityId> + Send + Sync>(
-        ids: I,
+    fn get_valid_to(&self) -> NaiveDateTime {
+        self.valid_to
+    }
+
+    fn archive(&mut self, next_version: &mut Self) {
+        next_version
+            .previous_value
+            .clone_from(&self.value);
+        self.valid_to = next_version.valid_from;
+    }
+
+    fn delete(&mut self, delete_version: NaiveDateTime) {
+        self.valid_to = delete_version
+    }
+
+    async fn latest_versions_by_ids(
+        ids: Vec<Self::EntityId>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<Box<Self>>, StorageError> {
+    ) -> Result<Vec<Self>, StorageError>
+    where
+        Self: Sized,
+    {
         let (accounts, slots): (Vec<_>, Vec<_>) = ids.into_iter().unzip();
+        #[allow(clippy::mutable_key_type)]
         let tuple_ids = accounts
             .iter()
             .zip(slots.iter())
@@ -1480,87 +1430,59 @@ impl StoredVersionedRow for ContractStorage {
                 contract_storage::account_id
                     .eq_any(&accounts)
                     .and(contract_storage::slot.eq_any(&slots))
-                    .and(contract_storage::valid_to.is_null()),
+                    .and(contract_storage::valid_to.eq(MAX_TS)),
             )
             .get_results(conn)
             .await
             .map_err(PostgresError::from)?
             .into_iter()
             .filter(|cs| tuple_ids.contains(&(&cs.account_id, &cs.slot)))
-            .map(Box::new)
+            .map(NewSlot::from)
             .collect())
     }
-
-    fn table_name() -> &'static str {
-        "contract_storage"
-    }
 }
 
-impl DeltaVersionedRow for ContractStorage {
-    type Value = Option<Bytes>;
-
-    fn get_value(&self) -> Self::Value {
-        self.value.clone()
-    }
-
-    fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value
-    }
-}
-
-impl StoredDeltaVersionedRow for ContractStorage {
-    type Value = Option<Bytes>;
-
-    fn get_value(&self) -> Self::Value {
-        self.value.clone()
+impl From<ContractStorage> for NewSlot {
+    fn from(value: ContractStorage) -> Self {
+        Self {
+            slot: value.slot,
+            value: value.value,
+            previous_value: value.previous_value,
+            account_id: value.account_id,
+            modify_tx: value.modify_tx,
+            ordinal: value.ordinal,
+            valid_from: value.valid_from,
+            valid_to: value.valid_to,
+        }
     }
 }
 
 #[derive(Insertable, Debug)]
-#[diesel(table_name = contract_storage)]
+#[diesel(table_name = contract_storage_default)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewSlot<'a> {
-    pub slot: &'a Bytes,
+pub struct NewSlotLatest {
+    pub slot: Bytes,
     pub value: Option<Bytes>,
     pub previous_value: Option<Bytes>,
     pub account_id: i64,
     pub modify_tx: i64,
     pub ordinal: i64,
     pub valid_from: NaiveDateTime,
-    pub valid_to: Option<NaiveDateTime>,
+    pub valid_to: NaiveDateTime,
 }
 
-impl<'a> VersionedRow for NewSlot<'a> {
-    type EntityId = (i64, Bytes);
-    type SortKey = ((i64, Bytes), NaiveDateTime, i64);
-    type Version = NaiveDateTime;
-
-    fn get_entity_id(&self) -> Self::EntityId {
-        (self.account_id, self.slot.clone())
-    }
-
-    fn get_sort_key(&self) -> Self::SortKey {
-        (self.get_entity_id(), self.valid_from, self.ordinal)
-    }
-
-    fn set_valid_to(&mut self, end_version: Self::Version) {
-        self.valid_to = Some(end_version);
-    }
-
-    fn get_valid_from(&self) -> Self::Version {
-        self.valid_from
-    }
-}
-
-impl<'a> DeltaVersionedRow for NewSlot<'a> {
-    type Value = Option<Bytes>;
-
-    fn get_value(&self) -> Self::Value {
-        self.value.clone()
-    }
-
-    fn set_previous_value(&mut self, previous_value: Self::Value) {
-        self.previous_value = previous_value;
+impl From<NewSlot> for NewSlotLatest {
+    fn from(value: NewSlot) -> Self {
+        Self {
+            slot: value.slot,
+            value: value.value,
+            previous_value: value.previous_value,
+            account_id: value.account_id,
+            modify_tx: value.modify_tx,
+            ordinal: value.ordinal,
+            valid_from: value.valid_from,
+            valid_to: MAX_TS,
+        }
     }
 }
 

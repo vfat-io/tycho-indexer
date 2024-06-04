@@ -164,7 +164,8 @@ CREATE TABLE IF NOT EXISTS protocol_component(
     UNIQUE ("chain_id", "protocol_system_id", "external_id")
 );
 
-CREATE INDEX IF NOT EXISTS idx_protocol_identity ON protocol_component(external_id, protocol_system_id, chain_id);
+CREATE INDEX IF NOT EXISTS idx_protocol_identity ON protocol_component(external_id,
+    protocol_system_id, chain_id);
 
 -- Describes the mutable state of a component. Versioned by blocks.
 CREATE TABLE IF NOT EXISTS protocol_state(
@@ -197,7 +198,8 @@ CREATE INDEX IF NOT EXISTS idx_protocol_state_tx ON protocol_state(modify_tx);
 
 CREATE INDEX IF NOT EXISTS idx_protocol_state_valid_to ON protocol_state(valid_to);
 
-CREATE INDEX IF NOT EXISTS idx_protocol_state_valid_protocol_component_id ON protocol_state(protocol_component_id);
+CREATE INDEX IF NOT EXISTS idx_protocol_state_valid_protocol_component_id ON
+    protocol_state(protocol_component_id);
 
 -- Describes a single account.
 CREATE TABLE IF NOT EXISTS "account"(
@@ -371,11 +373,14 @@ CREATE TABLE IF NOT EXISTS protocol_calls_contract(
     UNIQUE ("protocol_component_id", "account_id", "valid_to")
 );
 
-CREATE INDEX IF NOT EXISTS idx_protocol_calls_contract_protocol_component_id ON protocol_calls_contract(protocol_component_id);
+CREATE INDEX IF NOT EXISTS idx_protocol_calls_contract_protocol_component_id ON
+    protocol_calls_contract(protocol_component_id);
 
-CREATE INDEX IF NOT EXISTS idx_protocol_calls_contract_account_id ON protocol_calls_contract(account_id);
+CREATE INDEX IF NOT EXISTS idx_protocol_calls_contract_account_id ON
+    protocol_calls_contract(account_id);
 
-CREATE INDEX IF NOT EXISTS idx_protocol_calls_contract_valid_to ON protocol_calls_contract(valid_to);
+CREATE INDEX IF NOT EXISTS idx_protocol_calls_contract_valid_to ON
+    protocol_calls_contract(valid_to);
 
 -- keeps track of what we did.
 CREATE TABLE IF NOT EXISTS audit_log(
@@ -721,4 +726,3 @@ CREATE TRIGGER audit_table_extraction_state
     BEFORE UPDATE ON "extraction_state"
     FOR EACH ROW
     EXECUTE PROCEDURE audit_trigger();
-
