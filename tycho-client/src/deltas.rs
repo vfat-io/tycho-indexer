@@ -597,7 +597,10 @@ impl DeltasClient for WsDeltasClient {
 
                 loop {
                     let res = tokio::select! {
-                        Some(msg) = msg_rx.next() => this.handle_msg(msg).await,
+                        msg = msg_rx.next() => match msg {
+                            Some(msg) => this.handle_msg(msg).await,
+                            None => { break 'retry } // ws connection silently closed
+                        },
                         _ = cmd_rx.recv() => {break 'retry},
                     };
                     if let Err(error) = res {
