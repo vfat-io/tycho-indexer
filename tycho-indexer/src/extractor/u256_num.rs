@@ -39,7 +39,7 @@ pub fn bytes_to_f64(data: &[u8]) -> Option<f64> {
     let x = U256::from(data);
     let res = panic::catch_unwind(|| {
         if x == U256::zero() {
-            return Some(0.0)
+            return Some(0.0);
         }
 
         let x_bits = x.bits();
@@ -103,7 +103,7 @@ mod test {
 
     use super::*;
     use rstest::rstest;
-    use tycho_types::Bytes;
+    use tycho_core::Bytes;
 
     #[rstest]
     #[case::one(U256::one(), 1.0f64)]

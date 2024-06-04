@@ -1,8 +1,6 @@
 use ethers::types::{H160, H256, U256};
 
-use tycho_types::Bytes;
-
-use crate::storage::{Address, StorageError};
+use tycho_core::Bytes;
 
 /// Decoding trait with nice contextual error messages
 pub trait TryDecode: Sized {
@@ -28,7 +26,7 @@ pub trait TryDecode: Sized {
 impl TryDecode for H160 {
     fn try_decode(v: &Bytes, type_context: &str) -> Result<Self, String> {
         if v.len() != 20 {
-            return Err(format!("H160: Invalid {} format: 0x{}", type_context, hex::encode(v)))
+            return Err(format!("H160: Invalid {} format: 0x{}", type_context, hex::encode(v)));
         }
         // This is much simpler compared to AbiDecode::decode, the latter will do
         // some more complex parsing and required all input to be 32 bytes vs
@@ -40,7 +38,7 @@ impl TryDecode for H160 {
 impl TryDecode for H256 {
     fn try_decode(v: &Bytes, type_context: &str) -> Result<Self, String> {
         if v.len() != 32 {
-            return Err(format!("H256: Invalid {} format: 0x{}", type_context, hex::encode(v)))
+            return Err(format!("H256: Invalid {} format: 0x{}", type_context, hex::encode(v)));
         }
         Ok(H256::from_slice(v))
     }
@@ -49,7 +47,7 @@ impl TryDecode for H256 {
 impl TryDecode for U256 {
     fn try_decode(v: &Bytes, type_context: &str) -> Result<Self, String> {
         if v.len() != 32 {
-            return Err(format!("U256: Invalid {} format: 0x{}", type_context, hex::encode(v)))
+            return Err(format!("U256: Invalid {} format: 0x{}", type_context, hex::encode(v)));
         }
         Ok(U256::from_big_endian(v))
     }
@@ -62,7 +60,7 @@ pub fn pad_and_parse_h160(v: &Bytes) -> Result<H160, String> {
             "H160: too long; expected 20, got {}, val: 0x{}",
             v.len(),
             hex::encode(v)
-        ))
+        ));
     }
 
     let mut data: [u8; 20] = [0; 20];
@@ -72,19 +70,10 @@ pub fn pad_and_parse_h160(v: &Bytes) -> Result<H160, String> {
     Ok(H160::from(data))
 }
 
-/// Converts a slice of addresses to a vector of H160
-pub fn convert_addresses_to_h160(addresses: &[Address]) -> Result<Vec<H160>, StorageError> {
-    addresses
-        .iter()
-        .map(|address| {
-            pad_and_parse_h160(address).map_err(|err| StorageError::DecodeError(err.to_string()))
-        })
-        .collect()
-}
-
 /// Parses a tuple of U256 representing an slot entry
 ///
 /// In case the value is None it will assume a value of zero.
+#[cfg(test)]
 pub fn parse_u256_slot_entry(
     raw_key: &Bytes,
     raw_val: Option<&Bytes>,
@@ -106,7 +95,7 @@ where
             "Byte slice too long: Expected 32, got {}, val: 0x{}",
             v.len(),
             hex::encode(v)
-        ))
+        ));
     }
     let mut data: [u8; 32] = [0; 32];
     let start_index = 32 - v.len();

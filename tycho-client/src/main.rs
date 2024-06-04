@@ -1,4 +1,9 @@
 use std::time::Duration;
+
+use clap::Parser;
+use tracing::trace;
+use tracing_appender::rolling::{self};
+
 use tycho_client::{
     deltas::DeltasClient,
     feed::{
@@ -7,60 +12,221 @@ use tycho_client::{
     },
     HttpRPCClient, WsDeltasClient,
 };
-use tycho_types::dto::{Chain, ExtractorIdentity};
+use tycho_core::dto::{Chain, ExtractorIdentity};
 
-/// Run a simple example of a block synchronizer.
-///
-/// You need to port-forward tycho before running this:
-///
-/// ```bash
-/// kubectl port-forward deploy/tycho-indexer 8888:4242
-/// ```
+#[derive(Parser, Debug, Clone, PartialEq, Eq)]
+#[clap(version = "0.1.0")]
+struct CliArgs {
+    /// Tycho server URL, without protocol. Example: localhost:8888
+    #[clap(long, default_value = "localhost:8888")]
+    tycho_url: String,
+
+    /// Specifies exchanges and optionally a pool address in the format name:address
+    #[clap(long, number_of_values = 1)]
+    exchange: Vec<String>,
+
+    /// Specifies the minimum TVL to filter the components. Ignored if addresses are provided.
+    #[clap(long, default_value = "10")]
+    min_tvl: u32,
+
+    /// Specifies the client's block time
+    #[clap(long, default_value = "600")]
+    block_time: u64,
+
+    /// Specifies the client's timeout
+    #[clap(long, default_value = "1")]
+    timeout: u64,
+
+    /// Logging folder path.
+    #[clap(long, default_value = "logs")]
+    log_folder: String,
+
+    /// Run the example on a single block with UniswapV2 and UniswapV3.
+    #[clap(long)]
+    example: bool,
+
+    /// If set, only component and tokens are streamed, any snapshots or state updates
+    /// are omitted from the stream.
+    #[clap(long)]
+    no_state: bool,
+
+    /// Maximum amount of messages to process before exiting. Useful for debugging e.g.
+    /// to easily get a state sync messages for a fixture. Alternatively this may be
+    /// used to trigger a regular restart or resync.
+    #[clap(short='n', long, default_value=None)]
+    max_messages: Option<usize>,
+}
+
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    // Parse CLI Args
+    let args: CliArgs = CliArgs::parse();
 
-    let tycho_url = "localhost:8888";
-    let tycho_ws_url = format!("ws://{tycho_url}");
-    let tycho_rpc_url = format!("http://{tycho_url}");
+    // Setup Logging
+    let (non_blocking, _guard) =
+        tracing_appender::non_blocking(rolling::never(&args.log_folder, "dev_logs.log"));
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().expect("Bad env filter"),
+        )
+        .with_writer(non_blocking)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to set up logging subscriber");
+
+    // Runs example if flag is set.
+    if args.example {
+        // Run a simple example of a block synchronizer.
+        //
+        // You need to port-forward tycho before running this:
+        //
+        // ```bash
+        // kubectl port-forward -n dev-tycho deploy/tycho-indexer 8888:4242
+        // ```
+        let exchanges = vec![
+            (
+                "uniswap_v3".to_string(),
+                Some("0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640".to_string()),
+            ),
+            (
+                "uniswap_v2".to_string(),
+                Some("0xa478c2975ab1ea89e8196811f51a7b7ade33eb11".to_string()),
+            ),
+        ];
+        run(exchanges, args).await;
+        return;
+    }
+
+    // Parse exchange name and addresses from name:address format.
+    let exchanges: Vec<(String, Option<String>)> = args
+        .exchange
+        .iter()
+        .filter_map(|e| {
+            if e.contains('-') {
+                let parts: Vec<&str> = e.split('-').collect();
+                if parts.len() == 2 {
+                    Some((parts[0].to_string(), Some(parts[1].to_string())))
+                } else {
+                    tracing::warn!("Ignoring invalid exchange format: {}", e);
+                    None
+                }
+            } else {
+                Some((e.to_string(), None))
+            }
+        })
+        .collect();
+
+    tracing::info!("Running with exchanges: {:?}", exchanges);
+
+    run(exchanges, args).await;
+}
+
+async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
+    let tycho_ws_url = format!("ws://{}", &args.tycho_url);
+    let tycho_rpc_url = format!("http://{}", &args.tycho_url);
     let ws_client = WsDeltasClient::new(&tycho_ws_url).unwrap();
-    ws_client
+    let ws_jh = ws_client
         .connect()
         .await
         .expect("ws client connection error");
 
-    let v3_id = ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap_v3".to_string() };
-    let v3_sync = ProtocolStateSynchronizer::new(
-        v3_id.clone(),
-        true,
-        ComponentFilter::Ids(vec!["0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640".to_string()]),
-        1, // TODO can it be 0?
-        HttpRPCClient::new(&tycho_rpc_url).unwrap(),
-        ws_client.clone(),
-    );
-    let v2_id = ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap_v2".to_string() };
-    let v2_sync = ProtocolStateSynchronizer::new(
-        v2_id.clone(),
-        true,
-        ComponentFilter::Ids(vec!["0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc".to_string()]),
-        1,
-        HttpRPCClient::new(&tycho_rpc_url).unwrap(),
-        ws_client.clone(),
+    let mut block_sync = BlockSynchronizer::new(
+        Duration::from_secs(args.block_time),
+        Duration::from_secs(args.timeout),
     );
 
-    let block_sync = BlockSynchronizer::new(Duration::from_secs(600), Duration::from_secs(1))
-        .register_synchronizer(v3_id, v3_sync)
-        .register_synchronizer(v2_id, v2_sync);
+    if let Some(mm) = &args.max_messages {
+        block_sync.max_messages(*mm);
+    }
 
-    let (jh, mut rx) = block_sync
+    for (name, address) in exchanges {
+        trace!("Registering exchange: {}", name);
+        let id = ExtractorIdentity { chain: Chain::Ethereum, name: name.clone() }; //TODO: remove chain assumption
+        let filter = if address.is_some() {
+            ComponentFilter::Ids(vec![address.unwrap()])
+        } else {
+            ComponentFilter::MinimumTVL(args.min_tvl as f64)
+        };
+        let is_native: bool = !name.starts_with("vm:");
+        let sync = ProtocolStateSynchronizer::new(
+            id.clone(),
+            is_native,
+            true,
+            filter,
+            3,
+            !args.no_state,
+            HttpRPCClient::new(&tycho_rpc_url).unwrap(),
+            ws_client.clone(),
+        );
+        block_sync = block_sync.register_synchronizer(id, sync);
+    }
+
+    let (sync_jh, mut rx) = block_sync
         .run()
         .await
         .expect("block sync start error");
 
-    while let Some(msg) = rx.recv().await {
-        dbg!(msg);
+    let msg_printer = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if let Ok(msg_json) = serde_json::to_string(&msg) {
+                println!("{}", msg_json);
+            } else {
+                tracing::error!("Failed to serialize FeedMessage");
+            }
+        }
+    });
+
+    // Monitor the WebSocket, BlockSynchronizer and message printer futures.
+    tokio::select! {
+        res = ws_jh => {
+            let _ = res.expect("WebSocket connection dropped unexpectedly");
+        }
+        res = sync_jh => {
+            res.expect("BlockSynchronizer stopped unexpectedly");
+        }
+        res = msg_printer => {
+            res.expect("Message printer stopped unexpectedly");
+        }
     }
 
-    dbg!("RX closed");
-    jh.await.unwrap();
+    tracing::debug!("RX closed");
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use clap::Parser;
+
+    use super::CliArgs;
+
+    #[tokio::test]
+    async fn test_cli_args() {
+        let args = CliArgs::parse_from([
+            "tycho-client",
+            "--tycho-url",
+            "localhost:5000",
+            "--exchange",
+            "uniswap_v2",
+            "--min-tvl",
+            "3000",
+            "--block-time",
+            "50",
+            "--timeout",
+            "5",
+            "--log-folder",
+            "test_logs",
+            "--example",
+            "--max-messages",
+            "1",
+        ]);
+        let exchanges: Vec<String> = vec!["uniswap_v2".to_string()];
+        assert_eq!(args.tycho_url, "localhost:5000");
+        assert_eq!(args.exchange, exchanges);
+        assert_eq!(args.min_tvl, 3000);
+        assert_eq!(args.block_time, 50);
+        assert_eq!(args.timeout, 5);
+        assert_eq!(args.log_folder, "test_logs");
+        assert_eq!(args.max_messages, Some(1));
+        assert!(args.example);
+    }
 }

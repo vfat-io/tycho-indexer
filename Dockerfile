@@ -22,15 +22,11 @@ FROM chef AS build
 COPY --from=planner /build/recipe.json recipe.json
 RUN cargo chef cook --package tycho-indexer --release --recipe-path recipe.json
 COPY . .
-# the hack below is probably needed because of rust-toolchain.toml
-# will fix this later we have time to optimise the build
-RUN rustup target add wasm32-unknown-unknown && ./stable-build.sh
+RUN ./stable-build.sh
 
 FROM debian:bookworm
 WORKDIR /opt/tycho-indexer
 COPY --from=build /build/target/release/tycho-indexer ./tycho-indexer
-COPY --from=build /build/substreams/ethereum-ambient/substreams-ethereum-ambient-v0.4.0.spkg ./substreams/substreams-ethereum-ambient-v0.4.0.spkg
-COPY --from=build /build/substreams/ethereum-uniswap-v2/substreams-ethereum-uniswap-v2-v0.1.0.spkg ./substreams/substreams-ethereum-uniswap-v2-v0.1.0.spkg
-COPY --from=build /build/substreams/ethereum-uniswap-v3/substreams-ethereum-uniswap-v3-v0.1.0.spkg ./substreams/substreams-ethereum-uniswap-v3-v0.1.0.spkg
+COPY --from=build /build/extractors.yaml ./extractors.yaml
 RUN apt-get update && apt-get install -y libpq-dev libcurl4 && rm -rf /var/lib/apt/lists/*
 ENTRYPOINT ["/opt/tycho-indexer/tycho-indexer", "--endpoint", "https://mainnet.eth.streamingfast.io:443", "--module", "map_changes", "--spkg", "/opt/tycho-indexer/substreams/substreams-ethereum-ambient-v0.3.0.spkg"]

@@ -1,15 +1,35 @@
 import json
 import requests
-
-target_block_number = 12383119
-
-# Reading the JSON data from the file
-with open(f"uniswapv3_{target_block_number}.json", 'r') as file:
-    parsed_data = json.load(file)
-
+import argparse
 
 # The Graph API URL for Uniswap v3
 GRAPH_URL = 'https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3'
+
+
+def fetch_tycho_data(block: int, component_ids: list[str]):
+    payload = {
+      "protocolIds": [
+        {
+          "chain": "ethereum",
+          "id": cid
+        } for cid in component_ids
+      ],
+      "version": {
+        "block": {
+          "chain": "ethereum",
+          "number": block
+        }
+      }
+    }
+    uri="http://127.0.0.1:4242/v1/ethereum/protocol_state?balances_flag=false"
+    res = requests.post(uri,
+        json=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+    )
+    return res.json()
 
 def fetch_pool_data(pool_id, block_number=None):
     query = """
@@ -74,10 +94,21 @@ def compare_pools(local_pool, fetched_pool):
     return differences
 
 def main():
+    parser = argparse.ArgumentParser(description='Compare uniswap v3 protocol state.')
+    # Add arguments
+    parser.add_argument('block_number', type=int, help='The block state to query')
+    parser.add_argument('pools', nargs='+', help='A list of component ids (pool addresses)')
+    # Parse arguments
+    args = parser.parse_args()
+    # Use the parsed arguments
+    block_number = args.block_number
+    pool_addresses = args.pools
+
+    parsed_data = fetch_tycho_data(block_number, pool_addresses)
     for pool in parsed_data['states']:
         pool_id = pool['component_id']
-        fetched_pool_data = fetch_pool_data(pool_id, target_block_number)
-        if fetched_pool_data:
+        fetched_pool_data = fetch_pool_data(pool_id, block_number)
+        if fetched_pool_data is not None:
             differences = compare_pools(pool, fetched_pool_data)
             if differences:
                 print(f"Differences found for pool {pool_id}:")

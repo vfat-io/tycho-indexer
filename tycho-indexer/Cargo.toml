@@ -1,6 +1,6 @@
 [package]
 name = "tycho-indexer"
-version = "0.3.0"
+version = "0.5.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,8 +13,6 @@ path = "src/main.rs"
 chrono.workspace = true
 serde_json.workspace = true
 serde.workspace = true
-strum.workspace = true
-strum_macros.workspace = true
 uuid.workspace = true
 hex.workspace = true
 futures03.workspace = true
@@ -22,23 +20,22 @@ thiserror.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
+console-subscriber.workspace = true
 ethers.workspace = true
-diesel.workspace = true
 diesel-async.workspace = true
-unicode-segmentation.workspace = true
-tycho-types = { workspace = true, features = ["diesel"] }
-
+tycho-core = { workspace = true }
+tycho-storage.workspace = true
+token-analyzer.workspace = true
 anyhow.workspace = true
+reqwest.workspace = true
+url.workspace = true
 async-stream = "0.3"
-reqwest = "0.11"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-retry = "0.3"
 tonic = { version = "0.9", features = ["tls-roots"] }
 prost = "0.11"
 prost-types = "0.11"
-diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
-diesel_migrations = "2.1.0"
-clap = { version = "4.4.2", features = ["derive", "env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 tracing-subscriber = { version = "0.3.17", default-features = false, features = [
     "env-filter",
     "fmt",
@@ -47,15 +44,18 @@ once_cell = "1.18.0"
 actix = "0.13.1"
 actix-web = "4.4.0"
 actix-web-actors = "4.2.0"
-tracing-actix-web = "0.7.6"
 hex-literal = "0.4.1"
 mockall = "0.11.4"
 actix-web-opentelemetry = "0.16.0"
-typetag = "0.2"
+aws-config = { version = "1.1.8", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.18.0"
+serde_yaml = "0.9.32"
+# TODO still required??
+typetag = "0.2.16"
 utoipa = { version = "4.2.0", features = ["chrono"] }
 utoipa-swagger-ui = { version = "6.0.0", features = ["actix-web"] }
-lru = "0.12.1"
-itertools = "0.12.1"
+ethrpc = { git = "https://github.com/cowprotocol/services", rev = "f3678428991e055ceb517f184d1b37244f2d8f51" }
+web3 = { version = "0.19", default-features = false }
 
 [dev-dependencies]
 actix-rt = "2.9.0"
@@ -63,4 +63,5 @@ actix-test = "0.1.2"
 rstest = "0.18.2"
 tokio-tungstenite.workspace = true
 pretty_assertions = "1.4.0"
-test-log = { version = "0.2.14", features=["trace"]}
+test-log = { version = "0.2.14", features = ["trace"] }
+float_eq = "1.0.1"

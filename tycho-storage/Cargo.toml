@@ -1,0 +1,28 @@
+[package]
+name = "tycho-storage"
+version = "0.5.0"
+edition = "2021"
+
+[dependencies]
+chrono.workspace = true
+tycho-core = { workspace = true, features = ["diesel"] }
+diesel.workspace = true
+diesel-async.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+hex.workspace = true
+serde_json.workspace = true
+diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
+diesel_migrations = "2.1.0"
+lru = "0.12.1"
+itertools = "0.12.1"
+unicode-segmentation.workspace = true
+ethers.workspace = true
+lazy_static = "1.4.0"
+
+
+[dev-dependencies]
+rstest = "0.18.2"
+pretty_assertions = "1.4.0"
+test-log = { version = "0.2.14", features = ["trace"] }

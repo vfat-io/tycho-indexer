@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - patch/*
+      - ah/fix-token-owner-detection
+  workflow_dispatch: { }
+
 
 permissions:
   id-token: write
@@ -14,7 +17,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out Repo
         uses: actions/checkout@v4
@@ -36,8 +39,10 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v1
 
       - name: Get next version
-        uses: reecetech/version-increment@2023.10.1
         id: version
+        uses: reecetech/version-increment@2023.10.1
+        with:
+          release_branch: no-branch/we-only-use-this-for-pre-releases
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

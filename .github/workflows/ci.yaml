@@ -9,6 +9,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
 
 jobs:
   compile_and_test:
@@ -20,21 +22,21 @@ jobs:
         toolchain:
           - stable
     services:
-        postgres: 
-            image: postgres
-            env:
-                POSTGRES_PASSWORD: mypassword
-                POSTGRES_DB: tycho_indexer_0
-                POSTGRES_USER: postgres
-            options: >-
-                --health-cmd pg_isready
-                --health-interval 10s
-                --health-timeout 5s
-                --health-retries 5
-            ports:
-                - 5432:5432
+      postgres:
+        image: ghcr.io/dbsystel/postgresql-partman:15-5
+        env:
+          POSTGRESQL_PASSWORD: mypassword
+          POSTGRESQL_DATABASE: tycho_indexer_0
+          POSTGRESQL_USERNAME: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     env:
-        DATABASE_URL: postgres://postgres:mypassword@localhost:5432/tycho_indexer_0
+      DATABASE_URL: postgres://postgres:mypassword@localhost:5432/tycho_indexer_0
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -52,9 +54,11 @@ jobs:
           crate: diesel_cli
           features: postgres
       - name: DB Setup
-        run: cd tycho-indexer && diesel migration run
+        run: cd tycho-storage && diesel migration run
       - name: Install latest nextest release
         uses: taiki-e/install-action@nextest
+      - name: Compile
+        run: cargo nextest run --workspace --all-targets --all-features --no-run --locked
       - name: Test
         run: cargo nextest run --workspace --all-targets --all-features -E 'not test(serial_db)'
       - name: Test (Serial)
@@ -67,19 +71,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Setup toolchain
+        id: toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: nightly-2024-04-03
           components: rustfmt, clippy
       - name: Setup Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
-      - run: cargo +nightly clippy --workspace --all-targets --all-features
-        env:
-          RUSTFLAGS: -Dwarnings
+      - name: Clippy
+        run: cargo +${{steps.toolchain.outputs.name}} clippy --workspace --all-targets --all-features
 
-      - run: cargo +nightly fmt --all --check
+      - name: Rustfmt
+        run: cargo +${{steps.toolchain.outputs.name}} fmt --all --check
 
   buf_formatting:
     name: Protobuf Files Formatting

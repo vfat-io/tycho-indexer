@@ -1,7 +1,31 @@
+use super::{
+    compat::{
+        add_default_attributes_uniswapv2, add_default_attributes_uniswapv3, ignore_self_balances,
+        transcode_ambient_balances, transcode_usv2_balances,
+    },
+    evm::{
+        chain_state::ChainState,
+        native::{NativeContractExtractor, NativePgGateway},
+        token_pre_processor::TokenPreProcessor,
+        vm::{VmContractExtractor, VmPgGateway},
+    },
+    Extractor, ExtractorMsg,
+};
+use crate::{
+    extractor::{evm::protocol_cache::ProtocolMemoryCache, ExtractionError},
+    pb::sf::substreams::v1::Package,
+    substreams::{
+        stream::{BlockResponse, SubstreamsStream},
+        SubstreamsEndpoint,
+    },
+};
 use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
+use aws_config::meta::region::RegionProviderChain;
+use aws_sdk_s3::Client;
 use prost::Message;
-use std::{collections::HashMap, env, sync::Arc};
+use serde::Deserialize;
+use std::{collections::HashMap, env, path::Path, sync::Arc};
 use tokio::{
     sync::{
         mpsc::{self, error::SendError, Receiver, Sender},
@@ -11,17 +35,10 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
-
-use super::{Extractor, ExtractorMsg};
-use crate::{
-    extractor::ExtractionError,
-    models::ExtractorIdentity,
-    pb::sf::substreams::v1::Package,
-    substreams::{
-        stream::{BlockResponse, SubstreamsStream},
-        SubstreamsEndpoint,
-    },
+use tycho_core::models::{
+    Chain, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType,
 };
+use tycho_storage::postgres::cache::CachedGateway;
 
 pub enum ControlMessage {
     Stop,
@@ -65,12 +82,24 @@ impl ExtractorHandle {
 impl MessageSender for ExtractorHandle {
     #[instrument(skip(self))]
     async fn subscribe(&self) -> Result<Receiver<ExtractorMsg>, SendError<ControlMessage>> {
-        let (tx, rx) = mpsc::channel(1);
-        self.control_tx
-            .send(ControlMessage::Subscribe(tx))
-            .await?;
+        let (tx, rx) = mpsc::channel(16);
+        // Define a timeout duration
+        let timeout_duration = std::time::Duration::from_secs(5); // 5 seconds timeout
 
-        Ok(rx)
+        // Wrap the send operation with a timeout
+        let send_result = tokio::time::timeout(
+            timeout_duration,
+            self.control_tx
+                .send(ControlMessage::Subscribe(tx)),
+        )
+        .await;
+
+        match send_result {
+            Ok(Ok(())) => Ok(rx),
+            Ok(Err(e)) => Err(e),
+            // TODO: use a better error type that let's us return this as an error.
+            Err(_) => panic!("Subscription timed out!"),
+        }
     }
 }
 
@@ -95,8 +124,6 @@ impl ExtractorRunner {
         ExtractorRunner { extractor, substreams, subscriptions, next_subscriber_id: 0, control_rx }
     }
     pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
-        let id = self.extractor.get_id().clone();
-
         tokio::spawn(async move {
             let id = self.extractor.get_id();
             loop {
@@ -120,7 +147,6 @@ impl ExtractorRunner {
                             Some(Ok(BlockResponse::New(data))) => {
                                 let block_number = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 tracing::Span::current().record("block_number", block_number);
-                                debug!("New block data received.");
                                 // TODO: change interface to take a reference to avoid this clone
                                 match self.extractor.handle_tick_scoped_data(data.clone()).await {
                                     Ok(Some(msg)) => {
@@ -161,7 +187,9 @@ impl ExtractorRunner {
                 }
             }
         }
-        .instrument(tracing::info_span!("extractor_runner::run", id = %id)))
+            // Additional inner info span with substreams information
+            // trace_id is set later on in process_substreams_response
+        .instrument(tracing::info_span!("loop", trace_id = tracing::field::Empty)))
     }
 
     #[instrument(skip_all)]
@@ -179,7 +207,7 @@ impl ExtractorRunner {
     // TODO: add message tracing_id to the log
     #[instrument(skip_all)]
     async fn propagate_msg(subscribers: &Arc<Mutex<SubscriptionsMap>>, message: ExtractorMsg) {
-        debug!(msg = %message, "Propagating message to subscribers.");
+        trace!(msg = %message, "Propagating message to subscribers.");
         // TODO: rename variable here instead
         let arced_message = message;
 
@@ -192,7 +220,7 @@ impl ExtractorRunner {
             match sender.send(arced_message.clone()).await {
                 Ok(_) => {
                     // Message sent successfully
-                    debug!(subscriber_id = %counter, "Message sent successfully.");
+                    trace!(subscriber_id = %counter, "Message sent successfully.");
                 }
                 Err(err) => {
                     // Receiver has been dropped, mark for removal
@@ -210,57 +238,99 @@ impl ExtractorRunner {
     }
 }
 
-pub struct ExtractorRunnerBuilder {
-    spkg_file: String,
-    endpoint_url: String,
-    module_name: String,
+#[derive(Debug, Deserialize, Clone)]
+pub struct ProtocolTypeConfig {
+    name: String,
+    financial_type: FinancialType,
+}
+
+impl ProtocolTypeConfig {
+    pub fn new(name: String, financial_type: FinancialType) -> Self {
+        Self { name, financial_type }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ExtractorConfig {
+    name: String,
+    chain: Chain,
+    implementation_type: ImplementationType,
+    sync_batch_size: usize,
     start_block: i64,
-    end_block: i64,
+    stop_block: Option<i64>,
+    protocol_types: Vec<ProtocolTypeConfig>,
+    spkg: String,
+    module_name: String,
+}
+
+impl ExtractorConfig {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: String,
+        chain: Chain,
+        implementation_type: ImplementationType,
+        sync_batch_size: usize,
+        start_block: i64,
+        stop_block: Option<i64>,
+        protocol_types: Vec<ProtocolTypeConfig>,
+        spkg: String,
+        module_name: String,
+    ) -> Self {
+        Self {
+            name,
+            chain,
+            implementation_type,
+            sync_batch_size,
+            start_block,
+            stop_block,
+            protocol_types,
+            spkg,
+            module_name,
+        }
+    }
+}
+
+pub struct ExtractorBuilder {
+    config: ExtractorConfig,
+    endpoint_url: String,
     token: String,
-    extractor: Arc<dyn Extractor>,
+    extractor: Option<Arc<dyn Extractor>>,
     final_block_only: bool,
 }
 
-pub type HandleResult = (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle);
+pub type HandleResult =
+    (JoinHandle<Result<(), ExtractionError>>, (ExtractorHandle, ImplementationType));
 
-impl ExtractorRunnerBuilder {
-    pub fn new(spkg: &str, extractor: Arc<dyn Extractor>) -> Self {
+impl ExtractorBuilder {
+    pub fn new(config: &ExtractorConfig, endpoint_url: &str) -> Self {
         Self {
-            spkg_file: spkg.to_owned(),
-            endpoint_url: "https://mainnet.eth.streamingfast.io:443".to_owned(),
-            module_name: "map_changes".to_owned(),
-            start_block: 0,
-            end_block: 0,
+            config: config.clone(),
+            endpoint_url: endpoint_url.to_owned(),
             token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
-            extractor,
+            extractor: None,
             final_block_only: false,
         }
     }
 
     #[allow(dead_code)]
     pub fn endpoint_url(mut self, val: &str) -> Self {
-        self.endpoint_url = val.to_owned();
+        val.clone_into(&mut self.endpoint_url);
         self
     }
 
     pub fn module_name(mut self, val: &str) -> Self {
-        self.module_name = val.to_owned();
+        val.clone_into(&mut self.config.module_name);
         self
     }
 
     pub fn start_block(mut self, val: i64) -> Self {
-        self.start_block = val;
-        self
-    }
-
-    pub fn end_block(mut self, val: i64) -> Self {
-        self.end_block = val;
+        self.config.start_block = val;
         self
     }
 
     #[allow(dead_code)]
     pub fn token(mut self, val: &str) -> Self {
-        self.token = val.to_owned();
+        val.clone_into(&mut self.token);
         self
     }
 
@@ -269,10 +339,133 @@ impl ExtractorRunnerBuilder {
         self
     }
 
-    #[instrument(skip(self))]
+    #[cfg(test)]
+    pub fn set_extractor(mut self, val: Arc<dyn Extractor>) -> Self {
+        self.extractor = Some(val);
+        self
+    }
+
+    async fn ensure_spkg(&self) -> Result<(), ExtractionError> {
+        // Pull spkg from s3 and copy it at `spkg_path`
+        if !Path::new(&self.config.spkg).exists() {
+            download_file_from_s3(
+                "repo.propellerheads",
+                &self.config.spkg,
+                Path::new(&self.config.spkg),
+            )
+            .await
+            .map_err(|e| {
+                ExtractionError::Setup(format!(
+                    "Failed to download {} from s3. {}",
+                    &self.config.spkg, e
+                ))
+            })?;
+        }
+        Ok(())
+    }
+
+    pub async fn build(
+        mut self,
+        chain_state: ChainState,
+        cached_gw: &CachedGateway,
+        token_pre_processor: &TokenPreProcessor,
+        protocol_cache: &ProtocolMemoryCache,
+    ) -> Result<Self, ExtractionError> {
+        let protocol_types = self
+            .config
+            .protocol_types
+            .iter()
+            .map(|pt| {
+                (
+                    pt.name.clone(),
+                    ProtocolType::new(
+                        pt.name.clone(),
+                        pt.financial_type.clone(),
+                        None,
+                        self.config.implementation_type.clone(),
+                    ),
+                )
+            })
+            .collect();
+
+        match self.config.implementation_type {
+            ImplementationType::Vm => {
+                let gw = VmPgGateway::new(
+                    &self.config.name,
+                    self.config.chain,
+                    self.config.sync_batch_size,
+                    cached_gw.clone(),
+                );
+
+                self.extractor = Some(Arc::new(
+                    VmContractExtractor::new(
+                        &self.config.name,
+                        self.config.chain,
+                        chain_state,
+                        gw,
+                        protocol_types,
+                        self.config.name.clone(),
+                        protocol_cache.clone(),
+                        token_pre_processor.clone(),
+                        if self.config.name == "vm:ambient" {
+                            Some(transcode_ambient_balances)
+                        } else if self.config.name == "vm:balancer" {
+                            Some(ignore_self_balances)
+                        } else {
+                            None
+                        },
+                        128,
+                    )
+                    .await?,
+                ));
+            }
+            ImplementationType::Custom => {
+                let gw = NativePgGateway::new(
+                    &self.config.name,
+                    self.config.chain,
+                    self.config.sync_batch_size,
+                    cached_gw.clone(),
+                );
+
+                self.extractor = Some(Arc::new(
+                    NativeContractExtractor::new(
+                        &self.config.name,
+                        self.config.chain,
+                        chain_state,
+                        gw,
+                        protocol_types,
+                        self.config.name.clone(),
+                        protocol_cache.clone(),
+                        token_pre_processor.clone(),
+                        if self.config.name == "uniswap_v2" {
+                            Some(|b| transcode_usv2_balances(add_default_attributes_uniswapv2(b)))
+                        } else if self.config.name == "uniswap_v3" {
+                            Some(add_default_attributes_uniswapv3)
+                        } else {
+                            None
+                        },
+                        128,
+                    )
+                    .await?,
+                ));
+            }
+        }
+        Ok(self)
+    }
+
+    #[instrument(name = "extractor", skip(self), fields(id))] // this is the main info lvl span of the extractor
     pub async fn run(self) -> Result<HandleResult, ExtractionError> {
-        let content = std::fs::read(&self.spkg_file)
-            .context(format_err!("read package from file '{}'", self.spkg_file))
+        let extractor = self
+            .extractor
+            .clone()
+            .expect("Extractor not set");
+
+        tracing::Span::current().record("id", format!("{}", extractor.get_id()));
+
+        self.ensure_spkg().await?;
+
+        let content = std::fs::read(&self.config.spkg)
+            .context(format_err!("read package from file '{}'", self.config.spkg))
             .map_err(|err| ExtractionError::SubstreamsError(err.to_string()))?;
         let spkg = Package::decode(content.as_ref())
             .context("decode command")
@@ -282,39 +475,71 @@ impl ExtractorRunnerBuilder {
                 .await
                 .map_err(|err| ExtractionError::SubstreamsError(err.to_string()))?,
         );
-        let cursor = self.extractor.get_cursor().await;
+
+        let cursor = extractor.get_cursor().await;
         let stream = SubstreamsStream::new(
             endpoint,
             Some(cursor),
             spkg.modules.clone(),
-            self.module_name,
-            self.start_block,
-            self.end_block as u64,
+            self.config.module_name,
+            self.config.start_block,
+            self.config.stop_block.unwrap_or(0) as u64,
             self.final_block_only,
         );
 
-        let id = self.extractor.get_id();
-        let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
-        let runner = ExtractorRunner::new(
-            self.extractor,
-            stream,
-            Arc::new(Mutex::new(HashMap::new())),
-            ctrl_rx,
-        );
+        let id = extractor.get_id();
+        let (ctrl_tx, ctrl_rx) = mpsc::channel(128);
+        let runner =
+            ExtractorRunner::new(extractor, stream, Arc::new(Mutex::new(HashMap::new())), ctrl_rx);
 
         let handle = runner.run();
-        Ok((handle, ExtractorHandle::new(id, ctrl_tx)))
+        Ok((handle, (ExtractorHandle::new(id, ctrl_tx), self.config.implementation_type)))
     }
+}
+
+async fn download_file_from_s3(
+    bucket: &str,
+    key: &str,
+    download_path: &Path,
+) -> anyhow::Result<()> {
+    info!("Downloading file from s3: {}/{} to {:?}", bucket, key, download_path);
+
+    let region_provider = RegionProviderChain::default_provider().or_else("eu-central-1");
+
+    let config = aws_config::from_env()
+        .region(region_provider)
+        .load()
+        .await;
+
+    let client = Client::new(&config);
+
+    let resp = client
+        .get_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await?;
+
+    let data = resp.body.collect().await.unwrap();
+
+    // Ensure the directory exists
+    if let Some(parent) = download_path.parent() {
+        std::fs::create_dir_all(parent)
+            .context(format!("Failed to create directories for {:?}", parent))?;
+    }
+
+    std::fs::write(download_path, data.into_bytes()).unwrap();
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod test {
+    use super::*;
+    use crate::extractor::MockExtractor;
     use serde::{Deserialize, Serialize};
     use tracing::info_span;
-
-    use crate::{extractor::MockExtractor, models::NormalisedMessage};
-
-    use super::*;
+    use tycho_core::models::NormalisedMessage;
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     struct DummyMessage {
@@ -337,6 +562,14 @@ mod test {
     impl NormalisedMessage for DummyMessage {
         fn source(&self) -> ExtractorIdentity {
             self.extractor_id.clone()
+        }
+
+        fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
+            Arc::new(self.clone())
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 
@@ -392,15 +625,25 @@ mod test {
 
         // Build the ExtractorRunnerBuilder
         let extractor = Arc::new(mock_extractor);
-        let builder = ExtractorRunnerBuilder::new(
-            "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg",
-            extractor,
+        let builder = ExtractorBuilder::new(
+            &ExtractorConfig {
+                name: "test_module".to_owned(),
+                chain: Chain::Ethereum,
+                implementation_type: ImplementationType::Vm,
+                sync_batch_size: 0,
+                start_block: 0,
+                stop_block: None,
+                protocol_types: vec![ProtocolTypeConfig {
+                    name: "test_module_pool".to_owned(),
+                    financial_type: FinancialType::Swap,
+                }],
+                spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
+                module_name: "test_module".to_owned(),
+            },
+            "https://mainnet.eth.streamingfast.io",
         )
-        .endpoint_url("https://mainnet.eth.streamingfast.io:443")
-        .module_name("test_module")
-        .start_block(0)
-        .end_block(10)
-        .token("test_token");
+        .token("test_token")
+        .set_extractor(extractor);
 
         // Run the builder
         let (task, _handle) = builder.run().await.unwrap();

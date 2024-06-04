@@ -3,14 +3,15 @@ use std::collections::HashMap;
 use chrono::{Local, NaiveDateTime};
 use futures03::{future::join_all, stream::FuturesUnordered, StreamExt};
 
+use serde::Serialize;
 use tokio::{
     select,
     sync::mpsc::{self, Receiver},
     task::JoinHandle,
     time::timeout,
 };
-use tracing::{debug, error, info, warn};
-use tycho_types::{
+use tracing::{debug, error, info, trace, warn};
+use tycho_core::{
     dto::{Block, ExtractorIdentity},
     Bytes,
 };
@@ -24,7 +25,7 @@ mod block_history;
 pub mod component_tracker;
 pub mod synchronizer;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct Header {
     pub hash: Bytes,
     pub number: u64,
@@ -97,9 +98,11 @@ pub struct BlockSynchronizer<S> {
     synchronizers: Option<HashMap<ExtractorIdentity, S>>,
     block_time: std::time::Duration,
     max_wait: std::time::Duration,
+    max_messages: Option<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
 pub enum SynchronizerState {
     Started,
     Ready(Header),
@@ -299,7 +302,7 @@ impl SynchronizerStream {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize)]
 pub struct FeedMessage {
     pub state_msgs: HashMap<String, StateSyncMessage>,
     pub sync_states: HashMap<String, SynchronizerState>,
@@ -319,7 +322,11 @@ where
     S: StateSynchronizer,
 {
     pub fn new(block_time: std::time::Duration, max_wait: std::time::Duration) -> Self {
-        Self { synchronizers: None, block_time, max_wait }
+        Self { synchronizers: None, max_messages: None, block_time, max_wait }
+    }
+
+    pub fn max_messages(&mut self, val: usize) {
+        self.max_messages = Some(val);
     }
 
     pub fn register_synchronizer(mut self, id: ExtractorIdentity, synchronizer: S) -> Self {
@@ -329,6 +336,7 @@ where
         self
     }
     pub async fn run(mut self) -> BlockSyncResult<(JoinHandle<()>, Receiver<FeedMessage>)> {
+        trace!("Starting BlockSynchronizer...");
         let mut state_sync_tasks = FuturesUnordered::new();
         let mut synchronizers = self
             .synchronizers
@@ -409,6 +417,7 @@ where
         let mut block_history = BlockHistory::new(vec![start_header], 15);
         let (sync_tx, sync_rx) = mpsc::channel(30);
         let main_loop_jh: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let mut n_iter = 1;
             loop {
                 // Send retrieved data to receivers.
                 sync_tx
@@ -420,6 +429,15 @@ where
                             .collect(),
                     ))
                     .await?;
+
+                // Check if we have reached the max messages
+                if let Some(max_messages) = self.max_messages {
+                    if n_iter >= max_messages {
+                        info!(max_messages, "StreamEnd");
+                        return Ok(());
+                    }
+                }
+                n_iter += 1;
 
                 // Here we simply wait block_time + max_wait. This will not work for chains with
                 // unknown block times but is simple enough for now.
@@ -500,7 +518,7 @@ mod tests {
     use std::sync::Arc;
     use test_log::test;
     use tokio::sync::{oneshot, Mutex};
-    use tycho_types::dto::Chain;
+    use tycho_core::dto::Chain;
 
     #[derive(Clone)]
     struct MockStateSync {

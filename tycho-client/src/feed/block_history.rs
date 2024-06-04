@@ -4,7 +4,7 @@ use lru::LruCache;
 
 use super::Header;
 use tracing::error;
-use tycho_types::Bytes;
+use tycho_core::Bytes;
 
 pub struct BlockHistory {
     history: VecDeque<Header>,
@@ -141,7 +141,7 @@ impl BlockHistory {
 mod test {
     use rand::Rng;
     use rstest::rstest;
-    use tycho_types::Bytes;
+    use tycho_core::Bytes;
 
     use crate::feed::{block_history::BlockPosition, Header};
 

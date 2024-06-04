@@ -1,0 +1,1 @@
+echo $(aws s3 presign s3://repo.propellerheads/substreams/$1)

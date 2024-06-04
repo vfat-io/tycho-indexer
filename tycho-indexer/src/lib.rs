@@ -1,9 +1,9 @@
+pub mod cli;
 pub mod extractor;
-pub mod models;
 pub mod pb;
 pub mod services;
-pub mod storage;
 pub mod substreams;
+mod testing;
 
 #[cfg(test)]
 #[macro_use]
