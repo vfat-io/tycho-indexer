@@ -562,12 +562,9 @@ impl DeltasClient for WsDeltasClient {
         info!(?ws_uri, "Starting TychoWebsocketClient");
 
         let (cmd_tx, mut cmd_rx) = mpsc::channel(self.ws_buffer_size);
-        let (conn, _) = connect_async(&ws_uri).await?;
-        let (ws_tx, ws_rx) = conn.split();
-        let mut ws_rx = Some(ws_rx);
         {
             let mut guard = self.inner.as_ref().lock().await;
-            *guard = Some(Inner::new(cmd_tx.clone(), ws_tx, self.subscription_buffer_size));
+            *guard = None;
         }
         let this = self.clone();
         let jh = tokio::spawn(async move {
@@ -575,35 +572,38 @@ impl DeltasClient for WsDeltasClient {
             'retry: while retry_count < this.max_reconnects {
                 info!(?ws_uri, "Connecting to WebSocket server");
 
-                let mut msg_rx = if let Some(stream) = ws_rx.take() {
-                    stream.boxed()
-                } else {
-                    let (conn, _) = match connect_async(&ws_uri).await {
-                        Ok(conn) => conn,
-                        Err(e) => {
-                            // Prepare for reconnection
-                            retry_count += 1;
-                            let mut guard = this.inner.as_ref().lock().await;
-                            *guard = None;
+                let (conn, _) = match connect_async(&ws_uri).await {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        // Prepare for reconnection
+                        retry_count += 1;
+                        let mut guard = this.inner.as_ref().lock().await;
+                        *guard = None;
 
-                            warn!(?e, "Failed to connect to WebSocket server; Reconnecting");
-                            sleep(Duration::from_millis(500)).await;
+                        warn!(?e, "Failed to connect to WebSocket server; Reconnecting");
+                        sleep(Duration::from_millis(500)).await;
 
-                            continue 'retry;
-                        }
-                    };
-                    let (ws_tx_new, ws_rx_new) = conn.split();
+                        continue 'retry;
+                    }
+                };
+                debug!("Connected to WebSocket server");
+
+                let (ws_tx_new, ws_rx_new) = conn.split();
+                {
                     let mut guard = this.inner.as_ref().lock().await;
                     *guard =
                         Some(Inner::new(cmd_tx.clone(), ws_tx_new, this.subscription_buffer_size));
-                    ws_rx_new.boxed()
-                };
+                }
+                let mut msg_rx = ws_rx_new.boxed();
 
                 this.conn_notify.notify_waiters();
 
                 loop {
                     let res = tokio::select! {
-                        Some(msg) = msg_rx.next() => this.handle_msg(msg).await,
+                        msg = msg_rx.next() => match msg {
+                            Some(msg) => this.handle_msg(msg).await,
+                            None => { break 'retry } // ws connection silently closed
+                        },
                         _ = cmd_rx.recv() => {break 'retry},
                     };
                     if let Err(error) = res {
@@ -624,6 +624,7 @@ impl DeltasClient for WsDeltasClient {
                             break;
                         } else {
                             // Other errors are considered fatal
+                            error!(?error, "Fatal error; Exiting");
                             break 'retry;
                         }
                     }
@@ -683,6 +684,7 @@ mod tests {
         messages: &[ExpectedComm],
         reconnects: usize,
     ) -> (SocketAddr, JoinHandle<()>) {
+        info!("Starting mock webserver");
         // zero port here means the OS chooses an open port
         let server = TcpListener::bind("127.0.0.1:0")
             .await
@@ -691,27 +693,34 @@ mod tests {
         let messages = messages.to_vec();
 
         let jh = tokio::spawn(async move {
+            info!("mock webserver started");
             for _ in 0..(reconnects + 1) {
                 if let Ok((stream, _)) = server.accept().await {
                     let mut websocket = tokio_tungstenite::accept_async(stream)
                         .await
                         .unwrap();
 
+                    info!("Handling messages..");
                     for c in messages.iter().cloned() {
                         match c {
                             ExpectedComm::Receive(t, exp) => {
+                                info!("Awaiting message...");
                                 let msg = timeout(Duration::from_millis(t), websocket.next())
                                     .await
                                     .expect("Receive timeout")
                                     .expect("Stream exhausted")
                                     .expect("Failed to receive message.");
-
+                                info!("Message received");
                                 assert_eq!(msg, exp)
                             }
-                            ExpectedComm::Send(data) => websocket
-                                .send(data)
-                                .await
-                                .expect("Failed to send message"),
+                            ExpectedComm::Send(data) => {
+                                info!("Sending message");
+                                websocket
+                                    .send(data)
+                                    .await
+                                    .expect("Failed to send message");
+                                info!("Message sent");
+                            }
                         };
                     }
                     sleep(Duration::from_millis(100)).await;
@@ -1069,7 +1078,7 @@ mod tests {
         server_thread.await.unwrap();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn test_reconnect() {
         let exp_comm = [
             ExpectedComm::Receive(100, tungstenite::protocol::Message::Text(r#"
