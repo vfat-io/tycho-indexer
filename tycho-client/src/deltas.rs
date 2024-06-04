@@ -20,7 +20,10 @@
 //! Therefore, sharing one client among multiple tasks ensures optimal performance, reduces resource
 //! consumption, and enhances overall software scalability.
 use async_trait::async_trait;
-use futures03::{stream::SplitSink, SinkExt, StreamExt};
+use futures03::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
+};
 use hyper::Uri;
 #[cfg(test)]
 use mockall::automock;
@@ -562,12 +565,10 @@ impl DeltasClient for WsDeltasClient {
         info!(?ws_uri, "Starting TychoWebsocketClient");
 
         let (cmd_tx, mut cmd_rx) = mpsc::channel(self.ws_buffer_size);
-        let (conn, _) = connect_async(&ws_uri).await?;
-        let (ws_tx, ws_rx) = conn.split();
-        let mut ws_rx = Some(ws_rx);
+        let mut ws_rx: Option<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>> = None;
         {
             let mut guard = self.inner.as_ref().lock().await;
-            *guard = Some(Inner::new(cmd_tx.clone(), ws_tx, self.subscription_buffer_size));
+            *guard = None;
         }
         let this = self.clone();
         let jh = tokio::spawn(async move {
@@ -592,6 +593,7 @@ impl DeltasClient for WsDeltasClient {
                             continue 'retry;
                         }
                     };
+                    debug!("Connected to WebSocket server");
                     let (ws_tx_new, ws_rx_new) = conn.split();
                     let mut guard = this.inner.as_ref().lock().await;
                     *guard =
@@ -624,6 +626,7 @@ impl DeltasClient for WsDeltasClient {
                             break;
                         } else {
                             // Other errors are considered fatal
+                            error!(?error, "Fatal error; Exiting");
                             break 'retry;
                         }
                     }
