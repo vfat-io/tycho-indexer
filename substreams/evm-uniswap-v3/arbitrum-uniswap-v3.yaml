@@ -1,7 +1,7 @@
 specVersion: v0.1.0
 package:
-  name: "substreams_ethereum_uniswap_v3"
-  version: v0.1.0
+  name: "substreams_arbitrum_uniswap_v3"
+  version: v0.2.0
 
 protobuf:
   files:
@@ -20,7 +20,7 @@ binaries:
 modules:
   - name: map_pools_created
     kind: map
-    initialBlock: 12369621
+    initialBlock: 37418321
     inputs:
       - params: string
       - source: sf.ethereum.type.v2.Block
@@ -29,7 +29,7 @@ modules:
 
   - name: store_pools
     kind: store
-    initialBlock: 12369621
+    initialBlock: 37418321
     updatePolicy: set_if_not_exists
     valueType: proto:uniswap.v3.Pool
     inputs:
@@ -37,7 +37,7 @@ modules:
 
   - name: map_balance_changes
     kind: map
-    initialBlock: 12369621
+    initialBlock: 37418321
     inputs:
       - source: sf.ethereum.type.v2.Block
       - store: store_pools
@@ -46,7 +46,7 @@ modules:
 
   - name: store_pools_balances
     kind: store
-    initialBlock: 12369621
+    initialBlock: 37418321
     updatePolicy: add
     valueType: bigint
     inputs:
@@ -54,7 +54,7 @@ modules:
 
   - name: map_pool_events
     kind: map
-    initialBlock: 12369621
+    initialBlock: 37418321
     inputs:
       - source: sf.ethereum.type.v2.Block
       - map: map_pools_created
