@@ -589,8 +589,11 @@ impl DeltasClient for WsDeltasClient {
                 debug!("Connected to WebSocket server");
 
                 let (ws_tx_new, ws_rx_new) = conn.split();
-                let mut guard = this.inner.as_ref().lock().await;
-                *guard = Some(Inner::new(cmd_tx.clone(), ws_tx_new, this.subscription_buffer_size));
+                {
+                    let mut guard = this.inner.as_ref().lock().await;
+                    *guard =
+                        Some(Inner::new(cmd_tx.clone(), ws_tx_new, this.subscription_buffer_size));
+                }
                 let mut msg_rx = ws_rx_new.boxed();
 
                 this.conn_notify.notify_waiters();
@@ -681,6 +684,7 @@ mod tests {
         messages: &[ExpectedComm],
         reconnects: usize,
     ) -> (SocketAddr, JoinHandle<()>) {
+        info!("Starting mock webserver");
         // zero port here means the OS chooses an open port
         let server = TcpListener::bind("127.0.0.1:0")
             .await
@@ -689,27 +693,34 @@ mod tests {
         let messages = messages.to_vec();
 
         let jh = tokio::spawn(async move {
+            info!("mock webserver started");
             for _ in 0..(reconnects + 1) {
                 if let Ok((stream, _)) = server.accept().await {
                     let mut websocket = tokio_tungstenite::accept_async(stream)
                         .await
                         .unwrap();
 
+                    info!("Handling messages..");
                     for c in messages.iter().cloned() {
                         match c {
                             ExpectedComm::Receive(t, exp) => {
+                                info!("Awaiting message...");
                                 let msg = timeout(Duration::from_millis(t), websocket.next())
                                     .await
                                     .expect("Receive timeout")
                                     .expect("Stream exhausted")
                                     .expect("Failed to receive message.");
-
+                                info!("Message received");
                                 assert_eq!(msg, exp)
                             }
-                            ExpectedComm::Send(data) => websocket
-                                .send(data)
-                                .await
-                                .expect("Failed to send message"),
+                            ExpectedComm::Send(data) => {
+                                info!("Sending message");
+                                websocket
+                                    .send(data)
+                                    .await
+                                    .expect("Failed to send message");
+                                info!("Message sent");
+                            }
                         };
                     }
                     sleep(Duration::from_millis(100)).await;
@@ -1067,7 +1078,7 @@ mod tests {
         server_thread.await.unwrap();
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn test_reconnect() {
         let exp_comm = [
             ExpectedComm::Receive(100, tungstenite::protocol::Message::Text(r#"
