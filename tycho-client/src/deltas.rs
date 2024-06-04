@@ -20,10 +20,7 @@
 //! Therefore, sharing one client among multiple tasks ensures optimal performance, reduces resource
 //! consumption, and enhances overall software scalability.
 use async_trait::async_trait;
-use futures03::{
-    stream::{SplitSink, SplitStream},
-    SinkExt, StreamExt,
-};
+use futures03::{stream::SplitSink, SinkExt, StreamExt};
 use hyper::Uri;
 #[cfg(test)]
 use mockall::automock;
@@ -565,7 +562,6 @@ impl DeltasClient for WsDeltasClient {
         info!(?ws_uri, "Starting TychoWebsocketClient");
 
         let (cmd_tx, mut cmd_rx) = mpsc::channel(self.ws_buffer_size);
-        let mut ws_rx: Option<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>> = None;
         {
             let mut guard = self.inner.as_ref().lock().await;
             *guard = None;
@@ -576,30 +572,26 @@ impl DeltasClient for WsDeltasClient {
             'retry: while retry_count < this.max_reconnects {
                 info!(?ws_uri, "Connecting to WebSocket server");
 
-                let mut msg_rx = if let Some(stream) = ws_rx.take() {
-                    stream.boxed()
-                } else {
-                    let (conn, _) = match connect_async(&ws_uri).await {
-                        Ok(conn) => conn,
-                        Err(e) => {
-                            // Prepare for reconnection
-                            retry_count += 1;
-                            let mut guard = this.inner.as_ref().lock().await;
-                            *guard = None;
+                let (conn, _) = match connect_async(&ws_uri).await {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        // Prepare for reconnection
+                        retry_count += 1;
+                        let mut guard = this.inner.as_ref().lock().await;
+                        *guard = None;
 
-                            warn!(?e, "Failed to connect to WebSocket server; Reconnecting");
-                            sleep(Duration::from_millis(500)).await;
+                        warn!(?e, "Failed to connect to WebSocket server; Reconnecting");
+                        sleep(Duration::from_millis(500)).await;
 
-                            continue 'retry;
-                        }
-                    };
-                    debug!("Connected to WebSocket server");
-                    let (ws_tx_new, ws_rx_new) = conn.split();
-                    let mut guard = this.inner.as_ref().lock().await;
-                    *guard =
-                        Some(Inner::new(cmd_tx.clone(), ws_tx_new, this.subscription_buffer_size));
-                    ws_rx_new.boxed()
+                        continue 'retry;
+                    }
                 };
+                debug!("Connected to WebSocket server");
+
+                let (ws_tx_new, ws_rx_new) = conn.split();
+                let mut guard = this.inner.as_ref().lock().await;
+                *guard = Some(Inner::new(cmd_tx.clone(), ws_tx_new, this.subscription_buffer_size));
+                let mut msg_rx = ws_rx_new.boxed();
 
                 this.conn_notify.notify_waiters();
 
