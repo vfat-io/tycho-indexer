@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
 use clap::Parser;
 use tracing::debug;
@@ -20,6 +20,10 @@ struct CliArgs {
     /// Tycho server URL, without protocol. Example: localhost:8888
     #[clap(long, default_value = "localhost:8888")]
     tycho_url: String,
+
+    /// The blockchain to index on
+    #[clap(long, default_value = "ethereum")]
+    pub chain: String,
 
     /// Specifies exchanges and optionally a pool address in the format name:address
     #[clap(long, number_of_values = 1)]
@@ -142,7 +146,11 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
 
     for (name, address) in exchanges {
         debug!("Registering exchange: {}", name);
-        let id = ExtractorIdentity { chain: Chain::Ethereum, name: name.clone() }; //TODO: remove chain assumption
+        let id = ExtractorIdentity {
+            chain: Chain::from_str(&args.chain)
+                .unwrap_or_else(|_| panic!("Unknown chain {}", &args.chain)),
+            name: name.clone(),
+        };
         let filter = if address.is_some() {
             ComponentFilter::Ids(vec![address.unwrap()])
         } else {
