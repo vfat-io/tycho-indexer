@@ -18,7 +18,7 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::{
     dto::{
-        BlockParam, Chain, ContractId, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolId,
+        BlockParam, ContractId, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolId,
         ResponseAccount, ResponseProtocolState, StateRequestBody, StateRequestParameters,
         VersionParam,
     },
