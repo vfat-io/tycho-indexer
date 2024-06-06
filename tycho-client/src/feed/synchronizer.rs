@@ -18,7 +18,7 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::{
     dto::{
-        BlockParam, Chain, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolId,
+        BlockParam, Chain, ContractId, Deltas, ExtractorIdentity, ProtocolComponent, ProtocolId,
         ResponseAccount, ResponseProtocolState, StateRequestBody, StateRequestParameters,
         VersionParam,
     },
@@ -190,7 +190,7 @@ where
         let request_ids = ids
             .map(|it| {
                 it.into_iter()
-                    .map(|id| ProtocolId { id: id.clone(), chain: Chain::Ethereum }) //TODO: remove chain assumption
+                    .map(|id| ProtocolId { id: id.clone(), chain: self.extractor_id.chain })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_else(|| tracked_components.get_tracked_component_ids());
@@ -246,6 +246,7 @@ where
                             contract_ids
                                 .clone()
                                 .into_iter()
+                                .map(|id| ContractId::new(self.extractor_id.chain, id))
                                 .collect(),
                         ),
                         version,
