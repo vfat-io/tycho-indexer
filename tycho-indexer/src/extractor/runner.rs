@@ -437,7 +437,8 @@ impl ExtractorBuilder {
                         self.config.name.clone(),
                         protocol_cache.clone(),
                         token_pre_processor.clone(),
-                        if self.config.name == "uniswap_v2" {
+                        if self.config.name == "uniswap_v2" && self.config.chain == Chain::Ethereum
+                        {
                             Some(|b| transcode_usv2_balances(add_default_attributes_uniswapv2(b)))
                         } else if self.config.name == "uniswap_v3" {
                             Some(add_default_attributes_uniswapv3)
