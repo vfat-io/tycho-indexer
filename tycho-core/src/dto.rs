@@ -622,15 +622,8 @@ pub struct StateRequestBody {
 }
 
 impl StateRequestBody {
-    pub fn new(contract_ids: Option<Vec<Bytes>>, version: VersionParam) -> Self {
-        Self {
-            contract_ids: contract_ids.map(|ids| {
-                ids.into_iter()
-                    .map(|id| ContractId::new(Chain::Ethereum, id)) //TODO: remove chain assumption
-                    .collect()
-            }),
-            version,
-        }
+    pub fn new(contract_ids: Option<Vec<ContractId>>, version: VersionParam) -> Self {
+        Self { contract_ids, version }
     }
 
     pub fn from_block(block: BlockParam) -> Self {
