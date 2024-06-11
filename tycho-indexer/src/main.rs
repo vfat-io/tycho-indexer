@@ -13,7 +13,7 @@ use extractor::{
 };
 
 use actix_web::dev::ServerHandle;
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use clap::Parser;
 use ethers::{
     prelude::{Http, Provider},
@@ -148,7 +148,7 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
         &global_args,
         &run_args.substreams_args.rpc_url,
         &[Chain::from_str(&run_args.chain).unwrap()],
-        NaiveDateTime::from_str("2024-01-01T00:00:00").unwrap(),
+        Utc::now().naive_utc(),
         config,
     )
     .await?;
