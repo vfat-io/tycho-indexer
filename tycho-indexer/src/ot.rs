@@ -22,10 +22,15 @@ pub fn init_tracing(config: TracingConfig) -> Result<()> {
     global::set_error_handler(|error| error!(error = format!("{error:#}"), "otel error"))
         .context("set error handler")?;
 
+    let format = tracing_subscriber::fmt::format()
+        .with_level(true)
+        .with_target(false)
+        .compact();
+
     tracing_subscriber::registry()
         .with(EnvFilter::from_default_env())
         .with(otlp_layer(config)?)
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().event_format(format))
         .try_init()
         .context("initialize tracing subscriber")
 }

@@ -81,7 +81,13 @@ async fn main() -> Result<(), anyhow::Error> {
             ot::init_tracing(config)?;
         } else {
             warn!("OLTP_EXPORTER_ENDPOINT not set defaulting to stdout subscriber!");
-            tracing_subscriber::fmt::init();
+            let format = tracing_subscriber::fmt::format()
+                .with_level(true)
+                .with_target(false)
+                .compact();
+            tracing_subscriber::fmt()
+                .event_format(format)
+                .init();
         }
     }
 
