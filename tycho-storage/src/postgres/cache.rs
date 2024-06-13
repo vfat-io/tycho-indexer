@@ -15,7 +15,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{debug, info, trace};
+use tracing::{debug, info, instrument, trace};
 
 use tycho_core::{
     models::{
@@ -274,14 +274,14 @@ impl DBCacheWriteExecutor {
             Err(_) => None,
         };
 
-        tracing::debug!("Persisted block: {:?}", persisted_block);
+        debug!("Persisted block: {:?}", persisted_block);
 
         Self { name, chain, pool, state_gateway, persisted_block, msg_receiver }
     }
 
     /// Spawns a task to process incoming database messages (write requests or flush commands).
     pub fn run(mut self) -> JoinHandle<()> {
-        tracing::info!("DBCacheWriteExecutor {} started!", self.name);
+        info!(name = self.name, "DBCacheWriteExecutor started!");
         tokio::spawn(async move {
             while let Some(message) = self.msg_receiver.recv().await {
                 match message {
@@ -294,8 +294,9 @@ impl DBCacheWriteExecutor {
         })
     }
 
+    #[instrument(name="db_write", skip_all, fields(block_range = %new_db_tx.block_range))]
     async fn write(&mut self, new_db_tx: DBTransaction) {
-        debug!(block_range=?&new_db_tx.block_range, "Received new transaction");
+        debug!("NewDBTransactionStart");
         let mut conn = self
             .pool
             .get()
@@ -328,7 +329,7 @@ impl DBCacheWriteExecutor {
             .await;
 
         if res.is_ok() {
-            info!(block_range=%&new_db_tx.block_range, "Transaction successfully committed to DB!");
+            debug!("DBTransactionCommitted");
         }
 
         match self.persisted_block.as_ref() {
@@ -351,6 +352,7 @@ impl DBCacheWriteExecutor {
     ///
     /// This function handles different types of write operations such as
     /// upserts, updates, and reverts, ensuring data consistency in the database.
+    #[instrument(skip_all, fields(op=operation.variant_name()))]
     async fn execute_write_op(
         &mut self,
         operation: &WriteOp,
