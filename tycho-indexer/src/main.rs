@@ -38,6 +38,8 @@ use tycho_indexer::{
 };
 use tycho_storage::postgres::{builder::GatewayBuilder, cache::CachedGateway};
 
+mod ot;
+
 // TODO: We need to use `use pretty_assertions::{assert_eq, assert_ne}` per test module.
 #[allow(unused_imports)]
 #[cfg(test)]
@@ -65,16 +67,20 @@ impl ExtractorConfigs {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    let cli: Cli = Cli::parse();
+    let global_args = cli.args();
+
     // Set up the subscriber
     let console_flag = std::env::var("ENABLE_CONSOLE").unwrap_or_else(|_| "false".to_string());
     if console_flag == "true" {
         console_subscriber::init();
     } else {
-        tracing_subscriber::fmt::init();
+        let otlp_exporter_endpoint = std::env::var("OLTP_EXPORTER_ENDPOINT")
+            .unwrap_or_else(|_| "http://127.0.0.1:4317".to_string());
+        let config =
+            ot::TracingConfig { service_name: "tycho-indexer".to_string(), otlp_exporter_endpoint };
+        ot::init_tracing(config)?;
     }
-
-    let cli: Cli = Cli::parse();
-    let global_args = cli.args();
 
     match cli.command() {
         Command::Run(run_args) => run_spkg(global_args, run_args).await?,
