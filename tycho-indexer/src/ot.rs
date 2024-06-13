@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::global;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{propagation::TraceContextPropagator, runtime, trace, Resource};
 use serde::Deserialize;
@@ -10,7 +10,6 @@ use tracing_subscriber::{
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TracingConfig {
-    pub service_name: String,
     pub otlp_exporter_endpoint: String,
 }
 
@@ -40,8 +39,7 @@ where
         .tonic()
         .with_endpoint(config.otlp_exporter_endpoint);
 
-    let trace_config = trace::config()
-        .with_resource(Resource::new(vec![KeyValue::new("service.name", config.service_name)]));
+    let trace_config = trace::config().with_resource(Resource::default());
 
     let tracer = opentelemetry_otlp::new_pipeline()
         .tracing()

@@ -20,7 +20,7 @@ use ethers::{
     providers::Middleware,
 };
 use tokio::{select, task::JoinHandle};
-use tracing::info;
+use tracing::{info, warn};
 
 use tycho_core::models::{Chain, ImplementationType};
 use tycho_indexer::{
@@ -75,11 +75,14 @@ async fn main() -> Result<(), anyhow::Error> {
     if console_flag == "true" {
         console_subscriber::init();
     } else {
-        let otlp_exporter_endpoint = std::env::var("OLTP_EXPORTER_ENDPOINT")
-            .unwrap_or_else(|_| "http://127.0.0.1:4317".to_string());
-        let config =
-            ot::TracingConfig { service_name: "tycho-indexer".to_string(), otlp_exporter_endpoint };
-        ot::init_tracing(config)?;
+        // OLTP endpoint is set, construct OLTP pipeline
+        if let Ok(otlp_exporter_endpoint) = std::env::var("OLTP_EXPORTER_ENDPOINT") {
+            let config = ot::TracingConfig { otlp_exporter_endpoint };
+            ot::init_tracing(config)?;
+        } else {
+            warn!("OLTP_EXPORTER_ENDPOINT not set defaulting to stdout subscriber!");
+            tracing_subscriber::fmt::init();
+        }
     }
 
     match cli.command() {

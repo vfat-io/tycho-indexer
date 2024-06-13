@@ -509,7 +509,7 @@ where
             .last_processed_block
     }
 
-    #[instrument(skip_all, fields(block_number))]
+    #[instrument(skip_all)]
     async fn handle_tick_scoped_data(
         &self,
         inp: BlockScopedData,

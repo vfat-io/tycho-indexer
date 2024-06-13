@@ -109,6 +109,16 @@ impl BlockRange {
     }
 }
 
+impl std::fmt::Display for BlockRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}, {}] - [{:#x}, {:#x}]",
+            self.start.number, self.end.number, self.start.hash, self.end.hash
+        )
+    }
+}
+
 /// Represents a transaction in the database, including the block information,
 /// a list of operations to be performed, and a channel to send the result.
 pub struct DBTransaction {
@@ -318,7 +328,7 @@ impl DBCacheWriteExecutor {
             .await;
 
         if res.is_ok() {
-            info!(block_range=?&new_db_tx.block_range, "Transaction successfully committed to DB!");
+            info!(block_range=%&new_db_tx.block_range, "Transaction successfully committed to DB!");
         }
 
         match self.persisted_block.as_ref() {
