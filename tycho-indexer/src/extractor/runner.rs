@@ -142,6 +142,7 @@ impl ExtractorRunner {
                     val = self.substreams.next() => {
                         match val {
                             None => {
+                                error!("stream ended");
                                 return Err(ExtractionError::SubstreamsError(format!("{}: stream ended", id)));
                             }
                             Some(Ok(BlockResponse::New(data))) => {
@@ -157,7 +158,7 @@ impl ExtractorRunner {
                                         trace!("No message to propagate.");
                                     }
                                     Err(err) => {
-                                        error!(error = %err, msg = ?data, "Error while processing tick!");
+                                        error!(error = %err, "Error while processing tick!");
                                         return Err(err);
                                     }
                                 }
@@ -166,14 +167,14 @@ impl ExtractorRunner {
                                 info!(block=?&undo_signal.last_valid_block,  "Revert requested!");
                                 match self.extractor.handle_revert(undo_signal.clone()).await {
                                     Ok(Some(msg)) => {
-                                        trace!(msg = %msg, "Propagating block undo message.");
+                                        trace!("Propagating block undo message.");
                                         Self::propagate_msg(&self.subscriptions, msg).await
                                     }
                                     Ok(None) => {
                                         trace!("No message to propagate.");
                                     }
                                     Err(err) => {
-                                        error!(error = %err, ?undo_signal, "Error while processing revert!");
+                                        error!(error = %err, "Error while processing revert!");
                                         return Err(err);
                                     }
                                 }
@@ -197,7 +198,7 @@ impl ExtractorRunner {
         let subscriber_id = self.next_subscriber_id;
         self.next_subscriber_id += 1;
         tracing::Span::current().record("subscriber_id", subscriber_id);
-        info!("New subscription with id {}", subscriber_id);
+        info!(?subscriber_id, "New subscription");
         self.subscriptions
             .lock()
             .await
@@ -225,7 +226,7 @@ impl ExtractorRunner {
                 Err(err) => {
                     // Receiver has been dropped, mark for removal
                     to_remove.push(*counter);
-                    error!(error = %err, "Error while sending message to subscriber {}", counter);
+                    error!(error = %err, counter, "Error while sending message to subscriber");
                 }
             }
         }
