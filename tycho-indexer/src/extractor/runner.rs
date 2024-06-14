@@ -127,7 +127,17 @@ impl ExtractorRunner {
         tokio::spawn(async move {
             let id = self.extractor.get_id();
             loop {
-                tokio::select! {
+                // this is the main info span of an extractor
+                let loop_span = tracing::info_span!(
+                    parent: None,  // don't attach this to the parent (builder) span to keep spans short
+                    "extractor",
+                    extractor_id = %id,
+                    sf_trace_id = tracing::field::Empty,
+                    block_number = tracing::field::Empty,
+                    otel.status_code = tracing::field::Empty,
+                );
+                async {
+                    tokio::select! {
                     Some(ctrl) = self.control_rx.recv() =>  {
                         match ctrl {
                             ControlMessage::Stop => {
@@ -143,6 +153,7 @@ impl ExtractorRunner {
                         match val {
                             None => {
                                 error!("stream ended");
+                                tracing::Span::current().record("otel.status_code", "error");
                                 return Err(ExtractionError::SubstreamsError(format!("{}: stream ended", id)));
                             }
                             Some(Ok(BlockResponse::New(data))) => {
@@ -159,6 +170,7 @@ impl ExtractorRunner {
                                     }
                                     Err(err) => {
                                         error!(error = %err, "Error while processing tick!");
+                                        tracing::Span::current().record("otel.status_code", "error");
                                         return Err(err);
                                     }
                                 }
@@ -175,22 +187,24 @@ impl ExtractorRunner {
                                     }
                                     Err(err) => {
                                         error!(error = %err, "Error while processing revert!");
+                                        tracing::Span::current().record("otel.status_code", "error");
                                         return Err(err);
                                     }
                                 }
                             }
                             Some(Err(err)) => {
                                 error!(error = %err, "Stream terminated with error.");
+                                tracing::Span::current().record("otel.status_code", "error");
                                 return Err(ExtractionError::SubstreamsError(err.to_string()));
                             }
                         };
                     }
-                }
+                };
+                    tracing::Span::current().record("otel.status_code", "ok");
+                    Ok(())
+                }.instrument(loop_span).await?
             }
-        }
-            // Additional inner info span with substreams information
-            // trace_id is set later on in process_substreams_response
-        .instrument(tracing::info_span!("loop", trace_id = tracing::field::Empty)))
+        })
     }
 
     #[instrument(skip_all)]
@@ -455,7 +469,7 @@ impl ExtractorBuilder {
         Ok(self)
     }
 
-    #[instrument(name = "extractor", skip(self), fields(id))] // this is the main info lvl span of the extractor
+    #[instrument(name = "extractor_start", skip(self), fields(id))]
     pub async fn run(self) -> Result<HandleResult, ExtractionError> {
         let extractor = self
             .extractor

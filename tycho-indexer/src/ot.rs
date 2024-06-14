@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::global;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{propagation::TraceContextPropagator, runtime, trace, Resource};
 use serde::Deserialize;
@@ -10,7 +10,6 @@ use tracing_subscriber::{
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TracingConfig {
-    pub service_name: String,
     pub otlp_exporter_endpoint: String,
 }
 
@@ -23,10 +22,15 @@ pub fn init_tracing(config: TracingConfig) -> Result<()> {
     global::set_error_handler(|error| error!(error = format!("{error:#}"), "otel error"))
         .context("set error handler")?;
 
+    let format = tracing_subscriber::fmt::format()
+        .with_level(true)
+        .with_target(false)
+        .compact();
+
     tracing_subscriber::registry()
         .with(EnvFilter::from_default_env())
         .with(otlp_layer(config)?)
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().event_format(format))
         .try_init()
         .context("initialize tracing subscriber")
 }
@@ -40,8 +44,7 @@ where
         .tonic()
         .with_endpoint(config.otlp_exporter_endpoint);
 
-    let trace_config = trace::config()
-        .with_resource(Resource::new(vec![KeyValue::new("service.name", config.service_name)]));
+    let trace_config = trace::config().with_resource(Resource::default());
 
     let tracer = opentelemetry_otlp::new_pipeline()
         .tracing()
