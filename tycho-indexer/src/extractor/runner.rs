@@ -134,7 +134,7 @@ impl ExtractorRunner {
                     extractor_id = %id,
                     sf_trace_id = tracing::field::Empty,
                     block_number = tracing::field::Empty,
-                    status = tracing::field::Empty,
+                    otel.status_code = tracing::field::Empty,
                 );
                 async {
                     tokio::select! {
@@ -153,7 +153,7 @@ impl ExtractorRunner {
                         match val {
                             None => {
                                 error!("stream ended");
-                                tracing::Span::current().record("status", "error");
+                                tracing::Span::current().record("otel.status_code", "error");
                                 return Err(ExtractionError::SubstreamsError(format!("{}: stream ended", id)));
                             }
                             Some(Ok(BlockResponse::New(data))) => {
@@ -170,7 +170,7 @@ impl ExtractorRunner {
                                     }
                                     Err(err) => {
                                         error!(error = %err, "Error while processing tick!");
-                                        tracing::Span::current().record("status", "error");
+                                        tracing::Span::current().record("otel.status_code", "error");
                                         return Err(err);
                                     }
                                 }
@@ -187,20 +187,20 @@ impl ExtractorRunner {
                                     }
                                     Err(err) => {
                                         error!(error = %err, "Error while processing revert!");
-                                        tracing::Span::current().record("status", "error");
+                                        tracing::Span::current().record("otel.status_code", "error");
                                         return Err(err);
                                     }
                                 }
                             }
                             Some(Err(err)) => {
                                 error!(error = %err, "Stream terminated with error.");
-                                tracing::Span::current().record("status", "error");
+                                tracing::Span::current().record("otel.status_code", "error");
                                 return Err(ExtractionError::SubstreamsError(err.to_string()));
                             }
                         };
                     }
                 };
-                    tracing::Span::current().record("status", "ok");
+                    tracing::Span::current().record("otel.status_code", "ok");
                     Ok(())
                 }.instrument(loop_span).await?
             }
