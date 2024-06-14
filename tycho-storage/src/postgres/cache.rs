@@ -126,6 +126,8 @@ pub struct DBTransaction {
     size: usize,
     operations: Vec<WriteOp>,
     tx: oneshot::Sender<Result<(), StorageError>>,
+    /// Purely used to add an attribute to the span when the transaction is commited
+    owner: Option<String>,
 }
 
 impl DBTransaction {
@@ -294,9 +296,13 @@ impl DBCacheWriteExecutor {
         })
     }
 
-    #[instrument(name="db_write", skip_all, fields(block_range = %new_db_tx.block_range))]
+    #[instrument(name="db_write", skip_all, fields(block_range = %new_db_tx.block_range, extractor_id = tracing::field::Empty))]
     async fn write(&mut self, new_db_tx: DBTransaction) {
         debug!("NewDBTransactionStart");
+        if let Some(extractor_id) = new_db_tx.owner.as_ref() {
+            tracing::Span::current().record("extractor_id", extractor_id);
+        }
+
         let mut conn = self
             .pool
             .get()
@@ -474,7 +480,7 @@ impl Clone for CachedGateway {
 
 impl CachedGateway {
     // Accumulating transactions does not drop previous data nor are transactions nested.
-    pub async fn start_transaction(&self, block: &models::blockchain::Block) {
+    pub async fn start_transaction(&self, block: &models::blockchain::Block, owner: Option<&str>) {
         let mut open_tx = self.open_tx.lock().await;
 
         if let Some(tx) = open_tx.as_mut() {
@@ -487,6 +493,7 @@ impl CachedGateway {
                     size: 0,
                     operations: vec![],
                     tx,
+                    owner: owner.map(String::from),
                 },
                 rx,
             ));
@@ -1223,7 +1230,7 @@ mod test_serial_db {
             let block_1 = get_sample_block(1);
             let tx_1 = get_sample_transaction(1);
             cached_gw
-                .start_transaction(&block_1)
+                .start_transaction(&block_1, None)
                 .await;
             cached_gw
                 .upsert_block(&[block_1.clone()])
@@ -1241,7 +1248,7 @@ mod test_serial_db {
             // Send second block messages
             let block_2 = get_sample_block(2);
             cached_gw
-                .start_transaction(&block_2)
+                .start_transaction(&block_2, None)
                 .await;
             cached_gw
                 .upsert_block(&[block_2.clone()])
@@ -1255,7 +1262,7 @@ mod test_serial_db {
             // Send third block messages
             let block_3 = get_sample_block(3);
             cached_gw
-                .start_transaction(&block_3)
+                .start_transaction(&block_3, None)
                 .await;
             cached_gw
                 .upsert_block(&[block_3.clone()])
@@ -1383,6 +1390,7 @@ mod test_serial_db {
             size: operations.len(),
             operations,
             tx: os_tx,
+            owner: None,
         };
 
         tx.send(DBCacheMessage::Write(db_transaction))

@@ -129,7 +129,7 @@ impl NativePgGateway {
         syncing: bool,
     ) -> Result<(), StorageError> {
         self.state_gateway
-            .start_transaction(&(&changes.block).into())
+            .start_transaction(&(&changes.block).into(), Some(self.name.as_str()))
             .await;
         if !changes.new_tokens.is_empty() {
             let new_tokens = changes
@@ -1286,7 +1286,7 @@ mod test_serial_db {
                 "cursor@420".as_bytes(),
             );
             evm_gw
-                .start_transaction(&models::blockchain::Block::default())
+                .start_transaction(&models::blockchain::Block::default(), None)
                 .await;
             evm_gw
                 .save_state(&state)
