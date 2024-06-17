@@ -5,11 +5,10 @@
 //! queries, especially querying snapshots of data.
 //!
 //! Currently we provide only a HTTP implementation.
-use cached::{Cached, TimedSizedCache};
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
 #[cfg(test)]
 use mockall::automock;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, instrument, trace, warn};
 
@@ -165,7 +164,6 @@ pub trait RPCClient {
 pub struct HttpRPCClient {
     http_client: Client<HttpConnector>,
     uri: Uri,
-    cache: Arc<Mutex<TimedSizedCache<String, TokensRequestResponse>>>,
 }
 
 impl HttpRPCClient {
@@ -173,11 +171,7 @@ impl HttpRPCClient {
         let uri = base_uri
             .parse::<Uri>()
             .map_err(|e| RPCError::UriParsing(base_uri.to_string(), e.to_string()))?;
-        // cache is limited to 100 entries and each entry lives for a max 24 hours
-        let cache =
-            Arc::new(Mutex::new(TimedSizedCache::with_size_and_lifespan(100, 24 * 60 * 60)));
-
-        Ok(Self { http_client: Client::new(), uri, cache })
+        Ok(Self { http_client: Client::new(), uri })
     }
 }
 
@@ -191,8 +185,8 @@ impl RPCClient for HttpRPCClient {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.contract_ids.is_none()
-            || request
+        if request.contract_ids.is_none() ||
+            request
                 .contract_ids
                 .as_ref()
                 .unwrap()
@@ -292,8 +286,8 @@ impl RPCClient for HttpRPCClient {
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.protocol_ids.is_none()
-            || request
+        if request.protocol_ids.is_none() ||
+            request
                 .protocol_ids
                 .as_ref()
                 .unwrap()
@@ -346,20 +340,6 @@ impl RPCClient for HttpRPCClient {
         chain: &Chain,
         request: &TokensRequestBody,
     ) -> Result<TokensRequestResponse, RPCError> {
-        let cache_key = format!("{}-{:?}", chain, request);
-        dbg!(&cache_key);
-
-        // Check the cache for a cached response
-        if let Some(cached_response) = self
-            .cache
-            .lock()
-            .unwrap()
-            .cache_get(&cache_key)
-        {
-            trace!(?cached_response, "Returning cached response");
-            return Ok(cached_response.clone());
-        }
-
         let uri = format!(
             "{}/{}/{}/tokens",
             self.uri
@@ -394,16 +374,6 @@ impl RPCClient for HttpRPCClient {
         let states: TokensRequestResponse =
             serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         trace!(?states, "Received tokens response from Tycho server");
-
-        // Cache the response if it contains a full page of tokens
-        if states.tokens.len() == request.pagination.page_size as usize {
-            dbg!("Saving in cache");
-
-            self.cache
-                .lock()
-                .unwrap()
-                .cache_set(cache_key, states.clone());
-        }
 
         Ok(states)
     }
@@ -635,21 +605,14 @@ mod tests {
 
         let mocked_server = server
             .mock("POST", "/v1/ethereum/tokens")
-            .expect(1) // expect 1 call, second request should hit the cache
+            .expect(1)
             .with_body(server_resp)
             .create_async()
             .await;
         let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
 
-        // First call
-        let request_body = TokensRequestBody {
-            token_addresses: None,
-            min_quality: None,
-            traded_n_days_ago: None,
-            pagination: PaginationParams { page: 0, page_size: 2 },
-        };
         let response = client
-            .get_tokens(&Chain::Ethereum, &request_body)
+            .get_tokens(&Chain::Ethereum, &Default::default())
             .await
             .expect("get tokens");
 
@@ -677,15 +640,5 @@ mod tests {
         mocked_server.assert();
         assert_eq!(response.tokens, expected);
         assert_eq!(response.pagination, PaginationParams { page: 0, page_size: 2 });
-
-        // Second call with the same parameters
-        let second_response = client
-            .get_tokens(&Chain::Ethereum, &request_body)
-            .await
-            .expect("get cached tokens");
-
-        // Assert that the second response matches the first response
-        assert_eq!(second_response.tokens, expected);
-        assert_eq!(second_response.pagination, PaginationParams { page: 0, page_size: 2 });
     }
 }

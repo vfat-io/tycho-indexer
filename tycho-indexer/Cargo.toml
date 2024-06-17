@@ -60,6 +60,7 @@ utoipa = { version = "4.2.0", features = ["chrono"] }
 utoipa-swagger-ui = { version = "6.0.0", features = ["actix-web"] }
 ethrpc = { git = "https://github.com/cowprotocol/services", rev = "f3678428991e055ceb517f184d1b37244f2d8f51" }
 web3 = { version = "0.19", default-features = false }
+stretto = {version = "0.8.4", features = ["async"]}
 
 [dev-dependencies]
 actix-rt = "2.9.0"

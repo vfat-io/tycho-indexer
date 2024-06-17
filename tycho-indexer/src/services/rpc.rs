@@ -1,12 +1,13 @@
 //! This module contains Tycho RPC implementation
 use std::collections::HashSet;
+use stretto::{AsyncCache, AsyncCacheBuilder};
 
 use actix_web::{web, HttpResponse};
 use anyhow::Error;
 use chrono::{Duration, Utc};
 use diesel_async::pooled_connection::deadpool;
 use thiserror::Error;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use tycho_core::{
     dto::{self, ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
@@ -119,6 +120,7 @@ impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
 pub struct RpcHandler<G> {
     db_gateway: G,
     pending_deltas: PendingDeltas,
+    cache: AsyncCache<String, dto::TokensRequestResponse>,
 }
 
 impl<G> RpcHandler<G>
@@ -126,7 +128,12 @@ where
     G: Gateway,
 {
     pub fn new(db_gateway: G, pending_deltas: PendingDeltas) -> Self {
-        Self { db_gateway, pending_deltas }
+        let cache = AsyncCacheBuilder::new(1000, 100)
+            .set_metrics(true)
+            .finalize(tokio::spawn)
+            .expect("Failed to build cache");
+
+        Self { db_gateway, pending_deltas, cache }
     }
 
     #[instrument(skip(self, chain, request, params))]
@@ -370,8 +377,35 @@ where
         request: &dto::TokensRequestBody,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
         info!(?chain, ?request, "Getting tokens.");
-        self.get_tokens_inner(chain, request)
-            .await
+
+        let cache_key = format!("{}-{:?}", chain, request);
+
+        // Check the cache for a cached response
+        if let Some(cached_response) = self.cache.get(&cache_key).await {
+            trace!("Returning cached response");
+            return Ok(cached_response.value().clone());
+        }
+
+        let response = self
+            .get_tokens_inner(chain, request)
+            .await?;
+
+        // Cache the response if it contains a full page of tokens
+        if response.tokens.len() == request.pagination.page_size as usize {
+            trace!("Caching response");
+            let _ = self
+                .cache
+                .insert_with_ttl(
+                    cache_key.clone(),
+                    response.clone(),
+                    1,
+                    std::time::Duration::from_secs(24 * 60 * 60), // TTL of 24hrs
+                )
+                .await;
+            let _ = self.cache.wait().await;
+        };
+
+        Ok(response)
     }
 
     async fn get_tokens_inner(
@@ -916,13 +950,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_tokens() {
+    async fn test_get_tokens_rpc() {
         let expected = vec![
             CurrencyToken::new(&(USDC.parse().unwrap()), "USDC", 6, 0, &[], Chain::Ethereum, 100),
             CurrencyToken::new(&(WETH.parse().unwrap()), "WETH", 18, 0, &[], Chain::Ethereum, 100),
         ];
         let mut gw = MockGateway::new();
         let mock_response = Ok(expected.clone());
+        // ensure the gateway is only accessed once - the second request should hit cache
         gw.expect_get_tokens()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
@@ -935,11 +970,24 @@ mod tests {
             ]),
             min_quality: None,
             traded_n_days_ago: None,
-            pagination: dto::PaginationParams::default(),
+            pagination: dto::PaginationParams { page: 0, page_size: 2 },
         };
 
+        // First request
+
         let tokens = req_handler
-            .get_tokens_inner(&Chain::Ethereum, &request)
+            .get_tokens(&Chain::Ethereum, &request)
+            .await
+            .unwrap();
+
+        assert_eq!(tokens.tokens.len(), 2);
+        assert_eq!(tokens.tokens[0].symbol, "USDC");
+        assert_eq!(tokens.tokens[1].symbol, "WETH");
+
+        // Second request (should hit cache and not increase gateway access count)
+
+        let tokens = req_handler
+            .get_tokens(&Chain::Ethereum, &request)
             .await
             .unwrap();
 
