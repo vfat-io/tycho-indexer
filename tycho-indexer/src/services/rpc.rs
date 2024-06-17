@@ -386,7 +386,7 @@ where
             let read_lock = self.cache.read().await;
             if let Some(cached_response) = read_lock.get(&cache_key) {
                 trace!("Returning cached response");
-                return Ok(cached_response.clone());
+                return Ok(cached_response);
             }
         }
 
@@ -396,7 +396,7 @@ where
         // Double-check if another thread has already fetched and cached the data
         if let Some(cached_response) = write_lock.get(&cache_key) {
             trace!("Returning cached response after re-check");
-            return Ok(cached_response.clone());
+            return Ok(cached_response);
         }
 
         let response = self
