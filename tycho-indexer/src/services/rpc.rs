@@ -1,6 +1,7 @@
 //! This module contains Tycho RPC implementation
-use std::collections::HashSet;
-use stretto::{AsyncCache, AsyncCacheBuilder};
+use mini_moka::sync::Cache;
+use std::{collections::HashSet, sync::Arc};
+use tokio::sync::RwLock;
 
 use actix_web::{web, HttpResponse};
 use anyhow::Error;
@@ -120,7 +121,7 @@ impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
 pub struct RpcHandler<G> {
     db_gateway: G,
     pending_deltas: PendingDeltas,
-    cache: AsyncCache<String, dto::TokensRequestResponse>,
+    cache: Arc<RwLock<Cache<String, dto::TokensRequestResponse>>>,
 }
 
 impl<G> RpcHandler<G>
@@ -128,12 +129,12 @@ where
     G: Gateway,
 {
     pub fn new(db_gateway: G, pending_deltas: PendingDeltas) -> Self {
-        let cache = AsyncCacheBuilder::new(1000, 100)
-            .set_metrics(true)
-            .finalize(tokio::spawn)
-            .expect("Failed to build cache");
+        let cache = Cache::builder()
+            .max_capacity(10_000)
+            .time_to_live(std::time::Duration::from_secs(24 * 60 * 60))
+            .build();
 
-        Self { db_gateway, pending_deltas, cache }
+        Self { db_gateway, pending_deltas, cache: Arc::new(RwLock::new(cache)) }
     }
 
     #[instrument(skip(self, chain, request, params))]
@@ -381,9 +382,21 @@ where
         let cache_key = format!("{}-{:?}", chain, request);
 
         // Check the cache for a cached response
-        if let Some(cached_response) = self.cache.get(&cache_key).await {
-            trace!("Returning cached response");
-            return Ok(cached_response.value().clone());
+        {
+            let read_lock = self.cache.read().await;
+            if let Some(cached_response) = read_lock.get(&cache_key) {
+                trace!("Returning cached response");
+                return Ok(cached_response.clone());
+            }
+        }
+
+        // Acquire a write lock before querying the database (prevents concurrent db queries)
+        let write_lock = self.cache.write().await;
+
+        // Double-check if another thread has already fetched and cached the data
+        if let Some(cached_response) = write_lock.get(&cache_key) {
+            trace!("Returning cached response after re-check");
+            return Ok(cached_response.clone());
         }
 
         let response = self
@@ -393,16 +406,7 @@ where
         // Cache the response if it contains a full page of tokens
         if response.tokens.len() == request.pagination.page_size as usize {
             trace!("Caching response");
-            let _ = self
-                .cache
-                .insert_with_ttl(
-                    cache_key.clone(),
-                    response.clone(),
-                    1,
-                    std::time::Duration::from_secs(24 * 60 * 60), // TTL of 24hrs
-                )
-                .await;
-            let _ = self.cache.wait().await;
+            write_lock.insert(cache_key, response.clone());
         };
 
         Ok(response)
