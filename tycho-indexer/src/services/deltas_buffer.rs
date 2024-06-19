@@ -201,9 +201,8 @@ impl PendingDeltas {
         Ok(change_found)
     }
 
-    #[allow(dead_code)]
     pub fn get_new_components(&self, ids: Option<&[&str]>) -> Result<Vec<ProtocolComponent>> {
-        let id_set: Option<HashSet<&str>> = ids.map(|ids| ids.iter().cloned().collect());
+        let requested_ids: Option<HashSet<&str>> = ids.map(|ids| ids.iter().cloned().collect());
         let mut new_components = Vec::new();
         for buffer in self.native.values() {
             let guard = buffer
@@ -216,8 +215,8 @@ impl PendingDeltas {
                         .clone()
                         .into_values()
                         .filter(|comp| {
-                            if let Some(ref set) = id_set {
-                                set.contains(comp.id.as_str())
+                            if let Some(ids) = requested_ids.as_ref() {
+                                ids.contains(comp.id.as_str())
                             } else {
                                 true
                             }
@@ -236,8 +235,8 @@ impl PendingDeltas {
                         .clone()
                         .into_values()
                         .filter(|comp| {
-                            if let Some(ref set) = id_set {
-                                set.contains(comp.id.as_str())
+                            if let Some(ids) = requested_ids.as_ref() {
+                                ids.contains(comp.id.as_str())
                             } else {
                                 true
                             }
@@ -277,7 +276,6 @@ impl PendingDeltas {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn run(
         self,
         extractors: impl IntoIterator<Item = Arc<dyn MessageSender + Send + Sync>>,
