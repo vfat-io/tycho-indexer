@@ -6,7 +6,7 @@ use crate::extractor::{
 use ethers::prelude::StreamExt;
 use futures03::stream;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 use thiserror::Error;
@@ -201,8 +201,8 @@ impl PendingDeltas {
         Ok(change_found)
     }
 
-    #[allow(dead_code)]
-    pub fn get_new_components(&self) -> Result<Vec<ProtocolComponent>> {
+    pub fn get_new_components(&self, ids: Option<&[&str]>) -> Result<Vec<ProtocolComponent>> {
+        let requested_ids: Option<HashSet<&str>> = ids.map(|ids| ids.iter().cloned().collect());
         let mut new_components = Vec::new();
         for buffer in self.native.values() {
             let guard = buffer
@@ -213,7 +213,14 @@ impl PendingDeltas {
                     entry
                         .new_components
                         .clone()
-                        .into_values(),
+                        .into_values()
+                        .filter(|comp| {
+                            if let Some(ids) = requested_ids.as_ref() {
+                                ids.contains(comp.id.as_str())
+                            } else {
+                                true
+                            }
+                        }),
                 );
             }
         }
@@ -226,7 +233,14 @@ impl PendingDeltas {
                     entry
                         .new_components
                         .clone()
-                        .into_values(),
+                        .into_values()
+                        .filter(|comp| {
+                            if let Some(ids) = requested_ids.as_ref() {
+                                ids.contains(comp.id.as_str())
+                            } else {
+                                true
+                            }
+                        }),
                 );
             }
         }
@@ -262,7 +276,6 @@ impl PendingDeltas {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn run(
         self,
         extractors: impl IntoIterator<Item = Arc<dyn MessageSender + Send + Sync>>,
@@ -575,8 +588,14 @@ mod test {
             .insert(Arc::new(native_block_deltas()))
             .unwrap();
 
-        let new_components = buffer.get_new_components().unwrap();
+        let new_components = buffer.get_new_components(None).unwrap();
 
         assert_eq!(new_components, exp);
+
+        let new_components = buffer
+            .get_new_components(Some(&["component3"]))
+            .unwrap();
+
+        assert_eq!(new_components, vec![exp[0].clone()]);
     }
 }

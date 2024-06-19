@@ -130,7 +130,7 @@ where
 {
     pub fn new(db_gateway: G, pending_deltas: PendingDeltas) -> Self {
         let cache = Cache::builder()
-            .max_capacity(10_000)
+            .max_capacity(50)
             .time_to_live(std::time::Duration::from_secs(24 * 60 * 60))
             .build();
 
@@ -480,17 +480,41 @@ where
             .map(|vec| vec.iter().map(String::as_str).collect());
 
         let ids_slice = ids_strs.as_deref();
+
+        let mut components = self
+            .pending_deltas
+            .get_new_components(ids_slice)?;
+
+        // Check if we have all requested components in the cache
+        if let Some(requested_ids) = ids_slice {
+            let fetched_ids: HashSet<_> = components
+                .iter()
+                .map(|comp| comp.id.as_str())
+                .collect();
+
+            if requested_ids.len() == fetched_ids.len() {
+                let response_components = components
+                    .into_iter()
+                    .map(dto::ProtocolComponent::from)
+                    .collect::<Vec<dto::ProtocolComponent>>();
+
+                return Ok(dto::ProtocolComponentRequestResponse::new(response_components));
+            }
+        }
+
         match self
             .db_gateway
             .get_protocol_components(chain, system, ids_slice, params.tvl_gt)
             .await
         {
-            Ok(components) => Ok(dto::ProtocolComponentRequestResponse::new(
-                components
+            Ok(comps) => {
+                components.extend(comps);
+                let response_components = components
                     .into_iter()
                     .map(dto::ProtocolComponent::from)
-                    .collect(),
-            )),
+                    .collect::<Vec<dto::ProtocolComponent>>();
+                Ok(dto::ProtocolComponentRequestResponse::new(response_components))
+            }
             Err(err) => {
                 error!(error = %err, "Error while getting protocol components.");
                 Err(err.into())
