@@ -130,7 +130,7 @@ where
 {
     pub fn new(db_gateway: G, pending_deltas: PendingDeltas) -> Self {
         let cache = Cache::builder()
-            .max_capacity(10_000)
+            .max_capacity(50)
             .time_to_live(std::time::Duration::from_secs(24 * 60 * 60))
             .build();
 
