@@ -481,9 +481,26 @@ where
 
         let ids_slice = ids_strs.as_deref();
 
-        let mut new_components = self
+        let mut components = self
             .pending_deltas
             .get_new_components(ids_slice)?;
+
+        // Check if we have all requested components in the cache
+        if let Some(requested_ids) = ids_slice {
+            let fetched_ids: HashSet<_> = components
+                .iter()
+                .map(|comp| comp.id.as_str())
+                .collect();
+
+            if requested_ids.len() == fetched_ids.len() {
+                let response_components = components
+                    .into_iter()
+                    .map(dto::ProtocolComponent::from)
+                    .collect::<Vec<dto::ProtocolComponent>>();
+
+                return Ok(dto::ProtocolComponentRequestResponse::new(response_components));
+            }
+        }
 
         match self
             .db_gateway
@@ -491,12 +508,12 @@ where
             .await
         {
             Ok(comps) => {
-                new_components.extend(comps);
-                let components = new_components
+                components.extend(comps);
+                let response_components = components
                     .into_iter()
                     .map(dto::ProtocolComponent::from)
                     .collect::<Vec<dto::ProtocolComponent>>();
-                Ok(dto::ProtocolComponentRequestResponse::new(components))
+                Ok(dto::ProtocolComponentRequestResponse::new(response_components))
             }
             Err(err) => {
                 error!(error = %err, "Error while getting protocol components.");
