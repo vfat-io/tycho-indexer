@@ -1,17 +1,17 @@
-use self::utils::TryDecode;
-use super::{revert_buffer::StateUpdateBufferEntry, u256_num::bytes_to_f64, ExtractionError};
-use crate::pb::tycho::evm::v1 as substreams;
+use std::{
+    any::Any,
+    collections::{hash_map::Entry, HashMap, HashSet},
+    sync::Arc,
+};
+
 use chrono::NaiveDateTime;
 use ethers::{
     types::{H160, H256, U256},
     utils::keccak256,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    sync::Arc,
-};
 use tracing::log::warn;
+
 use tycho_core::{
     dto,
     models::{
@@ -23,8 +23,21 @@ use tycho_core::{
 };
 use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
 
+use crate::{
+    extractor::revert_buffer::{
+        AccountStateIdType, AccountStateKeyType, AccountStateValueType, ProtocolStateIdType,
+        ProtocolStateKeyType, ProtocolStateValueType,
+    },
+    pb::tycho::evm::v1 as substreams,
+};
+
+use super::{revert_buffer::StateUpdateBufferEntry, u256_num::bytes_to_f64, ExtractionError};
+
+use self::utils::TryDecode;
+
 pub mod chain_state;
 mod convert;
+pub mod hybrid;
 pub mod native;
 pub mod protocol_cache;
 pub mod token_analysis_cron;
@@ -548,14 +561,17 @@ pub struct BlockContractChanges {
 }
 
 impl StateUpdateBufferEntry for BlockContractChanges {
-    type IdType = H160;
-    type KeyType = U256;
-    type ValueType = U256;
-
-    fn get_filtered_state_update(
+    fn get_filtered_protocol_state_update(
         &self,
-        keys: Vec<(&Self::IdType, &Self::KeyType)>,
-    ) -> HashMap<(Self::IdType, Self::KeyType), Self::ValueType> {
+        _: Vec<(&ProtocolStateIdType, &ProtocolStateKeyType)>,
+    ) -> HashMap<(ProtocolStateIdType, ProtocolStateKeyType), ProtocolStateValueType> {
+        todo!()
+    }
+
+    fn get_filtered_account_state_update(
+        &self,
+        keys: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
+    ) -> HashMap<(AccountStateIdType, AccountStateKeyType), AccountStateValueType> {
         let keys_set: HashSet<_> = keys.into_iter().collect();
         let mut res = HashMap::new();
 
@@ -1300,14 +1316,10 @@ pub struct BlockEntityChanges {
 }
 
 impl StateUpdateBufferEntry for BlockEntityChanges {
-    type IdType = ComponentId;
-    type KeyType = AttrStoreKey;
-    type ValueType = StoreVal;
-
-    fn get_filtered_state_update(
+    fn get_filtered_protocol_state_update(
         &self,
-        keys: Vec<(&Self::IdType, &Self::KeyType)>,
-    ) -> HashMap<(Self::IdType, Self::KeyType), Self::ValueType> {
+        keys: Vec<(&ProtocolStateIdType, &ProtocolStateKeyType)>,
+    ) -> HashMap<(ProtocolStateIdType, ProtocolStateKeyType), ProtocolStateValueType> {
         // Convert keys to a HashSet for faster lookups
         let keys_set: HashSet<(&ComponentId, &AttrStoreKey)> = keys.into_iter().collect();
         let mut res = HashMap::new();
@@ -1326,6 +1338,13 @@ impl StateUpdateBufferEntry for BlockEntityChanges {
         }
 
         res
+    }
+
+    fn get_filtered_account_state_update(
+        &self,
+        _: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
+    ) -> HashMap<(AccountStateIdType, AccountStateKeyType), AccountStateValueType> {
+        todo!()
     }
 
     #[allow(clippy::mutable_key_type)] // Clippy thinks that tuple with Bytes are a mutable type.
@@ -1482,10 +1501,577 @@ impl BlockEntityChanges {
     }
 }
 
+/// Changes grouped by their respective transaction.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TxWithChanges {
+    pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
+    pub account_updates: HashMap<H160, AccountUpdate>,
+    pub state_updates: HashMap<ComponentId, ProtocolStateDelta>,
+    pub balance_changes: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
+    pub tx: Transaction,
+}
+
+impl TxWithChanges {
+    pub fn new(
+        protocol_components: HashMap<ComponentId, ProtocolComponent>,
+        account_updates: HashMap<H160, AccountUpdate>,
+        protocol_states: HashMap<ComponentId, ProtocolStateDelta>,
+        balance_changes: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
+        tx: Transaction,
+    ) -> Self {
+        Self {
+            account_updates,
+            protocol_components,
+            state_updates: protocol_states,
+            balance_changes,
+            tx,
+        }
+    }
+
+    fn try_from_message(
+        msg: substreams::TransactionChanges,
+        block: &Block,
+        protocol_system: &str,
+        protocol_types: &HashMap<String, ProtocolType>,
+    ) -> Result<Self, ExtractionError> {
+        let tx = Transaction::try_from_message(
+            msg.tx
+                .expect("TransactionChanges should have a transaction"),
+            &block.hash,
+        )?;
+
+        let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
+        let mut account_updates: HashMap<H160, AccountUpdate> = HashMap::new();
+        let mut state_updates: HashMap<String, ProtocolStateDelta> = HashMap::new();
+        let mut balance_changes: HashMap<String, HashMap<H160, ComponentBalance>> = HashMap::new();
+
+        // First, parse the new protocol components
+        for change in msg.component_changes.into_iter() {
+            let component = ProtocolComponent::try_from_message(
+                change,
+                block.chain,
+                protocol_system,
+                protocol_types,
+                tx.hash,
+                block.ts,
+            )?;
+            new_protocol_components.insert(component.id.clone(), component);
+        }
+
+        // Then, parse the account updates
+        for el in msg.contract_changes.into_iter() {
+            let update = AccountUpdate::try_from_message(el, block.chain)?;
+            account_updates.insert(update.address, update);
+        }
+
+        // Then, parse the state updates
+        for state_msg in msg.entity_changes.into_iter() {
+            let state = ProtocolStateDelta::try_from_message(state_msg)?;
+            // Check if a state update for the same component already exists
+            // If it exists, overwrite the existing state update with the new one and log a warning
+            match state_updates.entry(state.component_id.clone()) {
+                Entry::Vacant(e) => {
+                    e.insert(state);
+                }
+                Entry::Occupied(mut e) => {
+                    warn!("Received two state updates for the same component. Overwriting state for component {}", e.key());
+                    e.insert(state);
+                }
+            }
+        }
+
+        // Finally, parse the balance changes
+        for balance_change in msg.balance_changes.into_iter() {
+            let component_id = String::from_utf8(balance_change.component_id.clone())
+                .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
+            let token_address = H160::from_slice(balance_change.token.as_slice());
+            let balance = ComponentBalance::try_from_message(balance_change, &tx)?;
+
+            balance_changes
+                .entry(component_id)
+                .or_default()
+                .insert(token_address, balance);
+        }
+
+        Ok(Self {
+            protocol_components: new_protocol_components,
+            account_updates,
+            state_updates,
+            balance_changes,
+            tx,
+        })
+    }
+
+    /// Merges this update with another one.
+    ///
+    /// The method combines two `ChangesWithTx` instances if they are for the same
+    /// transaction.
+    ///
+    /// NB: It is assumed that `other` is a more recent update than `self` is and the two are
+    /// combined accordingly.
+    ///
+    /// # Errors
+    /// This method will return `ExtractionError::MergeError` if any of the above
+    /// conditions is violated.
+    pub fn merge(&mut self, other: TxWithChanges) -> Result<(), ExtractionError> {
+        if self.tx.block_hash != other.tx.block_hash {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge TxWithChanges from different blocks: 0x{:x} != 0x{:x}",
+                self.tx.block_hash, other.tx.block_hash,
+            )));
+        }
+        if self.tx.hash == other.tx.hash {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge TxWithChanges from the same transaction: 0x{:x}",
+                self.tx.hash
+            )));
+        }
+        if self.tx.index > other.tx.index {
+            return Err(ExtractionError::MergeError(format!(
+                "Can't merge TxWithChanges with lower transaction index: {} > {}",
+                self.tx.index, other.tx.index
+            )));
+        }
+
+        self.tx = other.tx;
+
+        // Merge new protocol components
+        // Log a warning if a new protocol component for the same id already exists, because this
+        // should never happen.
+        for (key, value) in other.protocol_components {
+            match self.protocol_components.entry(key) {
+                Entry::Occupied(mut entry) => {
+                    warn!(
+                        "Overwriting new protocol component for id {} with a new one. This should never happen! Please check logic",
+                        entry.get().id
+                    );
+                    entry.insert(value);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(value);
+                }
+            }
+        }
+
+        // Merge Account Updates
+        for (address, update) in other
+            .account_updates
+            .clone()
+            .into_iter()
+        {
+            match self.account_updates.entry(address) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().merge(update)?;
+                }
+                Entry::Vacant(e) => {
+                    e.insert(update);
+                }
+            }
+        }
+
+        // Merge Protocol States
+        for (key, value) in other.state_updates {
+            match self.state_updates.entry(key) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().merge(value)?;
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(value);
+                }
+            }
+        }
+
+        // Merge Balance Changes
+        for (component_id, balance_changes) in other.balance_changes {
+            let token_balances = self
+                .balance_changes
+                .entry(component_id)
+                .or_default();
+            for (token, balance) in balance_changes {
+                token_balances.insert(token, balance);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl From<TransactionVMUpdates> for TxWithChanges {
+    fn from(value: TransactionVMUpdates) -> Self {
+        Self {
+            protocol_components: value.protocol_components,
+            account_updates: value.account_updates,
+            state_updates: HashMap::new(),
+            balance_changes: value.component_balances,
+            tx: value.tx,
+        }
+    }
+}
+
+impl From<ProtocolChangesWithTx> for TxWithChanges {
+    fn from(value: ProtocolChangesWithTx) -> TxWithChanges {
+        TxWithChanges {
+            protocol_components: value.new_protocol_components,
+            account_updates: HashMap::new(),
+            state_updates: value.protocol_states,
+            balance_changes: value.balance_changes,
+            tx: value.tx,
+        }
+    }
+}
+
+/// A container for updates grouped by protocol component.
+///
+/// Hold a single update per component. This is a condensed form of
+/// [BlockChanges].
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+pub struct AggregatedBlockChanges {
+    extractor: String,
+    chain: Chain,
+    pub block: Block,
+    pub finalized_block_height: u64,
+    pub revert: bool,
+    pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
+    pub new_tokens: HashMap<Address, CurrencyToken>,
+    pub deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
+    pub state_updates: HashMap<ComponentId, ProtocolStateDelta>,
+    pub account_updates: HashMap<H160, AccountUpdate>,
+    pub component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
+    pub component_tvl: HashMap<ComponentId, f64>,
+}
+
+impl AggregatedBlockChanges {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        extractor: &str,
+        chain: Chain,
+        block: Block,
+        finalized_block_height: u64,
+        revert: bool,
+        new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
+        new_tokens: HashMap<Address, CurrencyToken>,
+        deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
+        protocol_states: HashMap<ComponentId, ProtocolStateDelta>,
+        account_updates: HashMap<H160, AccountUpdate>,
+        component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
+    ) -> Self {
+        Self {
+            extractor: extractor.to_string(),
+            chain,
+            block,
+            finalized_block_height,
+            revert,
+            new_protocol_components,
+            new_tokens,
+            deleted_protocol_components,
+            state_updates: protocol_states,
+            account_updates,
+            component_balances,
+            component_tvl: HashMap::new(),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn is_empty(&self) -> bool {
+        self.new_protocol_components.is_empty() &&
+            self.deleted_protocol_components
+                .is_empty() &&
+            self.state_updates.is_empty() &&
+            self.account_updates.is_empty() &&
+            self.component_balances.is_empty() &&
+            self.component_tvl.is_empty()
+    }
+}
+
+impl std::fmt::Display for AggregatedBlockChanges {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "block_number: {}, extractor: {}", self.block.number, self.extractor)
+    }
+}
+
+#[typetag::serde]
+impl NormalisedMessage for AggregatedBlockChanges {
+    fn source(&self) -> ExtractorIdentity {
+        ExtractorIdentity::new(self.chain, &self.extractor)
+    }
+
+    fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
+        Arc::new(Self {
+            extractor: self.extractor.clone(),
+            chain: self.chain,
+            block: self.block,
+            finalized_block_height: self.finalized_block_height,
+            revert: self.revert,
+            account_updates: HashMap::new(),
+            state_updates: HashMap::new(),
+            new_tokens: self.new_tokens.clone(),
+            new_protocol_components: self.new_protocol_components.clone(),
+            deleted_protocol_components: self.deleted_protocol_components.clone(),
+            component_balances: self.component_balances.clone(),
+            component_tvl: self.component_tvl.clone(),
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Debug, PartialEq, Default, Clone)]
+pub struct BlockChanges {
+    extractor: String,
+    chain: Chain,
+    pub block: Block,
+    pub finalized_block_height: u64,
+    pub revert: bool,
+    /// Required here, so it is part of the revert buffer and thus inserted into storage once
+    /// finalized.
+    pub new_tokens: HashMap<Address, CurrencyToken>,
+    /// Vec of updates at this block, aggregated by tx and sorted by tx index in ascending order
+    pub txs_with_update: Vec<TxWithChanges>,
+}
+
+impl StateUpdateBufferEntry for BlockChanges {
+    fn get_filtered_protocol_state_update(
+        &self,
+        keys: Vec<(&ProtocolStateIdType, &ProtocolStateKeyType)>,
+    ) -> HashMap<(ProtocolStateIdType, ProtocolStateKeyType), ProtocolStateValueType> {
+        // Convert keys to a HashSet for faster lookups
+        let keys_set: HashSet<(&ComponentId, &AttrStoreKey)> = keys.into_iter().collect();
+        let mut res = HashMap::new();
+
+        for update in self.txs_with_update.iter().rev() {
+            for (component_id, protocol_update) in update.state_updates.iter() {
+                for (attr, val) in protocol_update
+                    .updated_attributes
+                    .iter()
+                    .filter(|(attr, _)| keys_set.contains(&(component_id, attr)))
+                {
+                    res.entry((component_id.clone(), attr.clone()))
+                        .or_insert(val.clone());
+                }
+            }
+        }
+
+        res
+    }
+
+    fn get_filtered_account_state_update(
+        &self,
+        keys: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
+    ) -> HashMap<(AccountStateIdType, AccountStateKeyType), AccountStateValueType> {
+        let keys_set: HashSet<_> = keys.into_iter().collect();
+        let mut res = HashMap::new();
+
+        for update in self.txs_with_update.iter().rev() {
+            for (address, account_update) in update.account_updates.iter() {
+                for (slot, val) in account_update
+                    .slots
+                    .iter()
+                    .filter(|(slot, _)| keys_set.contains(&(address, slot)))
+                {
+                    res.entry((*address, *slot))
+                        .or_insert(*val);
+                }
+            }
+        }
+
+        res
+    }
+
+    #[allow(clippy::mutable_key_type)] // Clippy thinks that tuple with Bytes are a mutable type.
+    fn get_filtered_balance_update(
+        &self,
+        keys: Vec<(&ComponentId, &Address)>,
+    ) -> HashMap<(String, Bytes), tycho_core_protocol::ComponentBalance> {
+        // Convert keys to a HashSet for faster lookups
+        let keys_set: HashSet<(&String, &Bytes)> = keys.into_iter().collect();
+
+        let mut res = HashMap::new();
+
+        for update in self.txs_with_update.iter().rev() {
+            for (component_id, balance_update) in update.balance_changes.iter() {
+                for (token, value) in balance_update
+                    .iter()
+                    .filter(|(token, _)| {
+                        keys_set.contains(&(component_id, &token.as_bytes().into()))
+                    })
+                {
+                    res.entry((component_id.clone(), token.as_bytes().into()))
+                        .or_insert(value.into());
+                }
+            }
+        }
+
+        res
+    }
+}
+
+impl BlockScoped for BlockChanges {
+    fn block(&self) -> tycho_core::models::blockchain::Block {
+        (&self.block).into()
+    }
+}
+
+impl BlockChanges {
+    pub fn new(
+        extractor: String,
+        chain: Chain,
+        block: Block,
+        finalized_block_height: u64,
+        revert: bool,
+        txs_with_update: Vec<TxWithChanges>,
+    ) -> Self {
+        BlockChanges {
+            extractor,
+            chain,
+            block,
+            finalized_block_height,
+            revert,
+            new_tokens: HashMap::new(),
+            txs_with_update,
+        }
+    }
+
+    /// Parse from Tycho's protobuf message
+    pub fn try_from_message(
+        msg: substreams::BlockChanges,
+        extractor: &str,
+        chain: Chain,
+        protocol_system: &str,
+        protocol_types: &HashMap<String, ProtocolType>,
+        finalized_block_height: u64,
+    ) -> Result<Self, ExtractionError> {
+        if let Some(block) = msg.block {
+            let block = Block::try_from_message(block, chain)?;
+
+            let txs_with_update = msg
+                .changes
+                .into_iter()
+                .map(|change| {
+                    change.tx.as_ref().ok_or_else(|| {
+                        ExtractionError::DecodeError(
+                            "TransactionEntityChanges misses a transaction".to_owned(),
+                        )
+                    })?;
+
+                    TxWithChanges::try_from_message(change, &block, protocol_system, protocol_types)
+                })
+                .collect::<Result<Vec<TxWithChanges>, ExtractionError>>()?;
+
+            // Sort updates by transaction index
+            let mut txs_with_update = txs_with_update;
+            txs_with_update.sort_unstable_by_key(|update| update.tx.index);
+
+            Ok(Self {
+                extractor: extractor.to_string(),
+                chain,
+                block,
+                finalized_block_height,
+                revert: false,
+                new_tokens: HashMap::new(),
+                txs_with_update,
+            })
+        } else {
+            Err(ExtractionError::Empty)
+        }
+    }
+
+    /// Aggregates state updates.
+    ///
+    /// This function aggregates the protocol updates
+    /// for different protocol components into a [`AggregatedBlockChanges`] object.
+    /// This new object should have only one final ProtocolStateDelta and a HashMap to hold
+    /// `AccountUpdate` per component_id.
+    ///
+    /// After merging all updates, a [`AggregatedBlockChanges`] object is returned
+    /// which contains, amongst other data, the compacted state updates.
+    ///
+    /// # Errors
+    ///
+    /// This returns an error if there was a problem during merge. The error
+    /// type is `ExtractionError`.
+    pub fn aggregate_updates(self) -> Result<AggregatedBlockChanges, ExtractionError> {
+        let mut iter = self.txs_with_update.into_iter();
+
+        // Use unwrap_or_else to provide a default state if iter.next() is None
+        let first_state = iter.next().unwrap_or_default();
+
+        let aggregated_changes = iter
+            .try_fold(first_state, |mut acc_state, new_state| {
+                acc_state.merge(new_state.clone())?;
+                Ok::<_, ExtractionError>(acc_state.clone())
+            })
+            .unwrap();
+
+        Ok(AggregatedBlockChanges {
+            extractor: self.extractor,
+            chain: self.chain,
+            block: self.block,
+            finalized_block_height: self.finalized_block_height,
+            revert: self.revert,
+            new_protocol_components: aggregated_changes.protocol_components,
+            new_tokens: self.new_tokens,
+            deleted_protocol_components: HashMap::new(),
+            state_updates: aggregated_changes.state_updates,
+            account_updates: aggregated_changes.account_updates,
+            component_balances: aggregated_changes.balance_changes,
+            component_tvl: HashMap::new(),
+        })
+    }
+
+    pub fn protocol_components(&self) -> Vec<ProtocolComponent> {
+        self.txs_with_update
+            .iter()
+            .flat_map(|tx_u| {
+                tx_u.protocol_components
+                    .values()
+                    .cloned()
+            })
+            .collect()
+    }
+}
+
+impl From<BlockContractChanges> for BlockChanges {
+    fn from(value: BlockContractChanges) -> Self {
+        Self {
+            extractor: value.extractor,
+            chain: value.chain,
+            block: value.block,
+            finalized_block_height: value.finalized_block_height,
+            revert: value.revert,
+            new_tokens: value.new_tokens,
+            txs_with_update: value
+                .tx_updates
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+impl From<BlockEntityChanges> for BlockChanges {
+    fn from(value: BlockEntityChanges) -> Self {
+        Self {
+            extractor: value.extractor,
+            chain: value.chain,
+            block: value.block,
+            finalized_block_height: value.finalized_block_height,
+            revert: value.revert,
+            new_tokens: value.new_tokens,
+            txs_with_update: value
+                .txs_with_update
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
 #[cfg(test)]
 pub mod fixtures {
-    use prost::Message;
     use std::str::FromStr;
+
+    use prost::Message;
+
     use tycho_storage::postgres::db_fixtures::yesterday_midnight;
 
     use super::*;
@@ -1524,7 +2110,7 @@ pub mod fixtures {
             output: Some(MapModuleOutput {
                 name: "map_changes".to_owned(),
                 map_output: Some(prost_types::Any {
-                    type_url: "tycho.evm.v1.BlockContractChanges".to_owned(),
+                    type_url: "tycho.evm.v1.BlockChanges".to_owned(),
                     value: val,
                 }),
                 debug_info: None,
@@ -1939,6 +2525,411 @@ pub mod fixtures {
                 }],
             },
             _ => panic!("Requested BlockContractChanges version doesn't exist"),
+        }
+    }
+
+    pub fn pb_vm_block_changes(version: u8) -> crate::pb::tycho::evm::v1::BlockChanges {
+        use crate::pb::tycho::evm::v1::*;
+
+        match version {
+            0 => BlockChanges {
+                block: Some(Block {
+                    hash: vec![0x31, 0x32, 0x33, 0x34],
+                    parent_hash: vec![0x21, 0x22, 0x23, 0x24],
+                    number: 1,
+                    ts: 1000,
+                }),
+
+                changes: vec![
+                    TransactionChanges {
+                        tx: Some(Transaction {
+                            hash: vec![0x11, 0x12, 0x13, 0x14],
+                            from: vec![0x41, 0x42, 0x43, 0x44],
+                            to: vec![0x51, 0x52, 0x53, 0x54],
+                            index: 2,
+                        }),
+                        contract_changes: vec![ContractChange {
+                            address: vec![0x61, 0x62, 0x63, 0x64],
+                            balance: vec![0x71, 0x72, 0x73, 0x74],
+                            code: vec![0x81, 0x82, 0x83, 0x84],
+                            slots: vec![
+                                ContractSlot {
+                                    slot: vec![0xa1, 0xa2, 0xa3, 0xa4],
+                                    value: vec![0xb1, 0xb2, 0xb3, 0xb4],
+                                },
+                                ContractSlot {
+                                    slot: vec![0xc1, 0xc2, 0xc3, 0xc4],
+                                    value: vec![0xd1, 0xd2, 0xd3, 0xd4],
+                                },
+                            ],
+                            change: ChangeType::Update.into(),
+                        }],
+                        entity_changes: vec![],
+                        component_changes: vec![ProtocolComponent {
+                            id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
+                                .to_owned(),
+                            tokens: vec![
+                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                    .unwrap()
+                                    .0
+                                    .to_vec(),
+                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                    .unwrap()
+                                    .0
+                                    .to_vec(),
+                            ],
+                            contracts: vec![
+                                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                                    .unwrap()
+                                    .0
+                                    .to_vec(),
+                                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                                    .unwrap()
+                                    .0
+                                    .to_vec(),
+                            ],
+                            static_att: vec![
+                                Attribute {
+                                    name: "key1".to_owned(),
+                                    value: b"value1".to_vec(),
+                                    change: ChangeType::Creation.into(),
+                                },
+                                Attribute {
+                                    name: "key2".to_owned(),
+                                    value: b"value2".to_vec(),
+                                    change: ChangeType::Creation.into(),
+                                },
+                            ],
+                            change: ChangeType::Creation.into(),
+                            protocol_type: Some(ProtocolType {
+                                name: "WeightedPool".to_string(),
+                                financial_type: 0,
+                                attribute_schema: vec![],
+                                implementation_type: 0,
+                            }),
+                        }],
+                        balance_changes: vec![BalanceChange {
+                            token: hex::decode(
+                                "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+                                    .trim_start_matches("0x"),
+                            )
+                            .unwrap(),
+                            balance: 50000000.encode_to_vec(),
+                            component_id:
+                                "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
+                                    .as_bytes()
+                                    .to_vec(),
+                        }],
+                    },
+                    TransactionChanges {
+                        tx: Some(Transaction {
+                            hash: vec![
+                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+                            ],
+                            from: vec![0x41, 0x42, 0x43, 0x44],
+                            to: vec![0x51, 0x52, 0x53, 0x54],
+                            index: 5,
+                        }),
+                        contract_changes: vec![ContractChange {
+                            address: vec![0x61, 0x62, 0x63, 0x64],
+                            balance: vec![0xf1, 0xf2, 0xf3, 0xf4],
+                            code: vec![0x01, 0x02, 0x03, 0x04],
+                            slots: vec![
+                                ContractSlot {
+                                    slot: vec![0x91, 0x92, 0x93, 0x94],
+                                    value: vec![0xa1, 0xa2, 0xa3, 0xa4],
+                                },
+                                ContractSlot {
+                                    slot: vec![0xa1, 0xa2, 0xa3, 0xa4],
+                                    value: vec![0xc1, 0xc2, 0xc3, 0xc4],
+                                },
+                            ],
+                            change: ChangeType::Update.into(),
+                        }],
+                        entity_changes: vec![],
+                        component_changes: vec![],
+                        balance_changes: vec![BalanceChange {
+                            token: hex::decode(
+                                "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+                                    .trim_start_matches("0x"),
+                            )
+                            .unwrap(),
+                            balance: 10.encode_to_vec(),
+                            component_id:
+                                "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
+                                    .to_string()
+                                    .as_bytes()
+                                    .to_vec(),
+                        }],
+                    },
+                ],
+            },
+            1 => BlockChanges {
+                block: Some(pb_blocks(version as u64)),
+                changes: vec![TransactionChanges {
+                    tx: Some(pb_transactions(1, 1)),
+                    contract_changes: vec![ContractChange {
+                        address: address_from_str("0000000000000000000000000000000000000001"),
+                        balance: 1_i32.to_be_bytes().to_vec(),
+                        code: 123_i32.to_be_bytes().to_vec(),
+                        slots: vec![ContractSlot {
+                            slot: Bytes::from("0x01").into(),
+                            value: Bytes::from("0x01").into(),
+                        }],
+                        change: ChangeType::Creation.into(),
+                    }],
+                    entity_changes: vec![],
+                    component_changes: vec![ProtocolComponent {
+                        id: "pc_1".to_owned(),
+                        tokens: vec![
+                            address_from_str(WETH_ADDRESS),
+                            address_from_str(USDC_ADDRESS),
+                        ],
+                        contracts: vec![],
+                        static_att: vec![],
+                        change: ChangeType::Creation.into(),
+                        protocol_type: Some(ProtocolType {
+                            name: "pt_1".to_string(),
+                            financial_type: 0,
+                            attribute_schema: vec![],
+                            implementation_type: 0,
+                        }),
+                    }],
+                    balance_changes: vec![
+                        BalanceChange {
+                            token: address_from_str(USDC_ADDRESS),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_1".into(),
+                        },
+                        BalanceChange {
+                            token: address_from_str(WETH_ADDRESS),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_1".into(),
+                        },
+                    ],
+                }],
+            },
+            2 => BlockChanges {
+                block: Some(pb_blocks(version as u64)),
+                changes: vec![TransactionChanges {
+                    tx: Some(pb_transactions(2, 1)),
+                    contract_changes: vec![
+                        ContractChange {
+                            address: address_from_str("0000000000000000000000000000000000000002"),
+                            balance: 2_i32.to_be_bytes().to_vec(),
+                            code: 123_i32.to_be_bytes().to_vec(),
+                            slots: vec![ContractSlot {
+                                slot: Bytes::from("0x01").into(),
+                                value: Bytes::from("0x02").into(),
+                            }],
+                            change: ChangeType::Creation.into(),
+                        },
+                        ContractChange {
+                            address: address_from_str("0000000000000000000000000000000000000001"),
+                            balance: 10_i32.to_be_bytes().to_vec(),
+                            code: 123_i32.to_be_bytes().to_vec(),
+                            slots: vec![
+                                ContractSlot {
+                                    slot: Bytes::from(U256::from(1)).into(),
+                                    value: Bytes::from(U256::from(10)).into(),
+                                },
+                                ContractSlot {
+                                    slot: Bytes::from("0x02").into(),
+                                    value: Bytes::from("0x0a").into(),
+                                },
+                            ],
+                            change: ChangeType::Update.into(),
+                        },
+                    ],
+                    entity_changes: vec![],
+                    component_changes: vec![ProtocolComponent {
+                        id: "pc_2".to_owned(),
+                        tokens: vec![
+                            address_from_str(USDT_ADDRESS),
+                            address_from_str(USDC_ADDRESS),
+                        ],
+                        contracts: vec![address_from_str(
+                            "0000000000000000000000000000000000000002",
+                        )],
+                        static_att: vec![],
+                        change: ChangeType::Creation.into(),
+                        protocol_type: Some(ProtocolType {
+                            name: "pt_1".to_string(),
+                            financial_type: 0,
+                            attribute_schema: vec![],
+                            implementation_type: 0,
+                        }),
+                    }],
+                    balance_changes: vec![
+                        BalanceChange {
+                            token: address_from_str(USDC_ADDRESS),
+                            balance: 20_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_2".into(),
+                        },
+                        BalanceChange {
+                            token: address_from_str(USDT_ADDRESS),
+                            balance: 20_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_2".into(),
+                        },
+                        BalanceChange {
+                            token: address_from_str(USDC_ADDRESS),
+                            balance: 10_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_1".into(),
+                        },
+                    ],
+                }],
+            },
+            3 => BlockChanges {
+                block: Some(pb_blocks(version as u64)),
+                changes: vec![
+                    TransactionChanges {
+                        tx: Some(pb_transactions(3, 1)),
+                        contract_changes: vec![
+                            ContractChange {
+                                address: address_from_str(
+                                    "0000000000000000000000000000000000000001",
+                                ),
+                                balance: 1_i32.to_be_bytes().to_vec(),
+                                code: 123_i32.to_le_bytes().to_vec(),
+                                slots: vec![ContractSlot {
+                                    slot: Bytes::from("0x01").into(),
+                                    value: Bytes::from("0x01").into(),
+                                }],
+                                change: ChangeType::Update.into(),
+                            },
+                            ContractChange {
+                                address: address_from_str(
+                                    "0000000000000000000000000000000000000002",
+                                ),
+                                balance: 20_i32.to_be_bytes().to_vec(),
+                                code: 123_i32.to_le_bytes().to_vec(),
+                                slots: vec![ContractSlot {
+                                    slot: Bytes::from("0x02").into(),
+                                    value: Bytes::from(U256::from(200)).into(),
+                                }],
+                                change: ChangeType::Update.into(),
+                            },
+                        ],
+                        entity_changes: vec![],
+                        component_changes: vec![],
+                        balance_changes: vec![BalanceChange {
+                            token: address_from_str(USDC_ADDRESS),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_2".into(),
+                        }],
+                    },
+                    TransactionChanges {
+                        tx: Some(pb_transactions(3, 2)),
+                        contract_changes: vec![ContractChange {
+                            address: address_from_str("0000000000000000000000000000000000000001"),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            code: 123_i32.to_le_bytes().to_vec(),
+                            slots: vec![ContractSlot {
+                                slot: Bytes::from("0x01").into(),
+                                value: Bytes::from("0x01").into(),
+                            }],
+                            change: ChangeType::Update.into(),
+                        }],
+                        entity_changes: vec![],
+                        component_changes: vec![],
+                        balance_changes: vec![
+                            BalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 100_i32.to_be_bytes().to_vec(),
+                                component_id: "pc_1".into(),
+                            },
+                            BalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 2_i32.to_be_bytes().to_vec(),
+                                component_id: "pc_2".into(),
+                            },
+                        ],
+                    },
+                ],
+            },
+            4 => BlockChanges {
+                block: Some(pb_blocks(version as u64)),
+                changes: vec![TransactionChanges {
+                    tx: Some(pb_transactions(4, 1)),
+                    contract_changes: vec![ContractChange {
+                        address: address_from_str("0000000000000000000000000000000000000001"),
+                        balance: 1_i32.to_be_bytes().to_vec(),
+                        code: 123_i32.to_le_bytes().to_vec(),
+                        slots: vec![ContractSlot {
+                            slot: Bytes::from(U256::from(3)).into(),
+                            value: Bytes::from(U256::from(10)).into(),
+                        }],
+                        change: ChangeType::Update.into(),
+                    }],
+                    entity_changes: vec![],
+                    component_changes: vec![ProtocolComponent {
+                        id: "pc_3".to_owned(),
+                        tokens: vec![address_from_str(DAI_ADDRESS), address_from_str(USDC_ADDRESS)],
+                        contracts: vec![address_from_str(
+                            "0000000000000000000000000000000000000001",
+                        )],
+                        static_att: vec![],
+                        change: ChangeType::Creation.into(),
+                        protocol_type: Some(ProtocolType {
+                            name: "pt_1".to_string(),
+                            financial_type: 0,
+                            attribute_schema: vec![],
+                            implementation_type: 0,
+                        }),
+                    }],
+                    balance_changes: vec![],
+                }],
+            },
+            5 => BlockChanges {
+                block: Some(pb_blocks(version as u64)),
+                changes: vec![TransactionChanges {
+                    tx: Some(pb_transactions(5, 1)),
+                    contract_changes: vec![
+                        ContractChange {
+                            address: address_from_str("0000000000000000000000000000000000000001"),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            code: 123_i32.to_le_bytes().to_vec(),
+                            slots: vec![ContractSlot {
+                                slot: Bytes::from(U256::from(1)).into(),
+                                value: Bytes::from(U256::from(10)).into(),
+                            }],
+                            change: ChangeType::Update.into(),
+                        },
+                        ContractChange {
+                            address: address_from_str("0000000000000000000000000000000000000002"),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            code: 123_i32.to_le_bytes().to_vec(),
+                            slots: vec![ContractSlot {
+                                slot: Bytes::from(U256::from(1)).into(),
+                                value: Bytes::from(U256::from(10)).into(),
+                            }],
+                            change: ChangeType::Update.into(),
+                        },
+                    ],
+                    entity_changes: vec![],
+                    component_changes: vec![],
+                    balance_changes: vec![
+                        BalanceChange {
+                            token: address_from_str(USDC_ADDRESS),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_1".into(),
+                        },
+                        BalanceChange {
+                            token: address_from_str(USDC_ADDRESS),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_3".into(),
+                        },
+                        BalanceChange {
+                            token: address_from_str(WETH_ADDRESS),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_1".into(),
+                        },
+                    ],
+                }],
+            },
+            _ => panic!("Requested BlockChanges version doesn't exist"),
         }
     }
 
@@ -2381,6 +3372,388 @@ pub mod fixtures {
         }
     }
 
+    pub fn pb_native_block_changes(version: u8) -> crate::pb::tycho::evm::v1::BlockChanges {
+        use crate::pb::tycho::evm::v1::*;
+
+        match version {
+            0 => BlockChanges {
+                block: Some(Block {
+                    hash: vec![0x0, 0x0, 0x0, 0x0],
+                    parent_hash: vec![0x21, 0x22, 0x23, 0x24],
+                    number: 1,
+                    ts: yesterday_midnight().timestamp() as u64,
+                }),
+                changes: vec![
+                    TransactionChanges {
+                        tx: Some(Transaction {
+                            hash: vec![0x0, 0x0, 0x0, 0x0],
+                            from: vec![0x0, 0x0, 0x0, 0x0],
+                            to: vec![0x0, 0x0, 0x0, 0x0],
+                            index: 10,
+                        }),
+                        contract_changes: vec![],
+                        entity_changes: vec![
+                            EntityChanges {
+                                component_id: "State1".to_owned(),
+                                attributes: vec![
+                                    Attribute {
+                                        name: "reserve".to_owned(),
+                                        value: 1000_u64.to_be_bytes().to_vec(),
+                                        change: ChangeType::Update.into(),
+                                    },
+                                    Attribute {
+                                        name: "static_attribute".to_owned(),
+                                        value: 1_u64.to_be_bytes().to_vec(),
+                                        change: ChangeType::Update.into(),
+                                    },
+                                ],
+                            },
+                            EntityChanges {
+                                component_id: "State2".to_owned(),
+                                attributes: vec![
+                                    Attribute {
+                                        name: "reserve".to_owned(),
+                                        value: 1000_u64.to_be_bytes().to_vec(),
+                                        change: ChangeType::Update.into(),
+                                    },
+                                    Attribute {
+                                        name: "static_attribute".to_owned(),
+                                        value: 1_u64.to_be_bytes().to_vec(),
+                                        change: ChangeType::Update.into(),
+                                    },
+                                ],
+                            },
+                        ],
+                        component_changes: vec![],
+                        balance_changes: vec![],
+                    },
+                    TransactionChanges {
+                        tx: Some(Transaction {
+                            hash: vec![0x11, 0x12, 0x13, 0x14],
+                            from: vec![0x41, 0x42, 0x43, 0x44],
+                            to: vec![0x51, 0x52, 0x53, 0x54],
+                            index: 11,
+                        }),
+                        contract_changes: vec![],
+                        entity_changes: vec![EntityChanges {
+                            component_id: "State1".to_owned(),
+                            attributes: vec![
+                                Attribute {
+                                    name: "reserve".to_owned(),
+                                    value: 600_u64.to_be_bytes().to_vec(),
+                                    change: ChangeType::Update.into(),
+                                },
+                                Attribute {
+                                    name: "new".to_owned(),
+                                    value: 0_u64.to_be_bytes().to_vec(),
+                                    change: ChangeType::Update.into(),
+                                },
+                            ],
+                        }],
+                        component_changes: vec![ProtocolComponent {
+                            id: "Pool".to_owned(),
+                            tokens: vec![
+                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                    .unwrap()
+                                    .0
+                                    .to_vec(),
+                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                    .unwrap()
+                                    .0
+                                    .to_vec(),
+                            ],
+                            contracts: vec![H160::from_str(
+                                "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                            )
+                            .unwrap()
+                            .0
+                            .to_vec()],
+                            static_att: vec![Attribute {
+                                name: "key".to_owned(),
+                                value: 600_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Creation.into(),
+                            }],
+                            change: ChangeType::Creation.into(),
+                            protocol_type: Some(ProtocolType {
+                                name: "WeightedPool".to_string(),
+                                financial_type: 0,
+                                attribute_schema: vec![],
+                                implementation_type: 0,
+                            }),
+                        }],
+                        balance_changes: vec![BalanceChange {
+                            token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                .unwrap()
+                                .0
+                                .to_vec(),
+                            balance: 1_i32.to_le_bytes().to_vec(),
+                            component_id: "Balance1".into(),
+                        }],
+                    },
+                ],
+            },
+            1 => BlockChanges {
+                block: Some(pb_blocks(version as u64)),
+                changes: vec![TransactionChanges {
+                    tx: Some(pb_transactions(1, 1)),
+                    contract_changes: vec![],
+                    entity_changes: vec![EntityChanges {
+                        component_id: "pc_1".to_owned(),
+                        attributes: vec![
+                            Attribute {
+                                name: "attr_1".to_owned(),
+                                value: 1_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Update.into(),
+                            },
+                            Attribute {
+                                name: "attr_2".to_owned(),
+                                value: 2_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Update.into(),
+                            },
+                        ],
+                    }],
+                    component_changes: vec![ProtocolComponent {
+                        id: "pc_1".to_owned(),
+                        tokens: vec![
+                            address_from_str(WETH_ADDRESS),
+                            address_from_str(USDC_ADDRESS),
+                        ],
+                        contracts: vec![],
+                        static_att: vec![Attribute {
+                            name: "st_attr_1".to_owned(),
+                            value: 1_u64.to_be_bytes().to_vec(),
+                            change: ChangeType::Creation.into(),
+                        }],
+                        change: ChangeType::Creation.into(),
+                        protocol_type: Some(ProtocolType {
+                            name: "pt_1".to_string(),
+                            financial_type: 0,
+                            attribute_schema: vec![],
+                            implementation_type: 0,
+                        }),
+                    }],
+                    balance_changes: vec![BalanceChange {
+                        token: address_from_str(USDC_ADDRESS),
+                        balance: 1_i32.to_be_bytes().to_vec(),
+                        component_id: "pc_1".into(),
+                    }],
+                }],
+            },
+            2 => BlockChanges {
+                block: Some(pb_blocks(version as u64)),
+                changes: vec![TransactionChanges {
+                    tx: Some(pb_transactions(2, 1)),
+                    contract_changes: vec![],
+                    entity_changes: vec![EntityChanges {
+                        component_id: "pc_1".to_owned(),
+                        attributes: vec![Attribute {
+                            name: "attr_1".to_owned(),
+                            value: 10_u64.to_be_bytes().to_vec(),
+                            change: ChangeType::Update.into(),
+                        }],
+                    }],
+                    component_changes: vec![ProtocolComponent {
+                        id: "pc_2".to_owned(),
+                        tokens: vec![
+                            address_from_str(USDT_ADDRESS),
+                            address_from_str(USDC_ADDRESS),
+                        ],
+                        contracts: vec![],
+                        static_att: vec![],
+                        change: ChangeType::Creation.into(),
+                        protocol_type: Some(ProtocolType {
+                            name: "pt_1".to_string(),
+                            financial_type: 0,
+                            attribute_schema: vec![],
+                            implementation_type: 0,
+                        }),
+                    }],
+                    balance_changes: vec![
+                        BalanceChange {
+                            token: address_from_str(USDC_ADDRESS),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_2".into(),
+                        },
+                        BalanceChange {
+                            token: address_from_str(USDT_ADDRESS),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_2".into(),
+                        },
+                        BalanceChange {
+                            token: address_from_str(WETH_ADDRESS),
+                            balance: 1_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_1".into(),
+                        },
+                    ],
+                }],
+            },
+            3 => BlockChanges {
+                block: Some(pb_blocks(version as u64)),
+                changes: vec![
+                    TransactionChanges {
+                        tx: Some(pb_transactions(3, 2)),
+                        contract_changes: vec![],
+                        entity_changes: vec![EntityChanges {
+                            component_id: "pc_1".to_owned(),
+                            attributes: vec![Attribute {
+                                name: "attr_1".to_owned(),
+                                value: 1000_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Update.into(),
+                            }],
+                        }],
+                        component_changes: vec![],
+                        balance_changes: vec![BalanceChange {
+                            token: address_from_str(USDC_ADDRESS),
+                            balance: 3_i32.to_be_bytes().to_vec(),
+                            component_id: "pc_2".into(),
+                        }],
+                    },
+                    TransactionChanges {
+                        tx: Some(pb_transactions(3, 1)),
+                        contract_changes: vec![],
+                        entity_changes: vec![EntityChanges {
+                            component_id: "pc_1".to_owned(),
+                            attributes: vec![Attribute {
+                                name: "attr_1".to_owned(),
+                                value: 99999_u64.to_be_bytes().to_vec(),
+                                change: ChangeType::Update.into(),
+                            }],
+                        }],
+                        component_changes: vec![],
+                        balance_changes: vec![
+                            BalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 99999_i32.to_be_bytes().to_vec(),
+                                component_id: "pc_2".into(),
+                            },
+                            BalanceChange {
+                                token: address_from_str(WETH_ADDRESS),
+                                balance: 1000_i32.to_be_bytes().to_vec(),
+                                component_id: "pc_1".into(),
+                            },
+                        ],
+                    },
+                ],
+            },
+            4 => BlockChanges {
+                block: Some(pb_blocks(version as u64)),
+                changes: vec![
+                    TransactionChanges {
+                        tx: Some(pb_transactions(4, 1)),
+                        contract_changes: vec![],
+                        entity_changes: vec![
+                            EntityChanges {
+                                component_id: "pc_1".to_owned(),
+                                attributes: vec![Attribute {
+                                    name: "attr_1".to_owned(),
+                                    value: 10000_u64.to_be_bytes().to_vec(),
+                                    change: ChangeType::Update.into(),
+                                }],
+                            },
+                            EntityChanges {
+                                component_id: "pc_3".to_owned(),
+                                attributes: vec![Attribute {
+                                    name: "attr_1".to_owned(),
+                                    value: 3_u64.to_be_bytes().to_vec(),
+                                    change: ChangeType::Update.into(),
+                                }],
+                            },
+                        ],
+                        component_changes: vec![ProtocolComponent {
+                            id: "pc_3".to_owned(),
+                            tokens: vec![
+                                address_from_str(DAI_ADDRESS),
+                                address_from_str(WETH_ADDRESS),
+                            ],
+                            contracts: vec![],
+                            static_att: vec![],
+                            change: ChangeType::Creation.into(),
+                            protocol_type: Some(ProtocolType {
+                                name: "pt_2".to_string(),
+                                financial_type: 0,
+                                attribute_schema: vec![],
+                                implementation_type: 0,
+                            }),
+                        }],
+                        balance_changes: vec![],
+                    },
+                    TransactionChanges {
+                        tx: Some(pb_transactions(4, 2)),
+                        contract_changes: vec![],
+                        entity_changes: vec![
+                            EntityChanges {
+                                component_id: "pc_3".to_owned(),
+                                attributes: vec![Attribute {
+                                    name: "attr_1".to_owned(),
+                                    value: 30_u64.to_be_bytes().to_vec(),
+                                    change: ChangeType::Update.into(),
+                                }],
+                            },
+                            EntityChanges {
+                                component_id: "pc_1".to_owned(),
+                                attributes: vec![Attribute {
+                                    name: "attr_1".to_owned(),
+                                    value: 100000_u64.to_be_bytes().to_vec(),
+                                    change: ChangeType::Update.into(),
+                                }],
+                            },
+                        ],
+                        component_changes: vec![],
+                        balance_changes: vec![
+                            BalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 3000_i32.to_be_bytes().to_vec(),
+                                component_id: "pc_3".into(),
+                            },
+                            BalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 1000_i32.to_be_bytes().to_vec(),
+                                component_id: "pc_1".into(),
+                            },
+                        ],
+                    },
+                ],
+            },
+            5 => BlockChanges {
+                block: Some(pb_blocks(version as u64)),
+                changes: vec![TransactionChanges {
+                    tx: Some(pb_transactions(5, 1)),
+                    contract_changes: vec![],
+                    entity_changes: vec![EntityChanges {
+                        component_id: "pc_1".to_owned(),
+                        attributes: vec![Attribute {
+                            name: "attr_2".to_owned(),
+                            value: 1000000_u64.to_be_bytes().to_vec(),
+                            change: ChangeType::Update.into(),
+                        }],
+                    }],
+                    component_changes: vec![ProtocolComponent {
+                        id: "pc_2".to_owned(),
+                        tokens: vec![
+                            address_from_str(USDT_ADDRESS),
+                            address_from_str(USDC_ADDRESS),
+                        ],
+                        contracts: vec![],
+                        static_att: vec![],
+                        change: ChangeType::Deletion.into(),
+                        protocol_type: Some(ProtocolType {
+                            name: "pt_1".to_string(),
+                            financial_type: 0,
+                            attribute_schema: vec![],
+                            implementation_type: 0,
+                        }),
+                    }],
+                    balance_changes: vec![BalanceChange {
+                        token: address_from_str(WETH_ADDRESS),
+                        balance: 1000_i32.to_be_bytes().to_vec(),
+                        component_id: "pc_1".into(),
+                    }],
+                }],
+            },
+            _ => panic!("Requested unknown version of block entity changes"),
+        }
+    }
+
     pub fn pb_protocol_component() -> crate::pb::tycho::evm::v1::ProtocolComponent {
         use crate::pb::tycho::evm::v1::*;
         ProtocolComponent {
@@ -2433,8 +3806,8 @@ mod test {
     use std::str::FromStr;
 
     use prost::Message;
-
     use rstest::rstest;
+
     use tycho_storage::postgres::db_fixtures::yesterday_midnight;
 
     use crate::extractor::evm::fixtures::transaction01;
@@ -2957,7 +4330,7 @@ mod test {
             (&account1, &slot_missing),
         ];
 
-        let filtered = block.get_filtered_state_update(keys);
+        let filtered = block.get_filtered_account_state_update(keys);
 
         assert_eq!(
             filtered,
@@ -3243,7 +4616,7 @@ mod test {
             (&state1_key, &missing),
         ];
 
-        let filtered = block.get_filtered_state_update(keys);
+        let filtered = block.get_filtered_protocol_state_update(keys);
         assert_eq!(
             filtered,
             HashMap::from([(

@@ -41,7 +41,7 @@ use tokio::{
 };
 use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, instrument, trace, warn};
-use tycho_core::dto::{Command, Deltas, ExtractorIdentity, Response, WebSocketMessage};
+use tycho_core::dto::{BlockChanges, Command, ExtractorIdentity, Response, WebSocketMessage};
 use uuid::Uuid;
 
 use crate::TYCHO_SERVER_VERSION;
@@ -119,7 +119,7 @@ pub trait DeltasClient {
         &self,
         extractor_id: ExtractorIdentity,
         options: SubscriptionOptions,
-    ) -> Result<(Uuid, Receiver<Deltas>), DeltasError>;
+    ) -> Result<(Uuid, Receiver<BlockChanges>), DeltasError>;
 
     /// Unsubscribe from an subscription
     async fn unsubscribe(&self, subscription_id: Uuid) -> Result<(), DeltasError>;
@@ -166,7 +166,7 @@ type WebSocketSink =
 #[derive(Debug)]
 enum SubscriptionInfo {
     /// Subscription was requested we wait for server confirmation and uuid assignment.
-    RequestedSubscription(oneshot::Sender<(Uuid, Receiver<Deltas>)>),
+    RequestedSubscription(oneshot::Sender<(Uuid, Receiver<BlockChanges>)>),
     /// Subscription is active.
     Active,
     /// Unsubscription was requested, we wait for server confirmation.
@@ -185,7 +185,7 @@ struct Inner {
     subscriptions: HashMap<Uuid, SubscriptionInfo>,
     /// For eachs subscription we keep a sender handle, the receiver is returned to the caller of
     /// subscribe.
-    sender: HashMap<Uuid, Sender<Deltas>>,
+    sender: HashMap<Uuid, Sender<BlockChanges>>,
     /// How many messages to buffer per subscription before starting to drop new messages.
     buffer_size: usize,
 }
@@ -209,7 +209,7 @@ impl Inner {
     fn new_subscription(
         &mut self,
         id: &ExtractorIdentity,
-        ready_tx: oneshot::Sender<(Uuid, Receiver<Deltas>)>,
+        ready_tx: oneshot::Sender<(Uuid, Receiver<BlockChanges>)>,
     ) -> Result<(), DeltasError> {
         if self.pending.contains_key(id) {
             return Err(DeltasError::SubscriptionAlreadyPending);
@@ -256,7 +256,7 @@ impl Inner {
     }
 
     /// Sends a message to a subscription's receiver.
-    fn send(&mut self, id: &Uuid, msg: Deltas) -> Result<(), DeltasError> {
+    fn send(&mut self, id: &Uuid, msg: BlockChanges) -> Result<(), DeltasError> {
         if let Some(sender) = self.sender.get_mut(id) {
             sender
                 .try_send(msg)
@@ -508,7 +508,7 @@ impl DeltasClient for WsDeltasClient {
         &self,
         extractor_id: ExtractorIdentity,
         options: SubscriptionOptions,
-    ) -> Result<(Uuid, Receiver<Deltas>), DeltasError> {
+    ) -> Result<(Uuid, Receiver<BlockChanges>), DeltasError> {
         trace!("Starting subscribe");
         self.ensure_connection().await;
         let (ready_tx, ready_rx) = oneshot::channel();
@@ -755,7 +755,6 @@ mod tests {
                     "subscription_id":"30b740d1-cf09-4e0e-8cfe-b1434d447ece"
                 }"#.to_owned().replace(|c: char| c.is_whitespace(), "")
             )),
-            // VM block message
             ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
                 {
                     "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
@@ -769,6 +768,7 @@ mod tests {
                             "chain": "ethereum",             
                             "ts": "2023-09-14T00:00:00"
                         },
+                        "finalized_block_height": 0,
                         "revert": false,
                         "new_tokens": {},
                         "account_updates": {
@@ -779,6 +779,13 @@ mod tests {
                                 "balance": "0x01f4",
                                 "code": "",
                                 "change": "Update"
+                            }
+                        },
+                        "state_updates": {
+                            "component_1": {
+                                "component_id": "component_1",
+                                "updated_attributes": {"attr1": "0x01"},
+                                "deleted_attributes": ["attr2"]
                             }
                         },
                         "new_protocol_components": 
@@ -814,62 +821,6 @@ mod tests {
                     }
                 }
                 "#.to_owned()
-            )),
-            // Native protocol block message
-            ExpectedComm::Send(tungstenite::protocol::Message::Text(r#"
-                {
-                    "subscription_id": "30b740d1-cf09-4e0e-8cfe-b1434d447ece",
-                    "deltas": {
-                        "extractor": "vm:ambient",
-                        "chain": "ethereum",
-                        "block": {
-                            "number": 123,
-                            "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-                            "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-                            "chain": "ethereum",             
-                            "ts": "2023-09-14T00:00:00"
-                        },
-                        "revert": false,
-                        "new_tokens": {},
-                        "state_updates": {
-                            "component_1": {
-                                "component_id": "component_1",
-                                "updated_attributes": {"attr1": "0x01"},
-                                "deleted_attributes": ["attr2"]
-                            }
-                        },
-                        "new_protocol_components": {
-                            "protocol_1": {
-                                "id": "protocol_1",
-                                "protocol_system": "system_1",
-                                "protocol_type_name": "type_1",
-                                "chain": "ethereum",
-                                "tokens": ["0x01", "0x02"],
-                                "contract_ids": ["0x01", "0x02"],
-                                "static_attributes": {"attr1": "0x01f4"},
-                                "change": "Update",
-                                "creation_tx": "0x01",
-                                "created_at": "2023-09-14T00:00:00"
-                            }
-                        },
-                        "deleted_protocol_components": {},
-                        "component_balances": {
-                            "protocol_1": {
-                                "0x01": {
-                                    "token": "0x01",
-                                    "balance": "0x01f4",
-                                    "balance_float": 1000.0,
-                                    "modify_tx": "0x01",
-                                    "component_id": "protocol_1"
-                                }
-                            }
-                        },
-                        "component_tvl": {
-                            "protocol_1": 1000.0
-                        }
-                    }
-                }
-                "#.to_owned()
             ))
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
@@ -889,10 +840,6 @@ mod tests {
         .await
         .expect("subscription timed out")
         .expect("subscription failed");
-        let _ = timeout(Duration::from_millis(100), rx.recv())
-            .await
-            .expect("awaiting message timeout out")
-            .expect("receiving message failed");
         let _ = timeout(Duration::from_millis(100), rx.recv())
             .await
             .expect("awaiting message timeout out")
@@ -1114,6 +1061,7 @@ mod tests {
                             "chain": "ethereum",             
                             "ts": "2023-09-14T00:00:00"
                         },
+                        "finalized_block_height": 0,
                         "revert": false,
                         "new_tokens": {},
                         "account_updates": {
@@ -1124,6 +1072,13 @@ mod tests {
                                 "balance": "0x01f4",
                                 "code": "",
                                 "change": "Update"
+                            }
+                        },
+                        "state_updates": {
+                            "component_1": {
+                                "component_id": "component_1",
+                                "updated_attributes": {"attr1": "0x01"},
+                                "deleted_attributes": ["attr2"]
                             }
                         },
                         "new_protocol_components": {
