@@ -171,7 +171,6 @@ impl HttpRPCClient {
         let uri = base_uri
             .parse::<Uri>()
             .map_err(|e| RPCError::UriParsing(base_uri.to_string(), e.to_string()))?;
-
         Ok(Self { http_client: Client::new(), uri })
     }
 }
@@ -615,7 +614,7 @@ mod tests {
         let response = client
             .get_tokens(&Chain::Ethereum, &Default::default())
             .await
-            .expect("get state");
+            .expect("get tokens");
 
         let expected = vec![
             ResponseToken {
