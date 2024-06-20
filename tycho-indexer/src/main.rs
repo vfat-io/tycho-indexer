@@ -76,12 +76,12 @@ async fn main() -> Result<(), anyhow::Error> {
     if console_flag == "true" {
         console_subscriber::init();
     } else {
-        // OLTP endpoint is set, construct OLTP pipeline
-        if let Ok(otlp_exporter_endpoint) = std::env::var("OLTP_EXPORTER_ENDPOINT") {
+        // OTLP endpoint is set, construct OTLP pipeline
+        if let Ok(otlp_exporter_endpoint) = std::env::var("OTLP_EXPORTER_ENDPOINT") {
             let config = ot::TracingConfig { otlp_exporter_endpoint };
             ot::init_tracing(config)?;
         } else {
-            warn!("OLTP_EXPORTER_ENDPOINT not set defaulting to stdout subscriber!");
+            warn!("OTLP_EXPORTER_ENDPOINT not set defaulting to stdout subscriber!");
             let format = tracing_subscriber::fmt::format()
                 .with_level(true)
                 .with_target(false)
