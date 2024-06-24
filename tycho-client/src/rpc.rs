@@ -227,6 +227,10 @@ impl RPCClient for HttpRPCClient {
         let body = hyper::body::to_bytes(response.into_body())
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        if body.is_empty() {
+            // Pure native protocols will return empty contract states
+            return Ok(StateRequestResponse { accounts: vec![] });
+        }
         let accounts: StateRequestResponse =
             serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         trace!(?accounts, "Received contract_state response from Tycho server");
@@ -328,6 +332,10 @@ impl RPCClient for HttpRPCClient {
         let body = hyper::body::to_bytes(response.into_body())
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        if body.is_empty() {
+            // Pure VM protocols will return empty states
+            return Ok(ProtocolStateRequestResponse { states: vec![] });
+        }
         let states: ProtocolStateRequestResponse =
             serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         trace!(?states, "Received protocol_states response from Tycho server");
