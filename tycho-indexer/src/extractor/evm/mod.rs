@@ -39,13 +39,14 @@ pub mod chain_state;
 pub mod contract;
 mod convert;
 pub mod hybrid;
-pub mod native;
+// #[deprecated(since = "0.7.0", note = "Please use the hybrid extractor instead")]
+// pub mod native;
 pub mod protocol_cache;
 pub mod token_analysis_cron;
 pub mod token_pre_processor;
 mod utils;
-pub mod vm;
-
+// #[deprecated(since = "0.7.0", note = "Please use the hybrid extractor instead")]
+// pub mod vm;
 #[derive(Debug, PartialEq, Clone)]
 pub struct ERC20Token {
     pub address: H160,

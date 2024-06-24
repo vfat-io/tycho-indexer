@@ -36,7 +36,7 @@ mock! {
     pub Gateway {}
     #[async_trait]
     impl ExtractionStateGateway for Gateway {
-        async fn get_state(&self, name: &str, chain: &Chain) -> Result<ExtractionState, StorageError>;
+        async fn get_state(&self, name: &str, chain: &Chain) -> Result<(ExtractionState, Block), StorageError>;
         async fn save_state(&self, state: &ExtractionState) -> Result<(), StorageError>;
     }
 

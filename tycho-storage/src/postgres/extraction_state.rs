@@ -1,7 +1,7 @@
 use super::{orm, schema, storage_error_from_diesel, PostgresGateway, StorageError};
-use diesel::ExpressionMethods;
+use diesel::{ExpressionMethods, QueryDsl};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use tycho_core::models::{Chain, ExtractionState};
+use tycho_core::models::{self, Chain, ExtractionState};
 
 impl PostgresGateway {
     pub async fn get_state(
@@ -9,18 +9,28 @@ impl PostgresGateway {
         name: &str,
         chain: &Chain,
         conn: &mut AsyncPgConnection,
-    ) -> Result<ExtractionState, StorageError> {
+    ) -> Result<(ExtractionState, models::blockchain::Block), StorageError> {
         let block_chain_id = self.get_chain_id(chain);
 
         match orm::ExtractionState::by_name(name, block_chain_id, conn).await {
-            Ok(Some(orm_state)) => {
+            Ok(Some((orm_state, block))) => {
                 let state = ExtractionState::new(
                     orm_state.name,
                     *chain,
                     orm_state.attributes,
                     &orm_state.cursor.unwrap_or_default(),
+                    block.hash.clone(),
                 );
-                Ok(state)
+                Ok((
+                    state,
+                    models::blockchain::Block {
+                        hash: block.hash,
+                        parent_hash: block.parent_hash,
+                        number: block.number as u64,
+                        chain: *chain,
+                        ts: block.ts,
+                    },
+                ))
             }
             Ok(None) => Err(StorageError::NotFound("ExtractionState".to_owned(), name.to_owned())),
             Err(err) => Err(storage_error_from_diesel(err, "ExtractionState", name, None).into()),
@@ -33,12 +43,19 @@ impl PostgresGateway {
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let block_chain_id = self.get_chain_id(&state.chain);
+        let block_id = schema::block::table
+            .filter(schema::block::hash.eq(&state.block_hash))
+            .select(schema::block::id)
+            .get_result::<i64>(conn)
+            .await
+            .map_err(|err| storage_error_from_diesel(err, "ExtractionState", &state.name, None))?;
         match orm::ExtractionState::by_name(&state.name, block_chain_id, conn).await {
             Ok(Some(_)) => {
                 let update_form = orm::ExtractionStateForm {
                     attributes: Some(&state.attributes),
                     cursor: Some(&state.cursor),
                     modified_ts: Some(chrono::Utc::now().naive_utc()),
+                    block_id: Some(block_id),
                 };
                 let update_query = diesel::update(schema::extraction_state::dsl::extraction_state)
                     .filter(schema::extraction_state::name.eq(&state.name))
@@ -60,6 +77,7 @@ impl PostgresGateway {
                     attributes: Some(&state.attributes),
                     cursor: Some(&state.cursor),
                     modified_ts: chrono::Utc::now().naive_utc(),
+                    block_id,
                 };
                 let query = diesel::insert_into(schema::extraction_state::dsl::extraction_state)
                     .values(&orm_state);
@@ -82,8 +100,11 @@ impl PostgresGateway {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
     use diesel::prelude::*;
     use diesel_async::{AsyncConnection, RunQueryDsl};
+    use tycho_core::Bytes;
 
     use super::*;
 
@@ -104,6 +125,8 @@ mod test {
             .get_result(&mut conn)
             .await
             .unwrap();
+
+        let block_ids = crate::postgres::db_fixtures::insert_blocks(&mut conn, chain_id).await;
         let extractor_name = "setup_extractor";
 
         let cursor = Some("10".as_bytes());
@@ -115,6 +138,7 @@ mod test {
             cursor,
             version: "0.1.0",
             modified_ts: chrono::Utc::now().naive_utc(),
+            block_id: *block_ids.last().unwrap(),
         };
 
         diesel::insert_into(schema::extraction_state::table)
@@ -143,6 +167,8 @@ mod test {
             Chain::Ethereum,
             Some(serde_json::json!({"test": "test"})),
             "10".to_owned().as_bytes(),
+            Bytes::from_str("88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
+                .unwrap(),
         );
 
         // Save the state using the gateway
@@ -171,7 +197,7 @@ mod test {
         let gateway = get_dgw(&mut conn).await;
         let extractor_name = "setup_extractor";
 
-        let state = gateway
+        let (state, _) = gateway
             .get_state(extractor_name, &Chain::Ethereum, &mut conn)
             .await
             .unwrap();
@@ -206,6 +232,8 @@ mod test {
             Chain::Ethereum,
             Some(serde_json::json!({"test": "test"})),
             "20".as_bytes(),
+            Bytes::from_str("88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
+                .unwrap(),
         );
 
         gateway
@@ -217,6 +245,7 @@ mod test {
                 .get_state(&extractor_name, &Chain::Ethereum, &mut conn)
                 .await
                 .unwrap()
+                .0
                 .cursor,
             "20".to_owned().into_bytes()
         );

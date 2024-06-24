@@ -14,12 +14,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use token_analyzer::TokenFinder;
 use tycho_core::{
-    models,
     models::{
+        self,
         contract::Contract,
         protocol::{ComponentBalance, ProtocolComponentState},
         token::CurrencyToken,
-        Address, Chain, ChangeType, ExtractionState, ExtractorIdentity, ProtocolType, TxHash,
+        Address, BlockHash, Chain, ChangeType, ExtractionState, ExtractorIdentity, ProtocolType,
+        TxHash,
     },
     storage::{
         ChainGateway, ContractStateGateway, ExtractionStateGateway, ProtocolGateway, StorageError,
@@ -1078,9 +1079,18 @@ impl HybridPgGateway {
     }
 
     #[instrument(skip_all)]
-    async fn save_cursor(&self, new_cursor: &str) -> Result<(), StorageError> {
-        let state =
-            ExtractionState::new(self.name.to_string(), self.chain, None, new_cursor.as_bytes());
+    async fn save_cursor(
+        &self,
+        new_cursor: &str,
+        block_hash: BlockHash,
+    ) -> Result<(), StorageError> {
+        let state = ExtractionState::new(
+            self.name.to_string(),
+            self.chain,
+            None,
+            new_cursor.as_bytes(),
+            block_hash,
+        );
         self.state_gateway
             .save_state(&state)
             .await?;
@@ -1206,7 +1216,8 @@ impl HybridPgGateway {
                 .await?;
         }
 
-        self.save_cursor(new_cursor).await?;
+        self.save_cursor(new_cursor, changes.block.hash.into())
+            .await?;
 
         let batch_size: usize = if syncing { self.sync_batch_size } else { 0 };
         self.state_gateway
@@ -1215,7 +1226,7 @@ impl HybridPgGateway {
     }
 
     async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
-        let state = self
+        let (state, _) = self
             .state_gateway
             .get_state(&self.name, &self.chain)
             .await?;
@@ -1786,12 +1797,11 @@ mod test_serial_db {
         models::{ContractId, FinancialType, ImplementationType},
         storage::{BlockIdentifier, BlockOrTimestamp},
     };
-    use tycho_storage::{
-        postgres,
-        postgres::{
-            builder::GatewayBuilder, db_fixtures, db_fixtures::yesterday_midnight,
-            testing::run_against_db,
-        },
+    use tycho_storage::postgres::{
+        self,
+        builder::GatewayBuilder,
+        db_fixtures::{self, yesterday_midnight, yesterday_one_am},
+        testing::run_against_db,
     };
 
     const WETH_ADDRESS: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
@@ -1915,10 +1925,25 @@ mod test_serial_db {
                 Chain::Ethereum,
                 None,
                 "cursor@420".as_bytes(),
+                Bytes::from_str("88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
+                    .unwrap(),
             );
             evm_gw
                 .start_transaction(&models::blockchain::Block::default(), None)
                 .await;
+            evm_gw
+                .upsert_block(&[models::blockchain::Block {
+                    number: 1,
+                    chain: Chain::Ethereum,
+                    hash: Bytes::from_str(
+                        "88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                    )
+                    .unwrap(),
+                    parent_hash: Bytes::default(),
+                    ts: yesterday_one_am(),
+                }])
+                .await
+                .expect("block insertion succeeded");
             evm_gw
                 .save_state(&state)
                 .await

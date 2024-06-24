@@ -161,7 +161,11 @@ pub trait ExtractionStateGateway {
     /// # Returns
     /// Ok if the corrsponding state was retrieved successfully, Err in
     /// case the state was not found.
-    async fn get_state(&self, name: &str, chain: &Chain) -> Result<ExtractionState, StorageError>;
+    async fn get_state(
+        &self,
+        name: &str,
+        chain: &Chain,
+    ) -> Result<(ExtractionState, Block), StorageError>;
 
     /// Saves the state of an extractor instance to a storage.
     ///

@@ -65,6 +65,9 @@ pub struct ExtractionState {
     /// Chain identifier that the extractor instance is scoped to.
     pub chain_id: i64,
 
+    /// Block identifier associated with the extraction state.
+    pub block_id: i64,
+
     /// Last fully extracted cursor for the corresponding substream.
     /// Can be null, indicating no cursor has been extracted yet.
     pub cursor: Option<Vec<u8>>,
@@ -100,13 +103,14 @@ impl ExtractionState {
         extractor: &str,
         chain_id: i64,
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Option<ExtractionState>> {
+    ) -> QueryResult<Option<(ExtractionState, Block)>> {
         extraction_state::table
             .inner_join(chain::table)
+            .inner_join(block::table)
             .filter(extraction_state::name.eq(extractor))
             .filter(chain::id.eq(chain_id))
-            .select(ExtractionState::as_select())
-            .first::<ExtractionState>(conn)
+            .select((ExtractionState::as_select(), Block::as_select()))
+            .first::<(ExtractionState, Block)>(conn)
             .await
             .optional()
     }
@@ -119,6 +123,7 @@ pub struct NewExtractionState<'a> {
     pub name: &'a str,
     pub version: &'a str,
     pub chain_id: i64,
+    pub block_id: i64,
     pub cursor: Option<&'a [u8]>,
     pub attributes: Option<&'a serde_json::Value>,
     pub modified_ts: NaiveDateTime,
@@ -130,6 +135,7 @@ pub struct ExtractionStateForm<'a> {
     pub cursor: Option<&'a [u8]>,
     pub attributes: Option<&'a serde_json::Value>,
     pub modified_ts: Option<NaiveDateTime>,
+    pub block_id: Option<i64>,
 }
 
 #[derive(Identifiable, Queryable, Associations, Selectable)]
@@ -166,6 +172,14 @@ impl Block {
     pub async fn by_hash(block_hash: &[u8], conn: &mut AsyncPgConnection) -> QueryResult<Block> {
         block::table
             .filter(block::hash.eq(block_hash))
+            .select(Block::as_select())
+            .first::<Block>(conn)
+            .await
+    }
+
+    pub async fn by_db_id(id: i64, conn: &mut AsyncPgConnection) -> QueryResult<Block> {
+        block::table
+            .filter(block::id.eq(id))
             .select(Block::as_select())
             .first::<Block>(conn)
             .await
