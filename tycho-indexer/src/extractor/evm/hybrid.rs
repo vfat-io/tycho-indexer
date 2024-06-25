@@ -51,6 +51,7 @@ pub struct Inner {
     /// Used to give more informative logs
     last_report_ts: NaiveDateTime,
     last_report_block_number: u64,
+    first_message_processed: bool,
 }
 
 pub struct HybridContractExtractor<G, T> {
@@ -105,6 +106,7 @@ where
                         last_processed_block: None,
                         last_report_ts: chrono::Utc::now().naive_utc(),
                         last_report_block_number: 0,
+                        first_message_processed: false,
                     })),
                     protocol_types,
                     post_processor,
@@ -130,6 +132,7 @@ where
                         last_processed_block: None,
                         last_report_ts: chrono::Local::now().naive_utc(),
                         last_report_block_number: 0,
+                        first_message_processed: false,
                     })),
                     protocol_system,
                     protocol_cache,
@@ -150,6 +153,15 @@ where
     async fn update_cursor(&self, cursor: String) {
         let mut state = self.inner.lock().await;
         state.cursor = cursor.into();
+        state.first_message_processed = true;
+    }
+
+    async fn is_first_message(&self) -> bool {
+        !self
+            .inner
+            .lock()
+            .await
+            .first_message_processed
     }
 
     async fn update_last_processed_block(&self, block: Block) {
@@ -655,6 +667,16 @@ where
 
         tracing::Span::current().record("target_hash", format!("{:x}", block_hash));
         tracing::Span::current().record("target_number", block_ref.number);
+
+        // It can happen that the first received message is an undo signal. In that case we expect
+        // to not have the target block in our buffer, therefore we early return and ignore this
+        // revert.
+        if self.is_first_message().await {
+            info!("First message received was a revert. Nothing to revert in the buffer, ignoring it...");
+            self.update_cursor(inp.last_valid_cursor)
+                .await;
+            return Ok(None)
+        }
 
         let mut revert_buffer = self.revert_buffer.lock().await;
 
@@ -2506,7 +2528,6 @@ mod test_serial_db {
                         .handle_tick_scoped_data(inp)
                         .await
                         .unwrap();
-                    dbg!("+++");
                 })
                 .await;
 
