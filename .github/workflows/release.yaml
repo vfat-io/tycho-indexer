@@ -1,26 +1,14 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - '[0-9]+.*'
+  release:
+    types: [created]
 
 permissions:
-  id-token: write
   contents: write
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/create-gh-release-action@v1
-        with:
-          draft: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-
   upload-assets:
-    needs: create-release
     strategy:
       matrix:
         include:
@@ -38,9 +26,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Determine Tag Name
-        id: get_tag
-        run: echo "TAG_NAME=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_ENV
       - name: Install PostgreSQL Client on macOS
         if: runner.os == 'macOS'
         run: |
@@ -49,7 +34,7 @@ jobs:
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: ${{ matrix.package }}
-          archive: ${{ matrix.package }}-${{ matrix.target }}-${{ env.TAG_NAME }}
+          archive: ${{ matrix.package }}-${{ matrix.target }}-${{ github.event.release.tag_name }}
           target: ${{ matrix.target }}
           tar: all
           zip: none
@@ -62,6 +47,6 @@ jobs:
           aws-region: eu-central-1
       - name: Upload binary to S3
         run: |
-          FILE_NAME=${{ matrix.package }}-${{ matrix.target }}-${{ env.TAG_NAME }}.tar.gz
+          FILE_NAME=${{ matrix.package }}-${{ matrix.target }}-${{ github.event.release.tag_name }}.tar.gz
           BUCKET_NAME=repo.propellerheads/tycho-client
           aws s3 cp $FILE_NAME s3://$BUCKET_NAME/$FILE_NAME
