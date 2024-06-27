@@ -467,7 +467,6 @@ impl PostgresGateway {
             .get_id(protocol_system)
     }
 
-    #[allow(dead_code)]
     fn get_protocol_system(&self, id: &i64) -> String {
         self.protocol_system_id_cache
             .get_value(id)

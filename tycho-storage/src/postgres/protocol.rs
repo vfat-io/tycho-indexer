@@ -242,6 +242,14 @@ impl PostgresGateway {
                 .await
                 .map_err(PostgresError::from)?;
 
+        let protocol_type_names_by_id: HashMap<i64, String> = schema::protocol_type::table
+            .select((schema::protocol_type::id, schema::protocol_type::name))
+            .load::<(i64, String)>(conn)
+            .await
+            .map_err(PostgresError::from)?
+            .into_iter()
+            .collect();
+
         fn map_addresses_to_protocol_component(
             protocol_component_to_address: Vec<(i64, Address)>,
         ) -> HashMap<i64, Vec<Address>> {
@@ -285,8 +293,12 @@ impl PostgresGateway {
                 Ok(models::protocol::ProtocolComponent::new(
                     &pc.external_id,
                     &ps,
-                    // TODO: this is obiviously wrong and needs fixing
-                    &pc.protocol_type_id.to_string(),
+                    protocol_type_names_by_id
+                        .get(&pc.protocol_type_id)
+                        .ok_or(PostgresError(StorageError::NotFound(
+                            "ProtocolType".into(),
+                            pc.protocol_type_id.to_string(),
+                        )))?,
                     *chain,
                     tokens_by_pc,
                     contracts_by_pc,

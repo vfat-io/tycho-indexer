@@ -202,7 +202,31 @@ impl PendingDeltas {
         Ok(change_found)
     }
 
-    pub fn get_new_components(&self, ids: Option<&[&str]>) -> Result<Vec<ProtocolComponent>> {
+    /// Retrieves a list of new protocol components that match all the provided criteria.
+    /// (The filters are combined using an AND logic.)
+    ///
+    /// # Parameters
+    /// - `ids`: `Option<&[&str]>`
+    ///     - A list of component IDs to filter the results. If `None`, all components will be
+    ///       considered.
+    /// - `protocol_system`: `Option<&str>`
+    ///     - The protocol system to filter the components by. If `None`, components from all
+    ///       protocol systems will be considered.
+    ///
+    /// # Returns
+    /// - `Result<Vec<ProtocolComponent>>`
+    ///     - A `Result` which is `Ok` containing a vector of `ProtocolComponent` objects if
+    ///       successful, or an error otherwise.
+    ///
+    /// # Example
+    /// ```
+    /// let components = get_new_components(Some(&["id1", "id2"]), Some("system1"))?;
+    /// ```
+    pub fn get_new_components(
+        &self,
+        ids: Option<&[&str]>,
+        protocol_system: Option<&str>,
+    ) -> Result<Vec<ProtocolComponent>> {
         let requested_ids: Option<HashSet<&str>> = ids.map(|ids| ids.iter().cloned().collect());
         let mut new_components = Vec::new();
         for buffer in self.native.values() {
@@ -244,6 +268,10 @@ impl PendingDeltas {
                         }),
                 );
             }
+        }
+
+        if let Some(system) = protocol_system {
+            new_components.retain(|c| c.protocol_system == system);
         }
 
         Ok(new_components)
@@ -590,14 +618,22 @@ mod test {
             .insert(Arc::new(native_block_deltas()))
             .unwrap();
 
-        let new_components = buffer.get_new_components(None).unwrap();
+        let new_components = buffer
+            .get_new_components(None, None)
+            .unwrap();
 
         assert_eq!(new_components, exp);
 
         let new_components = buffer
-            .get_new_components(Some(&["component3"]))
+            .get_new_components(Some(&["component3"]), None)
             .unwrap();
 
         assert_eq!(new_components, vec![exp[0].clone()]);
+
+        let new_components = buffer
+            .get_new_components(None, Some("vm_swap"))
+            .unwrap();
+
+        assert_eq!(new_components, vec![exp[1].clone()]);
     }
 }
