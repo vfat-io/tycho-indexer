@@ -271,10 +271,7 @@ impl PendingDeltas {
         }
 
         if let Some(system) = protocol_system {
-            new_components = new_components
-                .into_iter()
-                .filter(|c| c.protocol_system == system)
-                .collect()
+            new_components.retain(|c| c.protocol_system == system);
         }
 
         Ok(new_components)
