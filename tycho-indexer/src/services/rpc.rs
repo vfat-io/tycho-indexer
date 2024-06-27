@@ -483,7 +483,7 @@ where
 
         let mut components = self
             .pending_deltas
-            .get_new_components(ids_slice)?;
+            .get_new_components(ids_slice, system.as_deref())?;
 
         // Check if we have all requested components in the cache
         if let Some(requested_ids) = ids_slice {
