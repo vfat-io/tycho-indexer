@@ -131,7 +131,7 @@ where
     pub fn new(db_gateway: G, pending_deltas: PendingDeltas) -> Self {
         let token_cache = Cache::builder()
             .max_capacity(50)
-            .time_to_live(std::time::Duration::from_secs(7 * 12))
+            .time_to_live(std::time::Duration::from_secs(7 * 60))
             .build();
 
         Self { db_gateway, pending_deltas, token_cache: Arc::new(RwLock::new(token_cache)) }
