@@ -131,7 +131,7 @@ where
     pub fn new(db_gateway: G, pending_deltas: PendingDeltas) -> Self {
         let cache = Cache::builder()
             .max_capacity(50)
-            .time_to_live(std::time::Duration::from_secs(24 * 60 * 60))
+            .time_to_live(std::time::Duration::from_secs(12))
             .build();
 
         Self { db_gateway, pending_deltas, cache: Arc::new(RwLock::new(cache)) }
@@ -380,18 +380,22 @@ where
         info!(?chain, ?request, "Getting tokens.");
 
         let cache_key = format!("{}-{:?}", chain, request);
+        let mut cache_entry_count: u64 = 0;
 
         // Check the cache for a cached response
         {
-            let read_lock = self.cache.read().await;
+            let read_lock = self.token_cache.read().await;
+            cache_entry_count = read_lock.entry_count();
             if let Some(cached_response) = read_lock.get(&cache_key) {
                 trace!("Returning cached response");
                 return Ok(cached_response);
             }
         }
 
+        trace!(?cache_key, "Token cache missed", cache_size = cache_entry_count);
+
         // Acquire a write lock before querying the database (prevents concurrent db queries)
-        let write_lock = self.cache.write().await;
+        let write_lock = self.token_cache.write().await;
 
         // Double-check if another thread has already fetched and cached the data
         if let Some(cached_response) = write_lock.get(&cache_key) {
