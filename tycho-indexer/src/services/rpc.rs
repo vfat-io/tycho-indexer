@@ -121,7 +121,7 @@ impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
 pub struct RpcHandler<G> {
     db_gateway: G,
     pending_deltas: PendingDeltas,
-    cache: Arc<RwLock<Cache<String, dto::TokensRequestResponse>>>,
+    token_cache: Arc<RwLock<Cache<String, dto::TokensRequestResponse>>>,
 }
 
 impl<G> RpcHandler<G>
@@ -129,12 +129,12 @@ where
     G: Gateway,
 {
     pub fn new(db_gateway: G, pending_deltas: PendingDeltas) -> Self {
-        let cache = Cache::builder()
+        let token_cache = Cache::builder()
             .max_capacity(50)
-            .time_to_live(std::time::Duration::from_secs(24 * 60 * 60))
+            .time_to_live(std::time::Duration::from_secs(7 * 60))
             .build();
 
-        Self { db_gateway, pending_deltas, cache: Arc::new(RwLock::new(cache)) }
+        Self { db_gateway, pending_deltas, token_cache: Arc::new(RwLock::new(token_cache)) }
     }
 
     #[instrument(skip(self, chain, request, params))]
@@ -381,17 +381,27 @@ where
 
         let cache_key = format!("{}-{:?}", chain, request);
 
+        // Cache entry count is only used for logging purposes
+        #[allow(unused_assignments)]
+        let mut cache_entry_count: u64 = 0;
+
         // Check the cache for a cached response
         {
-            let read_lock = self.cache.read().await;
+            let read_lock = self.token_cache.read().await;
+            cache_entry_count = read_lock.entry_count();
             if let Some(cached_response) = read_lock.get(&cache_key) {
                 trace!("Returning cached response");
                 return Ok(cached_response);
             }
         }
 
+        trace!(
+            ?cache_key,
+            "Token cache missed. Cache size: {cache_size}",
+            cache_size = cache_entry_count
+        );
         // Acquire a write lock before querying the database (prevents concurrent db queries)
-        let write_lock = self.cache.write().await;
+        let write_lock = self.token_cache.write().await;
 
         // Double-check if another thread has already fetched and cached the data
         if let Some(cached_response) = write_lock.get(&cache_key) {
