@@ -121,7 +121,7 @@ impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
 pub struct RpcHandler<G> {
     db_gateway: G,
     pending_deltas: PendingDeltas,
-    cache: Arc<RwLock<Cache<String, dto::TokensRequestResponse>>>,
+    token_cache: Arc<RwLock<Cache<String, dto::TokensRequestResponse>>>,
 }
 
 impl<G> RpcHandler<G>
@@ -129,12 +129,12 @@ where
     G: Gateway,
 {
     pub fn new(db_gateway: G, pending_deltas: PendingDeltas) -> Self {
-        let cache = Cache::builder()
+        let token_cache = Cache::builder()
             .max_capacity(50)
             .time_to_live(std::time::Duration::from_secs(12))
             .build();
 
-        Self { db_gateway, pending_deltas, cache: Arc::new(RwLock::new(cache)) }
+        Self { db_gateway, pending_deltas, token_cache: Arc::new(RwLock::new(cache)) }
     }
 
     #[instrument(skip(self, chain, request, params))]
