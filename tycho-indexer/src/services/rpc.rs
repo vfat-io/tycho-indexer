@@ -413,6 +413,8 @@ where
             .get_tokens_inner(chain, request)
             .await?;
 
+        trace!(n_tokens_received=?response.tokens.len(), "Retrieved tokens from DB");
+
         // Cache the response if it contains a full page of tokens
         if response.tokens.len() == request.pagination.page_size as usize {
             trace!("Caching response");
