@@ -276,7 +276,7 @@ pub struct ExtractorConfig {
     chain: Chain,
     implementation_type: ImplementationType,
     sync_batch_size: usize,
-    pub start_block: i64,
+    start_block: i64,
     stop_block: Option<i64>,
     protocol_types: Vec<ProtocolTypeConfig>,
     spkg: String,
