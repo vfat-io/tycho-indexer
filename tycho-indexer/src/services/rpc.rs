@@ -342,6 +342,7 @@ where
                 .collect::<Vec<&str>>()
         });
         debug!(?ids, "Getting protocol states.");
+        let ids = ids.as_deref();
 
         // Get the protocol states from the database
         let mut states = self
@@ -350,7 +351,7 @@ where
                 chain,
                 Some(db_version),
                 request.protocol_system.clone(),
-                ids.as_deref(),
+                ids,
                 params.include_balances,
             )
             .await

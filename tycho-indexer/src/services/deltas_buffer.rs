@@ -123,14 +123,15 @@ impl PendingDeltas {
     ///   fetched.
     pub fn merge_native_states(
         &self,
-        protocol_ids: Option<Vec<&str>>,
+        protocol_ids: Option<&[&str]>,
         db_states: &mut Vec<ProtocolComponentState>,
         version: Option<BlockNumberOrTimestamp>,
     ) -> Result<()> {
         // TODO: handle when no id is specified with filters
         let mut missing_ids: HashSet<&str> = protocol_ids
             .unwrap_or_default()
-            .into_iter()
+            .iter()
+            .cloned()
             .collect();
 
         // update db states with buffered deltas
@@ -606,7 +607,7 @@ mod test {
 
         buffer
             .merge_native_states(
-                Some(vec!["component1", "component3"]),
+                Some(&["component1", "component3"]),
                 &mut state,
                 Some(BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap())),
             )
