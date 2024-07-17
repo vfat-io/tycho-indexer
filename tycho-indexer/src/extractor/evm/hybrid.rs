@@ -526,6 +526,7 @@ where
             .as_ref()
             .unwrap();
 
+        // Backwards Compatibility:
         // Check if message_type ends with BlockAccountChanges or BlockEntityChanges. If it does,
         // then we need to decode as the corresponding message type, then convert it to BlockChanges
         let msg = match data.type_url.as_str() {

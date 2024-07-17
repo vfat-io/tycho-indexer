@@ -342,7 +342,6 @@ where
                 .collect::<Vec<&str>>()
         });
         debug!(?ids, "Getting protocol states.");
-        let ids = ids.as_deref();
 
         // Get the protocol states from the database
         let mut states = self
@@ -351,7 +350,7 @@ where
                 chain,
                 Some(db_version),
                 request.protocol_system.clone(),
-                ids,
+                ids.as_deref(),
                 params.include_balances,
             )
             .await
@@ -360,10 +359,12 @@ where
                 err
             })?;
 
+        // merge db states with pending deltas
         if let Some(at) = deltas_version {
             self.pending_deltas
-                .update_native_states(&mut states, Some(at))?;
+                .merge_native_states(ids, &mut states, Some(at))?;
         }
+
         Ok(dto::ProtocolStateRequestResponse::new(
             states
                 .into_iter()
