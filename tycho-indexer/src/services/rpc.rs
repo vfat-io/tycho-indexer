@@ -360,10 +360,12 @@ where
                 err
             })?;
 
+        // merge db states with pending deltas
         if let Some(at) = deltas_version {
             self.pending_deltas
-                .update_native_states(&mut states, Some(at))?;
+                .merge_native_states(ids, &mut states, Some(at))?;
         }
+
         Ok(dto::ProtocolStateRequestResponse::new(
             states
                 .into_iter()

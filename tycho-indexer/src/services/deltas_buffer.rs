@@ -112,14 +112,42 @@ impl PendingDeltas {
         Ok(())
     }
 
-    pub fn update_native_states(
+    /// Merges the buffered deltas with given db states. If a requested component is not in the
+    /// db yet, it creates a new state for it out of the buffered deltas.
+    ///
+    /// Arguments:
+    ///
+    /// * `protocol_ids`: A list of the requested protocol ids. Note: `None` is not supported yet.
+    /// * `db_states`: A mutable reference to the states fetched from the db.
+    /// * `version`: The version of the state to be fetched. If `None`, the latest state will be
+    ///   fetched.
+    pub fn merge_native_states(
         &self,
-        db_states: &mut [ProtocolComponentState],
+        protocol_ids: Option<&[&str]>,
+        db_states: &mut Vec<ProtocolComponentState>,
         version: Option<BlockNumberOrTimestamp>,
     ) -> Result<()> {
-        for state in db_states {
+        // TODO: handle when no id is specified with filters
+        let mut missing_ids: HashSet<&str> = protocol_ids
+            .unwrap_or_default()
+            .iter()
+            .cloned()
+            .collect();
+
+        // update db states with buffered deltas
+        for state in db_states.iter_mut() {
             self.update_native_state(state, version)?;
+            missing_ids.remove(state.component_id.as_str());
         }
+
+        // for new components (not in the db yet), create an empty state and apply buffered deltas
+        // to it
+        for id in missing_ids {
+            let mut state = ProtocolComponentState::new(id, HashMap::new(), HashMap::new());
+            self.update_native_state(&mut state, version)?;
+            db_states.push(state);
+        }
+
         Ok(())
     }
 
@@ -446,33 +474,60 @@ mod test {
             .collect::<HashMap<_, _>>(),
             HashMap::new(),
             HashMap::new(),
-            [evm::ProtocolStateDelta::new(
-                "component1".to_string(),
-                [("attr1", Bytes::from("0x01"))]
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string(), v))
-                    .collect(),
-            )]
+            [
+                evm::ProtocolStateDelta::new(
+                    "component1".to_string(),
+                    [("attr1", Bytes::from("0x01"))]
+                        .into_iter()
+                        .map(|(k, v)| (k.to_string(), v))
+                        .collect(),
+                ),
+                evm::ProtocolStateDelta::new(
+                    "component3".to_string(),
+                    [("attr2", Bytes::from("0x05"))]
+                        .into_iter()
+                        .map(|(k, v)| (k.to_string(), v))
+                        .collect(),
+                ),
+            ]
             .into_iter()
             .map(|v| (v.component_id.clone(), v))
             .collect(),
             HashMap::new(),
-            [(
-                "component1".to_string(),
-                [(
-                    H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                    evm::ComponentBalance {
-                        token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                            .unwrap(),
-                        balance_float: 1.0,
-                        balance: Bytes::from("0x01"),
-                        modify_tx: H256::zero(),
-                        component_id: "component1".to_string(),
-                    },
-                )]
-                .into_iter()
-                .collect(),
-            )]
+            [
+                (
+                    "component1".to_string(),
+                    [(
+                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                        evm::ComponentBalance {
+                            token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                                .unwrap(),
+                            balance_float: 1.0,
+                            balance: Bytes::from("0x01"),
+                            modify_tx: H256::zero(),
+                            component_id: "component1".to_string(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                ),
+                (
+                    "component3".to_string(),
+                    [(
+                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                        evm::ComponentBalance {
+                            token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                                .unwrap(),
+                            balance_float: 2.0,
+                            balance: Bytes::from("0x02"),
+                            modify_tx: H256::zero(),
+                            component_id: "component3".to_string(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                ),
+            ]
             .into_iter()
             .collect(),
         )
@@ -521,13 +576,14 @@ mod test {
     }
 
     #[test]
-    fn test_update_native_states() {
-        let mut state = [native_state()];
+    fn test_merge_native_states() {
+        let mut state = vec![native_state()]; // db state
         let buffer = PendingDeltas::new([], ["native:extractor"]);
         buffer
             .insert(Arc::new(native_block_deltas()))
             .unwrap();
-        let exp = ProtocolComponentState::new(
+        // expected state after applying buffer deltas to the given db state
+        let exp1 = ProtocolComponentState::new(
             "component1",
             [("attr2", Bytes::from("0x02")), ("attr1", Bytes::from("0x01"))]
                 .into_iter()
@@ -537,15 +593,29 @@ mod test {
                 .into_iter()
                 .collect::<HashMap<_, _>>(),
         );
+        // expected state for a new component not yet in the db
+        let exp3 = ProtocolComponentState::new(
+            "component3",
+            [("attr2", Bytes::from("0x05"))]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect::<HashMap<_, _>>(),
+            [(Bytes::from("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"), Bytes::from("0x02"))]
+                .into_iter()
+                .collect::<HashMap<_, _>>(),
+        );
 
         buffer
-            .update_native_states(
+            .merge_native_states(
+                Some(&["component1", "component3"]),
                 &mut state,
                 Some(BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap())),
             )
             .unwrap();
 
-        assert_eq!(&state[0], &exp);
+        assert_eq!(state.len(), 2);
+        assert_eq!(&state[0], &exp1);
+        assert_eq!(&state[1], &exp3);
     }
 
     #[test]
