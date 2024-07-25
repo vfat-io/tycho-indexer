@@ -36,6 +36,7 @@ use super::{revert_buffer::StateUpdateBufferEntry, u256_num::bytes_to_f64, Extra
 use self::utils::TryDecode;
 
 pub mod chain_state;
+pub mod contract;
 mod convert;
 pub mod hybrid;
 pub mod native;
