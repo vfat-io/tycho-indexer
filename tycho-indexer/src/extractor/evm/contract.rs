@@ -1,129 +1,96 @@
-use crate::extractor::evm::{AccountUpdate, Block};
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use ethers::{
     middleware::Middleware,
     prelude::{BlockId, Http, Provider, H160, H256, U256},
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, error::Error};
 use tracing::trace;
+
 use tycho_core::{
-    models::{Chain, ChangeType},
+    models::{Address, Chain, ChangeType},
     Bytes,
 };
 
-pub struct ContractExtractor {
-    addresses_per_block: HashMap<u64, Vec<H160>>,
+use crate::extractor::{
+    evm::{AccountUpdate, Block},
+    RPCError,
+};
+
+#[cfg_attr(test, mockall::automock)]
+#[async_trait]
+pub trait AccountExtractor {
+    async fn get_accounts(
+        &self,
+        block: Block,
+        account_addresses: Vec<Address>,
+    ) -> Result<HashMap<H160, AccountUpdate>, RPCError>;
+}
+
+pub struct EVMAccountExtractor {
     provider: Provider<Http>,
     chain: Chain,
 }
 
-#[cfg_attr(test, mockall::automock)]
-#[async_trait]
-pub trait EVMContractExtractor {
-    async fn new(
-        node_url: &str,
-        chain: Chain,
-        address_block_pairs: Vec<(H160, u64)>,
-    ) -> Result<Self, Box<dyn std::error::Error>>
-    where
-        Self: Sized;
-    async fn register_contracts(
-        &mut self,
-        address_block_pairs: Vec<(H160, u64)>,
-    ) -> Result<(), Box<dyn std::error::Error>>;
-    async fn process(
-        &self,
-        block: Block,
-    ) -> Result<HashMap<H160, AccountUpdate>, Box<dyn std::error::Error>>;
-}
-
-#[async_trait]
-impl EVMContractExtractor for ContractExtractor {
-    async fn new(
-        node_url: &str,
-        chain: Chain,
-        address_block_pairs: Vec<(H160, u64)>,
-    ) -> Result<Self, Box<dyn std::error::Error>>
+impl EVMAccountExtractor {
+    #[allow(dead_code)]
+    async fn new(node_url: &str, chain: Chain) -> Result<Self, RPCError>
     where
         Self: Sized,
     {
         let provider = Provider::<Http>::try_from(node_url);
-        return match provider {
-            Ok(p) => {
-                let addresses_per_block: HashMap<u64, Vec<H160>> = address_block_pairs
-                    .into_iter()
-                    .fold(HashMap::new(), |mut acc, (addr, block)| {
-                        acc.entry(block).or_default().push(addr);
-                        acc
-                    });
-                Ok(Self { addresses_per_block, provider: p, chain })
-            }
-            Err(e) => Err(Box::new(e)),
-        };
-    }
-
-    async fn register_contracts(
-        &mut self,
-        address_block_pairs: Vec<(H160, u64)>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        for (address, block) in address_block_pairs {
-            self.addresses_per_block
-                .entry(block)
-                .or_default()
-                .push(address);
+        match provider {
+            Ok(p) => Ok(Self { provider: p, chain }),
+            Err(e) => Err(RPCError::SetupError(e.to_string())),
         }
-        Ok(())
     }
-
-    async fn process(&self, block: Block) -> Result<HashMap<H160, AccountUpdate>, Box<dyn Error>> {
+}
+#[async_trait]
+impl AccountExtractor for EVMAccountExtractor {
+    async fn get_accounts(
+        &self,
+        block: Block,
+        account_addresses: Vec<Address>,
+    ) -> Result<HashMap<H160, AccountUpdate>, RPCError> {
         let mut updates = HashMap::new();
 
-        match self
-            .addresses_per_block
-            .get(&block.number)
-        {
-            Some(addresses) => {
-                for address in addresses {
-                    trace!(contract=?address, block_number=?block.number, block_hash=?block.hash, "Extracting contract code and storage" );
-                    let block_id = Some(BlockId::from(block.number));
-                    println!("Block Id: {:?}", block_id);
+        for address in account_addresses {
+            let address: H160 = address.into();
 
-                    let balance = Some(
-                        self.provider
-                            .get_balance(*address, block_id)
-                            .await?,
-                    );
-                    println!("Balance: {:?}", balance);
+            trace!(contract=?address, block_number=?block.number, block_hash=?block.hash, "Extracting contract code and storage" );
+            let block_id = Some(BlockId::from(block.number));
 
-                    let code = self
-                        .provider
-                        .get_code(*address, block_id)
-                        .await?;
+            let balance = Some(
+                self.provider
+                    .get_balance(address, block_id)
+                    .await?,
+            );
 
-                    let code: Option<Bytes> = Some(Bytes::from(code.to_vec()));
+            let code = self
+                .provider
+                .get_code(address, block_id)
+                .await?;
 
-                    println!("Code: {:?}", code);
-                    let slots = self
-                        .get_storage_range(*address, block.hash)
-                        .await?;
+            let code: Option<Bytes> = Some(Bytes::from(code.to_vec()));
 
-                    updates.insert(
-                        *address,
-                        AccountUpdate {
-                            address: *address,
-                            chain: self.chain,
-                            slots,
-                            balance,
-                            code,
-                            change: ChangeType::Creation,
-                        },
-                    );
-                }
-                return Ok(updates);
-            }
-            None => Ok(HashMap::new()),
+            let slots = self
+                .get_storage_range(address, block.hash)
+                .await?;
+
+            updates.insert(
+                address,
+                AccountUpdate {
+                    address,
+                    chain: self.chain,
+                    slots,
+                    balance,
+                    code,
+                    change: ChangeType::Creation,
+                },
+            );
         }
+        return Ok(updates);
     }
 }
 
@@ -139,12 +106,12 @@ struct StorageRange {
     next_key: Option<H256>,
 }
 
-impl ContractExtractor {
+impl EVMAccountExtractor {
     async fn get_storage_range(
         &self,
         address: H160,
         block: H256,
-    ) -> Result<HashMap<U256, U256>, Box<dyn std::error::Error>> {
+    ) -> Result<HashMap<U256, U256>, RPCError> {
         let mut all_slots = HashMap::new();
         let mut start_key = H256::zero();
         let block = format!("0x{:x}", block);
@@ -178,22 +145,21 @@ impl ContractExtractor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::str::FromStr;
 
+    use super::*;
+
     #[tokio::test]
-    #[ignore]
-    // This test requires a real RPC URL
+    // #[ignore = "require RPC connection"]
     async fn test_contract_extractor() -> Result<(), Box<dyn std::error::Error>> {
         let block_hash =
             H256::from_str("0x7f70ac678819e24c4947a3a95fdab886083892a18ba1a962ebaac31455584042")
                 .expect("valid block hash");
         let block_number: u64 = 20378314;
 
-        let contracts: Vec<(H160, u64)> = vec![(
-            H160::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8").expect("valid address"),
-            block_number,
-        )];
+        let accounts: Vec<Address> =
+            vec![Address::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8")
+                .expect("valid address")];
         let node = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
         println!("Using node: {}", node);
 
@@ -204,8 +170,10 @@ mod tests {
             chain: Chain::Ethereum,
             ts: Default::default(),
         };
-        let extractor = ContractExtractor::new(&node, Chain::Ethereum, contracts).await?;
-        let updates = extractor.process(block).await?;
+        let extractor = EVMAccountExtractor::new(&node, Chain::Ethereum).await?;
+        let updates = extractor
+            .get_accounts(block, accounts)
+            .await?;
 
         assert_eq!(updates.len(), 1);
         let update = updates
