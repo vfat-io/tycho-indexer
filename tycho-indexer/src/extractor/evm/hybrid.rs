@@ -70,7 +70,6 @@ pub struct HybridContractExtractor<G, T> {
     /// The number of blocks behind the current block to be considered as syncing.
     sync_threshold: u64,
     revert_buffer: Mutex<RevertBuffer<BlockUpdateWithCursor<evm::BlockChanges>>>,
-    #[allow(dead_code)]
     contract_extractor: Option<ContractExtractor>,
 }
 
