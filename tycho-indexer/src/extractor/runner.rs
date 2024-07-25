@@ -24,6 +24,7 @@ use tycho_storage::postgres::cache::CachedGateway;
 use crate::{
     extractor::{
         evm::{
+            contract::ContractExtractor,
             hybrid::{HybridContractExtractor, HybridPgGateway},
             protocol_cache::ProtocolMemoryCache,
         },
@@ -276,11 +277,12 @@ pub struct ExtractorConfig {
     chain: Chain,
     implementation_type: ImplementationType,
     sync_batch_size: usize,
-    start_block: i64,
+    pub start_block: i64,
     stop_block: Option<i64>,
     protocol_types: Vec<ProtocolTypeConfig>,
     spkg: String,
     module_name: String,
+    pub initialized_accounts: Vec<String>,
 }
 
 impl ExtractorConfig {
@@ -295,6 +297,7 @@ impl ExtractorConfig {
         protocol_types: Vec<ProtocolTypeConfig>,
         spkg: String,
         module_name: String,
+        initialized_accounts: Vec<String>,
     ) -> Self {
         Self {
             name,
@@ -306,6 +309,7 @@ impl ExtractorConfig {
             protocol_types,
             spkg,
             module_name,
+            initialized_accounts,
         }
     }
 }
@@ -390,6 +394,7 @@ impl ExtractorBuilder {
         cached_gw: &CachedGateway,
         token_pre_processor: &TokenPreProcessor,
         protocol_cache: &ProtocolMemoryCache,
+        contract_extractor: Option<ContractExtractor>,
     ) -> Result<Self, ExtractionError> {
         let protocol_types = self
             .config
@@ -440,6 +445,7 @@ impl ExtractorBuilder {
                     _ => None,
                 },
                 128,
+                contract_extractor,
             )
             .await?,
         ));
@@ -636,6 +642,7 @@ mod test {
                 }],
                 spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
                 module_name: "test_module".to_owned(),
+                initialized_accounts: vec![],
             },
             "https://mainnet.eth.streamingfast.io",
         )

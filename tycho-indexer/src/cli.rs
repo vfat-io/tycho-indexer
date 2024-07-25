@@ -128,6 +128,10 @@ pub struct RunSpkgArgs {
     /// Defaults to STOP_BLOCK env var or None.
     #[clap(long)]
     stop_block: Option<String>,
+
+    /// Account addresses to be initialized before indexing
+    #[clap(long, value_delimiter = ',')]
+    pub initialized_accounts: Vec<String>,
 }
 
 impl RunSpkgArgs {
@@ -216,6 +220,7 @@ mod cli_tests {
                     rpc_url: "http://example.com".to_string(),
                     substreams_api_token: "your_api_token".to_string(),
                 },
+                initialized_accounts: vec![],
             }),
         };
 

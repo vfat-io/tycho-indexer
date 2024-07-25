@@ -17,7 +17,7 @@ use actix_web::dev::ServerHandle;
 use chrono::{NaiveDateTime, Utc};
 use clap::Parser;
 use ethers::{
-    prelude::{Http, Provider},
+    prelude::{Http, Provider, H160},
     providers::Middleware,
 };
 use tokio::{select, task::JoinHandle};
@@ -29,7 +29,9 @@ use tycho_indexer::{
     extractor::{
         self,
         evm::{
-            chain_state::ChainState, protocol_cache::ProtocolMemoryCache,
+            chain_state::ChainState,
+            contract::{ContractExtractor, EVMContractExtractor},
+            protocol_cache::ProtocolMemoryCache,
             token_analysis_cron::analyze_tokens,
         },
         runner::{ExtractorConfig, HandleResult, ProtocolTypeConfig},
@@ -158,6 +160,7 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
                 .collect::<Vec<_>>(),
             run_args.spkg,
             run_args.module,
+            run_args.initialized_accounts,
         ),
     )]));
 
@@ -238,7 +241,7 @@ async fn create_indexing_tasks(
     );
     let (mut tasks, extractor_handles): (Vec<_>, Vec<_>) =
         // TODO: accept substreams configuration from cli.
-        build_all_extractors(&extractors_config, chain_state, chains, &global_args.endpoint_url, &cached_gw, &token_processor)
+        build_all_extractors(&extractors_config, chain_state, chains, &global_args.endpoint_url, &cached_gw, &token_processor, rpc_url)
             .await
             .map_err(|e| ExtractionError::Setup(format!("Failed to create extractors: {}", e)))?
             .into_iter()
@@ -274,6 +277,7 @@ async fn build_all_extractors(
     endpoint_url: &str,
     cached_gw: &CachedGateway,
     token_pre_processor: &TokenPreProcessor,
+    rpc_url: &str,
 ) -> Result<Vec<HandleResult>, ExtractionError> {
     let mut extractor_handles = Vec::new();
 
@@ -287,9 +291,37 @@ async fn build_all_extractors(
     );
     protocol_cache.populate().await?;
 
+    let mut contract_extractor =
+        ContractExtractor::new(rpc_url, *chains.first().unwrap(), vec![]).await?;
+
     for extractor_config in config.extractors.values() {
+        let block: u64 = extractor_config.start_block as u64;
+
+        if !(extractor_config
+            .initialized_accounts
+            .is_empty())
+        {
+            let register_contracts: Vec<(H160, u64)> = extractor_config
+                .initialized_accounts
+                .clone()
+                .into_iter()
+                .map(|a| (H160::from_str(&a).expect("Unable to convert address into H160"), block))
+                .collect();
+
+            contract_extractor
+                .register_contracts(register_contracts)
+                .await
+                .expect("Failed to register contracts");
+        }
+
         let (task, handle) = ExtractorBuilder::new(extractor_config, endpoint_url)
-            .build(chain_state, cached_gw, token_pre_processor, &protocol_cache)
+            .build(
+                chain_state,
+                cached_gw,
+                token_pre_processor,
+                &protocol_cache,
+                Some(contract_extractor.clone()),
+            )
             .await?
             .run()
             .await?;

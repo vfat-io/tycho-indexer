@@ -33,6 +33,7 @@ use crate::{
         evm,
         evm::{
             chain_state::ChainState,
+            contract::ContractExtractor,
             protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
             token_pre_processor::{map_vault, TokenPreProcessorTrait},
             utils::format_duration,
@@ -69,6 +70,8 @@ pub struct HybridContractExtractor<G, T> {
     /// The number of blocks behind the current block to be considered as syncing.
     sync_threshold: u64,
     revert_buffer: Mutex<RevertBuffer<BlockUpdateWithCursor<evm::BlockChanges>>>,
+    #[allow(dead_code)]
+    contract_extractor: Option<ContractExtractor>,
 }
 
 impl<G, T> HybridContractExtractor<G, T>
@@ -88,6 +91,7 @@ where
         token_pre_processor: T,
         post_processor: Option<fn(evm::BlockChanges) -> evm::BlockChanges>,
         sync_threshold: u64,
+        contract_extractor: Option<ContractExtractor>,
     ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
@@ -112,6 +116,7 @@ where
                     post_processor,
                     sync_threshold,
                     revert_buffer: Mutex::new(RevertBuffer::new()),
+                    contract_extractor,
                 }
             }
             Ok(cursor) => {
@@ -141,6 +146,7 @@ where
                     post_processor,
                     sync_threshold,
                     revert_buffer: Mutex::new(RevertBuffer::new()),
+                    contract_extractor,
                 }
             }
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
@@ -1311,6 +1317,7 @@ mod test {
             preprocessor,
             None,
             5,
+            None,
         )
         .await
         .expect("Failed to create extractor")
@@ -1608,6 +1615,7 @@ mod test {
             preprocessor,
             None,
             5,
+            None,
         )
         .await
         .expect("Extractor init failed");
@@ -1737,6 +1745,7 @@ mod test {
             preprocessor,
             None,
             5,
+            None,
         )
         .await
         .expect("extractor init failed");
@@ -2333,6 +2342,7 @@ mod test_serial_db {
                 get_mocked_token_pre_processor(),
                 None,
                 5,
+                None
             )
                 .await
                 .expect("Failed to create extractor");
@@ -2517,6 +2527,7 @@ mod test_serial_db {
                 preprocessor,
                 None,
                 5,
+                None
             )
                 .await
                 .expect("Failed to create extractor");
