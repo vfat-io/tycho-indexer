@@ -33,11 +33,11 @@ use crate::{
         evm,
         evm::{
             chain_state::ChainState,
-            contract::ContractExtractor,
+            contract::{ContractExtractor, EVMContractExtractor},
             protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
             token_pre_processor::{map_vault, TokenPreProcessorTrait},
             utils::format_duration,
-            Block,
+            Block, BlockChanges, Transaction, TxWithChanges,
         },
         revert_buffer::RevertBuffer,
         BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
@@ -484,6 +484,45 @@ where
             .collect();
         Ok(new_tokens)
     }
+
+    async fn load_related_contracts(&self, msg: BlockChanges) -> BlockChanges {
+        match self.contract_extractor {
+            Some(ref extractor) => {
+                let accounts = extractor
+                    .process(msg.block)
+                    .await
+                    .expect("Failed to process block");
+                if accounts.is_empty() {
+                    return msg
+                }
+
+                // We add a fake transaction on Index 0 to make sure these account updates are
+                // processed correctly and before the actual transactions. There can be a case
+                // where there are two transactions with the same index.
+                // Currently, there are no requirements in the code that would break this condition
+                // but this should be handled correctly in a future version.
+                let new_tx = TxWithChanges {
+                    protocol_components: Default::default(),
+                    account_updates: accounts,
+                    state_updates: Default::default(),
+                    balance_changes: Default::default(),
+                    tx: Transaction {
+                        hash: H256::zero(),
+                        block_hash: msg.block.hash,
+                        from: H160::zero(),
+                        to: None,
+                        index: 0,
+                    },
+                };
+                let mut new_msg = msg.clone();
+                new_msg
+                    .txs_with_update
+                    .insert(0, new_tx);
+                new_msg
+            }
+            None => msg,
+        }
+    }
 }
 
 #[async_trait]
@@ -590,6 +629,8 @@ where
             }
             Err(e) => return Err(e),
         };
+
+        let msg = self.load_related_contracts(msg).await;
 
         let mut msg =
             if let Some(post_process_f) = self.post_processor { post_process_f(msg) } else { msg };
@@ -1783,7 +1824,6 @@ mod test_serial_db {
     use crate::{
         extractor::evm::{
             token_pre_processor::MockTokenPreProcessorTrait, AccountUpdate, ProtocolComponent,
-            Transaction, TxWithChanges,
         },
         pb::sf::substreams::v1::BlockRef,
     };
