@@ -137,6 +137,7 @@ struct StorageEntry {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct StorageRange {
     storage: HashMap<H256, StorageEntry>,
     next_key: Option<H256>,
@@ -182,7 +183,7 @@ mod tests {
             )
             .expect("update exists");
 
-        assert!(!update.slots.is_empty());
+        assert_ne!(update.slots.len(), 1024);
 
         Ok(())
     }
