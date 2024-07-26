@@ -183,7 +183,7 @@ mod tests {
             )
             .expect("update exists");
 
-        assert_ne!(update.slots.len(), 1024);
+        assert_eq!(update.slots.len(), 47690);
 
         Ok(())
     }
