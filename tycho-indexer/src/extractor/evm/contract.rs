@@ -105,7 +105,7 @@ impl EVMAccountExtractor {
         loop {
             let params = serde_json::json!([
                 block, 0, // transaction index, 0 for the state at the end of the block
-                address, start_key, 1024 // limit
+                address, start_key, 2147483647 // limit
             ]);
 
             trace!("Requesting storage range for {:?}, block: {:?}", address, block);

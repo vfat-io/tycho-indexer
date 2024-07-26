@@ -11,7 +11,7 @@ use diesel::{
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use ethers::utils::keccak256;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
-use tracing::{error, instrument};
+use tracing::{debug, error, instrument};
 use tycho_core::{
     models,
     models::{
@@ -535,6 +535,7 @@ impl PostgresGateway {
             }
         }
 
+        debug!(n = new_entries.len(), "Inserting slots");
         new_entries.sort_by_cached_key(|b| b.ordinal);
         let sorted = new_entries
             .into_iter()
@@ -547,35 +548,40 @@ impl PostgresGateway {
             .map(orm::NewSlotLatest::from)
             .collect::<Vec<_>>();
 
-        diesel::insert_into(schema::contract_storage_default::table)
-            .values(&latest)
-            .on_conflict(on_constraint("contract_storage_default_unique_pk"))
-            .do_update()
-            .set((
-                schema::contract_storage_default::slot
-                    .eq(excluded(schema::contract_storage_default::slot)),
-                schema::contract_storage_default::value
-                    .eq(excluded(schema::contract_storage_default::value)),
-                schema::contract_storage_default::previous_value
-                    .eq(excluded(schema::contract_storage_default::previous_value)),
-                schema::contract_storage_default::account_id
-                    .eq(excluded(schema::contract_storage_default::account_id)),
-                schema::contract_storage_default::modify_tx
-                    .eq(excluded(schema::contract_storage_default::modify_tx)),
-                schema::contract_storage_default::ordinal
-                    .eq(excluded(schema::contract_storage_default::ordinal)),
-                schema::contract_storage_default::valid_from
-                    .eq(excluded(schema::contract_storage_default::valid_from)),
-            ))
-            .execute(conn)
-            .await
-            .map_err(PostgresError::from)?;
+        for chunk in latest.chunks(1_000) {
+            diesel::insert_into(schema::contract_storage_default::table)
+                .values(chunk)
+                .on_conflict(on_constraint("contract_storage_default_unique_pk"))
+                .do_update()
+                .set((
+                    schema::contract_storage_default::slot
+                        .eq(excluded(schema::contract_storage_default::slot)),
+                    schema::contract_storage_default::value
+                        .eq(excluded(schema::contract_storage_default::value)),
+                    schema::contract_storage_default::previous_value
+                        .eq(excluded(schema::contract_storage_default::previous_value)),
+                    schema::contract_storage_default::account_id
+                        .eq(excluded(schema::contract_storage_default::account_id)),
+                    schema::contract_storage_default::modify_tx
+                        .eq(excluded(schema::contract_storage_default::modify_tx)),
+                    schema::contract_storage_default::ordinal
+                        .eq(excluded(schema::contract_storage_default::ordinal)),
+                    schema::contract_storage_default::valid_from
+                        .eq(excluded(schema::contract_storage_default::valid_from)),
+                ))
+                .execute(conn)
+                .await
+                .map_err(PostgresError::from)?;
+        }
 
-        diesel::insert_into(schema::contract_storage::table)
-            .values(&to_archive)
-            .execute(conn)
-            .await
-            .map_err(PostgresError::from)?;
+        for chunk in to_archive.chunks(1_000) {
+            diesel::insert_into(schema::contract_storage::table)
+                .values(chunk)
+                .execute(conn)
+                .await
+                .map_err(PostgresError::from)?;
+        }
+
         Ok(())
     }
 
