@@ -33,19 +33,6 @@ pub struct EVMAccountExtractor {
     chain: Chain,
 }
 
-impl EVMAccountExtractor {
-    #[allow(dead_code)]
-    async fn new(node_url: &str, chain: Chain) -> Result<Self, RPCError>
-    where
-        Self: Sized,
-    {
-        let provider = Provider::<Http>::try_from(node_url);
-        match provider {
-            Ok(p) => Ok(Self { provider: p, chain }),
-            Err(e) => Err(RPCError::SetupError(e.to_string())),
-        }
-    }
-}
 #[async_trait]
 impl AccountExtractor for EVMAccountExtractor {
     async fn get_accounts(
@@ -94,19 +81,19 @@ impl AccountExtractor for EVMAccountExtractor {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct StorageEntry {
-    key: H256,
-    value: H256,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct StorageRange {
-    storage: HashMap<H256, StorageEntry>,
-    next_key: Option<H256>,
-}
-
 impl EVMAccountExtractor {
+    #[allow(dead_code)]
+    async fn new(node_url: &str, chain: Chain) -> Result<Self, RPCError>
+    where
+        Self: Sized,
+    {
+        let provider = Provider::<Http>::try_from(node_url);
+        match provider {
+            Ok(p) => Ok(Self { provider: p, chain }),
+            Err(e) => Err(RPCError::SetupError(e.to_string())),
+        }
+    }
+
     async fn get_storage_range(
         &self,
         address: H160,
@@ -143,6 +130,18 @@ impl EVMAccountExtractor {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct StorageEntry {
+    key: H256,
+    value: H256,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct StorageRange {
+    storage: HashMap<H256, StorageEntry>,
+    next_key: Option<H256>,
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -150,7 +149,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    // #[ignore = "require RPC connection"]
+    #[ignore = "require RPC connection"]
     async fn test_contract_extractor() -> Result<(), Box<dyn std::error::Error>> {
         let block_hash =
             H256::from_str("0x7f70ac678819e24c4947a3a95fdab886083892a18ba1a962ebaac31455584042")
