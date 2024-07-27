@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use tycho_core::models::Chain;
+use tycho_core::{models::Chain, Bytes};
 
 /// Tycho Indexer using Substreams
 ///
@@ -131,7 +131,11 @@ pub struct RunSpkgArgs {
 
     /// Account addresses to be initialized before indexing
     #[clap(long, value_delimiter = ',')]
-    pub initialized_accounts: Vec<String>,
+    pub initialized_accounts: Vec<Bytes>,
+
+    /// Block number to initialize the accounts at
+    #[clap(long)]
+    pub initialization_block: i64,
 }
 
 impl RunSpkgArgs {
@@ -221,6 +225,7 @@ mod cli_tests {
                     substreams_api_token: "your_api_token".to_string(),
                 },
                 initialized_accounts: vec![],
+                initialization_block: 0,
             }),
         };
 

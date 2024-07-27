@@ -17,22 +17,26 @@ use actix_web::dev::ServerHandle;
 use chrono::{NaiveDateTime, Utc};
 use clap::Parser;
 use ethers::{
-    prelude::{Http, Provider, H160},
+    prelude::{BlockId, Http, Provider, H160, H256},
     providers::Middleware,
 };
 use tokio::{select, task::JoinHandle};
 use tracing::{info, warn};
 
-use tycho_core::models::{Chain, ImplementationType};
+use tycho_core::{
+    models::{Address, Chain, ImplementationType},
+    storage::{ChainGateway, ContractStateGateway},
+};
 use tycho_indexer::{
     cli::{AnalyzeTokenArgs, Cli, Command, GlobalArgs, IndexArgs, RunSpkgArgs},
     extractor::{
-        self,
+        self, evm,
         evm::{
             chain_state::ChainState,
-            contract::{ContractExtractor, EVMContractExtractor},
+            contract::{AccountExtractor, EVMAccountExtractor},
             protocol_cache::ProtocolMemoryCache,
             token_analysis_cron::analyze_tokens,
+            AccountUpdate, Block, Transaction,
         },
         runner::{ExtractorConfig, HandleResult, ProtocolTypeConfig},
         ExtractionError,
@@ -161,6 +165,7 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
             run_args.spkg,
             run_args.module,
             run_args.initialized_accounts,
+            run_args.initialization_block,
         ),
     )]));
 
@@ -291,37 +296,20 @@ async fn build_all_extractors(
     );
     protocol_cache.populate().await?;
 
-    let mut contract_extractor =
-        ContractExtractor::new(rpc_url, *chains.first().unwrap(), vec![]).await?;
-
     for extractor_config in config.extractors.values() {
-        let block: u64 = extractor_config.start_block as u64;
-
-        if !(extractor_config
-            .initialized_accounts
-            .is_empty())
-        {
-            let register_contracts: Vec<(H160, u64)> = extractor_config
+        initialize_accounts(
+            extractor_config
                 .initialized_accounts
-                .clone()
-                .into_iter()
-                .map(|a| (H160::from_str(&a).expect("Unable to convert address into H160"), block))
-                .collect();
-
-            contract_extractor
-                .register_contracts(register_contracts)
-                .await
-                .expect("Failed to register contracts");
-        }
+                .clone(),
+            extractor_config.initialized_accounts_block,
+            rpc_url,
+            *chains.first().unwrap(),
+            cached_gw,
+        )
+        .await;
 
         let (task, handle) = ExtractorBuilder::new(extractor_config, endpoint_url)
-            .build(
-                chain_state,
-                cached_gw,
-                token_pre_processor,
-                &protocol_cache,
-                Some(contract_extractor.clone()),
-            )
+            .build(chain_state, cached_gw, token_pre_processor, &protocol_cache)
             .await?
             .run()
             .await?;
@@ -331,6 +319,78 @@ async fn build_all_extractors(
     }
 
     Ok(extractor_handles)
+}
+
+async fn initialize_accounts(
+    accounts: Vec<Address>,
+    block_id: i64,
+    rpc_url: &str,
+    chain: Chain,
+    cached_gw: &CachedGateway,
+) {
+    let (block, extracted_accounts) = get_accounts_data(accounts, block_id, rpc_url, chain).await;
+
+    let tx = Transaction {
+        hash: H256::zero(),
+        block_hash: block.hash,
+        from: H160::zero(),
+        to: None,
+        index: 0,
+    };
+
+    cached_gw
+        .start_transaction(&(&block).into(), Some("accountExtractor"))
+        .await;
+
+    cached_gw
+        .upsert_block(&[(&block).into()])
+        .await
+        .expect("Failed to insert block");
+
+    cached_gw
+        .upsert_tx(&[(tx).into()])
+        .await
+        .expect("Failed to insert tx");
+
+    for (_, account_update) in extracted_accounts.iter() {
+        let new: evm::Account = account_update.ref_into_account(&tx);
+        info!(block_number = block.number, contract_address = ?new.address, "NewContract");
+
+        // Insert new accounts
+        cached_gw
+            .upsert_contract(&(&new).into())
+            .await
+            .expect("Failed to insert contract");
+    }
+
+    cached_gw
+        .commit_transaction(0)
+        .await
+        .expect("Failed to commit transaction");
+}
+
+async fn get_accounts_data(
+    accounts: Vec<Address>,
+    block_id: i64,
+    rpc_url: &str,
+    chain: Chain,
+) -> (Block, HashMap<H160, AccountUpdate>) {
+    let provider = Provider::<Http>::try_from(rpc_url).expect("Failed to create provider");
+    let block_data = provider
+        .get_block(BlockId::from(block_id))
+        .await
+        .expect("Failed to get block");
+
+    let block: Block = block_data.into();
+    let account_extractor = EVMAccountExtractor::new(rpc_url, chain)
+        .await
+        .expect("Failed to create account extractor");
+
+    let extracted_accounts: HashMap<H160, AccountUpdate> = account_extractor
+        .get_accounts(block, accounts)
+        .await
+        .expect("Failed to extract accounts");
+    (block, extracted_accounts)
 }
 
 async fn shutdown_handler(

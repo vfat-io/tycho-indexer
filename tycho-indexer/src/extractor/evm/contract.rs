@@ -83,7 +83,7 @@ impl AccountExtractor for EVMAccountExtractor {
 
 impl EVMAccountExtractor {
     #[allow(dead_code)]
-    async fn new(node_url: &str, chain: Chain) -> Result<Self, RPCError>
+    pub async fn new(node_url: &str, chain: Chain) -> Result<Self, RPCError>
     where
         Self: Sized,
     {

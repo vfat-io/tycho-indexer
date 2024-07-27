@@ -33,11 +33,10 @@ use crate::{
         evm,
         evm::{
             chain_state::ChainState,
-            contract::{ContractExtractor, EVMContractExtractor},
             protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
             token_pre_processor::{map_vault, TokenPreProcessorTrait},
             utils::format_duration,
-            Block, BlockChanges, Transaction, TxWithChanges,
+            Block,
         },
         revert_buffer::RevertBuffer,
         BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
@@ -70,7 +69,6 @@ pub struct HybridContractExtractor<G, T> {
     /// The number of blocks behind the current block to be considered as syncing.
     sync_threshold: u64,
     revert_buffer: Mutex<RevertBuffer<BlockUpdateWithCursor<evm::BlockChanges>>>,
-    contract_extractor: Option<ContractExtractor>,
 }
 
 impl<G, T> HybridContractExtractor<G, T>
@@ -90,7 +88,6 @@ where
         token_pre_processor: T,
         post_processor: Option<fn(evm::BlockChanges) -> evm::BlockChanges>,
         sync_threshold: u64,
-        contract_extractor: Option<ContractExtractor>,
     ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
@@ -115,7 +112,6 @@ where
                     post_processor,
                     sync_threshold,
                     revert_buffer: Mutex::new(RevertBuffer::new()),
-                    contract_extractor,
                 }
             }
             Ok(cursor) => {
@@ -145,7 +141,6 @@ where
                     post_processor,
                     sync_threshold,
                     revert_buffer: Mutex::new(RevertBuffer::new()),
-                    contract_extractor,
                 }
             }
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
@@ -483,45 +478,6 @@ where
             .collect();
         Ok(new_tokens)
     }
-
-    async fn load_related_contracts(&self, msg: BlockChanges) -> BlockChanges {
-        match self.contract_extractor {
-            Some(ref extractor) => {
-                let accounts = extractor
-                    .process(msg.block)
-                    .await
-                    .expect("Failed to process block");
-                if accounts.is_empty() {
-                    return msg
-                }
-
-                // We add a fake transaction on Index 0 to make sure these account updates are
-                // processed correctly and before the actual transactions. There can be a case
-                // where there are two transactions with the same index.
-                // Currently, there are no requirements in the code that would break this condition
-                // but this should be handled correctly in a future version.
-                let new_tx = TxWithChanges {
-                    protocol_components: Default::default(),
-                    account_updates: accounts,
-                    state_updates: Default::default(),
-                    balance_changes: Default::default(),
-                    tx: Transaction {
-                        hash: H256::zero(),
-                        block_hash: msg.block.hash,
-                        from: H160::zero(),
-                        to: None,
-                        index: 0,
-                    },
-                };
-                let mut new_msg = msg.clone();
-                new_msg
-                    .txs_with_update
-                    .insert(0, new_tx);
-                new_msg
-            }
-            None => msg,
-        }
-    }
 }
 
 #[async_trait]
@@ -628,8 +584,6 @@ where
             }
             Err(e) => return Err(e),
         };
-
-        let msg = self.load_related_contracts(msg).await;
 
         let mut msg =
             if let Some(post_process_f) = self.post_processor { post_process_f(msg) } else { msg };
@@ -1357,7 +1311,6 @@ mod test {
             preprocessor,
             None,
             5,
-            None,
         )
         .await
         .expect("Failed to create extractor")
@@ -1655,7 +1608,6 @@ mod test {
             preprocessor,
             None,
             5,
-            None,
         )
         .await
         .expect("Extractor init failed");
@@ -1785,7 +1737,6 @@ mod test {
             preprocessor,
             None,
             5,
-            None,
         )
         .await
         .expect("extractor init failed");
@@ -1823,6 +1774,7 @@ mod test_serial_db {
     use crate::{
         extractor::evm::{
             token_pre_processor::MockTokenPreProcessorTrait, AccountUpdate, ProtocolComponent,
+            Transaction, TxWithChanges,
         },
         pb::sf::substreams::v1::BlockRef,
     };
@@ -2381,7 +2333,6 @@ mod test_serial_db {
                 get_mocked_token_pre_processor(),
                 None,
                 5,
-                None
             )
                 .await
                 .expect("Failed to create extractor");
@@ -2566,7 +2517,6 @@ mod test_serial_db {
                 preprocessor,
                 None,
                 5,
-                None
             )
                 .await
                 .expect("Failed to create extractor");

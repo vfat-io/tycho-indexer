@@ -85,6 +85,18 @@ pub struct Block {
     pub ts: NaiveDateTime,
 }
 
+impl<TX> From<ethers::core::types::Block<TX>> for Block {
+    fn from(value: ethers::core::types::Block<TX>) -> Self {
+        Block {
+            number: value.number.unwrap().as_u64(),
+            hash: value.hash.unwrap(),
+            parent_hash: value.parent_hash,
+            chain: Chain::Ethereum,
+            ts: NaiveDateTime::from_timestamp_opt(value.timestamp.as_u64() as i64, 0)
+                .expect("Failed to convert timestamp"),
+        }
+    }
+}
 #[derive(Debug, PartialEq, Copy, Clone, Default)]
 pub struct Transaction {
     pub hash: H256,

@@ -15,16 +15,15 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
-
-use tycho_core::models::{
-    Chain, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType,
+use tycho_core::{
+    models::{Chain, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType},
+    Bytes,
 };
 use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{
     extractor::{
         evm::{
-            contract::ContractExtractor,
             hybrid::{HybridContractExtractor, HybridPgGateway},
             protocol_cache::ProtocolMemoryCache,
         },
@@ -282,7 +281,8 @@ pub struct ExtractorConfig {
     protocol_types: Vec<ProtocolTypeConfig>,
     spkg: String,
     module_name: String,
-    pub initialized_accounts: Vec<String>,
+    pub initialized_accounts: Vec<Bytes>,
+    pub initialized_accounts_block: i64,
 }
 
 impl ExtractorConfig {
@@ -297,7 +297,8 @@ impl ExtractorConfig {
         protocol_types: Vec<ProtocolTypeConfig>,
         spkg: String,
         module_name: String,
-        initialized_accounts: Vec<String>,
+        initialized_accounts: Vec<Bytes>,
+        initialization_block: i64,
     ) -> Self {
         Self {
             name,
@@ -310,6 +311,7 @@ impl ExtractorConfig {
             spkg,
             module_name,
             initialized_accounts,
+            initialized_accounts_block: initialization_block,
         }
     }
 }
@@ -394,7 +396,6 @@ impl ExtractorBuilder {
         cached_gw: &CachedGateway,
         token_pre_processor: &TokenPreProcessor,
         protocol_cache: &ProtocolMemoryCache,
-        contract_extractor: Option<ContractExtractor>,
     ) -> Result<Self, ExtractionError> {
         let protocol_types = self
             .config
@@ -445,7 +446,6 @@ impl ExtractorBuilder {
                     _ => None,
                 },
                 128,
-                contract_extractor,
             )
             .await?,
         ));
@@ -643,6 +643,7 @@ mod test {
                 spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
                 module_name: "test_module".to_owned(),
                 initialized_accounts: vec![],
+                initialized_accounts_block: 0,
             },
             "https://mainnet.eth.streamingfast.io",
         )
