@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use ethers::{
     middleware::Middleware,
     prelude::{BlockId, Http, Provider, H160, H256, U256},
 };
 use serde::{Deserialize, Serialize};
 use tracing::trace;
-
 use tycho_core::{
     models::{Address, Chain, ChangeType},
     Bytes,
@@ -31,6 +31,19 @@ pub trait AccountExtractor {
 pub struct EVMAccountExtractor {
     provider: Provider<Http>,
     chain: Chain,
+}
+
+impl<TX> From<ethers::core::types::Block<TX>> for Block {
+    fn from(value: ethers::core::types::Block<TX>) -> Self {
+        Block {
+            number: value.number.unwrap().as_u64(),
+            hash: value.hash.unwrap(),
+            parent_hash: value.parent_hash,
+            chain: Chain::Ethereum,
+            ts: NaiveDateTime::from_timestamp_opt(value.timestamp.as_u64() as i64, 0)
+                .expect("Failed to convert timestamp"),
+        }
+    }
 }
 
 #[async_trait]
@@ -127,6 +140,15 @@ impl EVMAccountExtractor {
         }
 
         Ok(all_slots)
+    }
+
+    pub async fn get_block_data(&self, block_id: i64) -> Result<Block, RPCError> {
+        let block = self
+            .provider
+            .get_block(BlockId::from(u64::try_from(block_id).expect("Invalid block number")))
+            .await?
+            .expect("Block not found");
+        Ok(Block::from(block))
     }
 }
 
