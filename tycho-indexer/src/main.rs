@@ -24,8 +24,8 @@ use tokio::{select, task::JoinHandle};
 use tracing::{info, warn};
 
 use tycho_core::{
-    models::{Address, Chain, ImplementationType},
-    storage::{ChainGateway, ContractStateGateway},
+    models::{Address, Chain, ExtractionState, ImplementationType},
+    storage::{ChainGateway, ContractStateGateway, ExtractionStateGateway},
 };
 use tycho_indexer::{
     cli::{AnalyzeTokenArgs, Cli, Command, GlobalArgs, IndexArgs, RunSpkgArgs},
@@ -330,6 +330,8 @@ async fn initialize_accounts(
 ) {
     let (block, extracted_accounts) = get_accounts_data(accounts, block_id, rpc_url, chain).await;
 
+    info!(block_number = block.number, "Initializing accounts");
+
     let tx = Transaction {
         hash: H256::zero(),
         block_hash: block.hash,
@@ -348,7 +350,7 @@ async fn initialize_accounts(
         .expect("Failed to insert block");
 
     cached_gw
-        .upsert_tx(&[(tx).into()])
+        .upsert_tx(&[(&tx).into()])
         .await
         .expect("Failed to insert tx");
 
@@ -362,6 +364,18 @@ async fn initialize_accounts(
             .await
             .expect("Failed to insert contract");
     }
+
+    let state = ExtractionState::new(
+        "accountExtractor".to_string(),
+        chain,
+        None,
+        "account_cursor".as_bytes(),
+    );
+
+    cached_gw
+        .save_state(&state)
+        .await
+        .expect("Failed to save cursor");
 
     cached_gw
         .commit_transaction(0)
@@ -377,9 +391,10 @@ async fn get_accounts_data(
 ) -> (Block, HashMap<H160, AccountUpdate>) {
     let provider = Provider::<Http>::try_from(rpc_url).expect("Failed to create provider");
     let block_data = provider
-        .get_block(BlockId::from(block_id))
+        .get_block(BlockId::from(u64::try_from(block_id).expect("Invalid block number")))
         .await
-        .expect("Failed to get block");
+        .expect("Failed to get block")
+        .expect("Block not found");
 
     let block: Block = block_data.into();
     let account_extractor = EVMAccountExtractor::new(rpc_url, chain)
