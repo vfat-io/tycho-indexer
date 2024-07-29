@@ -134,7 +134,7 @@ pub struct RunSpkgArgs {
     pub initialized_accounts: Vec<Bytes>,
 
     /// Block number to initialize the accounts at
-    #[clap(long)]
+    #[clap(long, default_value = "0")]
     pub initialization_block: i64,
 }
 
