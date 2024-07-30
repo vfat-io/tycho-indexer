@@ -548,18 +548,22 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_accounts_handles_empty_accounts() {
-        let accounts = vec![];
-        let block_id = 20378314;
-        let rpc_url = "http://localhost:0000";
-        let db_url = std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
-        let chain = Chain::Ethereum;
+        run_against_db(|_| async move {
+            let accounts = vec![];
+            let block_id = 20378314;
+            let rpc_url = "http://localhost:0000";
+            let db_url =
+                std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+            let chain = Chain::Ethereum;
 
-        let (cached_gw, _) = GatewayBuilder::new(db_url.as_str())
-            .set_chains(&[chain])
-            .build()
-            .await
-            .expect("Failed to create Gateway");
+            let (cached_gw, _) = GatewayBuilder::new(db_url.as_str())
+                .set_chains(&[chain])
+                .build()
+                .await
+                .expect("Failed to create Gateway");
 
-        initialize_accounts(accounts, block_id, rpc_url, chain, &cached_gw).await;
+            initialize_accounts(accounts, block_id, rpc_url, chain, &cached_gw).await;
+        })
+        .await;
     }
 }
