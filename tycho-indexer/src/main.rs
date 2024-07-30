@@ -491,10 +491,11 @@ mod tests {
             ];
             let block_id = 20378314;
             let rpc_url = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
-            let db_url = "postgres://postgres:mypassword@localhost:5431/tycho_indexer_0";
+            let db_url =
+                std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
             let chain = Chain::Ethereum;
 
-            let (cached_gw, _) = GatewayBuilder::new(db_url)
+            let (cached_gw, _) = GatewayBuilder::new(db_url.as_str())
                 .set_chains(&[chain])
                 .build()
                 .await
@@ -520,10 +521,11 @@ mod tests {
                 vec![Address::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8").unwrap()];
             let block_id = 20378314;
             let rpc_url = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
-            let db_url = "postgres://postgres:mypassword@localhost:5431/tycho_indexer_0";
+            let db_url =
+                std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
             let chain = Chain::Ethereum;
 
-            let (cached_gw, _) = GatewayBuilder::new(db_url)
+            let (cached_gw, _) = GatewayBuilder::new(db_url.as_str())
                 .set_chains(&[chain])
                 .build()
                 .await
@@ -545,16 +547,14 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires DB connection"]
     async fn initialize_accounts_handles_empty_accounts() {
         let accounts = vec![];
         let block_id = 20378314;
         let rpc_url = "http://localhost:0000";
-        let db_url = "postgres://postgres:mypassword@localhost:5431/tycho_indexer_0";
-
+        let db_url = std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
         let chain = Chain::Ethereum;
 
-        let (cached_gw, _) = GatewayBuilder::new(db_url)
+        let (cached_gw, _) = GatewayBuilder::new(db_url.as_str())
             .set_chains(&[chain])
             .build()
             .await
