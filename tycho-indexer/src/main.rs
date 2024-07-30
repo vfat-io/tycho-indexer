@@ -545,6 +545,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires DB connection"]
     async fn initialize_accounts_handles_empty_accounts() {
         let accounts = vec![];
         let block_id = 20378314;
