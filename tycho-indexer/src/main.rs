@@ -24,7 +24,7 @@ use tokio::{select, task::JoinHandle};
 use tracing::{info, instrument, warn};
 use tycho_core::{
     models::{Address, Chain, ExtractionState, ImplementationType},
-    storage::{ChainGateway, ContractStateGateway, ExtractionStateGateway, StorageError},
+    storage::{ChainGateway, ContractStateGateway, ExtractionStateGateway},
 };
 use tycho_indexer::{
     cli::{AnalyzeTokenArgs, Cli, Command, GlobalArgs, IndexArgs, RunSpkgArgs},
@@ -328,6 +328,9 @@ async fn initialize_accounts(
     chain: Chain,
     cached_gw: &CachedGateway,
 ) {
+    if accounts.is_empty() {
+        return;
+    }
     let (block, extracted_accounts) = get_accounts_data(accounts, block_id, rpc_url, chain).await;
 
     info!(block_number = block.number, "Initializing accounts");
@@ -441,4 +444,121 @@ async fn run_token_analyzer(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tycho_storage::postgres::testing::run_against_db;
+
+    #[tokio::test]
+    #[ignore = "require archive node (RPC) and DB connection"]
+    async fn initialize_account_saves_correct_state() {
+        run_against_db(|_| async move {
+            let accounts =
+                vec![Address::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8").unwrap()];
+            let block_id = 20378314;
+            let rpc_url = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
+            let db_url =
+                std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+
+            let chain = Chain::Ethereum;
+
+            let (cached_gw, _) = GatewayBuilder::new(&db_url.to_string())
+                .set_chains(&[chain])
+                .build()
+                .await
+                .expect("Failed to create Gateway");
+            initialize_accounts(accounts, block_id, rpc_url.as_str(), chain, &cached_gw).await;
+
+            let contracts = cached_gw
+                .get_contracts(&chain, None, None, true, false)
+                .await
+                .unwrap();
+
+            assert_eq!(contracts.len(), 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "require archive node (RPC) and DB connection"]
+    async fn initialize_multiple_accounts_saves_correct_state() {
+        run_against_db(|_| async move {
+            let accounts = vec![
+                Address::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8").unwrap(),
+                Address::from_str("0x3175Df0976dFA876431C2E9eE6Bc45b65d3473CC").unwrap(),
+            ];
+            let block_id = 20378314;
+            let rpc_url = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
+            let db_url = "postgres://postgres:mypassword@localhost:5431/tycho_indexer_0";
+            let chain = Chain::Ethereum;
+
+            let (cached_gw, _) = GatewayBuilder::new(db_url)
+                .set_chains(&[chain])
+                .build()
+                .await
+                .expect("Failed to create Gateway");
+
+            initialize_accounts(accounts, block_id, rpc_url.as_str(), chain, &cached_gw).await;
+
+            let contracts = cached_gw
+                .get_contracts(&chain, None, None, true, false)
+                .await
+                .unwrap();
+
+            assert_eq!(contracts.len(), 2);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "require archive node (RPC) and DB connection"]
+    async fn initialize_multiple_accounts_different_blocks() {
+        run_against_db(|_| async move {
+            let accounts =
+                vec![Address::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8").unwrap()];
+            let block_id = 20378314;
+            let rpc_url = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
+            let db_url = "postgres://postgres:mypassword@localhost:5431/tycho_indexer_0";
+            let chain = Chain::Ethereum;
+
+            let (cached_gw, _) = GatewayBuilder::new(db_url)
+                .set_chains(&[chain])
+                .build()
+                .await
+                .expect("Failed to create Gateway");
+
+            initialize_accounts(accounts, block_id, rpc_url.as_str(), chain, &cached_gw).await;
+            let accounts =
+                vec![Address::from_str("0x3175Df0976dFA876431C2E9eE6Bc45b65d3473CC").unwrap()];
+            initialize_accounts(accounts, 20378315, rpc_url.as_str(), chain, &cached_gw).await;
+
+            let contracts = cached_gw
+                .get_contracts(&chain, None, None, true, false)
+                .await
+                .unwrap();
+
+            assert_eq!(contracts.len(), 2);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn initialize_accounts_handles_empty_accounts() {
+        let accounts = vec![];
+        let block_id = 20378314;
+        let rpc_url = "http://localhost:0000";
+        let db_url = "postgres://postgres:mypassword@localhost:5431/tycho_indexer_0";
+
+        let chain = Chain::Ethereum;
+
+        let (cached_gw, _) = GatewayBuilder::new(db_url)
+            .set_chains(&[chain])
+            .build()
+            .await
+            .expect("Failed to create Gateway");
+
+        initialize_accounts(accounts, block_id, rpc_url, chain, &cached_gw).await;
+    }
 }
