@@ -452,7 +452,7 @@ mod tests {
     use tycho_storage::postgres::testing::run_against_db;
 
     #[tokio::test]
-    #[ignore = "require archive node (RPC) and DB connection"]
+    #[ignore = "require archive node (RPC)"]
     async fn initialize_account_saves_correct_state() {
         run_against_db(|_| async move {
             let accounts =
@@ -482,7 +482,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "require archive node (RPC) and DB connection"]
+    #[ignore = "require archive node (RPC)"]
     async fn initialize_multiple_accounts_saves_correct_state() {
         run_against_db(|_| async move {
             let accounts = vec![
@@ -514,7 +514,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "require archive node (RPC) and DB connection"]
+    #[ignore = "require archive node (RPC)"]
     async fn initialize_multiple_accounts_different_blocks() {
         run_against_db(|_| async move {
             let accounts =
