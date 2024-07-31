@@ -17,20 +17,25 @@ use actix_web::dev::ServerHandle;
 use chrono::{NaiveDateTime, Utc};
 use clap::Parser;
 use ethers::{
-    prelude::{Http, Provider},
+    prelude::{Http, Provider, H160, H256},
     providers::Middleware,
 };
 use tokio::{select, task::JoinHandle};
-use tracing::{info, warn};
-
-use tycho_core::models::{Chain, ImplementationType};
+use tracing::{info, instrument, warn};
+use tycho_core::{
+    models::{Address, Chain, ExtractionState, ImplementationType},
+    storage::{ChainGateway, ContractStateGateway, ExtractionStateGateway},
+};
 use tycho_indexer::{
     cli::{AnalyzeTokenArgs, Cli, Command, GlobalArgs, IndexArgs, RunSpkgArgs},
     extractor::{
-        self,
+        self, evm,
         evm::{
-            chain_state::ChainState, protocol_cache::ProtocolMemoryCache,
+            chain_state::ChainState,
+            contract::{AccountExtractor, EVMAccountExtractor},
+            protocol_cache::ProtocolMemoryCache,
             token_analysis_cron::analyze_tokens,
+            AccountUpdate, Block, Transaction,
         },
         runner::{ExtractorConfig, HandleResult, ProtocolTypeConfig},
         ExtractionError,
@@ -158,6 +163,8 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
                 .collect::<Vec<_>>(),
             run_args.spkg,
             run_args.module,
+            run_args.initialized_accounts,
+            run_args.initialization_block,
         ),
     )]));
 
@@ -238,7 +245,7 @@ async fn create_indexing_tasks(
     );
     let (mut tasks, extractor_handles): (Vec<_>, Vec<_>) =
         // TODO: accept substreams configuration from cli.
-        build_all_extractors(&extractors_config, chain_state, chains, &global_args.endpoint_url, &cached_gw, &token_processor)
+        build_all_extractors(&extractors_config, chain_state, chains, &global_args.endpoint_url, &cached_gw, &token_processor, rpc_url)
             .await
             .map_err(|e| ExtractionError::Setup(format!("Failed to create extractors: {}", e)))?
             .into_iter()
@@ -274,6 +281,7 @@ async fn build_all_extractors(
     endpoint_url: &str,
     cached_gw: &CachedGateway,
     token_pre_processor: &TokenPreProcessor,
+    rpc_url: &str,
 ) -> Result<Vec<HandleResult>, ExtractionError> {
     let mut extractor_handles = Vec::new();
 
@@ -288,6 +296,17 @@ async fn build_all_extractors(
     protocol_cache.populate().await?;
 
     for extractor_config in config.extractors.values() {
+        initialize_accounts(
+            extractor_config
+                .initialized_accounts
+                .clone(),
+            extractor_config.initialized_accounts_block,
+            rpc_url,
+            *chains.first().unwrap(),
+            cached_gw,
+        )
+        .await;
+
         let (task, handle) = ExtractorBuilder::new(extractor_config, endpoint_url)
             .build(chain_state, cached_gw, token_pre_processor, &protocol_cache)
             .await?
@@ -299,6 +318,94 @@ async fn build_all_extractors(
     }
 
     Ok(extractor_handles)
+}
+
+#[instrument(skip_all, fields(n_accounts = %accounts.len(), block_id = block_id))]
+async fn initialize_accounts(
+    accounts: Vec<Address>,
+    block_id: i64,
+    rpc_url: &str,
+    chain: Chain,
+    cached_gw: &CachedGateway,
+) {
+    if accounts.is_empty() {
+        return;
+    }
+    let (block, extracted_accounts) = get_accounts_data(accounts, block_id, rpc_url, chain).await;
+
+    info!(block_number = block.number, "Initializing accounts");
+
+    let tx = Transaction {
+        hash: H256::random(),
+        block_hash: block.hash,
+        from: H160::zero(),
+        to: None,
+        index: 0,
+    };
+
+    cached_gw
+        .start_transaction(&(&block).into(), Some("accountExtractor"))
+        .await;
+
+    cached_gw
+        .upsert_block(&[(&block).into()])
+        .await
+        .expect("Failed to insert block");
+
+    cached_gw
+        .upsert_tx(&[(&tx).into()])
+        .await
+        .expect("Failed to insert tx");
+
+    for account_update in extracted_accounts.values() {
+        let new_account: evm::Account = account_update.ref_into_account(&tx);
+        info!(block_number = block.number, contract_address = ?new_account.address, "NewContract");
+
+        // Insert new accounts
+        cached_gw
+            .upsert_contract(&(&new_account).into())
+            .await
+            .expect("Failed to insert contract");
+    }
+
+    let state = ExtractionState::new(
+        "accountExtractor".to_string(),
+        chain,
+        None,
+        "account_cursor".as_bytes(),
+    );
+
+    cached_gw
+        .save_state(&state)
+        .await
+        .expect("Failed to save cursor");
+
+    cached_gw
+        .commit_transaction(0)
+        .await
+        .expect("Failed to commit transaction");
+}
+
+async fn get_accounts_data(
+    accounts: Vec<Address>,
+    block_id: i64,
+    rpc_url: &str,
+    chain: Chain,
+) -> (Block, HashMap<H160, AccountUpdate>) {
+    let account_extractor = EVMAccountExtractor::new(rpc_url, chain)
+        .await
+        .expect("Failed to create account extractor");
+
+    let block = account_extractor
+        .get_block_data(block_id)
+        .await
+        .expect("Failed to get block data");
+
+    let extracted_accounts: HashMap<H160, AccountUpdate> = account_extractor
+        .get_accounts(block, accounts)
+        .await
+        .expect("Failed to extract accounts");
+    (block, extracted_accounts)
 }
 
 async fn shutdown_handler(
@@ -337,4 +444,126 @@ async fn run_token_analyzer(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tycho_storage::postgres::testing::run_against_db;
+
+    #[tokio::test]
+    #[ignore = "require archive node (RPC)"]
+    async fn initialize_account_saves_correct_state() {
+        run_against_db(|_| async move {
+            let accounts =
+                vec![Address::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8").unwrap()];
+            let block_id = 20378314;
+            let rpc_url = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
+            let db_url =
+                std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+
+            let chain = Chain::Ethereum;
+
+            let (cached_gw, _) = GatewayBuilder::new(&db_url.to_string())
+                .set_chains(&[chain])
+                .build()
+                .await
+                .expect("Failed to create Gateway");
+            initialize_accounts(accounts, block_id, rpc_url.as_str(), chain, &cached_gw).await;
+
+            let contracts = cached_gw
+                .get_contracts(&chain, None, None, true, false)
+                .await
+                .unwrap();
+
+            assert_eq!(contracts.len(), 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "require archive node (RPC)"]
+    async fn initialize_multiple_accounts_saves_correct_state() {
+        run_against_db(|_| async move {
+            let accounts = vec![
+                Address::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8").unwrap(),
+                Address::from_str("0x3175Df0976dFA876431C2E9eE6Bc45b65d3473CC").unwrap(),
+            ];
+            let block_id = 20378314;
+            let rpc_url = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
+            let db_url =
+                std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+            let chain = Chain::Ethereum;
+
+            let (cached_gw, _) = GatewayBuilder::new(db_url.as_str())
+                .set_chains(&[chain])
+                .build()
+                .await
+                .expect("Failed to create Gateway");
+
+            initialize_accounts(accounts, block_id, rpc_url.as_str(), chain, &cached_gw).await;
+
+            let contracts = cached_gw
+                .get_contracts(&chain, None, None, true, false)
+                .await
+                .unwrap();
+
+            assert_eq!(contracts.len(), 2);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "require archive node (RPC)"]
+    async fn initialize_multiple_accounts_different_blocks() {
+        run_against_db(|_| async move {
+            let accounts =
+                vec![Address::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8").unwrap()];
+            let block_id = 20378314;
+            let rpc_url = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
+            let db_url =
+                std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+            let chain = Chain::Ethereum;
+
+            let (cached_gw, _) = GatewayBuilder::new(db_url.as_str())
+                .set_chains(&[chain])
+                .build()
+                .await
+                .expect("Failed to create Gateway");
+
+            initialize_accounts(accounts, block_id, rpc_url.as_str(), chain, &cached_gw).await;
+            let accounts =
+                vec![Address::from_str("0x3175Df0976dFA876431C2E9eE6Bc45b65d3473CC").unwrap()];
+            initialize_accounts(accounts, 20378315, rpc_url.as_str(), chain, &cached_gw).await;
+
+            let contracts = cached_gw
+                .get_contracts(&chain, None, None, true, false)
+                .await
+                .unwrap();
+
+            assert_eq!(contracts.len(), 2);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn initialize_accounts_handles_empty_accounts() {
+        run_against_db(|_| async move {
+            let accounts = vec![];
+            let block_id = 20378314;
+            let rpc_url = "http://localhost:0000";
+            let db_url =
+                std::env::var("DATABASE_URL").expect("Database URL must be set for testing");
+            let chain = Chain::Ethereum;
+
+            let (cached_gw, _) = GatewayBuilder::new(db_url.as_str())
+                .set_chains(&[chain])
+                .build()
+                .await
+                .expect("Failed to create Gateway");
+
+            initialize_accounts(accounts, block_id, rpc_url, chain, &cached_gw).await;
+        })
+        .await;
+    }
 }
