@@ -411,7 +411,7 @@ where
             .into_iter()
             .map(|(addr, _)| addr)
             .collect::<Vec<_>>();
-        let unkown_tokens_h160 = unknown_tokens
+        let unknown_tokens_h160 = unknown_tokens
             .into_iter()
             .map(|(addr, _)| H160::from(addr))
             .collect::<Vec<_>>();
@@ -467,7 +467,7 @@ where
         let new_tokens: HashMap<Address, CurrencyToken> = self
             .token_pre_processor
             .get_tokens(
-                unkown_tokens_h160,
+                unknown_tokens_h160,
                 Arc::new(tf),
                 web3::types::BlockNumber::Number(msg.block.number.into()),
             )
