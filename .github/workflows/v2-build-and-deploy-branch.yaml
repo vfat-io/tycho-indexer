@@ -27,6 +27,38 @@ jobs:
       image_tag: ${{ github.sha }}
       image_name: tycho-indexer
 
+  check-build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Build, tag, and push image to Amazon ECR'
+        env:
+          ECR_REGISTRY: 827659017777.dkr.ecr.eu-central-1.amazonaws.com
+          ECR_REPOSITORY: tycho-indexer
+          ECR_BUILD_CACHE_REPOSITORY: build-cache
+        run: >
+          COMMIT_COUNT=$(git rev-list $(git describe --tags --abbrev=0)..HEAD
+          --count)
+
+          if [ "$COMMIT_COUNT" -ne "0" ]; then
+              CONTAINER_TAG=${{ steps.version.outputs.version }}
+          else
+              CONTAINER_TAG=$(git describe --tags --abbrev=0)
+          fi
+
+
+          CHECK_IMAGE=$(aws ecr describe-images --repository-name
+          $ECR_REPOSITORY --image-ids imageTag=$CONTAINER_TAG --region
+          eu-central-1 || true)
+
+          if [ -z "$CHECK_IMAGE" ]; then
+              docker buildx build --push -t $ECR_REGISTRY/$ECR_REPOSITORY:$CONTAINER_TAG \
+              --cache-to mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=$ECR_REGISTRY/$ECR_BUILD_CACHE_REPOSITORY:tycho-indexer \
+              --cache-from type=registry,ref=$ECR_REGISTRY/$ECR_BUILD_CACHE_REPOSITORY:tycho-indexer .
+          
+          else
+            echo "$ECR_REGISTRY/$ECR_REPOSITORY:$CONTAINER_TAG already present - build skipped"
+          fi
+
   deploy-dev:
     needs:
       - build-and-push
