@@ -1,9 +1,6 @@
 name: Dev; Build and deploy
 
 on:
-  push:
-    branches:
-      - feature/ci-cd
   workflow_dispatch:
     inputs:
       app_name:
@@ -38,4 +35,3 @@ jobs:
     secrets:
       app_id: ${{ secrets.APP_ID }}
       app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
-
