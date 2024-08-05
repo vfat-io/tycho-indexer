@@ -7,7 +7,7 @@ on:
 
 jobs:
   release:
-    uses: propeller-heads/ci-cd-templates-dont-remove/.github/workflows/release.yaml@main
+    uses: propeller-heads/ci-cd-templates/.github/workflows/release.yaml@main
     permissions:
       contents: write # to be able to publish a GitHub release
       issues: write # to be able to comment on released issues
@@ -21,7 +21,7 @@ jobs:
     needs:
       - release
     if: needs.release.outputs.next_release_version != ''
-    uses: propeller-heads/ci-cd-templates-dont-remove/.github/workflows/build-and-push-docker-image.yaml@main
+    uses: propeller-heads/ci-cd-templates/.github/workflows/build-and-push-docker-image.yaml@main
     permissions:
       id-token: write
       contents: read
