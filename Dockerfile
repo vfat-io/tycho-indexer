@@ -3,6 +3,7 @@ ARG TARGETPLATFORM
 WORKDIR /build
 RUN apt-get update && apt-get install -y libpq-dev jq
 RUN echo $ARCH
+RUN echo $TARGETPLATFORM
 RUN ARCH=$(echo $TARGETPLATFORM | sed -e 's/\//_/g') && \
     if [ "$ARCH" = "linux_amd64" ]; then \
     ARCH="linux_x86_64"; \
