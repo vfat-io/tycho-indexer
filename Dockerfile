@@ -1,5 +1,5 @@
 FROM rust:1.74-bookworm AS chef
-ARG TARGETPLATFORM
+ARG TARGETPLATFORM=linux/amd64
 WORKDIR /build
 RUN apt-get update && apt-get install -y libpq-dev jq
 RUN ARCH=$(echo $TARGETPLATFORM | sed -e 's/\//_/g') && \
@@ -10,7 +10,7 @@ RUN ARCH=$(echo $TARGETPLATFORM | sed -e 's/\//_/g') && \
     echo ARCH: $ARCH, LINK: $LINK && \
     curl -L  $LINK  | tar zxf - -C /usr/local/bin/
 RUN cargo install cargo-workspaces
-RUN cargo install cargo-chef 
+RUN cargo install cargo-chef
 COPY rust-toolchain.toml .
 RUN rustup update 1.74
 
