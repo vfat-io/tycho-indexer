@@ -281,7 +281,9 @@ pub struct ExtractorConfig {
     protocol_types: Vec<ProtocolTypeConfig>,
     spkg: String,
     module_name: String,
+    #[serde(default)]
     pub initialized_accounts: Vec<Bytes>,
+    #[serde(default)]
     pub initialized_accounts_block: i64,
 }
 
