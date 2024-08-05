@@ -283,12 +283,8 @@ pub struct ExtractorConfig {
     module_name: String,
     #[serde(default)]
     pub initialized_accounts: Vec<Bytes>,
-    #[serde(default = "default_initialized_accounts_block")]
+    #[serde(default)]
     pub initialized_accounts_block: i64,
-}
-
-fn default_initialized_accounts_block() -> i64 {
-    0
 }
 
 impl ExtractorConfig {
