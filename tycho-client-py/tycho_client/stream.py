@@ -19,8 +19,6 @@ log = getLogger(__name__)
 
 
 class TychoStream:
-    # we allow to initialise this class with some preset PoolStates for use cases such as DAIPSM that do not need
-    # updates.
     def __init__(
             self,
             tycho_url: str,

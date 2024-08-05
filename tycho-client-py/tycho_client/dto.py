@@ -47,10 +47,6 @@ class ExtractorIdentity(BaseModel):
     chain: Chain
     name: str
 
-    @classmethod
-    def new(cls, chain: Chain, name: str) -> "ExtractorIdentity":
-        return cls(chain=chain, name=name)
-
 
 class Command(BaseModel):
     class Subscribe(BaseModel):
