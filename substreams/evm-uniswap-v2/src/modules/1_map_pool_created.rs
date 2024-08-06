@@ -43,7 +43,7 @@ fn get_pools(block: &eth::Block, new_pools: &mut Vec<TransactionChanges>, params
         let tycho_tx: Transaction = _tx.into();
 
         new_pools.push(TransactionChanges {
-            tx: Some(tycho_tx.clone().clone()),
+            tx: Some(tycho_tx.clone()),
             contract_changes: vec![],
             entity_changes: vec![EntityChanges {
                 component_id: event.pair.to_hex(),
