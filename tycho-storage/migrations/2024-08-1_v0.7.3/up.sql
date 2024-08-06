@@ -45,4 +45,4 @@ ALTER TABLE public.protocol_component_holds_contract
     ON DELETE CASCADE;
 
 -- drop unused table (we use protocol_component_holds_contract instead)
-DROP TABLE IF EXISTS public.protocol_calls_contract;
+DROP TABLE IF EXISTS protocol_calls_contract;
