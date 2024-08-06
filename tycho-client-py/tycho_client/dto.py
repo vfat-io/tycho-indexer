@@ -260,3 +260,15 @@ class ContractStateParams(BaseModel):
     include_balances: Optional[bool] = True
     contract_ids: Optional[List[ContractId]] = None
     version: Optional[VersionParams] = None
+
+
+class PaginationParams(BaseModel):
+    page: Optional[int] = None
+    page_size: Optional[int] = None
+
+
+class TokensParams(BaseModel):
+    min_quality: Optional[int] = None
+    pagination: Optional[PaginationParams] = None
+    token_addresses: Optional[List[HexBytes]] = None
+    traded_n_days_ago: Optional[int] = None

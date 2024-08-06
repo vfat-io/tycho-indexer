@@ -8,6 +8,8 @@ from .dto import (
     ProtocolComponentsParams,
     ProtocolStateParams,
     ContractStateParams,
+    ResponseToken,
+    TokensParams,
 )
 
 
@@ -96,6 +98,18 @@ class TychoRPCClient:
             params=query_params,
         )
         return [ResponseAccount(**a) for a in res["accounts"]]
+
+    def get_tokens(self, params: TokensParams) -> list[ResponseToken]:
+        body = {
+            "min_quality": params.min_quality,
+            "pagination": params.pagination.dict() if params.pagination else None,
+            "tokenAddresses": params.token_addresses,
+            "traded_n_days_ago": params.traded_n_days_ago,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        res = self._post_request(f"/v1/{self._chain}/tokens", body=body, params={})
+        return [ResponseToken(**t) for t in res["tokens"]]
 
 
 if __name__ == "__main__":
