@@ -35,5 +35,14 @@ ALTER TABLE public.component_balance
     REFERENCES protocol_component(id)
     ON DELETE CASCADE;
 
+
+-- Add cascade delete for account related tables
+ALTER TABLE public.protocol_component_holds_contract
+    DROP CONSTRAINT IF EXISTS protocol_component_holds_contract_contract_code_id_fkey,
+    ADD CONSTRAINT protocol_component_holds_contract_contract_code_id_fkey
+    FOREIGN KEY (contract_code_id)
+    REFERENCES contract_code(id)
+    ON DELETE CASCADE;
+
 -- drop unused table (we use protocol_component_holds_contract instead)
 DROP TABLE IF EXISTS public.protocol_calls_contract;

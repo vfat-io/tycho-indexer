@@ -30,6 +30,12 @@ ALTER TABLE public.component_balance
     FOREIGN KEY (protocol_component_id)
     REFERENCES protocol_component(id);
 
+ALTER TABLE public.protocol_component_holds_contract
+    DROP CONSTRAINT IF EXISTS protocol_component_holds_contract_contract_code_id_fkey,
+    ADD CONSTRAINT protocol_component_holds_contract_contract_code_id_fkey
+    FOREIGN KEY (contract_code_id)
+    REFERENCES contract_code(id);
+
 
 -- Add protocol_calls_contract table
 
