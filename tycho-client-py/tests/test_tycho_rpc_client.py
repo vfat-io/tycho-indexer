@@ -8,6 +8,8 @@ from tycho_client.dto import (
     ProtocolComponentsParams,
     ProtocolStateParams,
     ContractStateParams,
+    TokensParams,
+    ResponseToken,
 )
 from tycho_client.rpc_client import TychoRPCClient
 
@@ -85,3 +87,37 @@ def test_get_contract_state_returns_expected_result(mock_post, asset_dir):
     assert isinstance(result, list)
     assert isinstance(result[0], ResponseAccount)
     assert len(result[0].slots) > 0
+
+
+import json
+from unittest.mock import patch, Mock
+
+
+@patch("requests.post")
+def test_get_tokens_returns_expected_result(mock_post, asset_dir):
+    with (asset_dir / "rpc" / "tokens.json").open("r") as fp:
+        data = json.load(fp)
+
+    mock_response = Mock()
+    mock_response.json.return_value = data
+    mock_post.return_value = mock_response
+
+    client = TychoRPCClient()
+    params = TokensParams(
+        min_quality=10,
+        traded_n_days_ago=30
+    )
+    result = client.get_tokens(params)
+
+    mock_post.assert_called_once_with(
+        "http://0.0.0.0:4242/v1/ethereum/tokens",
+        headers={"accept": "application/json", "Content-Type": "application/json"},
+        json={
+            "min_quality": 10,
+            "traded_n_days_ago": 30
+        },
+        params={}
+    )
+    assert isinstance(result, list)
+    assert isinstance(result[0], ResponseToken)
+    assert len(result) == len(data["tokens"])
