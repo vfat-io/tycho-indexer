@@ -1,0 +1,39 @@
+-- Add cascade deletes for protocol system related tables
+
+ALTER TABLE public.protocol_component
+    DROP CONSTRAINT IF EXISTS protocol_component_protocol_system_id_fkey,
+    ADD CONSTRAINT protocol_component_protocol_system_id_fkey
+    FOREIGN KEY (protocol_system_id)
+    REFERENCES protocol_system(id)
+    ON DELETE CASCADE;
+
+ALTER TABLE public.protocol_component_holds_token
+    DROP CONSTRAINT IF EXISTS protocol_component_holds_token_protocol_component_id_fkey,
+    ADD CONSTRAINT protocol_component_holds_token_protocol_component_id_fkey
+    FOREIGN KEY (protocol_component_id)
+    REFERENCES protocol_component(id)
+    ON DELETE CASCADE;
+
+ALTER TABLE public.protocol_component_holds_contract
+    DROP CONSTRAINT IF EXISTS protocol_component_holds_contract_protocol_component_id_fkey,
+    ADD CONSTRAINT protocol_component_holds_contract_protocol_component_id_fkey
+    FOREIGN KEY (protocol_component_id)
+    REFERENCES protocol_component(id)
+    ON DELETE CASCADE;
+
+ALTER TABLE public.protocol_state
+    DROP CONSTRAINT IF EXISTS protocol_state_protocol_component_id_fkey,
+    ADD CONSTRAINT protocol_state_protocol_component_id_fkey
+    FOREIGN KEY (protocol_component_id)
+    REFERENCES protocol_component(id)
+    ON DELETE CASCADE;
+
+ALTER TABLE public.component_balance
+    DROP CONSTRAINT IF EXISTS component_balance_protocol_component_id_fkey,
+    ADD CONSTRAINT component_balance_protocol_component_id_fkey
+    FOREIGN KEY (protocol_component_id)
+    REFERENCES protocol_component(id)
+    ON DELETE CASCADE;
+
+-- drop unused table (we use protocol_component_holds_contract instead)
+DROP TABLE IF EXISTS public.protocol_calls_contract;
