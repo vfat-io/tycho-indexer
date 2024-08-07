@@ -92,7 +92,7 @@ fn get_pools(block: &eth::Block, new_pools: &mut Vec<TransactionChanges>, params
 
     let mut eh = EventHandler::new(block);
 
-    eh.filter_by_address(vec![Address::from_str(factory_address).unwrap()]);
+    eh.filter_by_address(vec![Address::from_str(&params.factory_address).unwrap()]);
 
     eh.on::<PairCreated, _>(&mut on_pair_created);
     eh.handle_events();
