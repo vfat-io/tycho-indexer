@@ -51,6 +51,10 @@ WHERE id IN (
 DELETE FROM protocol_system
 WHERE name = :'protocol_system_name';
 
+-- Delete substreams cursor
+DELETE FROM extraction_state
+WHERE name = :'protocol_system_name';
+
 COMMIT;
 EOF
 
