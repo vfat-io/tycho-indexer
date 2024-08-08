@@ -20,6 +20,9 @@ permissions:
 jobs:
   build-and-push:
     uses: propeller-heads/ci-cd-templates/.github/workflows/build-and-push-docker-image.yaml@main
+    permissions:
+      id-token: write
+      contents: read
     with:
       image_tag: ${{ github.sha }}
       image_name: tycho-indexer
@@ -27,7 +30,10 @@ jobs:
   deploy-dev:
     needs:
       - build-and-push
-    uses: propeller-heads/ci-cd-templates/.github/workflows/deploy-dev.yaml@main
+    uses: propeller-heads/ci-cd-templates/.github/workflows/deploy-any-branch-dev.yaml@main
+    permissions:
+      id-token: write
+      contents: read
     with:
       image_name: tycho-indexer
       image_tag: ${{ github.sha }}
