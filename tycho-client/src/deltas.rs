@@ -569,6 +569,8 @@ impl DeltasClient for WsDeltasClient {
         let this = self.clone();
         let jh = tokio::spawn(async move {
             let mut retry_count = 0;
+            let mut result = Err(DeltasError::NotConnected);
+
             'retry: while retry_count < this.max_reconnects {
                 info!(?ws_uri, "Connecting to WebSocket server");
 
@@ -586,7 +588,6 @@ impl DeltasClient for WsDeltasClient {
                         continue 'retry;
                     }
                 };
-                debug!("Connected to WebSocket server");
 
                 let (ws_tx_new, ws_rx_new) = conn.split();
                 {
@@ -596,7 +597,9 @@ impl DeltasClient for WsDeltasClient {
                 }
                 let mut msg_rx = ws_rx_new.boxed();
 
+                info!("Connection Successful: TychoWebsocketClient started");
                 this.conn_notify.notify_waiters();
+                result = Ok(());
 
                 loop {
                     let res = tokio::select! {
@@ -625,28 +628,34 @@ impl DeltasClient for WsDeltasClient {
                         } else {
                             // Other errors are considered fatal
                             error!(?error, "Fatal error; Exiting");
+                            result = Err(error);
                             break 'retry;
                         }
                     }
                 }
             }
 
-            // Check if max retries has been reached.
-            if retry_count >= this.max_reconnects {
-                error!("Max reconnection attempts reached; Exiting");
-                return Err(DeltasError::NotConnected);
-            }
-
-            // clean up before exiting
+            // Clean up before exiting
             let mut guard = this.inner.as_ref().lock().await;
             *guard = None;
 
-            Ok(())
+            // Check if max retries has been reached.
+            if retry_count >= this.max_reconnects {
+                error!("Max reconnection attempts reached; Exiting");
+                this.conn_notify.notify_waiters(); // Notify that the task is done
+                result = Err(DeltasError::ConnectionClosed);
+            }
+
+            result
         });
+
         self.conn_notify.notified().await;
 
-        info!("Connection successful: TychoWebsocketClient started");
-        Ok(jh)
+        if self.is_connected().await {
+            Ok(jh)
+        } else {
+            Err(DeltasError::NotConnected)
+        }
     }
 
     #[instrument(skip(self))]
@@ -1152,5 +1161,30 @@ mod tests {
         server_thread
             .await
             .expect("ws server loop errored");
+    }
+
+    async fn mock_bad_connection_tycho_ws() -> (SocketAddr, JoinHandle<()>) {
+        let server = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("localhost bind failed");
+        let addr = server.local_addr().unwrap();
+        let jh = tokio::spawn(async move {
+            while let Ok((stream, _)) = server.accept().await {
+                // Immediately close the connection to simulate a failure
+                drop(stream);
+            }
+        });
+        (addr, jh)
+    }
+
+    #[tokio::test]
+    async fn test_connect_max_attempts() {
+        let (addr, _) = mock_bad_connection_tycho_ws().await;
+        let client = WsDeltasClient::new_with_reconnects(&format!("ws://{}", addr), 3).unwrap();
+
+        let join_handle = client.connect().await;
+
+        assert!(join_handle.is_err());
+        assert_eq!(join_handle.unwrap_err().to_string(), DeltasError::NotConnected.to_string());
     }
 }
