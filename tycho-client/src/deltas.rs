@@ -643,6 +643,7 @@ impl DeltasClient for WsDeltasClient {
             if retry_count >= this.max_reconnects {
                 error!("Max reconnection attempts reached; Exiting");
                 this.conn_notify.notify_waiters(); // Notify that the task is done
+                result = Err(DeltasError::ConnectionClosed);
             }
 
             result
