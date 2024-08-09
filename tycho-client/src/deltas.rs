@@ -631,15 +631,16 @@ impl DeltasClient for WsDeltasClient {
                 }
             }
 
+            // Clean up before exiting
+            let mut guard = this.inner.as_ref().lock().await;
+            *guard = None;
+
             // Check if max retries has been reached.
             if retry_count >= this.max_reconnects {
+                this.conn_notify.notify_waiters();
                 error!("Max reconnection attempts reached; Exiting");
                 return Err(DeltasError::NotConnected);
             }
-
-            // clean up before exiting
-            let mut guard = this.inner.as_ref().lock().await;
-            *guard = None;
 
             Ok(())
         });
@@ -1152,5 +1153,31 @@ mod tests {
         server_thread
             .await
             .expect("ws server loop errored");
+    }
+
+    async fn mock_bad_connection_tycho_ws() -> (SocketAddr, JoinHandle<()>) {
+        let server = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("localhost bind failed");
+        let addr = server.local_addr().unwrap();
+        let jh = tokio::spawn(async move {
+            while let Ok((stream, _)) = server.accept().await {
+                // Immediately close the connection to simulate a failure
+                drop(stream);
+            }
+        });
+        (addr, jh)
+    }
+
+    #[tokio::test]
+    async fn test_connect_max_attempts() {
+        let (addr, _) = mock_bad_connection_tycho_ws().await;
+        let client = WsDeltasClient::new_with_reconnects(&format!("ws://{}", addr), 3).unwrap();
+        let join_handle = client.connect().await.unwrap();
+
+        let result = join_handle.await.unwrap();
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), DeltasError::NotConnected.to_string());
     }
 }
