@@ -9,14 +9,14 @@ const config = {
       prerelease: "pre",
     },
   ],
-  tagFormat: '${version}',
+  tagFormat: "${version}",
   ci: true,
   debug: true,
   plugins: [
     [
       "@semantic-release/commit-analyzer",
       {
-        preset: "ESLint",
+        preset: "conventionalcommits",
         releaseRules: [
           { tag: "breaking", release: "major" },
           { tag: "chore", release: false },
@@ -36,12 +36,14 @@ const config = {
       {
         publishCmd:
           'echo "NEXT_RELEASE_VERSION=${nextRelease.version}" >> $GITHUB_OUTPUT',
+        verifyReleaseCmd:
+          'echo "VERIFY_RELEASE_VERSION=${nextRelease.version}" >> $GITHUB_OUTPUT',
       },
     ],
     [
       "@semantic-release/release-notes-generator",
       {
-        preset: "ESLint",
+        preset: "conventionalcommits",
       },
     ],
     [

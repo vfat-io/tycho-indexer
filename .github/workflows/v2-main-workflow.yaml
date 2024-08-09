@@ -6,8 +6,24 @@ on:
       - main
 
 jobs:
+  check-release:
+    uses: propeller-heads/ci-cd-templates/.github/workflows/release-v2.yaml@main
+    with:
+      args: --dry-run --no-ci
+    permissions:
+      contents: write # to be able to publish a GitHub release
+      issues: write # to be able to comment on released issues
+      pull-requests: write # to be able to comment on released pull requests
+      id-token: write # to enable use of OIDC for npm provenance
+    secrets:
+      app_id: ${{ secrets.APP_ID }}
+      app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
   release:
-    uses: propeller-heads/ci-cd-templates/.github/workflows/release.yaml@main
+    needs:
+      - check-release
+    if: needs.check-release.outputs.verify_release_version != ''
+    uses: propeller-heads/ci-cd-templates/.github/workflows/release-v2.yaml@main
     permissions:
       contents: write # to be able to publish a GitHub release
       issues: write # to be able to comment on released issues
@@ -20,28 +36,25 @@ jobs:
   build-and-push:
     needs:
       - release
-    if: needs.release.outputs.next_release_version != ''
     uses: propeller-heads/ci-cd-templates/.github/workflows/build-and-push-docker-image.yaml@main
     permissions:
       id-token: write
       contents: read
     with:
-      image_tag: "${{ needs.release.outputs.next_release_version }}"
+      image_tag: ${{ needs.release.outputs.next_release_version }}
       image_name: tycho-indexer
 
-  deploy-dev:
+  promote-to-dev:
     needs:
       - release
       - build-and-push
-    if: ${{ needs.release.outputs.next_release_version != '' }}
-    uses: propeller-heads/ci-cd-templates/.github/workflows/deploy-dev.yaml@main
+    uses: propeller-heads/ci-cd-templates/.github/workflows/promote-to-dev.yaml@main
+    with:
+      image_tag: ${{ needs.release.outputs.next_release_version }}
+      image_name: tycho-indexer
     permissions:
       id-token: write
       contents: read
-    with:
-      image_tag: "${{ needs.release.outputs.next_release_version }}"
-      image_name: tycho-indexer
-      app_name: tycho-indexer
     secrets:
       app_id: ${{ secrets.APP_ID }}
       app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
