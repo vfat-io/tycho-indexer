@@ -12,7 +12,15 @@ from .dto import (
     ContractStateParams,
     ResponseToken,
     TokensParams,
+    HexBytes,
 )
+
+
+class HexBytesEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, HexBytes):
+            return obj.hex()
+        return super().default(obj)
 
 
 class TychoRPCClient:
@@ -37,9 +45,9 @@ class TychoRPCClient:
 
         # Convert to JSON strings to cast booleans to strings
         if body is not None:
-            body = json.dumps(body)
+            body = json.dumps(body, cls=HexBytesEncoder)
         if params:
-            params = json.dumps(params)
+            params = json.dumps(params, cls=HexBytesEncoder)
 
         response = requests.post(
             self.rpc_url + endpoint,
@@ -73,7 +81,7 @@ class TychoRPCClient:
         params = params.dict(exclude_none=True)
 
         query_params_fields = ["tvl_gt", "inertia_min_gt", "include_balances"]
-        body_fields = ["protocolIds", "protocolSystem", "version"]
+        body_fields = ["protocol_ids", "protocol_system", "version"]
 
         query_params = {k: v for k, v in params.items() if k in query_params_fields}
         body = {k: v for k, v in params.items() if k in body_fields}
@@ -87,7 +95,7 @@ class TychoRPCClient:
         params = params.dict(exclude_none=True)
 
         query_params_fields = ["tvl_gt", "inertia_min_gt", "include_balances"]
-        body_fields = ["contractIds", "version"]
+        body_fields = ["contract_ids", "version"]
 
         query_params = {k: v for k, v in params.items() if k in query_params_fields}
         body = {k: v for k, v in params.items() if k in body_fields}
@@ -102,7 +110,7 @@ class TychoRPCClient:
     def get_tokens(self, params: TokensParams) -> list[ResponseToken]:
         params = params.dict(exclude_none=True)
 
-        body_fields = ["min_quality", "pagination", "tokenAddresses", "traded_n_days_ago"]
+        body_fields = ["min_quality", "pagination", "token_addresses", "traded_n_days_ago"]
         body = {k: v for k, v in params.items() if k in body_fields}
 
         res = self._post_request(f"/v1/{self._chain}/tokens", body=body, params={})
@@ -111,7 +119,13 @@ class TychoRPCClient:
 
 if __name__ == "__main__":
     client = TychoRPCClient("http://0.0.0.0:4242")
-    print(client.get_protocol_components(ProtocolComponentsParams(protocol_system="test_protocol")))
-    print(client.get_protocol_state(ProtocolStateParams(protocol_system="test_protocol")))
+    print(
+        client.get_protocol_components(
+            ProtocolComponentsParams(protocol_system="test_protocol")
+        )
+    )
+    print(
+        client.get_protocol_state(ProtocolStateParams(protocol_system="test_protocol"))
+    )
     print(client.get_contract_state(ContractStateParams()))
     print(client.get_tokens(TokensParams(min_quality=10, traded_n_days_ago=30)))
