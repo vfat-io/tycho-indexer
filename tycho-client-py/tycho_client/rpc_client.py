@@ -29,7 +29,7 @@ class TychoRPCClient:
     """
 
     def __init__(
-            self, rpc_url: str = "http://0.0.0.0:4242", chain: Chain = Chain.ethereum
+        self, rpc_url: str = "http://0.0.0.0:4242", chain: Chain = Chain.ethereum
     ):
         self.rpc_url = rpc_url
         self._headers = {
@@ -39,7 +39,7 @@ class TychoRPCClient:
         self._chain = chain
 
     def _post_request(
-            self, endpoint: str, params: dict = None, body: dict = None
+        self, endpoint: str, params: dict = None, body: dict = None
     ) -> dict:
         """Sends a POST request to the given endpoint and returns the response."""
 
@@ -58,7 +58,7 @@ class TychoRPCClient:
         return response.json()
 
     def get_protocol_components(
-            self, params: ProtocolComponentsParams
+        self, params: ProtocolComponentsParams
     ) -> list[ProtocolComponent]:
         params = params.dict(exclude_none=True)
 
@@ -69,14 +69,12 @@ class TychoRPCClient:
         body = {k: v for k, v in params.items() if k in body_fields}
 
         res = self._post_request(
-            f"/v1/{self._chain}/protocol_components",
-            body=body,
-            params=query_params,
+            f"/v1/{self._chain}/protocol_components", body=body, params=query_params
         )
         return [ProtocolComponent(**c) for c in res["protocol_components"]]
 
     def get_protocol_state(
-            self, params: ProtocolStateParams
+        self, params: ProtocolStateParams
     ) -> list[ResponseProtocolState]:
         params = params.dict(exclude_none=True)
 
@@ -101,16 +99,19 @@ class TychoRPCClient:
         body = {k: v for k, v in params.items() if k in body_fields}
 
         res = self._post_request(
-            f"/v1/{self._chain}/contract_state",
-            body=body,
-            params=query_params,
+            f"/v1/{self._chain}/contract_state", body=body, params=query_params
         )
         return [ResponseAccount(**a) for a in res["accounts"]]
 
     def get_tokens(self, params: TokensParams) -> list[ResponseToken]:
         params = params.dict(exclude_none=True)
 
-        body_fields = ["min_quality", "pagination", "token_addresses", "traded_n_days_ago"]
+        body_fields = [
+            "min_quality",
+            "pagination",
+            "token_addresses",
+            "traded_n_days_ago",
+        ]
         body = {k: v for k, v in params.items() if k in body_fields}
 
         res = self._post_request(f"/v1/{self._chain}/tokens", body=body, params={})

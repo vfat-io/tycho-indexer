@@ -21,7 +21,7 @@ class HexBytes(_HexBytes):
         # the returned value will be ignored
         field_schema.update(
             # some example postcodes
-            examples=["0xBadBad"],
+            examples=["0xBadBad"]
         )
 
     @classmethod
@@ -235,6 +235,7 @@ class FeedMessage(BaseModel):
 
 
 # Client Parameters
+
 
 class ProtocolId(BaseModel):
     chain: Chain
