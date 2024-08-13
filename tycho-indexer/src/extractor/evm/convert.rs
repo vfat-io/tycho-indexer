@@ -80,7 +80,6 @@ impl From<&evm::Account> for Contract {
                 .map(|(u, v)| (Bytes::from(u), Bytes::from(v)))
                 .collect(),
             native_balance: Bytes::from(value.balance),
-            balances: HashMap::new(), // empty balances when converted from Account
             code: value.code.clone(),
             code_hash: Bytes::from(value.code_hash.as_bytes()),
             balance_modify_tx: Bytes::from(value.balance_modify_tx.as_bytes()),

@@ -51,7 +51,6 @@ pub trait RPCClient {
     async fn get_contract_state(
         &self,
         chain: Chain,
-        filters: &StateRequestParameters,
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError>;
 
@@ -179,11 +178,10 @@ impl HttpRPCClient {
 
 #[async_trait]
 impl RPCClient for HttpRPCClient {
-    #[instrument(skip(self, filters, request))]
+    #[instrument(skip(self, request))]
     async fn get_contract_state(
         &self,
         chain: Chain,
-        filters: &StateRequestParameters,
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
@@ -198,13 +196,12 @@ impl RPCClient for HttpRPCClient {
         }
 
         let uri = format!(
-            "{}/{}/{}/contract_state{}",
+            "{}/{}/{}/contract_state",
             self.uri
                 .to_string()
                 .trim_end_matches('/'),
             TYCHO_SERVER_VERSION,
-            chain,
-            filters.to_query_string()
+            chain
         );
         debug!(%uri, "Sending contract_state request to Tycho server");
         let body =
@@ -411,9 +408,6 @@ mod tests {
                     "title": "",
                     "slots": {},
                     "native_balance": "0x01f4",
-                    "balances": {
-                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": "0x01f4"
-                    },
                     "code": "0x00",
                     "code_hash": "0x5c06b7c5b3d910fd33bc2229846f9ddaf91d584d9b196e16636901ac3a77077e",
                     "balance_modify_tx": "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -427,7 +421,7 @@ mod tests {
         serde_json::from_str::<StateRequestResponse>(server_resp).expect("deserialize");
 
         let mocked_server = server
-            .mock("POST", "/v1/ethereum/contract_state?include_balances=false")
+            .mock("POST", "/v1/ethereum/contract_state")
             .expect(1)
             .with_body(server_resp)
             .create_async()
@@ -436,7 +430,7 @@ mod tests {
         let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
 
         let response = client
-            .get_contract_state(Chain::Ethereum, &Default::default(), &Default::default())
+            .get_contract_state(Chain::Ethereum, &Default::default())
             .await
             .expect("get state");
         let accounts = response.accounts;
@@ -450,13 +444,6 @@ mod tests {
             accounts[0].code_hash,
             hex::decode("5c06b7c5b3d910fd33bc2229846f9ddaf91d584d9b196e16636901ac3a77077e")
                 .unwrap()
-        );
-        assert_eq!(
-            accounts[0].balances.get(
-                &Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                    .expect("Missing balance!")
-            ),
-            Some(&Bytes::from_str("0x01f4").unwrap())
         );
     }
 

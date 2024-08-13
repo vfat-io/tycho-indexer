@@ -137,15 +137,14 @@ where
         Self { db_gateway, pending_deltas, token_cache: Arc::new(RwLock::new(token_cache)) }
     }
 
-    #[instrument(skip(self, chain, request, params))]
+    #[instrument(skip(self, chain, request))]
     async fn get_contract_state(
         &self,
         chain: &Chain,
         request: &dto::StateRequestBody,
-        params: &dto::StateRequestParameters,
     ) -> Result<dto::StateRequestResponse, RpcError> {
-        info!(?chain, ?request, ?params, "Getting contract state.");
-        self.get_contract_state_inner(chain, request, params)
+        info!(?chain, ?request, "Getting contract state.");
+        self.get_contract_state_inner(chain, request)
             .await
     }
 
@@ -153,7 +152,6 @@ where
         &self,
         chain: &Chain,
         request: &dto::StateRequestBody,
-        params: &dto::StateRequestParameters,
     ) -> Result<dto::StateRequestResponse, RpcError> {
         //TODO: set version to latest if we are targeting a version within pending deltas
         let at = BlockOrTimestamp::try_from(&request.version)?;
@@ -174,7 +172,7 @@ where
         // Get the contract states from the database
         let mut accounts = self
             .db_gateway
-            .get_contracts(chain, addresses, Some(&db_version), true, params.include_balances)
+            .get_contracts(chain, addresses, Some(&db_version), true)
             .await
             .map_err(|err| {
                 error!(error = %err, "Error while getting contract states.");
@@ -603,26 +601,24 @@ where
     ),
     request_body = StateRequestBody,
     params(
-        ("execution_env" = Chain, description = "Execution environment"),
-        StateRequestParameters
+        ("execution_env" = Chain, description = "Execution environment")
     ),
 )]
 pub async fn contract_state<G: Gateway>(
     execution_env: web::Path<Chain>,
-    query: web::Query<dto::StateRequestParameters>,
     body: web::Json<dto::StateRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
     // Call the handler to get the state
     let response = handler
         .into_inner()
-        .get_contract_state(&execution_env, &body, &query)
+        .get_contract_state(&execution_env, &body)
         .await;
 
     match response {
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
-            error!(error = %err, ?body, ?query, "Error while getting contract state.");
+            error!(error = %err, ?body, "Error while getting contract state.");
             HttpResponse::InternalServerError().finish()
         }
     }
@@ -924,7 +920,6 @@ mod tests {
             "account0".to_owned(),
             evm_contract_slots([(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
             Bytes::from(U256::from(101)),
-            HashMap::new(),
             Bytes::from("C0C0C0"),
             "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                 .parse()
@@ -944,7 +939,7 @@ mod tests {
         let mut gw = MockGateway::new();
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_contracts()
-            .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
+            .return_once(|_, _, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::StateRequestBody {
@@ -958,11 +953,7 @@ mod tests {
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
         let state = req_handler
-            .get_contract_state_inner(
-                &Chain::Ethereum,
-                &request,
-                &dto::StateRequestParameters::default(),
-            )
+            .get_contract_state_inner(&Chain::Ethereum, &request)
             .await
             .unwrap();
 

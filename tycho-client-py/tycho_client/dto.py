@@ -21,7 +21,7 @@ class HexBytes(_HexBytes):
         # the returned value will be ignored
         field_schema.update(
             # some example postcodes
-            examples=["0xBadBad"]
+            examples=["0xBadBad"],
         )
 
     @classmethod
@@ -177,7 +177,6 @@ class ResponseAccount(BaseModel):
     title: str
     slots: Dict[HexBytes, HexBytes]
     native_balance: HexBytes = Field(alias="balance")
-    balances: Dict[HexBytes, HexBytes]
     code: HexBytes
     code_hash: HexBytes
     balance_modify_tx: HexBytes
@@ -275,9 +274,6 @@ class ProtocolStateParams(BaseModel):
 
 
 class ContractStateParams(BaseModel):
-    tvl_gt: Optional[int] = None
-    inertia_min_gt: Optional[int] = None
-    include_balances: Optional[bool] = True
     contract_ids: Optional[List[ContractId]] = Field(default=None)
     version: Optional[VersionParams] = None
 

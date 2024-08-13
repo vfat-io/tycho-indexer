@@ -441,7 +441,7 @@ async fn run_token_analyzer(
 }
 
 #[cfg(test)]
-mod tests {
+mod test_serial_db {
     use super::*;
     use tycho_storage::postgres::testing::run_against_db;
 
@@ -466,7 +466,7 @@ mod tests {
             initialize_accounts(accounts, block_id, rpc_url.as_str(), chain, &cached_gw).await;
 
             let contracts = cached_gw
-                .get_contracts(&chain, None, None, true, false)
+                .get_contracts(&chain, None, None, true)
                 .await
                 .unwrap();
 
@@ -498,7 +498,7 @@ mod tests {
             initialize_accounts(accounts, block_id, rpc_url.as_str(), chain, &cached_gw).await;
 
             let contracts = cached_gw
-                .get_contracts(&chain, None, None, true, false)
+                .get_contracts(&chain, None, None, true)
                 .await
                 .unwrap();
 
@@ -531,7 +531,7 @@ mod tests {
             initialize_accounts(accounts, 20378315, rpc_url.as_str(), chain, &cached_gw).await;
 
             let contracts = cached_gw
-                .get_contracts(&chain, None, None, true, false)
+                .get_contracts(&chain, None, None, true)
                 .await
                 .unwrap();
 
