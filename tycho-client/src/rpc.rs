@@ -69,11 +69,13 @@ pub trait RPCClient {
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError>;
 
+    #[allow(clippy::too_many_arguments)]
     async fn get_protocol_states_paginated(
         &self,
         chain: Chain,
         filters: &StateRequestParameters,
         ids: &[ProtocolId],
+        protocol_system: &Option<String>,
         version: &VersionParam,
         chunk_size: usize,
         concurrency: usize,
@@ -83,7 +85,7 @@ pub trait RPCClient {
             .chunks(chunk_size)
             .map(|c| ProtocolStateRequestBody {
                 protocol_ids: Some(c.to_vec()),
-                protocol_system: None,
+                protocol_system: protocol_system.clone(),
                 version: version.clone(),
             })
             .collect::<Vec<_>>();

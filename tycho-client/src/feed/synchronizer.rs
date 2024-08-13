@@ -208,6 +208,7 @@ where
                 self.extractor_id.chain,
                 &filters,
                 &request_ids,
+                &Some(self.extractor_id.name.clone()),
                 &version,
                 50,
                 4,
@@ -254,6 +255,7 @@ where
                                 .map(|id| ContractId::new(self.extractor_id.chain, id))
                                 .collect(),
                         ),
+                        Some(self.extractor_id.name.clone()),
                         version,
                     ),
                 )

@@ -223,7 +223,7 @@ impl From<&dto::PaginationParams> for PaginationParams {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum DeltaError {
     #[error("Id mismatch: {0} vs {1}")]
     IdMismatch(String, String),
