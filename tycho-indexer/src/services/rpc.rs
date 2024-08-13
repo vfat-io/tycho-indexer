@@ -945,7 +945,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_contracts()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::StateRequestBody {
             contract_ids: Some(vec![dto::ContractId::new(
@@ -1006,7 +1006,7 @@ mod tests {
         // ensure the gateway is only accessed once - the second request should hit cache
         gw.expect_get_tokens()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         // request for 2 tokens that are in the DB (WETH and USDC)
         let request = dto::TokensRequestBody {
@@ -1053,7 +1053,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_states()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::ProtocolStateRequestBody {
             protocol_ids: Some(vec![dto::ProtocolId {
@@ -1102,7 +1102,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_components()
             .return_once(|_, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::ProtocolComponentsRequestBody {
             protocol_system: Option::from("ambient".to_string()),
@@ -1141,7 +1141,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_accounts_delta()
             .return_once(|_, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
         let request = dto::ContractDeltaRequestBody {
             contract_ids: Some(vec![dto::ContractId::new(
                 Chain::Ethereum.into(),
@@ -1202,7 +1202,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_states_delta()
             .return_once(|_, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
         let request = dto::ProtocolDeltaRequestBody {
             component_ids: Some(vec!["state3".to_owned()]), // Filter to only "state3"
             start: dto::VersionParam {

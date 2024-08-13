@@ -327,8 +327,7 @@ pub struct ExtractorBuilder {
     final_block_only: bool,
 }
 
-pub type HandleResult =
-    (JoinHandle<Result<(), ExtractionError>>, (ExtractorHandle, ImplementationType));
+pub type HandleResult = (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle);
 
 impl ExtractorBuilder {
     pub fn new(config: &ExtractorConfig, endpoint_url: &str) -> Self {
@@ -496,7 +495,7 @@ impl ExtractorBuilder {
             ExtractorRunner::new(extractor, stream, Arc::new(Mutex::new(HashMap::new())), ctrl_rx);
 
         let handle = runner.run();
-        Ok((handle, (ExtractorHandle::new(id, ctrl_tx), self.config.implementation_type)))
+        Ok((handle, ExtractorHandle::new(id, ctrl_tx)))
     }
 }
 
