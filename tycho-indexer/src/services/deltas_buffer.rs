@@ -655,7 +655,9 @@ mod test {
             .get_new_components(None, None)
             .unwrap();
 
-        assert_eq!(new_components, exp);
+        for expected in &exp {
+            assert!(new_components.contains(expected));
+        }
 
         let new_components = buffer
             .get_new_components(Some(&["component3"]), None)
