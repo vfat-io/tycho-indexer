@@ -680,6 +680,7 @@ mod test {
     // bad input
     #[case(Some("unknown_system".to_string()), Some(PendingDeltasError::UnknownExtractor("unknown_system".to_string())))]
     // no extractor provided
+    #[allow(clippy::duplicated_attributes)]
     #[case(None, None)]
     fn test_get_block_finality(
         #[case] protocol_system: Option<String>,
