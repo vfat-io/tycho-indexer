@@ -503,7 +503,7 @@ impl ProtocolStateDelta {
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
 pub struct StateRequestBody {
-    #[serde(rename = "contractIds")]
+    #[serde(alias = "contractIds")]
     pub contract_ids: Option<Vec<ContractId>>,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
@@ -708,7 +708,7 @@ impl StateRequestParameters {
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
 pub struct TokensRequestBody {
-    #[serde(rename = "tokenAddresses")]
+    #[serde(alias = "tokenAddresses")]
     #[schema(value_type=Option<Vec<String>>)]
     pub token_addresses: Option<Vec<Bytes>>,
     #[serde(default)]
@@ -788,7 +788,7 @@ impl From<models::token::CurrencyToken> for ResponseToken {
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
 pub struct ProtocolComponentsRequestBody {
     pub protocol_system: Option<String>,
-    #[serde(rename = "componentAddresses")]
+    #[serde(alias = "componentAddresses")]
     pub component_ids: Option<Vec<String>>,
 }
 
@@ -843,7 +843,7 @@ impl ProtocolComponentRequestResponse {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct ContractDeltaRequestBody {
-    #[serde(rename = "contractIds")]
+    #[serde(alias = "contractIds")]
     pub contract_ids: Option<Vec<ContractId>>,
     #[serde(default = "VersionParam::default")]
     pub start: VersionParam,
@@ -893,9 +893,9 @@ impl From<models::protocol::ProtocolComponentState> for ResponseProtocolState {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema, Default)]
 pub struct ProtocolStateRequestBody {
-    #[serde(rename = "protocolIds")]
+    #[serde(alias = "protocolIds")]
     pub protocol_ids: Option<Vec<ProtocolId>>,
-    #[serde(rename = "protocolSystem")]
+    #[serde(alias = "protocolSystem")]
     pub protocol_system: Option<String>,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
@@ -920,7 +920,7 @@ impl ProtocolStateRequestResponse {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct ProtocolDeltaRequestBody {
-    #[serde(rename = "contractIds")]
+    #[serde(alias = "contractIds")]
     pub component_ids: Option<Vec<String>>,
     #[serde(default = "VersionParam::default")]
     pub start: VersionParam,
@@ -1009,6 +1009,37 @@ mod test {
         };
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_state_request_dual_interface() {
+        let json_common = r#"
+    {
+        "__CONTRACT_IDS__": [
+            {
+                "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
+                "chain": "ethereum"
+            }
+        ],
+        "version": {
+            "timestamp": "2069-01-01T04:20:00",
+            "block": {
+                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#;
+
+        let json_str_snake = json_common.replace("\"__CONTRACT_IDS__\"", "\"contract_ids\"");
+        let json_str_camel = json_common.replace("\"__CONTRACT_IDS__\"", "\"contractIds\"");
+
+        let snake: StateRequestBody = serde_json::from_str(&json_str_snake).unwrap();
+        let camel: StateRequestBody = serde_json::from_str(&json_str_camel).unwrap();
+
+        assert_eq!(snake, camel);
     }
 
     #[test]
