@@ -22,16 +22,12 @@ use tycho_core::{
     storage::StorageError,
 };
 
-type NativeRevertBuffer = Arc<Mutex<RevertBuffer<BlockAggregatedDeltas>>>;
-type VmRevertBuffer = Arc<Mutex<RevertBuffer<BlockAggregatedDeltas>>>;
-
 #[derive(Default, Clone)]
 pub struct PendingDeltas {
-    native: HashMap<String, NativeRevertBuffer>,
-    vm: HashMap<String, VmRevertBuffer>,
+    buffers: HashMap<String, Arc<Mutex<RevertBuffer<BlockAggregatedDeltas>>>>,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum PendingDeltasError {
     #[error("Failed to acquire {0} lock: {1}")]
     LockError(String, String),
@@ -48,22 +44,12 @@ pub enum PendingDeltasError {
 pub type Result<T> = std::result::Result<T, PendingDeltasError>;
 
 impl PendingDeltas {
-    pub fn new<'a>(
-        vm_extractors: impl IntoIterator<Item = &'a str>,
-        native_extractors: impl IntoIterator<Item = &'a str>,
-    ) -> Self {
+    pub fn new<'a>(extractors: impl IntoIterator<Item = &'a str>) -> Self {
         Self {
-            native: native_extractors
+            buffers: extractors
                 .into_iter()
                 .map(|e| {
-                    debug!("Creating new NativeRevertBuffer for {}", e);
-                    (e.to_string(), Arc::new(Mutex::new(RevertBuffer::new())))
-                })
-                .collect(),
-            vm: vm_extractors
-                .into_iter()
-                .map(|e| {
-                    debug!("Creating new VmRevertBuffer for {}", e);
+                    debug!("Creating new RevertBuffer for {}", e);
                     (e.to_string(), Arc::new(Mutex::new(RevertBuffer::new())))
                 })
                 .collect(),
@@ -77,24 +63,12 @@ impl PendingDeltas {
             .map(|msg| msg.into());
         match maybe_convert {
             Some(msg) => {
-                let maybe_vm_buffer = self.vm.get(&msg.extractor);
-                let maybe_native_buffer = self.native.get(&msg.extractor);
+                let maybe_buffer = self.buffers.get(&msg.extractor);
 
-                match (maybe_vm_buffer, maybe_native_buffer) {
-                    (Some(buffer), _) => {
+                match maybe_buffer {
+                    Some(buffer) => {
                         let mut guard = buffer.lock().map_err(|e| {
-                            PendingDeltasError::LockError("VM".to_string(), e.to_string())
-                        })?;
-                        if msg.revert {
-                            guard.purge(msg.block.hash.clone())?;
-                        } else {
-                            guard.insert_block(msg.clone())?;
-                            guard.drain_new_finalized_blocks(msg.finalised_block_height)?;
-                        }
-                    }
-                    (_, Some(buffer)) => {
-                        let mut guard = buffer.lock().map_err(|e| {
-                            PendingDeltasError::LockError("Native".to_string(), e.to_string())
+                            PendingDeltasError::LockError(msg.extractor.to_string(), e.to_string())
                         })?;
                         if msg.revert {
                             guard.purge(msg.block.hash.clone())?;
@@ -157,7 +131,7 @@ impl PendingDeltas {
         version: Option<BlockNumberOrTimestamp>,
     ) -> Result<bool> {
         let mut change_found = false;
-        for buffer in self.native.values() {
+        for buffer in self.buffers.values() {
             let guard = buffer
                 .lock()
                 .map_err(|e| PendingDeltasError::LockError("Native".to_string(), e.to_string()))?;
@@ -205,7 +179,7 @@ impl PendingDeltas {
         version: Option<BlockNumberOrTimestamp>,
     ) -> Result<bool> {
         let mut change_found = false;
-        for buffer in self.vm.values() {
+        for buffer in self.buffers.values() {
             let guard = buffer
                 .lock()
                 .map_err(|e| PendingDeltasError::LockError("VM".to_string(), e.to_string()))?;
@@ -257,30 +231,10 @@ impl PendingDeltas {
     ) -> Result<Vec<ProtocolComponent>> {
         let requested_ids: Option<HashSet<&str>> = ids.map(|ids| ids.iter().cloned().collect());
         let mut new_components = Vec::new();
-        for buffer in self.native.values() {
+        for (name, buffer) in self.buffers.iter() {
             let guard = buffer
                 .lock()
-                .map_err(|e| PendingDeltasError::LockError("Native".to_string(), e.to_string()))?;
-            for entry in guard.get_block_range(None, None)? {
-                new_components.extend(
-                    entry
-                        .new_components
-                        .clone()
-                        .into_values()
-                        .filter(|comp| {
-                            if let Some(ids) = requested_ids.as_ref() {
-                                ids.contains(comp.id.as_str())
-                            } else {
-                                true
-                            }
-                        }),
-                );
-            }
-        }
-        for buffer in self.vm.values() {
-            let guard = buffer
-                .lock()
-                .map_err(|e| PendingDeltasError::LockError("Native".to_string(), e.to_string()))?;
+                .map_err(|e| PendingDeltasError::LockError(name.to_string(), e.to_string()))?;
             for entry in guard.get_block_range(None, None)? {
                 new_components.extend(
                     entry
@@ -307,29 +261,38 @@ impl PendingDeltas {
 
     /// Returns finality for any extractor, can error if lock is poisened. Returns None if buffer is
     /// empty.
+    /// Note - if no protocol system is provided, we choose a random extractor to get the finality
+    /// status from. This is particularly risky when there is an extractor syncing.
     pub fn get_block_finality(
         &self,
         version: BlockNumberOrTimestamp,
+        protocol_system: Option<String>,
     ) -> Result<Option<FinalityStatus>> {
-        // TODO: This is a temporary hack, since finality status may be different depending on each
-        //  individual extractor.
-        let vm_first = self.vm.values().next();
-        let native_first = self.native.values().next();
+        match protocol_system {
+            Some(system) => {
+                if let Some(buffer) = self.buffers.get(&system) {
+                    let guard = buffer
+                        .lock()
+                        .map_err(|e| PendingDeltasError::LockError(system, e.to_string()))?;
+                    Ok(guard.get_finality_status(version))
+                } else {
+                    Err(PendingDeltasError::UnknownExtractor(system))
+                }
+            }
+            None => {
+                // Use any extractor to get the finality status
+                let maybe_buffer = self.buffers.iter().next();
 
-        match (native_first, vm_first) {
-            (Some(first), _) => {
-                let guard = first.lock().map_err(|e| {
-                    PendingDeltasError::LockError("Native".to_string(), e.to_string())
-                })?;
-                Ok(guard.get_finality_status(version))
+                match maybe_buffer {
+                    Some((name, buffer)) => {
+                        let guard = buffer.lock().map_err(|e| {
+                            PendingDeltasError::LockError(name.to_string(), e.to_string())
+                        })?;
+                        Ok(guard.get_finality_status(version))
+                    }
+                    _ => Ok(None),
+                }
             }
-            (_, Some(first)) => {
-                let guard = first
-                    .lock()
-                    .map_err(|e| PendingDeltasError::LockError("VM".to_string(), e.to_string()))?;
-                Ok(guard.get_finality_status(version))
-            }
-            _ => Ok(None),
         }
     }
 
@@ -535,18 +498,18 @@ mod test {
 
     #[test]
     fn test_insert_vm() {
-        let buffer = PendingDeltas::new(["vm:extractor"], []);
+        let buffer = PendingDeltas::new(["vm:extractor"]);
         let exp: BlockAggregatedDeltas = (&vm_block_deltas()).into();
 
         buffer
             .insert(Arc::new(vm_block_deltas()))
             .expect("vm insert failed");
 
-        let vm_revert_buffer = buffer
-            .vm
+        let revert_buffer = buffer
+            .buffers
             .get("vm:extractor")
             .expect("vm:extractor buffer missing");
-        let binding = vm_revert_buffer.lock().unwrap();
+        let binding = revert_buffer.lock().unwrap();
         let res = binding
             .get_block_range(None, None)
             .expect("Failed to get block range")
@@ -556,15 +519,15 @@ mod test {
 
     #[test]
     fn test_insert_native() {
-        let buffer = PendingDeltas::new([], ["native:extractor"]);
+        let pending_buffer = PendingDeltas::new(["native:extractor"]);
         let exp: BlockAggregatedDeltas = (&native_block_deltas()).into();
 
-        buffer
+        pending_buffer
             .insert(Arc::new(native_block_deltas()))
             .expect("native insert failed");
 
-        let native_revert_buffer = buffer
-            .native
+        let native_revert_buffer = pending_buffer
+            .buffers
             .get("native:extractor")
             .expect("native:extractor buffer missing");
         let binding = native_revert_buffer.lock().unwrap();
@@ -578,7 +541,7 @@ mod test {
     #[test]
     fn test_merge_native_states() {
         let mut state = vec![native_state()]; // db state
-        let buffer = PendingDeltas::new([], ["native:extractor"]);
+        let buffer = PendingDeltas::new(["native:extractor"]);
         buffer
             .insert(Arc::new(native_block_deltas()))
             .unwrap();
@@ -621,7 +584,7 @@ mod test {
     #[test]
     fn test_update_vm_states() {
         let mut state = [vm_state()];
-        let buffer = PendingDeltas::new(["vm:extractor"], []);
+        let buffer = PendingDeltas::new(["vm:extractor"]);
         buffer
             .insert(Arc::new(vm_block_deltas()))
             .unwrap();
@@ -680,7 +643,7 @@ mod test {
                 "2020-01-01T00:00:00".parse().unwrap(),
             ),
         ];
-        let buffer = PendingDeltas::new(["vm:extractor"], ["native:extractor"]);
+        let buffer = PendingDeltas::new(["vm:extractor", "native:extractor"]);
         buffer
             .insert(Arc::new(vm_block_deltas()))
             .unwrap();
@@ -692,7 +655,9 @@ mod test {
             .get_new_components(None, None)
             .unwrap();
 
-        assert_eq!(new_components, exp);
+        for expected in &exp {
+            assert!(new_components.contains(expected));
+        }
 
         let new_components = buffer
             .get_new_components(Some(&["component3"]), None)
@@ -705,5 +670,44 @@ mod test {
             .unwrap();
 
         assert_eq!(new_components, vec![exp[1].clone()]);
+    }
+
+    use rstest::rstest;
+
+    #[rstest]
+    // native extractor
+    #[case(Some("native:extractor".to_string()), None)]
+    // vm extractor
+    #[case(Some("vm:extractor".to_string()), None)]
+    // bad input
+    #[case(Some("unknown_system".to_string()), Some(PendingDeltasError::UnknownExtractor("unknown_system".to_string())))]
+    // no extractor provided
+    #[allow(clippy::duplicated_attributes)]
+    #[case(None, None)]
+    fn test_get_block_finality(
+        #[case] protocol_system: Option<String>,
+        #[case] expected_error: Option<PendingDeltasError>,
+    ) {
+        let buffer = PendingDeltas::new(["vm:extractor", "native:extractor"]);
+        buffer
+            .insert(Arc::new(vm_block_deltas()))
+            .expect("vm insert failed");
+        buffer
+            .insert(Arc::new(native_block_deltas()))
+            .expect("native insert failed");
+
+        let version = BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap());
+
+        let result = buffer.get_block_finality(version, protocol_system.clone());
+
+        match expected_error {
+            Some(expected_err) => {
+                assert!(matches!(result, Err(ref err) if err == &expected_err));
+            }
+            None => {
+                let finality_status = result.expect("Failed to get block finality");
+                assert!(finality_status.is_some());
+            }
+        }
     }
 }

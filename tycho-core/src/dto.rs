@@ -505,22 +505,33 @@ impl ProtocolStateDelta {
 pub struct StateRequestBody {
     #[serde(alias = "contractIds")]
     pub contract_ids: Option<Vec<ContractId>>,
+    #[serde(rename = "protocolSystem", default)]
+    pub protocol_system: Option<String>,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
 }
 
 impl StateRequestBody {
-    pub fn new(contract_ids: Option<Vec<ContractId>>, version: VersionParam) -> Self {
-        Self { contract_ids, version }
+    pub fn new(
+        contract_ids: Option<Vec<ContractId>>,
+        protocol_system: Option<String>,
+        version: VersionParam,
+    ) -> Self {
+        Self { contract_ids, protocol_system, version }
     }
 
     pub fn from_block(block: BlockParam) -> Self {
-        Self { contract_ids: None, version: VersionParam { timestamp: None, block: Some(block) } }
+        Self {
+            contract_ids: None,
+            protocol_system: None,
+            version: VersionParam { timestamp: None, block: Some(block) },
+        }
     }
 
     pub fn from_timestamp(timestamp: NaiveDateTime) -> Self {
         Self {
             contract_ids: None,
+            protocol_system: None,
             version: VersionParam { timestamp: Some(timestamp), block: None },
         }
     }
@@ -998,6 +1009,7 @@ mod test {
 
         let expected = StateRequestBody {
             contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
+            protocol_system: None,
             version: VersionParam {
                 timestamp: Some(expected_timestamp),
                 block: Some(BlockParam {
@@ -1067,6 +1079,7 @@ mod test {
 
         let expected = StateRequestBody {
             contract_ids: None,
+            protocol_system: None,
             version: VersionParam {
                 timestamp: Some(expected_timestamp),
                 block: Some(BlockParam {

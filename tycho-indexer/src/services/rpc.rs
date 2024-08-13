@@ -158,7 +158,7 @@ where
         //TODO: set version to latest if we are targeting a version within pending deltas
         let at = BlockOrTimestamp::try_from(&request.version)?;
         let (db_version, deltas_version) = self
-            .calculate_versions(&at, *chain)
+            .calculate_versions(&at, &request.protocol_system.clone(), *chain)
             .await?;
 
         // Get the contract IDs from the request
@@ -208,6 +208,7 @@ where
     async fn calculate_versions(
         &self,
         request_version: &BlockOrTimestamp,
+        protocol_system: &Option<String>,
         chain: Chain,
     ) -> Result<(Version, Option<BlockNumberOrTimestamp>), RpcError> {
         let ordered_version = match request_version {
@@ -224,7 +225,7 @@ where
         };
         let request_version_finality = self
             .pending_deltas
-            .get_block_finality(ordered_version)?
+            .get_block_finality(ordered_version, protocol_system.clone())?
             .unwrap_or_else(|| {
                 warn!(?ordered_version, "No finality found for version.");
                 FinalityStatus::Finalized
@@ -331,7 +332,7 @@ where
         //TODO: handle when no id is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
         let (db_version, deltas_version) = self
-            .calculate_versions(&at, *chain)
+            .calculate_versions(&at, &request.protocol_system.clone(), *chain)
             .await?;
 
         // Get the protocol IDs from the request
@@ -892,6 +893,7 @@ mod tests {
 
         let expected = dto::StateRequestBody {
             contract_ids: Some(vec![dto::ContractId::new(dto::Chain::Ethereum, contract0)]),
+            protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
 
@@ -943,7 +945,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_contracts()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::StateRequestBody {
             contract_ids: Some(vec![dto::ContractId::new(
@@ -952,6 +954,7 @@ mod tests {
                     .parse::<Bytes>()
                     .unwrap(),
             )]),
+            protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
         let state = req_handler
@@ -978,6 +981,7 @@ mod tests {
                 dto::Chain::Ethereum,
                 Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap(),
             )]),
+            protocol_system: None,
             version: dto::VersionParam::default(),
         };
 
@@ -1002,7 +1006,7 @@ mod tests {
         // ensure the gateway is only accessed once - the second request should hit cache
         gw.expect_get_tokens()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         // request for 2 tokens that are in the DB (WETH and USDC)
         let request = dto::TokensRequestBody {
@@ -1049,7 +1053,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_states()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::ProtocolStateRequestBody {
             protocol_ids: Some(vec![dto::ProtocolId {
@@ -1098,7 +1102,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_components()
             .return_once(|_, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::ProtocolComponentsRequestBody {
             protocol_system: Option::from("ambient".to_string()),
@@ -1137,7 +1141,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_accounts_delta()
             .return_once(|_, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
         let request = dto::ContractDeltaRequestBody {
             contract_ids: Some(vec![dto::ContractId::new(
                 Chain::Ethereum.into(),
@@ -1198,7 +1202,7 @@ mod tests {
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_states_delta()
             .return_once(|_, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([], []));
+        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
         let request = dto::ProtocolDeltaRequestBody {
             component_ids: Some(vec!["state3".to_owned()]), // Filter to only "state3"
             start: dto::VersionParam {
