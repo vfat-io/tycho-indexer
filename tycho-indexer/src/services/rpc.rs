@@ -249,65 +249,6 @@ where
         }
     }
 
-    #[instrument(skip(self, chain, request, params))]
-    async fn get_contract_delta(
-        &self,
-        chain: &Chain,
-        request: &dto::ContractDeltaRequestBody,
-        params: &dto::StateRequestParameters,
-    ) -> Result<dto::ContractDeltaRequestResponse, RpcError> {
-        info!(?request, ?params, "Getting contract delta.");
-        self.get_contract_delta_inner(chain, request, params)
-            .await
-    }
-
-    async fn get_contract_delta_inner(
-        &self,
-        chain: &Chain,
-        request: &dto::ContractDeltaRequestBody,
-        params: &dto::StateRequestParameters,
-    ) -> Result<dto::ContractDeltaRequestResponse, RpcError> {
-        #![allow(unused_variables)]
-        //TODO: handle when no contract is specified with filters
-        let start = BlockOrTimestamp::try_from(&request.start)?;
-        let end = BlockOrTimestamp::try_from(&request.end)?;
-
-        // Get the contract IDs from the request
-        let contract_ids = request.contract_ids.clone();
-        let addresses: Option<HashSet<Address>> = contract_ids.map(|ids| {
-            ids.into_iter()
-                .map(|id| id.address)
-                .collect::<HashSet<Address>>()
-        });
-        debug!(?addresses, "Getting contract states.");
-        let addresses: Option<&HashSet<Address>> = addresses.as_ref();
-
-        // Get the contract deltas from the database
-        match self
-            .db_gateway
-            .get_accounts_delta(chain, Some(&start), &end)
-            .await
-        {
-            Ok(mut accounts) => {
-                // Filter by contract addresses if specified in the request
-                // PERF: This is not efficient, we should filter in the query
-                if let Some(contract_addrs) = addresses {
-                    accounts.retain(|acc| contract_addrs.contains(&acc.address));
-                }
-                Ok(dto::ContractDeltaRequestResponse::new(
-                    accounts
-                        .into_iter()
-                        .map(dto::AccountUpdate::from)
-                        .collect(),
-                ))
-            }
-            Err(err) => {
-                error!(error = %err, "Error while getting contract delta.");
-                Err(err.into())
-            }
-        }
-    }
-
     #[instrument(skip(self, request, params))]
     async fn get_protocol_state(
         &self,
@@ -534,63 +475,6 @@ where
             }
         }
     }
-
-    #[instrument(skip(self, chain, request))]
-    async fn get_protocol_delta(
-        &self,
-        chain: &Chain,
-        request: &dto::ProtocolDeltaRequestBody,
-    ) -> Result<dto::ProtocolDeltaRequestResponse, RpcError> {
-        info!(?request, "Getting protocol delta.");
-        self.get_protocol_delta_inner(chain, request)
-            .await
-    }
-
-    async fn get_protocol_delta_inner(
-        &self,
-        chain: &Chain,
-        request: &dto::ProtocolDeltaRequestBody,
-    ) -> Result<dto::ProtocolDeltaRequestResponse, RpcError> {
-        let start = BlockOrTimestamp::try_from(&request.start)?;
-        let end = BlockOrTimestamp::try_from(&request.end)?;
-
-        // Get the components IDs from the request
-        let ids = request.component_ids.clone();
-        let component_ids: Option<HashSet<String>> = ids.map(|ids| {
-            ids.into_iter()
-                .collect::<HashSet<String>>()
-        });
-        debug!(?component_ids, "Getting protocol states delta.");
-        let component_ids: Option<&HashSet<String>> = component_ids.as_ref();
-
-        // Get the protocol state deltas from the database
-        match self
-            .db_gateway
-            .get_protocol_states_delta(chain, Some(&start), &end)
-            .await
-        {
-            Ok(mut components) => {
-                // Filter by component id if specified in the request
-                // PERF: This is not efficient, we should filter in the query
-                if let Some(component_ids) = component_ids {
-                    components.retain(|acc| {
-                        let id: String = acc.component_id.clone();
-                        component_ids.contains(&id)
-                    });
-                }
-                Ok(dto::ProtocolDeltaRequestResponse::new(
-                    components
-                        .into_iter()
-                        .map(dto::ProtocolStateDelta::from)
-                        .collect(),
-                ))
-            }
-            Err(err) => {
-                error!(error = %err, "Error while getting protocol state delta.");
-                Err(err.into())
-            }
-        }
-    }
 }
 
 #[utoipa::path(
@@ -619,39 +503,6 @@ pub async fn contract_state<G: Gateway>(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, "Error while getting contract state.");
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/{execution_env}/contract_delta",
-    responses(
-        (status = 200, description = "OK", body = ContractDeltaRequestResponse),
-    ),
-    request_body = ContractDeltaRequestBody,
-    params(
-        ("execution_env" = Chain, description = "Execution environment"),
-        StateRequestParameters
-    ),
-)]
-pub async fn contract_delta<G: Gateway>(
-    execution_env: web::Path<Chain>,
-    params: web::Query<dto::StateRequestParameters>,
-    body: web::Json<dto::ContractDeltaRequestBody>,
-    handler: web::Data<RpcHandler<G>>,
-) -> HttpResponse {
-    // Call the handler to get the state delta
-    let response = handler
-        .into_inner()
-        .get_contract_delta(&execution_env, &body, &params)
-        .await;
-
-    match response {
-        Ok(state) => HttpResponse::Ok().json(state),
-        Err(err) => {
-            error!(error = %err, ?body, "Error while getting contract state delta.");
             HttpResponse::InternalServerError().finish()
         }
     }
@@ -755,38 +606,6 @@ pub async fn protocol_state<G: Gateway>(
 }
 
 #[utoipa::path(
-    post,
-    path = "/v1/{execution_env}/protocol_delta",
-    responses(
-        (status = 200, description = "OK", body = ProtocolDeltaRequestResponse),
-    ),
-    request_body = ProtocolDeltaRequestBody,
-    params(
-        ("execution_env" = Chain, description = "Execution environment"),
-        StateRequestParameters
-    ),
-)]
-pub async fn protocol_delta<G: Gateway>(
-    execution_env: web::Path<Chain>,
-    body: web::Json<dto::ProtocolDeltaRequestBody>,
-    handler: web::Data<RpcHandler<G>>,
-) -> HttpResponse {
-    // Call the handler to get protocol deltas
-    let response = handler
-        .into_inner()
-        .get_protocol_delta(&execution_env, &body)
-        .await;
-
-    match response {
-        Ok(state) => HttpResponse::Ok().json(state),
-        Err(err) => {
-            error!(error = %err, ?body, "Error while getting protocol deltas.");
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
-#[utoipa::path(
     get,
     path="/v1/health",
     responses(
@@ -806,8 +625,8 @@ mod tests {
     use ethers::types::U256;
 
     use tycho_core::models::{
-        contract::{Contract, ContractDelta},
-        protocol::{ProtocolComponent, ProtocolComponentState, ProtocolComponentStateDelta},
+        contract::Contract,
+        protocol::{ProtocolComponent, ProtocolComponentState},
         token::CurrencyToken,
         ChangeType,
     };
@@ -1107,119 +926,5 @@ mod tests {
             .unwrap();
 
         assert_eq!(components.protocol_components[0], expected.into());
-    }
-
-    #[tokio::test]
-    async fn test_get_contract_delta() {
-        // Setup
-        let mut gw = MockGateway::new();
-        let expected = ContractDelta::new(
-            &Chain::Ethereum,
-            &("6B175474E89094C44Da98b954EedeAC495271d0F"
-                .parse()
-                .unwrap()),
-            Some(
-                evm_contract_slots([(6, 30), (5, 25), (1, 3), (0, 2)])
-                    .into_iter()
-                    .map(|(k, v)| (k, Some(v)))
-                    .collect(),
-            )
-            .as_ref(),
-            Some(&Bytes::from(U256::from(101))),
-            None,
-            ChangeType::Update,
-        );
-        let mock_response = Ok(vec![expected.clone()]);
-        gw.expect_get_accounts_delta()
-            .return_once(|_, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
-        let request = dto::ContractDeltaRequestBody {
-            contract_ids: Some(vec![dto::ContractId::new(
-                Chain::Ethereum.into(),
-                "6B175474E89094C44Da98b954EedeAC495271d0F"
-                    .parse()
-                    .unwrap(),
-            )]),
-            start: dto::VersionParam {
-                timestamp: None,
-                block: Some(dto::BlockParam {
-                    hash: Some(
-                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
-                            .parse()
-                            .unwrap(),
-                    ),
-                    chain: None,
-                    number: None,
-                }),
-            },
-            end: dto::VersionParam {
-                timestamp: None,
-                block: Some(dto::BlockParam {
-                    hash: Some(
-                        "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
-                            .parse()
-                            .unwrap(),
-                    ),
-                    chain: None,
-                    number: None,
-                }),
-            },
-        };
-
-        let delta = req_handler
-            .get_contract_delta_inner(
-                &Chain::Ethereum,
-                &request,
-                &StateRequestParameters::default(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(delta.accounts.len(), 1);
-        assert_eq!(delta.accounts[0], expected.into());
-    }
-
-    #[tokio::test]
-    async fn test_get_protocol_delta() {
-        // Setup
-        let mut gw = MockGateway::new();
-        let expected = ProtocolComponentStateDelta::new(
-            "state3",
-            HashMap::new(),
-            vec!["deleted2".to_owned()]
-                .into_iter()
-                .collect(),
-        );
-        let mock_response = Ok(vec![expected.clone()]);
-        gw.expect_get_protocol_states_delta()
-            .return_once(|_, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
-        let request = dto::ProtocolDeltaRequestBody {
-            component_ids: Some(vec!["state3".to_owned()]), // Filter to only "state3"
-            start: dto::VersionParam {
-                timestamp: None,
-                block: Some(dto::BlockParam {
-                    hash: None,
-                    chain: Some(dto::Chain::Ethereum),
-                    number: Some(1),
-                }),
-            },
-            end: dto::VersionParam {
-                timestamp: None,
-                block: Some(dto::BlockParam {
-                    hash: None,
-                    chain: Some(dto::Chain::Ethereum),
-                    number: Some(2),
-                }),
-            },
-        };
-
-        let delta = req_handler
-            .get_protocol_delta_inner(&Chain::Ethereum, &request)
-            .await
-            .unwrap();
-
-        assert_eq!(delta.protocols.len(), 1);
-        assert_eq!(delta.protocols[0], expected.into());
     }
 }

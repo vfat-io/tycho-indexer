@@ -845,27 +845,6 @@ impl ProtocolComponentRequestResponse {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct ContractDeltaRequestBody {
-    #[serde(alias = "contractIds")]
-    pub contract_ids: Option<Vec<ContractId>>,
-    #[serde(default = "VersionParam::default")]
-    pub start: VersionParam,
-    #[serde(default = "VersionParam::default")]
-    pub end: VersionParam,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct ContractDeltaRequestResponse {
-    pub accounts: Vec<AccountUpdate>,
-}
-
-impl ContractDeltaRequestResponse {
-    pub fn new(accounts: Vec<AccountUpdate>) -> Self {
-        Self { accounts }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 pub struct ProtocolId {
     pub id: String,
@@ -919,27 +898,6 @@ pub struct ProtocolStateRequestResponse {
 impl ProtocolStateRequestResponse {
     pub fn new(states: Vec<ResponseProtocolState>) -> Self {
         Self { states }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct ProtocolDeltaRequestBody {
-    #[serde(alias = "contractIds")]
-    pub component_ids: Option<Vec<String>>,
-    #[serde(default = "VersionParam::default")]
-    pub start: VersionParam,
-    #[serde(default = "VersionParam::default")]
-    pub end: VersionParam,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct ProtocolDeltaRequestResponse {
-    pub protocols: Vec<ProtocolStateDelta>,
-}
-
-impl ProtocolDeltaRequestResponse {
-    pub fn new(protocols: Vec<ProtocolStateDelta>) -> Self {
-        Self { protocols }
     }
 }
 
