@@ -39,14 +39,11 @@ pub mod chain_state;
 pub mod contract;
 mod convert;
 pub mod hybrid;
-// #[deprecated(since = "0.7.0", note = "Please use the hybrid extractor instead")]
-// pub mod native;
 pub mod protocol_cache;
 pub mod token_analysis_cron;
 pub mod token_pre_processor;
 mod utils;
-// #[deprecated(since = "0.7.0", note = "Please use the hybrid extractor instead")]
-// pub mod vm;
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct ERC20Token {
     pub address: H160,
@@ -292,8 +289,8 @@ impl AccountUpdate {
     ///
     /// # Arguments
     ///
-    /// * `other`: An instance of `AccountUpdate`. The attribute values and keys
-    /// of `other` will overwrite those of `self`.
+    /// * `other`: An instance of `AccountUpdate`. The attribute values and keys of `other` will
+    ///   overwrite those of `self`.
     fn merge(&mut self, other: AccountUpdate) -> Result<(), ExtractionError> {
         if self.address != other.address {
             return Err(ExtractionError::MergeError(format!(
