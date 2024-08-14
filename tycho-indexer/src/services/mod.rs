@@ -13,13 +13,12 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::services::deltas_buffer::PendingDeltas;
 use tycho_core::{
     dto::{
-        AccountUpdate, BlockParam, ChangeType, Health, PaginationParams, ProtocolComponent,
-        ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolId,
-        ProtocolStateDelta, ProtocolStateRequestBody, ProtocolStateRequestResponse,
+        AccountUpdate, BlockParam, Chain, ChangeType, ContractId, Health, PaginationParams,
+        ProtocolComponent, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody,
+        ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody, ProtocolStateRequestResponse,
         ResponseAccount, ResponseProtocolState, ResponseToken, StateRequestBody,
         StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
     },
-    models::{Chain, ContractId},
     storage::Gateway,
 };
 

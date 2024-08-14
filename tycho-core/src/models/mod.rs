@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
-use utoipa::ToSchema;
 
 /// Address hash literal type to uniquely identify contracts/accounts on a
 /// blockchain.
@@ -50,18 +49,7 @@ pub type AccountToContractStore = HashMap<Address, ContractStore>;
 pub type ComponentId = String;
 
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    EnumString,
-    Display,
-    Default,
-    ToSchema,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -181,9 +169,8 @@ pub enum ChangeType {
     Creation,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ContractId {
-    #[schema(value_type=String)]
     pub address: Address,
     pub chain: Chain,
 }

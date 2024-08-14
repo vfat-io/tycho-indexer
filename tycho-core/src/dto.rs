@@ -29,7 +29,18 @@ use crate::{
 };
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    EnumString,
+    Display,
+    Default,
+    ToSchema,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -152,6 +163,7 @@ pub struct Block {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct BlockParam {
     #[schema(value_type=Option<String>)]
     #[serde(with = "hex_bytes_option", default)]
@@ -501,6 +513,7 @@ impl ProtocolStateDelta {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct StateRequestBody {
     #[serde(alias = "contractIds")]
     pub contract_ids: Option<Vec<ContractId>>,
@@ -630,9 +643,11 @@ impl std::fmt::Debug for ResponseAccount {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ContractId {
     #[serde(with = "hex_bytes")]
+    #[schema(value_type=String)]
     pub address: Bytes,
     pub chain: Chain,
 }
@@ -655,6 +670,7 @@ impl Display for ContractId {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct VersionParam {
     pub timestamp: Option<NaiveDateTime>,
     pub block: Option<BlockParam>,
@@ -711,6 +727,7 @@ impl StateRequestParameters {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TokensRequestBody {
     #[serde(alias = "tokenAddresses")]
     #[schema(value_type=Option<Vec<String>>)]
@@ -737,6 +754,7 @@ impl TokensRequestResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PaginationParams {
     #[serde(default)]
     pub page: i64,
@@ -790,6 +808,7 @@ impl From<models::token::CurrencyToken> for ResponseToken {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProtocolComponentsRequestBody {
     pub protocol_system: Option<String>,
     #[serde(alias = "componentAddresses")]
@@ -846,6 +865,7 @@ impl ProtocolComponentRequestResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProtocolId {
     pub id: String,
     pub chain: Chain,
@@ -875,6 +895,7 @@ impl From<models::protocol::ProtocolComponentState> for ResponseProtocolState {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ProtocolStateRequestBody {
     #[serde(alias = "protocolIds")]
     pub protocol_ids: Option<Vec<ProtocolId>>,
@@ -1003,6 +1024,41 @@ mod test {
         let camel: StateRequestBody = serde_json::from_str(&json_str_camel).unwrap();
 
         assert_eq!(snake, camel);
+    }
+
+    #[test]
+    fn test_parse_state_request_unknown_field() {
+        let body = r#"
+    {
+        "contract_ids_with_typo_error": [
+            {
+                "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
+                "chain": "ethereum"
+            }
+        ],
+        "version": {
+            "timestamp": "2069-01-01T04:20:00",
+            "block": {
+                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#;
+
+        let decoded = serde_json::from_str::<StateRequestBody>(&body);
+
+        assert!(decoded.is_err(), "Expected an error due to unknown field");
+
+        if let Err(e) = decoded {
+            assert!(
+                e.to_string()
+                    .contains("unknown field `contract_ids_with_typo_error`"),
+                "Error message does not contain expected unknown field information"
+            );
+        }
     }
 
     #[test]
