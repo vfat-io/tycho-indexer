@@ -677,7 +677,7 @@ where
             info!("First message received was a revert. Nothing to revert in the buffer, ignoring it...");
             self.update_cursor(inp.last_valid_cursor)
                 .await;
-            return Ok(None)
+            return Ok(None);
         }
 
         let mut revert_buffer = self.revert_buffer.lock().await;
@@ -1226,7 +1226,7 @@ impl HybridPgGateway {
     }
 
     async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
-        let (state, _) = self
+        let state = self
             .state_gateway
             .get_state(&self.name, &self.chain)
             .await?;

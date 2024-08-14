@@ -1,7 +1,7 @@
 use super::{orm, schema, storage_error_from_diesel, PostgresGateway, StorageError};
 use diesel::{ExpressionMethods, QueryDsl};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use tycho_core::models::{self, Chain, ExtractionState};
+use tycho_core::models::{Chain, ExtractionState};
 
 impl PostgresGateway {
     pub async fn get_state(
@@ -9,28 +9,19 @@ impl PostgresGateway {
         name: &str,
         chain: &Chain,
         conn: &mut AsyncPgConnection,
-    ) -> Result<(ExtractionState, models::blockchain::Block), StorageError> {
+    ) -> Result<ExtractionState, StorageError> {
         let block_chain_id = self.get_chain_id(chain);
 
         match orm::ExtractionState::by_name(name, block_chain_id, conn).await {
-            Ok(Some((orm_state, block))) => {
+            Ok(Some((orm_state, block_hash))) => {
                 let state = ExtractionState::new(
                     orm_state.name,
                     *chain,
                     orm_state.attributes,
                     &orm_state.cursor.unwrap_or_default(),
-                    block.hash.clone(),
+                    block_hash,
                 );
-                Ok((
-                    state,
-                    models::blockchain::Block {
-                        hash: block.hash,
-                        parent_hash: block.parent_hash,
-                        number: block.number as u64,
-                        chain: *chain,
-                        ts: block.ts,
-                    },
-                ))
+                Ok(state)
             }
             Ok(None) => Err(StorageError::NotFound("ExtractionState".to_owned(), name.to_owned())),
             Err(err) => Err(storage_error_from_diesel(err, "ExtractionState", name, None).into()),
@@ -197,7 +188,7 @@ mod test {
         let gateway = get_dgw(&mut conn).await;
         let extractor_name = "setup_extractor";
 
-        let (state, _) = gateway
+        let state = gateway
             .get_state(extractor_name, &Chain::Ethereum, &mut conn)
             .await
             .unwrap();
@@ -245,7 +236,6 @@ mod test {
                 .get_state(&extractor_name, &Chain::Ethereum, &mut conn)
                 .await
                 .unwrap()
-                .0
                 .cursor,
             "20".to_owned().into_bytes()
         );

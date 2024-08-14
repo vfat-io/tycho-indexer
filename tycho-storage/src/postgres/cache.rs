@@ -621,11 +621,7 @@ impl CachedGateway {
 
 #[async_trait]
 impl ExtractionStateGateway for CachedGateway {
-    async fn get_state(
-        &self,
-        name: &str,
-        chain: &Chain,
-    ) -> Result<(ExtractionState, Block), StorageError> {
+    async fn get_state(&self, name: &str, chain: &Chain) -> Result<ExtractionState, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
@@ -1196,8 +1192,7 @@ mod test_serial_db {
             // Assert block 1 messages have been flushed
             assert_eq!(fetched_block_1, block_1);
             assert_eq!(fetched_tx, tx_1);
-            assert_eq!(fetched_extraction_state.0, extraction_state_1);
-            assert_eq!(fetched_extraction_state.1, block_1);
+            assert_eq!(fetched_extraction_state, extraction_state_1);
             // Assert block 2 messages have been flushed
             assert_eq!(fetched_block_2, block_2);
             // Assert block 3 messages have been flushed

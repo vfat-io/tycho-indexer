@@ -103,14 +103,14 @@ impl ExtractionState {
         extractor: &str,
         chain_id: i64,
         conn: &mut AsyncPgConnection,
-    ) -> QueryResult<Option<(ExtractionState, Block)>> {
+    ) -> QueryResult<Option<(ExtractionState, Bytes)>> {
         extraction_state::table
             .inner_join(chain::table)
             .inner_join(block::table)
             .filter(extraction_state::name.eq(extractor))
             .filter(chain::id.eq(chain_id))
-            .select((ExtractionState::as_select(), Block::as_select()))
-            .first::<(ExtractionState, Block)>(conn)
+            .select((ExtractionState::as_select(), block::hash))
+            .first::<(ExtractionState, Bytes)>(conn)
             .await
             .optional()
     }
