@@ -646,7 +646,6 @@ mod tests {
             "timestamp": "2069-01-01T04:20:00",
             "block": {
                 "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
-                "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
                 "number": 213,
                 "chain": "ethereum"
             }
