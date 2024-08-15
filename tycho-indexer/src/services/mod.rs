@@ -13,15 +13,12 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::services::deltas_buffer::PendingDeltas;
 use tycho_core::{
     dto::{
-        AccountUpdate, BlockParam, ChangeType, ContractDeltaRequestBody,
-        ContractDeltaRequestResponse, Health, PaginationParams, ProtocolComponent,
-        ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolDeltaRequestBody,
-        ProtocolDeltaRequestResponse, ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody,
-        ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState, ResponseToken,
-        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
-        VersionParam,
+        AccountUpdate, BlockParam, Chain, ChangeType, ContractId, Health, PaginationParams,
+        ProtocolComponent, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody,
+        ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody, ProtocolStateRequestResponse,
+        ResponseAccount, ResponseProtocolState, ResponseToken, StateRequestBody,
+        StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
     },
-    models::{Chain, ContractId},
     storage::Gateway,
 };
 
@@ -87,9 +84,7 @@ where
                 rpc::contract_state,
                 rpc::tokens,
                 rpc::protocol_components,
-                rpc::contract_delta,
                 rpc::protocol_state,
-                rpc::protocol_delta,
                 rpc::health,
             ),
             components(
@@ -107,16 +102,12 @@ where
                 schemas(ProtocolComponentsRequestBody),
                 schemas(ProtocolComponentRequestResponse),
                 schemas(ProtocolComponent),
-                schemas(ContractDeltaRequestBody),
-                schemas(ContractDeltaRequestResponse),
                 schemas(ProtocolStateRequestBody),
                 schemas(ProtocolStateRequestResponse),
                 schemas(AccountUpdate),
                 schemas(ProtocolId),
                 schemas(ResponseProtocolState),
                 schemas(ChangeType),
-                schemas(ProtocolDeltaRequestBody),
-                schemas(ProtocolDeltaRequestResponse),
                 schemas(ProtocolStateDelta),
                 schemas(Health),
             )
@@ -149,16 +140,8 @@ where
                         .route(web::post().to(rpc::contract_state::<G>)),
                 )
                 .service(
-                    web::resource(format!("/{}/{{execution_env}}/contract_delta", self.prefix))
-                        .route(web::post().to(rpc::contract_delta::<G>)),
-                )
-                .service(
                     web::resource(format!("/{}/{{execution_env}}/protocol_state", self.prefix))
                         .route(web::post().to(rpc::protocol_state::<G>)),
-                )
-                .service(
-                    web::resource(format!("/{}/{{execution_env}}/protocol_delta", self.prefix))
-                        .route(web::post().to(rpc::protocol_delta::<G>)),
                 )
                 .service(
                     web::resource(format!("/{}/{{execution_env}}/tokens", self.prefix))

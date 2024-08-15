@@ -29,7 +29,18 @@ use crate::{
 };
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display, Default,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    EnumString,
+    Display,
+    Default,
+    ToSchema,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -49,7 +60,6 @@ impl From<models::contract::Contract> for ResponseAccount {
             value.title,
             value.slots,
             value.native_balance,
-            value.balances,
             value.code,
             value.code_hash,
             value.balance_modify_tx,
@@ -153,6 +163,7 @@ pub struct Block {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct BlockParam {
     #[schema(value_type=Option<String>)]
     #[serde(with = "hex_bytes_option", default)]
@@ -502,6 +513,7 @@ impl ProtocolStateDelta {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct StateRequestBody {
     #[serde(alias = "contractIds")]
     pub contract_ids: Option<Vec<ContractId>>,
@@ -567,9 +579,6 @@ pub struct ResponseAccount {
     #[schema(value_type=HashMap<String, String>, example="0x00")]
     #[serde(with = "hex_bytes")]
     pub native_balance: Bytes,
-    #[schema(value_type=HashMap<String, String>)]
-    #[serde(with = "hex_hashmap_key_value")]
-    pub balances: HashMap<Bytes, Bytes>,
     #[schema(value_type=HashMap<String, String>, example="0xBADBABE")]
     #[serde(with = "hex_bytes")]
     pub code: Bytes,
@@ -595,7 +604,6 @@ impl ResponseAccount {
         title: String,
         slots: HashMap<Bytes, Bytes>,
         native_balance: Bytes,
-        balances: HashMap<Bytes, Bytes>,
         code: Bytes,
         code_hash: Bytes,
         balance_modify_tx: Bytes,
@@ -608,7 +616,6 @@ impl ResponseAccount {
             title,
             slots,
             native_balance,
-            balances,
             code,
             code_hash,
             balance_modify_tx,
@@ -627,7 +634,6 @@ impl std::fmt::Debug for ResponseAccount {
             .field("title", &self.title)
             .field("slots", &self.slots)
             .field("native_balance", &self.native_balance)
-            .field("balances", &self.balances)
             .field("code", &format!("[{} bytes]", self.code.len()))
             .field("code_hash", &self.code_hash)
             .field("balance_modify_tx", &self.balance_modify_tx)
@@ -637,9 +643,11 @@ impl std::fmt::Debug for ResponseAccount {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ContractId {
     #[serde(with = "hex_bytes")]
+    #[schema(value_type=String)]
     pub address: Bytes,
     pub chain: Chain,
 }
@@ -662,6 +670,7 @@ impl Display for ContractId {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct VersionParam {
     pub timestamp: Option<NaiveDateTime>,
     pub block: Option<BlockParam>,
@@ -718,6 +727,7 @@ impl StateRequestParameters {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TokensRequestBody {
     #[serde(alias = "tokenAddresses")]
     #[schema(value_type=Option<Vec<String>>)]
@@ -744,6 +754,7 @@ impl TokensRequestResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PaginationParams {
     #[serde(default)]
     pub page: i64,
@@ -797,6 +808,7 @@ impl From<models::token::CurrencyToken> for ResponseToken {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProtocolComponentsRequestBody {
     pub protocol_system: Option<String>,
     #[serde(alias = "componentAddresses")]
@@ -852,28 +864,8 @@ impl ProtocolComponentRequestResponse {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct ContractDeltaRequestBody {
-    #[serde(alias = "contractIds")]
-    pub contract_ids: Option<Vec<ContractId>>,
-    #[serde(default = "VersionParam::default")]
-    pub start: VersionParam,
-    #[serde(default = "VersionParam::default")]
-    pub end: VersionParam,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct ContractDeltaRequestResponse {
-    pub accounts: Vec<AccountUpdate>,
-}
-
-impl ContractDeltaRequestResponse {
-    pub fn new(accounts: Vec<AccountUpdate>) -> Self {
-        Self { accounts }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProtocolId {
     pub id: String,
     pub chain: Chain,
@@ -903,6 +895,7 @@ impl From<models::protocol::ProtocolComponentState> for ResponseProtocolState {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ProtocolStateRequestBody {
     #[serde(alias = "protocolIds")]
     pub protocol_ids: Option<Vec<ProtocolId>>,
@@ -926,27 +919,6 @@ pub struct ProtocolStateRequestResponse {
 impl ProtocolStateRequestResponse {
     pub fn new(states: Vec<ResponseProtocolState>) -> Self {
         Self { states }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct ProtocolDeltaRequestBody {
-    #[serde(alias = "contractIds")]
-    pub component_ids: Option<Vec<String>>,
-    #[serde(default = "VersionParam::default")]
-    pub start: VersionParam,
-    #[serde(default = "VersionParam::default")]
-    pub end: VersionParam,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
-pub struct ProtocolDeltaRequestResponse {
-    pub protocols: Vec<ProtocolStateDelta>,
-}
-
-impl ProtocolDeltaRequestResponse {
-    pub fn new(protocols: Vec<ProtocolStateDelta>) -> Self {
-        Self { protocols }
     }
 }
 
@@ -986,7 +958,6 @@ mod test {
                 "timestamp": "2069-01-01T04:20:00",
                 "block": {
                     "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
-                    "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
                     "number": 213,
                     "chain": "ethereum"
                 }
@@ -1037,7 +1008,6 @@ mod test {
             "timestamp": "2069-01-01T04:20:00",
             "block": {
                 "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
-                "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
                 "number": 213,
                 "chain": "ethereum"
             }
@@ -1055,6 +1025,41 @@ mod test {
     }
 
     #[test]
+    fn test_parse_state_request_unknown_field() {
+        let body = r#"
+    {
+        "contract_ids_with_typo_error": [
+            {
+                "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
+                "chain": "ethereum"
+            }
+        ],
+        "version": {
+            "timestamp": "2069-01-01T04:20:00",
+            "block": {
+                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#;
+
+        let decoded = serde_json::from_str::<StateRequestBody>(body);
+
+        assert!(decoded.is_err(), "Expected an error due to unknown field");
+
+        if let Err(e) = decoded {
+            assert!(
+                e.to_string()
+                    .contains("unknown field `contract_ids_with_typo_error`"),
+                "Error message does not contain expected unknown field information"
+            );
+        }
+    }
+
+    #[test]
     fn test_parse_state_request_no_contract_specified() {
         let json_str = r#"
     {
@@ -1062,7 +1067,6 @@ mod test {
             "timestamp": "2069-01-01T04:20:00",
             "block": {
                 "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
-                "parentHash": "0x8d75152454e60413efe758cc424bfd339897062d7e658f302765eb7b50971815",
                 "number": 213,
                 "chain": "ethereum"
             }

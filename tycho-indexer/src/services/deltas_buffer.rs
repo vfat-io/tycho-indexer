@@ -344,7 +344,6 @@ mod test {
                 .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
                 .collect::<HashMap<_, _>>(),
             Bytes::from("0x1999"),
-            HashMap::new(),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0xbabe"),
             Bytes::from("0x4200"),
@@ -597,7 +596,6 @@ mod test {
                 .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
                 .collect::<HashMap<_, _>>(),
             Bytes::from("0x00000000000000000000000000000000000000000000000000000000000007cf"),
-            HashMap::new(),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0xbabe"),
             Bytes::from("0x4200"),

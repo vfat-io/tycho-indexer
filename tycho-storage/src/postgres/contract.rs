@@ -397,7 +397,7 @@ impl PostgresGateway {
             // Restore full state delta at from target version for accounts that were deleted
             let version = Some(Version::from_ts(*target_version_ts));
             let restored: HashMap<Address, models::contract::ContractDelta> = self
-                .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, false, conn)
+                .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, conn)
                 .await
                 .map_err(PostgresError::from)?
                 .into_iter()
@@ -759,7 +759,6 @@ impl PostgresGateway {
             account_orm.title,
             HashMap::new(),
             balance_orm.balance,
-            HashMap::new(),
             code_orm.code,
             code_orm.hash,
             balance_tx,
@@ -787,7 +786,6 @@ impl PostgresGateway {
         ids: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
-        retrieve_balances: bool,
         conn: &mut AsyncPgConnection,
     ) -> Result<Vec<models::contract::Contract>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
@@ -894,43 +892,6 @@ impl PostgresGateway {
             )));
         }
 
-        // get token balances
-        let (components, token_balances) = if retrieve_balances {
-            // note: balances are retrived by component, not by contract. Therefore, each contract
-            // linked to a component will show all balances for that component.
-            let code_ids = codes
-                .iter()
-                .map(|c| c.id)
-                .collect::<HashSet<_>>();
-            let mut components: HashMap<i64, String> =
-                schema::protocol_component_holds_contract::table
-                    .inner_join(schema::protocol_component::table)
-                    .filter(
-                        schema::protocol_component_holds_contract::contract_code_id
-                            .eq_any(code_ids),
-                    )
-                    .select((
-                        schema::protocol_component_holds_contract::contract_code_id,
-                        schema::protocol_component::external_id,
-                    ))
-                    .get_results::<(i64, String)>(conn)
-                    .await
-                    .map_err(PostgresError::from)?
-                    .into_iter()
-                    .collect();
-            let component_ids: Vec<&str> = components
-                .values_mut()
-                .map(|s| s.as_str())
-                .collect();
-            let token_balances = self
-                .get_balances(chain, Some(&component_ids[..]), version, conn)
-                .await?;
-
-            (components, token_balances)
-        } else {
-            (HashMap::new(), HashMap::new())
-        };
-
         accounts
             .into_iter()
             .zip(native_balances.into_iter().zip(codes))
@@ -948,35 +909,12 @@ impl PostgresGateway {
                 let code_tx = code.tx.clone().unwrap();
                 let creation_tx = account.tx.clone();
 
-                let balances = if retrieve_balances {
-                    let component_id = components
-                        .get(&code.id)
-                        .ok_or_else(|| {
-                            StorageError::NoRelatedEntity(
-                                "ComponentBalance".to_string(),
-                                "Account".to_string(),
-                                account.title.clone(),
-                            )
-                        })?;
-
-                    token_balances
-                        .get(component_id)
-                        .unwrap_or(&HashMap::new())
-                        .clone()
-                        .into_iter()
-                        .map(|(key, balance)| (key, balance.new_balance))
-                        .collect()
-                } else {
-                    HashMap::new()
-                };
-
                 let mut contract = models::contract::Contract::new(
                     *chain,
                     account.entity.address.clone(),
                     account.entity.title.clone(),
                     HashMap::new(),
                     balance.entity.balance.clone(),
-                    balances,
                     code.entity.code.clone(),
                     code.entity.hash.clone(),
                     balance_tx,
@@ -1585,7 +1523,6 @@ mod test {
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
                 Bytes::from(U256::from(100)),
-                HashMap::new(),
                 Bytes::from("C0C0C0"),
                 "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                     .parse()
@@ -1613,7 +1550,6 @@ mod test {
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
                 Bytes::from(U256::from(101)),
-                HashMap::new(),
                 Bytes::from("C0C0C0"),
                 "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                     .parse()
@@ -1656,7 +1592,6 @@ mod test {
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
                 Bytes::from(U256::from(50)),
-                HashMap::new(),
                 Bytes::from("C1C1C1"),
                 "0xa04b84acdf586a694085997f32c4aa11c2726a7f7e0b677a27d44d180c08e07f"
                     .parse()
@@ -1690,7 +1625,6 @@ mod test {
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
                 Bytes::from(U256::from(25)),
-                HashMap::new(),
                 Bytes::from("C2C2C2"),
                 "0x7eb1e0ed9d018991eed6077f5be45b52347f6e5870728809d368ead5b96a1e96"
                     .parse()
@@ -1782,7 +1716,7 @@ mod test {
         let addresses = ids.as_deref();
 
         let results = gw
-            .get_contracts(&Chain::Ethereum, addresses, version.as_ref(), true, false, &mut conn)
+            .get_contracts(&Chain::Ethereum, addresses, version.as_ref(), true, &mut conn)
             .await
             .unwrap();
 
@@ -1840,7 +1774,6 @@ mod test {
             "NewAccount".to_owned(),
             HashMap::new(),
             Bytes::from("0x64"),
-            HashMap::new(),
             code,
             code_hash,
             "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"

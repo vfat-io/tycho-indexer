@@ -92,14 +92,12 @@ class TychoRPCClient:
     def get_contract_state(self, params: ContractStateParams) -> list[ResponseAccount]:
         params = params.dict(exclude_none=True)
 
-        query_params_fields = ["tvl_gt", "inertia_min_gt", "include_balances"]
         body_fields = ["contract_ids", "version"]
 
-        query_params = {k: v for k, v in params.items() if k in query_params_fields}
         body = {k: v for k, v in params.items() if k in body_fields}
 
         res = self._post_request(
-            f"/v1/{self._chain}/contract_state", body=body, params=query_params
+            f"/v1/{self._chain}/contract_state", body=body
         )
         return [ResponseAccount(**a) for a in res["accounts"]]
 

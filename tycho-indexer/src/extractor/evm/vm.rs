@@ -1023,7 +1023,7 @@ impl VmGateway for VmPgGateway {
         component_ids: &[Address],
     ) -> Result<Vec<Contract>, StorageError> {
         self.state_gateway
-            .get_contracts(&self.chain, Some(component_ids), None, true, false)
+            .get_contracts(&self.chain, Some(component_ids), None, true)
             .await
     }
 

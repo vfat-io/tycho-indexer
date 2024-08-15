@@ -246,7 +246,6 @@ where
                 .rpc_client
                 .get_contract_state(
                     self.extractor_id.chain,
-                    &StateRequestParameters::new(false),
                     &StateRequestBody::new(
                         Some(
                             contract_ids
@@ -586,11 +585,10 @@ mod test {
         async fn get_contract_state(
             &self,
             chain: Chain,
-            filters: &StateRequestParameters,
             request: &StateRequestBody,
         ) -> Result<StateRequestResponse, RPCError> {
             self.0
-                .get_contract_state(chain, filters, request)
+                .get_contract_state(chain, request)
                 .await
         }
 
@@ -747,7 +745,7 @@ mod test {
         rpc.expect_get_protocol_states()
             .returning(|_, _, _| Ok(state_snapshot_native()));
         rpc.expect_get_contract_state()
-            .returning(|_, _, _| Ok(state_snapshot_vm()));
+            .returning(|_, _| Ok(state_snapshot_vm()));
         let state_sync = with_mocked_clients(false, Some(rpc), None);
         let mut tracker = ComponentTracker::new(
             Chain::Ethereum,
