@@ -1,6 +1,6 @@
 import json
 
-from tycho_client.dto import (
+from tycho_indexer_client.dto import (
     FeedMessage,
     SynchronizerState,
     SynchronizerStateEnum,
