@@ -1167,7 +1167,7 @@ mod test {
     }
 
     #[test]
-    fn test_parse_native_websocket_message() {
+    fn test_parse_websocket_message() {
         let json_data = r#"
         {
             "subscription_id": "5d23bfbe-89ad-4ea3-8672-dc9e973ac9dc",
