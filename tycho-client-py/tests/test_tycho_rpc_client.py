@@ -1,7 +1,7 @@
 import json
 from unittest.mock import patch, Mock
 
-from tycho_client.dto import (
+from tycho_indexer_client.dto import (
     ProtocolComponent,
     ResponseProtocolState,
     ResponseAccount,
@@ -11,7 +11,7 @@ from tycho_client.dto import (
     TokensParams,
     ResponseToken,
 )
-from tycho_client.rpc_client import TychoRPCClient
+from tycho_indexer_client.rpc_client import TychoRPCClient
 
 
 @patch("requests.post")
