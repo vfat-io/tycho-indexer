@@ -397,49 +397,67 @@ impl WsDeltasClient {
         let mut guard = self.inner.lock().await;
 
         match msg {
+            // We do not deserialize the message directly into a WebSocketMessage. This is because the
+            // serde arbitrary_precision feature (often included in many dependencies we use) breaks some
+            // untagged enum deserializations. Instead, we deserialize the message into a serde_json::Value
+            // and convert that into a WebSocketMessage. For more info on this issue, see: https://github.com/serde-rs/json/issues/740
             Ok(tungstenite::protocol::Message::Text(text)) => match serde_json::from_str::<
-                WebSocketMessage,
+                serde_json::Value,
             >(&text)
             {
-                Ok(WebSocketMessage::BlockChanges { subscription_id, deltas }) => {
-                    trace!(?deltas, "Received a block state change, sending to channel");
-                    let inner = guard
-                        .as_mut()
-                        .ok_or_else(|| DeltasError::NotConnected)?;
-                    // If we get data too quickly this may block
-                    match inner.send(&subscription_id, deltas) {
-                        Err(DeltasError::BufferFull) => {
-                            error!(?subscription_id, "Buffer full, message dropped!");
+                Ok(value) => match serde_json::from_value::<WebSocketMessage>(value) {
+                    Ok(ws_message) => match ws_message {
+                        WebSocketMessage::BlockChanges { subscription_id, deltas } => {
+                            trace!(?deltas, "Received a block state change, sending to channel");
+                            let inner = guard
+                                .as_mut()
+                                .ok_or_else(|| DeltasError::NotConnected)?;
+                            match inner.send(&subscription_id, deltas) {
+                                Err(DeltasError::BufferFull) => {
+                                    error!(?subscription_id, "Buffer full, message dropped!");
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        ?subscription_id,
+                                        "Receiver for has gone away, unsubscribing!"
+                                    );
+                                    let (tx, _) = oneshot::channel();
+                                    let _ = WsDeltasClient::unsubscribe_inner(
+                                        inner,
+                                        subscription_id,
+                                        tx,
+                                    )
+                                    .await;
+                                }
+                                _ => { /* Do nothing */ }
+                            }
                         }
-                        Err(_) => {
-                            warn!(?subscription_id, "Receiver for has gone away, unsubscribing!");
-                            let (tx, _) = oneshot::channel();
-                            let _ =
-                                WsDeltasClient::unsubscribe_inner(inner, subscription_id, tx).await;
+                        WebSocketMessage::Response(Response::NewSubscription {
+                            extractor_id,
+                            subscription_id,
+                        }) => {
+                            info!(?extractor_id, ?subscription_id, "Received a new subscription");
+                            let inner = guard
+                                .as_mut()
+                                .ok_or_else(|| DeltasError::NotConnected)?;
+                            inner.mark_active(&extractor_id, subscription_id);
                         }
-                        _ => { /* Do nothing */ }
+                        WebSocketMessage::Response(Response::SubscriptionEnded {
+                            subscription_id,
+                        }) => {
+                            info!(?subscription_id, "Received a subscription ended");
+                            let inner = guard
+                                .as_mut()
+                                .ok_or_else(|| DeltasError::NotConnected)?;
+                            inner.remove_subscription(subscription_id);
+                        }
+                    },
+                    Err(e) => {
+                        error!(error = %e, message=text, "Failed to deserialize Value into WebSocketMessage");
                     }
-                }
-                Ok(WebSocketMessage::Response(Response::NewSubscription {
-                    extractor_id,
-                    subscription_id,
-                })) => {
-                    info!(?extractor_id, ?subscription_id, "Received a new subscription");
-                    let inner = guard
-                        .as_mut()
-                        .ok_or_else(|| DeltasError::NotConnected)?;
-                    inner.mark_active(&extractor_id, subscription_id);
-                }
-                Ok(WebSocketMessage::Response(Response::SubscriptionEnded { subscription_id })) => {
-                    info!(?subscription_id, "Received a subscription ended");
-
-                    let inner = guard
-                        .as_mut()
-                        .ok_or_else(|| DeltasError::NotConnected)?;
-                    inner.remove_subscription(subscription_id);
-                }
+                },
                 Err(e) => {
-                    error!(error = %e, message=text, "Failed to deserialize message");
+                    error!(error = %e, message=text, "Failed to deserialize message as serde_json::Value");
                 }
             },
             Ok(tungstenite::protocol::Message::Ping(_)) => {
