@@ -397,10 +397,10 @@ impl WsDeltasClient {
         let mut guard = self.inner.lock().await;
 
         match msg {
-            // We do not deserialize the message directly into a WebSocketMessage. This is because the
-            // serde arbitrary_precision feature (often included in many dependencies we use) breaks some
-            // untagged enum deserializations. Instead, we deserialize the message into a serde_json::Value
-            // and convert that into a WebSocketMessage. For more info on this issue, see: https://github.com/serde-rs/json/issues/740
+            // We do not deserialize the message directly into a WebSocketMessage. This is because
+            // the serde arbitrary_precision feature (often included in many
+            // dependencies we use) breaks some untagged enum deserializations. Instead,
+            // we deserialize the message into a serde_json::Value and convert that into a WebSocketMessage. For more info on this issue, see: https://github.com/serde-rs/json/issues/740
             Ok(tungstenite::protocol::Message::Text(text)) => match serde_json::from_str::<
                 serde_json::Value,
             >(&text)
