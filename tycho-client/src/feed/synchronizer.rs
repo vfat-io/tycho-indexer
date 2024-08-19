@@ -28,7 +28,7 @@ use tycho_core::{
 use super::Header;
 use crate::{
     deltas::{DeltasClient, SubscriptionOptions},
-    feed::component_tracker::{ComponentFilter, ComponentTracker},
+    feed::component_tracker::{ComponentFilter, ComponentFilterVariant, ComponentTracker},
     rpc::RPCClient,
 };
 
@@ -381,44 +381,9 @@ where
                 let header = Header::from_block(deltas.get_block(), deltas.is_revert());
                 debug!(block_number=?header.number, "Received delta message");
                 let (snapshots, removed_components) = {
-                    match &self.component_filter {
-                        ComponentFilter::Ids(_) => (Default::default(), Default::default()),
-                        ComponentFilter::MinimumTVL(min_tvl) => {
-                            // 1. Remove components based on tvl changes
-                            // 2. Add components based on tvl changes, query those for snapshots
-                            let (to_add, to_remove): (Vec<_>, Vec<_>) = deltas
-                                .component_tvl
-                                .iter()
-                                .partition(|(_, &tvl)| tvl > *min_tvl);
-
-                            // Only components we don't track yet need a snapshot,
-                            let requiring_snapshot = to_add
-                                .iter()
-                                .filter_map(|(k, _)| {
-                                    if tracker.components.contains_key(*k) {
-                                        None
-                                    } else {
-                                        Some(*k)
-                                    }
-                                })
-                                .collect::<Vec<_>>();
-                            debug!(components=?requiring_snapshot, "SnapshotRequest");
-                            tracker
-                                .start_tracking(&requiring_snapshot)
-                                .await?;
-                            let snapshots = self
-                                .get_snapshots(header.clone(), &tracker, Some(requiring_snapshot))
-                                .await?
-                                .snapshots;
-
-                            let removed_components = if !to_remove.is_empty() {
-                                tracker.stop_tracking(to_remove.iter().map(|(id, _)| *id))
-                            } else {
-                                Default::default()
-                            };
-                            (snapshots, removed_components)
-                        }
-                        ComponentFilter::MinimumTVLRange((
+                    match &self.component_filter.variant() {
+                        ComponentFilterVariant::Ids(_) => (Default::default(), Default::default()),
+                        ComponentFilterVariant::MinimumTVLRange((
                             remove_tvl_threshold,
                             add_tvl_threshold,
                         )) => {
@@ -1221,7 +1186,7 @@ mod test {
         let mut state_sync = ProtocolStateSynchronizer::new(
             ExtractorIdentity::new(Chain::Ethereum, "uniswap-v2"),
             true,
-            ComponentFilter::MinimumTVLRange((remove_tvl_threshold, add_tvl_threshold)),
+            ComponentFilter::MinimumTVLRange(remove_tvl_threshold, add_tvl_threshold),
             1,
             true,
             ArcRPCClient(Arc::new(rpc_client)),

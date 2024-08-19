@@ -10,14 +10,44 @@ use tycho_core::{
 };
 
 #[derive(Clone, Debug)]
-pub enum ComponentFilter {
+pub enum ComponentFilterVariant {
     Ids(Vec<String>),
-    MinimumTVL(f64),
     /// MinimumTVLRange is a tuple of (remove_tvl_threshold, add_tvl_threshold). Components that
     /// drop below the remove threshold will be removed from tracking, components that exceed the
     /// add threshold will be added. This helps buffer against components that fluctuate on the
     /// tvl threshold boundary.
     MinimumTVLRange((f64, f64)),
+}
+
+#[derive(Clone, Debug)]
+pub struct ComponentFilter {
+    variant: ComponentFilterVariant,
+}
+
+impl ComponentFilter {
+    #[allow(non_snake_case)] // for backwards compatibility
+    pub fn MinimumTVL(min_tvl: f64) -> ComponentFilter {
+        ComponentFilter { variant: ComponentFilterVariant::MinimumTVLRange((min_tvl, min_tvl)) }
+    }
+
+    #[allow(non_snake_case)]
+    pub fn MinimumTVLRange(remove_tvl_threshold: f64, add_tvl_threshold: f64) -> ComponentFilter {
+        ComponentFilter {
+            variant: ComponentFilterVariant::MinimumTVLRange((
+                remove_tvl_threshold,
+                add_tvl_threshold,
+            )),
+        }
+    }
+
+    #[allow(non_snake_case)] // for backwards compatibility
+    pub fn Ids(ids: Vec<String>) -> ComponentFilter {
+        ComponentFilter { variant: ComponentFilterVariant::Ids(ids) }
+    }
+
+    pub fn variant(&self) -> &ComponentFilterVariant {
+        &self.variant
+    }
 }
 
 /// Helper struct to store which components are being tracked atm.
@@ -51,15 +81,11 @@ where
     }
     /// Retrieve all components that belong to the system we are extracing and have sufficient tvl.
     pub async fn initialise_components(&mut self) -> Result<(), RPCError> {
-        let (filters, body) = match &self.filter {
-            ComponentFilter::Ids(ids) => {
+        let (filters, body) = match &self.filter.variant {
+            ComponentFilterVariant::Ids(ids) => {
                 (Default::default(), ProtocolComponentsRequestBody::id_filtered(ids.clone()))
             }
-            ComponentFilter::MinimumTVL(min_tvl_threshold) => (
-                ProtocolComponentRequestParameters::tvl_filtered(*min_tvl_threshold),
-                ProtocolComponentsRequestBody::system_filtered(&self.protocol_system),
-            ),
-            ComponentFilter::MinimumTVLRange((_, upper_tvl_threshold)) => (
+            ComponentFilterVariant::MinimumTVLRange((_, upper_tvl_threshold)) => (
                 ProtocolComponentRequestParameters::tvl_filtered(*upper_tvl_threshold),
                 ProtocolComponentsRequestBody::system_filtered(&self.protocol_system),
             ),
