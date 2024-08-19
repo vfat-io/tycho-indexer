@@ -3,16 +3,49 @@ use std::collections::{HashMap, HashSet};
 use tracing::{debug, instrument, warn};
 use tycho_core::{
     dto::{
-        Chain, ProtocolComponent, ProtocolComponentRequestParameters,
+        BlockChanges, Chain, ProtocolComponent, ProtocolComponentRequestParameters,
         ProtocolComponentsRequestBody, ProtocolId,
     },
     Bytes,
 };
 
 #[derive(Clone, Debug)]
-pub enum ComponentFilter {
+pub(crate) enum ComponentFilterVariant {
     Ids(Vec<String>),
-    MinimumTVL(f64),
+    /// MinimumTVLRange is a tuple of (remove_tvl_threshold, add_tvl_threshold). Components that
+    /// drop below the remove threshold will be removed from tracking, components that exceed the
+    /// add threshold will be added. This helps buffer against components that fluctuate on the
+    /// tvl threshold boundary.
+    MinimumTVLRange((f64, f64)),
+}
+
+#[derive(Clone, Debug)]
+pub struct ComponentFilter {
+    variant: ComponentFilterVariant,
+}
+
+impl ComponentFilter {
+    #[allow(non_snake_case)] // for backwards compatibility
+    #[deprecated(since = "0.9.2", note = "Please use with_tvl_range instead")]
+    pub fn MinimumTVL(min_tvl: f64) -> ComponentFilter {
+        ComponentFilter { variant: ComponentFilterVariant::MinimumTVLRange((min_tvl, min_tvl)) }
+    }
+
+    #[allow(non_snake_case)]
+    pub fn with_tvl_range(remove_tvl_threshold: f64, add_tvl_threshold: f64) -> ComponentFilter {
+        ComponentFilter {
+            variant: ComponentFilterVariant::MinimumTVLRange((
+                remove_tvl_threshold,
+                add_tvl_threshold,
+            )),
+        }
+    }
+
+    #[deprecated(since = "0.9.2")]
+    #[allow(non_snake_case)] // for backwards compatibility
+    pub fn Ids(ids: Vec<String>) -> ComponentFilter {
+        ComponentFilter { variant: ComponentFilterVariant::Ids(ids) }
+    }
 }
 
 /// Helper struct to store which components are being tracked atm.
@@ -46,12 +79,12 @@ where
     }
     /// Retrieve all components that belong to the system we are extracing and have sufficient tvl.
     pub async fn initialise_components(&mut self) -> Result<(), RPCError> {
-        let (filters, body) = match &self.filter {
-            ComponentFilter::Ids(ids) => {
+        let (filters, body) = match &self.filter.variant {
+            ComponentFilterVariant::Ids(ids) => {
                 (Default::default(), ProtocolComponentsRequestBody::id_filtered(ids.clone()))
             }
-            ComponentFilter::MinimumTVL(min_tvl_threshold) => (
-                ProtocolComponentRequestParameters::tvl_filtered(*min_tvl_threshold),
+            ComponentFilterVariant::MinimumTVLRange((_, upper_tvl_threshold)) => (
+                ProtocolComponentRequestParameters::tvl_filtered(*upper_tvl_threshold),
                 ProtocolComponentsRequestBody::system_filtered(&self.protocol_system),
             ),
         };
@@ -148,6 +181,20 @@ where
             .map(|k| ProtocolId { chain: self.chain, id: k.clone() })
             .collect()
     }
+
+    /// Given BlockChanges, filter out components that are no longer relevant and return the
+    /// components that need to be added or removed.
+    pub fn filter_updated_components(&self, deltas: &BlockChanges) -> (Vec<String>, Vec<String>) {
+        match &self.filter.variant {
+            ComponentFilterVariant::Ids(_) => (Default::default(), Default::default()),
+            ComponentFilterVariant::MinimumTVLRange((remove_tvl, add_tvl)) => deltas
+                .component_tvl
+                .iter()
+                .filter(|(_, &tvl)| tvl < *remove_tvl || tvl > *add_tvl)
+                .map(|(id, _)| id.clone())
+                .partition(|id| deltas.component_tvl[id] > *add_tvl),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -163,7 +210,12 @@ mod test {
 
     fn with_mocked_rpc() -> ComponentTracker<MockRPCClient> {
         let rpc = MockRPCClient::new();
-        ComponentTracker::new(Chain::Ethereum, "uniswap-v2", ComponentFilter::MinimumTVL(0.0), rpc)
+        ComponentTracker::new(
+            Chain::Ethereum,
+            "uniswap-v2",
+            ComponentFilter::with_tvl_range(0.0, 0.0),
+            rpc,
+        )
     }
 
     fn components_response() -> (Vec<Bytes>, ProtocolComponent) {

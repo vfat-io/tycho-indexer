@@ -14,7 +14,7 @@ use tycho_client::{
 };
 use tycho_core::dto::{Chain, ExtractorIdentity};
 
-#[derive(Parser, Debug, Clone, PartialEq, Eq)]
+#[derive(Parser, Debug, Clone, PartialEq)]
 #[clap(version = "0.1.0")]
 struct CliArgs {
     /// Tycho server URL, without protocol. Example: localhost:4242
@@ -32,6 +32,16 @@ struct CliArgs {
     /// Specifies the minimum TVL to filter the components. Ignored if addresses are provided.
     #[clap(long, default_value = "10")]
     min_tvl: u32,
+
+    /// Specifies the lower bound of the TVL threshold range. Components below this TVL will be
+    /// removed from tracking.
+    #[clap(long)]
+    remove_tvl_threshold: Option<u32>,
+
+    /// Specifies the upper bound of the TVL threshold range. Components above this TVL will be
+    /// added to tracking.
+    #[clap(long)]
+    add_tvl_threshold: Option<u32>,
 
     /// Specifies the client's block time
     #[clap(long, default_value = "600")]
@@ -61,10 +71,25 @@ struct CliArgs {
     max_messages: Option<usize>,
 }
 
+impl CliArgs {
+    fn validate(&self) -> Result<(), String> {
+        if self.remove_tvl_threshold.is_some() && self.add_tvl_threshold.is_none() {
+            return Err("Both remove_tvl_threshold and add_tvl_threshold must be set.".to_string());
+        }
+        if self.remove_tvl_threshold.is_none() && self.add_tvl_threshold.is_some() {
+            return Err("Both remove_tvl_threshold and add_tvl_threshold must be set.".to_string());
+        }
+        Ok(())
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // Parse CLI Args
     let args: CliArgs = CliArgs::parse();
+    if let Err(e) = args.validate() {
+        panic!("{}", e);
+    }
 
     // Setup Logging
     let (non_blocking, _guard) =
@@ -127,6 +152,7 @@ async fn main() {
     run(exchanges, args).await;
 }
 
+#[allow(deprecated)]
 async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     let tycho_ws_url = format!("ws://{}", &args.tycho_url);
     let tycho_rpc_url = format!("http://{}", &args.tycho_url);
@@ -154,8 +180,12 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
         };
         let filter = if address.is_some() {
             ComponentFilter::Ids(vec![address.unwrap()])
+        } else if let (Some(remove_tvl), Some(add_tvl)) =
+            (args.remove_tvl_threshold, args.add_tvl_threshold)
+        {
+            ComponentFilter::with_tvl_range(remove_tvl as f64, add_tvl as f64)
         } else {
-            ComponentFilter::MinimumTVL(args.min_tvl as f64)
+            ComponentFilter::with_tvl_range(args.min_tvl as f64, args.min_tvl as f64)
         };
         let sync = ProtocolStateSynchronizer::new(
             id.clone(),
