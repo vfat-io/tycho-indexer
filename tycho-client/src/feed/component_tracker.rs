@@ -10,7 +10,7 @@ use tycho_core::{
 };
 
 #[derive(Clone, Debug)]
-pub enum ComponentFilterVariant {
+pub(crate) enum ComponentFilterVariant {
     Ids(Vec<String>),
     /// MinimumTVLRange is a tuple of (remove_tvl_threshold, add_tvl_threshold). Components that
     /// drop below the remove threshold will be removed from tracking, components that exceed the
@@ -26,6 +26,7 @@ pub struct ComponentFilter {
 
 impl ComponentFilter {
     #[allow(non_snake_case)] // for backwards compatibility
+    #[deprecated(since = "0.9.2", note = "Please use MinimumTVLRange instead")]
     pub fn MinimumTVL(min_tvl: f64) -> ComponentFilter {
         ComponentFilter { variant: ComponentFilterVariant::MinimumTVLRange((min_tvl, min_tvl)) }
     }
@@ -45,7 +46,7 @@ impl ComponentFilter {
         ComponentFilter { variant: ComponentFilterVariant::Ids(ids) }
     }
 
-    pub fn variant(&self) -> &ComponentFilterVariant {
+    pub(crate) fn variant(&self) -> &ComponentFilterVariant {
         &self.variant
     }
 }
@@ -198,7 +199,12 @@ mod test {
 
     fn with_mocked_rpc() -> ComponentTracker<MockRPCClient> {
         let rpc = MockRPCClient::new();
-        ComponentTracker::new(Chain::Ethereum, "uniswap-v2", ComponentFilter::MinimumTVL(0.0), rpc)
+        ComponentTracker::new(
+            Chain::Ethereum,
+            "uniswap-v2",
+            ComponentFilter::MinimumTVLRange(0.0, 0.0),
+            rpc,
+        )
     }
 
     fn components_response() -> (Vec<Bytes>, ProtocolComponent) {

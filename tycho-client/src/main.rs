@@ -36,12 +36,12 @@ struct CliArgs {
     /// Specifies the lower bound of the TVL threshold range. Components below this TVL will be
     /// removed from tracking.
     #[clap(long)]
-    remove_tvl_threshold: Option<f64>,
+    remove_tvl_threshold: Option<u32>,
 
     /// Specifies the upper bound of the TVL threshold range. Components above this TVL will be
     /// added to tracking.
     #[clap(long)]
-    add_tvl_threshold: Option<f64>,
+    add_tvl_threshold: Option<u32>,
 
     /// Specifies the client's block time
     #[clap(long, default_value = "600")]
@@ -182,9 +182,9 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
         } else if let (Some(remove_tvl), Some(add_tvl)) =
             (args.remove_tvl_threshold, args.add_tvl_threshold)
         {
-            ComponentFilter::MinimumTVLRange(remove_tvl, add_tvl)
+            ComponentFilter::MinimumTVLRange(remove_tvl as f64, add_tvl as f64)
         } else {
-            ComponentFilter::MinimumTVL(args.min_tvl as f64)
+            ComponentFilter::MinimumTVLRange(args.min_tvl as f64, args.min_tvl as f64)
         };
         let sync = ProtocolStateSynchronizer::new(
             id.clone(),
