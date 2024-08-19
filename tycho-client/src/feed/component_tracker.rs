@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use tracing::{debug, instrument, warn};
 use tycho_core::{
     dto::{
-        Chain, ProtocolComponent, ProtocolComponentRequestParameters,
+        BlockChanges, Chain, ProtocolComponent, ProtocolComponentRequestParameters,
         ProtocolComponentsRequestBody, ProtocolId,
     },
     Bytes,
@@ -45,10 +45,6 @@ impl ComponentFilter {
     #[allow(non_snake_case)] // for backwards compatibility
     pub fn Ids(ids: Vec<String>) -> ComponentFilter {
         ComponentFilter { variant: ComponentFilterVariant::Ids(ids) }
-    }
-
-    pub(crate) fn variant(&self) -> &ComponentFilterVariant {
-        &self.variant
     }
 }
 
@@ -184,6 +180,20 @@ where
             .keys()
             .map(|k| ProtocolId { chain: self.chain, id: k.clone() })
             .collect()
+    }
+
+    /// Given BlockChanges, filter out components that are no longer relevant and return the
+    /// components that need to be added or removed.
+    pub fn filter_updated_components(&self, deltas: &BlockChanges) -> (Vec<String>, Vec<String>) {
+        match &self.filter.variant {
+            ComponentFilterVariant::Ids(_) => (Default::default(), Default::default()),
+            ComponentFilterVariant::MinimumTVLRange((remove_tvl, add_tvl)) => deltas
+                .component_tvl
+                .iter()
+                .filter(|(_, &tvl)| tvl < *remove_tvl || tvl > *add_tvl)
+                .map(|(id, _)| id.clone())
+                .partition(|id| deltas.component_tvl[id] > *add_tvl),
+        }
     }
 }
 

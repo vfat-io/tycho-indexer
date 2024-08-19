@@ -381,50 +381,34 @@ where
                 let header = Header::from_block(deltas.get_block(), deltas.is_revert());
                 debug!(block_number=?header.number, "Received delta message");
                 let (snapshots, removed_components) = {
-                    match &self.component_filter.variant() {
-                        ComponentFilterVariant::Ids(_) => (Default::default(), Default::default()),
-                        ComponentFilterVariant::MinimumTVLRange((
-                            remove_tvl_threshold,
-                            add_tvl_threshold,
-                        )) => {
-                            // 1. Remove components based on tvl changes
-                            // 2. Add components based on tvl changes, query those for snapshots
-                            let (to_add, to_remove): (Vec<_>, Vec<_>) = deltas
-                                .component_tvl
-                                .iter()
-                                .filter(|(_, &tvl)| {
-                                    tvl < *remove_tvl_threshold || tvl > *add_tvl_threshold
-                                })
-                                .partition(|(_, &tvl)| tvl > *add_tvl_threshold);
+                    // 1. Remove components based on latest changes
+                    // 2. Add components based on latest changes, query those for snapshots
+                    let (to_add, to_remove) = tracker.filter_updated_components(&deltas);
 
-                            // Only components we don't track yet need a snapshot,
-                            let requiring_snapshot = to_add
-                                .iter()
-                                .filter_map(|(k, _)| {
-                                    if tracker.components.contains_key(*k) {
-                                        None
-                                    } else {
-                                        Some(*k)
-                                    }
-                                })
-                                .collect::<Vec<_>>();
-                            debug!(components=?requiring_snapshot, "SnapshotRequest");
-                            tracker
-                                .start_tracking(&requiring_snapshot)
-                                .await?;
-                            let snapshots = self
-                                .get_snapshots(header.clone(), &tracker, Some(requiring_snapshot))
-                                .await?
-                                .snapshots;
+                    // Only components we don't track yet need a snapshot,
+                    let requiring_snapshot: Vec<_> = to_add
+                        .iter()
+                        .filter(|id| {
+                            !tracker
+                                .components
+                                .contains_key(id.as_str())
+                        })
+                        .collect();
+                    debug!(components=?requiring_snapshot, "SnapshotRequest");
+                    tracker
+                        .start_tracking(requiring_snapshot.as_slice())
+                        .await?;
+                    let snapshots = self
+                        .get_snapshots(header.clone(), &tracker, Some(requiring_snapshot))
+                        .await?
+                        .snapshots;
 
-                            let removed_components = if !to_remove.is_empty() {
-                                tracker.stop_tracking(to_remove.iter().map(|(id, _)| *id))
-                            } else {
-                                Default::default()
-                            };
-                            (snapshots, removed_components)
-                        }
-                    }
+                    let removed_components = if !to_remove.is_empty() {
+                        tracker.stop_tracking(&to_remove)
+                    } else {
+                        Default::default()
+                    };
+                    (snapshots, removed_components)
                 };
 
                 // 3. Filter deltas by currently tracked components / contracts
