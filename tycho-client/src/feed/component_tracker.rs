@@ -13,6 +13,11 @@ use tycho_core::{
 pub enum ComponentFilter {
     Ids(Vec<String>),
     MinimumTVL(f64),
+    /// MinimumTVLRange is a tuple of (remove_tvl_threshold, add_tvl_threshold). Components that
+    /// drop below the remove threshold will be removed from tracking, components that exceed the
+    /// add threshold will be added. This helps buffer against components that fluctuate on the
+    /// tvl threshold boundary.
+    MinimumTVLRange((f64, f64)),
 }
 
 /// Helper struct to store which components are being tracked atm.
@@ -52,6 +57,10 @@ where
             }
             ComponentFilter::MinimumTVL(min_tvl_threshold) => (
                 ProtocolComponentRequestParameters::tvl_filtered(*min_tvl_threshold),
+                ProtocolComponentsRequestBody::system_filtered(&self.protocol_system),
+            ),
+            ComponentFilter::MinimumTVLRange((_, upper_tvl_threshold)) => (
+                ProtocolComponentRequestParameters::tvl_filtered(*upper_tvl_threshold),
                 ProtocolComponentsRequestBody::system_filtered(&self.protocol_system),
             ),
         };
