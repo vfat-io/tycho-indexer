@@ -182,9 +182,9 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
         } else if let (Some(remove_tvl), Some(add_tvl)) =
             (args.remove_tvl_threshold, args.add_tvl_threshold)
         {
-            ComponentFilter::MinimumTVLRange(remove_tvl as f64, add_tvl as f64)
+            ComponentFilter::with_tvl_range(remove_tvl as f64, add_tvl as f64)
         } else {
-            ComponentFilter::MinimumTVLRange(args.min_tvl as f64, args.min_tvl as f64)
+            ComponentFilter::with_tvl_range(args.min_tvl as f64, args.min_tvl as f64)
         };
         let sync = ProtocolStateSynchronizer::new(
             id.clone(),

@@ -673,7 +673,7 @@ mod test {
         ProtocolStateSynchronizer::new(
             ExtractorIdentity::new(Chain::Ethereum, "uniswap-v2"),
             native,
-            ComponentFilter::MinimumTVLRange(50.0, 50.0),
+            ComponentFilter::with_tvl_range(50.0, 50.0),
             1,
             true,
             rpc_client,
@@ -700,7 +700,7 @@ mod test {
         let mut tracker = ComponentTracker::new(
             Chain::Ethereum,
             "uniswap-v2",
-            ComponentFilter::MinimumTVLRange(0.0, 0.0),
+            ComponentFilter::with_tvl_range(0.0, 0.0),
             state_sync.rpc_client.clone(),
         );
         let component = ProtocolComponent { id: "Component1".to_string(), ..Default::default() };
@@ -756,7 +756,7 @@ mod test {
         let mut tracker = ComponentTracker::new(
             Chain::Ethereum,
             "uniswap-v2",
-            ComponentFilter::MinimumTVLRange(0.0, 0.0),
+            ComponentFilter::with_tvl_range(0.0, 0.0),
             state_sync.rpc_client.clone(),
         );
         let component = ProtocolComponent {
@@ -1186,7 +1186,7 @@ mod test {
         let mut state_sync = ProtocolStateSynchronizer::new(
             ExtractorIdentity::new(Chain::Ethereum, "uniswap-v2"),
             true,
-            ComponentFilter::MinimumTVLRange(remove_tvl_threshold, add_tvl_threshold),
+            ComponentFilter::with_tvl_range(remove_tvl_threshold, add_tvl_threshold),
             1,
             true,
             ArcRPCClient(Arc::new(rpc_client)),

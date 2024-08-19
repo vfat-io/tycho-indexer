@@ -26,13 +26,13 @@ pub struct ComponentFilter {
 
 impl ComponentFilter {
     #[allow(non_snake_case)] // for backwards compatibility
-    #[deprecated(since = "0.9.2", note = "Please use MinimumTVLRange instead")]
+    #[deprecated(since = "0.9.2", note = "Please use with_tvl_range instead")]
     pub fn MinimumTVL(min_tvl: f64) -> ComponentFilter {
         ComponentFilter { variant: ComponentFilterVariant::MinimumTVLRange((min_tvl, min_tvl)) }
     }
 
     #[allow(non_snake_case)]
-    pub fn MinimumTVLRange(remove_tvl_threshold: f64, add_tvl_threshold: f64) -> ComponentFilter {
+    pub fn with_tvl_range(remove_tvl_threshold: f64, add_tvl_threshold: f64) -> ComponentFilter {
         ComponentFilter {
             variant: ComponentFilterVariant::MinimumTVLRange((
                 remove_tvl_threshold,
@@ -41,6 +41,7 @@ impl ComponentFilter {
         }
     }
 
+    #[deprecated(since = "0.9.2")]
     #[allow(non_snake_case)] // for backwards compatibility
     pub fn Ids(ids: Vec<String>) -> ComponentFilter {
         ComponentFilter { variant: ComponentFilterVariant::Ids(ids) }
@@ -202,7 +203,7 @@ mod test {
         ComponentTracker::new(
             Chain::Ethereum,
             "uniswap-v2",
-            ComponentFilter::MinimumTVLRange(0.0, 0.0),
+            ComponentFilter::with_tvl_range(0.0, 0.0),
             rpc,
         )
     }
