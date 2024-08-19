@@ -152,6 +152,7 @@ async fn main() {
     run(exchanges, args).await;
 }
 
+#[allow(deprecated)]
 async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     let tycho_ws_url = format!("ws://{}", &args.tycho_url);
     let tycho_rpc_url = format!("http://{}", &args.tycho_url);

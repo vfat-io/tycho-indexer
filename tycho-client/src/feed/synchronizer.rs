@@ -28,7 +28,7 @@ use tycho_core::{
 use super::Header;
 use crate::{
     deltas::{DeltasClient, SubscriptionOptions},
-    feed::component_tracker::{ComponentFilter, ComponentFilterVariant, ComponentTracker},
+    feed::component_tracker::{ComponentFilter, ComponentTracker},
     rpc::RPCClient,
 };
 
