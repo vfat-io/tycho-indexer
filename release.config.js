@@ -40,10 +40,6 @@ const config = {
           'echo "NEXT_RELEASE_VERSION=${nextRelease.version}" >> $GITHUB_OUTPUT',
         prepareCmd: [
           "toml set --toml-path substreams/common/Cargo.toml package.version ${nextRelease.version}",
-          "toml set --toml-path substreams/evm-ambient/Cargo.toml package.version ${nextRelease.version}",
-          "toml set --toml-path substreams/evm-uniswap-v2/Cargo.toml package.version ${nextRelease.version}",
-          "toml set --toml-path substreams/evm-uniswap-v3/Cargo.toml package.version ${nextRelease.version}",
-          "toml set --toml-path substreams/substreams-helper/Cargo.toml package.version ${nextRelease.version}",
           "toml set --toml-path token-analyzer/Cargo.toml package.version ${nextRelease.version}",
           "toml set --toml-path tycho-client/Cargo.toml package.version ${nextRelease.version}",
           "toml set --toml-path tycho-client-py/pyproject.toml project.version ${nextRelease.version}",
@@ -86,10 +82,6 @@ if (
       assets: [
         "CHANGELOG.md",
         "substreams/common/Cargo.toml",
-        "substreams/evm-ambient/Cargo.toml",
-        "substreams/evm-uniswap-v2/Cargo.toml",
-        "substreams/evm-uniswap-v3/Cargo.toml",
-        "substreams/substreams-helper/Cargo.toml",
         "token-analyzer/Cargo.toml",
         "tycho-client/Cargo.toml",
         "tycho-client-py/pyproject.toml",
