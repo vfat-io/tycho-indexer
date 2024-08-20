@@ -34,10 +34,19 @@ const config = {
     [
       "@semantic-release/exec",
       {
-        publishCmd:
-          'echo "NEXT_RELEASE_VERSION=${nextRelease.version}" >> $GITHUB_OUTPUT',
         verifyReleaseCmd:
           'echo "VERIFY_RELEASE_VERSION=${nextRelease.version}" >> $GITHUB_OUTPUT',
+        publishCmd:
+          'echo "NEXT_RELEASE_VERSION=${nextRelease.version}" >> $GITHUB_OUTPUT',
+        prepareCmd: [
+          "toml set --toml-path substreams/common/Cargo.toml package.version ${nextRelease.version}",
+          "toml set --toml-path token-analyzer/Cargo.toml package.version ${nextRelease.version}",
+          "toml set --toml-path tycho-client/Cargo.toml package.version ${nextRelease.version}",
+          "toml set --toml-path tycho-client-py/pyproject.toml project.version ${nextRelease.version}",
+          "toml set --toml-path tycho-core/Cargo.toml project.version ${nextRelease.version}",
+          "toml set --toml-path tycho-indexer/Cargo.toml project.version ${nextRelease.version}",
+          "toml set --toml-path tycho-storage/Cargo.toml project.version ${nextRelease.version}",
+        ].join(" && "),
       },
     ],
     [
@@ -70,6 +79,16 @@ if (
     "@semantic-release/git",
     {
       assets: ["CHANGELOG.md"],
+      assets: [
+        "CHANGELOG.md",
+        "substreams/common/Cargo.toml",
+        "token-analyzer/Cargo.toml",
+        "tycho-client/Cargo.toml",
+        "tycho-client-py/pyproject.toml",
+        "tycho-core/Cargo.toml",
+        "tycho-indexer/Cargo.toml",
+        "tycho-storage/Cargo.toml",
+      ],
       message:
         "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
     },
