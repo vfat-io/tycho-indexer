@@ -16,11 +16,12 @@ fi
 
 
 # Potential common directories to place binaries
-directories=("/usr/local/bin" "/usr/bin" "/bin")
+directories=("/usr/local/bin" "/usr/bin" "/bin" "$HOME/bin")
 
 # Loop through the directories and pick the first one that exists and is writable
 for dir in "${directories[@]}"; do
   if [[ -d "$dir" && -w "$dir" ]]; then
+    echo "Found a writable binary directory: $dir"
     BIN_DIR=$dir
     break
   fi
