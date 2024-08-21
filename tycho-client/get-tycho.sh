@@ -39,6 +39,7 @@ if [ -z "$VERSION" ]; then
   echo "installing latest version: ${FNAME}"
 else
   FNAME="tycho-client-${ARCH}-${OS}-${VERSION}.tar.gz"
+  echo "installing version: ${FNAME}"
 fi
 
 RELEASE="s3://repo.propellerheads/tycho-client/${FNAME}"
