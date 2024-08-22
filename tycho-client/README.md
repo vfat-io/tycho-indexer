@@ -55,10 +55,7 @@ This should display the version of the Tycho client installed.
 
 ## Quickstart
 
-To use the Tycho Client, you will need a connection to the Tycho Indexer. We usually
-port-forward to our cluster's instance for this. If you are using a local instance, such as one running within Docker Compose, you can skip this step.
-
-Once you have a connection to an indexer instance, you can simply create a stream using:
+To use the Tycho Client, you will need a connection to the Tycho Indexer. Once you have a connection to an indexer instance, you can simply create a stream using:
 
 ```
 tycho-client \
