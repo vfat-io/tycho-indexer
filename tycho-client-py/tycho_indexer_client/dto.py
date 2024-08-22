@@ -21,7 +21,7 @@ class HexBytes(_HexBytes):
         # the returned value will be ignored
         field_schema.update(
             # some example postcodes
-            examples=["0xBadBad"],
+            examples=["0xBadBad"]
         )
 
     @classmethod
@@ -275,6 +275,7 @@ class ProtocolStateParams(BaseModel):
 
 class ContractStateParams(BaseModel):
     contract_ids: Optional[List[ContractId]] = Field(default=None)
+    protocol_system: Optional[str] = Field(default=None)
     version: Optional[VersionParams] = None
 
     class Config:
