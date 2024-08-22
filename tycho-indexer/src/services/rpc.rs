@@ -223,9 +223,10 @@ where
         };
         let request_version_finality = self
             .pending_deltas
-            .get_block_finality(ordered_version, protocol_system.clone())?
+            .get_block_finality(ordered_version, protocol_system.clone())
+            .unwrap_or(None)
             .unwrap_or_else(|| {
-                warn!(?ordered_version, "No finality found for version.");
+                warn!(?ordered_version, ?protocol_system, "No finality found for version.");
                 FinalityStatus::Finalized
             });
         debug!(

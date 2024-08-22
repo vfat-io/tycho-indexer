@@ -261,6 +261,7 @@ impl PendingDeltas {
 
     /// Returns finality for any extractor, can error if lock is poisened. Returns None if buffer is
     /// empty.
+    /// Returns an error if the provided protocol system isn't found in the buffer.
     /// Note - if no protocol system is provided, we choose a random extractor to get the finality
     /// status from. This is particularly risky when there is an extractor syncing.
     pub fn get_block_finality(
@@ -276,6 +277,7 @@ impl PendingDeltas {
                         .map_err(|e| PendingDeltasError::LockError(system, e.to_string()))?;
                     Ok(guard.get_finality_status(version))
                 } else {
+                    debug!(?system, "Missing requested protocol system in pending deltas");
                     Err(PendingDeltasError::UnknownExtractor(system))
                 }
             }
