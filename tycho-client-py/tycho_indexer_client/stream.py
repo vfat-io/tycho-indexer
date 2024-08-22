@@ -29,6 +29,21 @@ class TychoStream:
         logs_directory: str = None,
         tycho_client_path: str = None,
     ):
+        """
+        Initializes the TychoStream instance.
+
+        Args:
+            tycho_url: The URL of the Tycho indexer server.
+            exchanges: A list of exchanges to monitor in the stream.
+            blockchain: The blockchain chain you are querying (e.g., Ethereum).
+            min_tvl: The minimum total value locked (TVL) for filtering data in the stream. Defaults to None.
+            min_tvl_range: A tuple of (removal_threshold, addition_threshold). New components will be added to the data stream
+                if their TVL exceeds addition_threshold and will be removed from the stream if it drops below removal_threshold.
+                Defaults to None. If both min_tvl and min_tvl_range are given, preference is given to min_tvl.
+            include_state: Whether to include protocol states in the stream. Defaults to True.
+            logs_directory: Directory to store log files. If not specified, a default directory based on the OS is used.
+            tycho_client_path: Path to the Tycho client binary. If not specified, the binary is searched for in the system's PATH.
+        """
         self.tycho_url = tycho_url
         self.min_tvl = min_tvl
         self.tycho_client = None

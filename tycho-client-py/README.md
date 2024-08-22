@@ -1,6 +1,6 @@
 # Tycho Python Client
 
-A Python client library for interacting with the Tycho RPC server and streaming data from the Tycho client.
+A Python client library for interacting with the Tycho RPC server and streaming data from Tycho.
 
 ## Features
 - RPC Client: Interact with the Tycho RPC server to query various blockchain data, including protocol components, states, contract states, and tokens.
@@ -89,14 +89,3 @@ async def main():
 
 asyncio.run(main())
 ```
-
-#### Configurations
-- `rpc_url`: The URL of the Tycho RPC server. Defaults to http://0.0.0.0:4242.
-- `chain`: The blockchain chain you are querying (e.g., Ethereum).
-- `tycho_url`: The URL of the Tycho indexer server.
-- `exchanges`: A list of exchanges to monitor in the stream.
-- `min_tvl`: The minimum total value locked (TVL) for filtering data in the stream. Defaults to 10 ETH. Note: this is a hard limit. If a pool fluctuates in tvl close to this boundary the client will emit a message to add/remove that pool every time it crosses that boundary. To mitegate this please use the ranged tvl boundary decribed below.
-- `min_tvl_range`: A tuple of (removal_threshold, addition_threshold). New components will be added to the data stream if their TVL exceeds addition_threshold and will be removed from the stream if it drops below removal_threshold. Defaults to None. If both min_tvl and min_tvl_range is given, prefernece is given to min_tvl.
-- `include_state`: Whether to include protocol states in the stream. Defaults to True.
-- `logs_directory`: Directory to store log files. If not specified, a default directory based on the OS is used.
-- `tycho_client_path`: Path to the Tycho client binary. If not specified, the binary is searched for in the system's PATH.
