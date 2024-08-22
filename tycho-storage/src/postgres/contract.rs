@@ -1,5 +1,6 @@
 use super::{
-    maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema, storage_error_from_diesel,
+    keccak256, maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema,
+    storage_error_from_diesel,
     versioning::{apply_partitioned_versioning, apply_versioning},
     PostgresError, PostgresGateway, WithOrdinal, WithTxHash, MAX_TS,
 };
@@ -9,7 +10,6 @@ use diesel::{
     upsert::{excluded, on_constraint},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use ethers::utils::keccak256;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use tracing::{debug, error, instrument};
 use tycho_core::{

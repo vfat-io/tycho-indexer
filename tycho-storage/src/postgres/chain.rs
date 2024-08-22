@@ -276,7 +276,6 @@ mod test {
         db_fixtures::{yesterday_midnight, yesterday_one_am},
     };
     use diesel_async::AsyncConnection;
-    use ethers::types::{H256, U256};
     use std::{str::FromStr, time::Duration};
     use tycho_core::models::Chain;
 
@@ -582,16 +581,14 @@ mod test {
 
         // set up contracts data
         let block1_hash =
-            H256::from_str("0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
-                .unwrap()
-                .0
-                .into();
+            Bytes::from_str("88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
+                .unwrap();
         let c0_address =
             Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").expect("c0 address valid");
-        let exp_slots: HashMap<U256, U256> = vec![
-            (U256::from(0), U256::from(1)),
-            (U256::from(1), U256::from(5)),
-            (U256::from(2), U256::from(1)),
+        let exp_slots: HashMap<Bytes, Bytes> = vec![
+            (Bytes::from(0_u8).lpad(32, 0), Bytes::from(1_u8).lpad(32, 0)),
+            (Bytes::from(1_u8).lpad(32, 0), Bytes::from(5_u8).lpad(32, 0)),
+            (Bytes::from(2_u8).lpad(32, 0), Bytes::from(1_u8).lpad(32, 0)),
         ]
         .into_iter()
         .collect();
@@ -602,7 +599,7 @@ mod test {
             .await
             .unwrap();
 
-        let slots: HashMap<U256, U256> = schema::contract_storage::table
+        let slots: HashMap<Bytes, Bytes> = schema::contract_storage::table
             .inner_join(schema::account::table)
             .filter(schema::account::address.eq(c0_address))
             .select((schema::contract_storage::slot, schema::contract_storage::value))
@@ -612,10 +609,9 @@ mod test {
             .iter()
             .map(|(k, v)| {
                 (
-                    U256::from_big_endian(k),
-                    v.as_ref()
-                        .map(|rv| U256::from_big_endian(rv))
-                        .unwrap_or_else(U256::zero),
+                    k.clone(),
+                    v.clone()
+                        .unwrap_or(Bytes::from([0u8; 32])),
                 )
             })
             .collect();

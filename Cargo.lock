@@ -6572,6 +6572,7 @@ dependencies = [
  "rstest",
  "serde_json",
  "test-log",
+ "tiny-keccak",
  "tokio",
  "tracing",
  "tycho-core",
