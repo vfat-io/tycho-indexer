@@ -1,6 +1,5 @@
 use super::{
-    keccak256, maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema,
-    storage_error_from_diesel,
+    maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema, storage_error_from_diesel,
     versioning::{apply_partitioned_versioning, apply_versioning},
     PostgresError, PostgresGateway, WithOrdinal, WithTxHash, MAX_TS,
 };
@@ -13,9 +12,9 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use tracing::{debug, error, instrument};
 use tycho_core::{
-    models,
+    keccak256,
     models::{
-        AccountToContractStore, Address, Balance, Chain, ChangeType, Code, ContractId,
+        self, AccountToContractStore, Address, Balance, Chain, ChangeType, Code, ContractId,
         ContractStore, StoreKey, StoreVal, TxHash,
     },
     storage::{BlockOrTimestamp, StorageError, Version},

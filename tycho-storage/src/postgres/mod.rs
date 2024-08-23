@@ -139,7 +139,6 @@ use diesel_async::{
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use tracing::{debug, info};
 
-use tiny_keccak::{Hasher, Keccak};
 use tycho_core::{
     models::{Chain, TxHash},
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError, Version, VersionKind},
@@ -399,19 +398,6 @@ async fn maybe_lookup_version_ts(
         return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", version.1)));
     }
     maybe_lookup_block_ts(&version.0, conn).await
-}
-
-/// Compute the Keccak-256 hash of input bytes.
-///
-/// Note that strings are interpreted as UTF-8 bytes,
-pub fn keccak256<T: AsRef<[u8]>>(bytes: T) -> [u8; 32] {
-    let mut output = [0u8; 32];
-
-    let mut hasher = Keccak::v256();
-    hasher.update(bytes.as_ref());
-    hasher.finalize(&mut output);
-
-    output
 }
 
 #[derive(Clone)]
@@ -742,6 +728,7 @@ pub mod db_fixtures {
     use serde_json::Value;
 
     use tycho_core::{
+        keccak256,
         models::{Balance, Code, FinancialType, ImplementationType},
         Bytes,
     };
@@ -975,7 +962,7 @@ pub mod db_fixtures {
 
         let data = (
             schema::contract_code::code.eq(&code),
-            schema::contract_code::hash.eq(Bytes::from(&super::keccak256(&code))),
+            schema::contract_code::hash.eq(Bytes::from(&keccak256(&code))),
             schema::contract_code::account_id.eq(account_id),
             schema::contract_code::modify_tx.eq(modify_tx),
             schema::contract_code::valid_from.eq(ts),
