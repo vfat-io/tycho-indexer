@@ -7,7 +7,7 @@ use crate::extractor::{
 use ethers::prelude::{H160, H256, U256};
 use tycho_core::{
     models::{
-        blockchain::{Block, BlockAggregatedDeltas, Transaction},
+        blockchain::{Block, BlockAggregatedDeltas},
         contract::{Contract, ContractDelta},
         protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
         token::CurrencyToken,
@@ -36,33 +36,6 @@ impl From<Block> for evm::Block {
             parent_hash: H256::from_slice(&value.parent_hash),
             chain: value.chain,
             ts: value.ts,
-        }
-    }
-}
-
-impl From<Transaction> for evm::Transaction {
-    fn from(value: Transaction) -> Self {
-        Self {
-            hash: H256::from_slice(&value.hash),
-            block_hash: H256::from_slice(&value.block_hash),
-            from: H160::from_slice(&value.from),
-            to: value
-                .to
-                .as_ref()
-                .map(|e| H160::from_slice(e)),
-            index: value.index,
-        }
-    }
-}
-
-impl From<&evm::Transaction> for Transaction {
-    fn from(value: &evm::Transaction) -> Self {
-        Self {
-            hash: Bytes::from(value.hash),
-            block_hash: Bytes::from(value.block_hash),
-            from: Bytes::from(value.from),
-            to: value.to.map(Bytes::from),
-            index: value.index,
         }
     }
 }

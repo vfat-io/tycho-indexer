@@ -15,13 +15,15 @@ use tracing::log::warn;
 use tycho_core::{
     dto,
     models::{
-        blockchain::BlockScoped, protocol as tycho_core_protocol, token::CurrencyToken, Address,
-        AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity, NormalisedMessage,
-        ProtocolType, StoreVal,
+        blockchain::{BlockScoped, Transaction},
+        protocol as tycho_core_protocol,
+        token::CurrencyToken,
+        Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
+        NormalisedMessage, ProtocolType, StoreVal,
     },
     Bytes,
 };
-use utils::{pad_and_parse_32bytes, pad_and_parse_h160};
+use utils::{pad_and_parse_20bytes, pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
     extractor::revert_buffer::{
@@ -32,8 +34,6 @@ use crate::{
 };
 
 use super::{revert_buffer::StateUpdateBufferEntry, u256_num::bytes_to_f64, ExtractionError};
-
-use self::utils::TryDecode;
 
 pub mod chain_state;
 mod convert;
@@ -82,24 +82,12 @@ pub struct Block {
     pub ts: NaiveDateTime,
 }
 
-#[derive(Debug, PartialEq, Copy, Clone, Default)]
-pub struct Transaction {
-    pub hash: H256,
-    pub block_hash: H256,
-    pub from: H160,
-    pub to: Option<H160>,
-    pub index: u64,
-}
+pub trait TryFromMessage {
+    type Args<'a>;
 
-impl Transaction {
-    pub fn new(hash: H256, block_hash: H256, from: H160, to: Option<H160>, index: u64) -> Self {
-        Transaction { hash, block_hash, from, to, index }
-    }
-
-    // This serves to expose the 'try_decode' method from utils externally
-    pub fn hash_from_bytes(hash: Bytes) -> H256 {
-        H256::try_decode(&hash, "tx hash").expect("Failed to decode tx hash")
-    }
+    fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError>
+    where
+        Self: Sized;
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -179,9 +167,9 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
                         .as_ref()
                         .map(|v| H256::from(keccak256(v)))
                         .unwrap_or_default(),
-                    value.tx.hash,
-                    value.tx.hash,
-                    Some(value.tx.hash),
+                    value.tx.hash.clone().into(),
+                    value.tx.hash.clone().into(),
+                    Some(value.tx.hash.clone().into()),
                 );
                 acc
             })
@@ -231,9 +219,9 @@ impl AccountUpdate {
                 .as_ref()
                 .map(|v| H256::from(keccak256(v)))
                 .unwrap_or(empty_hash),
-            tx.hash,
-            tx.hash,
-            Some(tx.hash),
+            tx.hash.clone().into(),
+            tx.hash.clone().into(),
+            Some(tx.hash.clone().into()),
         )
     }
 
@@ -478,13 +466,13 @@ impl TransactionVMUpdates {
     pub fn merge(&mut self, other: &TransactionVMUpdates) -> Result<(), ExtractionError> {
         if self.tx.block_hash != other.tx.block_hash {
             return Err(ExtractionError::MergeError(format!(
-                "Can't merge TransactionVMUpdates from different blocks: 0x{:x} != 0x{:x}",
+                "Can't merge TransactionVMUpdates from different blocks: {:x} != {:x}",
                 self.tx.block_hash, other.tx.block_hash,
             )));
         }
         if self.tx.hash == other.tx.hash {
             return Err(ExtractionError::MergeError(format!(
-                "Can't merge TransactionVMUpdates from the same transaction: 0x{:x}",
+                "Can't merge TransactionVMUpdates from the same transaction: {:x}",
                 self.tx.hash
             )));
         }
@@ -494,7 +482,7 @@ impl TransactionVMUpdates {
                 self.tx.index, other.tx.index
             )));
         }
-        self.tx = other.tx;
+        self.tx = other.tx.clone();
 
         for (address, update) in other
             .account_updates
@@ -650,21 +638,22 @@ impl Block {
     }
 }
 
-impl Transaction {
-    /// Parses transaction from tychos protobuf transaction message
-    pub fn try_from_message(
-        msg: substreams::Transaction,
-        block_hash: &H256,
-    ) -> Result<Self, ExtractionError> {
+impl TryFromMessage for Transaction {
+    type Args<'a> = (substreams::Transaction, &'a H256);
+
+    fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
+        let (msg, block_hash) = args;
+
         let to = if !msg.to.is_empty() {
-            Some(pad_and_parse_h160(&msg.to.into()).map_err(ExtractionError::DecodeError)?)
+            Some(pad_and_parse_20bytes(&msg.to).map_err(ExtractionError::DecodeError)?)
         } else {
             None
         };
+
         Ok(Self {
             hash: pad_and_parse_32bytes(&msg.hash).map_err(ExtractionError::DecodeError)?,
-            block_hash: *block_hash,
-            from: pad_and_parse_h160(&msg.from.into()).map_err(ExtractionError::DecodeError)?,
+            block_hash: Bytes::from(*block_hash),
+            from: pad_and_parse_20bytes(&msg.from).map_err(ExtractionError::DecodeError)?,
             to,
             index: msg.index,
         })
@@ -706,7 +695,7 @@ impl ComponentBalance {
             token: pad_and_parse_h160(&msg.token.into()).map_err(ExtractionError::DecodeError)?,
             balance: Bytes::from(msg.balance),
             balance_float,
-            modify_tx: tx.hash,
+            modify_tx: tx.hash.clone().into(),
             component_id: String::from_utf8(msg.component_id)
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
         })
@@ -881,7 +870,7 @@ impl BlockContractChanges {
                     HashMap::new();
 
                 if let Some(tx) = change.tx {
-                    let tx = Transaction::try_from_message(tx, &block.hash)?;
+                    let tx = Transaction::try_from_message((tx, &block.hash))?;
                     for el in change.contract_changes.into_iter() {
                         let update = AccountUpdate::try_from_message(el, chain)?;
                         account_updates.insert(update.address, update);
@@ -892,7 +881,7 @@ impl BlockContractChanges {
                             chain,
                             &protocol_system,
                             protocol_types,
-                            tx.hash,
+                            tx.hash.clone().into(),
                             block.ts,
                         )?;
                         protocol_components.insert(component.id.clone(), component);
@@ -1084,11 +1073,11 @@ impl ProtocolChangesWithTx {
         protocol_system: &str,
         protocol_types: &HashMap<String, ProtocolType>,
     ) -> Result<Self, ExtractionError> {
-        let tx = Transaction::try_from_message(
+        let tx = Transaction::try_from_message((
             msg.tx
                 .expect("TransactionEntityChanges should have a transaction"),
             &block.hash,
-        )?;
+        ))?;
 
         let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
         let mut state_updates: HashMap<String, ProtocolStateDelta> = HashMap::new();
@@ -1102,7 +1091,7 @@ impl ProtocolChangesWithTx {
                 block.chain,
                 protocol_system,
                 protocol_types,
-                tx.hash,
+                tx.hash.clone().into(),
                 block.ts,
             )?;
             new_protocol_components.insert(change.id, component);
@@ -1173,13 +1162,13 @@ impl ProtocolChangesWithTx {
     pub fn merge(&mut self, other: ProtocolChangesWithTx) -> Result<(), ExtractionError> {
         if self.tx.block_hash != other.tx.block_hash {
             return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates from different blocks: 0x{:x} != 0x{:x}",
+                "Can't merge ProtocolStates from different blocks: {:x} != {:x}",
                 self.tx.block_hash, other.tx.block_hash,
             )));
         }
         if self.tx.hash == other.tx.hash {
             return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates from the same transaction: 0x{:x}",
+                "Can't merge ProtocolStates from the same transaction: {:x}",
                 self.tx.hash
             )));
         }
@@ -1532,11 +1521,11 @@ impl TxWithChanges {
         protocol_system: &str,
         protocol_types: &HashMap<String, ProtocolType>,
     ) -> Result<Self, ExtractionError> {
-        let tx = Transaction::try_from_message(
+        let tx = Transaction::try_from_message((
             msg.tx
                 .expect("TransactionChanges should have a transaction"),
             &block.hash,
-        )?;
+        ))?;
 
         let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
         let mut account_updates: HashMap<H160, AccountUpdate> = HashMap::new();
@@ -1550,7 +1539,7 @@ impl TxWithChanges {
                 block.chain,
                 protocol_system,
                 protocol_types,
-                tx.hash,
+                tx.hash.clone().into(),
                 block.ts,
             )?;
             new_protocol_components.insert(component.id.clone(), component);
@@ -2078,15 +2067,21 @@ pub mod fixtures {
         "0x0000000000000000000000000000000000000000000000000000000000000000";
 
     pub fn transaction01() -> Transaction {
-        Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10)
+        Transaction::new(
+            Bytes::zero(32),
+            Bytes::zero(32),
+            Bytes::zero(20),
+            Some(Bytes::zero(20)),
+            10,
+        )
     }
 
     pub fn transaction02(hash: &str, block: &str, index: u64) -> Transaction {
         Transaction::new(
             hash.parse().unwrap(),
             block.parse().unwrap(),
-            H160::zero(),
-            Some(H160::zero()),
+            Bytes::zero(20),
+            Some(Bytes::zero(20)),
             index,
         )
     }
@@ -3984,26 +3979,29 @@ mod test {
 
     fn block_state_changes() -> BlockContractChanges {
         let tx = Transaction {
-            hash: H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000011121314,
-            ),
-            block_hash: H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000031323334,
-            ),
-            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
-            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            hash: Bytes::from_str(
+                "0000000000000000000000000000000000000000000000000000000011121314",
+            )
+            .unwrap(),
+            block_hash: Bytes::from_str(
+                "0000000000000000000000000000000000000000000000000000000031323334",
+            )
+            .unwrap(),
+            from: Bytes::from_str("0000000000000000000000000000000041424344").unwrap(),
+            to: Some(Bytes::from_str("0000000000000000000000000000000051525354").unwrap()),
             index: 2,
         };
         let tx_5 = Transaction {
-            hash: H256::from_str(HASH_256_1).unwrap(),
-            block_hash: H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000031323334,
-            ),
-            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
-            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            hash: Bytes::from_str(HASH_256_1).unwrap(),
+            block_hash: Bytes::from_str(
+                "0000000000000000000000000000000000000000000000000000000031323334",
+            )
+            .unwrap(),
+            from: Bytes::from_str("0000000000000000000000000000000041424344").unwrap(),
+            to: Some(Bytes::from_str("0000000000000000000000000000000051525354").unwrap()),
             index: 5,
         };
-        let protocol_component = create_protocol_component(tx.hash);
+        let protocol_component = create_protocol_component(tx.hash.clone().into());
         BlockContractChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
@@ -4504,14 +4502,16 @@ mod test {
 
     fn block_entity_changes() -> BlockEntityChanges {
         let tx = Transaction {
-            hash: H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000011121314,
-            ),
-            block_hash: H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000000000000,
-            ),
-            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
-            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            hash: Bytes::from_str(
+                "0x0000000000000000000000000000000000000000000000000000000011121314",
+            )
+            .unwrap(),
+            block_hash: Bytes::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .unwrap(),
+            from: Bytes::from_str("0000000000000000000000000000000041424344").unwrap(),
+            to: Some(Bytes::from_str("0000000000000000000000000000000051525354").unwrap()),
             index: 11,
         };
         let attr: HashMap<String, Bytes> = vec![
@@ -4550,7 +4550,7 @@ mod test {
                     H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
                 ],
                 change: ChangeType::Creation,
-                creation_tx: tx.hash,
+                creation_tx: tx.hash.clone().into(),
                 created_at: yesterday_midnight(),
             },
         )]
@@ -4563,7 +4563,7 @@ mod test {
                 ComponentBalance {
                     token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                     balance: Bytes::from(1_i32.to_le_bytes()),
-                    modify_tx: tx.hash,
+                    modify_tx: tx.hash.clone().into(),
                     component_id: "Balance1".to_string(),
                     balance_float: 16777216.0,
                 },
@@ -4685,14 +4685,16 @@ mod test {
 
     fn block_entity_changes_result() -> BlockEntityChangesResult {
         let tx = Transaction {
-            hash: H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000011121314,
-            ),
-            block_hash: H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000000000000,
-            ),
-            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
-            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            hash: Bytes::from_str(
+                "0x0000000000000000000000000000000000000000000000000000000011121314",
+            )
+            .unwrap(),
+            block_hash: Bytes::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .unwrap(),
+            from: Bytes::from_str("0000000000000000000000000000000041424344").unwrap(),
+            to: Some(Bytes::from_str("0000000000000000000000000000000051525354").unwrap()),
             index: 2,
         };
         let attr1: HashMap<String, Bytes> = vec![
@@ -4748,7 +4750,7 @@ mod test {
                     H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
                 ],
                 change: ChangeType::Creation,
-                creation_tx: tx.hash,
+                creation_tx: tx.hash.clone().into(),
                 created_at: yesterday_midnight(),
             },
         )]
@@ -4762,7 +4764,7 @@ mod test {
                 ComponentBalance {
                     token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                     balance: Bytes::from(1_i32.to_le_bytes()),
-                    modify_tx: tx.hash,
+                    modify_tx: tx.hash.clone().into(),
                     component_id: "Balance1".to_string(),
                     balance_float: 16777216.0,
                 },
@@ -4778,7 +4780,7 @@ mod test {
             chain: Chain::Ethereum,
             block: Block {
                 number: 1,
-                hash: tx.block_hash,
+                hash: tx.block_hash.into(),
                 parent_hash: H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000021222324,
                 ),
@@ -4814,14 +4816,16 @@ mod test {
 
     fn create_transaction() -> Transaction {
         Transaction {
-            hash: H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000011121314,
-            ),
-            block_hash: H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000031323334,
-            ),
-            from: H160::from_low_u64_be(0x0000000000000000000000000000000041424344),
-            to: Some(H160::from_low_u64_be(0x0000000000000000000000000000000051525354)),
+            hash: Bytes::from_str(
+                "0000000000000000000000000000000000000000000000000000000011121314",
+            )
+            .unwrap(),
+            block_hash: Bytes::from_str(
+                "0000000000000000000000000000000000000000000000000000000031323334",
+            )
+            .unwrap(),
+            from: Bytes::from_str("0000000000000000000000000000000041424344").unwrap(),
+            to: Some(Bytes::from_str("0000000000000000000000000000000051525354").unwrap()),
             index: 2,
         }
     }
@@ -4906,7 +4910,7 @@ mod test {
         let from_message = ComponentBalance::try_from_message(msg, &tx).unwrap();
 
         assert_eq!(from_message.balance, msg_balance);
-        assert_eq!(from_message.modify_tx, tx.hash);
+        assert_eq!(from_message.modify_tx, tx.hash.into());
         assert_eq!(from_message.token, expected_token);
         assert_eq!(from_message.component_id, expected_component_id);
     }
@@ -4915,8 +4919,10 @@ mod test {
     fn test_merge() {
         let tx_first_update = fixtures::transaction01();
         let tx_second_update = fixtures::transaction02(HASH_256_1, HASH_256_0, 15);
-        let protocol_component_first_tx = create_protocol_component(tx_first_update.hash);
-        let protocol_component_second_tx = create_protocol_component(tx_second_update.hash);
+        let protocol_component_first_tx =
+            create_protocol_component(tx_first_update.hash.clone().into());
+        let protocol_component_second_tx =
+            create_protocol_component(tx_second_update.hash.clone().into());
 
         let first_update = TransactionVMUpdates {
             account_updates: [(

@@ -126,6 +126,26 @@ impl Bytes {
 
         Bytes(bytes::Bytes::from(padded_vec))
     }
+
+    /// Creates a `Bytes` object of the specified length, filled with zeros.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - The length of the `Bytes` object to be created.
+    ///
+    /// # Returns
+    ///
+    /// A `Bytes` object of the specified length, where each byte is set to zero.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let b = zero(5);
+    /// assert_eq!(b, Bytes::from(vec![0, 0, 0, 0, 0]));
+    /// ```
+    pub fn zero(length: usize) -> Bytes {
+        Bytes::from(vec![0u8; length])
+    }
 }
 
 impl Deref for Bytes {

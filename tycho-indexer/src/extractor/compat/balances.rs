@@ -8,7 +8,7 @@ fn transcode_ascii_balance_to_be(ascii_encoded: &Bytes) -> anyhow::Result<Bytes>
         .map_err(|e| anyhow::format_err!("Invalid UTF-8 sequence: {ascii_encoded}: {e}"))?;
 
     if ascii_string.starts_with('-') {
-        Ok(Bytes::from([0u8; 32]))
+        Ok(Bytes::zero(32))
     } else {
         let as_integer = BigUint::from_str_radix(&ascii_string, 10)
             .map_err(|e| anyhow::format_err!("Invalid integer: {e}"))?;
@@ -98,10 +98,10 @@ mod tests {
     use std::{collections::HashMap, str::FromStr};
 
     use ethers::types::{H160, H256, U256};
-    use tycho_core::models::Chain;
+    use tycho_core::models::{blockchain::Transaction, Chain};
 
     use crate::{
-        extractor::evm::{ComponentBalance, Transaction, TxWithChanges},
+        extractor::evm::{ComponentBalance, TxWithChanges},
         testing::evm_block,
     };
 
@@ -127,41 +127,49 @@ mod tests {
 
     #[test]
     fn test_ignore_self_balances() {
-        let txs_with_update =
-            vec![TxWithChanges {
+        let txs_with_update = vec![TxWithChanges {
             account_updates: HashMap::new(),
             protocol_components: HashMap::new(),
             balance_changes: HashMap::from([(
                 "0xabc".to_string(),
-                HashMap::from([(
-                    H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
-                    ComponentBalance {
-                        token: H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
-                            .unwrap(),
-                        balance: Bytes::from(0_i32.to_le_bytes()),
-                        balance_float: 36522027799.0,
-                        modify_tx: H256::from_low_u64_be(
-                            0x0000000000000000000000000000000000000000000000000000000011121314,
-                        ),
-                        component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
-                    },
-                ),(
-                    H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
-                    ComponentBalance {
-                        token: H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
-                            .unwrap(),
-                        balance: Bytes::from(0_i32.to_le_bytes()),
-                        balance_float: 36522027799.0,
-                        modify_tx: H256::from_low_u64_be(
-                            0x0000000000000000000000000000000000000000000000000000000011121314,
-                        ),
-                        component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
-                    },
-                )]),
+                HashMap::from([
+                    (
+                        H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
+                        ComponentBalance {
+                            token: H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
+                                .unwrap(),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
+                            balance_float: 36522027799.0,
+                            modify_tx: H256::from_low_u64_be(
+                                0x0000000000000000000000000000000000000000000000000000000011121314,
+                            ),
+                            component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
+                        },
+                    ),
+                    (
+                        H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
+                        ComponentBalance {
+                            token: H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
+                                .unwrap(),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
+                            balance_float: 36522027799.0,
+                            modify_tx: H256::from_low_u64_be(
+                                0x0000000000000000000000000000000000000000000000000000000011121314,
+                            ),
+                            component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
+                        },
+                    ),
+                ]),
             )]),
-            tx: Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10),
-                state_updates: Default::default(),
-            }];
+            tx: Transaction::new(
+                Bytes::zero(32),
+                Bytes::zero(32),
+                Bytes::zero(20),
+                Some(Bytes::zero(20)),
+                10,
+            ),
+            state_updates: Default::default(),
+        }];
 
         let changes = BlockChanges::new(
             "test".to_string(),
@@ -198,10 +206,10 @@ mod tests {
                     )]),
                 )]),
                 tx: Transaction::new(
-                    H256::zero(),
-                    H256::zero(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(32),
+                    Bytes::zero(32),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: Default::default(),

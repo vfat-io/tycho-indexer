@@ -1124,10 +1124,10 @@ impl HybridPgGateway {
 
             // Insert transaction
             self.state_gateway
-                .upsert_tx(&[(&tx_update.tx).into()])
+                .upsert_tx(&[tx_update.tx.clone()])
                 .await?;
 
-            let hash: TxHash = tx_update.tx.hash.into();
+            let hash: TxHash = tx_update.tx.hash.clone();
 
             // Map new protocol components
             for (_component_id, new_protocol_component) in tx_update.protocol_components.iter() {
@@ -1146,8 +1146,7 @@ impl HybridPgGateway {
                         .upsert_contract(&(&new).into())
                         .await?;
                 } else if account_update.is_update() {
-                    account_changes
-                        .push((tycho_core::Bytes::from(tx_update.tx.hash), account_update.into()));
+                    account_changes.push((tx_update.tx.hash.clone(), account_update.into()));
                 } else {
                     // log error
                     error!(?account_update, "Invalid account update type");
@@ -1979,10 +1978,10 @@ mod test_serial_db {
             ]),
             txs_with_update: vec![TxWithChanges {
                 tx: Transaction::new(
-                    H256::zero(),
+                    Bytes::zero(32),
                     NATIVE_BLOCK_HASH_0.parse().unwrap(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: HashMap::new(),

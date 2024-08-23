@@ -27,6 +27,12 @@ pub struct Transaction {
     pub index: u64,
 }
 
+impl Transaction {
+    pub fn new(hash: Bytes, block_hash: Bytes, from: Bytes, to: Option<Bytes>, index: u64) -> Self {
+        Transaction { hash, block_hash, from, to, index }
+    }
+}
+
 pub struct BlockTransactionDeltas<T> {
     pub extractor: String,
     pub chain: Chain,

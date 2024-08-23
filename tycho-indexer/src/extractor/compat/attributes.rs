@@ -22,13 +22,13 @@ pub fn add_default_attributes(mut changes: BlockChanges, attributes: &[&str]) ->
                     {
                         state
                             .updated_attributes
-                            .insert(mandatory_attr.to_string(), Bytes::from([0u8; 32]));
+                            .insert(mandatory_attr.to_string(), Bytes::zero(32));
                     }
                 }
             } else {
                 let mut default_attr = HashMap::new();
                 for mandatory_attr in attributes {
-                    default_attr.insert(mandatory_attr.to_string(), Bytes::from([0u8; 32]));
+                    default_attr.insert(mandatory_attr.to_string(), Bytes::zero(32));
                 }
                 tx.state_updates.insert(
                     c_id.clone(),
@@ -85,21 +85,21 @@ pub fn add_default_attributes_uniswapv2(changes: BlockChanges) -> BlockChanges {
 
 #[cfg(test)]
 mod test {
-    use crate::extractor::{
-        compat::{
-            attributes::{
-                add_default_attributes, PLAIN_POOL, STABLE_SWAP_FACTORY, USV3_MANDATORY_ATTRIBUTES,
-            },
-            trim_curve_component_token,
+    use crate::extractor::compat::{
+        attributes::{
+            add_default_attributes, PLAIN_POOL, STABLE_SWAP_FACTORY, USV3_MANDATORY_ATTRIBUTES,
         },
-        evm::Transaction,
+        trim_curve_component_token,
     };
     use ethers::types::{H160, H256};
     use std::{
         collections::{HashMap, HashSet},
         str::FromStr,
     };
-    use tycho_core::{models::Chain, Bytes};
+    use tycho_core::{
+        models::{blockchain::Transaction, Chain},
+        Bytes,
+    };
 
     use crate::extractor::{evm, evm::TxWithChanges};
 
@@ -124,10 +124,10 @@ mod test {
             false,
             vec![TxWithChanges {
                 tx: Transaction::new(
-                    H256::zero(),
+                    Bytes::zero(32),
                     BLOCK_HASH_0.parse().unwrap(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: HashMap::from([(
@@ -175,7 +175,8 @@ mod test {
                     .txs_with_update
                     .first()
                     .unwrap()
-                    .tx,
+                    .tx
+                    .clone(),
                 state_updates: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
                     evm::ProtocolStateDelta {
@@ -221,10 +222,10 @@ mod test {
             false,
             vec![TxWithChanges {
                 tx: Transaction::new(
-                    H256::zero(),
+                    Bytes::zero(32),
                     BLOCK_HASH_0.parse().unwrap(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: HashMap::from([(
@@ -289,10 +290,10 @@ mod test {
                     },
                 )]),
                 tx: Transaction::new(
-                    H256::zero(),
+                    Bytes::zero(32),
                     BLOCK_HASH_0.parse().unwrap(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: HashMap::new(),
@@ -336,10 +337,10 @@ mod test {
                     },
                 )]),
                 tx: Transaction::new(
-                    H256::zero(),
+                    Bytes::zero(32),
                     BLOCK_HASH_0.parse().unwrap(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: HashMap::new(),
