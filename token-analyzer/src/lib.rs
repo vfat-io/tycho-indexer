@@ -1,3 +1,4 @@
+pub mod contract;
 pub mod ethrpc;
 pub mod http_client;
 pub mod trace_call;
@@ -6,9 +7,22 @@ pub mod trace_many;
 use std::collections::HashMap;
 
 use anyhow::Result;
-use ethers::types::{H160, U256};
+use ethers::{
+    providers::ProviderError,
+    types::{H160, U256},
+};
+use thiserror::Error;
 use trace_call::TokenOwnerFinding;
 use web3::types::BlockNumber;
+
+#[derive(Error, Debug)]
+pub enum RPCError {
+    #[error("RPC setup error: {0}")]
+    SetupError(String),
+    #[error("RPC error: {0}")]
+    RequestError(#[from] ProviderError),
+}
+
 /// How well behaved a token is.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TokenQuality {

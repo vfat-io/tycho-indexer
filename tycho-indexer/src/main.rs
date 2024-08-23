@@ -5,6 +5,7 @@ use futures03::future::select_all;
 use reqwest::Client;
 use serde::Deserialize;
 use std::{collections::HashMap, fs::File, io::Read, str::FromStr, sync::Arc};
+use token_analyzer::contract::EVMAccountExtractor;
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
@@ -17,25 +18,27 @@ use actix_web::dev::ServerHandle;
 use chrono::{NaiveDateTime, Utc};
 use clap::Parser;
 use ethers::{
-    prelude::{Http, Provider, H160, H256},
+    prelude::{Http, Provider, H256},
     providers::Middleware,
 };
 use tokio::{select, task::JoinHandle};
 use tracing::{info, instrument, warn};
 use tycho_core::{
-    models::{Address, Chain, ExtractionState, ImplementationType},
+    models::{
+        blockchain::Transaction as CoreTransaction, contract::ContractDelta, Address, Chain,
+        ExtractionState, ImplementationType,
+    },
     storage::{ChainGateway, ContractStateGateway, ExtractionStateGateway},
+    traits::AccountExtractor,
+    Bytes,
 };
 use tycho_indexer::{
     cli::{AnalyzeTokenArgs, Cli, Command, GlobalArgs, IndexArgs, RunSpkgArgs},
     extractor::{
-        self, evm,
+        self,
         evm::{
-            chain_state::ChainState,
-            contract::{AccountExtractor, EVMAccountExtractor},
-            protocol_cache::ProtocolMemoryCache,
-            token_analysis_cron::analyze_tokens,
-            AccountUpdate, Block, Transaction,
+            chain_state::ChainState, protocol_cache::ProtocolMemoryCache,
+            token_analysis_cron::analyze_tokens, Block,
         },
         runner::{ExtractorConfig, HandleResult, ProtocolTypeConfig},
         ExtractionError,
@@ -329,10 +332,10 @@ async fn initialize_accounts(
 
     info!(block_number = block.number, "Initializing accounts");
 
-    let tx = Transaction {
-        hash: H256::random(),
-        block_hash: block.hash,
-        from: H160::zero(),
+    let tx = CoreTransaction {
+        hash: H256::random().into(),
+        block_hash: block.hash.into(),
+        from: Bytes::from([0u8; 20]),
         to: None,
         index: 0,
     };
@@ -347,17 +350,17 @@ async fn initialize_accounts(
         .expect("Failed to insert block");
 
     cached_gw
-        .upsert_tx(&[(&tx).into()])
+        .upsert_tx(&[tx.clone()])
         .await
         .expect("Failed to insert tx");
 
-    for account_update in extracted_accounts.values() {
-        let new_account: evm::Account = account_update.ref_into_account(&tx);
+    for account_update in extracted_accounts.into_values() {
+        let new_account = account_update.into_account(&tx);
         info!(block_number = block.number, contract_address = ?new_account.address, "NewContract");
 
         // Insert new accounts
         cached_gw
-            .upsert_contract(&(&new_account).into())
+            .upsert_contract(&new_account)
             .await
             .expect("Failed to insert contract");
     }
@@ -385,7 +388,7 @@ async fn get_accounts_data(
     block_id: i64,
     rpc_url: &str,
     chain: Chain,
-) -> (Block, HashMap<H160, AccountUpdate>) {
+) -> (Block, HashMap<Bytes, ContractDelta>) {
     let account_extractor = EVMAccountExtractor::new(rpc_url, chain)
         .await
         .expect("Failed to create account extractor");
@@ -395,11 +398,11 @@ async fn get_accounts_data(
         .await
         .expect("Failed to get block data");
 
-    let extracted_accounts: HashMap<H160, AccountUpdate> = account_extractor
-        .get_accounts(block, accounts)
+    let extracted_accounts: HashMap<Bytes, ContractDelta> = account_extractor
+        .get_accounts(block.clone(), accounts)
         .await
         .expect("Failed to extract accounts");
-    (block, extracted_accounts)
+    (block.into(), extracted_accounts)
 }
 
 async fn shutdown_handler(

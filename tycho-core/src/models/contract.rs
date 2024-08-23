@@ -1,7 +1,12 @@
-use crate::models::{Chain, ChangeType, ContractId, DeltaError};
+use crate::{
+    keccak256,
+    models::{Chain, ChangeType, ContractId, DeltaError},
+};
 use std::collections::HashMap;
 
-use super::{Address, Balance, Code, CodeHash, StoreKey, StoreVal, TxHash};
+use super::{
+    blockchain::Transaction, Address, Balance, Code, CodeHash, StoreKey, StoreVal, TxHash,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Contract {
@@ -114,6 +119,29 @@ impl ContractDelta {
 
     pub fn contract_id(&self) -> ContractId {
         ContractId::new(self.chain, self.address.clone())
+    }
+
+    pub fn into_account(self, tx: &Transaction) -> Contract {
+        let empty_hash = keccak256(Vec::new());
+        Contract::new(
+            self.chain,
+            self.address.clone(),
+            format!("{:#020x}", self.address),
+            self.slots
+                .into_iter()
+                .map(|(k, v)| (k, v.map(Into::into).unwrap_or_default()))
+                .collect(),
+            self.balance.unwrap_or_default(),
+            self.code.clone().unwrap_or_default(),
+            self.code
+                .as_ref()
+                .map(keccak256)
+                .unwrap_or(empty_hash)
+                .into(),
+            tx.hash.clone(),
+            tx.hash.clone(),
+            Some(tx.hash.clone()),
+        )
     }
 }
 
