@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use ethers::types::U256;
 use tycho_core::Bytes;
 use web3::types::H160;
 
@@ -23,13 +22,13 @@ pub fn add_default_attributes(mut changes: BlockChanges, attributes: &[&str]) ->
                     {
                         state
                             .updated_attributes
-                            .insert(mandatory_attr.to_string(), Bytes::from(U256::zero()));
+                            .insert(mandatory_attr.to_string(), Bytes::from([0u8; 32]));
                     }
                 }
             } else {
                 let mut default_attr = HashMap::new();
                 for mandatory_attr in attributes {
-                    default_attr.insert(mandatory_attr.to_string(), Bytes::from(U256::zero()));
+                    default_attr.insert(mandatory_attr.to_string(), Bytes::from([0u8; 32]));
                 }
                 tx.state_updates.insert(
                     c_id.clone(),

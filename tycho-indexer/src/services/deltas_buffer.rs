@@ -3,8 +3,7 @@ use crate::extractor::{
     revert_buffer::{BlockNumberOrTimestamp, FinalityStatus, RevertBuffer},
     runner::MessageSender,
 };
-use ethers::prelude::StreamExt;
-use futures03::stream;
+use futures03::{stream, StreamExt};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},

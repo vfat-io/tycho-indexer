@@ -3966,9 +3966,9 @@ dependencies = [
 
 [[package]]
 name = "num-traits"
-version = "0.2.17"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39e3200413f237f41ab11ad6d161bc7239c84dcb631773ccd7de3dfe4b5c267c"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
@@ -5954,6 +5954,7 @@ version = "0.11.1"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "clap",
  "contracts",
  "ethcontract",
@@ -5963,9 +5964,12 @@ dependencies = [
  "mockall",
  "primitive-types",
  "reqwest",
+ "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tracing",
+ "tycho-core",
  "url",
  "web3",
 ]
@@ -6487,6 +6491,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "thiserror",
+ "tiny-keccak",
  "tokio",
  "typetag",
  "utoipa",
@@ -6520,6 +6525,8 @@ dependencies = [
  "hex-literal",
  "mini-moka",
  "mockall",
+ "num-bigint",
+ "num-traits",
  "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -6572,7 +6579,6 @@ dependencies = [
  "rstest",
  "serde_json",
  "test-log",
- "tiny-keccak",
  "tokio",
  "tracing",
  "tycho-core",

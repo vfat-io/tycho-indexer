@@ -1,18 +1,26 @@
 use crate::extractor::{evm::BlockChanges, u256_num::bytes_to_f64};
-use ethers::types::U256;
+use num_bigint::BigUint;
+use num_traits::Num;
 use tycho_core::Bytes;
 
 fn transcode_ascii_balance_to_be(ascii_encoded: &Bytes) -> anyhow::Result<Bytes> {
     let ascii_string = String::from_utf8(ascii_encoded.clone().to_vec())
         .map_err(|e| anyhow::format_err!("Invalid UTF-8 sequence: {ascii_encoded}: {e}"))?;
-    // Balances can go negative, so if the ascii string starts with a -, we default to
-    // U256::zero(), see WBTC/USDC pool at block 19297943
+
     if ascii_string.starts_with('-') {
-        Ok(Bytes::from(U256::zero()))
+        Ok(Bytes::from([0u8; 32]))
     } else {
-        let as_integer = U256::from_dec_str(&ascii_string)
+        let as_integer = BigUint::from_str_radix(&ascii_string, 10)
             .map_err(|e| anyhow::format_err!("Invalid integer: {e}"))?;
-        Ok(Bytes::from(as_integer))
+
+        let mut result = [0u8; 32];
+        let integer_bytes = as_integer.to_bytes_be();
+
+        // Copy the bytes into the result array, starting from the right (big-endian)
+        let start = 32 - integer_bytes.len();
+        result[start..].copy_from_slice(&integer_bytes);
+
+        Ok(Bytes::from(result))
     }
 }
 
@@ -89,7 +97,7 @@ pub fn transcode_usv2_balances(mut changes: BlockChanges) -> BlockChanges {
 mod tests {
     use std::{collections::HashMap, str::FromStr};
 
-    use ethers::types::{H160, H256};
+    use ethers::types::{H160, H256, U256};
     use tycho_core::models::Chain;
 
     use crate::{
