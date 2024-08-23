@@ -36,15 +36,12 @@ use super::{revert_buffer::StateUpdateBufferEntry, u256_num::bytes_to_f64, Extra
 use self::utils::TryDecode;
 
 pub mod chain_state;
-pub mod contract;
 mod convert;
 pub mod hybrid;
-pub mod native;
 pub mod protocol_cache;
 pub mod token_analysis_cron;
 pub mod token_pre_processor;
 mod utils;
-pub mod vm;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ERC20Token {
