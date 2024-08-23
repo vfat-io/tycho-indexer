@@ -19,18 +19,21 @@ log = getLogger(__name__)
 
 
 class TychoStream:
+
     def __init__(
         self,
         tycho_url: str,
         exchanges: list[str],
-        min_tvl: Decimal,
         blockchain: Chain,
+        min_tvl: Decimal = None,
+        min_tvl_range: tuple[Decimal, Decimal] = None,
         include_state=True,
         logs_directory: str = None,
         tycho_client_path: str = None,
     ):
         self.tycho_url = tycho_url
         self.min_tvl = min_tvl
+        self.min_tvl_range = min_tvl_range
         self.tycho_client = None
         self.exchanges = exchanges
         self._include_state = include_state
@@ -43,16 +46,23 @@ class TychoStream:
         # stdout=PIPE means that the output is piped directly to this Python process
         # stderr=STDOUT combines the stderr and stdout streams
 
-        cmd = [
-            "--log-folder",
-            self._logs_directory,
-            "--tycho-url",
-            self.tycho_url,
-            "--min-tvl",
-            str(self.min_tvl),
-        ]
+        cmd = ["--log-folder", self._logs_directory, "--tycho-url", self.tycho_url]
+
+        if self.min_tvl is not None:
+            cmd.extend(["--min-tvl", str(self.min_tvl)])
+        elif self.min_tvl_range is not None:
+            cmd.extend(
+                [
+                    "--remove-tvl-threshold",
+                    str(self.min_tvl_range[0]),
+                    "--add-tvl-threshold",
+                    str(self.min_tvl_range[1]),
+                ]
+            )
+
         if not self._include_state:
             cmd.append("--no-state")
+
         for exchange in self.exchanges:
             cmd.append("--exchange")
             cmd.append(exchange)

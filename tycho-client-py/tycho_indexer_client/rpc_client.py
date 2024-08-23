@@ -92,13 +92,11 @@ class TychoRPCClient:
     def get_contract_state(self, params: ContractStateParams) -> list[ResponseAccount]:
         params = params.dict(exclude_none=True)
 
-        body_fields = ["contract_ids", "version"]
+        body_fields = ["contract_ids", "protocol_system", "version"]
 
         body = {k: v for k, v in params.items() if k in body_fields}
 
-        res = self._post_request(
-            f"/v1/{self._chain}/contract_state", body=body
-        )
+        res = self._post_request(f"/v1/{self._chain}/contract_state", body=body)
         return [ResponseAccount(**a) for a in res["accounts"]]
 
     def get_tokens(self, params: TokensParams) -> list[ResponseToken]:
