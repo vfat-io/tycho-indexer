@@ -110,7 +110,7 @@ pub enum SynchronizerState {
     Stale(Header),
     Delayed(Header),
     // For this to happen we must have a gap, and a gap usually means a new snapshot from the
-    // StateSynchronizer. This can only happen if we are processing too slow and the one of the
+    // StateSynchronizer. This can only happen if we are processing too slow and one of the
     // synchronizers restarts e.g. because Tycho ended the subscription.
     Advanced(Header),
     Ended,

@@ -15,7 +15,7 @@ use tycho_client::{
 use tycho_core::dto::{Chain, ExtractorIdentity};
 
 #[derive(Parser, Debug, Clone, PartialEq)]
-#[clap(version = "0.1.0")]
+#[clap(version = env!("CARGO_PKG_VERSION"))]
 struct CliArgs {
     /// Tycho server URL, without protocol. Example: localhost:4242
     #[clap(long, default_value = "localhost:4242")]
