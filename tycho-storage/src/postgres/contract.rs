@@ -619,11 +619,9 @@ impl PostgresGateway {
                 .inner_join(account::table)
                 .filter(account::chain_id.eq(chain_id))
                 .filter(
-                    valid_from.le(version_ts).and(
-                        valid_to
-                            .gt(version_ts)
-                            .or(valid_to.is_null()),
-                    ),
+                    valid_from
+                        .le(version_ts)
+                        .and(valid_to.gt(version_ts)),
                 )
                 .order_by((account::id, slot, valid_from.desc(), ordinal.desc()))
                 .select((account::id, slot, value))

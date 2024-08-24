@@ -42,12 +42,11 @@
 //!
 //! * `valid_from` and `valid_to`: These timestamps enable data versioning aka time-travel
 //!   functionality. Hence, these should always be set correctly. `valid_from` must be set to the
-//!   timestamp at which the entity was created
-//!   - most often that will be the value of the corresponding `block.ts`. Same
-//!   applies for `valid_to`. There are triggers in place to automatically set
-//!   `valid_to` if you insert a new entity with the same identity (not primary
-//!   key). But to delete a record, `valid_to` needs to be manually set as no
-//!   automatic trigger exists for deletes yet.
+//!   timestamp at which the entity was created - most often that will be the value of the
+//!   corresponding `block.ts`. Same applies for `valid_to`. There are triggers in place to
+//!   automatically set `valid_to` if you insert a new entity with the same identity (not primary
+//!   key). But to delete a record, `valid_to` needs to be manually set as no automatic trigger
+//!   exists for deletes yet.
 //!
 //! * `created_ts`: For entities that are immutable, this timestamp records when the entity was
 //!   created and is used for time-travel functionality. For example, for contracts, this timestamp
@@ -68,11 +67,11 @@
 //! for a specific timestamp is found using the following predicate:
 //!
 //! ```sql
-//! valid_from < version_ts AND (version_ts <= valid_to OR valid_to is NULL)
+//! valid_from < version_ts AND (version_ts <= valid_to)
 //! ```
 //!
-//! The `valid_to` can be set to null, signifying that the version remains
-//! valid. However, as all alterations within a block happen simultaneously,
+//! The `valid_to` can be set to a max timestamp (262142-12-31T23:59:59.9999Z), signifying that the
+//! version remains valid. However, as all alterations within a block happen simultaneously,
 //! this predicate might yield multiple valid versions for a single entity.
 //!
 //! To further assign a temporal sequence to these entities, the transaction
@@ -83,7 +82,7 @@
 //! SELECT * FROM table
 //! JOIN transaction
 //! WHERE valid_from < version_ts
-//!     AND (version_ts <= valid_to OR valid_to is NULL)
+//!     AND (version_ts <= valid_to)
 //! ORDER BY entity_id, transaction.index DESC
 //! DISTINCT ON entity_id
 //! ```

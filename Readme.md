@@ -229,44 +229,6 @@ buf lint
 
 It will return a list of errors that you need to fix. If not, then all the changes you made conform to the linter.
 
-### Postgres & Diesel
-
-1. If you are on a mac, you might need to install postgres library first and add it to the library path:
-
-```bash
-brew install libpq
-# PATH-TO-LIB looks somewhat like this: /opt/homebrew/Cellar/libpq/15.4/lib
-export LIBRARY_PATH=<PATH-TO-LIB>:$LIBRARY_PATH
-```
-
-2. Install the diesel-cli:
-
-```bash
-cargo install diesel_cli --no-default-features --features postgres
-```
-
-3. Start up the postgres db service
-
-```bash
-docker-compose up -d db
-```
-
-4. Set the env var for the DB connection and RPC url
-
-```
-export DATABASE_URL=postgres://postgres:mypassword@localhost:5432/tycho_indexer_0
-export ETH_RPC_URL="url-here"
-
-```
-
-5. Setup/update the database:
-
-```bash
-diesel migration run --migration-dir ./tycho-indexer/migrations
-```
-
-6. We use [pgFormatter](https://github.com/darold/pgFormatter) to keep SQL files consistently formatted.
-
 ### Local development
 
 1. Please also make sure that the following commands pass if you have changed the code:
@@ -302,77 +264,6 @@ and use the following VSCode user settings:
 "editor.defaultFormatter": "rust-lang.rust-analyzer"
 }
 ```
-
-#### Setup pgFormatter with RustRover
-
-1. First make sure you have pgFormatter installed: `brew install pgformatter`
-2. Search RustRover configuration for external tools and add one using the "+" button.
-3. Check where the path of pgformatter installation: `which pg_format`
-4. The path should go under "Program", usually sth like: ``
-5. The arguments should be: `--no-space-function -i $FilePath$`
-6. Leave working directory empty.
-7. Save the tool under pgFormat and add a shortcut to it if you'd like.
-
-In case this works, but you get warning about your LOCALE settings, you can use
-`/usr/bin/env` to set the locale and then invoke pgformat as an argument to env:
-
-Program: `/usr/bin/env`
-Arguments: `LC_CTYPE=UTF-8 /opt/homebrew/bin/pg_format --no-space-function -i $FilePath$`
-
-### Tests
-
-Currently Tycho exposes a single special [test-group](https://nexte.st/book/test-groups.html) via nextest:
-
-1. `test(serial-db)`: These are tests against the database that need to commit data. To not intefere with other test
-   that require a empty db but do not commit, we run these tests separately. Most of these tests use
-   the `run_against_db` test harness. Test within that group are run sequentially, the remaining tests run in parallel.
-   To add a test to this group simply ensure its name or its test package name includes the string `serial_db`.
-
-If your test does not require committing to the database there is no any other special resources there is nothing
-special to take care of.
-
-### Migrations
-
-If you have to change the database schema, please make sure the down migration is included and test it by executing:
-
-```bash
-diesel migration redo --migration-dir ./tycho-storage/migrations
-```
-
-If the schema.rs file does not automatically update after you've run a migration with table changes, you can trigger the
-update by executing:
-
-```bash
-diesel print-schema > ./tycho-indexer/src/storage/postgres/schema.rs
-```
-
-## Access to our RDS databases
-
-Our infra uses two RDS PostgreSQL databases for storing data: dev and prod.
-For security purpose, theses databases are only accessible from inside our cluster.
-
-In your terminal, run the following command to create a postgres client pod.
-
-```bash
-kubectl run postgres-client --image=postgres:latest --rm -i -t -- bash
-```
-
-It will open a terminal inside the postgres pod. From there you can connect to the databases using one of the following
-commands:
-
-For dev:
-
-```bash
-psql -h terraform-20231114200049679600000001.ccqaypweylhx.eu-central-1.rds.amazonaws.com -U tycho -d tycho_postgres_dev
-```
-
-For prod:
-
-```bash
-psql -h terraform-20231115132306743400000001.ccqaypweylhx.eu-central-1.rds.amazonaws.com -U tycho -d tycho_postgres_prod
-```
-
-Then you will find the password in our aws `{env}/tycho_credentials`
 
 # Architecture
 
