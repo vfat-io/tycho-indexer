@@ -313,7 +313,7 @@ impl PostgresGateway {
         start_version_ts: &NaiveDateTime,
         target_version_ts: &NaiveDateTime,
         conn: &mut AsyncPgConnection,
-    ) -> Result<CreatedOrDeleted<models::contract::ContractDelta>, StorageError> {
+    ) -> Result<CreatedOrDeleted<models::contract::AccountUpdate>, StorageError> {
         // Find created or deleted Accounts
         let cod_accounts: Vec<orm::Account> = {
             use schema::account::dsl::*;
@@ -395,7 +395,7 @@ impl PostgresGateway {
 
             // Restore full state delta at from target version for accounts that were deleted
             let version = Some(Version::from_ts(*target_version_ts));
-            let restored: HashMap<Address, models::contract::ContractDelta> = self
+            let restored: HashMap<Address, models::contract::AccountUpdate> = self
                 .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, conn)
                 .await
                 .map_err(PostgresError::from)?
@@ -410,7 +410,7 @@ impl PostgresGateway {
                         // assuming these have ChangeType created
                         update.clone()
                     } else {
-                        models::contract::ContractDelta::deleted(chain, &acc.address)
+                        models::contract::AccountUpdate::deleted(chain, &acc.address)
                     };
                     Ok((acc.address.clone(), update))
                 })
@@ -443,7 +443,7 @@ impl PostgresGateway {
             let deltas = deleted
                 .iter()
                 .map(|acc| {
-                    let update = models::contract::ContractDelta::deleted(chain, &acc.address);
+                    let update = models::contract::AccountUpdate::deleted(chain, &acc.address);
                     Ok((acc.address.clone(), update))
                 })
                 .collect::<Result<HashMap<_, _>, StorageError>>()?;
@@ -1036,7 +1036,7 @@ impl PostgresGateway {
     pub async fn update_contracts(
         &self,
         chain: &Chain,
-        new: &[(Address, &models::contract::ContractDelta)],
+        new: &[(Address, &models::contract::AccountUpdate)],
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let chain_id = self.get_chain_id(chain);
@@ -1259,7 +1259,7 @@ impl PostgresGateway {
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<models::contract::ContractDelta>, StorageError> {
+    ) -> Result<Vec<models::contract::AccountUpdate>, StorageError> {
         let chain_id = self.get_chain_id(chain);
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
@@ -1321,7 +1321,7 @@ impl PostgresGateway {
                     ChangeType::Update
                 };
 
-                let update = models::contract::ContractDelta::new(
+                let update = models::contract::AccountUpdate::new(
                     chain,
                     &address,
                     slots,
@@ -1814,7 +1814,7 @@ mod test {
         db_fixtures::insert_txns(&mut conn, &[(block.id, 100, modify_txhash)]).await;
         let mut account = account_c1(2);
         account.set_balance(&Bytes::from("0x2710"), &modify_txhash.parse().unwrap());
-        let update = models::contract::ContractDelta::new(
+        let update = models::contract::AccountUpdate::new(
             &account.chain,
             &account.address,
             None,
@@ -2278,7 +2278,7 @@ mod test {
         let gw = EvmGateway::from_connection(&mut conn).await;
         let exp = vec![
             // c0 had some changes which need to be reverted
-            models::contract::ContractDelta::new(
+            models::contract::AccountUpdate::new(
                 &Chain::Ethereum,
                 &("0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
@@ -2289,7 +2289,7 @@ mod test {
                 ChangeType::Update,
             ),
             // c1 which was deployed on block 2 is deleted
-            models::contract::ContractDelta::new(
+            models::contract::AccountUpdate::new(
                 &Chain::Ethereum,
                 &("0x73bce791c239c8010cd3c857d96580037ccdd0ee"
                     .parse()
@@ -2300,7 +2300,7 @@ mod test {
                 ChangeType::Deletion,
             ),
             // c2 is recreated
-            models::contract::ContractDelta::new(
+            models::contract::AccountUpdate::new(
                 &Chain::Ethereum,
                 &("0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
                     .parse()
@@ -2333,7 +2333,7 @@ mod test {
         let gw = EvmGateway::from_connection(&mut conn).await;
         let exp = vec![
             // c0 updates some slots and balances
-            models::contract::ContractDelta::new(
+            models::contract::AccountUpdate::new(
                 &Chain::Ethereum,
                 &("0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
@@ -2344,7 +2344,7 @@ mod test {
                 ChangeType::Update,
             ),
             // c1 was deployed
-            models::contract::ContractDelta::new(
+            models::contract::AccountUpdate::new(
                 &Chain::Ethereum,
                 &("0x73bce791c239c8010cd3c857d96580037ccdd0ee"
                     .parse()
@@ -2355,7 +2355,7 @@ mod test {
                 ChangeType::Creation,
             ),
             // c2 is deleted
-            models::contract::ContractDelta::new(
+            models::contract::AccountUpdate::new(
                 &Chain::Ethereum,
                 &("0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
                     .parse()

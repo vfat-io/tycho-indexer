@@ -26,7 +26,7 @@ use tracing::{info, instrument, warn};
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction as CoreTransaction},
-        contract::ContractDelta,
+        contract::AccountUpdate,
         Address, Chain, ExtractionState, ImplementationType,
     },
     storage::{ChainGateway, ContractStateGateway, ExtractionStateGateway},
@@ -389,7 +389,7 @@ async fn get_accounts_data(
     block_id: i64,
     rpc_url: &str,
     chain: Chain,
-) -> (Block, HashMap<Bytes, ContractDelta>) {
+) -> (Block, HashMap<Bytes, AccountUpdate>) {
     let account_extractor = EVMAccountExtractor::new(rpc_url, chain)
         .await
         .expect("Failed to create account extractor");
@@ -399,7 +399,7 @@ async fn get_accounts_data(
         .await
         .expect("Failed to get block data");
 
-    let extracted_accounts: HashMap<Bytes, ContractDelta> = account_extractor
+    let extracted_accounts: HashMap<Bytes, AccountUpdate> = account_extractor
         .get_accounts(block.clone(), accounts)
         .await
         .expect("Failed to extract accounts");

@@ -13,7 +13,7 @@ use mockall::mock;
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
-        contract::{Account, ContractDelta},
+        contract::{Account, AccountUpdate},
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
             ProtocolComponentStateDelta,
@@ -106,7 +106,7 @@ mock! {
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn update_contracts<'life0, 'life1, 'async_trait>(
             &'life0 self,
-            new: &'life1 [(TxHash, ContractDelta)],
+            new: &'life1 [(TxHash, AccountUpdate)],
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
@@ -146,7 +146,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<Vec<ContractDelta>, StorageError>,
+                    Output = Result<Vec<AccountUpdate>, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >

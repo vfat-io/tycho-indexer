@@ -1113,7 +1113,7 @@ impl HybridPgGateway {
         let mut new_protocol_components: Vec<models::protocol::ProtocolComponent> = vec![];
         let mut state_updates: Vec<(TxHash, models::protocol::ProtocolComponentStateDelta)> =
             vec![];
-        let mut account_changes: Vec<(Bytes, models::contract::ContractDelta)> = vec![];
+        let mut account_changes: Vec<(Bytes, models::contract::AccountUpdate)> = vec![];
 
         let mut balance_changes: Vec<models::protocol::ComponentBalance> = vec![];
         let mut protocol_tokens: HashSet<H160> = HashSet::new();

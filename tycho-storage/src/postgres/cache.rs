@@ -21,7 +21,7 @@ use tycho_core::{
     models::{
         self,
         blockchain::{Block, Transaction},
-        contract::{Account, ContractDelta},
+        contract::{Account, AccountUpdate},
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
             ProtocolComponentStateDelta,
@@ -51,7 +51,7 @@ pub(crate) enum WriteOp {
     // Support saving a batch
     UpsertContract(Vec<models::contract::Account>),
     // Simply merge
-    UpdateContracts(Vec<(TxHash, models::contract::ContractDelta)>),
+    UpdateContracts(Vec<(TxHash, models::contract::AccountUpdate)>),
     // Simply merge
     InsertProtocolComponents(Vec<models::protocol::ProtocolComponent>),
     // Simply merge
@@ -389,7 +389,7 @@ impl DBCacheWriteExecutor {
                 }
             }
             WriteOp::UpdateContracts(contracts) => {
-                let collected_changes: Vec<(TxHash, &models::contract::ContractDelta)> = contracts
+                let collected_changes: Vec<(TxHash, &models::contract::AccountUpdate)> = contracts
                     .iter()
                     .map(|(tx, update)| (tx.clone(), update))
                     .collect();
@@ -445,7 +445,7 @@ struct RevertParameters {
 type DeltasCache = LruCache<
     RevertParameters,
     (
-        Vec<models::contract::ContractDelta>,
+        Vec<models::contract::AccountUpdate>,
         Vec<models::protocol::ProtocolComponentStateDelta>,
         Vec<models::protocol::ComponentBalance>,
     ),
@@ -570,7 +570,7 @@ impl CachedGateway {
         end_version: &BlockOrTimestamp,
     ) -> Result<
         (
-            Vec<models::contract::ContractDelta>,
+            Vec<models::contract::AccountUpdate>,
             Vec<models::protocol::ProtocolComponentStateDelta>,
             Vec<models::protocol::ComponentBalance>,
         ),
@@ -722,7 +722,7 @@ impl ContractStateGateway for CachedGateway {
         Ok(())
     }
 
-    async fn update_contracts(&self, new: &[(TxHash, ContractDelta)]) -> Result<(), StorageError> {
+    async fn update_contracts(&self, new: &[(TxHash, AccountUpdate)]) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpdateContracts(new.to_vec()))
             .await?;
         Ok(())
@@ -743,7 +743,7 @@ impl ContractStateGateway for CachedGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<Vec<ContractDelta>, StorageError> {
+    ) -> Result<Vec<AccountUpdate>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))

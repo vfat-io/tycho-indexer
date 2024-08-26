@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use crate::{
-    models::{blockchain::Block, contract::ContractDelta, Address},
+    models::{blockchain::Block, contract::AccountUpdate, Address},
     Bytes,
 };
 
@@ -15,5 +15,5 @@ pub trait AccountExtractor {
         &self,
         block: Block,
         account_addresses: Vec<Address>,
-    ) -> Result<HashMap<Bytes, ContractDelta>, Self::Error>;
+    ) -> Result<HashMap<Bytes, AccountUpdate>, Self::Error>;
 }

@@ -55,7 +55,7 @@ impl Account {
         self.balance_modify_tx = modified_at.clone();
     }
 
-    pub fn apply_contract_delta(&mut self, delta: &ContractDelta) -> Result<(), DeltaError> {
+    pub fn apply_contract_delta(&mut self, delta: &AccountUpdate) -> Result<(), DeltaError> {
         let self_id = (self.chain, &self.address);
         let other_id = (delta.chain, &delta.address);
         if self_id != other_id {
@@ -80,7 +80,7 @@ impl Account {
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct ContractDelta {
+pub struct AccountUpdate {
     pub chain: Chain,
     pub address: Address,
     pub slots: HashMap<StoreKey, Option<StoreVal>>,
@@ -89,7 +89,7 @@ pub struct ContractDelta {
     pub change: ChangeType,
 }
 
-impl ContractDelta {
+impl AccountUpdate {
     pub fn deleted(chain: &Chain, address: &Address) -> Self {
         Self {
             chain: *chain,
@@ -145,7 +145,7 @@ impl ContractDelta {
     }
 }
 
-impl From<Account> for ContractDelta {
+impl From<Account> for AccountUpdate {
     fn from(value: Account) -> Self {
         Self {
             chain: value.chain,

@@ -1,6 +1,6 @@
 use crate::{
     models::{
-        contract::ContractDelta,
+        contract::AccountUpdate,
         protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
         Chain, ComponentId,
     },
@@ -59,7 +59,7 @@ pub struct BlockAggregatedDeltas {
     pub finalised_block_height: u64,
     pub revert: bool,
     pub state_deltas: HashMap<String, ProtocolComponentStateDelta>,
-    pub account_deltas: HashMap<Bytes, ContractDelta>,
+    pub account_deltas: HashMap<Bytes, AccountUpdate>,
     pub new_components: HashMap<String, ProtocolComponent>,
     pub deleted_components: HashMap<String, ProtocolComponent>,
     pub component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
@@ -76,7 +76,7 @@ impl BlockAggregatedDeltas {
         finalised_block_height: u64,
         revert: bool,
         state_deltas: &HashMap<String, ProtocolComponentStateDelta>,
-        account_deltas: &HashMap<Bytes, ContractDelta>,
+        account_deltas: &HashMap<Bytes, AccountUpdate>,
         new_components: &HashMap<String, ProtocolComponent>,
         deleted_components: &HashMap<String, ProtocolComponent>,
         component_balances: &HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,

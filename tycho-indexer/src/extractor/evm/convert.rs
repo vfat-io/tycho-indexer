@@ -5,13 +5,13 @@ use ethers::prelude::{H160, U256};
 use tycho_core::{
     models::{
         blockchain::BlockAggregatedDeltas,
-        contract::ContractDelta,
+        contract::AccountUpdate,
         protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
     },
     Bytes,
 };
 
-impl From<&evm::AccountUpdate> for ContractDelta {
+impl From<&evm::AccountUpdate> for AccountUpdate {
     fn from(value: &evm::AccountUpdate) -> Self {
         Self {
             chain: value.chain,
@@ -30,8 +30,8 @@ impl From<&evm::AccountUpdate> for ContractDelta {
 }
 
 // Temporary until evm models are phased out
-impl From<ContractDelta> for evm::AccountUpdate {
-    fn from(value: ContractDelta) -> Self {
+impl From<AccountUpdate> for evm::AccountUpdate {
+    fn from(value: AccountUpdate) -> Self {
         Self {
             address: H160::from_slice(&value.address),
             chain: value.chain,
@@ -93,7 +93,7 @@ impl From<&evm::AggregatedBlockChanges> for BlockAggregatedDeltas {
             .account_updates
             .iter()
             .map(|(address, delta)| (address.as_bytes().into(), delta.into()))
-            .collect::<HashMap<Bytes, ContractDelta>>();
+            .collect::<HashMap<Bytes, AccountUpdate>>();
         let new_components = value
             .new_protocol_components
             .iter()

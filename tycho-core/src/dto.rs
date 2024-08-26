@@ -18,10 +18,7 @@ use uuid::Uuid;
 
 use crate::{
     models,
-    models::{
-        contract::{Account, ContractDelta},
-        token::CurrencyToken,
-    },
+    models::{contract::Account, token::CurrencyToken},
     serde_primitives::{
         hex_bytes, hex_bytes_option, hex_bytes_vec, hex_hashmap_key, hex_hashmap_key_value,
         hex_hashmap_value,
@@ -381,8 +378,8 @@ impl AccountUpdate {
     }
 }
 
-impl From<models::contract::ContractDelta> for AccountUpdate {
-    fn from(value: ContractDelta) -> Self {
+impl From<models::contract::AccountUpdate> for AccountUpdate {
+    fn from(value: models::contract::AccountUpdate) -> Self {
         AccountUpdate::new(
             value.address,
             value.chain.into(),
