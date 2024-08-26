@@ -143,7 +143,7 @@ impl WsActor {
                 let subscription_id = Uuid::new_v4();
 
                 // Add the subscription_id to the current tracing span recorded fields
-                tracing::Span::current().record("subscription_id", &subscription_id.to_string());
+                tracing::Span::current().record("subscription_id", subscription_id.to_string());
 
                 info!(extractor_id = %extractor_id, "Subscribing to extractor");
 

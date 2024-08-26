@@ -22,6 +22,14 @@ use tycho_core::{
     storage::StorageError,
 };
 
+/// The `PendingDeltas` struct manages access to the revert buffers maintained by each extractor.
+///
+/// The main responsibilities of `PendingDeltas` include:
+/// - Inserting new blocks and deltas into the correct `RevertBuffer`.
+/// - Managing and applying deltas to state data, which includes merging buffered changes with data
+///   fetched from the database.
+/// - Retrieving finality status for blocks, which is used to determine whether to fetch data from
+///   the database and/or from the buffer.
 #[derive(Default, Clone)]
 pub struct PendingDeltas {
     buffers: HashMap<String, Arc<Mutex<RevertBuffer<BlockAggregatedDeltas>>>>,
