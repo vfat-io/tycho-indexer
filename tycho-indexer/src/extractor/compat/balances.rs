@@ -42,9 +42,9 @@ pub fn transcode_ambient_balances(mut changes: BlockChanges) -> BlockChanges {
                     balance
                         .iter_mut()
                         .for_each(|(_, value)| {
-                            value.balance = transcode_ascii_balance_to_be(&value.balance)
+                            value.new_balance = transcode_ascii_balance_to_be(&value.new_balance)
                                 .expect("Balance transcoding failed");
-                            value.balance_float = bytes_to_f64(value.balance.as_ref())
+                            value.balance_float = bytes_to_f64(value.new_balance.as_ref())
                                 .expect("failed converting balance to float");
                         });
                 });
@@ -84,8 +84,9 @@ pub fn transcode_usv2_balances(mut changes: BlockChanges) -> BlockChanges {
                     balance
                         .iter_mut()
                         .for_each(|(_, value)| {
-                            value.balance = transcode_le_balance_to_be(&value.balance).unwrap();
-                            value.balance_float = bytes_to_f64(value.balance.as_ref())
+                            value.new_balance =
+                                transcode_le_balance_to_be(&value.new_balance).unwrap();
+                            value.balance_float = bytes_to_f64(value.new_balance.as_ref())
                                 .expect("failed converting balance to float");
                         });
                 });
@@ -98,12 +99,9 @@ mod tests {
     use std::{collections::HashMap, str::FromStr};
 
     use ethers::types::{H160, H256, U256};
-    use tycho_core::models::{blockchain::Transaction, Chain};
+    use tycho_core::models::{blockchain::Transaction, protocol::ComponentBalance, Chain};
 
-    use crate::{
-        extractor::evm::{ComponentBalance, TxWithChanges},
-        testing::block,
-    };
+    use crate::{extractor::evm::TxWithChanges, testing::block};
 
     use super::*;
 
@@ -127,7 +125,8 @@ mod tests {
 
     #[test]
     fn test_ignore_self_balances() {
-        let txs_with_update = vec![TxWithChanges {
+        let txs_with_update =
+            vec![TxWithChanges {
             account_updates: HashMap::new(),
             protocol_components: HashMap::new(),
             balance_changes: HashMap::from([(
@@ -137,12 +136,12 @@ mod tests {
                         H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
                         ComponentBalance {
                             token: H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
-                                .unwrap(),
-                            balance: Bytes::from(0_i32.to_le_bytes()),
+                                .unwrap().into(),
+                            new_balance: Bytes::from(0_i32.to_le_bytes()),
                             balance_float: 36522027799.0,
                             modify_tx: H256::from_low_u64_be(
                                 0x0000000000000000000000000000000000000000000000000000000011121314,
-                            ),
+                            ).into(),
                             component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
                         },
                     ),
@@ -150,12 +149,12 @@ mod tests {
                         H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
                         ComponentBalance {
                             token: H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
-                                .unwrap(),
-                            balance: Bytes::from(0_i32.to_le_bytes()),
+                                .unwrap().into(),
+                            new_balance: Bytes::from(0_i32.to_le_bytes()),
                             balance_float: 36522027799.0,
                             modify_tx: H256::from_low_u64_be(
                                 0x0000000000000000000000000000000000000000000000000000000011121314,
-                            ),
+                            ).into(),
                             component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
                         },
                     ),
@@ -180,13 +179,14 @@ mod tests {
             txs_with_update.clone(),
         );
 
-        let expected = BlockChanges::new(
-            "test".to_string(),
-            Chain::Ethereum,
-            block(1),
-            0,
-            false,
-            vec![TxWithChanges {
+        let expected =
+            BlockChanges::new(
+                "test".to_string(),
+                Chain::Ethereum,
+                block(1),
+                0,
+                false,
+                vec![TxWithChanges {
                 account_updates: HashMap::new(),
                 protocol_components: HashMap::new(),
                 balance_changes: HashMap::from([(
@@ -195,12 +195,12 @@ mod tests {
                         H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
                         ComponentBalance {
                             token: H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
-                                .unwrap(),
-                            balance: Bytes::from(0_i32.to_le_bytes()),
+                                .unwrap().into(),
+                            new_balance: Bytes::from(0_i32.to_le_bytes()),
                             balance_float: 36522027799.0,
                             modify_tx: H256::from_low_u64_be(
                                 0x0000000000000000000000000000000000000000000000000000000011121314,
-                            ),
+                            ).into(),
                             component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
                         },
                     )]),
@@ -214,7 +214,7 @@ mod tests {
                 ),
                 state_updates: Default::default(),
             }],
-        );
+            );
 
         let processed = ignore_self_balances(changes);
 

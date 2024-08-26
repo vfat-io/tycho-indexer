@@ -395,15 +395,13 @@ mod test {
     use ethers::types::{H160, H256};
     use rstest::rstest;
     use tycho_core::{
-        models::{blockchain::Transaction, Chain},
+        models::{blockchain::Transaction, protocol::ComponentBalance, Chain},
         storage::StorageError,
         Bytes,
     };
 
     use crate::{
-        extractor::evm::{
-            BlockEntityChanges, ComponentBalance, ProtocolChangesWithTx, ProtocolStateDelta,
-        },
+        extractor::evm::{BlockEntityChanges, ProtocolChangesWithTx, ProtocolStateDelta},
         testing,
     };
 
@@ -442,9 +440,10 @@ mod test {
                             H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                             ComponentBalance {
                                 token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap(),
-                                balance: Bytes::from(1_i32.to_le_bytes()),
-                                modify_tx: tx.hash.clone().into(),
+                                    .unwrap()
+                                    .into(),
+                                new_balance: Bytes::from(1_i32.to_le_bytes()),
+                                modify_tx: tx.hash.clone(),
                                 component_id: "Balance1".to_string(),
                                 balance_float: 1.0,
                             },
@@ -458,9 +457,10 @@ mod test {
                             H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                             ComponentBalance {
                                 token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap(),
-                                balance: Bytes::from(30_i32.to_le_bytes()),
-                                modify_tx: tx.hash.clone().into(),
+                                    .unwrap()
+                                    .into(),
+                                new_balance: Bytes::from(30_i32.to_le_bytes()),
+                                modify_tx: tx.hash.clone(),
                                 component_id: "Balance2".to_string(),
                                 balance_float: 30.0,
                             },
@@ -533,9 +533,10 @@ mod test {
                         H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                         ComponentBalance {
                             token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                .unwrap(),
-                            balance: Bytes::from(3_i32.to_le_bytes()),
-                            modify_tx: tx.hash.clone().into(),
+                                .unwrap()
+                                .into(),
+                            new_balance: Bytes::from(3_i32.to_le_bytes()),
+                            modify_tx: tx.hash.clone(),
                             component_id: "Balance1".to_string(),
                             balance_float: 3.0,
                         },

@@ -3,6 +3,7 @@ use crate::{
     Bytes,
 };
 use chrono::NaiveDateTime;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use super::{Address, AttrStoreKey, Balance, ComponentId, DeltaError, StoreVal, TxHash};
@@ -123,7 +124,7 @@ impl ProtocolComponentStateDelta {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ComponentBalance {
     pub token: Address,
     pub new_balance: Balance,

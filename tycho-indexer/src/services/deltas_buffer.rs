@@ -331,7 +331,7 @@ mod test {
     use ethers::types::{H160, H256, U256};
     use std::str::FromStr;
     use tycho_core::{
-        models::{Chain, ChangeType},
+        models::{protocol::ComponentBalance, Chain, ChangeType},
         Bytes,
     };
 
@@ -462,12 +462,13 @@ mod test {
                     "component1".to_string(),
                     [(
                         H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                        evm::ComponentBalance {
+                        ComponentBalance {
                             token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                                .unwrap(),
+                                .unwrap()
+                                .into(),
                             balance_float: 1.0,
-                            balance: Bytes::from("0x01"),
-                            modify_tx: H256::zero(),
+                            new_balance: Bytes::from("0x01"),
+                            modify_tx: H256::zero().into(),
                             component_id: "component1".to_string(),
                         },
                     )]
@@ -478,12 +479,13 @@ mod test {
                     "component3".to_string(),
                     [(
                         H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                        evm::ComponentBalance {
+                        ComponentBalance {
                             token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                                .unwrap(),
+                                .unwrap()
+                                .into(),
                             balance_float: 2.0,
-                            balance: Bytes::from("0x02"),
-                            modify_tx: H256::zero(),
+                            new_balance: Bytes::from("0x02"),
+                            modify_tx: H256::zero().into(),
                             component_id: "component3".to_string(),
                         },
                     )]

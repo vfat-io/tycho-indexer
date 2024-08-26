@@ -13,11 +13,10 @@ use serde::{Deserialize, Serialize};
 use tracing::log::warn;
 
 use tycho_core::{
-    dto,
     models::{
         blockchain::{Block, BlockScoped, Transaction},
         contract::Account,
-        protocol as tycho_core_protocol,
+        protocol::{self as tycho_core_protocol, ComponentBalance},
         token::CurrencyToken,
         Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
         NormalisedMessage, ProtocolType, StoreVal,
@@ -43,15 +42,6 @@ pub mod protocol_cache;
 pub mod token_analysis_cron;
 pub mod token_pre_processor;
 mod utils;
-
-// #[derive(Debug, PartialEq, Copy, Clone, Deserialize, Serialize, Default)]
-// pub struct Block {
-//     pub number: u64,
-//     pub hash: H256,
-//     pub parent_hash: H256,
-//     pub chain: Chain,
-//     pub ts: NaiveDateTime,
-// }
 
 pub trait TryFromMessage {
     type Args<'a>;
@@ -516,7 +506,7 @@ impl StateUpdateBufferEntry for BlockContractChanges {
     fn get_filtered_balance_update(
         &self,
         keys: Vec<(&ComponentId, &Address)>,
-    ) -> HashMap<(String, Bytes), tycho_core_protocol::ComponentBalance> {
+    ) -> HashMap<(String, Bytes), ComponentBalance> {
         // Convert keys to a HashSet for faster lookups
         let keys_set: HashSet<(&String, &Bytes)> = keys.into_iter().collect();
 
@@ -531,7 +521,7 @@ impl StateUpdateBufferEntry for BlockContractChanges {
                     })
                 {
                     res.entry((component_id.clone(), token.as_bytes().into()))
-                        .or_insert(value.into());
+                        .or_insert(value.clone());
                 }
             }
         }
@@ -598,42 +588,17 @@ impl TryFromMessage for Transaction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct ComponentBalance {
-    pub token: H160,
-    pub balance: Bytes,
-    /// the balance as a float value, its main usage is to allow for fast queries and tvl
-    /// calculation. Not available for backward revert deltas. In this case the balance will be
-    /// NaN.
-    pub balance_float: f64,
-    // tx where the this balance was observed
-    pub modify_tx: H256,
-    pub component_id: ComponentId,
-}
+impl TryFromMessage for ComponentBalance {
+    type Args<'a> = (substreams::BalanceChange, &'a Transaction);
 
-impl From<ComponentBalance> for dto::ComponentBalance {
-    fn from(value: ComponentBalance) -> Self {
-        Self {
-            token: value.token.into(),
-            balance: value.balance,
-            balance_float: value.balance_float,
-            modify_tx: value.modify_tx.into(),
-            component_id: value.component_id,
-        }
-    }
-}
-
-impl ComponentBalance {
-    pub fn try_from_message(
-        msg: substreams::BalanceChange,
-        tx: &Transaction,
-    ) -> Result<Self, ExtractionError> {
+    fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
+        let (msg, tx) = args;
         let balance_float = bytes_to_f64(&msg.balance).unwrap_or(f64::NAN);
         Ok(Self {
-            token: pad_and_parse_h160(&msg.token.into()).map_err(ExtractionError::DecodeError)?,
-            balance: Bytes::from(msg.balance),
+            token: pad_and_parse_20bytes(&msg.token).map_err(ExtractionError::DecodeError)?,
+            new_balance: Bytes::from(msg.balance),
             balance_float,
-            modify_tx: tx.hash.clone().into(),
+            modify_tx: tx.hash.clone(),
             component_id: String::from_utf8(msg.component_id)
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?,
         })
@@ -830,7 +795,7 @@ impl BlockContractChanges {
                             String::from_utf8(balance_change.component_id.clone())
                                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
                         let token_address = H160::from_slice(balance_change.token.as_slice());
-                        let balance = ComponentBalance::try_from_message(balance_change, &tx)?;
+                        let balance = ComponentBalance::try_from_message((balance_change, &tx))?;
 
                         balances_changes
                             .entry(component_id)
@@ -1053,7 +1018,7 @@ impl ProtocolChangesWithTx {
 
         // Finally, parse the balance changes
         for balance_change in msg.balance_changes.into_iter() {
-            let component_balance = ComponentBalance::try_from_message(balance_change, &tx)?;
+            let component_balance = ComponentBalance::try_from_message((balance_change, &tx))?;
 
             // Check if a balance change for the same token and component already exists
             // If it exists, overwrite the existing balance change with the new one and log a
@@ -1063,7 +1028,7 @@ impl ProtocolChangesWithTx {
                 .or_default();
 
             if let Some(existing_balance) =
-                token_balances.insert(component_balance.token, component_balance)
+                token_balances.insert(component_balance.token.clone().into(), component_balance)
             {
                 warn!(
                     "Received two balance updates for the same component id: {} and token {}. Overwriting balance change",
@@ -1291,7 +1256,7 @@ impl StateUpdateBufferEntry for BlockEntityChanges {
                     })
                 {
                     res.entry((component_id.clone(), token.as_bytes().into()))
-                        .or_insert(value.into());
+                        .or_insert(value.clone());
                 }
             }
         }
@@ -1510,7 +1475,7 @@ impl TxWithChanges {
             let component_id = String::from_utf8(balance_change.component_id.clone())
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
             let token_address = H160::from_slice(balance_change.token.as_slice());
-            let balance = ComponentBalance::try_from_message(balance_change, &tx)?;
+            let balance = ComponentBalance::try_from_message((balance_change, &tx))?;
 
             balance_changes
                 .entry(component_id)
@@ -1822,7 +1787,7 @@ impl StateUpdateBufferEntry for BlockChanges {
                     })
                 {
                     res.entry((component_id.clone(), token.as_bytes().into()))
-                        .or_insert(value.into());
+                        .or_insert(value.clone());
                 }
             }
         }
@@ -3983,10 +3948,10 @@ mod test {
                         [(
                             H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                             ComponentBalance {
-                                token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
-                                balance: Bytes::from(50000000.encode_to_vec()),
+                                token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                                new_balance: Bytes::from(50000000.encode_to_vec()),
                                 balance_float: 36522027799.0,
-                                modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000011121314),
+                                modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000011121314).into(),
                                 component_id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                             },
                         )]
@@ -4021,10 +3986,10 @@ mod test {
                         [(
                             H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                             ComponentBalance {
-                                token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
-                                balance: Bytes::from(10.encode_to_vec()),
+                                token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                                new_balance: Bytes::from(10.encode_to_vec()),
                                 balance_float: 2058.0,
-                                modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000000000001),
+                                modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000000000001).into(),
                                 component_id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                             },
                         )]
@@ -4089,12 +4054,15 @@ mod test {
             [(
                 H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                 ComponentBalance {
-                    token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
-                    balance: Bytes::from(10.encode_to_vec()),
+                    token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+                        .unwrap()
+                        .into(),
+                    new_balance: Bytes::from(10.encode_to_vec()),
                     balance_float: 2058.0,
                     modify_tx: H256::from_low_u64_be(
                         0x0000000000000000000000000000000000000000000000000000000000000001,
-                    ),
+                    )
+                    .into(),
                     component_id:
                         "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
                             .to_string(),
@@ -4501,9 +4469,11 @@ mod test {
             [(
                 H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                 ComponentBalance {
-                    token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                    balance: Bytes::from(1_i32.to_le_bytes()),
-                    modify_tx: tx.hash.clone().into(),
+                    token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                        .unwrap()
+                        .into(),
+                    new_balance: Bytes::from(1_i32.to_le_bytes()),
+                    modify_tx: tx.hash.clone(),
                     component_id: "Balance1".to_string(),
                     balance_float: 16777216.0,
                 },
@@ -4704,9 +4674,11 @@ mod test {
             [(
                 H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                 ComponentBalance {
-                    token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                    balance: Bytes::from(1_i32.to_le_bytes()),
-                    modify_tx: tx.hash.clone().into(),
+                    token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                        .unwrap()
+                        .into(),
+                    new_balance: Bytes::from(1_i32.to_le_bytes()),
+                    modify_tx: tx.hash.clone(),
                     component_id: "Balance1".to_string(),
                     balance_float: 16777216.0,
                 },
@@ -4850,11 +4822,11 @@ mod test {
             token: msg_token,
             component_id: msg_component_id,
         };
-        let from_message = ComponentBalance::try_from_message(msg, &tx).unwrap();
+        let from_message = ComponentBalance::try_from_message((msg, &tx)).unwrap();
 
-        assert_eq!(from_message.balance, msg_balance);
-        assert_eq!(from_message.modify_tx, tx.hash.into());
-        assert_eq!(from_message.token, expected_token);
+        assert_eq!(from_message.new_balance, msg_balance);
+        assert_eq!(from_message.modify_tx, tx.hash);
+        assert_eq!(from_message.token, Bytes::from(expected_token));
         assert_eq!(from_message.component_id, expected_component_id);
     }
 
@@ -4892,8 +4864,9 @@ mod test {
                 [(
                     H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                     ComponentBalance {
-                        token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666),
-                        balance: Bytes::from(0_i32.to_le_bytes()),
+                        token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666)
+                            .into(),
+                        new_balance: Bytes::from(0_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
                         balance_float: 0.0,
@@ -4931,8 +4904,9 @@ mod test {
                 [(
                     H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                     ComponentBalance {
-                        token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666),
-                        balance: Bytes::from(500000_i32.to_le_bytes()),
+                        token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666)
+                            .into(),
+                        new_balance: Bytes::from(500000_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
                         balance_float: 500000.0,

@@ -369,12 +369,7 @@ where
                     id,
                     balances
                         .into_iter()
-                        .map(|(token, value)| {
-                            (
-                                H160::from(token),
-                                crate::extractor::evm::ComponentBalance::from(&value),
-                            )
-                        })
+                        .map(|(token, value)| (H160::from(token), value))
                         .collect::<HashMap<_, _>>(),
                 )
             })
@@ -449,7 +444,10 @@ where
                                     // We currently only keep the latest created pool for
                                     // it's token
                                     .map(move |(token, balance)| {
-                                        (*token, (addr, U256::from_big_endian(&balance.balance)))
+                                        (
+                                            *token,
+                                            (addr, U256::from_big_endian(&balance.new_balance)),
+                                        )
                                     })
                             })
                     })
@@ -1166,8 +1164,9 @@ impl HybridPgGateway {
             balance_changes.extend(
                 tx_update
                     .balance_changes
-                    .iter()
-                    .flat_map(|(_, tokens)| tokens.values().map(Into::into)),
+                    .clone()
+                    .into_iter()
+                    .flat_map(|(_, tokens)| tokens.into_values()),
             );
         }
 
@@ -1626,27 +1625,27 @@ mod test {
                 "comp1".to_string(),
                 HashMap::from([(
                     H160::from_str("0x0000000000000000000000000000000000000001").unwrap(),
-                    evm::ComponentBalance {
+                    ComponentBalance {
                         token: H160::from_str("0x0000000000000000000000000000000000000001")
-                            .unwrap(),
-                        balance: Bytes::from(
+                            .unwrap().into(),
+                        new_balance: Bytes::from(
                             "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
                         ),
                         balance_float: 11_304_207_639.4e18,
-                        modify_tx: H256::default(),
+                        modify_tx: H256::default().into(),
                         component_id: "comp1".to_string(),
                     },
                 ),
                     (
                         H160::from_str("0x0000000000000000000000000000000000000002").unwrap(),
-                        evm::ComponentBalance {
+                        ComponentBalance {
                             token: H160::from_str("0x0000000000000000000000000000000000000002")
-                                .unwrap(),
-                            balance: Bytes::from(
+                                .unwrap().into(),
+                            new_balance: Bytes::from(
                                 "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
                             ),
                             balance_float: 100_000e6,
-                            modify_tx: H256::default(),
+                            modify_tx: H256::default().into(),
                             component_id: "comp1".to_string(),
                         },
                     )
@@ -2080,9 +2079,9 @@ mod test_serial_db {
                         component_id.clone(),
                         HashMap::from([(
                             base_token,
-                            crate::extractor::evm::ComponentBalance {
-                                token: base_token,
-                                balance: Bytes::from(&[0u8]),
+                            ComponentBalance {
+                                token: base_token.into(),
+                                new_balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
                                 modify_tx: VM_TX_HASH_0.parse().unwrap(),
                                 component_id: component_id.clone(),
@@ -2111,9 +2110,9 @@ mod test_serial_db {
                         component_id.clone(),
                         HashMap::from([(
                             base_token,
-                            crate::extractor::evm::ComponentBalance {
-                                token: base_token,
-                                balance: Bytes::from(&[0u8]),
+                            ComponentBalance {
+                                token: base_token.into(),
+                                new_balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
                                 modify_tx: VM_TX_HASH_1.parse().unwrap(),
                                 component_id: component_id.clone(),
@@ -2424,18 +2423,18 @@ mod test_serial_db {
                 ]),
                 component_balances: HashMap::from([
                     ("pc_1".to_string(), HashMap::from([
-                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), evm::ComponentBalance {
-                            token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
-                            balance: Bytes::from("0x00000001"),
+                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), ComponentBalance {
+                            token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
+                            new_balance: Bytes::from("0x00000001"),
                             balance_float: 1.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
                             component_id: "pc_1".to_string(),
                         }),
-                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), evm::ComponentBalance {
-                            token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
-                            balance: Bytes::from("0x000003e8"),
+                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), ComponentBalance {
+                            token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                            new_balance: Bytes::from("0x000003e8"),
                             balance_float: 1000.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007531").unwrap(),
+                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007531").unwrap().into(),
                             component_id: "pc_1".to_string(),
                         }),
                     ])),
@@ -2605,18 +2604,18 @@ mod test_serial_db {
                 ]),
                 component_balances: HashMap::from([
                     ("pc_1".to_string(), HashMap::from([
-                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), crate::extractor::evm::ComponentBalance {
-                            token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
-                            balance: Bytes::from("0x00000064"),
+                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), ComponentBalance {
+                            token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
+                            new_balance: Bytes::from("0x00000064"),
                             balance_float: 100.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007532").unwrap(),
+                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007532").unwrap().into(),
                             component_id: "pc_1".to_string(),
                         }),
-                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), crate::extractor::evm::ComponentBalance {
-                            token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
-                            balance: Bytes::from("0x00000001"),
+                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), ComponentBalance {
+                            token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                            new_balance: Bytes::from("0x00000001"),
                             balance_float: 1.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
                             component_id: "pc_1".to_string(),
                         }),
                     ])),

@@ -82,30 +82,6 @@ impl From<&evm::ProtocolStateDelta> for ProtocolComponentStateDelta {
     }
 }
 
-impl From<&evm::ComponentBalance> for ComponentBalance {
-    fn from(value: &evm::ComponentBalance) -> Self {
-        Self {
-            token: value.token.as_bytes().into(),
-            new_balance: value.balance.clone(),
-            balance_float: value.balance_float,
-            modify_tx: value.modify_tx.as_bytes().into(),
-            component_id: value.component_id.clone(),
-        }
-    }
-}
-
-impl From<&ComponentBalance> for evm::ComponentBalance {
-    fn from(value: &ComponentBalance) -> Self {
-        Self {
-            token: value.token.clone().into(),
-            balance: value.new_balance.clone(),
-            balance_float: value.balance_float,
-            modify_tx: value.modify_tx.clone().into(),
-            component_id: value.component_id.clone(),
-        }
-    }
-}
-
 impl From<&evm::AggregatedBlockChanges> for BlockAggregatedDeltas {
     fn from(value: &evm::AggregatedBlockChanges) -> Self {
         let state_deltas = value
@@ -136,7 +112,7 @@ impl From<&evm::AggregatedBlockChanges> for BlockAggregatedDeltas {
                     cid.clone(),
                     balance_map
                         .iter()
-                        .map(|(addr, balance)| (addr.as_bytes().into(), balance.into()))
+                        .map(|(addr, balance)| (addr.as_bytes().into(), balance.clone()))
                         .collect::<HashMap<Bytes, ComponentBalance>>(),
                 )
             })
