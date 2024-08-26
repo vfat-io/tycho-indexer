@@ -511,6 +511,7 @@ where
             .lock()
             .await
             .last_processed_block
+            .clone()
     }
 
     #[instrument(skip_all, fields(block_number))]
@@ -624,10 +625,11 @@ where
                     .await?;
             }
         }
-        self.update_last_processed_block(msg.block)
+        self.update_last_processed_block(msg.block.clone())
             .await;
 
-        self.report_progress(msg.block).await;
+        self.report_progress(msg.block.clone())
+            .await;
 
         self.update_cursor(inp.cursor).await;
 
@@ -1002,8 +1004,7 @@ where
             chain: self.chain,
             block: revert_buffer
                 .get_most_recent_block()
-                .expect("Couldn't find most recent block in buffer during revert")
-                .into(),
+                .expect("Couldn't find most recent block in buffer during revert"),
             finalized_block_height: reverted_state[0]
                 .block_update
                 .finalized_block_height,
@@ -1094,7 +1095,7 @@ impl HybridPgGateway {
         syncing: bool,
     ) -> Result<(), StorageError> {
         self.state_gateway
-            .start_transaction(&(&changes.block).into(), Some(self.name.as_str()))
+            .start_transaction(&changes.block, Some(self.name.as_str()))
             .await;
         if !changes.new_tokens.is_empty() {
             let new_tokens = changes
@@ -1108,7 +1109,7 @@ impl HybridPgGateway {
                 .await?;
         }
         self.state_gateway
-            .upsert_block(&[(&changes.block).into()])
+            .upsert_block(&[changes.block.clone()])
             .await?;
 
         let mut new_protocol_components: Vec<models::protocol::ProtocolComponent> = vec![];
@@ -1524,7 +1525,7 @@ mod test {
     async fn test_construct_tokens() {
         let msg = evm::BlockChanges {
             extractor: "ex".to_string(),
-            block: evm::Block::default(),
+            block: Block::default(),
             chain: Chain::Ethereum,
             finalized_block_height: 0,
             revert: false,
@@ -1936,7 +1937,7 @@ mod test_serial_db {
         evm::BlockChanges {
             extractor: "native:test".to_owned(),
             chain: Chain::Ethereum,
-            block: evm::Block {
+            block: Block {
                 number: 0,
                 chain: Chain::Ethereum,
                 hash: NATIVE_BLOCK_HASH_0.parse().unwrap(),
@@ -2038,7 +2039,7 @@ mod test_serial_db {
         evm::BlockChanges {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
-            block: evm::Block::default(),
+            block: Block { hash: Bytes::zero(32), ..Default::default() },
             finalized_block_height: 0,
             revert: false,
             new_tokens: HashMap::new(),
@@ -2126,11 +2127,11 @@ mod test_serial_db {
     // Allow dead code until reverts are supported again
     #[allow(dead_code)]
     fn vm_update02() -> evm::BlockContractChanges {
-        let block = evm::Block {
+        let block = Block {
             number: 1,
             chain: Chain::Ethereum,
             hash: VM_BLOCK_HASH_0.parse().unwrap(),
-            parent_hash: H256::zero(),
+            parent_hash: H256::zero().into(),
             ts: "2020-01-01T01:00:00".parse().unwrap(),
         };
         evm::BlockContractChanges {
@@ -2367,8 +2368,8 @@ mod test_serial_db {
                 chain: Chain::Ethereum,
                 block: Block {
                     number: 3,
-                    hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
-                    parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
+                    hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap().into(),
+                    parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap().into(),
                     chain: Chain::Ethereum,
                     ts: NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
                 },
@@ -2549,8 +2550,8 @@ mod test_serial_db {
                 chain: Chain::Ethereum,
                 block: Block {
                     number: 3,
-                    hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
-                    parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
+                    hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap().into(),
+                    parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap().into(),
                     chain: Chain::Ethereum,
                     ts: NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
                 },

@@ -473,7 +473,7 @@ mod test {
                 BlockEntityChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    testing::evm_block(1),
+                    testing::block(1),
                     0,
                     false,
                     vec![ProtocolChangesWithTx {
@@ -514,7 +514,7 @@ mod test {
                 BlockEntityChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    testing::evm_block(2),
+                    testing::block(2),
                     0,
                     false,
                     vec![ProtocolChangesWithTx {
@@ -547,7 +547,7 @@ mod test {
                 BlockEntityChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    testing::evm_block(3),
+                    testing::block(3),
                     0,
                     false,
                     vec![ProtocolChangesWithTx { tx, balance_changes, ..Default::default() }],

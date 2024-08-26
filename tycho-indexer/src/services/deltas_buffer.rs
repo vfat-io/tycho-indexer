@@ -326,7 +326,7 @@ mod test {
     use super::*;
     use crate::{
         extractor::{evm, evm::AccountUpdate},
-        testing::evm_block,
+        testing::block,
     };
     use ethers::types::{H160, H256, U256};
     use std::str::FromStr;
@@ -358,7 +358,7 @@ mod test {
         AggregatedBlockChanges::new(
             "vm:extractor",
             Chain::Ethereum,
-            evm_block(1),
+            block(1),
             1,
             false,
             [(
@@ -415,7 +415,7 @@ mod test {
         AggregatedBlockChanges::new(
             "native:extractor",
             Chain::Ethereum,
-            evm_block(1),
+            block(1),
             1,
             false,
             [(

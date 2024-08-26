@@ -25,8 +25,9 @@ use tokio::{select, task::JoinHandle};
 use tracing::{info, instrument, warn};
 use tycho_core::{
     models::{
-        blockchain::Transaction as CoreTransaction, contract::ContractDelta, Address, Chain,
-        ExtractionState, ImplementationType,
+        blockchain::{Block, Transaction as CoreTransaction},
+        contract::ContractDelta,
+        Address, Chain, ExtractionState, ImplementationType,
     },
     storage::{ChainGateway, ContractStateGateway, ExtractionStateGateway},
     traits::AccountExtractor,
@@ -38,7 +39,7 @@ use tycho_indexer::{
         self,
         evm::{
             chain_state::ChainState, protocol_cache::ProtocolMemoryCache,
-            token_analysis_cron::analyze_tokens, Block,
+            token_analysis_cron::analyze_tokens,
         },
         runner::{ExtractorConfig, HandleResult, ProtocolTypeConfig},
         ExtractionError,
@@ -334,18 +335,18 @@ async fn initialize_accounts(
 
     let tx = CoreTransaction {
         hash: H256::random().into(),
-        block_hash: block.hash.into(),
+        block_hash: block.hash.clone(),
         from: Bytes::from([0u8; 20]),
         to: None,
         index: 0,
     };
 
     cached_gw
-        .start_transaction(&(&block).into(), Some("accountExtractor"))
+        .start_transaction(&block, Some("accountExtractor"))
         .await;
 
     cached_gw
-        .upsert_block(&[(&block).into()])
+        .upsert_block(&[block.clone()])
         .await
         .expect("Failed to insert block");
 
@@ -402,7 +403,7 @@ async fn get_accounts_data(
         .get_accounts(block.clone(), accounts)
         .await
         .expect("Failed to extract accounts");
-    (block.into(), extracted_accounts)
+    (block, extracted_accounts)
 }
 
 async fn shutdown_handler(

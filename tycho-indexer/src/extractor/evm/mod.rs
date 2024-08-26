@@ -15,7 +15,7 @@ use tracing::log::warn;
 use tycho_core::{
     dto,
     models::{
-        blockchain::{BlockScoped, Transaction},
+        blockchain::{Block, BlockScoped, Transaction},
         protocol as tycho_core_protocol,
         token::CurrencyToken,
         Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
@@ -43,14 +43,14 @@ pub mod token_analysis_cron;
 pub mod token_pre_processor;
 mod utils;
 
-#[derive(Debug, PartialEq, Copy, Clone, Deserialize, Serialize, Default)]
-pub struct Block {
-    pub number: u64,
-    pub hash: H256,
-    pub parent_hash: H256,
-    pub chain: Chain,
-    pub ts: NaiveDateTime,
-}
+// #[derive(Debug, PartialEq, Copy, Clone, Deserialize, Serialize, Default)]
+// pub struct Block {
+//     pub number: u64,
+//     pub hash: H256,
+//     pub parent_hash: H256,
+//     pub chain: Chain,
+//     pub ts: NaiveDateTime,
+// }
 
 pub trait TryFromMessage {
     type Args<'a>;
@@ -347,7 +347,7 @@ impl NormalisedMessage for BlockAccountChanges {
         Arc::new(Self {
             extractor: self.extractor.clone(),
             chain: self.chain,
-            block: self.block,
+            block: self.block.clone(),
             finalized_block_height: self.finalized_block_height,
             revert: self.revert,
             account_updates: HashMap::new(),
@@ -380,7 +380,7 @@ impl NormalisedMessage for BlockEntityChangesResult {
         Arc::new(Self::new(
             &self.extractor,
             self.chain,
-            self.block,
+            self.block.clone(),
             self.finalized_block_height,
             self.revert,
             HashMap::new(),
@@ -577,13 +577,16 @@ impl StateUpdateBufferEntry for BlockContractChanges {
 
 impl BlockScoped for BlockContractChanges {
     fn block(&self) -> tycho_core::models::blockchain::Block {
-        (&self.block).into()
+        self.block.clone()
     }
 }
 
-impl Block {
+impl TryFromMessage for Block {
+    type Args<'a> = (substreams::Block, Chain);
+
     /// Parses block from tychos protobuf block message
-    pub fn try_from_message(msg: substreams::Block, chain: Chain) -> Result<Self, ExtractionError> {
+    fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
+        let (msg, chain) = args;
         let ts_nano = match chain {
             // For blockchains with subsecond block times, like Arbitrum, timestamps aren't precise
             // enough to distinguish between two blocks accurately. To maintain accurate ordering,
@@ -830,7 +833,7 @@ impl BlockContractChanges {
         finalized_block_height: u64,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
-            let block = Block::try_from_message(block, chain)?;
+            let block = Block::try_from_message((block, chain))?;
             let mut tx_updates = Vec::new();
 
             for change in msg.changes.into_iter() {
@@ -840,7 +843,7 @@ impl BlockContractChanges {
                     HashMap::new();
 
                 if let Some(tx) = change.tx {
-                    let tx = Transaction::try_from_message((tx, &block.hash))?;
+                    let tx = Transaction::try_from_message((tx, &block.hash.clone().into()))?;
                     for el in change.contract_changes.into_iter() {
                         let update = AccountUpdate::try_from_message(el, chain)?;
                         account_updates.insert(update.address, update);
@@ -1046,7 +1049,7 @@ impl ProtocolChangesWithTx {
         let tx = Transaction::try_from_message((
             msg.tx
                 .expect("TransactionEntityChanges should have a transaction"),
-            &block.hash,
+            &block.hash.clone().into(),
         ))?;
 
         let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
@@ -1334,7 +1337,7 @@ impl StateUpdateBufferEntry for BlockEntityChanges {
 
 impl BlockScoped for BlockEntityChanges {
     fn block(&self) -> tycho_core::models::blockchain::Block {
-        (&self.block).into()
+        self.block.clone()
     }
 }
 
@@ -1367,7 +1370,7 @@ impl BlockEntityChanges {
         finalized_block_height: u64,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
-            let block = Block::try_from_message(block, chain)?;
+            let block = Block::try_from_message((block, chain))?;
 
             let mut txs_with_update = msg
                 .changes
@@ -1494,7 +1497,7 @@ impl TxWithChanges {
         let tx = Transaction::try_from_message((
             msg.tx
                 .expect("TransactionChanges should have a transaction"),
-            &block.hash,
+            &block.hash.clone().into(),
         ))?;
 
         let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
@@ -1755,7 +1758,7 @@ impl NormalisedMessage for AggregatedBlockChanges {
         Arc::new(Self {
             extractor: self.extractor.clone(),
             chain: self.chain,
-            block: self.block,
+            block: self.block.clone(),
             finalized_block_height: self.finalized_block_height,
             revert: self.revert,
             account_updates: HashMap::new(),
@@ -1865,7 +1868,7 @@ impl StateUpdateBufferEntry for BlockChanges {
 
 impl BlockScoped for BlockChanges {
     fn block(&self) -> tycho_core::models::blockchain::Block {
-        (&self.block).into()
+        self.block.clone()
     }
 }
 
@@ -1899,7 +1902,7 @@ impl BlockChanges {
         finalized_block_height: u64,
     ) -> Result<Self, ExtractionError> {
         if let Some(block) = msg.block {
-            let block = Block::try_from_message(block, chain)?;
+            let block = Block::try_from_message((block, chain))?;
 
             let txs_with_update = msg
                 .changes
@@ -3979,10 +3982,10 @@ mod test {
                 number: 1,
                 hash: H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000031323334,
-                ),
+                ).into(),
                 parent_hash: H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000021222324,
-                ),
+                ).into(),
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
@@ -4145,10 +4148,12 @@ mod test {
                 number: 1,
                 hash: H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000031323334,
-                ),
+                )
+                .into(),
                 parent_hash: H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000021222324,
-                ),
+                )
+                .into(),
                 chain: Chain::Ethereum,
                 ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             },
@@ -4548,10 +4553,12 @@ mod test {
                 number: 1,
                 hash: H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000000000000,
-                ),
+                )
+                .into(),
                 parent_hash: H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000021222324,
-                ),
+                )
+                .into(),
                 chain: Chain::Ethereum,
                 ts: yesterday_midnight(),
             },
@@ -4750,10 +4757,11 @@ mod test {
             chain: Chain::Ethereum,
             block: Block {
                 number: 1,
-                hash: tx.block_hash.into(),
+                hash: tx.block_hash,
                 parent_hash: H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000021222324,
-                ),
+                )
+                .into(),
                 chain: Chain::Ethereum,
                 ts: yesterday_midnight(),
             },

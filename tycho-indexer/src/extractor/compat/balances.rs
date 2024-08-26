@@ -102,7 +102,7 @@ mod tests {
 
     use crate::{
         extractor::evm::{ComponentBalance, TxWithChanges},
-        testing::evm_block,
+        testing::block,
     };
 
     use super::*;
@@ -174,7 +174,7 @@ mod tests {
         let changes = BlockChanges::new(
             "test".to_string(),
             Chain::Ethereum,
-            evm_block(1),
+            block(1),
             0,
             false,
             txs_with_update.clone(),
@@ -183,7 +183,7 @@ mod tests {
         let expected = BlockChanges::new(
             "test".to_string(),
             Chain::Ethereum,
-            evm_block(1),
+            block(1),
             0,
             false,
             vec![TxWithChanges {

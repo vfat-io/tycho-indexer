@@ -97,7 +97,10 @@ mod test {
         str::FromStr,
     };
     use tycho_core::{
-        models::{blockchain::Transaction, Chain},
+        models::{
+            blockchain::{Block, Transaction},
+            Chain,
+        },
         Bytes,
     };
 
@@ -113,7 +116,7 @@ mod test {
         let changes = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            evm::Block {
+            Block {
                 number: 0,
                 chain: Chain::Ethereum,
                 hash: BLOCK_HASH_0.parse().unwrap(),
@@ -167,7 +170,7 @@ mod test {
         let expected = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            changes.block,
+            changes.block.clone(),
             0,
             changes.revert,
             vec![TxWithChanges {
@@ -211,7 +214,7 @@ mod test {
         let changes = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            evm::Block {
+            Block {
                 number: 0,
                 chain: Chain::Ethereum,
                 hash: BLOCK_HASH_0.parse().unwrap(),
@@ -255,7 +258,7 @@ mod test {
         let changes = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            evm::Block {
+            Block {
                 number: 0,
                 chain: Chain::Ethereum,
                 hash: BLOCK_HASH_0.parse().unwrap(),
@@ -304,7 +307,7 @@ mod test {
         let expected = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            evm::Block {
+            Block {
                 number: 0,
                 chain: Chain::Ethereum,
                 hash: BLOCK_HASH_0.parse().unwrap(),

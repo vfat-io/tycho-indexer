@@ -29,9 +29,6 @@ use tycho_core::{
     Bytes,
 };
 
-#[cfg(test)]
-use crate::extractor::evm;
-
 mock! {
     pub Gateway {}
     #[async_trait]
@@ -482,9 +479,9 @@ pub fn evm_contract_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap
         .collect()
 }
 
-/// Creates an evm block for testing, version 0 is not allowed and will panic.
+/// Creates a block for testing, version 0 is not allowed and will panic.
 #[cfg(test)]
-pub fn evm_block(version: u64) -> evm::Block {
+pub fn block(version: u64) -> Block {
     if version == 0 {
         panic!("Block version 0 doesn't exist. Smallest version is 1");
     }
@@ -492,10 +489,10 @@ pub fn evm_block(version: u64) -> evm::Block {
     let ts: NaiveDateTime = "2020-01-01T00:00:00"
         .parse()
         .expect("failed parsing block ts");
-    evm::Block {
+    Block {
         number: version,
-        hash: H256::from_low_u64_be(version),
-        parent_hash: H256::from_low_u64_be(version - 1),
+        hash: H256::from_low_u64_be(version).into(),
+        parent_hash: H256::from_low_u64_be(version - 1).into(),
         chain: Chain::Ethereum,
         ts: ts + Duration::from_secs(version * 12),
     }

@@ -7,9 +7,10 @@ use crate::{
     Bytes,
 };
 use chrono::NaiveDateTime;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Clone, Default, PartialEq, Debug)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize, Debug)]
 pub struct Block {
     pub hash: Bytes,
     pub parent_hash: Bytes,

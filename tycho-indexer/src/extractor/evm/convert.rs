@@ -1,40 +1,15 @@
 use std::collections::HashMap;
 
 use crate::extractor::{evm, evm::ProtocolStateDelta};
-use ethers::prelude::{H160, H256, U256};
+use ethers::prelude::{H160, U256};
 use tycho_core::{
     models::{
-        blockchain::{Block, BlockAggregatedDeltas},
+        blockchain::BlockAggregatedDeltas,
         contract::{Contract, ContractDelta},
         protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
     },
     Bytes,
 };
-
-impl From<&evm::Block> for Block {
-    fn from(value: &evm::Block) -> Self {
-        Self {
-            hash: Bytes::from(value.hash),
-            parent_hash: Bytes::from(value.parent_hash),
-            number: value.number,
-            chain: value.chain,
-            ts: value.ts,
-        }
-    }
-}
-
-// TODO: Remove once remove DB side reverts.
-impl From<Block> for evm::Block {
-    fn from(value: Block) -> Self {
-        Self {
-            number: value.number,
-            hash: H256::from_slice(&value.hash),
-            parent_hash: H256::from_slice(&value.parent_hash),
-            chain: value.chain,
-            ts: value.ts,
-        }
-    }
-}
 
 impl From<&evm::Account> for Contract {
     fn from(value: &evm::Account) -> Self {
@@ -193,7 +168,7 @@ impl From<&evm::AggregatedBlockChanges> for BlockAggregatedDeltas {
         Self::new(
             &value.extractor,
             value.chain,
-            (&value.block).into(),
+            value.block.clone(),
             value.finalized_block_height,
             value.revert,
             &state_deltas,
