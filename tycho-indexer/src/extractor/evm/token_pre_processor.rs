@@ -1,4 +1,3 @@
-use crate::extractor::evm::ERC20Token;
 use async_trait::async_trait;
 use ethers::{
     abi::Abi,
@@ -17,7 +16,7 @@ use tracing::{instrument, warn};
 use web3::types::BlockNumber;
 
 use ethrpc::Web3;
-use tycho_core::models::Chain;
+use tycho_core::models::{token::CurrencyToken, Chain};
 
 #[derive(Debug, Clone)]
 pub struct TokenPreProcessor {
@@ -34,7 +33,7 @@ pub trait TokenPreProcessorTrait: Send + Sync {
         addresses: Vec<H160>,
         token_finder: Arc<dyn TokenOwnerFinding>,
         block: BlockNumber,
-    ) -> Vec<ERC20Token>;
+    ) -> Vec<CurrencyToken>;
 }
 
 const ABI_STR: &str = include_str!("./abi/erc20.json");
@@ -74,7 +73,7 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
         addresses: Vec<H160>,
         token_finder: Arc<dyn TokenOwnerFinding>,
         block: BlockNumber,
-    ) -> Vec<ERC20Token> {
+    ) -> Vec<CurrencyToken> {
         let mut tokens_info = Vec::new();
 
         for address in addresses {
@@ -127,8 +126,8 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
                 quality = 50;
             }
 
-            tokens_info.push(ERC20Token {
-                address,
+            tokens_info.push(CurrencyToken {
+                address: address.into(),
                 symbol: symbol.replace('\0', ""),
                 decimals: decimals.into(),
                 tax: tax

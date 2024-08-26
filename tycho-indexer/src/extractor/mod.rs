@@ -6,7 +6,6 @@ use crate::{
     pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
 };
 use async_trait::async_trait;
-use ethers::prelude::ProviderError;
 use mockall::automock;
 use prost::DecodeError;
 use std::{collections::HashMap, sync::Arc};
@@ -57,7 +56,7 @@ pub enum RPCError {
     #[error("RPC setup error: {0}")]
     SetupError(String),
     #[error("RPC error: {0}")]
-    RequestError(#[from] ProviderError),
+    RequestError(String),
 }
 
 pub type ExtractorMsg = Arc<dyn NormalisedMessage>;

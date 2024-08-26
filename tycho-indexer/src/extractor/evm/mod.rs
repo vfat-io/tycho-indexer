@@ -43,36 +43,6 @@ pub mod token_analysis_cron;
 pub mod token_pre_processor;
 mod utils;
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct ERC20Token {
-    pub address: H160,
-    pub symbol: String,
-    pub decimals: u32,
-    pub tax: u64,
-    pub gas: Vec<Option<u64>>,
-    pub chain: Chain,
-    /// Quality is between 0-100, where:
-    ///  - 100: Normal token
-    ///  - 75: Rebase token
-    ///  - 50: Fee token
-    ///  - 0: Scam token that we shouldn't use
-    pub quality: u32,
-}
-
-impl ERC20Token {
-    pub fn new(
-        address: H160,
-        symbol: String,
-        decimals: u32,
-        tax: u64,
-        gas: Vec<Option<u64>>,
-        chain: Chain,
-        quality: u32,
-    ) -> Self {
-        ERC20Token { address, symbol, decimals, tax, gas, chain, quality }
-    }
-}
-
 #[derive(Debug, PartialEq, Copy, Clone, Deserialize, Serialize, Default)]
 pub struct Block {
     pub number: u64,

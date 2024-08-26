@@ -472,8 +472,8 @@ where
                 web3::types::BlockNumber::Number(msg.block.number.into()),
             )
             .await
-            .iter()
-            .map(|t| (Bytes::from(t.address.as_bytes()), t.into()))
+            .into_iter()
+            .map(|t| (t.address.clone(), t))
             .chain(existing_tokens)
             .collect();
         Ok(new_tokens)
@@ -1572,14 +1572,12 @@ mod test {
             .expect("adding tokens failed");
 
         let mut preprocessor = MockTokenPreProcessorTrait::new();
-        let t3 = evm::ERC20Token::new(
-            "0x0000000000000000000000000000000000000003"
-                .parse()
-                .unwrap(),
-            "TOK3".to_string(),
+        let t3 = evm::CurrencyToken::new(
+            &Bytes::from_str("0000000000000000000000000000000000000003").unwrap(),
+            "TOK3",
             18,
             0,
-            Vec::new(),
+            &[],
             Chain::Ethereum,
             100,
         );
@@ -1610,10 +1608,7 @@ mod test {
         )
         .await
         .expect("Extractor init failed");
-        let exp = HashMap::from([
-            (t1.address.clone(), t1),
-            (Bytes::from(t3.address.as_bytes()), (&t3).into()),
-        ]);
+        let exp = HashMap::from([(t1.address.clone(), t1), (t3.address.clone(), t3)]);
 
         let res = extractor
             .construct_currency_tokens(&msg)
@@ -1814,43 +1809,43 @@ mod test_serial_db {
     fn get_mocked_token_pre_processor() -> MockTokenPreProcessorTrait {
         let mut mock_processor = MockTokenPreProcessorTrait::new();
         let new_tokens = vec![
-            evm::ERC20Token::new(
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                    .expect("Invalid H160 address"),
-                "WETH".to_string(),
+            evm::CurrencyToken::new(
+                &Bytes::from_str("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .expect("Invalid address"),
+                "WETH",
                 18,
                 0,
-                vec![],
+                &[],
                 Default::default(),
                 100,
             ),
-            evm::ERC20Token::new(
-                H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                    .expect("Invalid H160 address"),
-                "USDC".to_string(),
+            evm::CurrencyToken::new(
+                &Bytes::from_str("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                    .expect("Invalid address"),
+                "USDC",
                 6,
                 0,
-                vec![],
+                &[],
                 Default::default(),
                 100,
             ),
-            evm::ERC20Token::new(
-                H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f")
-                    .expect("Invalid H160 address"),
-                "DAI".to_string(),
+            evm::CurrencyToken::new(
+                &Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f")
+                    .expect("Invalid address"),
+                "DAI",
                 18,
                 0,
-                vec![],
+                &[],
                 Default::default(),
                 100,
             ),
-            evm::ERC20Token::new(
-                H160::from_str("0xdAC17F958D2ee523a2206206994597C13D831ec7")
-                    .expect("Invalid H160 address"),
-                "USDT".to_string(),
+            evm::CurrencyToken::new(
+                &Bytes::from_str("dAC17F958D2ee523a2206206994597C13D831ec7")
+                    .expect("Invalid address"),
+                "USDT",
                 6,
                 0,
-                vec![],
+                &[],
                 Default::default(),
                 100,
             ),

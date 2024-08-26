@@ -74,20 +74,6 @@ impl From<evm::AccountUpdate> for dto::AccountUpdate {
     }
 }
 
-impl From<evm::ERC20Token> for dto::ResponseToken {
-    fn from(token: evm::ERC20Token) -> Self {
-        Self {
-            address: token.address.into(),
-            symbol: token.symbol,
-            decimals: token.decimals,
-            tax: token.tax,
-            chain: token.chain.into(),
-            gas: token.gas,
-            quality: token.quality,
-        }
-    }
-}
-
 impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
     fn from(protocol_component: evm::ProtocolComponent) -> Self {
         Self {

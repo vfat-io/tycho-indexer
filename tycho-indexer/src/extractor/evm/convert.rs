@@ -1,16 +1,12 @@
 use std::collections::HashMap;
 
-use crate::extractor::{
-    evm,
-    evm::{ERC20Token, ProtocolStateDelta},
-};
+use crate::extractor::{evm, evm::ProtocolStateDelta};
 use ethers::prelude::{H160, H256, U256};
 use tycho_core::{
     models::{
         blockchain::{Block, BlockAggregatedDeltas},
         contract::{Contract, ContractDelta},
         protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
-        token::CurrencyToken,
     },
     Bytes,
 };
@@ -155,20 +151,6 @@ impl From<&ComponentBalance> for evm::ComponentBalance {
             balance_float: value.balance_float,
             modify_tx: value.modify_tx.clone().into(),
             component_id: value.component_id.clone(),
-        }
-    }
-}
-
-impl From<&evm::ERC20Token> for CurrencyToken {
-    fn from(value: &ERC20Token) -> Self {
-        Self {
-            address: Bytes::from(value.address.as_bytes()),
-            symbol: value.symbol.clone(),
-            decimals: value.decimals,
-            tax: value.tax,
-            gas: value.gas.clone(),
-            chain: value.chain,
-            quality: value.quality,
         }
     }
 }
