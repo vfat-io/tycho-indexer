@@ -13,7 +13,7 @@ use mockall::mock;
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
-        contract::{Contract, ContractDelta},
+        contract::{Account, ContractDelta},
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
             ProtocolComponentStateDelta,
@@ -56,7 +56,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<Contract, StorageError>,
+                    Output = Result<Account, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >
@@ -76,7 +76,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<Vec<Contract>, StorageError>,
+                    Output = Result<Vec<Account>, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >
@@ -90,7 +90,7 @@ mock! {
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn upsert_contract<'life0, 'life1, 'async_trait>(
             &'life0 self,
-            new: &'life1 Contract,
+            new: &'life1 Account,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<

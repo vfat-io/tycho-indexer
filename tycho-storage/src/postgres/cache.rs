@@ -21,7 +21,7 @@ use tycho_core::{
     models::{
         self,
         blockchain::{Block, Transaction},
-        contract::{Contract, ContractDelta},
+        contract::{Account, ContractDelta},
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
             ProtocolComponentStateDelta,
@@ -49,7 +49,7 @@ pub(crate) enum WriteOp {
     // Simply keep last
     SaveExtractionState(ExtractionState),
     // Support saving a batch
-    UpsertContract(Vec<models::contract::Contract>),
+    UpsertContract(Vec<models::contract::Account>),
     // Simply merge
     UpdateContracts(Vec<(TxHash, models::contract::ContractDelta)>),
     // Simply merge
@@ -690,7 +690,7 @@ impl ContractStateGateway for CachedGateway {
         id: &ContractId,
         version: Option<&Version>,
         include_slots: bool,
-    ) -> Result<Contract, StorageError> {
+    ) -> Result<Account, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
@@ -706,7 +706,7 @@ impl ContractStateGateway for CachedGateway {
         addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
-    ) -> Result<Vec<Contract>, StorageError> {
+    ) -> Result<Vec<Account>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
@@ -716,7 +716,7 @@ impl ContractStateGateway for CachedGateway {
             .await
     }
 
-    async fn upsert_contract(&self, new: &Contract) -> Result<(), StorageError> {
+    async fn upsert_contract(&self, new: &Account) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpsertContract(vec![new.clone()]))
             .await?;
         Ok(())

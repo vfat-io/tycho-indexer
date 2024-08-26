@@ -16,6 +16,7 @@ use tycho_core::{
     dto,
     models::{
         blockchain::{Block, BlockScoped, Transaction},
+        contract::Account,
         protocol as tycho_core_protocol,
         token::CurrencyToken,
         Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
@@ -60,55 +61,6 @@ pub trait TryFromMessage {
         Self: Sized;
 }
 
-#[derive(PartialEq, Debug, Clone)]
-pub struct Account {
-    pub chain: Chain,
-    pub address: H160,
-    pub title: String,
-    pub slots: HashMap<U256, U256>,
-    pub balance: U256,
-    pub code: Bytes,
-    pub code_hash: H256,
-    pub balance_modify_tx: H256,
-    pub code_modify_tx: H256,
-    pub creation_tx: Option<H256>,
-}
-
-impl Account {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        chain: Chain,
-        address: H160,
-        title: String,
-        slots: HashMap<U256, U256>,
-        balance: U256,
-        code: Bytes,
-        code_hash: H256,
-        balance_modify_tx: H256,
-        code_modify_tx: H256,
-        creation_tx: Option<H256>,
-    ) -> Self {
-        Self {
-            chain,
-            address,
-            title,
-            slots,
-            balance,
-            code,
-            code_hash,
-            balance_modify_tx,
-            code_modify_tx,
-            creation_tx,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn set_balance(&mut self, new_balance: U256, modified_at: H256) {
-        self.balance = new_balance;
-        self.balance_modify_tx = modified_at;
-    }
-}
-
 impl From<&TransactionVMUpdates> for Vec<Account> {
     /// Creates a full account from a change.
     ///
@@ -127,19 +79,27 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
             .map(|update| {
                 let acc = Account::new(
                     update.chain,
-                    update.address,
+                    update.address.into(),
                     format!("{:#020x}", update.address),
-                    update.slots,
-                    update.balance.unwrap_or_default(),
+                    update
+                        .slots
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v.into()))
+                        .collect(),
+                    update
+                        .balance
+                        .unwrap_or_default()
+                        .into(),
                     update.code.clone().unwrap_or_default(),
                     update
                         .code
                         .as_ref()
-                        .map(|v| H256::from(keccak256(v)))
-                        .unwrap_or_default(),
-                    value.tx.hash.clone().into(),
-                    value.tx.hash.clone().into(),
-                    Some(value.tx.hash.clone().into()),
+                        .map(keccak256)
+                        .unwrap_or_default()
+                        .into(),
+                    value.tx.hash.clone(),
+                    value.tx.hash.clone(),
+                    Some(value.tx.hash.clone()),
                 );
                 acc
             })
@@ -173,25 +133,30 @@ impl AccountUpdate {
     // Converting AccountUpdate into Account with references saves us from cloning the whole
     // struct of BlockContractChanges in the forward function in ambient.rs.
     pub fn ref_into_account(&self, tx: &Transaction) -> Account {
-        let empty_hash = H256::from(keccak256(Vec::new()));
+        let empty_hash = keccak256(Vec::new());
         if self.change != ChangeType::Creation {
             warn!("Creating an account from a partial change!")
         }
 
         Account::new(
             self.chain,
-            self.address,
+            self.address.into(),
             format!("{:#020x}", self.address),
-            self.slots.clone(),
-            self.balance.unwrap_or_default(),
+            self.slots
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+            self.balance.unwrap_or_default().into(),
             self.code.clone().unwrap_or_default(),
             self.code
                 .as_ref()
-                .map(|v| H256::from(keccak256(v)))
-                .unwrap_or(empty_hash),
-            tx.hash.clone().into(),
-            tx.hash.clone().into(),
-            Some(tx.hash.clone().into()),
+                .map(keccak256)
+                .unwrap_or(empty_hash)
+                .into(),
+            tx.hash.clone(),
+            tx.hash.clone(),
+            Some(tx.hash.clone()),
         )
     }
 
@@ -3792,13 +3757,13 @@ mod test {
                 .parse()
                 .unwrap(),
             "0xe688b84b23f322a994a53dbf8e15fa82cdb71127".into(),
-            fixtures::evm_slots([]),
-            U256::from(10000),
+            HashMap::new(),
+            U256::from(10000).into(),
             code.into(),
-            code_hash,
-            H256::zero(),
-            H256::zero(),
-            Some(H256::zero()),
+            code_hash.into(),
+            H256::zero().into(),
+            H256::zero().into(),
+            Some(H256::zero().into()),
         )
     }
 

@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::{
     models,
     models::{
-        contract::{Contract, ContractDelta},
+        contract::{Account, ContractDelta},
         token::CurrencyToken,
     },
     serde_primitives::{
@@ -53,8 +53,8 @@ pub enum Chain {
     Arbitrum,
 }
 
-impl From<models::contract::Contract> for ResponseAccount {
-    fn from(value: Contract) -> Self {
+impl From<models::contract::Account> for ResponseAccount {
+    fn from(value: Account) -> Self {
         ResponseAccount::new(
             value.chain.into(),
             value.address,

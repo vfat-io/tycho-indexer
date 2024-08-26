@@ -5,35 +5,11 @@ use ethers::prelude::{H160, U256};
 use tycho_core::{
     models::{
         blockchain::BlockAggregatedDeltas,
-        contract::{Contract, ContractDelta},
+        contract::ContractDelta,
         protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
     },
     Bytes,
 };
-
-impl From<&evm::Account> for Contract {
-    fn from(value: &evm::Account) -> Self {
-        Self {
-            chain: value.chain,
-            address: Bytes::from(value.address.as_bytes()),
-            title: value.title.clone(),
-            slots: value
-                .slots
-                .clone()
-                .into_iter()
-                .map(|(u, v)| (Bytes::from(u), Bytes::from(v)))
-                .collect(),
-            native_balance: Bytes::from(value.balance),
-            code: value.code.clone(),
-            code_hash: Bytes::from(value.code_hash.as_bytes()),
-            balance_modify_tx: Bytes::from(value.balance_modify_tx.as_bytes()),
-            code_modify_tx: Bytes::from(value.code_modify_tx.as_bytes()),
-            creation_tx: value
-                .creation_tx
-                .map(|s| Bytes::from(s.as_bytes())),
-        }
-    }
-}
 
 impl From<&evm::AccountUpdate> for ContractDelta {
     fn from(value: &evm::AccountUpdate) -> Self {

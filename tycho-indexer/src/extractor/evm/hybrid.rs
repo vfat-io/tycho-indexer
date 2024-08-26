@@ -16,7 +16,7 @@ use token_analyzer::TokenFinder;
 use tycho_core::{
     models,
     models::{
-        contract::Contract,
+        contract::Account,
         protocol::{ComponentBalance, ProtocolComponentState},
         token::CurrencyToken,
         Address, Chain, ChangeType, ExtractionState, ExtractorIdentity, ProtocolType, TxHash,
@@ -1060,7 +1060,7 @@ pub trait HybridGateway: Send + Sync {
     async fn get_contracts(
         &self,
         component_ids: &[models::Address],
-    ) -> Result<Vec<Contract>, StorageError>;
+    ) -> Result<Vec<Account>, StorageError>;
 
     async fn get_components_balances<'a>(
         &self,
@@ -1144,7 +1144,7 @@ impl HybridPgGateway {
 
                     // Insert new accounts
                     self.state_gateway
-                        .upsert_contract(&(&new).into())
+                        .upsert_contract(&new)
                         .await?;
                 } else if account_update.is_update() {
                     account_changes.push((tx_update.tx.hash.clone(), account_update.into()));
@@ -1258,7 +1258,7 @@ impl HybridGateway for HybridPgGateway {
     async fn get_contracts(
         &self,
         component_ids: &[models::Address],
-    ) -> Result<Vec<Contract>, StorageError> {
+    ) -> Result<Vec<Account>, StorageError> {
         self.state_gateway
             .get_contracts(&self.chain, Some(component_ids), None, true)
             .await
@@ -2005,16 +2005,19 @@ mod test_serial_db {
         }
     }
 
-    fn vm_account(at_version: u64) -> models::contract::Contract {
+    fn vm_account(at_version: u64) -> models::contract::Account {
         match at_version {
-            0 => (&evm::Account::new(
+            0 => Account::new(
                 Chain::Ethereum,
                 "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688"
                     .parse()
                     .unwrap(),
                 "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
-                evm::fixtures::evm_slots([(1, 200)]),
-                U256::from(1000),
+                evm::fixtures::evm_slots([(1, 200)])
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v.into()))
+                    .collect(),
+                U256::from(1000).into(),
                 vec![0, 0, 0, 0].into(),
                 "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
                     .parse()
@@ -2022,8 +2025,7 @@ mod test_serial_db {
                 VM_TX_HASH_1.parse().unwrap(),
                 VM_TX_HASH_0.parse().unwrap(),
                 Some(VM_TX_HASH_0.parse().unwrap()),
-            ))
-                .into(),
+            ),
             _ => panic!("Unkown version"),
         }
     }

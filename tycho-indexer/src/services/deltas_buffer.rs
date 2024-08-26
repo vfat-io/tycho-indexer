@@ -14,7 +14,7 @@ use tracing::debug;
 use tycho_core::{
     models::{
         blockchain::BlockAggregatedDeltas,
-        contract::Contract,
+        contract::Account,
         protocol::{ProtocolComponent, ProtocolComponentState},
         DeltaError, NormalisedMessage,
     },
@@ -163,7 +163,7 @@ impl PendingDeltas {
 
     pub fn update_vm_states(
         &self,
-        db_states: &mut [Contract],
+        db_states: &mut [Account],
         version: Option<BlockNumberOrTimestamp>,
     ) -> Result<()> {
         for state in db_states {
@@ -174,7 +174,7 @@ impl PendingDeltas {
 
     fn update_vm_state(
         &self,
-        db_state: &mut Contract,
+        db_state: &mut Account,
         version: Option<BlockNumberOrTimestamp>,
     ) -> Result<bool> {
         let mut change_found = false;
@@ -335,8 +335,8 @@ mod test {
         Bytes,
     };
 
-    fn vm_state() -> Contract {
-        Contract::new(
+    fn vm_state() -> Account {
+        Account::new(
             Chain::Ethereum,
             Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05"),
             "Contract1".to_string(),
@@ -588,7 +588,7 @@ mod test {
         buffer
             .insert(Arc::new(vm_block_deltas()))
             .unwrap();
-        let exp = Contract::new(
+        let exp = Account::new(
             Chain::Ethereum,
             Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05"),
             "Contract1".to_string(),

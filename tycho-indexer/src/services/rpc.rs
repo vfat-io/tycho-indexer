@@ -744,7 +744,7 @@ mod tests {
     use ethers::types::U256;
 
     use tycho_core::models::{
-        contract::Contract,
+        contract::Account,
         protocol::{ProtocolComponent, ProtocolComponentState},
         token::CurrencyToken,
         ChangeType,
@@ -850,7 +850,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_state() {
-        let expected = Contract::new(
+        let expected = Account::new(
             Chain::Ethereum,
             "0x6b175474e89094c44da98b954eedeac495271d0f"
                 .parse()

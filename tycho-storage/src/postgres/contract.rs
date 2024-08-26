@@ -678,7 +678,7 @@ impl PostgresGateway {
         version: Option<&Version>,
         include_slots: bool,
         db: &mut AsyncPgConnection,
-    ) -> Result<models::contract::Contract, StorageError> {
+    ) -> Result<models::contract::Account, StorageError> {
         let account_orm: orm::Account = orm::Account::by_id(id, db)
             .await
             .map_err(|err| {
@@ -750,7 +750,7 @@ impl PostgresGateway {
                 .ok(),
             None => None,
         };
-        let mut account = models::contract::Contract::new(
+        let mut account = models::contract::Account::new(
             id.chain,
             account_orm.address,
             account_orm.title,
@@ -784,7 +784,7 @@ impl PostgresGateway {
         version: Option<&Version>,
         include_slots: bool,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<models::contract::Contract>, StorageError> {
+    ) -> Result<Vec<models::contract::Account>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
         let version_ts = match &version {
             Some(version) => maybe_lookup_version_ts(version, conn).await?,
@@ -892,7 +892,7 @@ impl PostgresGateway {
         accounts
             .into_iter()
             .zip(native_balances.into_iter().zip(codes))
-            .map(|(account, (balance, code))| -> Result<models::contract::Contract, StorageError> {
+            .map(|(account, (balance, code))| -> Result<models::contract::Account, StorageError> {
                 if !(account.id == balance.account_id && balance.account_id == code.account_id) {
                     return Err(StorageError::Unexpected(format!(
                         "Identity mismatch - while retrieving entries for account id: {} \
@@ -906,7 +906,7 @@ impl PostgresGateway {
                 let code_tx = code.tx.clone().unwrap();
                 let creation_tx = account.tx.clone();
 
-                let mut contract = models::contract::Contract::new(
+                let mut contract = models::contract::Account::new(
                     *chain,
                     account.entity.address.clone(),
                     account.entity.title.clone(),
@@ -941,7 +941,7 @@ impl PostgresGateway {
     /// method exists for updating these related components.
     pub async fn upsert_contract(
         &self,
-        new: &models::contract::Contract,
+        new: &models::contract::Account,
         db: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let (creation_tx_id, created_ts) = if let Some(h) = &new.creation_tx {
@@ -1507,9 +1507,9 @@ mod test {
         .await;
     }
 
-    fn account_c0(version: u64) -> models::contract::Contract {
+    fn account_c0(version: u64) -> models::contract::Account {
         match version {
-            1 => models::contract::Contract::new(
+            1 => models::contract::Account::new(
                 Chain::Ethereum,
                 "0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
@@ -1536,7 +1536,7 @@ mod test {
                         .unwrap(),
                 ),
             ),
-            2 => models::contract::Contract::new(
+            2 => models::contract::Account::new(
                 Chain::Ethereum,
                 "0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
@@ -1576,9 +1576,9 @@ mod test {
             .collect()
     }
 
-    fn account_c1(version: u64) -> models::contract::Contract {
+    fn account_c1(version: u64) -> models::contract::Account {
         match version {
-            2 => models::contract::Contract::new(
+            2 => models::contract::Account::new(
                 Chain::Ethereum,
                 "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
                     .parse()
@@ -1609,9 +1609,9 @@ mod test {
         }
     }
 
-    fn account_c2(version: u64) -> models::contract::Contract {
+    fn account_c2(version: u64) -> models::contract::Account {
         match version {
-            1 => models::contract::Contract::new(
+            1 => models::contract::Account::new(
                 Chain::Ethereum,
                 "0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
                     .parse()
@@ -1705,7 +1705,7 @@ mod test {
     async fn test_get_contracts(
         #[case] ids: Option<Vec<Bytes>>,
         #[case] version: Option<Version>,
-        #[case] exp: Vec<models::contract::Contract>,
+        #[case] exp: Vec<models::contract::Account>,
     ) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1763,7 +1763,7 @@ mod test {
         .await;
         let code = Bytes::from("1234");
         let code_hash = Bytes::from(&ethers::utils::keccak256(&code));
-        let expected = models::contract::Contract::new(
+        let expected = models::contract::Account::new(
             Chain::Ethereum,
             "6B175474E89094C44Da98b954EedeAC495271d0F"
                 .parse()

@@ -9,7 +9,7 @@ use super::{
 };
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Contract {
+pub struct Account {
     pub chain: Chain,
     pub address: Address,
     pub title: String,
@@ -22,7 +22,7 @@ pub struct Contract {
     pub creation_tx: Option<TxHash>,
 }
 
-impl Contract {
+impl Account {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain: Chain,
@@ -121,9 +121,9 @@ impl ContractDelta {
         ContractId::new(self.chain, self.address.clone())
     }
 
-    pub fn into_account(self, tx: &Transaction) -> Contract {
+    pub fn into_account(self, tx: &Transaction) -> Account {
         let empty_hash = keccak256(Vec::new());
-        Contract::new(
+        Account::new(
             self.chain,
             self.address.clone(),
             format!("{:#020x}", self.address),
@@ -145,8 +145,8 @@ impl ContractDelta {
     }
 }
 
-impl From<Contract> for ContractDelta {
-    fn from(value: Contract) -> Self {
+impl From<Account> for ContractDelta {
+    fn from(value: Account) -> Self {
         Self {
             chain: value.chain,
             address: value.address,
