@@ -477,7 +477,7 @@ where
 /// Path params will override the request body.
 #[utoipa::path(
     post,
-    path = "/v1/{execution_env}/contract_state",
+    path = "/v1/contract_state",
     responses(
         (status = 200, description = "OK", body = StateRequestResponse),
     ),
@@ -509,6 +509,24 @@ pub async fn contract_state_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve contract states
+///
+/// This endpoint retrieves the state of contracts within a specific execution environment. If no
+/// contract ids are given, all contracts are returned. Note that `protocol_system` is not a filter;
+/// it's a way to specify the protocol system associated with the contracts requested and is used to
+/// ensure that the correct extractor's block status is used when querying the database. If omitted,
+/// the block status will be determined by a random extractor, which could be risky if the extractor
+/// is out of sync.
+///
+/// Filters:
+/// - `contract_ids`: (optional) A list of contract IDs to filter by.
+/// - `version`: (optional) The version of the contract state to retrieve. By default, the latest
+///   version is used.
+///
+/// Optional Information:
+/// - `protocol_system`: (optional) The protocol system associated with the contracts. It is highly
+///   recommended to supply this if you are
+/// filtering by contract ids.
 #[utoipa::path(
     post,
     path = "/v1/contract_state",
@@ -541,7 +559,7 @@ pub async fn contract_state<G: Gateway>(
 /// Path params will override the request body.
 #[utoipa::path(
     post,
-    path = "/v1/{execution_env}/tokens",
+    path = "/v1/tokens",
     responses(
         (status = 200, description = "OK", body = TokensRequestResponse),
     ),
@@ -573,6 +591,17 @@ pub async fn tokens_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve tokens
+///
+/// This endpoint retrieves tokens for a specific execution environment, filtered by various
+/// criteria. The tokens are returned in a paginated format.
+///
+/// Filters:
+/// - `token_addresses`: (optional) A list of token addresses to filter by. If ommitted, will return
+///   all tokens.
+/// - `min_quality`: (optional) The minimum quality of tokens to return. Main quality levels: 100
+///   (normal), 75 (rebase token), 50 (fee token), and <50 (unable to analyze).
+/// - `traded_n_days_ago`: (optional) The number of days ago the token was last traded.
 #[utoipa::path(
     post,
     path = "/v1/tokens",
@@ -605,7 +634,7 @@ pub async fn tokens<G: Gateway>(
 /// Path params will override the request body.
 #[utoipa::path(
     post,
-    path = "/v1/{execution_env}/protocol_components",
+    path = "/v1/protocol_components",
     responses(
         (status = 200, description = "OK", body = ProtocolComponentRequestResponse),
     ),
@@ -640,6 +669,15 @@ pub async fn protocol_components_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve protocol components
+///
+/// This endpoint retrieves components within a specific execution environment, filtered by various criteria.
+///
+/// Filters:
+/// - `component_ids`: (optional) A list of component addresses to filter by. If not provided, all
+///   components are considered.
+/// - `protocol_system`: (optional) The protocol system associated with the components. If not
+///   provided, all components from the specified execution environment are considered.
 #[utoipa::path(
     post,
     path = "/v1/protocol_components",
@@ -672,7 +710,7 @@ pub async fn protocol_components<G: Gateway>(
 /// Path params will override the request body.
 #[utoipa::path(
     post,
-    path = "/v1/{execution_env}/protocol_state",
+    path = "/v1/protocol_state",
     responses(
         (status = 200, description = "OK", body = ProtocolStateRequestResponse),
     ),
@@ -711,6 +749,24 @@ pub async fn protocol_state_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve protocol states
+///
+/// This endpoint retrieves the state of protocols within a specific execution environment.
+/// Currently, the filters are not compounded, meaning that if multiple filters are provided, one
+/// will be prioritised. The proority from highest to lowest is as follows: 'protocol_ids',
+/// 'protocol_system', 'chain'. Note that 'protocol_system' serves as both a filter and as a way
+/// to specify the protocol system associated with the components requested. This is used to ensure
+/// that the correct extractor's block status is used when querying the database. If omitted, the
+/// block status will be determined by a random extractor, which could be risky if the extractor is
+/// out of sync.
+///
+/// Filters:
+/// - `protocol_ids`: (optional) A list of protocol IDs to filter by.
+/// - `protocol_system`: (optional) The protocol system associated with the protocols. Recommended
+///   to be supplied if protocol ids
+/// is also provided.
+/// - `version`: (optional) The version of the protocol state to retrieve. By default, the latest
+///   version is used.
 #[utoipa::path(
     post,
     path = "/v1/protocol_state",
@@ -849,8 +905,8 @@ mod tests {
             .version
             .timestamp
             .unwrap()
-            .timestamp_millis() -
-            result
+            .timestamp_millis()
+            - result
                 .version
                 .timestamp
                 .unwrap()
