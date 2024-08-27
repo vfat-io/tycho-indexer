@@ -208,12 +208,12 @@ class StateSyncMessage(BaseModel):
 
 
 class SynchronizerStateEnum(str, Enum):
-    started = "started"
-    ready = "ready"
-    stale = "stale"
-    delayed = "delayed"
-    advanced = "advanced"
-    ended = "ended"
+    started = "Started"
+    ready = "Ready"
+    stale = "Stale"
+    delayed = "Delayed"
+    advanced = "Advanced"
+    ended = "Ended"
 
 
 class SynchronizerState(BaseModel):
