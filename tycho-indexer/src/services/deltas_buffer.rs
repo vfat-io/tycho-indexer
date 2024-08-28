@@ -328,7 +328,11 @@ mod test {
     use ethers::types::{H160, H256, U256};
     use std::str::FromStr;
     use tycho_core::{
-        models::{contract::AccountUpdate, protocol::ComponentBalance, Chain, ChangeType},
+        models::{
+            contract::AccountUpdate,
+            protocol::{ComponentBalance, ProtocolComponentStateDelta},
+            Chain, ChangeType,
+        },
         Bytes,
     };
 
@@ -432,19 +436,21 @@ mod test {
             HashMap::new(),
             HashMap::new(),
             [
-                evm::ProtocolStateDelta::new(
-                    "component1".to_string(),
+                ProtocolComponentStateDelta::new(
+                    "component1",
                     [("attr1", Bytes::from("0x01"))]
                         .into_iter()
                         .map(|(k, v)| (k.to_string(), v))
                         .collect(),
+                    HashSet::new(),
                 ),
-                evm::ProtocolStateDelta::new(
-                    "component3".to_string(),
+                ProtocolComponentStateDelta::new(
+                    "component3",
                     [("attr2", Bytes::from("0x05"))]
                         .into_iter()
                         .map(|(k, v)| (k.to_string(), v))
                         .collect(),
+                    HashSet::new(),
                 ),
             ]
             .into_iter()

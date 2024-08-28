@@ -18,10 +18,7 @@ use tycho_core::{
 };
 
 use crate::{
-    extractor::{
-        evm,
-        revert_buffer::{BlockNumberOrTimestamp, FinalityStatus},
-    },
+    extractor::revert_buffer::{BlockNumberOrTimestamp, FinalityStatus},
     services::deltas_buffer::{PendingDeltas, PendingDeltasError},
 };
 
@@ -43,16 +40,6 @@ pub enum RpcError {
 impl From<anyhow::Error> for RpcError {
     fn from(value: Error) -> Self {
         Self::Parse(value.to_string())
-    }
-}
-
-impl From<evm::ProtocolStateDelta> for dto::ProtocolStateDelta {
-    fn from(protocol_state: evm::ProtocolStateDelta) -> Self {
-        Self {
-            component_id: protocol_state.component_id,
-            updated_attributes: protocol_state.updated_attributes,
-            deleted_attributes: protocol_state.deleted_attributes,
-        }
     }
 }
 

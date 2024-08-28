@@ -1,31 +1,21 @@
 use std::collections::HashMap;
 
-use crate::extractor::{evm, evm::ProtocolStateDelta};
+use crate::extractor::{evm, evm::ProtocolComponentStateDelta};
 use tycho_core::{
     models::{
         blockchain::BlockAggregatedDeltas,
         contract::AccountUpdate,
-        protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
+        protocol::{ComponentBalance, ProtocolComponent},
     },
     Bytes,
 };
-
-impl From<&evm::ProtocolStateDelta> for ProtocolComponentStateDelta {
-    fn from(value: &ProtocolStateDelta) -> Self {
-        Self {
-            component_id: value.component_id.clone(),
-            updated_attributes: value.updated_attributes.clone(),
-            deleted_attributes: value.deleted_attributes.clone(),
-        }
-    }
-}
 
 impl From<&evm::AggregatedBlockChanges> for BlockAggregatedDeltas {
     fn from(value: &evm::AggregatedBlockChanges) -> Self {
         let state_deltas = value
             .state_updates
             .iter()
-            .map(|(cid, delta)| (cid.clone(), delta.into()))
+            .map(|(cid, delta)| (cid.clone(), delta.clone()))
             .collect::<HashMap<_, ProtocolComponentStateDelta>>();
         let account_deltas = value
             .account_updates

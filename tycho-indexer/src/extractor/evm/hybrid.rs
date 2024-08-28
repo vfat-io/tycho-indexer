@@ -17,7 +17,7 @@ use tycho_core::{
     models::{
         self,
         contract::{Account, AccountUpdate},
-        protocol::{ComponentBalance, ProtocolComponentState},
+        protocol::{ComponentBalance, ProtocolComponentState, ProtocolComponentStateDelta},
         token::CurrencyToken,
         Address, Chain, ChangeType, ExtractionState, ExtractorIdentity, ProtocolType, TxHash,
     },
@@ -941,12 +941,12 @@ where
 
         let empty = HashSet::<String>::new();
 
-        let state_updates: HashMap<String, evm::ProtocolStateDelta> = db_states
+        let state_updates: HashMap<String, ProtocolComponentStateDelta> = db_states
             .into_iter()
             .chain(buffered_state)
             .fold(HashMap::new(), |mut acc, ((c_id, key), value)| {
                 acc.entry(c_id.clone())
-                    .or_insert_with(|| evm::ProtocolStateDelta {
+                    .or_insert_with(|| ProtocolComponentStateDelta {
                         component_id: c_id.clone(),
                         updated_attributes: HashMap::new(),
                         deleted_attributes: not_found
@@ -1157,7 +1157,7 @@ impl HybridPgGateway {
                 tx_update
                     .state_updates
                     .values()
-                    .map(|state_change| (hash.clone(), state_change.into())),
+                    .map(|state_change| (hash.clone(), state_change.clone())),
             );
 
             // Map balance changes
@@ -2383,7 +2383,7 @@ mod test_serial_db {
                 finalized_block_height: 1,
                 revert: true,
                 state_updates: HashMap::from([
-                    ("pc_1".to_string(), evm::ProtocolStateDelta {
+                    ("pc_1".to_string(), ProtocolComponentStateDelta {
                         component_id: "pc_1".to_string(),
                         updated_attributes: HashMap::from([
                             ("attr_2".to_string(), Bytes::from("0x0000000000000002")),

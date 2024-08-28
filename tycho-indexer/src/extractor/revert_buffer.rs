@@ -397,13 +397,17 @@ mod test {
     use ethers::types::{H160, H256};
     use rstest::rstest;
     use tycho_core::{
-        models::{blockchain::Transaction, protocol::ComponentBalance, Chain},
+        models::{
+            blockchain::Transaction,
+            protocol::{ComponentBalance, ProtocolComponentStateDelta},
+            Chain,
+        },
         storage::StorageError,
         Bytes,
     };
 
     use crate::{
-        extractor::evm::{BlockEntityChanges, ProtocolChangesWithTx, ProtocolStateDelta},
+        extractor::evm::{BlockEntityChanges, ProtocolChangesWithTx},
         testing,
     };
 
@@ -429,7 +433,7 @@ mod test {
                 ]);
                 let state_updates = HashMap::from([(
                     "State1".to_owned(),
-                    ProtocolStateDelta {
+                    ProtocolComponentStateDelta {
                         component_id: "State1".to_owned(),
                         updated_attributes: attr,
                         deleted_attributes: HashSet::new(),
@@ -491,7 +495,7 @@ mod test {
                 let state_updates = HashMap::from([
                     (
                         "State1".to_owned(),
-                        ProtocolStateDelta {
+                        ProtocolComponentStateDelta {
                             component_id: "State1".to_owned(),
                             updated_attributes: HashMap::from([(
                                 "new".to_owned(),
@@ -502,7 +506,7 @@ mod test {
                     ),
                     (
                         "State2".to_owned(),
-                        ProtocolStateDelta {
+                        ProtocolComponentStateDelta {
                             component_id: "State2".to_owned(),
                             updated_attributes: HashMap::from([
                                 ("new".to_owned(), Bytes::from(3_u64.to_be_bytes().to_vec())),

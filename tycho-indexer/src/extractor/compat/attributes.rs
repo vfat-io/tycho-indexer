@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use tycho_core::Bytes;
+use tycho_core::{models::protocol::ProtocolComponentStateDelta, Bytes};
 
-use crate::extractor::evm::{BlockChanges, ProtocolStateDelta};
+use crate::extractor::evm::BlockChanges;
 
 const USV3_MANDATORY_ATTRIBUTES: [&str; 3] = ["liquidity", "tick", "sqrt_price_x96"];
 const USV2_MANDATORY_ATTRIBUTES: [&str; 2] = ["reserve0", "reserve1"];
@@ -31,7 +31,7 @@ pub fn add_default_attributes(mut changes: BlockChanges, attributes: &[&str]) ->
                 }
                 tx.state_updates.insert(
                     c_id.clone(),
-                    ProtocolStateDelta {
+                    ProtocolComponentStateDelta {
                         component_id: c_id.clone(),
                         updated_attributes: default_attr,
                         deleted_attributes: HashSet::new(),
@@ -98,7 +98,7 @@ mod test {
     use tycho_core::{
         models::{
             blockchain::{Block, Transaction},
-            protocol::ProtocolComponent,
+            protocol::{ProtocolComponent, ProtocolComponentStateDelta},
             Chain,
         },
         Bytes,
@@ -135,7 +135,7 @@ mod test {
                 ),
                 state_updates: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolStateDelta {
+                    ProtocolComponentStateDelta {
                         component_id: CREATED_CONTRACT.to_string(),
                         updated_attributes: HashMap::from([(
                             "tick".to_string(),
@@ -186,7 +186,7 @@ mod test {
                     .clone(),
                 state_updates: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolStateDelta {
+                    ProtocolComponentStateDelta {
                         component_id: CREATED_CONTRACT.to_string(),
                         updated_attributes: HashMap::from([
                             ("tick".to_string(), Bytes::from(1_u64.to_be_bytes())),
@@ -237,7 +237,7 @@ mod test {
                 ),
                 state_updates: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolStateDelta {
+                    ProtocolComponentStateDelta {
                         component_id: CREATED_CONTRACT.to_string(),
                         updated_attributes: HashMap::from([(
                             "tick".to_string(),

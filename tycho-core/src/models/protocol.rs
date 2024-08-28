@@ -107,7 +107,7 @@ impl ProtocolComponentState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProtocolComponentStateDelta {
     pub component_id: ComponentId,
     pub updated_attributes: HashMap<AttrStoreKey, StoreVal>,
@@ -121,6 +121,37 @@ impl ProtocolComponentStateDelta {
         deleted_attributes: HashSet<AttrStoreKey>,
     ) -> Self {
         Self { component_id: component_id.to_string(), updated_attributes, deleted_attributes }
+    }
+
+    /// Merges this update with another one.
+    ///
+    /// The method combines two `ProtocolComponentStateDelta` instances if they are for the same
+    /// protocol component.
+    ///
+    /// NB: It is assumed that `other` is a more recent update than `self` is and the two are
+    /// combined accordingly.
+    ///
+    /// # Errors
+    /// This method will return `CoreError::MergeError` if any of the above
+    /// conditions is violated.
+    pub fn merge(&mut self, other: ProtocolComponentStateDelta) -> Result<(), String> {
+        if self.component_id != other.component_id {
+            return Err(format!(
+                "Can't merge ProtocolStates from differing identities; Expected {}, got {}",
+                self.component_id, other.component_id
+            ));
+        }
+        for attr in &other.deleted_attributes {
+            self.updated_attributes.remove(attr);
+        }
+        for attr in other.updated_attributes.keys() {
+            self.deleted_attributes.remove(attr);
+        }
+        self.updated_attributes
+            .extend(other.updated_attributes);
+        self.deleted_attributes
+            .extend(other.deleted_attributes);
+        Ok(())
     }
 }
 
