@@ -4,6 +4,7 @@
 //! be very simple and ideally not contain any business logic.
 //!
 //! Structs in here implement utoipa traits so they can be used to derive an OpenAPI schema.
+#![allow(deprecated)]
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
@@ -521,6 +522,8 @@ pub struct StateRequestBody {
     pub protocol_system: Option<String>,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
+    #[serde(default)]
+    pub chain: Chain,
 }
 
 impl StateRequestBody {
@@ -528,23 +531,26 @@ impl StateRequestBody {
         contract_ids: Option<Vec<ContractId>>,
         protocol_system: Option<String>,
         version: VersionParam,
+        chain: Chain,
     ) -> Self {
-        Self { contract_ids, protocol_system, version }
+        Self { contract_ids, protocol_system, version, chain }
     }
 
     pub fn from_block(block: BlockParam) -> Self {
         Self {
             contract_ids: None,
             protocol_system: None,
-            version: VersionParam { timestamp: None, block: Some(block) },
+            version: VersionParam { timestamp: None, block: Some(block.clone()) },
+            chain: block.chain.unwrap_or_default(),
         }
     }
 
-    pub fn from_timestamp(timestamp: NaiveDateTime) -> Self {
+    pub fn from_timestamp(timestamp: NaiveDateTime, chain: Chain) -> Self {
         Self {
             contract_ids: None,
             protocol_system: None,
             version: VersionParam { timestamp: Some(timestamp), block: None },
+            chain,
         }
     }
 }
@@ -688,10 +694,7 @@ impl Default for VersionParam {
     }
 }
 
-fn default_include_balances_flag() -> bool {
-    true
-}
-
+#[deprecated(note = "Use StateRequestBody instead")]
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct StateRequestParameters {
     #[param(default = 0)]
@@ -738,6 +741,8 @@ pub struct TokensRequestBody {
     pub traded_n_days_ago: Option<u64>,
     #[serde(default)]
     pub pagination: PaginationParams,
+    #[serde(default)]
+    pub chain: Chain,
 }
 
 /// Response from Tycho server for a tokens request.
@@ -813,24 +818,34 @@ pub struct ProtocolComponentsRequestBody {
     pub protocol_system: Option<String>,
     #[serde(alias = "componentAddresses")]
     pub component_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub tvl_gt: Option<f64>,
+    #[serde(default)]
+    pub chain: Chain,
 }
 
 impl ProtocolComponentsRequestBody {
-    pub fn system_filtered(system: &str) -> Self {
-        Self { protocol_system: Some(system.to_string()), component_ids: None }
+    pub fn system_filtered(system: &str, tvl_gt: Option<f64>, chain: Chain) -> Self {
+        Self { protocol_system: Some(system.to_string()), component_ids: None, tvl_gt, chain }
     }
 
-    pub fn id_filtered(ids: Vec<String>) -> Self {
-        Self { protocol_system: None, component_ids: Some(ids) }
+    pub fn id_filtered(ids: Vec<String>, chain: Chain) -> Self {
+        Self { protocol_system: None, component_ids: Some(ids), tvl_gt: None, chain }
     }
 }
 
 impl ProtocolComponentsRequestBody {
-    pub fn new(protocol_system: Option<String>, component_ids: Option<Vec<String>>) -> Self {
-        Self { protocol_system, component_ids }
+    pub fn new(
+        protocol_system: Option<String>,
+        component_ids: Option<Vec<String>>,
+        tvl_gt: Option<f64>,
+        chain: Chain,
+    ) -> Self {
+        Self { protocol_system, component_ids, tvl_gt, chain }
     }
 }
 
+#[deprecated(note = "Use ProtocolComponentsRequestBody instead")]
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct ProtocolComponentRequestParameters {
     #[param(default = 0)]
@@ -894,6 +909,10 @@ impl From<models::protocol::ProtocolComponentState> for ResponseProtocolState {
     }
 }
 
+fn default_include_balances_flag() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolStateRequestBody {
@@ -901,6 +920,10 @@ pub struct ProtocolStateRequestBody {
     pub protocol_ids: Option<Vec<ProtocolId>>,
     #[serde(alias = "protocolSystem")]
     pub protocol_system: Option<String>,
+    #[serde(default)]
+    pub chain: Chain,
+    #[serde(default = "default_include_balances_flag")]
+    pub include_balances: bool,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
 }
@@ -989,6 +1012,7 @@ mod test {
                     number: Some(block_number),
                 }),
             },
+            chain: Chain::Ethereum,
         };
 
         assert_eq!(result, expected);
@@ -1092,6 +1116,7 @@ mod test {
                     number: Some(block_number),
                 }),
             },
+            chain: Chain::Ethereum,
         };
 
         assert_eq!(result, expected);

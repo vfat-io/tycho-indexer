@@ -1,4 +1,5 @@
 //! This module contains Tycho RPC implementation
+#![allow(deprecated)]
 use mini_moka::sync::Cache;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
@@ -11,7 +12,7 @@ use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use tycho_core::{
-    dto::{self, ProtocolComponentRequestParameters, ResponseToken, StateRequestParameters},
+    dto,
     models::{Address, Chain, PaginationParams},
     storage::{BlockIdentifier, BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
     Bytes,
@@ -73,7 +74,7 @@ impl From<evm::AccountUpdate> for dto::AccountUpdate {
     }
 }
 
-impl From<evm::ERC20Token> for ResponseToken {
+impl From<evm::ERC20Token> for dto::ResponseToken {
     fn from(token: evm::ERC20Token) -> Self {
         Self {
             address: token.address.into(),
@@ -137,26 +138,25 @@ where
         Self { db_gateway, pending_deltas, token_cache: Arc::new(RwLock::new(token_cache)) }
     }
 
-    #[instrument(skip(self, chain, request))]
+    #[instrument(skip(self, request))]
     async fn get_contract_state(
         &self,
-        chain: &Chain,
         request: &dto::StateRequestBody,
     ) -> Result<dto::StateRequestResponse, RpcError> {
-        info!(?chain, ?request, "Getting contract state.");
-        self.get_contract_state_inner(chain, request)
+        info!(?request, "Getting contract state.");
+        self.get_contract_state_inner(request)
             .await
     }
 
     async fn get_contract_state_inner(
         &self,
-        chain: &Chain,
         request: &dto::StateRequestBody,
     ) -> Result<dto::StateRequestResponse, RpcError> {
         //TODO: set version to latest if we are targeting a version within pending deltas
         let at = BlockOrTimestamp::try_from(&request.version)?;
+        let chain = request.chain.into();
         let (db_version, deltas_version) = self
-            .calculate_versions(&at, &request.protocol_system.clone(), *chain)
+            .calculate_versions(&at, &request.protocol_system.clone(), chain)
             .await?;
 
         // Get the contract IDs from the request
@@ -172,7 +172,7 @@ where
         // Get the contract states from the database
         let mut accounts = self
             .db_gateway
-            .get_contracts(chain, addresses, Some(&db_version), true)
+            .get_contracts(&chain, addresses, Some(&db_version), true)
             .await
             .map_err(|err| {
                 error!(error = %err, "Error while getting contract states.");
@@ -250,29 +250,25 @@ where
         }
     }
 
-    #[instrument(skip(self, request, params))]
+    #[instrument(skip(self, request))]
     async fn get_protocol_state(
         &self,
-        chain: &Chain,
         request: &dto::ProtocolStateRequestBody,
-        params: &dto::StateRequestParameters,
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
-        debug!(?request, ?params, "Getting protocol state.");
-        self.get_protocol_state_inner(chain, request, params)
+        debug!(?request, "Getting protocol state.");
+        self.get_protocol_state_inner(request)
             .await
     }
 
-    #[allow(unused_variables)]
     async fn get_protocol_state_inner(
         &self,
-        chain: &Chain,
         request: &dto::ProtocolStateRequestBody,
-        params: &dto::StateRequestParameters,
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
         //TODO: handle when no id is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
+        let chain = request.chain.into();
         let (db_version, deltas_version) = self
-            .calculate_versions(&at, &request.protocol_system.clone(), *chain)
+            .calculate_versions(&at, &request.protocol_system.clone(), chain)
             .await?;
 
         // Get the protocol IDs from the request
@@ -289,11 +285,11 @@ where
         let mut states = self
             .db_gateway
             .get_protocol_states(
-                chain,
+                &chain,
                 Some(db_version),
                 request.protocol_system.clone(),
                 ids,
-                params.include_balances,
+                request.include_balances,
             )
             .await
             .map_err(|err| {
@@ -317,12 +313,11 @@ where
 
     async fn get_tokens(
         &self,
-        chain: &Chain,
         request: &dto::TokensRequestBody,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
-        info!(?chain, ?request, "Getting tokens.");
+        info!(?request, "Getting tokens.");
 
-        let cache_key = format!("{}-{:?}", chain, request);
+        let cache_key = format!("{:?}", request);
 
         // Cache entry count is only used for logging purposes
         #[allow(unused_assignments)]
@@ -352,9 +347,7 @@ where
             return Ok(cached_response);
         }
 
-        let response = self
-            .get_tokens_inner(chain, request)
-            .await?;
+        let response = self.get_tokens_inner(request).await?;
 
         trace!(n_tokens_received=?response.tokens.len(), "Retrieved tokens from DB");
 
@@ -369,7 +362,6 @@ where
 
     async fn get_tokens_inner(
         &self,
-        chain: &Chain,
         request: &dto::TokensRequestBody,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
         let address_refs: Option<Vec<&Address>> = request
@@ -394,7 +386,13 @@ where
 
         match self
             .db_gateway
-            .get_tokens(*chain, addresses_slice, min_quality, n_days_ago, Some(&converted_params))
+            .get_tokens(
+                request.chain.into(),
+                addresses_slice,
+                min_quality,
+                n_days_ago,
+                Some(&converted_params),
+            )
             .await
         {
             Ok(tokens) => Ok(dto::TokensRequestResponse::new(
@@ -413,20 +411,16 @@ where
 
     async fn get_protocol_components(
         &self,
-        chain: &Chain,
         request: &dto::ProtocolComponentsRequestBody,
-        params: &dto::ProtocolComponentRequestParameters,
     ) -> Result<dto::ProtocolComponentRequestResponse, RpcError> {
-        info!(?chain, ?request, "Getting protocol components.");
-        self.get_protocol_components_inner(chain, request, params)
+        info!(?request, "Getting protocol components.");
+        self.get_protocol_components_inner(request)
             .await
     }
 
     async fn get_protocol_components_inner(
         &self,
-        chain: &Chain,
         request: &dto::ProtocolComponentsRequestBody,
-        params: &dto::ProtocolComponentRequestParameters,
     ) -> Result<dto::ProtocolComponentRequestResponse, RpcError> {
         let system = request.protocol_system.clone();
         let ids_strs: Option<Vec<&str>> = request
@@ -459,7 +453,7 @@ where
 
         match self
             .db_gateway
-            .get_protocol_components(chain, system, ids_slice, params.tvl_gt)
+            .get_protocol_components(&request.chain.into(), system, ids_slice, request.tvl_gt)
             .await
         {
             Ok(comps) => {
@@ -478,6 +472,9 @@ where
     }
 }
 
+/// Deprecated endpoint
+///
+/// Path params will override the request body.
 #[utoipa::path(
     post,
     path = "/v1/{execution_env}/contract_state",
@@ -489,15 +486,45 @@ where
         ("execution_env" = Chain, description = "Execution environment")
     ),
 )]
+pub async fn contract_state_deprecated<G: Gateway>(
+    execution_env: web::Path<dto::Chain>,
+    body: web::Json<dto::StateRequestBody>,
+    handler: web::Data<RpcHandler<G>>,
+) -> HttpResponse {
+    let mut request = body.into_inner();
+    request.chain = execution_env.into_inner();
+
+    // Call the handler to get the state
+    let response = handler
+        .into_inner()
+        .get_contract_state(&request)
+        .await;
+
+    match response {
+        Ok(state) => HttpResponse::Ok().json(state),
+        Err(err) => {
+            error!(error = %err, ?request, "Error while getting contract state.");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/contract_state",
+    responses(
+        (status = 200, description = "OK", body = StateRequestResponse),
+    ),
+    request_body = StateRequestBody,
+)]
 pub async fn contract_state<G: Gateway>(
-    execution_env: web::Path<Chain>,
     body: web::Json<dto::StateRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
     // Call the handler to get the state
     let response = handler
         .into_inner()
-        .get_contract_state(&execution_env, &body)
+        .get_contract_state(&body)
         .await;
 
     match response {
@@ -509,6 +536,9 @@ pub async fn contract_state<G: Gateway>(
     }
 }
 
+/// Deprecated endpoint
+///
+/// Path params will override the request body.
 #[utoipa::path(
     post,
     path = "/v1/{execution_env}/tokens",
@@ -520,15 +550,45 @@ pub async fn contract_state<G: Gateway>(
         ("execution_env" = Chain, description = "Execution environment"),
     ),
 )]
-pub async fn tokens<G: Gateway>(
+pub async fn tokens_deprecated<G: Gateway>(
     execution_env: web::Path<Chain>,
+    body: web::Json<dto::TokensRequestBody>,
+    handler: web::Data<RpcHandler<G>>,
+) -> HttpResponse {
+    let mut request = body.into_inner();
+    request.chain = execution_env.into_inner().into();
+
+    // Call the handler to get tokens
+    let response = handler
+        .into_inner()
+        .get_tokens(&request)
+        .await;
+
+    match response {
+        Ok(state) => HttpResponse::Ok().json(state),
+        Err(err) => {
+            error!(error = %err, ?request, "Error while getting tokens.");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/tokens",
+    responses(
+        (status = 200, description = "OK", body = TokensRequestResponse),
+    ),
+    request_body = TokensRequestBody,
+)]
+pub async fn tokens<G: Gateway>(
     body: web::Json<dto::TokensRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
     // Call the handler to get tokens
     let response = handler
         .into_inner()
-        .get_tokens(&execution_env, &body)
+        .get_tokens(&body)
         .await;
 
     match response {
@@ -540,6 +600,9 @@ pub async fn tokens<G: Gateway>(
     }
 }
 
+/// Deprecated endpoint
+///
+/// Path params will override the request body.
 #[utoipa::path(
     post,
     path = "/v1/{execution_env}/protocol_components",
@@ -549,19 +612,50 @@ pub async fn tokens<G: Gateway>(
     request_body = ProtocolComponentsRequestBody,
     params(
         ("execution_env" = Chain, description = "Execution environment"),
-        ProtocolComponentRequestParameters
+        ("tvl_gt" = Option<f64>, Query, description = "Filter components by TVL greater than this value")
     ),
 )]
-pub async fn protocol_components<G: Gateway>(
-    execution_env: web::Path<Chain>,
+pub async fn protocol_components_deprecated<G: Gateway>(
+    execution_env: web::Path<dto::Chain>,
     body: web::Json<dto::ProtocolComponentsRequestBody>,
     params: web::Query<dto::ProtocolComponentRequestParameters>,
+    handler: web::Data<RpcHandler<G>>,
+) -> HttpResponse {
+    let mut request = body.into_inner();
+    request.chain = execution_env.into_inner();
+    request.tvl_gt = params.tvl_gt.or(request.tvl_gt);
+
+    // Call the handler to get tokens
+    let response = handler
+        .into_inner()
+        .get_protocol_components(&request)
+        .await;
+
+    match response {
+        Ok(state) => HttpResponse::Ok().json(state),
+        Err(err) => {
+            error!(error = %err, ?request, "Error while getting tokens.");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/protocol_components",
+    responses(
+        (status = 200, description = "OK", body = ProtocolComponentRequestResponse),
+    ),
+    request_body = ProtocolComponentsRequestBody,
+)]
+pub async fn protocol_components<G: Gateway>(
+    body: web::Json<dto::ProtocolComponentsRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
     // Call the handler to get tokens
     let response = handler
         .into_inner()
-        .get_protocol_components(&execution_env, &body, &params)
+        .get_protocol_components(&body)
         .await;
 
     match response {
@@ -573,6 +667,9 @@ pub async fn protocol_components<G: Gateway>(
     }
 }
 
+/// Deprecated endpoint
+///
+/// Path params will override the request body.
 #[utoipa::path(
     post,
     path = "/v1/{execution_env}/protocol_state",
@@ -582,19 +679,54 @@ pub async fn protocol_components<G: Gateway>(
     request_body = ProtocolStateRequestBody,
     params(
         ("execution_env" = Chain, description = "Execution environment"),
-        StateRequestParameters
+        ("include_balances" = Option<bool>, Query, description = "Include account balances in the response", example=true),
+        ("tvl_gt" = Option<f64>, Query, description = "Note - not supported."),
+        ("inertia_min_gt" = Option<f64>, Query, description = "Note - not supported.")
     ),
 )]
-pub async fn protocol_state<G: Gateway>(
-    execution_env: web::Path<Chain>,
+pub async fn protocol_state_deprecated<G: Gateway>(
+    execution_env: web::Path<dto::Chain>,
     body: web::Json<dto::ProtocolStateRequestBody>,
     params: web::Query<dto::StateRequestParameters>,
+    handler: web::Data<RpcHandler<G>>,
+) -> HttpResponse {
+    let mut request = body.into_inner();
+    request.chain = execution_env.into_inner();
+    request.include_balances = params.include_balances;
+
+    info!(?request, "Getting protocol state.");
+
+    // Call the handler to get protocol states
+    let response = handler
+        .into_inner()
+        .get_protocol_state(&request)
+        .await;
+
+    match response {
+        Ok(state) => HttpResponse::Ok().json(state),
+        Err(err) => {
+            error!(error = %err, ?request, "Error while getting protocol states.");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/protocol_state",
+    responses(
+        (status = 200, description = "OK", body = ProtocolStateRequestResponse),
+    ),
+    request_body = ProtocolStateRequestBody,
+)]
+pub async fn protocol_state<G: Gateway>(
+    body: web::Json<dto::ProtocolStateRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
     // Call the handler to get protocol states
     let response = handler
         .into_inner()
-        .get_protocol_state(&execution_env, &body, &params)
+        .get_protocol_state(&body)
         .await;
 
     match response {
@@ -710,14 +842,15 @@ mod tests {
             contract_ids: Some(vec![dto::ContractId::new(dto::Chain::Ethereum, contract0)]),
             protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
+            chain: dto::Chain::Ethereum,
         };
 
         let time_difference = expected
             .version
             .timestamp
             .unwrap()
-            .timestamp_millis() -
-            result
+            .timestamp_millis()
+            - result
                 .version
                 .timestamp
                 .unwrap()
@@ -770,9 +903,10 @@ mod tests {
             )]),
             protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
+            chain: dto::Chain::Ethereum,
         };
         let state = req_handler
-            .get_contract_state_inner(&Chain::Ethereum, &request)
+            .get_contract_state_inner(&request)
             .await
             .unwrap();
 
@@ -793,6 +927,7 @@ mod tests {
             )]),
             protocol_system: None,
             version: dto::VersionParam::default(),
+            chain: dto::Chain::Ethereum,
         };
 
         // Serialize the request body to JSON
@@ -827,12 +962,13 @@ mod tests {
             min_quality: None,
             traded_n_days_ago: None,
             pagination: dto::PaginationParams { page: 0, page_size: 2 },
+            chain: dto::Chain::Ethereum,
         };
 
         // First request
 
         let tokens = req_handler
-            .get_tokens(&Chain::Ethereum, &request)
+            .get_tokens(&request)
             .await
             .unwrap();
 
@@ -843,7 +979,7 @@ mod tests {
         // Second request (should hit cache and not increase gateway access count)
 
         let tokens = req_handler
-            .get_tokens(&Chain::Ethereum, &request)
+            .get_tokens(&request)
             .await
             .unwrap();
 
@@ -871,12 +1007,12 @@ mod tests {
                 chain: dto::Chain::Ethereum,
             }]),
             protocol_system: None,
+            chain: dto::Chain::Ethereum,
+            include_balances: true,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
-        let params =
-            StateRequestParameters { tvl_gt: None, inertia_min_gt: None, include_balances: true };
         let res = req_handler
-            .get_protocol_state_inner(&Chain::Ethereum, &request, &params)
+            .get_protocol_state_inner(&request)
             .await
             .unwrap();
 
@@ -917,11 +1053,12 @@ mod tests {
         let request = dto::ProtocolComponentsRequestBody {
             protocol_system: Option::from("ambient".to_string()),
             component_ids: None,
+            tvl_gt: None,
+            chain: dto::Chain::Ethereum,
         };
-        let params = dto::ProtocolComponentRequestParameters::default();
 
         let components = req_handler
-            .get_protocol_components_inner(&Chain::Ethereum, &request, &params)
+            .get_protocol_components_inner(&request)
             .await
             .unwrap();
 
