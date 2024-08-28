@@ -61,56 +61,32 @@ class TychoRPCClient:
         self, params: ProtocolComponentsParams
     ) -> list[ProtocolComponent]:
         params = params.dict(exclude_none=True)
+        params["chain"] = self._chain
 
-        query_params_fields = ["tvl_gt"]
-        body_fields = ["protocol_system", "component_addresses"]
-
-        query_params = {k: v for k, v in params.items() if k in query_params_fields}
-        body = {k: v for k, v in params.items() if k in body_fields}
-
-        res = self._post_request(
-            f"/v1/{self._chain}/protocol_components", body=body, params=query_params
-        )
+        res = self._post_request(f"/v1/protocol_components", body=params)
         return [ProtocolComponent(**c) for c in res["protocol_components"]]
 
     def get_protocol_state(
         self, params: ProtocolStateParams
     ) -> list[ResponseProtocolState]:
         params = params.dict(exclude_none=True)
+        params["chain"] = self._chain
 
-        query_params_fields = ["tvl_gt", "inertia_min_gt", "include_balances"]
-        body_fields = ["protocol_ids", "protocol_system", "version"]
-
-        query_params = {k: v for k, v in params.items() if k in query_params_fields}
-        body = {k: v for k, v in params.items() if k in body_fields}
-
-        res = self._post_request(
-            f"/v1/{self._chain}/protocol_state", params=query_params, body=body
-        )
+        res = self._post_request(f"/v1/protocol_state", body=params)
         return [ResponseProtocolState(**s) for s in res["states"]]
 
     def get_contract_state(self, params: ContractStateParams) -> list[ResponseAccount]:
         params = params.dict(exclude_none=True)
+        params["chain"] = self._chain
 
-        body_fields = ["contract_ids", "protocol_system", "version"]
-
-        body = {k: v for k, v in params.items() if k in body_fields}
-
-        res = self._post_request(f"/v1/{self._chain}/contract_state", body=body)
+        res = self._post_request(f"/v1/contract_state", body=params)
         return [ResponseAccount(**a) for a in res["accounts"]]
 
     def get_tokens(self, params: TokensParams) -> list[ResponseToken]:
         params = params.dict(exclude_none=True)
+        params["chain"] = self._chain
 
-        body_fields = [
-            "min_quality",
-            "pagination",
-            "token_addresses",
-            "traded_n_days_ago",
-        ]
-        body = {k: v for k, v in params.items() if k in body_fields}
-
-        res = self._post_request(f"/v1/{self._chain}/tokens", body=body, params={})
+        res = self._post_request(f"/v1/{self._chain}/tokens", body=params)
         return [ResponseToken(**t) for t in res["tokens"]]
 
 
