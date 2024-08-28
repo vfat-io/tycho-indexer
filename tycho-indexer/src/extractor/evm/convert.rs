@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use crate::extractor::{evm, evm::ProtocolStateDelta};
-use ethers::prelude::{H160, U256};
 use tycho_core::{
     models::{
         blockchain::BlockAggregatedDeltas,
@@ -10,42 +9,6 @@ use tycho_core::{
     },
     Bytes,
 };
-
-impl From<&evm::AccountUpdate> for AccountUpdate {
-    fn from(value: &evm::AccountUpdate) -> Self {
-        Self {
-            chain: value.chain,
-            address: Bytes::from(value.address.as_bytes()),
-            slots: value
-                .slots
-                .clone()
-                .into_iter()
-                .map(|(u, v)| (Bytes::from(u), Some(Bytes::from(v))))
-                .collect(),
-            balance: value.balance.map(Bytes::from),
-            code: value.code.clone(),
-            change: value.change,
-        }
-    }
-}
-
-// Temporary until evm models are phased out
-impl From<AccountUpdate> for evm::AccountUpdate {
-    fn from(value: AccountUpdate) -> Self {
-        Self {
-            address: H160::from_slice(&value.address),
-            chain: value.chain,
-            slots: value
-                .slots
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.map(Into::into).unwrap_or_default()))
-                .collect(),
-            balance: value.balance.map(U256::from),
-            code: value.code,
-            change: value.change,
-        }
-    }
-}
 
 impl From<&evm::ProtocolComponent> for ProtocolComponent {
     fn from(value: &evm::ProtocolComponent) -> Self {
@@ -92,7 +55,7 @@ impl From<&evm::AggregatedBlockChanges> for BlockAggregatedDeltas {
         let account_deltas = value
             .account_updates
             .iter()
-            .map(|(address, delta)| (address.as_bytes().into(), delta.into()))
+            .map(|(address, delta)| (address.as_bytes().into(), delta.clone()))
             .collect::<HashMap<Bytes, AccountUpdate>>();
         let new_components = value
             .new_protocol_components

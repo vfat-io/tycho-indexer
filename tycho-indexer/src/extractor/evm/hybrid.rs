@@ -14,9 +14,9 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use token_analyzer::TokenFinder;
 use tycho_core::{
-    models,
     models::{
-        contract::Account,
+        self,
+        contract::{Account, AccountUpdate},
         protocol::{ComponentBalance, ProtocolComponentState},
         token::CurrencyToken,
         Address, Chain, ChangeType, ExtractionState, ExtractorIdentity, ProtocolType, TxHash,
@@ -676,7 +676,7 @@ where
             info!("First message received was a revert. Nothing to revert in the buffer, ignoring it...");
             self.update_cursor(inp.last_valid_cursor)
                 .await;
-            return Ok(None)
+            return Ok(None);
         }
 
         let mut revert_buffer = self.revert_buffer.lock().await;
@@ -777,7 +777,7 @@ where
                 .fold(HashMap::new(), |mut acc, (addr, key)| {
                     acc.entry(addr.into())
                         .or_default()
-                        .push(key.into());
+                        .push(key);
                     acc
                 });
 
@@ -809,28 +809,27 @@ where
                                 Some(state) => {
                                     // If the state is found, attempt to get the value for the key
                                     state.slots.get(key).map_or_else(
-                                        // If the key is not found, return 0
+                                        // If the value for this key is not found, return empty
+                                        // Bytes
                                         || {
                                             (
-                                                (state.address.clone().into(), key.clone().into()),
-                                                0.into(),
+                                                (state.address.clone().into(), key.clone()),
+                                                Bytes::new(),
                                             )
                                         },
                                         // If the key is found, return its value
                                         |value| {
                                             (
-                                                (
-                                                    state.address.clone().into(),
-                                                    U256::from_big_endian(key),
-                                                ),
-                                                U256::from_big_endian(value),
+                                                (state.address.clone().into(), key.clone()),
+                                                value.clone(),
                                             )
                                         },
                                     )
                                 }
                                 None => {
-                                    // If the state is not found, return 0 for the key
-                                    (((*address).clone().into(), key.clone().into()), 0.into())
+                                    // If the whole account state is not found, return empty Bytes
+                                    // for the key
+                                    (((*address).clone().into(), key.clone()), Bytes::new())
                                 }
                             }
                         })
@@ -843,8 +842,8 @@ where
                 .into_iter()
                 .fold(HashMap::new(), |mut acc, ((addr, key), value)| {
                     acc.entry(addr)
-                        .or_insert_with(|| evm::AccountUpdate {
-                            address: addr,
+                        .or_insert_with(|| AccountUpdate {
+                            address: addr.into(),
                             chain: self.chain,
                             slots: HashMap::new(),
                             balance: None, //TODO: handle balance changes
@@ -852,7 +851,7 @@ where
                             change: ChangeType::Update,
                         })
                         .slots
-                        .insert(key, value);
+                        .insert(key, Some(value));
                     acc
                 });
 
@@ -1113,7 +1112,7 @@ impl HybridPgGateway {
         let mut new_protocol_components: Vec<models::protocol::ProtocolComponent> = vec![];
         let mut state_updates: Vec<(TxHash, models::protocol::ProtocolComponentStateDelta)> =
             vec![];
-        let mut account_changes: Vec<(Bytes, models::contract::AccountUpdate)> = vec![];
+        let mut account_changes: Vec<(Bytes, AccountUpdate)> = vec![];
 
         let mut balance_changes: Vec<models::protocol::ComponentBalance> = vec![];
         let mut protocol_tokens: HashSet<H160> = HashSet::new();
@@ -1145,7 +1144,7 @@ impl HybridPgGateway {
                         .upsert_contract(&new)
                         .await?;
                 } else if account_update.is_update() {
-                    account_changes.push((tx_update.tx.hash.clone(), account_update.into()));
+                    account_changes.push((tx_update.tx.hash.clone(), account_update.clone()));
                 } else {
                     // log error
                     error!(?account_update, "Invalid account update type");
@@ -1767,8 +1766,8 @@ mod test_serial_db {
     use super::*;
     use crate::{
         extractor::evm::{
-            token_pre_processor::MockTokenPreProcessorTrait, AccountUpdate, ProtocolComponent,
-            Transaction, TxWithChanges,
+            token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, Transaction,
+            TxWithChanges,
         },
         pb::sf::substreams::v1::BlockRef,
     };
@@ -2012,10 +2011,7 @@ mod test_serial_db {
                     .parse()
                     .unwrap(),
                 "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
-                evm::fixtures::evm_slots([(1, 200)])
-                    .into_iter()
-                    .map(|(k, v)| (k.into(), v.into()))
-                    .collect(),
+                evm::fixtures::evm_slots([(1, 200)]),
                 U256::from(1000).into(),
                 vec![0, 0, 0, 0].into(),
                 "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
@@ -2064,8 +2060,8 @@ mod test_serial_db {
                     [(
                         H160(VM_CONTRACT),
                         AccountUpdate::new(
-                            H160(VM_CONTRACT),
                             Chain::Ethereum,
+                            VM_CONTRACT.into(),
                             HashMap::new(),
                             None,
                             Some(vec![0, 0, 0, 0].into()),
@@ -2095,10 +2091,10 @@ mod test_serial_db {
                     [(
                         H160(VM_CONTRACT),
                         AccountUpdate::new(
-                            H160(VM_CONTRACT),
                             Chain::Ethereum,
-                            evm::fixtures::evm_slots([(1, 200)]),
-                            Some(U256::from(1000)),
+                            VM_CONTRACT.into(),
+                            evm::fixtures::slots([(1, 200)]),
+                            Some(U256::from(1000).into()),
                             None,
                             ChangeType::Update,
                         ),
@@ -2146,10 +2142,10 @@ mod test_serial_db {
                 [(
                     H160(VM_CONTRACT),
                     AccountUpdate::new(
-                        H160(VM_CONTRACT),
                         Chain::Ethereum,
-                        evm::fixtures::evm_slots([(42, 0xbadbabe)]),
-                        Some(U256::from(2000)),
+                        VM_CONTRACT.into(),
+                        evm::fixtures::slots([(42, 0xbadbabe)]),
+                        Some(U256::from(2000).into()),
                         None,
                         ChangeType::Update,
                     ),
@@ -2560,21 +2556,21 @@ mod test_serial_db {
                 revert: true,
                 account_updates: HashMap::from([
                     (H160::from_str("0x0000000000000000000000000000000000000001").unwrap(), AccountUpdate {
-                        address: H160::from_str("0x0000000000000000000000000000000000000001").unwrap(),
+                        address: Bytes::from_str("0000000000000000000000000000000000000001").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
-                            (U256::from_dec_str("1356938545749799165119972480570561420155507632800475359837393562592731987968").unwrap(), 0.into()),
-                            (1.into(), 1.into()),
+                            (Bytes::from(3u128).lpad(32, 0), Some(Bytes::new())),
+                            (Bytes::from(1u128).lpad(32, 0), Some(Bytes::from(1u128).lpad(32, 0))),
                         ]),
                         balance: None,
                         code: None,
                         change: ChangeType::Update,
                     }),
                     (H160::from_str("0x0000000000000000000000000000000000000002").unwrap(), AccountUpdate {
-                        address: H160::from_str("0x0000000000000000000000000000000000000002").unwrap(),
+                        address: Bytes::from_str("0000000000000000000000000000000000000002").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
-                            (1.into(), 2.into()),
+                            (Bytes::from(1u128).lpad(32, 0), Some(Bytes::from(2u128).lpad(32, 0))),
                         ]),
                         balance: None,
                         code: None,

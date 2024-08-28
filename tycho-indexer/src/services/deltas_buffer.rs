@@ -324,14 +324,11 @@ impl PendingDeltas {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        extractor::{evm, evm::AccountUpdate},
-        testing::block,
-    };
+    use crate::{extractor::evm, testing::block};
     use ethers::types::{H160, H256, U256};
     use std::str::FromStr;
     use tycho_core::{
-        models::{protocol::ComponentBalance, Chain, ChangeType},
+        models::{contract::AccountUpdate, protocol::ComponentBalance, Chain, ChangeType},
         Bytes,
     };
 
@@ -340,10 +337,7 @@ mod test {
             Chain::Ethereum,
             Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05"),
             "Contract1".to_string(),
-            evm::fixtures::evm_slots([(2, 2)])
-                .into_iter()
-                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
-                .collect::<HashMap<_, _>>(),
+            evm::fixtures::evm_slots([(2, 2)]),
             Bytes::from("0x1999"),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0xbabe"),
@@ -384,10 +378,10 @@ mod test {
             [(
                 address,
                 AccountUpdate::new(
-                    address,
                     Chain::Ethereum,
-                    evm::fixtures::evm_slots([(1, 1), (2, 1)]),
-                    Some(U256::from(1999)),
+                    address.into(),
+                    evm::fixtures::slots([(1, 1), (2, 1)]),
+                    Some(U256::from(1999).into()),
                     None,
                     ChangeType::Update,
                 ),
@@ -594,10 +588,7 @@ mod test {
             Chain::Ethereum,
             Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05"),
             "Contract1".to_string(),
-            evm::fixtures::evm_slots([(1, 1), (2, 1)])
-                .into_iter()
-                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
-                .collect::<HashMap<_, _>>(),
+            evm::fixtures::evm_slots([(1, 1), (2, 1)]),
             Bytes::from("0x00000000000000000000000000000000000000000000000000000000000007cf"),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0xbabe"),

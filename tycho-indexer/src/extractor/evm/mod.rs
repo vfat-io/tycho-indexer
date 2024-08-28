@@ -6,7 +6,7 @@ use std::{
 
 use chrono::NaiveDateTime;
 use ethers::{
-    types::{H160, H256, U256},
+    types::{H160, H256},
     utils::keccak256,
 };
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use tracing::log::warn;
 use tycho_core::{
     models::{
         blockchain::{Block, BlockScoped, Transaction},
-        contract::Account,
+        contract::{Account, AccountUpdate},
         protocol::{self as tycho_core_protocol, ComponentBalance},
         token::CurrencyToken,
         Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
@@ -69,17 +69,14 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
             .map(|update| {
                 let acc = Account::new(
                     update.chain,
-                    update.address.into(),
+                    update.address.clone(),
                     format!("{:#020x}", update.address),
                     update
                         .slots
                         .into_iter()
-                        .map(|(k, v)| (k.into(), v.into()))
+                        .map(|(k, v)| (k, v.unwrap_or_default())) //TODO: is default ok here or should it be Bytes::zero(32)
                         .collect(),
-                    update
-                        .balance
-                        .unwrap_or_default()
-                        .into(),
+                    update.balance.unwrap_or_default(),
                     update.code.clone().unwrap_or_default(),
                     update
                         .code
@@ -97,75 +94,26 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
     }
 }
 
-#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
-pub struct AccountUpdate {
-    pub address: H160,
-    pub chain: Chain,
-    pub slots: HashMap<U256, U256>,
-    pub balance: Option<U256>,
-    pub code: Option<Bytes>,
-    pub change: ChangeType,
-}
+impl TryFromMessage for AccountUpdate {
+    type Args<'a> = (substreams::ContractChange, Chain);
 
-impl AccountUpdate {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        address: H160,
-        chain: Chain,
-        slots: HashMap<U256, U256>,
-        balance: Option<U256>,
-        code: Option<Bytes>,
-        change: ChangeType,
-    ) -> Self {
-        Self { address, chain, slots, balance, code, change }
-    }
-
-    // Converting AccountUpdate into Account with references saves us from cloning the whole
-    // struct of BlockContractChanges in the forward function in ambient.rs.
-    pub fn ref_into_account(&self, tx: &Transaction) -> Account {
-        let empty_hash = keccak256(Vec::new());
-        if self.change != ChangeType::Creation {
-            warn!("Creating an account from a partial change!")
-        }
-
-        Account::new(
-            self.chain,
-            self.address.into(),
-            format!("{:#020x}", self.address),
-            self.slots
-                .clone()
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-            self.balance.unwrap_or_default().into(),
-            self.code.clone().unwrap_or_default(),
-            self.code
-                .as_ref()
-                .map(keccak256)
-                .unwrap_or(empty_hash)
-                .into(),
-            tx.hash.clone(),
-            tx.hash.clone(),
-            Some(tx.hash.clone()),
-        )
-    }
-
-    pub fn try_from_message(
-        msg: substreams::ContractChange,
-        chain: Chain,
-    ) -> Result<Self, ExtractionError> {
+    fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
+        let (msg, chain) = args;
         let change = msg.change().into();
         let update = AccountUpdate::new(
-            pad_and_parse_h160(&msg.address.into()).map_err(ExtractionError::DecodeError)?,
             chain,
+            pad_and_parse_h160(&msg.address.into()) //TODO: we shouldn't pad here, this is not blockchain agnostic
+                .map_err(ExtractionError::DecodeError)?
+                .into(),
             msg.slots
                 .into_iter()
                 .map(|cs| {
                     Ok((
-                        pad_and_parse_32bytes::<U256>(&cs.slot)
-                            .map_err(ExtractionError::DecodeError)?,
-                        pad_and_parse_32bytes::<U256>(&cs.value)
-                            .map_err(ExtractionError::DecodeError)?,
+                        pad_and_parse_32bytes(&cs.slot).map_err(ExtractionError::DecodeError)?,
+                        Some(
+                            pad_and_parse_32bytes(&cs.value)
+                                .map_err(ExtractionError::DecodeError)?,
+                        ),
                     ))
                 })
                 .collect::<Result<HashMap<_, _>, ExtractionError>>()?,
@@ -178,53 +126,6 @@ impl AccountUpdate {
             change,
         );
         Ok(update)
-    }
-
-    /// Merge this update (`self`) with another one (`other`)
-    ///
-    /// This function is utilized for aggregating multiple updates into a single
-    /// update. The attribute values of `other` are set on `self`.
-    /// Meanwhile, contract storage maps are merged, in which keys from `other`
-    /// take precedence.
-    ///
-    /// Be noted that, this function will mutate the state of the calling
-    /// struct. An error will occur if merging updates from different accounts.
-    ///
-    /// There are no further validation checks within this method, hence it
-    /// could be used as needed. However, you should give preference to
-    /// utilizing [TransactionVMUpdates] for merging, when possible.
-    ///
-    /// # Errors
-    ///
-    /// It returns an `ExtractionError::MergeError` error if `self.address` and
-    /// `other.address` are not identical.
-    ///
-    /// # Arguments
-    ///
-    /// * `other`: An instance of `AccountUpdate`. The attribute values and keys
-    /// of `other` will overwrite those of `self`.
-    fn merge(&mut self, other: AccountUpdate) -> Result<(), ExtractionError> {
-        if self.address != other.address {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge AccountUpdates from differing identities; Expected {:#020x}, got {:#020x}",
-                self.address, other.address
-            )));
-        }
-
-        self.slots.extend(other.slots);
-
-        self.balance = other.balance.or(self.balance);
-        self.code = other.code.or(self.code.take());
-
-        Ok(())
-    }
-
-    fn is_update(&self) -> bool {
-        self.change == ChangeType::Update
-    }
-
-    fn is_creation(&self) -> bool {
-        self.change == ChangeType::Creation
     }
 }
 
@@ -416,7 +317,9 @@ impl TransactionVMUpdates {
         {
             match self.account_updates.entry(address) {
                 Entry::Occupied(mut e) => {
-                    e.get_mut().merge(update)?;
+                    e.get_mut()
+                        .merge(update)
+                        .map_err(|err| ExtractionError::MergeError(err.to_string()))?;
                 }
                 Entry::Vacant(e) => {
                     e.insert(update);
@@ -479,6 +382,7 @@ impl StateUpdateBufferEntry for BlockContractChanges {
         todo!()
     }
 
+    #[allow(clippy::mutable_key_type)]
     fn get_filtered_account_state_update(
         &self,
         keys: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
@@ -491,10 +395,10 @@ impl StateUpdateBufferEntry for BlockContractChanges {
                 for (attr, val) in account_update
                     .slots
                     .iter()
-                    .filter(|(attr, _)| keys_set.contains(&(address, attr)))
+                    .filter(|(attr, _)| keys_set.contains(&(address, *attr)))
                 {
-                    res.entry((*address, *attr))
-                        .or_insert(*val);
+                    res.entry((*address, (*attr).clone()))
+                        .or_insert(val.clone().unwrap_or_default());
                 }
             }
         }
@@ -774,9 +678,9 @@ impl BlockContractChanges {
 
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message((tx, &block.hash.clone().into()))?;
-                    for el in change.contract_changes.into_iter() {
-                        let update = AccountUpdate::try_from_message(el, chain)?;
-                        account_updates.insert(update.address, update);
+                    for contract_change in change.contract_changes.into_iter() {
+                        let update = AccountUpdate::try_from_message((contract_change, chain))?;
+                        account_updates.insert(update.address.clone().into(), update);
                     }
                     for component_msg in change.component_changes.into_iter() {
                         let component = ProtocolComponent::try_from_message(
@@ -1449,9 +1353,9 @@ impl TxWithChanges {
         }
 
         // Then, parse the account updates
-        for el in msg.contract_changes.into_iter() {
-            let update = AccountUpdate::try_from_message(el, block.chain)?;
-            account_updates.insert(update.address, update);
+        for contract_change in msg.contract_changes.into_iter() {
+            let update = AccountUpdate::try_from_message((contract_change, block.chain))?;
+            account_updates.insert(update.address.clone().into(), update);
         }
 
         // Then, parse the state updates
@@ -1551,7 +1455,9 @@ impl TxWithChanges {
         {
             match self.account_updates.entry(address) {
                 Entry::Occupied(mut e) => {
-                    e.get_mut().merge(update)?;
+                    e.get_mut()
+                        .merge(update)
+                        .map_err(|err| ExtractionError::MergeError(err.to_string()))?;
                 }
                 Entry::Vacant(e) => {
                     e.insert(update);
@@ -1745,6 +1651,7 @@ impl StateUpdateBufferEntry for BlockChanges {
         res
     }
 
+    #[allow(clippy::mutable_key_type)]
     fn get_filtered_account_state_update(
         &self,
         keys: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
@@ -1757,10 +1664,10 @@ impl StateUpdateBufferEntry for BlockChanges {
                 for (slot, val) in account_update
                     .slots
                     .iter()
-                    .filter(|(slot, _)| keys_set.contains(&(address, slot)))
+                    .filter(|(slot, _)| keys_set.contains(&(address, *slot)))
                 {
-                    res.entry((*address, *slot))
-                        .or_insert(*val);
+                    res.entry((*address, (*slot).clone()))
+                        .or_insert(val.clone().unwrap_or_default());
                 }
             }
         }
@@ -1958,6 +1865,7 @@ impl From<BlockEntityChanges> for BlockChanges {
 }
 #[cfg(test)]
 pub mod fixtures {
+    use ethers::types::U256;
     use std::str::FromStr;
 
     use prost::Message;
@@ -1989,9 +1897,17 @@ pub mod fixtures {
         )
     }
 
-    pub fn evm_slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<U256, U256> {
+    pub fn evm_slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<Bytes, Bytes> {
         data.into_iter()
-            .map(|(s, v)| (U256::from(s), U256::from(v)))
+            .map(|(s, v)| (U256::from(s).into(), U256::from(v).into()))
+            .collect()
+    }
+
+    //Utils function that return slots that match `AccountUpdate` slots.
+    // TODO: this is temporary, we shoud make AccountUpdate.slots use Bytes instead of Option<Bytes>
+    pub fn slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<Bytes, Option<Bytes>> {
+        data.into_iter()
+            .map(|(s, v)| (U256::from(s).into(), Some(U256::from(v).into())))
             .collect()
     }
 
@@ -3701,6 +3617,7 @@ pub mod fixtures {
 mod test {
     use std::str::FromStr;
 
+    use ethers::types::U256;
     use prost::Message;
     use rstest::rstest;
 
@@ -3740,12 +3657,10 @@ mod test {
                 .parse()
                 .unwrap(),
             AccountUpdate::new(
-                "0xe688b84b23f322a994A53dbF8E15FA82CDB71127"
-                    .parse()
-                    .unwrap(),
                 Chain::Ethereum,
-                fixtures::evm_slots([]),
-                Some(U256::from(10000)),
+                Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
+                HashMap::new(),
+                Some(U256::from(10000).into()),
                 Some(code.into()),
                 ChangeType::Update,
             ),
@@ -3761,12 +3676,10 @@ mod test {
 
     fn update_balance() -> AccountUpdate {
         AccountUpdate::new(
-            "0xe688b84b23f322a994A53dbF8E15FA82CDB71127"
-                .parse()
-                .unwrap(),
             Chain::Ethereum,
-            fixtures::evm_slots([]),
-            Some(U256::from(420)),
+            Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
+            HashMap::new(),
+            Some(U256::from(420).into()),
             None,
             ChangeType::Update,
         )
@@ -3774,11 +3687,9 @@ mod test {
 
     fn update_slots() -> AccountUpdate {
         AccountUpdate::new(
-            "0xe688b84b23f322a994A53dbF8E15FA82CDB71127"
-                .parse()
-                .unwrap(),
             Chain::Ethereum,
-            fixtures::evm_slots([(0, 1), (1, 2)]),
+            Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
+            fixtures::slots([(0, 1), (1, 2)]),
             None,
             None,
             ChangeType::Update,
@@ -3806,7 +3717,7 @@ mod test {
         let mut update_left = update_balance();
         let update_right = update_slots();
         let mut exp = update_slots();
-        exp.balance = Some(U256::from(420));
+        exp.balance = Some(U256::from(420).into());
 
         update_left.merge(update_right).unwrap();
 
@@ -3817,13 +3728,11 @@ mod test {
     fn test_merge_account_update_wrong_address() {
         let mut update_left = update_balance();
         let mut update_right = update_slots();
-        update_right.address = H160::zero();
-        let exp = Err(ExtractionError::MergeError(
-            "Can't merge AccountUpdates from differing identities; \
+        update_right.address = Bytes::zero(20);
+        let exp = Err("Can't merge AccountUpdates from differing identities; \
             Expected 0xe688b84b23f322a994a53dbf8e15fa82cdb71127, \
             got 0x0000000000000000000000000000000000000000"
-                .into(),
-        ));
+            .into());
 
         let res = update_left.merge(update_right);
 
@@ -3927,13 +3836,13 @@ mod test {
                     account_updates: [(
                         H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                         AccountUpdate::new(
-                            H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                             Chain::Ethereum,
-                            fixtures::evm_slots([
+                            Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                            fixtures::slots([
                                 (2711790500, 2981278644),
                                 (3250766788, 3520254932),
                             ]),
-                            Some(U256::from(1903326068)),
+                            Some(U256::from(1903326068).into()),
                             Some(vec![129, 130, 131, 132].into()),
                             ChangeType::Update,
                         ),
@@ -3967,13 +3876,13 @@ mod test {
                     account_updates: [(
                         H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                         AccountUpdate::new(
-                            H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                             Chain::Ethereum,
-                            fixtures::evm_slots([
+                            Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                            fixtures::slots([
                                 (2711790500, 3250766788),
                                 (2442302356, 2711790500),
                             ]),
-                            Some(U256::from(4059231220u64)),
+                            Some(U256::from(4059231220u64).into()),
                             Some(vec![1, 2, 3, 4].into()),
                             ChangeType::Update,
                         ),
@@ -4095,15 +4004,15 @@ mod test {
             vec![(
                 address,
                 AccountUpdate {
-                    address: H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                     chain: Chain::Ethereum,
-                    slots: fixtures::evm_slots([
+                    address: Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                    slots: fixtures::slots([
                         (2711790500, 2981278644),
                         (3250766788, 3520254932),
                         (2711790500, 3250766788),
                         (2442302356, 2711790500),
                     ]),
-                    balance: Some(U256::from(4059231220u64)),
+                    balance: Some(U256::from(4059231220u64).into()),
                     code: Some(vec![1, 2, 3, 4].into()),
                     change: ChangeType::Update,
                 },
@@ -4222,10 +4131,10 @@ mod test {
         let block = block_state_changes();
 
         let account1 = H160::from_low_u64_be(0x0000000000000000000000000000000061626364);
-        let slot1 = U256::from(2711790500_u64);
-        let slot2 = U256::from(3250766788_u64);
+        let slot1 = Bytes::from(U256::from(2711790500_u64));
+        let slot2 = Bytes::from(U256::from(3250766788_u64));
         let account_missing = H160::from_low_u64_be(0x000000000000000000000000000000000badbabe);
-        let slot_missing = U256::from(12345678_u64);
+        let slot_missing = Bytes::from(U256::from(12345678_u64));
 
         let keys = vec![
             (&account1, &slot1),
@@ -4234,13 +4143,14 @@ mod test {
             (&account1, &slot_missing),
         ];
 
+        #[allow(clippy::mutable_key_type)]
         let filtered = block.get_filtered_account_state_update(keys);
 
         assert_eq!(
             filtered,
             HashMap::from([
-                ((account1, slot1), U256::from(3250766788_u64)),
-                ((account1, slot2), U256::from(3520254932_u64))
+                ((account1, slot1), U256::from(3250766788_u64).into()),
+                ((account1, slot2), U256::from(3520254932_u64).into())
             ])
         );
     }
@@ -4843,10 +4753,10 @@ mod test {
             account_updates: [(
                 H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                 AccountUpdate::new(
-                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                     Chain::Ethereum,
-                    fixtures::evm_slots([(2711790500, 2981278644), (3250766788, 3520254932)]),
-                    Some(U256::from(1903326068)),
+                    Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                    fixtures::slots([(2711790500, 2981278644), (3250766788, 3520254932)]),
+                    Some(U256::from(1903326068).into()),
                     Some(vec![129, 130, 131, 132].into()),
                     ChangeType::Update,
                 ),
@@ -4883,10 +4793,10 @@ mod test {
             account_updates: [(
                 H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                 AccountUpdate::new(
-                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
                     Chain::Ethereum,
-                    fixtures::evm_slots([(2981278644, 3250766788), (2442302356, 2711790500)]),
-                    Some(U256::from(4059231220u64)),
+                    Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                    fixtures::slots([(2981278644, 3250766788), (2442302356, 2711790500)]),
+                    Some(U256::from(4059231220u64).into()),
                     Some(vec![1, 2, 3, 4].into()),
                     ChangeType::Update,
                 ),
@@ -4941,14 +4851,14 @@ mod test {
             .next()
             .unwrap();
 
-        acc_update.slots = fixtures::evm_slots([
+        acc_update.slots = fixtures::slots([
             (2442302356, 2711790500),
             (2711790500, 2981278644),
             (3250766788, 3520254932),
             (2981278644, 3250766788),
         ]);
 
-        let acc_update = [(acc_update.address, acc_update)]
+        let acc_update = [(acc_update.address.clone().into(), acc_update)]
             .iter()
             .cloned()
             .collect();

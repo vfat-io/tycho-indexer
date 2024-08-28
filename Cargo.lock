@@ -6493,6 +6493,7 @@ dependencies = [
  "thiserror",
  "tiny-keccak",
  "tokio",
+ "tracing",
  "typetag",
  "utoipa",
  "uuid 1.7.0",

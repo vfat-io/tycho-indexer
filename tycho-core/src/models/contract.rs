@@ -1,3 +1,6 @@
+use serde::{Deserialize, Serialize};
+use tracing::warn;
+
 use crate::{
     keccak256,
     models::{Chain, ChangeType, ContractId, DeltaError},
@@ -79,7 +82,7 @@ impl Account {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct AccountUpdate {
     pub chain: Chain,
     pub address: Address,
@@ -100,21 +103,14 @@ impl AccountUpdate {
     }
 
     pub fn new(
-        chain: &Chain,
-        address: &Address,
-        slots: Option<&HashMap<StoreKey, Option<StoreVal>>>,
-        balance: Option<&Balance>,
-        code: Option<&Code>,
+        chain: Chain,
+        address: Address,
+        slots: HashMap<StoreKey, Option<StoreVal>>,
+        balance: Option<Balance>,
+        code: Option<Code>,
         change: ChangeType,
     ) -> Self {
-        Self {
-            chain: *chain,
-            address: address.clone(),
-            change,
-            slots: slots.cloned().unwrap_or_default(),
-            balance: balance.cloned(),
-            code: code.cloned(),
-        }
+        Self { chain, address, change, slots, balance, code }
     }
 
     pub fn contract_id(&self) -> ContractId {
@@ -142,6 +138,84 @@ impl AccountUpdate {
             tx.hash.clone(),
             Some(tx.hash.clone()),
         )
+    }
+
+    // Convert AccountUpdate into Account using references.
+    pub fn ref_into_account(&self, tx: &Transaction) -> Account {
+        let empty_hash = keccak256(Vec::new());
+        if self.change != ChangeType::Creation {
+            warn!("Creating an account from a partial change!")
+        }
+
+        Account::new(
+            self.chain,
+            self.address.clone(),
+            format!("{:#020x}", self.address),
+            self.slots
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k, v.unwrap_or_default()))
+                .collect(),
+            self.balance.clone().unwrap_or_default(),
+            self.code.clone().unwrap_or_default(),
+            self.code
+                .as_ref()
+                .map(keccak256)
+                .unwrap_or(empty_hash)
+                .into(),
+            tx.hash.clone(),
+            tx.hash.clone(),
+            Some(tx.hash.clone()),
+        )
+    }
+
+    /// Merge this update (`self`) with another one (`other`)
+    ///
+    /// This function is utilized for aggregating multiple updates into a single
+    /// update. The attribute values of `other` are set on `self`.
+    /// Meanwhile, contract storage maps are merged, in which keys from `other`
+    /// take precedence.
+    ///
+    /// Be noted that, this function will mutate the state of the calling
+    /// struct. An error will occur if merging updates from different accounts.
+    ///
+    /// There are no further validation checks within this method, hence it
+    /// could be used as needed. However, you should give preference to
+    /// utilizing [TransactionVMUpdates] for merging, when possible.
+    ///
+    /// # Errors
+    ///
+    /// It returns an `CoreError::MergeError` error if `self.address` and
+    /// `other.address` are not identical.
+    ///
+    /// # Arguments
+    ///
+    /// * `other`: An instance of `AccountUpdate`. The attribute values and keys
+    /// of `other` will overwrite those of `self`.
+    pub fn merge(&mut self, other: AccountUpdate) -> Result<(), String> {
+        if self.address != other.address {
+            return Err(format!(
+                "Can't merge AccountUpdates from differing identities; Expected {:#020x}, got {:#020x}",
+                self.address, other.address
+            ));
+        }
+
+        self.slots.extend(other.slots);
+
+        if let Some(balance) = other.balance {
+            self.balance = Some(balance)
+        }
+        self.code = other.code.or(self.code.take());
+
+        Ok(())
+    }
+
+    pub fn is_update(&self) -> bool {
+        self.change == ChangeType::Update
+    }
+
+    pub fn is_creation(&self) -> bool {
+        self.change == ChangeType::Creation
     }
 }
 

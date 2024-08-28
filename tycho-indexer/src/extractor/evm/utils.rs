@@ -84,4 +84,12 @@ mod test {
     fn test_pad_and_parse_bytes32(#[case] inp: Bytes, #[case] exp: Result<H256, String>) {
         assert_eq!(pad_and_parse_32bytes(&inp), exp);
     }
+
+    #[rstest]
+    #[case::ok([0;20].into(), Ok(H160::zero()))]
+    #[case::pad([0;1].into(), Ok(H160::zero()))]
+    #[case::err([0;21].into(), Err("Byte slice too long: Expected 20, got 21, val: 0x000000000000000000000000000000000000000000".to_owned()))]
+    fn test_pad_and_parse_bytes20(#[case] inp: Bytes, #[case] exp: Result<H160, String>) {
+        assert_eq!(pad_and_parse_20bytes(&inp), exp);
+    }
 }

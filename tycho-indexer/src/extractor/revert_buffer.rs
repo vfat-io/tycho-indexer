@@ -1,5 +1,5 @@
 use chrono::NaiveDateTime;
-use ethers::prelude::{H160, U256};
+use ethers::prelude::H160;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use tracing::{debug, trace, warn};
@@ -241,8 +241,8 @@ pub type ProtocolStateIdType = ComponentId;
 pub type ProtocolStateKeyType = AttrStoreKey;
 pub type ProtocolStateValueType = StoreVal;
 pub type AccountStateIdType = H160;
-pub type AccountStateKeyType = U256;
-pub type AccountStateValueType = U256;
+pub type AccountStateKeyType = Bytes;
+pub type AccountStateValueType = Bytes;
 
 /// A RevertBuffer entry containing state updates.
 ///
@@ -253,6 +253,7 @@ pub(crate) trait StateUpdateBufferEntry: std::fmt::Debug {
         keys: Vec<(&ProtocolStateIdType, &ProtocolStateKeyType)>,
     ) -> HashMap<(ProtocolStateIdType, ProtocolStateKeyType), ProtocolStateValueType>;
 
+    #[allow(clippy::mutable_key_type)]
     fn get_filtered_account_state_update(
         &self,
         keys: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
@@ -312,6 +313,7 @@ where
     ///
     /// Clippy thinks it is a complex type that is difficult to read
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::mutable_key_type)]
     pub fn lookup_account_state(
         &self,
         keys: &[(&AccountStateIdType, &AccountStateKeyType)],
@@ -323,7 +325,7 @@ where
         let mut remaining_keys: HashSet<(AccountStateIdType, AccountStateKeyType)> =
             HashSet::from_iter(
                 keys.iter()
-                    .map(|&(c_id, attr)| (*c_id, *attr)),
+                    .map(|&(c_id, attr)| (*c_id, (*attr).clone())),
             );
 
         for block_message in self.block_messages.iter().rev() {
@@ -337,7 +339,7 @@ where
                     .map(|k| (&k.0, &k.1))
                     .collect(),
             ) {
-                if remaining_keys.remove(&(key.0, key.1)) {
+                if remaining_keys.remove(&(key.0, key.1.clone())) {
                     res.insert(key, val);
                 }
             }

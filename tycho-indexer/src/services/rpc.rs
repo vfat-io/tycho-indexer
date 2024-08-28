@@ -57,23 +57,6 @@ impl From<evm::ProtocolStateDelta> for dto::ProtocolStateDelta {
     }
 }
 
-impl From<evm::AccountUpdate> for dto::AccountUpdate {
-    fn from(account_update: evm::AccountUpdate) -> Self {
-        Self {
-            address: account_update.address.into(),
-            chain: account_update.chain.into(),
-            slots: account_update
-                .slots
-                .into_iter()
-                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
-                .collect(),
-            balance: account_update.balance.map(Bytes::from),
-            code: account_update.code,
-            change: account_update.change.into(),
-        }
-    }
-}
-
 impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
     fn from(protocol_component: evm::ProtocolComponent) -> Self {
         Self {

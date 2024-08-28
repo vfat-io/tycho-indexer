@@ -48,6 +48,9 @@ impl LowerHex for Bytes {
 }
 
 impl Bytes {
+    pub fn new() -> Self {
+        Self(bytes::Bytes::new())
+    }
     /// This function converts the internal byte array into a `Vec<u8>`
     ///
     /// # Returns
@@ -140,7 +143,7 @@ impl Bytes {
     /// # Example
     ///
     /// ```
-    /// let b = zero(5);
+    /// let b = Bytes::zero(5);
     /// assert_eq!(b, Bytes::from(vec![0, 0, 0, 0, 0]));
     /// ```
     pub fn zero(length: usize) -> Bytes {
