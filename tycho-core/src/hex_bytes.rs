@@ -48,9 +48,83 @@ impl LowerHex for Bytes {
 }
 
 impl Bytes {
-    /// Return bytes as [`Vec::<u8>`]
+    /// This function converts the internal byte array into a `Vec<u8>`
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<u8>` containing the bytes from the `Bytes` struct.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let bytes = Bytes::from(vec![0x01, 0x02, 0x03]);
+    /// let vec = bytes.to_vec();
+    /// assert_eq!(vec, vec![0x01, 0x02, 0x03]);
+    /// ```
     pub fn to_vec(&self) -> Vec<u8> {
         self.as_ref().to_vec()
+    }
+
+    /// Left-pads the byte array to the specified length with the given padding byte.
+    ///
+    /// This function creates a new `Bytes` instance by prepending the specified padding byte
+    /// to the current byte array until its total length matches the desired length.
+    ///
+    /// If the current length of the byte array is greater than or equal to the specified length,
+    /// the original byte array is returned unchanged.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - The desired total length of the resulting byte array.
+    /// * `pad_byte` - The byte value to use for padding. Commonly `0x00`.
+    ///
+    /// # Returns
+    ///
+    /// A new `Bytes` instance with the byte array left-padded to the desired length.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let bytes = Bytes::from(vec![0x01, 0x02, 0x03]);
+    /// let padded = bytes.lpad(6, 0x00);
+    /// assert_eq!(padded.to_vec(), vec![0x00, 0x00, 0x00, 0x01, 0x02, 0x03]);
+    /// ```
+    pub fn lpad(&self, length: usize, pad_byte: u8) -> Bytes {
+        let mut padded_vec = vec![pad_byte; length.saturating_sub(self.len())];
+        padded_vec.extend_from_slice(self.as_ref());
+
+        Bytes(bytes::Bytes::from(padded_vec))
+    }
+
+    /// Right-pads the byte array to the specified length with the given padding byte.
+    ///
+    /// This function creates a new `Bytes` instance by appending the specified padding byte
+    /// to the current byte array until its total length matches the desired length.
+    ///
+    /// If the current length of the byte array is greater than or equal to the specified length,
+    /// the original byte array is returned unchanged.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - The desired total length of the resulting byte array.
+    /// * `pad_byte` - The byte value to use for padding. Commonly `0x00`.
+    ///
+    /// # Returns
+    ///
+    /// A new `Bytes` instance with the byte array right-padded to the desired length.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let bytes = Bytes::from(vec![0x01, 0x02, 0x03]);
+    /// let padded = bytes.rpad(6, 0x00);
+    /// assert_eq!(padded.to_vec(), vec![0x01, 0x02, 0x03, 0x00, 0x00, 0x00]);
+    /// ```
+    pub fn rpad(&self, length: usize, pad_byte: u8) -> Bytes {
+        let mut padded_vec = self.to_vec();
+        padded_vec.resize(length, pad_byte);
+
+        Bytes(bytes::Bytes::from(padded_vec))
     }
 }
 
@@ -225,6 +299,24 @@ macro_rules! impl_from_for_ethers_fixed_hash {
 }
 
 impl_from_for_ethers_fixed_hash!(H160, H256);
+
+macro_rules! impl_from_uint_for_bytes {
+    ($($t:ty),*) => {
+        $(
+            impl From<$t> for Bytes {
+                fn from(src: $t) -> Self {
+                    let size = std::mem::size_of::<$t>();
+                    let mut buf = vec![0u8; size];
+                    buf.copy_from_slice(&src.to_be_bytes());
+
+                    Self(bytes::Bytes::from(buf))
+                }
+            }
+        )*
+    };
+}
+
+impl_from_uint_for_bytes!(u8, u16, u32, u64, u128);
 
 impl From<U256> for Bytes {
     fn from(src: U256) -> Self {

@@ -139,6 +139,7 @@ use diesel_async::{
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use tracing::{debug, info};
 
+use tiny_keccak::{Hasher, Keccak};
 use tycho_core::{
     models::{Chain, TxHash},
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError, Version, VersionKind},
@@ -398,6 +399,19 @@ async fn maybe_lookup_version_ts(
         return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", version.1)));
     }
     maybe_lookup_block_ts(&version.0, conn).await
+}
+
+/// Compute the Keccak-256 hash of input bytes.
+///
+/// Note that strings are interpreted as UTF-8 bytes,
+pub fn keccak256<T: AsRef<[u8]>>(bytes: T) -> [u8; 32] {
+    let mut output = [0u8; 32];
+
+    let mut hasher = Keccak::v256();
+    hasher.update(bytes.as_ref());
+    hasher.finalize(&mut output);
+
+    output
 }
 
 #[derive(Clone)]
@@ -725,7 +739,6 @@ pub mod db_fixtures {
     use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime};
     use diesel::{prelude::*, sql_query};
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
-    use ethers::types::{H160, H256, U256};
     use serde_json::Value;
 
     use tycho_core::{
@@ -776,18 +789,16 @@ pub mod db_fixtures {
         let block_records = vec![
             (
                 schema::block::hash.eq(Vec::from(
-                    H256::from_str(
-                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                    Bytes::from_str(
+                        "88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
                     )
-                    .unwrap()
-                    .as_bytes(),
+                    .unwrap(),
                 )),
                 schema::block::parent_hash.eq(Vec::from(
-                    H256::from_str(
-                        "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+                    Bytes::from_str(
+                        "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
                     )
-                    .unwrap()
-                    .as_bytes(),
+                    .unwrap(),
                 )),
                 schema::block::number.eq(1),
                 schema::block::ts.eq(yesterday_midnight()),
@@ -795,18 +806,16 @@ pub mod db_fixtures {
             ),
             (
                 schema::block::hash.eq(Vec::from(
-                    H256::from_str(
-                        "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
+                    Bytes::from_str(
+                        "b495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9",
                     )
-                    .unwrap()
-                    .as_bytes(),
+                    .unwrap(),
                 )),
                 schema::block::parent_hash.eq(Vec::from(
-                    H256::from_str(
-                        "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
+                    Bytes::from_str(
+                        "88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
                     )
-                    .unwrap()
-                    .as_bytes(),
+                    .unwrap(),
                 )),
                 schema::block::number.eq(2),
                 schema::block::ts.eq(yesterday_one_am()),
@@ -823,8 +832,8 @@ pub mod db_fixtures {
 
     /// Insert a bunch of transactions using (block_id, index, hash)
     pub async fn insert_txns(conn: &mut AsyncPgConnection, txns: &[(i64, i64, &str)]) -> Vec<i64> {
-        let from_val = H160::from_str("0x4648451b5F87FF8F0F7D622bD40574bb97E25980").unwrap();
-        let to_val = H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
+        let from_val = Bytes::from_str("4648451b5F87FF8F0F7D622bD40574bb97E25980").unwrap();
+        let to_val = Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
         let data: Vec<_> = txns
             .iter()
             .map(|(b, i, h)| {
@@ -832,12 +841,9 @@ pub mod db_fixtures {
                 (
                     block_id.eq(b),
                     index.eq(i),
-                    hash.eq(H256::from_str(h)
-                        .expect("valid txhash")
-                        .as_bytes()
-                        .to_owned()),
-                    from.eq(from_val.as_bytes()),
-                    to.eq(to_val.as_bytes()),
+                    hash.eq(Bytes::from_str(h).expect("valid txhash")),
+                    from.eq(from_val.clone()),
+                    to.eq(to_val.clone()),
                 )
             })
             .collect();
@@ -896,19 +902,11 @@ pub mod db_fixtures {
             .iter()
             .enumerate()
             .map(|(idx, (k, v, pv))| {
-                let previous_value =
-                    pv.map(|pv| hex::decode(format!("{:064x}", U256::from(pv))).unwrap());
+                let previous_value = pv.map(|pv| hex::decode(format!("{:064x}", pv)).unwrap());
                 (
-                    schema::contract_storage::slot.eq(hex::decode(format!(
-                        "{:064x}",
-                        U256::from(*k)
-                    ))
-                    .unwrap()),
-                    schema::contract_storage::value.eq(hex::decode(format!(
-                        "{:064x}",
-                        U256::from(*v)
-                    ))
-                    .unwrap()),
+                    schema::contract_storage::slot.eq(hex::decode(format!("{:064x}", *k)).unwrap()),
+                    schema::contract_storage::value
+                        .eq(hex::decode(format!("{:064x}", *v)).unwrap()),
                     schema::contract_storage::previous_value.eq(previous_value),
                     schema::contract_storage::account_id.eq(contract_id),
                     schema::contract_storage::modify_tx.eq(modify_tx),
@@ -940,8 +938,11 @@ pub mod db_fixtures {
             .first::<NaiveDateTime>(conn)
             .await
             .expect("setup tx id not found");
+
         let mut b0 = [0; 32];
-        U256::from(new_balance).to_big_endian(&mut b0);
+        let new_balance_bytes = new_balance.to_be_bytes();
+        b0[24..].copy_from_slice(&new_balance_bytes);
+
         {
             use schema::account_balance::dsl::*;
             diesel::insert_into(account_balance)
@@ -972,10 +973,9 @@ pub mod db_fixtures {
             .await
             .expect("setup tx id not found");
 
-        let code_hash = H256::from_slice(&ethers::utils::keccak256(&code));
         let data = (
-            schema::contract_code::code.eq(code),
-            schema::contract_code::hash.eq(code_hash.as_bytes()),
+            schema::contract_code::code.eq(&code),
+            schema::contract_code::hash.eq(Bytes::from(&super::keccak256(&code))),
             schema::contract_code::account_id.eq(account_id),
             schema::contract_code::modify_tx.eq(modify_tx),
             schema::contract_code::valid_from.eq(ts),
