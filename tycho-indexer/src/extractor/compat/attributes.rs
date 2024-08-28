@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
 use tycho_core::Bytes;
-use web3::types::H160;
 
 use crate::extractor::evm::{BlockChanges, ProtocolStateDelta};
 
@@ -61,7 +60,7 @@ pub fn trim_curve_component_token(mut changes: BlockChanges) -> BlockChanges {
                         if pool_type == PLAIN_POOL {
                             component
                                 .tokens
-                                .retain(|token| token != &H160::zero());
+                                .retain(|token| token != &Bytes::zero(20));
                         }
                     }
                 }
@@ -99,6 +98,7 @@ mod test {
     use tycho_core::{
         models::{
             blockchain::{Block, Transaction},
+            protocol::ProtocolComponent,
             Chain,
         },
         Bytes,
@@ -147,16 +147,20 @@ mod test {
                 balance_changes: HashMap::new(),
                 protocol_components: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolComponent {
+                    ProtocolComponent {
                         id: CREATED_CONTRACT.to_string(),
                         protocol_system: "test".to_string(),
                         protocol_type_name: "Pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                                .unwrap()
+                                .into(),
+                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                                .unwrap()
+                                .into(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         creation_tx: Default::default(),
                         static_attributes: Default::default(),
                         created_at: Default::default(),
@@ -271,18 +275,26 @@ mod test {
                 account_updates: HashMap::new(),
                 protocol_components: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolComponent {
+                    ProtocolComponent {
                         id: CREATED_CONTRACT.to_string(),
                         protocol_system: "test".to_string(),
                         protocol_type_name: "Pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-                            H160::from_str("0x0000000000000000000000000000000000000000").unwrap(),
-                            H160::from_str("0x0000000000000000000000000000000000000000").unwrap(),
+                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                                .unwrap()
+                                .into(),
+                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                                .unwrap()
+                                .into(),
+                            H160::from_str("0x0000000000000000000000000000000000000000")
+                                .unwrap()
+                                .into(),
+                            H160::from_str("0x0000000000000000000000000000000000000000")
+                                .unwrap()
+                                .into(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         creation_tx: Default::default(),
                         static_attributes: HashMap::from([
                             ("pool_type".to_string(), Bytes::from(PLAIN_POOL)),
@@ -320,16 +332,20 @@ mod test {
                 account_updates: HashMap::new(),
                 protocol_components: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolComponent {
+                    ProtocolComponent {
                         id: CREATED_CONTRACT.to_string(),
                         protocol_system: "test".to_string(),
                         protocol_type_name: "Pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                                .unwrap()
+                                .into(),
+                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                                .unwrap()
+                                .into(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         creation_tx: Default::default(),
                         static_attributes: HashMap::from([
                             ("pool_type".to_string(), Bytes::from(PLAIN_POOL)),

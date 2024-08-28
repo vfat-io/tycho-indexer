@@ -15,7 +15,6 @@ use tycho_core::{
     dto,
     models::{Address, Chain, PaginationParams},
     storage::{BlockIdentifier, BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
-    Bytes,
 };
 
 use crate::{
@@ -53,37 +52,6 @@ impl From<evm::ProtocolStateDelta> for dto::ProtocolStateDelta {
             component_id: protocol_state.component_id,
             updated_attributes: protocol_state.updated_attributes,
             deleted_attributes: protocol_state.deleted_attributes,
-        }
-    }
-}
-
-impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
-    fn from(protocol_component: evm::ProtocolComponent) -> Self {
-        Self {
-            chain: protocol_component.chain.into(),
-            id: protocol_component.id,
-            protocol_system: protocol_component.protocol_system,
-            protocol_type_name: protocol_component.protocol_type_name,
-            tokens: protocol_component
-                .tokens
-                .into_iter()
-                .map(|token| {
-                    let bytes = token.as_bytes().to_vec();
-                    Bytes::from(bytes)
-                })
-                .collect(),
-            contract_ids: protocol_component
-                .contract_ids
-                .into_iter()
-                .map(|h| {
-                    let bytes = h.as_bytes().to_vec();
-                    Bytes::from(bytes)
-                })
-                .collect(),
-            static_attributes: protocol_component.static_attributes,
-            creation_tx: protocol_component.creation_tx.into(),
-            created_at: protocol_component.created_at,
-            change: protocol_component.change.into(),
         }
     }
 }
@@ -726,11 +694,14 @@ mod tests {
     use chrono::NaiveDateTime;
     use ethers::types::U256;
 
-    use tycho_core::models::{
-        contract::Account,
-        protocol::{ProtocolComponent, ProtocolComponentState},
-        token::CurrencyToken,
-        ChangeType,
+    use tycho_core::{
+        models::{
+            contract::Account,
+            protocol::{ProtocolComponent, ProtocolComponentState},
+            token::CurrencyToken,
+            ChangeType,
+        },
+        Bytes,
     };
 
     use crate::testing::{evm_contract_slots, MockGateway};

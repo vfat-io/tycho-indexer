@@ -357,16 +357,16 @@ mod test {
             false,
             [(
                 "component2".to_string(),
-                evm::ProtocolComponent {
+                ProtocolComponent {
                     id: "component2".to_string(),
                     protocol_system: "vm_swap".to_string(),
                     protocol_type_name: "swap".to_string(),
                     chain: Chain::Ethereum,
                     tokens: Vec::new(),
-                    contract_ids: Vec::new(),
+                    contract_addresses: Vec::new(),
                     static_attributes: HashMap::new(),
                     change: ChangeType::Creation,
-                    creation_tx: H256::zero(),
+                    creation_tx: Bytes::new(),
                     created_at: "2020-01-01T00:00:00".parse().unwrap(),
                 },
             )]
@@ -414,16 +414,16 @@ mod test {
             false,
             [(
                 "component3".to_string(),
-                evm::ProtocolComponent {
+                ProtocolComponent {
                     id: "component3".to_string(),
                     protocol_system: "native_swap".to_string(),
                     protocol_type_name: "swap".to_string(),
                     chain: Chain::Ethereum,
                     tokens: Vec::new(),
-                    contract_ids: Vec::new(),
+                    contract_addresses: Vec::new(),
                     static_attributes: HashMap::new(),
                     change: ChangeType::Creation,
-                    creation_tx: H256::zero(),
+                    creation_tx: Bytes::new(),
                     created_at: "2020-01-01T00:00:00".parse().unwrap(),
                 },
             )]
@@ -619,7 +619,7 @@ mod test {
                 Vec::new(),
                 HashMap::new(),
                 ChangeType::Creation,
-                Bytes::from("0x0000000000000000000000000000000000000000000000000000000000000000"),
+                Bytes::new(),
                 "2020-01-01T00:00:00".parse().unwrap(),
             ),
             ProtocolComponent::new(
@@ -631,7 +631,7 @@ mod test {
                 Vec::new(),
                 HashMap::new(),
                 ChangeType::Creation,
-                Bytes::from("0x0000000000000000000000000000000000000000000000000000000000000000"),
+                Bytes::new(),
                 "2020-01-01T00:00:00".parse().unwrap(),
             ),
         ];

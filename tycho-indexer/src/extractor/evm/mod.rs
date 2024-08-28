@@ -16,10 +16,10 @@ use tycho_core::{
     models::{
         blockchain::{Block, BlockScoped, Transaction},
         contract::{Account, AccountUpdate},
-        protocol::{self as tycho_core_protocol, ComponentBalance},
+        protocol::{self as tycho_core_protocol, ComponentBalance, ProtocolComponent},
         token::CurrencyToken,
         Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
-        NormalisedMessage, ProtocolType, StoreVal,
+        NormalisedMessage, ProtocolType, StoreVal, TxHash,
     },
     Bytes,
 };
@@ -509,72 +509,38 @@ impl TryFromMessage for ComponentBalance {
     }
 }
 
-/// Represents the static parts of a protocol component.
-///
-/// `ProtocolComponent` provides detailed descriptions of the functionalities a protocol,
-/// for example, swap pools that enables the exchange of two tokens.
-///
-/// A `ProtocolComponent` can be associated with an `Account`, and it has an identifier (`id`) that
-/// can be either the on-chain address or a custom one. It belongs to a specific `ProtocolSystem`
-/// and has a `ProtocolTypeID` that associates it with a `ProtocolType` that describes its behaviour
-/// e.g., swap, lend, bridge. The component is associated with a specific `Chain` and holds
-/// information about tradable tokens, related contract IDs, and static attributes.
-///
-/// A `ProtocolComponent` can have a one-to-one or one-to-many relationship with contracts.
-/// For example, `UniswapV2` and `UniswapV3` have a one-to-one relationship one component (pool) one
-/// contract, while `Ambient` has a one-to-many relationship with a single component and multiple
-/// contracts.
-///
-/// The `ProtocolComponent` struct is designed to store static attributes related to the associated
-/// smart contract.
-#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
-pub struct ProtocolComponent {
-    /// Is the unique identifier of a contract. It can represent an on-chain
-    /// address or in the case of a one-to-many relationship it could be something like
-    /// 'USDC-ETH'. This is for example the case with ambient, where one contract is
-    /// responsible for multiple components.
-    pub id: ComponentId,
-    // what system this component belongs to
-    pub protocol_system: String,
-    // more metadata information about the components general type (swap, lend, bridge, etc.)
-    pub protocol_type_name: String,
-    // blockchain the component belongs to
-    pub chain: Chain,
-    // ids of the tokens tradable
-    pub tokens: Vec<H160>,
-    // addresses of the related contracts
-    pub contract_ids: Vec<H160>,
-    // stores the static attributes
-    pub static_attributes: HashMap<AttrStoreKey, StoreVal>,
-    // the type of change (creation, deletion etc)
-    pub change: ChangeType,
-    // Hash of the transaction in which the component got created
-    pub creation_tx: H256,
-    // Time at which the component got created
-    pub created_at: NaiveDateTime,
-}
+impl TryFromMessage for ProtocolComponent {
+    type Args<'a> = (
+        substreams::ProtocolComponent,
+        Chain,
+        &'a str,
+        &'a HashMap<String, ProtocolType>,
+        TxHash,
+        NaiveDateTime,
+    );
 
-impl ProtocolComponent {
-    pub fn try_from_message(
-        msg: substreams::ProtocolComponent,
-        chain: Chain,
-        protocol_system: &str,
-        protocol_types: &HashMap<String, ProtocolType>,
-        tx_hash: H256,
-        creation_ts: NaiveDateTime,
-    ) -> Result<Self, ExtractionError> {
-        let tokens = msg
+    fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
+        let (msg, chain, protocol_system, protocol_types, tx_hash, creation_ts) = args;
+        let tokens: Vec<Bytes> = msg
             .tokens
             .clone()
             .into_iter()
-            .map(|t| pad_and_parse_h160(&t.into()).map_err(ExtractionError::DecodeError))
+            .map(|t| {
+                pad_and_parse_h160(&t.into())
+                    .map_err(ExtractionError::DecodeError)
+                    .map(Into::into)
+            })
             .collect::<Result<Vec<_>, ExtractionError>>()?;
 
         let contract_ids = msg
             .contracts
             .clone()
             .into_iter()
-            .map(|c| pad_and_parse_h160(&c.into()).map_err(ExtractionError::DecodeError))
+            .map(|c| {
+                pad_and_parse_h160(&c.into())
+                    .map_err(ExtractionError::DecodeError)
+                    .map(Into::into)
+            })
             .collect::<Result<Vec<_>, ExtractionError>>()?;
 
         let static_attributes = msg
@@ -601,27 +567,13 @@ impl ProtocolComponent {
             protocol_type_name: protocol_type.name,
             protocol_system: protocol_system.to_owned(),
             tokens,
-            contract_ids,
+            contract_addresses: contract_ids,
             static_attributes,
             chain,
             change: msg.change().into(),
             creation_tx: tx_hash,
             created_at: creation_ts,
         })
-    }
-
-    pub fn get_byte_contract_addresses(&self) -> Vec<Address> {
-        self.contract_ids
-            .iter()
-            .map(|t| Address::from(t.0))
-            .collect()
-    }
-
-    pub fn get_byte_token_addresses(&self) -> Vec<Address> {
-        self.tokens
-            .iter()
-            .map(|t| Address::from(t.0))
-            .collect()
     }
 }
 
@@ -683,14 +635,14 @@ impl BlockContractChanges {
                         account_updates.insert(update.address.clone().into(), update);
                     }
                     for component_msg in change.component_changes.into_iter() {
-                        let component = ProtocolComponent::try_from_message(
+                        let component = ProtocolComponent::try_from_message((
                             component_msg,
                             chain,
                             &protocol_system,
                             protocol_types,
-                            tx.hash.clone().into(),
+                            tx.hash.clone(),
                             block.ts,
-                        )?;
+                        ))?;
                         protocol_components.insert(component.id.clone(), component);
                     }
 
@@ -893,14 +845,14 @@ impl ProtocolChangesWithTx {
 
         // First, parse the new protocol components
         for change in msg.component_changes.into_iter() {
-            let component = ProtocolComponent::try_from_message(
+            let component = ProtocolComponent::try_from_message((
                 change.clone(),
                 block.chain,
                 protocol_system,
                 protocol_types,
-                tx.hash.clone().into(),
+                tx.hash.clone(),
                 block.ts,
-            )?;
+            ))?;
             new_protocol_components.insert(change.id, component);
         }
 
@@ -1341,14 +1293,14 @@ impl TxWithChanges {
 
         // First, parse the new protocol components
         for change in msg.component_changes.into_iter() {
-            let component = ProtocolComponent::try_from_message(
+            let component = ProtocolComponent::try_from_message((
                 change,
                 block.chain,
                 protocol_system,
                 protocol_types,
-                tx.hash.clone().into(),
+                tx.hash.clone(),
                 block.ts,
-            )?;
+            ))?;
             new_protocol_components.insert(component.id.clone(), component);
         }
 
@@ -3772,19 +3724,27 @@ mod test {
             protocol_type_name: String::from("WeightedPool"),
             chain: Chain::Ethereum,
             tokens: vec![
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                    .unwrap()
+                    .into(),
+                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                    .unwrap()
+                    .into(),
             ],
-            contract_ids: vec![
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+            contract_addresses: vec![
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .unwrap()
+                    .into(),
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .unwrap()
+                    .into(),
             ],
             static_attributes: HashMap::from([
                 ("key1".to_string(), Bytes::from(b"value1".to_vec())),
                 ("key2".to_string(), Bytes::from(b"value2".to_vec())),
             ]),
             change: ChangeType::Creation,
-            creation_tx: tx_hash,
+            creation_tx: tx_hash.into(),
             created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         }
     }
@@ -3937,12 +3897,20 @@ mod test {
             protocol_type_name: String::from("WeightedPool"),
             chain: Chain::Ethereum,
             tokens: vec![
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                    .unwrap()
+                    .into(),
+                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                    .unwrap()
+                    .into(),
             ],
-            contract_ids: vec![
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+            contract_addresses: vec![
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .unwrap()
+                    .into(),
+                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .unwrap()
+                    .into(),
             ],
             static_attributes: [
                 ("key1".to_string(), Bytes::from(b"value1".to_vec())),
@@ -3955,7 +3923,8 @@ mod test {
             creation_tx: H256::from_str(
                 "0x0000000000000000000000000000000000000000000000000000000011121314",
             )
-            .unwrap(),
+            .unwrap()
+            .into(),
             created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         };
         let component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>> = [(
@@ -4360,15 +4329,21 @@ mod test {
                 protocol_type_name: "WeightedPool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec![
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                        .unwrap()
+                        .into(),
+                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                        .unwrap()
+                        .into(),
                 ],
                 static_attributes: static_attr,
-                contract_ids: vec![
-                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
-                ],
+                contract_addresses: vec![H160::from_str(
+                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                )
+                .unwrap()
+                .into()],
                 change: ChangeType::Creation,
-                creation_tx: tx.hash.clone().into(),
+                creation_tx: tx.hash.clone(),
                 created_at: yesterday_midnight(),
             },
         )]
@@ -4564,15 +4539,21 @@ mod test {
                 protocol_type_name: "WeightedPool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec![
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                        .unwrap()
+                        .into(),
+                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                        .unwrap()
+                        .into(),
                 ],
                 static_attributes: static_attr,
-                contract_ids: vec![
-                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap()
-                ],
+                contract_addresses: vec![H160::from_str(
+                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                )
+                .unwrap()
+                .into()],
                 change: ChangeType::Creation,
-                creation_tx: tx.hash.clone().into(),
+                creation_tx: tx.hash.clone(),
                 created_at: yesterday_midnight(),
             },
         )]
@@ -4673,15 +4654,16 @@ mod test {
             HashMap::from([(protocol_type_id.clone(), ProtocolType::default())]);
 
         // Call the try_from_message method
-        let result = ProtocolComponent::try_from_message(
+        let result = ProtocolComponent::try_from_message((
             msg,
             expected_chain,
             &expected_protocol_system,
             &protocol_types,
             H256::from_str("0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac")
-                .unwrap(),
+                .unwrap()
+                .into(),
             Default::default(),
-        );
+        ));
 
         // Assert the result
         assert!(result.is_ok());
@@ -4700,15 +4682,15 @@ mod test {
         assert_eq!(
             protocol_component.tokens,
             vec![
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
             ]
         );
         assert_eq!(
-            protocol_component.contract_ids,
+            protocol_component.contract_addresses,
             vec![
-                H160::from_str("0x31fF2589Ee5275a2038beB855F44b9Be993aA804").unwrap(),
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                Bytes::from_str("31fF2589Ee5275a2038beB855F44b9Be993aA804").unwrap(),
+                Bytes::from_str("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
             ]
         );
         assert_eq!(protocol_component.static_attributes, expected_attribute_map);

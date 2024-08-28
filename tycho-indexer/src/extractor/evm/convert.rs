@@ -10,31 +10,6 @@ use tycho_core::{
     Bytes,
 };
 
-impl From<&evm::ProtocolComponent> for ProtocolComponent {
-    fn from(value: &evm::ProtocolComponent) -> Self {
-        Self {
-            id: value.id.clone(),
-            protocol_system: value.protocol_system.clone(),
-            protocol_type_name: value.protocol_type_name.clone(),
-            chain: value.chain,
-            tokens: value
-                .tokens
-                .iter()
-                .map(|t| t.as_bytes().into())
-                .collect(),
-            contract_addresses: value
-                .contract_ids
-                .iter()
-                .map(|a| a.as_bytes().into())
-                .collect(),
-            static_attributes: value.static_attributes.clone(),
-            change: value.change,
-            creation_tx: value.creation_tx.into(),
-            created_at: value.created_at,
-        }
-    }
-}
-
 impl From<&evm::ProtocolStateDelta> for ProtocolComponentStateDelta {
     fn from(value: &ProtocolStateDelta) -> Self {
         Self {
@@ -60,12 +35,12 @@ impl From<&evm::AggregatedBlockChanges> for BlockAggregatedDeltas {
         let new_components = value
             .new_protocol_components
             .iter()
-            .map(|(cid, comp)| (cid.clone(), comp.into()))
+            .map(|(cid, comp)| (cid.clone(), comp.clone()))
             .collect::<HashMap<_, ProtocolComponent>>();
         let deleted_components = value
             .deleted_protocol_components
             .iter()
-            .map(|(cid, comp)| (cid.clone(), comp.into()))
+            .map(|(cid, comp)| (cid.clone(), comp.clone()))
             .collect::<HashMap<_, ProtocolComponent>>();
         let balances = value
             .component_balances

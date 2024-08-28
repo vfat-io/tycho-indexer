@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::{Address, AttrStoreKey, Balance, ComponentId, DeltaError, StoreVal, TxHash};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProtocolComponent {
     pub id: ComponentId,
     pub protocol_system: String,

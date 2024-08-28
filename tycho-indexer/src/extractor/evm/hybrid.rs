@@ -390,7 +390,6 @@ where
             .protocol_components()
             .into_iter()
             .flat_map(|pc| pc.tokens.clone().into_iter())
-            .map(|addr| Bytes::from(addr.as_bytes()))
             .collect::<Vec<_>>();
 
         // Separate between known and unkown tokens
@@ -423,14 +422,15 @@ where
                         map_vault(&change.protocol_system)
                             .or_else(|| {
                                 change
-                                    .contract_ids
+                                    .contract_addresses
                                     // TODO: Currently, it's assumed that the pool is always the
                                     // first contract in the
                                     // protocol component. This approach is a temporary
                                     // workaround and needs to be revisited for a more robust
                                     // solution.
                                     .first()
-                                    .copied()
+                                    .cloned()
+                                    .map(Into::into)
                                     .or_else(|| H160::from_str(&change.id).ok())
                             })
                             .map(|owner| (c_id, owner))
@@ -594,11 +594,7 @@ where
             .add_tokens(msg.new_tokens.values().cloned())
             .await?;
         self.protocol_cache
-            .add_components(
-                msg.protocol_components()
-                    .iter()
-                    .map(Into::into),
-            )
+            .add_components(msg.protocol_components())
             .await?;
 
         trace!(?msg, "Processing message");
@@ -1129,8 +1125,13 @@ impl HybridPgGateway {
 
             // Map new protocol components
             for (_component_id, new_protocol_component) in tx_update.protocol_components.iter() {
-                new_protocol_components.push(new_protocol_component.into());
-                protocol_tokens.extend(new_protocol_component.tokens.iter());
+                new_protocol_components.push(new_protocol_component.clone());
+                protocol_tokens.extend(
+                    new_protocol_component
+                        .tokens
+                        .iter()
+                        .map(|t| H160::from(t.clone())),
+                );
             }
 
             // Map new account / contracts
@@ -1982,16 +1983,20 @@ mod test_serial_db {
                 balance_changes: HashMap::new(),
                 protocol_components: HashMap::from([(
                     "pool".to_string(),
-                    evm::ProtocolComponent {
+                    ProtocolComponent {
                         id: NATIVE_CREATED_CONTRACT.to_string(),
                         protocol_system: "test".to_string(),
                         protocol_type_name: "pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                                .unwrap()
+                                .into(),
+                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                                .unwrap()
+                                .into(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         creation_tx: Default::default(),
                         static_attributes: Default::default(),
                         created_at: Default::default(),
@@ -2049,8 +2054,8 @@ mod test_serial_db {
                             protocol_system: "test".to_string(),
                             protocol_type_name: "vm:pool".to_string(),
                             chain: Chain::Ethereum,
-                            tokens: vec![base_token, quote_token],
-                            contract_ids: vec![H160(VM_CONTRACT)],
+                            tokens: vec![base_token.into(), quote_token.into()],
+                            contract_addresses: vec![H160(VM_CONTRACT).into()],
                             static_attributes: Default::default(),
                             change: Default::default(),
                             creation_tx: VM_TX_HASH_0.parse().unwrap(),
@@ -2175,14 +2180,19 @@ mod test_serial_db {
                 protocol_type_name: "pool".to_string(),
                 chain: Chain::Ethereum,
                 tokens: vec![
-                    H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                    H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                        .unwrap()
+                        .into(),
+                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                        .unwrap()
+                        .into(),
                 ],
-                contract_ids: vec![],
+                contract_addresses: vec![],
                 creation_tx: H256::from_str(
                     "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
                 )
-                .unwrap(),
+                .unwrap()
+                .into(),
                 static_attributes: Default::default(),
                 created_at: Default::default(),
                 change: Default::default(),
@@ -2390,13 +2400,13 @@ mod test_serial_db {
                         protocol_type_name: "pt_1".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap(),
-                            H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+                            H160::from_str("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap().into(),
+                            H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         static_attributes: HashMap::new(),
                         change: ChangeType::Creation,
-                        creation_tx: H256::from_str("0x000000000000000000000000000000000000000000000000000000000000c351").unwrap(),
+                        creation_tx: H256::from_str("0x000000000000000000000000000000000000000000000000000000000000c351").unwrap().into(),
                         created_at: NaiveDateTime::from_timestamp_opt(base_ts + 5000, 0).unwrap(),
                     }),
                 ]),
@@ -2407,13 +2417,13 @@ mod test_serial_db {
                         protocol_type_name: "pt_2".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap(),
-                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                            H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap().into(),
+                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         static_attributes: HashMap::new(),
                         change: ChangeType::Deletion,
-                        creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
+                        creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap().into(),
                         created_at: NaiveDateTime::from_timestamp_opt(base_ts + 4000, 0).unwrap(),
                     }),
                 ]),
@@ -2586,15 +2596,15 @@ mod test_serial_db {
                         protocol_type_name: "pt_1".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap(),
-                            H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+                            H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap().into(),
+                            H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
                         ],
-                        contract_ids: vec![
-                            H160::from_str("0x0000000000000000000000000000000000000001").unwrap(),
+                        contract_addresses: vec![
+                            H160::from_str("0x0000000000000000000000000000000000000001").unwrap().into(),
                         ],
                         static_attributes: HashMap::new(),
                         change: ChangeType::Deletion,
-                        creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
+                        creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap().into(),
                         created_at: NaiveDateTime::from_timestamp_opt(base_ts + 4000, 0).unwrap(),
                     }),
                 ]),
