@@ -2,7 +2,7 @@
 //!
 //! The objective of this module is to provide swift and simplified access to the Remote Procedure
 //! Call (RPC) endpoints of Tycho. These endpoints are chiefly responsible for facilitating data
-//! queries, especially querying snapshots of data.ß
+//! queries, especially querying snapshots of data.
 #[cfg(test)]
 use mockall::automock;
 use std::sync::Arc;
@@ -78,11 +78,12 @@ pub trait RPCClient {
         let chunked_bodies = ids
             .chunks(chunk_size)
             .map(|c| ProtocolStateRequestBody {
-                protocol_ids: Some(c.to_vec()),
+                protocol_ids: Some(ids.to_vec()),
                 protocol_system: protocol_system.clone(),
                 chain,
                 include_balances,
                 version: version.clone(),
+                pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
             })
             .collect::<Vec<_>>();
 
@@ -105,6 +106,8 @@ pub trait RPCClient {
                     .into_iter()
                     .flat_map(|r| r.states.into_iter())
                     .collect(),
+                // TODO: Should use the response from the task
+                pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
             })
     }
 
@@ -198,8 +201,8 @@ impl RPCClient for HttpRPCClient {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.contract_ids.is_none() ||
-            request
+        if request.contract_ids.is_none()
+            || request
                 .contract_ids
                 .as_ref()
                 .unwrap()
@@ -233,7 +236,7 @@ impl RPCClient for HttpRPCClient {
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         if body.is_empty() {
             // Pure native protocols will return empty contract states
-            return Ok(StateRequestResponse { accounts: vec![] });
+            return Ok(StateRequestResponse { accounts: vec![], pagination: Default::default() });
         }
 
         let accounts = serde_json::from_str::<StateRequestResponse>(&body)
@@ -284,8 +287,8 @@ impl RPCClient for HttpRPCClient {
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.protocol_ids.is_none() ||
-            request
+        if request.protocol_ids.is_none()
+            || request
                 .protocol_ids
                 .as_ref()
                 .unwrap()
@@ -320,7 +323,10 @@ impl RPCClient for HttpRPCClient {
 
         if body.is_empty() {
             // Pure VM protocols will return empty states
-            return Ok(ProtocolStateRequestResponse { states: vec![] });
+            return Ok(ProtocolStateRequestResponse {
+                states: vec![],
+                pagination: Default::default(),
+            });
         }
 
         let states = serde_json::from_str::<ProtocolStateRequestResponse>(&body)

@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use actix_web::{web, HttpResponse};
 use anyhow::Error;
 use chrono::{Duration, Utc};
+use clap::builder::Str;
 use diesel_async::pooled_connection::deadpool;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -110,6 +111,8 @@ where
             .calculate_versions(&at, &request.protocol_system.clone(), chain)
             .await?;
 
+        let pagination_parameters: PaginationParams = (&request.pagination).into();
+
         // Get the contract IDs from the request
         let addresses = request.contract_ids.clone();
         debug!(?addresses, "Getting contract states.");
@@ -118,7 +121,7 @@ where
         // Get the contract states from the database
         let mut accounts = self
             .db_gateway
-            .get_contracts(&chain, addresses, Some(&db_version), true)
+            .get_contracts(&chain, addresses, Some(&db_version), true, Some(&pagination_parameters))
             .await
             .map_err(|err| {
                 error!(error = %err, "Error while getting contract states.");
@@ -134,6 +137,7 @@ where
                 .into_iter()
                 .map(dto::ResponseAccount::from)
                 .collect(),
+            request.pagination.clone(),
         ))
     }
 
@@ -241,6 +245,8 @@ where
             .calculate_versions(&at, &request.protocol_system.clone(), chain)
             .await?;
 
+        let pagination_parameters: PaginationParams = (&request.pagination).into();
+
         // Get the protocol IDs from the request
         let protocol_ids: Option<Vec<dto::ProtocolId>> = request.protocol_ids.clone();
         let ids: Option<Vec<&str>> = protocol_ids.as_ref().map(|ids| {
@@ -260,6 +266,7 @@ where
                 request.protocol_system.clone(),
                 ids,
                 request.include_balances,
+                Some(&pagination_parameters),
             )
             .await
             .map_err(|err| {
@@ -278,6 +285,7 @@ where
                 .into_iter()
                 .map(dto::ResponseProtocolState::from)
                 .collect(),
+            request.pagination.clone(),
         ))
     }
 
@@ -365,6 +373,8 @@ where
         request: &dto::ProtocolComponentsRequestBody,
     ) -> Result<dto::ProtocolComponentRequestResponse, RpcError> {
         let system = request.protocol_system.clone();
+        let pagination_parameters: PaginationParams = (&request.pagination).into();
+
         let ids_strs: Option<Vec<&str>> = request
             .component_ids
             .as_ref()
@@ -389,13 +399,22 @@ where
                     .map(dto::ProtocolComponent::from)
                     .collect::<Vec<dto::ProtocolComponent>>();
 
-                return Ok(dto::ProtocolComponentRequestResponse::new(response_components));
+                return Ok(dto::ProtocolComponentRequestResponse::new(
+                    response_components,
+                    request.pagination.clone(),
+                ));
             }
         }
 
         match self
             .db_gateway
-            .get_protocol_components(&request.chain.into(), system, ids_slice, request.tvl_gt)
+            .get_protocol_components(
+                &request.chain.into(),
+                system,
+                ids_slice,
+                request.tvl_gt,
+                Some(&pagination_parameters),
+            )
             .await
         {
             Ok(comps) => {
@@ -404,7 +423,10 @@ where
                     .into_iter()
                     .map(dto::ProtocolComponent::from)
                     .collect::<Vec<dto::ProtocolComponent>>();
-                Ok(dto::ProtocolComponentRequestResponse::new(response_components))
+                Ok(dto::ProtocolComponentRequestResponse::new(
+                    response_components,
+                    request.pagination.clone(),
+                ))
             }
             Err(err) => {
                 error!(error = %err, "Error while getting protocol components.");
@@ -715,7 +737,7 @@ pub async fn protocol_state<G: Gateway>(
 /// This endpoint is used to check the health of the service.
 #[utoipa::path(
     get,
-    path="/v1/health",
+    path = "/v1/health",
     responses(
         (status = 200, description = "OK", body=Health),
     ),
@@ -817,14 +839,15 @@ mod tests {
             protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             chain: dto::Chain::Ethereum,
+            pagination: dto::PaginationParams::default(),
         };
 
         let time_difference = expected
             .version
             .timestamp
             .unwrap()
-            .timestamp_millis() -
-            result
+            .timestamp_millis()
+            - result
                 .version
                 .timestamp
                 .unwrap()
@@ -875,6 +898,7 @@ mod tests {
             protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             chain: dto::Chain::Ethereum,
+            pagination: dto::PaginationParams::default(),
         };
         let state = req_handler
             .get_contract_state_inner(request)
@@ -898,6 +922,7 @@ mod tests {
             protocol_system: None,
             version: dto::VersionParam::default(),
             chain: dto::Chain::Ethereum,
+            pagination: dto::PaginationParams::default(),
         };
 
         // Serialize the request body to JSON
@@ -980,6 +1005,7 @@ mod tests {
             chain: dto::Chain::Ethereum,
             include_balances: true,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
+            pagination: dto::PaginationParams::default(),
         };
         let res = req_handler
             .get_protocol_state_inner(request)
@@ -1025,6 +1051,7 @@ mod tests {
             component_ids: None,
             tvl_gt: None,
             chain: dto::Chain::Ethereum,
+            pagination: dto::PaginationParams::default(),
         };
 
         let components = req_handler
