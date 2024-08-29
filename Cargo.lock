@@ -5950,7 +5950,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "token-analyzer"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6440,7 +6440,7 @@ dependencies = [
 
 [[package]]
 name = "tycho-client"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6470,7 +6470,7 @@ dependencies = [
 
 [[package]]
 name = "tycho-core"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6495,7 +6495,7 @@ dependencies = [
 
 [[package]]
 name = "tycho-indexer"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "actix",
  "actix-rt",
@@ -6555,7 +6555,7 @@ dependencies = [
 
 [[package]]
 name = "tycho-storage"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "async-trait",
  "chrono",
