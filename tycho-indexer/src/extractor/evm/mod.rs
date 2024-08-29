@@ -13,8 +13,8 @@ use tycho_core::{
         blockchain::{AggregatedBlockChanges, Block, BlockScoped, Transaction},
         contract::{Account, AccountUpdate, TransactionVMUpdates},
         protocol::{
-            self as tycho_core_protocol, ComponentBalance, ProtocolComponent,
-            ProtocolComponentStateDelta,
+            self as tycho_core_protocol, ComponentBalance, ProtocolChangesWithTx,
+            ProtocolComponent, ProtocolComponentStateDelta,
         },
         token::CurrencyToken,
         Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
@@ -647,23 +647,16 @@ impl TryFromMessage for ProtocolComponentStateDelta {
     }
 }
 
-/// Updates grouped by their respective transaction.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct ProtocolChangesWithTx {
-    pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub protocol_states: HashMap<ComponentId, ProtocolComponentStateDelta>,
-    pub balance_changes: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-    pub tx: Transaction,
-}
+impl TryFromMessage for ProtocolChangesWithTx {
+    type Args<'a> = (
+        substreams::TransactionEntityChanges,
+        &'a Block,
+        &'a str,
+        &'a HashMap<String, ProtocolType>,
+    );
 
-impl ProtocolChangesWithTx {
-    /// Parses protocol state from tychos protobuf EntityChanges message
-    pub fn try_from_message(
-        msg: substreams::TransactionEntityChanges,
-        block: &Block,
-        protocol_system: &str,
-        protocol_types: &HashMap<String, ProtocolType>,
-    ) -> Result<Self, ExtractionError> {
+    fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
+        let (msg, block, protocol_system, protocol_types) = args;
         let tx = Transaction::try_from_message((
             msg.tx
                 .expect("TransactionEntityChanges should have a transaction"),
@@ -728,93 +721,19 @@ impl ProtocolChangesWithTx {
         Ok(Self {
             new_protocol_components,
             protocol_states: state_updates,
-            balance_changes: component_balances,
+            balance_changes: component_balances
+                .into_iter()
+                .map(|(id, bals)| {
+                    (
+                        id,
+                        bals.into_iter()
+                            .map(|(id, bal)| (Bytes::from(id), bal))
+                            .collect(),
+                    )
+                })
+                .collect(),
             tx,
         })
-    }
-
-    /// Merges this update with another one.
-    ///
-    /// The method combines two `ProtocolStatesWithTx` instances under certain
-    /// conditions:
-    /// - The block from which both updates came should be the same. If the updates are from
-    ///   different blocks, the method will return an error.
-    /// - The transactions for each of the updates should be distinct. If they come from the same
-    ///   transaction, the method will return an error.
-    /// - The order of the transaction matters. The transaction from `other` must have occurred
-    ///   later than the self transaction. If the self transaction has a higher index than `other`,
-    ///   the method will return an error.
-    ///
-    /// The merged update keeps the transaction of `other`.
-    ///
-    /// # Errors
-    /// This method will return `ExtractionError::MergeError` if any of the above
-    /// conditions is violated.
-    pub fn merge(&mut self, other: ProtocolChangesWithTx) -> Result<(), ExtractionError> {
-        if self.tx.block_hash != other.tx.block_hash {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates from different blocks: {:x} != {:x}",
-                self.tx.block_hash, other.tx.block_hash,
-            )));
-        }
-        if self.tx.hash == other.tx.hash {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates from the same transaction: {:x}",
-                self.tx.hash
-            )));
-        }
-        if self.tx.index > other.tx.index {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge ProtocolStates with lower transaction index: {} > {}",
-                self.tx.index, other.tx.index
-            )));
-        }
-        self.tx = other.tx;
-        // Merge protocol states
-        for (key, value) in other.protocol_states {
-            match self.protocol_states.entry(key) {
-                Entry::Occupied(mut entry) => {
-                    entry
-                        .get_mut()
-                        .merge(value)
-                        .map_err(ExtractionError::MergeError)?;
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(value);
-                }
-            }
-        }
-
-        // Merge token balances
-        for (component_id, balance_changes) in other.balance_changes {
-            let token_balances = self
-                .balance_changes
-                .entry(component_id)
-                .or_default();
-            for (token, balance) in balance_changes {
-                token_balances.insert(token, balance);
-            }
-        }
-
-        // Merge new protocol components
-        // Log a warning if a new protocol component for the same id already exists, because this
-        // should never happen.
-        for (key, value) in other.new_protocol_components {
-            match self.new_protocol_components.entry(key) {
-                Entry::Occupied(mut entry) => {
-                    warn!(
-                        "Overwriting new protocol component for id {} with a new one. This should never happen! Please check logic",
-                        entry.get().id
-                    );
-                    entry.insert(value);
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(value);
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -942,11 +861,9 @@ impl StateUpdateBufferEntry for BlockEntityChanges {
             for (component_id, protocol_update) in update.balance_changes.iter() {
                 for (token, value) in protocol_update
                     .iter()
-                    .filter(|(token, _)| {
-                        keys_set.contains(&(component_id, &token.as_bytes().into()))
-                    })
+                    .filter(|(token, _)| keys_set.contains(&(component_id, token)))
                 {
-                    res.entry((component_id.clone(), token.as_bytes().into()))
+                    res.entry((component_id.clone(), token.clone()))
                         .or_insert(value.clone());
                 }
             }
@@ -1003,12 +920,12 @@ impl BlockEntityChanges {
                         )
                     })?;
 
-                    ProtocolChangesWithTx::try_from_message(
+                    ProtocolChangesWithTx::try_from_message((
                         change,
                         &block,
                         protocol_system,
                         protocol_types,
-                    )
+                    ))
                 })
                 .collect::<Result<Vec<ProtocolChangesWithTx>, ExtractionError>>()?;
 
@@ -1050,7 +967,9 @@ impl BlockEntityChanges {
 
         let aggregated_changes = iter
             .try_fold(first_state, |mut acc_state, new_state| {
-                acc_state.merge(new_state.clone())?;
+                acc_state
+                    .merge(new_state.clone())
+                    .map_err(ExtractionError::MergeError)?;
                 Ok::<_, ExtractionError>(acc_state.clone())
             })
             .unwrap();
@@ -1065,7 +984,18 @@ impl BlockEntityChanges {
             new_tokens: self.new_tokens,
             new_protocol_components: aggregated_changes.new_protocol_components,
             deleted_protocol_components: HashMap::new(),
-            component_balances: aggregated_changes.balance_changes,
+            component_balances: aggregated_changes
+                .balance_changes
+                .into_iter()
+                .map(|(id, bals)| {
+                    (
+                        id,
+                        bals.into_iter()
+                            .map(|(id, bal)| (H160::from(id), bal))
+                            .collect(),
+                    )
+                })
+                .collect(),
             component_tvl: HashMap::new(),
         })
     }
@@ -1314,7 +1244,18 @@ impl From<ProtocolChangesWithTx> for TxWithChanges {
             protocol_components: value.new_protocol_components,
             account_updates: HashMap::new(),
             state_updates: value.protocol_states,
-            balance_changes: value.balance_changes,
+            balance_changes: value
+                .balance_changes
+                .into_iter()
+                .map(|(id, bals)| {
+                    (
+                        id,
+                        bals.into_iter()
+                            .map(|(id, bal)| (H160::from(id), bal))
+                            .collect(),
+                    )
+                })
+                .collect(),
             tx: value.tx,
         }
     }
@@ -3983,19 +3924,19 @@ mod test {
     #[rstest]
     #[case::diff_block(
     fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
-    Err(ExtractionError::MergeError(format ! ("Can't merge ProtocolStates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
+    Err(format ! ("Can't merge ProtocolStates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1))
     )]
     #[case::same_tx(
     fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
-    Err(ExtractionError::MergeError(format ! ("Can't merge ProtocolStates from the same transaction: 0x{:x}", H256::zero())))
+    Err(format ! ("Can't merge ProtocolStates from the same transaction: 0x{:x}", H256::zero()))
     )]
     #[case::lower_idx(
     fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
-    Err(ExtractionError::MergeError("Can't merge ProtocolStates with lower transaction index: 10 > 1".to_owned()))
+    Err("Can't merge ProtocolStates with lower transaction index: 10 > 1".to_owned())
     )]
     fn test_merge_pool_state_update_with_tx_errors(
         #[case] tx: Transaction,
-        #[case] exp: Result<(), ExtractionError>,
+        #[case] exp: Result<(), String>,
     ) {
         let mut base_state = protocol_state_with_tx();
 
@@ -4121,7 +4062,9 @@ mod test {
         let new_balances = HashMap::from([(
             "Balance1".to_string(),
             [(
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                    .unwrap()
+                    .into(),
                 ComponentBalance {
                     token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                         .unwrap()

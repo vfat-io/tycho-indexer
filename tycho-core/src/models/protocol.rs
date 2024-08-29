@@ -4,9 +4,13 @@ use crate::{
 };
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
+use tracing::warn;
 
-use super::{Address, AttrStoreKey, Balance, ComponentId, DeltaError, StoreVal, TxHash};
+use super::{
+    blockchain::Transaction, Address, AttrStoreKey, Balance, ComponentId, DeltaError, StoreVal,
+    TxHash,
+};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProtocolComponent {
@@ -179,5 +183,96 @@ impl ComponentBalance {
             modify_tx,
             component_id: component_id.to_string(),
         }
+    }
+}
+
+/// Updates grouped by their respective transaction.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ProtocolChangesWithTx {
+    pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
+    pub protocol_states: HashMap<ComponentId, ProtocolComponentStateDelta>,
+    pub balance_changes: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+    pub tx: Transaction,
+}
+
+impl ProtocolChangesWithTx {
+    /// Merges this update with another one.
+    ///
+    /// The method combines two `ProtocolStatesWithTx` instances under certain
+    /// conditions:
+    /// - The block from which both updates came should be the same. If the updates are from
+    ///   different blocks, the method will return an error.
+    /// - The transactions for each of the updates should be distinct. If they come from the same
+    ///   transaction, the method will return an error.
+    /// - The order of the transaction matters. The transaction from `other` must have occurred
+    ///   later than the self transaction. If the self transaction has a higher index than `other`,
+    ///   the method will return an error.
+    ///
+    /// The merged update keeps the transaction of `other`.
+    ///
+    /// # Errors
+    /// This method will return an error if any of the above conditions is violated.
+    pub fn merge(&mut self, other: ProtocolChangesWithTx) -> Result<(), String> {
+        if self.tx.block_hash != other.tx.block_hash {
+            return Err(format!(
+                "Can't merge ProtocolStates from different blocks: {:x} != {:x}",
+                self.tx.block_hash, other.tx.block_hash,
+            ));
+        }
+        if self.tx.hash == other.tx.hash {
+            return Err(format!(
+                "Can't merge ProtocolStates from the same transaction: {:x}",
+                self.tx.hash
+            ));
+        }
+        if self.tx.index > other.tx.index {
+            return Err(format!(
+                "Can't merge ProtocolStates with lower transaction index: {} > {}",
+                self.tx.index, other.tx.index
+            ));
+        }
+        self.tx = other.tx;
+        // Merge protocol states
+        for (key, value) in other.protocol_states {
+            match self.protocol_states.entry(key) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().merge(value)?;
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(value);
+                }
+            }
+        }
+
+        // Merge token balances
+        for (component_id, balance_changes) in other.balance_changes {
+            let token_balances = self
+                .balance_changes
+                .entry(component_id)
+                .or_default();
+            for (token, balance) in balance_changes {
+                token_balances.insert(token, balance);
+            }
+        }
+
+        // Merge new protocol components
+        // Log a warning if a new protocol component for the same id already exists, because this
+        // should never happen.
+        for (key, value) in other.new_protocol_components {
+            match self.new_protocol_components.entry(key) {
+                Entry::Occupied(mut entry) => {
+                    warn!(
+                        "Overwriting new protocol component for id {} with a new one. This should never happen! Please check logic",
+                        entry.get().id
+                    );
+                    entry.insert(value);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(value);
+                }
+            }
+        }
+
+        Ok(())
     }
 }

@@ -399,17 +399,14 @@ mod test {
     use tycho_core::{
         models::{
             blockchain::Transaction,
-            protocol::{ComponentBalance, ProtocolComponentStateDelta},
+            protocol::{ComponentBalance, ProtocolChangesWithTx, ProtocolComponentStateDelta},
             Chain,
         },
         storage::StorageError,
         Bytes,
     };
 
-    use crate::{
-        extractor::evm::{BlockEntityChanges, ProtocolChangesWithTx},
-        testing,
-    };
+    use crate::{extractor::evm::BlockEntityChanges, testing};
 
     use super::{BlockNumberOrTimestamp, FinalityStatus, RevertBuffer};
 
@@ -443,7 +440,9 @@ mod test {
                     (
                         "Balance1".to_string(),
                         [(
-                            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                .unwrap()
+                                .into(),
                             ComponentBalance {
                                 token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                     .unwrap()
@@ -460,7 +459,9 @@ mod test {
                     (
                         "Balance2".to_string(),
                         [(
-                            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                .unwrap()
+                                .into(),
                             ComponentBalance {
                                 token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                     .unwrap()
@@ -536,7 +537,9 @@ mod test {
                 let balance_changes = HashMap::from([(
                     "Balance1".to_string(),
                     [(
-                        H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                        H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                            .unwrap()
+                            .into(),
                         ComponentBalance {
                             token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                 .unwrap()

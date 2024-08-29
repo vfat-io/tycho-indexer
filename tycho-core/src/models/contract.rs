@@ -273,8 +273,7 @@ impl TransactionVMUpdates {
     /// The merged update keeps the transaction of `other`.
     ///
     /// # Errors
-    /// This method will return `ExtractionError::MergeError` if any of the above
-    /// conditions is violated.
+    /// This method will return an error if any of the above conditions is violated.
     pub fn merge(&mut self, other: &TransactionVMUpdates) -> Result<(), String> {
         if self.tx.block_hash != other.tx.block_hash {
             return Err(format!(
