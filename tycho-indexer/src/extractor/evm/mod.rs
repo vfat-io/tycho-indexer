@@ -175,38 +175,38 @@ impl NormalisedMessage for BlockAccountChanges {
     }
 }
 
-impl std::fmt::Display for BlockEntityChangesResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "block_number: {}, extractor: {}", self.block.number, self.extractor)
-    }
-}
+// impl std::fmt::Display for BlockEntityChangesResult {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "block_number: {}, extractor: {}", self.block.number, self.extractor)
+//     }
+// }
 
-#[typetag::serde]
-impl NormalisedMessage for BlockEntityChangesResult {
-    fn source(&self) -> ExtractorIdentity {
-        ExtractorIdentity::new(self.chain, &self.extractor)
-    }
+// #[typetag::serde]
+// impl NormalisedMessage for BlockEntityChangesResult {
+//     fn source(&self) -> ExtractorIdentity {
+//         ExtractorIdentity::new(self.chain, &self.extractor)
+//     }
 
-    fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
-        Arc::new(Self::new(
-            &self.extractor,
-            self.chain,
-            self.block.clone(),
-            self.finalized_block_height,
-            self.revert,
-            HashMap::new(),
-            self.new_tokens.clone(),
-            self.new_protocol_components.clone(),
-            self.deleted_protocol_components.clone(),
-            self.component_balances.clone(),
-            self.component_tvl.clone(),
-        ))
-    }
+//     fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
+//         Arc::new(Self::new(
+//             &self.extractor,
+//             self.chain,
+//             self.block.clone(),
+//             self.finalized_block_height,
+//             self.revert,
+//             HashMap::new(),
+//             self.new_tokens.clone(),
+//             self.new_protocol_components.clone(),
+//             self.deleted_protocol_components.clone(),
+//             self.component_balances.clone(),
+//             self.component_tvl.clone(),
+//         ))
+//     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
+//     fn as_any(&self) -> &dyn std::any::Any {
+//         self
+//     }
+// }
 
 /// A container for account updates grouped by transaction.
 ///
@@ -737,66 +737,6 @@ impl TryFromMessage for ProtocolChangesWithTx {
     }
 }
 
-/// A container for state updates grouped by protocol component.
-///
-/// Hold a single update per component. This is a condensed form of
-/// [BlockEntityChanges].
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
-pub struct BlockEntityChangesResult {
-    extractor: String,
-    chain: Chain,
-    pub block: Block,
-    pub finalized_block_height: u64,
-    pub revert: bool,
-    pub state_updates: HashMap<String, ProtocolComponentStateDelta>,
-    pub new_tokens: HashMap<Address, CurrencyToken>,
-    pub new_protocol_components: HashMap<String, ProtocolComponent>,
-    pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
-    pub component_balances: HashMap<String, HashMap<H160, ComponentBalance>>,
-    pub component_tvl: HashMap<String, f64>,
-}
-
-impl BlockEntityChangesResult {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        extractor: &str,
-        chain: Chain,
-        block: Block,
-        finalized_block_height: u64,
-        revert: bool,
-        state_updates: HashMap<String, ProtocolComponentStateDelta>,
-        new_tokens: HashMap<Address, CurrencyToken>,
-        new_protocol_components: HashMap<String, ProtocolComponent>,
-        deleted_protocol_components: HashMap<String, ProtocolComponent>,
-        component_balances: HashMap<String, HashMap<H160, ComponentBalance>>,
-        component_tvl: HashMap<String, f64>,
-    ) -> Self {
-        Self {
-            extractor: extractor.to_string(),
-            chain,
-            block,
-            finalized_block_height,
-            revert,
-            state_updates,
-            new_tokens,
-            new_protocol_components,
-            deleted_protocol_components,
-            component_balances,
-            component_tvl,
-        }
-    }
-
-    #[allow(dead_code)]
-    fn is_empty(&self) -> bool {
-        self.state_updates.is_empty() &&
-            self.new_protocol_components.is_empty() &&
-            self.deleted_protocol_components
-                .is_empty() &&
-            self.component_balances.is_empty() &&
-            self.component_tvl.is_empty()
-    }
-}
-
 /// A container for state updates grouped by transaction
 ///
 /// Hold the detailed state changes for a block alongside with protocol
@@ -944,60 +884,6 @@ impl BlockEntityChanges {
         } else {
             Err(ExtractionError::Empty)
         }
-    }
-
-    /// Aggregates state updates.
-    ///
-    /// This function aggregates the protocol updates (`ProtocolStateDelta` and `ComponentBalance`)
-    /// for different protocol components into a `BlockEntityChangesResult` object.
-    /// This new object should have only one final ProtocolStateDelta per component_id.
-    ///
-    /// After merging all updates, a `BlockEntityChangesResult` object is returned
-    /// which contains, amongst other data, the compacted state updates.
-    ///
-    /// # Errors
-    ///
-    /// This returns an error if there was a problem during merge. The error
-    /// type is `ExtractionError`.
-    pub fn aggregate_updates(self) -> Result<BlockEntityChangesResult, ExtractionError> {
-        let mut iter = self.txs_with_update.into_iter();
-
-        // Use unwrap_or_else to provide a default state if iter.next() is None
-        let first_state = iter.next().unwrap_or_default();
-
-        let aggregated_changes = iter
-            .try_fold(first_state, |mut acc_state, new_state| {
-                acc_state
-                    .merge(new_state.clone())
-                    .map_err(ExtractionError::MergeError)?;
-                Ok::<_, ExtractionError>(acc_state.clone())
-            })
-            .unwrap();
-
-        Ok(BlockEntityChangesResult {
-            extractor: self.extractor,
-            chain: self.chain,
-            block: self.block,
-            finalized_block_height: self.finalized_block_height,
-            revert: self.revert,
-            state_updates: aggregated_changes.protocol_states,
-            new_tokens: self.new_tokens,
-            new_protocol_components: aggregated_changes.new_protocol_components,
-            deleted_protocol_components: HashMap::new(),
-            component_balances: aggregated_changes
-                .balance_changes
-                .into_iter()
-                .map(|(id, bals)| {
-                    (
-                        id,
-                        bals.into_iter()
-                            .map(|(id, bal)| (H160::from(id), bal))
-                            .collect(),
-                    )
-                })
-                .collect(),
-            component_tvl: HashMap::new(),
-        })
     }
 
     pub fn protocol_components(&self) -> Vec<ProtocolComponent> {
@@ -4006,146 +3892,6 @@ mod test {
         )
         .unwrap();
         assert_eq!(res, block_entity_changes());
-    }
-
-    fn block_entity_changes_result() -> BlockEntityChangesResult {
-        let tx = Transaction {
-            hash: Bytes::from_str(
-                "0x0000000000000000000000000000000000000000000000000000000011121314",
-            )
-            .unwrap(),
-            block_hash: Bytes::from_str(
-                "0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .unwrap(),
-            from: Bytes::from_str("0000000000000000000000000000000041424344").unwrap(),
-            to: Some(Bytes::from_str("0000000000000000000000000000000051525354").unwrap()),
-            index: 2,
-        };
-        let attr1: HashMap<String, Bytes> = vec![
-            ("reserve".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec())),
-            ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
-            ("new".to_owned(), Bytes::from(0_u64.to_be_bytes().to_vec())),
-        ]
-        .into_iter()
-        .collect();
-        let attr2: HashMap<String, Bytes> = vec![
-            ("reserve".to_owned(), Bytes::from(1000_u64.to_be_bytes().to_vec())),
-            ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
-        ]
-        .into_iter()
-        .collect();
-        let state_updates: HashMap<String, ProtocolComponentStateDelta> = vec![
-            (
-                "State1".to_owned(),
-                ProtocolComponentStateDelta {
-                    component_id: "State1".to_owned(),
-                    updated_attributes: attr1,
-                    deleted_attributes: HashSet::new(),
-                },
-            ),
-            (
-                "State2".to_owned(),
-                ProtocolComponentStateDelta {
-                    component_id: "State2".to_owned(),
-                    updated_attributes: attr2,
-                    deleted_attributes: HashSet::new(),
-                },
-            ),
-        ]
-        .into_iter()
-        .collect();
-        let static_attr: HashMap<String, Bytes> =
-            vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
-                .into_iter()
-                .collect();
-        let new_protocol_components: HashMap<String, ProtocolComponent> = vec![(
-            "Pool".to_owned(),
-            ProtocolComponent {
-                id: "Pool".to_owned(),
-                protocol_system: "ambient".to_string(),
-                protocol_type_name: "WeightedPool".to_owned(),
-                chain: Chain::Ethereum,
-                tokens: vec![
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                        .unwrap()
-                        .into(),
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                        .unwrap()
-                        .into(),
-                ],
-                static_attributes: static_attr,
-                contract_addresses: vec![H160::from_str(
-                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-                )
-                .unwrap()
-                .into()],
-                change: ChangeType::Creation,
-                creation_tx: tx.hash.clone(),
-                created_at: yesterday_midnight(),
-            },
-        )]
-        .into_iter()
-        .collect();
-
-        let new_balances = [(
-            "Balance1".to_string(),
-            [(
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-                ComponentBalance {
-                    token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                        .unwrap()
-                        .into(),
-                    new_balance: Bytes::from(1_i32.to_le_bytes()),
-                    modify_tx: tx.hash.clone(),
-                    component_id: "Balance1".to_string(),
-                    balance_float: 16777216.0,
-                },
-            )]
-            .into_iter()
-            .collect(),
-        )]
-        .into_iter()
-        .collect();
-
-        BlockEntityChangesResult {
-            extractor: "test".to_string(),
-            chain: Chain::Ethereum,
-            block: Block {
-                number: 1,
-                hash: tx.block_hash,
-                parent_hash: H256::from_low_u64_be(
-                    0x0000000000000000000000000000000000000000000000000000000021222324,
-                )
-                .into(),
-                chain: Chain::Ethereum,
-                ts: yesterday_midnight(),
-            },
-            finalized_block_height: 420,
-            revert: false,
-            state_updates,
-            new_tokens: HashMap::new(),
-            new_protocol_components,
-            deleted_protocol_components: HashMap::new(),
-            component_balances: new_balances,
-            component_tvl: HashMap::new(),
-        }
-    }
-
-    #[test]
-    fn test_block_entity_changes_aggregate() {
-        let mut block_changes = block_entity_changes();
-        let block_hash = "0x0000000000000000000000000000000000000000000000000000000000000000";
-        // use a different tx so merge works
-        let new_tx = fixtures::transaction02(HASH_256_1, block_hash, 5);
-        block_changes.txs_with_update[0].tx = new_tx;
-
-        let res = block_changes
-            .aggregate_updates()
-            .unwrap();
-
-        assert_eq!(res, block_entity_changes_result());
-        assert_eq!(res.state_updates.len(), 2);
     }
 
     fn create_transaction() -> Transaction {
