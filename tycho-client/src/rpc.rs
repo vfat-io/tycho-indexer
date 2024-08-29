@@ -16,10 +16,9 @@ use async_trait::async_trait;
 use futures03::future::try_join_all;
 
 use tycho_core::dto::{
-    Chain, PaginationParams, ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
-    ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
-    ProtocolStateRequestResponse, ResponseToken, StateRequestBody, StateRequestParameters,
-    StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
+    Chain, PaginationParams, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody,
+    ProtocolId, ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseToken,
+    StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
 };
 
 use tokio::sync::Semaphore;
@@ -50,21 +49,16 @@ pub trait RPCClient {
     /// Retrieves a snapshot of contract state.
     async fn get_contract_state(
         &self,
-        chain: Chain,
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError>;
 
     async fn get_protocol_components(
         &self,
-        chain: Chain,
-        filters: &ProtocolComponentRequestParameters,
         request: &ProtocolComponentsRequestBody,
     ) -> Result<ProtocolComponentRequestResponse, RPCError>;
 
     async fn get_protocol_states(
         &self,
-        chain: Chain,
-        filters: &StateRequestParameters,
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError>;
 
@@ -72,9 +66,9 @@ pub trait RPCClient {
     async fn get_protocol_states_paginated(
         &self,
         chain: Chain,
-        filters: &StateRequestParameters,
         ids: &[ProtocolId],
         protocol_system: &Option<String>,
+        include_balances: bool,
         version: &VersionParam,
         chunk_size: usize,
         concurrency: usize,
@@ -85,6 +79,8 @@ pub trait RPCClient {
             .map(|c| ProtocolStateRequestBody {
                 protocol_ids: Some(c.to_vec()),
                 protocol_system: protocol_system.clone(),
+                chain,
+                include_balances,
                 version: version.clone(),
             })
             .collect::<Vec<_>>();
@@ -97,8 +93,7 @@ pub trait RPCClient {
                     .acquire()
                     .await
                     .map_err(|_| RPCError::Fatal("Semaphore dropped".to_string()))?;
-                self.get_protocol_states(chain, filters, body)
-                    .await
+                self.get_protocol_states(body).await
             });
         }
 
@@ -116,7 +111,6 @@ pub trait RPCClient {
     /// get_all_tokens.
     async fn get_tokens(
         &self,
-        chain: &Chain,
         request: &TokensRequestBody,
     ) -> Result<TokensRequestResponse, RPCError>;
 
@@ -131,22 +125,20 @@ pub trait RPCClient {
         let mut all_tokens = Vec::new();
         loop {
             let mut response = self
-                .get_tokens(
-                    &chain,
-                    &TokensRequestBody {
-                        token_addresses: None,
-                        min_quality,
-                        traded_n_days_ago,
-                        pagination: PaginationParams {
-                            page: request_page,
-                            page_size: chunk_size.try_into().map_err(|_| {
-                                RPCError::FormatRequest(
-                                    "Failed to convert chunk_size into i64".to_string(),
-                                )
-                            })?,
-                        },
+                .get_tokens(&TokensRequestBody {
+                    token_addresses: None,
+                    min_quality,
+                    traded_n_days_ago,
+                    pagination: PaginationParams {
+                        page: request_page,
+                        page_size: chunk_size.try_into().map_err(|_| {
+                            RPCError::FormatRequest(
+                                "Failed to convert chunk_size into i64".to_string(),
+                            )
+                        })?,
                     },
-                )
+                    chain,
+                })
                 .await?;
 
             let num_tokens = response.tokens.len();
@@ -181,7 +173,6 @@ impl RPCClient for HttpRPCClient {
     #[instrument(skip(self, request))]
     async fn get_contract_state(
         &self,
-        chain: Chain,
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
@@ -196,12 +187,11 @@ impl RPCClient for HttpRPCClient {
         }
 
         let uri = format!(
-            "{}/{}/{}/contract_state",
+            "{}/{}/contract_state",
             self.uri
                 .to_string()
                 .trim_end_matches('/'),
-            TYCHO_SERVER_VERSION,
-            chain
+            TYCHO_SERVER_VERSION
         );
         debug!(%uri, "Sending contract_state request to Tycho server");
         let body =
@@ -239,18 +229,14 @@ impl RPCClient for HttpRPCClient {
 
     async fn get_protocol_components(
         &self,
-        chain: Chain,
-        filters: &ProtocolComponentRequestParameters,
         request: &ProtocolComponentsRequestBody,
     ) -> Result<ProtocolComponentRequestResponse, RPCError> {
         let uri = format!(
-            "{}/{}/{}/protocol_components{}",
+            "{}/{}/protocol_components",
             self.uri
                 .to_string()
                 .trim_end_matches('/'),
             TYCHO_SERVER_VERSION,
-            chain,
-            filters.to_query_string()
         );
         debug!(%uri, "Sending protocol_components request to Tycho server");
 
@@ -284,8 +270,6 @@ impl RPCClient for HttpRPCClient {
 
     async fn get_protocol_states(
         &self,
-        chain: Chain,
-        filters: &StateRequestParameters,
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError> {
         // Check if contract ids are specified
@@ -300,13 +284,11 @@ impl RPCClient for HttpRPCClient {
         }
 
         let uri = format!(
-            "{}/{}/{}/protocol_state{}",
+            "{}/{}/protocol_state",
             self.uri
                 .to_string()
                 .trim_end_matches('/'),
             TYCHO_SERVER_VERSION,
-            chain,
-            filters.to_query_string()
         );
         debug!(%uri, "Sending protocol_states request to Tycho server");
 
@@ -344,16 +326,14 @@ impl RPCClient for HttpRPCClient {
 
     async fn get_tokens(
         &self,
-        chain: &Chain,
         request: &TokensRequestBody,
     ) -> Result<TokensRequestResponse, RPCError> {
         let uri = format!(
-            "{}/{}/{}/tokens",
+            "{}/{}/tokens",
             self.uri
                 .to_string()
                 .trim_end_matches('/'),
             TYCHO_SERVER_VERSION,
-            chain,
         );
         debug!(%uri, "Sending token request to Tycho server");
 
@@ -421,7 +401,7 @@ mod tests {
         serde_json::from_str::<StateRequestResponse>(server_resp).expect("deserialize");
 
         let mocked_server = server
-            .mock("POST", "/v1/ethereum/contract_state")
+            .mock("POST", "/v1/contract_state")
             .expect(1)
             .with_body(server_resp)
             .create_async()
@@ -430,7 +410,7 @@ mod tests {
         let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
 
         let response = client
-            .get_contract_state(Chain::Ethereum, &Default::default())
+            .get_contract_state(&Default::default())
             .await
             .expect("get state");
         let accounts = response.accounts;
@@ -479,7 +459,7 @@ mod tests {
         serde_json::from_str::<ProtocolComponentRequestResponse>(server_resp).expect("deserialize");
 
         let mocked_server = server
-            .mock("POST", "/v1/ethereum/protocol_components")
+            .mock("POST", "/v1/protocol_components")
             .expect(1)
             .with_body(server_resp)
             .create_async()
@@ -488,7 +468,7 @@ mod tests {
         let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
 
         let response = client
-            .get_protocol_components(Chain::Ethereum, &Default::default(), &Default::default())
+            .get_protocol_components(&Default::default())
             .await
             .expect("get state");
         let components = response.protocol_components;
@@ -529,7 +509,7 @@ mod tests {
         serde_json::from_str::<ProtocolStateRequestResponse>(server_resp).expect("deserialize");
 
         let mocked_server = server
-            .mock("POST", "/v1/ethereum/protocol_state?include_balances=false")
+            .mock("POST", "/v1/protocol_state")
             .expect(1)
             .with_body(server_resp)
             .create_async()
@@ -537,7 +517,7 @@ mod tests {
         let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
 
         let response = client
-            .get_protocol_states(Chain::Ethereum, &Default::default(), &Default::default())
+            .get_protocol_states(&Default::default())
             .await
             .expect("get state");
         let states = response.states;
@@ -601,7 +581,7 @@ mod tests {
         serde_json::from_str::<TokensRequestResponse>(server_resp).expect("deserialize");
 
         let mocked_server = server
-            .mock("POST", "/v1/ethereum/tokens")
+            .mock("POST", "/v1/tokens")
             .expect(1)
             .with_body(server_resp)
             .create_async()
@@ -609,7 +589,7 @@ mod tests {
         let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
 
         let response = client
-            .get_tokens(&Chain::Ethereum, &Default::default())
+            .get_tokens(&Default::default())
             .await
             .expect("get tokens");
 

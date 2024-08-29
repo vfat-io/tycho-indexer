@@ -19,8 +19,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::{
     dto::{
         BlockChanges, BlockParam, ContractId, ExtractorIdentity, ProtocolComponent, ProtocolId,
-        ResponseAccount, ResponseProtocolState, StateRequestBody, StateRequestParameters,
-        VersionParam,
+        ResponseAccount, ResponseProtocolState, StateRequestBody, VersionParam,
     },
     Bytes,
 };
@@ -201,14 +200,13 @@ where
             return Ok(StateSyncMessage { header, ..Default::default() });
         }
 
-        let filters = StateRequestParameters::new(self.retrieve_balances);
         let mut protocol_states = self
             .rpc_client
             .get_protocol_states_paginated(
                 self.extractor_id.chain,
-                &filters,
                 &request_ids,
                 &Some(self.extractor_id.name.clone()),
+                self.retrieve_balances,
                 &version,
                 50,
                 4,
@@ -244,20 +242,18 @@ where
         let vm_storage = if !contract_ids.is_empty() {
             let contract_states = self
                 .rpc_client
-                .get_contract_state(
-                    self.extractor_id.chain,
-                    &StateRequestBody::new(
-                        Some(
-                            contract_ids
-                                .clone()
-                                .into_iter()
-                                .map(|id| ContractId::new(self.extractor_id.chain, id))
-                                .collect(),
-                        ),
-                        Some(self.extractor_id.name.clone()),
-                        version,
+                .get_contract_state(&StateRequestBody::new(
+                    Some(
+                        contract_ids
+                            .clone()
+                            .into_iter()
+                            .map(|id| ContractId::new(self.extractor_id.chain, id))
+                            .collect(),
                     ),
-                )
+                    Some(self.extractor_id.name.clone()),
+                    version,
+                    self.extractor_id.chain,
+                ))
                 .await?
                 .accounts
                 .into_iter()
@@ -529,7 +525,6 @@ mod test {
         DeltasError, RPCError,
     };
     use async_trait::async_trait;
-    use mockall::predicate::always;
     use std::{collections::HashMap, sync::Arc, time::Duration};
     use test_log::test;
     use tokio::{
@@ -540,10 +535,10 @@ mod test {
     use tycho_core::{
         dto::{
             Block, BlockChanges, Chain, ExtractorIdentity, ProtocolComponent,
-            ProtocolComponentRequestParameters, ProtocolComponentRequestResponse,
-            ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
-            ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState, StateRequestBody,
-            StateRequestParameters, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
+            ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolId,
+            ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseAccount,
+            ResponseProtocolState, StateRequestBody, StateRequestResponse, TokensRequestBody,
+            TokensRequestResponse,
         },
         Bytes,
     };
@@ -566,41 +561,33 @@ mod test {
     {
         async fn get_tokens(
             &self,
-            chain: &Chain,
             request: &TokensRequestBody,
         ) -> Result<TokensRequestResponse, RPCError> {
-            self.0.get_tokens(chain, request).await
+            self.0.get_tokens(request).await
         }
 
         async fn get_contract_state(
             &self,
-            chain: Chain,
             request: &StateRequestBody,
         ) -> Result<StateRequestResponse, RPCError> {
-            self.0
-                .get_contract_state(chain, request)
-                .await
+            self.0.get_contract_state(request).await
         }
 
         async fn get_protocol_components(
             &self,
-            chain: Chain,
-            filters: &ProtocolComponentRequestParameters,
             request: &ProtocolComponentsRequestBody,
         ) -> Result<ProtocolComponentRequestResponse, RPCError> {
             self.0
-                .get_protocol_components(chain, filters, request)
+                .get_protocol_components(request)
                 .await
         }
 
         async fn get_protocol_states(
             &self,
-            chain: Chain,
-            filters: &StateRequestParameters,
             request: &ProtocolStateRequestBody,
         ) -> Result<ProtocolStateRequestResponse, RPCError> {
             self.0
-                .get_protocol_states(chain, filters, request)
+                .get_protocol_states(request)
                 .await
         }
     }
@@ -679,7 +666,7 @@ mod test {
         let header = Header::default();
         let mut rpc = MockRPCClient::new();
         rpc.expect_get_protocol_states()
-            .returning(|_, _, _| Ok(state_snapshot_native()));
+            .returning(|_| Ok(state_snapshot_native()));
         let state_sync = with_mocked_clients(true, Some(rpc), None);
         let mut tracker = ComponentTracker::new(
             Chain::Ethereum,
@@ -733,9 +720,9 @@ mod test {
         let header = Header::default();
         let mut rpc = MockRPCClient::new();
         rpc.expect_get_protocol_states()
-            .returning(|_, _, _| Ok(state_snapshot_native()));
+            .returning(|_| Ok(state_snapshot_native()));
         rpc.expect_get_contract_state()
-            .returning(|_, _| Ok(state_snapshot_vm()));
+            .returning(|_| Ok(state_snapshot_vm()));
         let state_sync = with_mocked_clients(false, Some(rpc), None);
         let mut tracker = ComponentTracker::new(
             Chain::Ethereum,
@@ -791,20 +778,16 @@ mod test {
         // specific, see: https://docs.rs/mockall/latest/mockall/#matching-multiple-calls
         rpc_client
             .expect_get_protocol_components()
-            .with(
-                always(),
-                always(),
-                mockall::predicate::function(
-                    move |request_params: &ProtocolComponentsRequestBody| {
-                        if let Some(ids) = request_params.component_ids.as_ref() {
-                            ids.contains(&"Component3".to_string())
-                        } else {
-                            false
-                        }
-                    },
-                ),
-            )
-            .returning(|_, _, _| {
+            .with(mockall::predicate::function(
+                move |request_params: &ProtocolComponentsRequestBody| {
+                    if let Some(ids) = request_params.component_ids.as_ref() {
+                        ids.contains(&"Component3".to_string())
+                    } else {
+                        false
+                    }
+                },
+            ))
+            .returning(|_| {
                 // return Component3
                 Ok(ProtocolComponentRequestResponse {
                     protocol_components: vec![
@@ -815,20 +798,16 @@ mod test {
             });
         rpc_client
             .expect_get_protocol_states()
-            .with(
-                always(),
-                always(),
-                mockall::predicate::function(move |request_params: &ProtocolStateRequestBody| {
-                    let expected_id =
-                        ProtocolId { chain: Chain::Ethereum, id: "Component3".to_string() };
-                    if let Some(ids) = request_params.protocol_ids.as_ref() {
-                        ids.contains(&expected_id)
-                    } else {
-                        false
-                    }
-                }),
-            )
-            .returning(|_, _, _| {
+            .with(mockall::predicate::function(move |request_params: &ProtocolStateRequestBody| {
+                let expected_id =
+                    ProtocolId { chain: Chain::Ethereum, id: "Component3".to_string() };
+                if let Some(ids) = request_params.protocol_ids.as_ref() {
+                    ids.contains(&expected_id)
+                } else {
+                    false
+                }
+            }))
+            .returning(|_| {
                 // return Component3 state
                 Ok(ProtocolStateRequestResponse {
                     states: vec![ResponseProtocolState {
@@ -841,7 +820,7 @@ mod test {
         // mock calls for the initial state snapshots
         rpc_client
             .expect_get_protocol_components()
-            .returning(|_, _, _| {
+            .returning(|_| {
                 // Initial sync of components
                 Ok(ProtocolComponentRequestResponse {
                     protocol_components: vec![
@@ -855,7 +834,7 @@ mod test {
             });
         rpc_client
             .expect_get_protocol_states()
-            .returning(|_, _, _| {
+            .returning(|_| {
                 // Initial state snapshot
                 Ok(ProtocolStateRequestResponse {
                     states: vec![
@@ -1087,20 +1066,16 @@ mod test {
 
         rpc_client
             .expect_get_protocol_components()
-            .with(
-                always(),
-                always(),
-                mockall::predicate::function(
-                    move |request_params: &ProtocolComponentsRequestBody| {
-                        if let Some(ids) = request_params.component_ids.as_ref() {
-                            ids.contains(&"Component3".to_string())
-                        } else {
-                            false
-                        }
-                    },
-                ),
-            )
-            .returning(|_, _, _| {
+            .with(mockall::predicate::function(
+                move |request_params: &ProtocolComponentsRequestBody| {
+                    if let Some(ids) = request_params.component_ids.as_ref() {
+                        ids.contains(&"Component3".to_string())
+                    } else {
+                        false
+                    }
+                },
+            ))
+            .returning(|_| {
                 Ok(ProtocolComponentRequestResponse {
                     protocol_components: vec![ProtocolComponent {
                         id: "Component3".to_string(),
@@ -1111,20 +1086,16 @@ mod test {
 
         rpc_client
             .expect_get_protocol_states()
-            .with(
-                always(),
-                always(),
-                mockall::predicate::function(move |request_params: &ProtocolStateRequestBody| {
-                    let expected_id =
-                        ProtocolId { chain: Chain::Ethereum, id: "Component3".to_string() };
-                    if let Some(ids) = request_params.protocol_ids.as_ref() {
-                        ids.contains(&expected_id)
-                    } else {
-                        false
-                    }
-                }),
-            )
-            .returning(|_, _, _| {
+            .with(mockall::predicate::function(move |request_params: &ProtocolStateRequestBody| {
+                let expected_id =
+                    ProtocolId { chain: Chain::Ethereum, id: "Component3".to_string() };
+                if let Some(ids) = request_params.protocol_ids.as_ref() {
+                    ids.contains(&expected_id)
+                } else {
+                    false
+                }
+            }))
+            .returning(|_| {
                 Ok(ProtocolStateRequestResponse {
                     states: vec![ResponseProtocolState {
                         component_id: "Component3".to_string(),
@@ -1136,7 +1107,7 @@ mod test {
         // Mock for the initial snapshot retrieval
         rpc_client
             .expect_get_protocol_components()
-            .returning(|_, _, _| {
+            .returning(|_| {
                 Ok(ProtocolComponentRequestResponse {
                     protocol_components: vec![
                         ProtocolComponent { id: "Component1".to_string(), ..Default::default() },
@@ -1147,7 +1118,7 @@ mod test {
 
         rpc_client
             .expect_get_protocol_states()
-            .returning(|_, _, _| {
+            .returning(|_| {
                 Ok(ProtocolStateRequestResponse {
                     states: vec![
                         ResponseProtocolState {

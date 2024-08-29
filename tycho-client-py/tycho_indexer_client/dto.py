@@ -261,8 +261,6 @@ class ProtocolComponentsParams(BaseModel):
 
 
 class ProtocolStateParams(BaseModel):
-    tvl_gt: Optional[int] = None
-    inertia_min_gt: Optional[int] = None
     include_balances: Optional[bool] = True
     protocol_ids: Optional[List[ProtocolId]] = Field(default=None)
     protocol_system: Optional[str] = Field(default=None)

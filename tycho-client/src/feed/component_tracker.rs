@@ -2,10 +2,7 @@ use crate::{rpc::RPCClient, RPCError};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, instrument, warn};
 use tycho_core::{
-    dto::{
-        BlockChanges, Chain, ProtocolComponent, ProtocolComponentRequestParameters,
-        ProtocolComponentsRequestBody, ProtocolId,
-    },
+    dto::{BlockChanges, Chain, ProtocolComponent, ProtocolComponentsRequestBody, ProtocolId},
     Bytes,
 };
 
@@ -79,19 +76,22 @@ where
     }
     /// Retrieve all components that belong to the system we are extracing and have sufficient tvl.
     pub async fn initialise_components(&mut self) -> Result<(), RPCError> {
-        let (filters, body) = match &self.filter.variant {
+        let body = match &self.filter.variant {
             ComponentFilterVariant::Ids(ids) => {
-                (Default::default(), ProtocolComponentsRequestBody::id_filtered(ids.clone()))
+                ProtocolComponentsRequestBody::id_filtered(ids.clone(), self.chain)
             }
-            ComponentFilterVariant::MinimumTVLRange((_, upper_tvl_threshold)) => (
-                ProtocolComponentRequestParameters::tvl_filtered(*upper_tvl_threshold),
-                ProtocolComponentsRequestBody::system_filtered(&self.protocol_system),
-            ),
+            ComponentFilterVariant::MinimumTVLRange((_, upper_tvl_threshold)) => {
+                ProtocolComponentsRequestBody::system_filtered(
+                    &self.protocol_system,
+                    Some(*upper_tvl_threshold),
+                    self.chain,
+                )
+            }
         };
 
         self.components = self
             .rpc_client
-            .get_protocol_components(self.chain, &filters, &body)
+            .get_protocol_components(&body)
             .await?
             .protocol_components
             .into_iter()
@@ -115,17 +115,17 @@ where
         if new_components.is_empty() {
             return Ok(());
         }
-        let filters = ProtocolComponentRequestParameters::default();
         let request = ProtocolComponentsRequestBody::id_filtered(
             new_components
                 .iter()
                 .map(|pc_id| pc_id.to_string())
                 .collect(),
+            self.chain,
         );
 
         self.components.extend(
             self.rpc_client
-                .get_protocol_components(self.chain, &filters, &request)
+                .get_protocol_components(&request)
                 .await?
                 .protocol_components
                 .into_iter()
@@ -236,7 +236,7 @@ mod test {
         tracker
             .rpc_client
             .expect_get_protocol_components()
-            .returning(move |_, _, _| {
+            .returning(move |_| {
                 Ok(ProtocolComponentRequestResponse {
                     protocol_components: vec![component.clone()],
                 })
@@ -267,7 +267,7 @@ mod test {
         tracker
             .rpc_client
             .expect_get_protocol_components()
-            .returning(move |_, _, _| {
+            .returning(move |_| {
                 Ok(ProtocolComponentRequestResponse {
                     protocol_components: vec![component.clone()],
                 })
