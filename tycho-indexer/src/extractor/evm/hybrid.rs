@@ -16,6 +16,7 @@ use token_analyzer::TokenFinder;
 use tycho_core::{
     models::{
         self,
+        blockchain::AggregatedBlockChanges,
         contract::{Account, AccountUpdate},
         protocol::{ComponentBalance, ProtocolComponentState, ProtocolComponentStateDelta},
         token::CurrencyToken,
@@ -210,7 +211,7 @@ where
     #[allow(clippy::mutable_key_type)]
     async fn handle_tvl_changes(
         &self,
-        msg: &mut evm::AggregatedBlockChanges,
+        msg: &mut AggregatedBlockChanges,
     ) -> Result<(), ExtractionError> {
         trace!("Calculating tvl changes");
         if msg.component_balances.is_empty() {
@@ -259,8 +260,7 @@ where
         // most of this data should be in the cache.
         let addresses = balances
             .values()
-            .flat_map(|b| b.keys())
-            .map(|addr| Bytes::from(addr.as_bytes()))
+            .flat_map(|b| b.clone().into_keys())
             .collect::<Vec<_>>();
 
         let prices = self
@@ -286,8 +286,7 @@ where
                 let component_tvl: f64 = bal
                     .iter()
                     .filter_map(|(addr, bal)| {
-                        let addr = Bytes::from(addr.as_bytes());
-                        let price = *prices.get(&addr)?;
+                        let price = *prices.get(addr)?;
                         let tvl = bal.balance_float / price;
                         Some(tvl)
                     })
@@ -309,7 +308,7 @@ where
         &self,
         revert_buffer: &RevertBuffer<BlockUpdateWithCursor<evm::BlockChanges>>,
         reverted_balances_keys: &[(&String, &Bytes)],
-    ) -> Result<HashMap<String, HashMap<H160, evm::ComponentBalance>>, ExtractionError> {
+    ) -> Result<HashMap<String, HashMap<Bytes, evm::ComponentBalance>>, ExtractionError> {
         // First search in the buffer
         let (buffered_balances, missing_balances_keys) =
             revert_buffer.lookup_balances(reverted_balances_keys);
@@ -336,49 +335,46 @@ where
 
         let empty = HashMap::<Bytes, ComponentBalance>::new();
 
-        let combined_balances: HashMap<
-            String,
-            HashMap<H160, crate::extractor::evm::ComponentBalance>,
-        > = missing_balances_map
-            .iter()
-            .map(|(id, tokens)| {
-                let balances_for_id = missing_balances
-                    .get(id)
-                    .unwrap_or(&empty);
-                let filtered_balances: HashMap<_, _> = tokens
-                    .iter()
-                    .map(|token| {
-                        let balance = balances_for_id
-                            .get(token)
-                            .cloned()
-                            .unwrap_or_else(|| ComponentBalance {
-                                token: token.clone(),
-                                new_balance: Bytes::from(H256::zero()),
-                                balance_float: 0.0,
-                                modify_tx: H256::zero().into(),
-                                component_id: id.to_string(),
-                            });
-                        (token.clone(), balance)
-                    })
-                    .collect();
-                (id.clone(), filtered_balances)
-            })
-            .chain(buffered_balances)
-            .map(|(id, balances)| {
-                (
-                    id,
-                    balances
-                        .into_iter()
-                        .map(|(token, value)| (H160::from(token), value))
-                        .collect::<HashMap<_, _>>(),
-                )
-            })
-            .fold(HashMap::new(), |mut acc, (c_id, b_changes)| {
-                acc.entry(c_id)
-                    .or_default()
-                    .extend(b_changes);
-                acc
-            });
+        let combined_balances: HashMap<String, HashMap<Bytes, ComponentBalance>> =
+            missing_balances_map
+                .iter()
+                .map(|(id, tokens)| {
+                    let balances_for_id = missing_balances
+                        .get(id)
+                        .unwrap_or(&empty);
+                    let filtered_balances: HashMap<_, _> = tokens
+                        .iter()
+                        .map(|token| {
+                            let balance = balances_for_id
+                                .get(token)
+                                .cloned()
+                                .unwrap_or_else(|| ComponentBalance {
+                                    token: token.clone(),
+                                    new_balance: Bytes::from(H256::zero()),
+                                    balance_float: 0.0,
+                                    modify_tx: H256::zero().into(),
+                                    component_id: id.to_string(),
+                                });
+                            (token.clone(), balance)
+                        })
+                        .collect();
+                    (id.clone(), filtered_balances)
+                })
+                .chain(buffered_balances)
+                .map(|(id, balances)| {
+                    (
+                        id,
+                        balances
+                            .into_iter()
+                            .collect::<HashMap<_, _>>(),
+                    )
+                })
+                .fold(HashMap::new(), |mut acc, (c_id, b_changes)| {
+                    acc.entry(c_id)
+                        .or_default()
+                        .extend(b_changes);
+                    acc
+                });
         Ok(combined_balances)
     }
 
@@ -837,7 +833,7 @@ where
             combined_states
                 .into_iter()
                 .fold(HashMap::new(), |mut acc, ((addr, key), value)| {
-                    acc.entry(addr)
+                    acc.entry(Bytes::from(addr))
                         .or_insert_with(|| AccountUpdate {
                             address: addr.into(),
                             chain: self.chain,
@@ -992,7 +988,7 @@ where
             .get_balances(&revert_buffer, &reverted_balances_keys_vec)
             .await?;
 
-        let revert_message = evm::AggregatedBlockChanges {
+        let revert_message = AggregatedBlockChanges {
             extractor: self.name.clone(),
             chain: self.chain,
             block: revert_buffer
@@ -1620,11 +1616,11 @@ mod test {
 
     #[test_log::test(tokio::test)]
     async fn test_handle_tvl_changes() {
-        let mut msg = evm::AggregatedBlockChanges {
+        let mut msg = AggregatedBlockChanges {
             component_balances: HashMap::from([(
                 "comp1".to_string(),
                 HashMap::from([(
-                    H160::from_str("0x0000000000000000000000000000000000000001").unwrap(),
+                    H160::from_str("0x0000000000000000000000000000000000000001").unwrap().into(),
                     ComponentBalance {
                         token: H160::from_str("0x0000000000000000000000000000000000000001")
                             .unwrap().into(),
@@ -1637,7 +1633,7 @@ mod test {
                     },
                 ),
                     (
-                        H160::from_str("0x0000000000000000000000000000000000000002").unwrap(),
+                        H160::from_str("0x0000000000000000000000000000000000000002").unwrap().into(),
                         ComponentBalance {
                             token: H160::from_str("0x0000000000000000000000000000000000000002")
                                 .unwrap().into(),
@@ -2367,10 +2363,10 @@ mod test_serial_db {
 
             let res = client_msg
                 .as_any()
-                .downcast_ref::<evm::AggregatedBlockChanges>()
+                .downcast_ref::<AggregatedBlockChanges>()
                 .expect("not good type");
             let base_ts = yesterday_midnight().timestamp();
-            let block_entity_changes_result = evm::AggregatedBlockChanges {
+            let block_entity_changes_result = AggregatedBlockChanges {
                 extractor: "native_name".to_string(),
                 chain: Chain::Ethereum,
                 block: Block {
@@ -2429,14 +2425,14 @@ mod test_serial_db {
                 ]),
                 component_balances: HashMap::from([
                     ("pc_1".to_string(), HashMap::from([
-                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), ComponentBalance {
+                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(), ComponentBalance {
                             token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
                             new_balance: Bytes::from("0x00000001"),
                             balance_float: 1.0,
                             modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
                             component_id: "pc_1".to_string(),
                         }),
-                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), ComponentBalance {
+                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(), ComponentBalance {
                             token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
                             new_balance: Bytes::from("0x000003e8"),
                             balance_float: 1000.0,
@@ -2548,11 +2544,11 @@ mod test_serial_db {
 
             let res = client_msg
                 .as_any()
-                .downcast_ref::<evm::AggregatedBlockChanges>()
+                .downcast_ref::<AggregatedBlockChanges>()
                 .expect("not good type");
 
             let base_ts = yesterday_midnight().timestamp();
-            let block_account_expected = evm::AggregatedBlockChanges {
+            let block_account_expected = AggregatedBlockChanges {
                 extractor: "vm_name".to_string(),
                 chain: Chain::Ethereum,
                 block: Block {
@@ -2565,7 +2561,7 @@ mod test_serial_db {
                 finalized_block_height: 1,
                 revert: true,
                 account_updates: HashMap::from([
-                    (H160::from_str("0x0000000000000000000000000000000000000001").unwrap(), AccountUpdate {
+                    (H160::from_str("0x0000000000000000000000000000000000000001").unwrap().into(), AccountUpdate {
                         address: Bytes::from_str("0000000000000000000000000000000000000001").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
@@ -2576,7 +2572,7 @@ mod test_serial_db {
                         code: None,
                         change: ChangeType::Update,
                     }),
-                    (H160::from_str("0x0000000000000000000000000000000000000002").unwrap(), AccountUpdate {
+                    (H160::from_str("0x0000000000000000000000000000000000000002").unwrap().into(), AccountUpdate {
                         address: Bytes::from_str("0000000000000000000000000000000000000002").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
@@ -2610,14 +2606,14 @@ mod test_serial_db {
                 ]),
                 component_balances: HashMap::from([
                     ("pc_1".to_string(), HashMap::from([
-                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), ComponentBalance {
+                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(), ComponentBalance {
                             token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
                             new_balance: Bytes::from("0x00000064"),
                             balance_float: 100.0,
                             modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007532").unwrap().into(),
                             component_id: "pc_1".to_string(),
                         }),
-                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), ComponentBalance {
+                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(), ComponentBalance {
                             token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
                             new_balance: Bytes::from("0x00000001"),
                             balance_float: 1.0,

@@ -8,7 +8,9 @@ use crate::{
 };
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{any::Any, collections::HashMap, sync::Arc};
+
+use super::{token::CurrencyToken, Address, ExtractorIdentity, NormalisedMessage};
 
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize, Debug)]
 pub struct Block {
@@ -51,23 +53,23 @@ pub struct TransactionDeltaGroup<T> {
     tx: Transaction,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct BlockAggregatedDeltas {
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AggregatedBlockChanges {
     pub extractor: String,
     pub chain: Chain,
     pub block: Block,
-    pub finalised_block_height: u64,
+    pub finalized_block_height: u64,
     pub revert: bool,
-    pub state_deltas: HashMap<String, ProtocolComponentStateDelta>,
-    pub account_deltas: HashMap<Bytes, AccountUpdate>,
-    pub new_components: HashMap<String, ProtocolComponent>,
-    pub deleted_components: HashMap<String, ProtocolComponent>,
+    pub state_updates: HashMap<String, ProtocolComponentStateDelta>,
+    pub account_updates: HashMap<Bytes, AccountUpdate>,
+    pub new_tokens: HashMap<Address, CurrencyToken>,
+    pub new_protocol_components: HashMap<String, ProtocolComponent>,
+    pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
     pub component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
-    #[allow(dead_code)]
-    component_tvl: HashMap<String, f64>,
+    pub component_tvl: HashMap<String, f64>,
 }
 
-impl BlockAggregatedDeltas {
+impl AggregatedBlockChanges {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor: &str,
@@ -75,26 +77,62 @@ impl BlockAggregatedDeltas {
         block: Block,
         finalised_block_height: u64,
         revert: bool,
-        state_deltas: &HashMap<String, ProtocolComponentStateDelta>,
-        account_deltas: &HashMap<Bytes, AccountUpdate>,
-        new_components: &HashMap<String, ProtocolComponent>,
-        deleted_components: &HashMap<String, ProtocolComponent>,
-        component_balances: &HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
-        component_tvl: &HashMap<String, f64>,
+        state_deltas: HashMap<String, ProtocolComponentStateDelta>,
+        account_deltas: HashMap<Bytes, AccountUpdate>,
+        new_tokens: HashMap<Address, CurrencyToken>,
+        new_components: HashMap<String, ProtocolComponent>,
+        deleted_components: HashMap<String, ProtocolComponent>,
+        component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+        component_tvl: HashMap<String, f64>,
     ) -> Self {
         Self {
             extractor: extractor.to_string(),
             chain,
             block,
-            finalised_block_height,
+            finalized_block_height: finalised_block_height,
             revert,
-            state_deltas: state_deltas.clone(),
-            account_deltas: account_deltas.clone(),
-            new_components: new_components.clone(),
-            deleted_components: deleted_components.clone(),
-            component_balances: component_balances.clone(),
-            component_tvl: component_tvl.clone(),
+            state_updates: state_deltas,
+            account_updates: account_deltas,
+            new_protocol_components: new_components,
+            deleted_protocol_components: deleted_components,
+            component_balances,
+            component_tvl,
+            new_tokens,
         }
+    }
+}
+
+impl std::fmt::Display for AggregatedBlockChanges {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "block_number: {}, extractor: {}", self.block.number, self.extractor)
+    }
+}
+
+#[typetag::serde]
+impl NormalisedMessage for AggregatedBlockChanges {
+    fn source(&self) -> ExtractorIdentity {
+        ExtractorIdentity::new(self.chain, &self.extractor)
+    }
+
+    fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
+        Arc::new(Self {
+            extractor: self.extractor.clone(),
+            chain: self.chain,
+            block: self.block.clone(),
+            finalized_block_height: self.finalized_block_height,
+            revert: self.revert,
+            account_updates: HashMap::new(),
+            state_updates: HashMap::new(),
+            new_tokens: self.new_tokens.clone(),
+            new_protocol_components: self.new_protocol_components.clone(),
+            deleted_protocol_components: self.deleted_protocol_components.clone(),
+            component_balances: self.component_balances.clone(),
+            component_tvl: self.component_tvl.clone(),
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -102,7 +140,7 @@ pub trait BlockScoped {
     fn block(&self) -> Block;
 }
 
-impl BlockScoped for BlockAggregatedDeltas {
+impl BlockScoped for AggregatedBlockChanges {
     fn block(&self) -> Block {
         self.block.clone()
     }

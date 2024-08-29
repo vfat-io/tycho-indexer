@@ -1,5 +1,4 @@
 use std::{
-    any::Any,
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::Arc,
 };
@@ -14,7 +13,7 @@ use tracing::log::warn;
 
 use tycho_core::{
     models::{
-        blockchain::{Block, BlockScoped, Transaction},
+        blockchain::{AggregatedBlockChanges, Block, BlockScoped, Transaction},
         contract::{Account, AccountUpdate},
         protocol::{
             self as tycho_core_protocol, ComponentBalance, ProtocolComponent,
@@ -39,7 +38,6 @@ use crate::{
 use super::{revert_buffer::StateUpdateBufferEntry, u256_num::bytes_to_f64, ExtractionError};
 
 pub mod chain_state;
-mod convert;
 pub mod hybrid;
 pub mod protocol_cache;
 pub mod token_analysis_cron;
@@ -1433,103 +1431,6 @@ impl From<ProtocolChangesWithTx> for TxWithChanges {
     }
 }
 
-/// A container for updates grouped by protocol component.
-///
-/// Hold a single update per component. This is a condensed form of
-/// [BlockChanges].
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
-pub struct AggregatedBlockChanges {
-    extractor: String,
-    chain: Chain,
-    pub block: Block,
-    pub finalized_block_height: u64,
-    pub revert: bool,
-    pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub new_tokens: HashMap<Address, CurrencyToken>,
-    pub deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub state_updates: HashMap<ComponentId, ProtocolComponentStateDelta>,
-    pub account_updates: HashMap<H160, AccountUpdate>,
-    pub component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-    pub component_tvl: HashMap<ComponentId, f64>,
-}
-
-impl AggregatedBlockChanges {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        extractor: &str,
-        chain: Chain,
-        block: Block,
-        finalized_block_height: u64,
-        revert: bool,
-        new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
-        new_tokens: HashMap<Address, CurrencyToken>,
-        deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
-        protocol_states: HashMap<ComponentId, ProtocolComponentStateDelta>,
-        account_updates: HashMap<H160, AccountUpdate>,
-        component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-    ) -> Self {
-        Self {
-            extractor: extractor.to_string(),
-            chain,
-            block,
-            finalized_block_height,
-            revert,
-            new_protocol_components,
-            new_tokens,
-            deleted_protocol_components,
-            state_updates: protocol_states,
-            account_updates,
-            component_balances,
-            component_tvl: HashMap::new(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn is_empty(&self) -> bool {
-        self.new_protocol_components.is_empty() &&
-            self.deleted_protocol_components
-                .is_empty() &&
-            self.state_updates.is_empty() &&
-            self.account_updates.is_empty() &&
-            self.component_balances.is_empty() &&
-            self.component_tvl.is_empty()
-    }
-}
-
-impl std::fmt::Display for AggregatedBlockChanges {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "block_number: {}, extractor: {}", self.block.number, self.extractor)
-    }
-}
-
-#[typetag::serde]
-impl NormalisedMessage for AggregatedBlockChanges {
-    fn source(&self) -> ExtractorIdentity {
-        ExtractorIdentity::new(self.chain, &self.extractor)
-    }
-
-    fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
-        Arc::new(Self {
-            extractor: self.extractor.clone(),
-            chain: self.chain,
-            block: self.block.clone(),
-            finalized_block_height: self.finalized_block_height,
-            revert: self.revert,
-            account_updates: HashMap::new(),
-            state_updates: HashMap::new(),
-            new_tokens: self.new_tokens.clone(),
-            new_protocol_components: self.new_protocol_components.clone(),
-            deleted_protocol_components: self.deleted_protocol_components.clone(),
-            component_balances: self.component_balances.clone(),
-            component_tvl: self.component_tvl.clone(),
-        })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct BlockChanges {
     extractor: String,
@@ -1728,8 +1629,23 @@ impl BlockChanges {
             new_tokens: self.new_tokens,
             deleted_protocol_components: HashMap::new(),
             state_updates: aggregated_changes.state_updates,
-            account_updates: aggregated_changes.account_updates,
-            component_balances: aggregated_changes.balance_changes,
+            account_updates: aggregated_changes
+                .account_updates
+                .into_iter()
+                .map(|(k, v)| (k.into(), v))
+                .collect(),
+            component_balances: aggregated_changes
+                .balance_changes
+                .into_iter()
+                .map(|(id, bals)| {
+                    (
+                        id,
+                        bals.into_iter()
+                            .map(|(id, bal)| (Bytes::from(id), bal))
+                            .collect(),
+                    )
+                })
+                .collect(),
             component_tvl: HashMap::new(),
         })
     }

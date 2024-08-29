@@ -1,5 +1,4 @@
 use crate::extractor::{
-    evm::AggregatedBlockChanges,
     revert_buffer::{BlockNumberOrTimestamp, FinalityStatus, RevertBuffer},
     runner::MessageSender,
 };
@@ -13,7 +12,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use tycho_core::{
     models::{
-        blockchain::BlockAggregatedDeltas,
+        blockchain::AggregatedBlockChanges,
         contract::Account,
         protocol::{ProtocolComponent, ProtocolComponentState},
         DeltaError, NormalisedMessage,
@@ -23,7 +22,7 @@ use tycho_core::{
 
 #[derive(Default, Clone)]
 pub struct PendingDeltas {
-    buffers: HashMap<String, Arc<Mutex<RevertBuffer<BlockAggregatedDeltas>>>>,
+    buffers: HashMap<String, Arc<Mutex<RevertBuffer<AggregatedBlockChanges>>>>,
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -56,10 +55,10 @@ impl PendingDeltas {
     }
 
     fn insert(&self, message: Arc<dyn NormalisedMessage>) -> Result<()> {
-        let maybe_convert: Option<BlockAggregatedDeltas> = message
+        let maybe_convert: Option<AggregatedBlockChanges> = message
             .as_any()
             .downcast_ref::<AggregatedBlockChanges>()
-            .map(|msg| msg.into());
+            .cloned();
         match maybe_convert {
             Some(msg) => {
                 let maybe_buffer = self.buffers.get(&msg.extractor);
@@ -73,7 +72,7 @@ impl PendingDeltas {
                             guard.purge(msg.block.hash.clone())?;
                         } else {
                             guard.insert_block(msg.clone())?;
-                            guard.drain_new_finalized_blocks(msg.finalised_block_height)?;
+                            guard.drain_new_finalized_blocks(msg.finalized_block_height)?;
                         }
                     }
                     _ => return Err(PendingDeltasError::UnknownExtractor(msg.extractor.clone())),
@@ -137,7 +136,7 @@ impl PendingDeltas {
 
             for entry in guard.get_block_range(None, version)? {
                 if let Some(delta) = entry
-                    .state_deltas
+                    .state_updates
                     .get(&db_state.component_id)
                 {
                     db_state.apply_state_delta(delta)?;
@@ -184,7 +183,7 @@ impl PendingDeltas {
                 .map_err(|e| PendingDeltasError::LockError("VM".to_string(), e.to_string()))?;
             for entry in guard.get_block_range(None, version)? {
                 if let Some(delta) = entry
-                    .account_deltas
+                    .account_updates
                     .get(&db_state.address)
                 {
                     db_state.apply_contract_delta(delta)?;
@@ -237,7 +236,7 @@ impl PendingDeltas {
             for entry in guard.get_block_range(None, None)? {
                 new_components.extend(
                     entry
-                        .new_components
+                        .new_protocol_components
                         .clone()
                         .into_values()
                         .filter(|comp| {
@@ -359,6 +358,21 @@ mod test {
             block(1),
             1,
             false,
+            HashMap::new(),
+            [(
+                address.into(),
+                AccountUpdate::new(
+                    Chain::Ethereum,
+                    address.into(),
+                    evm::fixtures::slots([(1, 1), (2, 1)]),
+                    Some(U256::from(1999).into()),
+                    None,
+                    ChangeType::Update,
+                ),
+            )]
+            .into_iter()
+            .collect::<HashMap<_, _>>(),
+            HashMap::new(),
             [(
                 "component2".to_string(),
                 ProtocolComponent {
@@ -378,20 +392,6 @@ mod test {
             .collect::<HashMap<_, _>>(),
             HashMap::new(),
             HashMap::new(),
-            HashMap::new(),
-            [(
-                address,
-                AccountUpdate::new(
-                    Chain::Ethereum,
-                    address.into(),
-                    evm::fixtures::slots([(1, 1), (2, 1)]),
-                    Some(U256::from(1999).into()),
-                    None,
-                    ChangeType::Update,
-                ),
-            )]
-            .into_iter()
-            .collect::<HashMap<_, _>>(),
             HashMap::new(),
         )
     }
@@ -416,25 +416,6 @@ mod test {
             block(1),
             1,
             false,
-            [(
-                "component3".to_string(),
-                ProtocolComponent {
-                    id: "component3".to_string(),
-                    protocol_system: "native_swap".to_string(),
-                    protocol_type_name: "swap".to_string(),
-                    chain: Chain::Ethereum,
-                    tokens: Vec::new(),
-                    contract_addresses: Vec::new(),
-                    static_attributes: HashMap::new(),
-                    change: ChangeType::Creation,
-                    creation_tx: Bytes::new(),
-                    created_at: "2020-01-01T00:00:00".parse().unwrap(),
-                },
-            )]
-            .into_iter()
-            .collect::<HashMap<_, _>>(),
-            HashMap::new(),
-            HashMap::new(),
             [
                 ProtocolComponentStateDelta::new(
                     "component1",
@@ -457,11 +438,32 @@ mod test {
             .map(|v| (v.component_id.clone(), v))
             .collect(),
             HashMap::new(),
+            HashMap::new(),
+            [(
+                "component3".to_string(),
+                ProtocolComponent {
+                    id: "component3".to_string(),
+                    protocol_system: "native_swap".to_string(),
+                    protocol_type_name: "swap".to_string(),
+                    chain: Chain::Ethereum,
+                    tokens: Vec::new(),
+                    contract_addresses: Vec::new(),
+                    static_attributes: HashMap::new(),
+                    change: ChangeType::Creation,
+                    creation_tx: Bytes::new(),
+                    created_at: "2020-01-01T00:00:00".parse().unwrap(),
+                },
+            )]
+            .into_iter()
+            .collect::<HashMap<_, _>>(),
+            HashMap::new(),
             [
                 (
                     "component1".to_string(),
                     [(
-                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                            .unwrap()
+                            .into(),
                         ComponentBalance {
                             token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
                                 .unwrap()
@@ -478,7 +480,9 @@ mod test {
                 (
                     "component3".to_string(),
                     [(
-                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                            .unwrap()
+                            .into(),
                         ComponentBalance {
                             token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
                                 .unwrap()
@@ -495,13 +499,14 @@ mod test {
             ]
             .into_iter()
             .collect(),
+            HashMap::new(),
         )
     }
 
     #[test]
     fn test_insert_vm() {
         let buffer = PendingDeltas::new(["vm:extractor"]);
-        let exp: BlockAggregatedDeltas = (&vm_block_deltas()).into();
+        let exp: AggregatedBlockChanges = vm_block_deltas();
 
         buffer
             .insert(Arc::new(vm_block_deltas()))
@@ -522,7 +527,7 @@ mod test {
     #[test]
     fn test_insert_native() {
         let pending_buffer = PendingDeltas::new(["native:extractor"]);
-        let exp: BlockAggregatedDeltas = (&native_block_deltas()).into();
+        let exp: AggregatedBlockChanges = native_block_deltas();
 
         pending_buffer
             .insert(Arc::new(native_block_deltas()))
