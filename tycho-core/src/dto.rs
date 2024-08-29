@@ -697,13 +697,13 @@ impl Default for VersionParam {
 #[deprecated(note = "Use StateRequestBody instead")]
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct StateRequestParameters {
-    /// The minimum TVL of the protocol components to return, denoted in ETH.
+    /// The minimum TVL of the protocol components to return, denoted in the chain's native token.
     #[param(default = 0)]
     pub tvl_gt: Option<u64>,
     /// The minimum inertia of the protocol components to return.
     #[param(default = 0)]
     pub inertia_min_gt: Option<u64>,
-    /// Whether to include balances in the response.
+    /// Whether to include ERC20 balances in the response.
     #[serde(default = "default_include_balances_flag")]
     pub include_balances: bool,
 }
@@ -851,7 +851,7 @@ impl ProtocolComponentsRequestBody {
 #[deprecated(note = "Use ProtocolComponentsRequestBody instead")]
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct ProtocolComponentRequestParameters {
-    /// The minimum TVL of the protocol components to return, denoted in ETH.
+    /// The minimum TVL of the protocol components to return, denoted in the chain's native token.
     #[param(default = 0)]
     pub tvl_gt: Option<f64>,
 }
