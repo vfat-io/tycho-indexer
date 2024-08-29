@@ -1,11 +1,7 @@
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use chrono::NaiveDateTime;
 use ethers::types::{H160, H256};
-use serde::{Deserialize, Serialize};
 use tracing::log::warn;
 
 use tycho_core::{
@@ -17,8 +13,7 @@ use tycho_core::{
             ProtocolComponent, ProtocolComponentStateDelta,
         },
         token::CurrencyToken,
-        Address, AttrStoreKey, Chain, ChangeType, ComponentId, ExtractorIdentity,
-        NormalisedMessage, ProtocolType, TxHash,
+        Address, AttrStoreKey, Chain, ChangeType, ComponentId, ProtocolType, TxHash,
     },
     Bytes,
 };
@@ -83,130 +78,6 @@ impl TryFromMessage for AccountUpdate {
         Ok(update)
     }
 }
-
-/// A container for account updates grouped by account.
-///
-/// Hold a single update per account. This is a condensed form of
-/// [BlockContractChanges].
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
-pub struct BlockAccountChanges {
-    extractor: String,
-    chain: Chain,
-    pub block: Block,
-    pub finalized_block_height: u64,
-    pub revert: bool,
-    pub account_updates: HashMap<H160, AccountUpdate>,
-    pub new_tokens: HashMap<Address, CurrencyToken>,
-    pub new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-    pub component_tvl: HashMap<ComponentId, f64>,
-}
-
-impl BlockAccountChanges {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        extractor: &str,
-        chain: Chain,
-        block: Block,
-        finalized_block_height: u64,
-        revert: bool,
-        account_updates: HashMap<H160, AccountUpdate>,
-        new_tokens: HashMap<Address, CurrencyToken>,
-        new_protocol_components: HashMap<ComponentId, ProtocolComponent>,
-        deleted_protocol_components: HashMap<ComponentId, ProtocolComponent>,
-        component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-    ) -> Self {
-        BlockAccountChanges {
-            extractor: extractor.to_owned(),
-            chain,
-            block,
-            finalized_block_height,
-            revert,
-            account_updates,
-            new_tokens,
-            new_protocol_components,
-            deleted_protocol_components,
-            component_balances,
-            component_tvl: HashMap::new(),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.account_updates.is_empty() &&
-            self.new_protocol_components.is_empty() &&
-            self.deleted_protocol_components
-                .is_empty() &&
-            self.component_balances.is_empty() &&
-            self.component_tvl.is_empty()
-    }
-}
-
-impl std::fmt::Display for BlockAccountChanges {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "block_number: {}, extractor: {}", self.block.number, self.extractor)
-    }
-}
-
-#[typetag::serde]
-impl NormalisedMessage for BlockAccountChanges {
-    fn source(&self) -> ExtractorIdentity {
-        ExtractorIdentity::new(self.chain, &self.extractor)
-    }
-
-    fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
-        Arc::new(Self {
-            extractor: self.extractor.clone(),
-            chain: self.chain,
-            block: self.block.clone(),
-            finalized_block_height: self.finalized_block_height,
-            revert: self.revert,
-            account_updates: HashMap::new(),
-            new_tokens: self.new_tokens.clone(),
-            new_protocol_components: self.new_protocol_components.clone(),
-            deleted_protocol_components: self.deleted_protocol_components.clone(),
-            component_balances: self.component_balances.clone(),
-            component_tvl: self.component_tvl.clone(),
-        })
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-// impl std::fmt::Display for BlockEntityChangesResult {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "block_number: {}, extractor: {}", self.block.number, self.extractor)
-//     }
-// }
-
-// #[typetag::serde]
-// impl NormalisedMessage for BlockEntityChangesResult {
-//     fn source(&self) -> ExtractorIdentity {
-//         ExtractorIdentity::new(self.chain, &self.extractor)
-//     }
-
-//     fn drop_state(&self) -> Arc<dyn NormalisedMessage> {
-//         Arc::new(Self::new(
-//             &self.extractor,
-//             self.chain,
-//             self.block.clone(),
-//             self.finalized_block_height,
-//             self.revert,
-//             HashMap::new(),
-//             self.new_tokens.clone(),
-//             self.new_protocol_components.clone(),
-//             self.deleted_protocol_components.clone(),
-//             self.component_balances.clone(),
-//             self.component_tvl.clone(),
-//         ))
-//     }
-
-//     fn as_any(&self) -> &dyn std::any::Any {
-//         self
-//     }
-// }
 
 /// A container for account updates grouped by transaction.
 ///
@@ -539,73 +410,6 @@ impl BlockContractChanges {
             });
         }
         Err(ExtractionError::Empty)
-    }
-
-    /// Aggregates transaction updates.
-    ///
-    /// This function aggregates the transaction updates (`tx_updates`) from
-    /// different accounts into a single object of  
-    /// `BlockAccountChanges`. It maintains a HashMap to hold
-    /// `AccountUpdate` corresponding to each unique address.
-    ///
-    /// If the address from an update is already present in the HashMap, it
-    /// merges the update with the existing one. Otherwise, it inserts the new
-    /// update into the HashMap.
-    ///
-    /// After merging all updates, a `BlockAccountChanges` object is returned
-    /// which contains, amongst other data, the compacted account updates.
-    ///
-    /// # Errors
-    ///
-    /// This returns an error if there was a problem during merge. The error
-    /// type is `ExtractionError`.
-    pub fn aggregate_updates(self) -> Result<BlockAccountChanges, ExtractionError> {
-        let (account_updates, protocol_components, component_balances) = if !self
-            .tx_updates
-            .is_empty()
-        {
-            let mut sorted_tx_updates = self.tx_updates.clone();
-            sorted_tx_updates.sort_unstable_by_key(|update| update.tx.index);
-            let mut tx_update = sorted_tx_updates
-                .first()
-                .cloned()
-                .ok_or(ExtractionError::Empty)?;
-
-            for update in sorted_tx_updates.into_iter().skip(1) {
-                tx_update
-                    .merge(&update.clone())
-                    .map_err(ExtractionError::MergeError)?;
-            }
-            (tx_update.account_updates, tx_update.protocol_components, tx_update.component_balances)
-        } else {
-            (HashMap::new(), HashMap::new(), HashMap::new())
-        };
-
-        Ok(BlockAccountChanges::new(
-            &self.extractor,
-            self.chain,
-            self.block,
-            self.finalized_block_height,
-            self.revert,
-            account_updates
-                .into_iter()
-                .map(|(k, v)| (k.into(), v))
-                .collect(),
-            self.new_tokens,
-            protocol_components,
-            HashMap::new(),
-            component_balances
-                .into_iter()
-                .map(|(id, bals)| {
-                    (
-                        id,
-                        bals.into_iter()
-                            .map(|(id, bal)| (H160::from(id), bal))
-                            .collect(),
-                    )
-                })
-                .collect(),
-        ))
     }
 
     pub fn protocol_components(&self) -> Vec<ProtocolComponent> {
@@ -3299,127 +3103,6 @@ mod test {
         )
         .unwrap();
         assert_eq!(res, block_state_changes());
-    }
-
-    fn block_account_changes() -> BlockAccountChanges {
-        let address = H160::from_low_u64_be(0x0000000000000000000000000000000061626364);
-        let protocol_component = ProtocolComponent {
-            id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_owned(),
-            protocol_system: "ambient".to_string(),
-            protocol_type_name: String::from("WeightedPool"),
-            chain: Chain::Ethereum,
-            tokens: vec![
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                    .unwrap()
-                    .into(),
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                    .unwrap()
-                    .into(),
-            ],
-            contract_addresses: vec![
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                    .unwrap()
-                    .into(),
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                    .unwrap()
-                    .into(),
-            ],
-            static_attributes: [
-                ("key1".to_string(), Bytes::from(b"value1".to_vec())),
-                ("key2".to_string(), Bytes::from(b"value2".to_vec())),
-            ]
-            .iter()
-            .cloned()
-            .collect(),
-            change: ChangeType::Creation,
-            creation_tx: H256::from_str(
-                "0x0000000000000000000000000000000000000000000000000000000011121314",
-            )
-            .unwrap()
-            .into(),
-            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
-        };
-        let component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>> = [(
-            String::from("d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"),
-            [(
-                H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
-                ComponentBalance {
-                    token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
-                        .unwrap()
-                        .into(),
-                    new_balance: Bytes::from(10.encode_to_vec()),
-                    balance_float: 2058.0,
-                    modify_tx: H256::from_low_u64_be(
-                        0x0000000000000000000000000000000000000000000000000000000000000001,
-                    )
-                    .into(),
-                    component_id:
-                        "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
-                            .to_string(),
-                },
-            )]
-            .into_iter()
-            .collect(),
-        )]
-        .into_iter()
-        .collect();
-
-        BlockAccountChanges::new(
-            "test",
-            Chain::Ethereum,
-            Block {
-                number: 1,
-                hash: H256::from_low_u64_be(
-                    0x0000000000000000000000000000000000000000000000000000000031323334,
-                )
-                .into(),
-                parent_hash: H256::from_low_u64_be(
-                    0x0000000000000000000000000000000000000000000000000000000021222324,
-                )
-                .into(),
-                chain: Chain::Ethereum,
-                ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
-            },
-            0,
-            false,
-            vec![(
-                address,
-                AccountUpdate {
-                    chain: Chain::Ethereum,
-                    address: Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
-                    slots: fixtures::slots([
-                        (2711790500, 2981278644),
-                        (3250766788, 3520254932),
-                        (2711790500, 3250766788),
-                        (2442302356, 2711790500),
-                    ]),
-                    balance: Some(U256::from(4059231220u64).into()),
-                    code: Some(vec![1, 2, 3, 4].into()),
-                    change: ChangeType::Update,
-                },
-            )]
-            .into_iter()
-            .collect(),
-            HashMap::new(),
-            [(protocol_component.id.clone(), protocol_component)]
-                .into_iter()
-                .collect(),
-            HashMap::new(),
-            component_balances,
-        )
-    }
-
-    #[test]
-    fn test_block_state_changes_aggregate() {
-        let mut msg = block_state_changes();
-        let block_hash = "0x0000000000000000000000000000000000000000000000000000000031323334";
-        // use a different tx so merge works
-        msg.tx_updates[1].tx = fixtures::transaction02(HASH_256_1, block_hash, 5);
-
-        // should error cause same tx
-        let res = msg.aggregate_updates().unwrap();
-
-        assert_eq!(res, block_account_changes());
     }
 
     #[test]
