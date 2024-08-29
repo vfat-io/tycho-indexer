@@ -308,7 +308,7 @@ where
         &self,
         revert_buffer: &RevertBuffer<BlockUpdateWithCursor<evm::BlockChanges>>,
         reverted_balances_keys: &[(&String, &Bytes)],
-    ) -> Result<HashMap<String, HashMap<Bytes, evm::ComponentBalance>>, ExtractionError> {
+    ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, ExtractionError> {
         // First search in the buffer
         let (buffered_balances, missing_balances_keys) =
             revert_buffer.lookup_balances(reverted_balances_keys);
@@ -1123,7 +1123,7 @@ impl HybridPgGateway {
             // Map new account / contracts
             for (_, account_update) in tx_update.account_updates.iter() {
                 if account_update.is_creation() {
-                    let new: evm::Account = account_update.ref_into_account(&tx_update.tx);
+                    let new: Account = account_update.ref_into_account(&tx_update.tx);
                     info!(block_number = ?changes.block.number, contract_address = ?new.address, "NewContract");
 
                     // Insert new accounts
@@ -1268,6 +1268,7 @@ mod test {
         testing::MockGateway,
     };
     use float_eq::assert_float_eq;
+    use models::blockchain::{Transaction, TxWithChanges};
     use tycho_core::models::protocol::ProtocolComponent;
 
     const EXTRACTOR_NAME: &str = "TestExtractor";
@@ -1515,10 +1516,10 @@ mod test {
             finalized_block_height: 0,
             revert: false,
             new_tokens: HashMap::new(),
-            txs_with_update: vec![evm::TxWithChanges {
+            txs_with_update: vec![TxWithChanges {
                 protocol_components: HashMap::from([(
                     "TestProtocol".to_string(),
-                    evm::ProtocolComponent {
+                    ProtocolComponent {
                         tokens: vec![
                             "0x0000000000000000000000000000000000000001"
                                 .parse()
@@ -1533,7 +1534,7 @@ mod test {
                 account_updates: HashMap::new(),
                 state_updates: Default::default(),
                 balance_changes: HashMap::new(),
-                tx: evm::Transaction::default(),
+                tx: Transaction::default(),
             }],
         };
 
@@ -1558,7 +1559,7 @@ mod test {
             .expect("adding tokens failed");
 
         let mut preprocessor = MockTokenPreProcessorTrait::new();
-        let t3 = evm::CurrencyToken::new(
+        let t3 = CurrencyToken::new(
             &Bytes::from_str("0000000000000000000000000000000000000003").unwrap(),
             "TOK3",
             18,
@@ -1796,7 +1797,7 @@ mod test_serial_db {
     fn get_mocked_token_pre_processor() -> MockTokenPreProcessorTrait {
         let mut mock_processor = MockTokenPreProcessorTrait::new();
         let new_tokens = vec![
-            evm::CurrencyToken::new(
+            CurrencyToken::new(
                 &Bytes::from_str("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
                     .expect("Invalid address"),
                 "WETH",
@@ -1806,7 +1807,7 @@ mod test_serial_db {
                 Default::default(),
                 100,
             ),
-            evm::CurrencyToken::new(
+            CurrencyToken::new(
                 &Bytes::from_str("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
                     .expect("Invalid address"),
                 "USDC",
@@ -1816,7 +1817,7 @@ mod test_serial_db {
                 Default::default(),
                 100,
             ),
-            evm::CurrencyToken::new(
+            CurrencyToken::new(
                 &Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f")
                     .expect("Invalid address"),
                 "DAI",
@@ -1826,7 +1827,7 @@ mod test_serial_db {
                 Default::default(),
                 100,
             ),
-            evm::CurrencyToken::new(
+            CurrencyToken::new(
                 &Bytes::from_str("dAC17F958D2ee523a2206206994597C13D831ec7")
                     .expect("Invalid address"),
                 "USDT",

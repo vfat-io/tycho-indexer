@@ -6,7 +6,7 @@ use tracing::log::warn;
 use tycho_core::{
     models::{
         blockchain::{AggregatedBlockChanges, Block, BlockScoped, Transaction, TxWithChanges},
-        contract::{Account, AccountUpdate, TransactionVMUpdates},
+        contract::{AccountUpdate, TransactionVMUpdates},
         protocol::{
             self as tycho_core_protocol, ComponentBalance, ProtocolChangesWithTx,
             ProtocolComponent, ProtocolComponentStateDelta,
@@ -2770,7 +2770,7 @@ mod test {
     use prost::Message;
     use rstest::rstest;
 
-    use tycho_core::keccak256;
+    use tycho_core::{keccak256, models::contract::Account};
     use tycho_storage::postgres::db_fixtures::yesterday_midnight;
 
     use crate::extractor::evm::fixtures::transaction01;
