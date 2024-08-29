@@ -1,7 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use chrono::NaiveDateTime;
-use ethers::types::{H160, H256};
 use tracing::log::warn;
 
 use tycho_core::{
@@ -192,7 +191,7 @@ impl TryFromMessage for Block {
 }
 
 impl TryFromMessage for Transaction {
-    type Args<'a> = (substreams::Transaction, &'a H256);
+    type Args<'a> = (substreams::Transaction, &'a Bytes);
 
     fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
         let (msg, block_hash) = args;
@@ -205,7 +204,7 @@ impl TryFromMessage for Transaction {
 
         Ok(Self {
             hash: pad_and_parse_32bytes(&msg.hash).map_err(ExtractionError::DecodeError)?,
-            block_hash: Bytes::from(*block_hash),
+            block_hash: block_hash.clone(),
             from: pad_and_parse_20bytes(&msg.from).map_err(ExtractionError::DecodeError)?,
             to,
             index: msg.index,
@@ -346,11 +345,11 @@ impl BlockContractChanges {
             for change in msg.changes.into_iter() {
                 let mut account_updates = HashMap::new();
                 let mut protocol_components = HashMap::new();
-                let mut balances_changes: HashMap<ComponentId, HashMap<H160, ComponentBalance>> =
+                let mut balances_changes: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>> =
                     HashMap::new();
 
                 if let Some(tx) = change.tx {
-                    let tx = Transaction::try_from_message((tx, &block.hash.clone().into()))?;
+                    let tx = Transaction::try_from_message((tx, &block.hash.clone()))?;
                     for contract_change in change.contract_changes.into_iter() {
                         let update = AccountUpdate::try_from_message((contract_change, chain))?;
                         account_updates.insert(update.address.clone(), update);
@@ -371,7 +370,7 @@ impl BlockContractChanges {
                         let component_id =
                             String::from_utf8(balance_change.component_id.clone())
                                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
-                        let token_address = H160::from_slice(balance_change.token.as_slice());
+                        let token_address = balance_change.token.clone().into();
                         let balance = ComponentBalance::try_from_message((balance_change, &tx))?;
 
                         balances_changes
@@ -383,17 +382,7 @@ impl BlockContractChanges {
                     tx_updates.push(TransactionVMUpdates::new(
                         account_updates,
                         protocol_components,
-                        balances_changes
-                            .into_iter()
-                            .map(|(id, bals)| {
-                                (
-                                    id,
-                                    bals.into_iter()
-                                        .map(|(id, bal)| (Bytes::from(id), bal))
-                                        .collect(),
-                                )
-                            })
-                            .collect(),
+                        balances_changes,
                         tx,
                     ));
                 }
@@ -464,12 +453,12 @@ impl TryFromMessage for ProtocolChangesWithTx {
         let tx = Transaction::try_from_message((
             msg.tx
                 .expect("TransactionEntityChanges should have a transaction"),
-            &block.hash.clone().into(),
+            &block.hash.clone(),
         ))?;
 
         let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
         let mut state_updates: HashMap<String, ProtocolComponentStateDelta> = HashMap::new();
-        let mut component_balances: HashMap<String, HashMap<H160, ComponentBalance>> =
+        let mut component_balances: HashMap<String, HashMap<Bytes, ComponentBalance>> =
             HashMap::new();
 
         // First, parse the new protocol components
@@ -513,7 +502,7 @@ impl TryFromMessage for ProtocolChangesWithTx {
                 .or_default();
 
             if let Some(existing_balance) =
-                token_balances.insert(component_balance.token.clone().into(), component_balance)
+                token_balances.insert(component_balance.token.clone(), component_balance)
             {
                 warn!(
                     "Received two balance updates for the same component id: {} and token {}. Overwriting balance change",
@@ -525,17 +514,7 @@ impl TryFromMessage for ProtocolChangesWithTx {
         Ok(Self {
             new_protocol_components,
             protocol_states: state_updates,
-            balance_changes: component_balances
-                .into_iter()
-                .map(|(id, bals)| {
-                    (
-                        id,
-                        bals.into_iter()
-                            .map(|(id, bal)| (Bytes::from(id), bal))
-                            .collect(),
-                    )
-                })
-                .collect(),
+            balance_changes: component_balances,
             tx,
         })
     }
@@ -711,7 +690,7 @@ impl TryFromMessage for TxWithChanges {
         let tx = Transaction::try_from_message((
             msg.tx
                 .expect("TransactionChanges should have a transaction"),
-            &block.hash.clone().into(),
+            &block.hash.clone(),
         ))?;
 
         let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
@@ -1035,7 +1014,7 @@ impl From<BlockEntityChanges> for BlockChanges {
 }
 #[cfg(test)]
 pub mod fixtures {
-    use ethers::types::U256;
+    use ethers::types::{H160, H256, U256};
     use std::str::FromStr;
 
     use prost::Message;
@@ -2787,7 +2766,7 @@ pub mod fixtures {
 mod test {
     use std::str::FromStr;
 
-    use ethers::types::U256;
+    use ethers::types::{H160, H256, U256};
     use prost::Message;
     use rstest::rstest;
 
