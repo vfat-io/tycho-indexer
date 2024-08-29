@@ -4,17 +4,14 @@ use std::{
 };
 
 use chrono::NaiveDateTime;
-use ethers::{
-    types::{H160, H256},
-    utils::keccak256,
-};
+use ethers::types::{H160, H256};
 use serde::{Deserialize, Serialize};
 use tracing::log::warn;
 
 use tycho_core::{
     models::{
         blockchain::{AggregatedBlockChanges, Block, BlockScoped, Transaction},
-        contract::{Account, AccountUpdate},
+        contract::{Account, AccountUpdate, TransactionVMUpdates},
         protocol::{
             self as tycho_core_protocol, ComponentBalance, ProtocolComponent,
             ProtocolComponentStateDelta,
@@ -50,49 +47,6 @@ pub trait TryFromMessage {
     fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError>
     where
         Self: Sized;
-}
-
-impl From<&TransactionVMUpdates> for Vec<Account> {
-    /// Creates a full account from a change.
-    ///
-    /// This can be used to get an insertable an account if we know the update
-    /// is actually a creation.
-    ///
-    /// Assumes that all relevant changes are set on `self` if something is
-    /// missing, it will use the corresponding types default.
-    /// Will use the associated transaction as creation, balance and code modify
-    /// transaction.
-    fn from(value: &TransactionVMUpdates) -> Self {
-        value
-            .account_updates
-            .clone()
-            .into_values()
-            .map(|update| {
-                let acc = Account::new(
-                    update.chain,
-                    update.address.clone(),
-                    format!("{:#020x}", update.address),
-                    update
-                        .slots
-                        .into_iter()
-                        .map(|(k, v)| (k, v.unwrap_or_default())) //TODO: is default ok here or should it be Bytes::zero(32)
-                        .collect(),
-                    update.balance.unwrap_or_default(),
-                    update.code.clone().unwrap_or_default(),
-                    update
-                        .code
-                        .as_ref()
-                        .map(keccak256)
-                        .unwrap_or_default()
-                        .into(),
-                    value.tx.hash.clone(),
-                    value.tx.hash.clone(),
-                    Some(value.tx.hash.clone()),
-                );
-                acc
-            })
-            .collect()
-    }
 }
 
 impl TryFromMessage for AccountUpdate {
@@ -254,109 +208,6 @@ impl NormalisedMessage for BlockEntityChangesResult {
     }
 }
 
-/// Updates grouped by their respective transaction.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TransactionVMUpdates {
-    pub account_updates: HashMap<H160, AccountUpdate>,
-    pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-    pub tx: Transaction,
-}
-
-impl TransactionVMUpdates {
-    pub fn new(
-        account_updates: HashMap<H160, AccountUpdate>,
-        protocol_components: HashMap<ComponentId, ProtocolComponent>,
-        component_balances: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-        tx: Transaction,
-    ) -> Self {
-        Self { account_updates, protocol_components, component_balances, tx }
-    }
-
-    /// Merges this update with another one.
-    ///
-    /// The method combines two `AccountUpdateWithTx` instances under certain
-    /// conditions:
-    /// - The block from which both updates came should be the same. If the updates are from
-    ///   different blocks, the method will return an error.
-    /// - The transactions for each of the updates should be distinct. If they come from the same
-    ///   transaction, the method will return an error.
-    /// - The order of the transaction matters. The transaction from `other` must have occurred
-    ///   later than the self transaction. If the self transaction has a higher index than `other`,
-    ///   the method will return an error.
-    ///
-    /// The merged update keeps the transaction of `other`.
-    ///
-    /// # Errors
-    /// This method will return `ExtractionError::MergeError` if any of the above
-    /// conditions is violated.
-    pub fn merge(&mut self, other: &TransactionVMUpdates) -> Result<(), ExtractionError> {
-        if self.tx.block_hash != other.tx.block_hash {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge TransactionVMUpdates from different blocks: {:x} != {:x}",
-                self.tx.block_hash, other.tx.block_hash,
-            )));
-        }
-        if self.tx.hash == other.tx.hash {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge TransactionVMUpdates from the same transaction: {:x}",
-                self.tx.hash
-            )));
-        }
-        if self.tx.index > other.tx.index {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge TransactionVMUpdates with lower transaction index: {} > {}",
-                self.tx.index, other.tx.index
-            )));
-        }
-        self.tx = other.tx.clone();
-
-        for (address, update) in other
-            .account_updates
-            .clone()
-            .into_iter()
-        {
-            match self.account_updates.entry(address) {
-                Entry::Occupied(mut e) => {
-                    e.get_mut()
-                        .merge(update)
-                        .map_err(ExtractionError::MergeError)?;
-                }
-                Entry::Vacant(e) => {
-                    e.insert(update);
-                }
-            }
-        }
-
-        // Add new protocol components
-        self.protocol_components
-            .extend(other.protocol_components.clone());
-
-        // Add new component balances and overwrite existing ones
-        for (component_id, balance_by_token_map) in other
-            .component_balances
-            .clone()
-            .into_iter()
-        {
-            // Check if the key exists in the first map
-            if let Some(existing_inner_map) = self
-                .component_balances
-                .get_mut(&component_id)
-            {
-                // Iterate through the inner map and update values
-                for (inner_key, value) in balance_by_token_map {
-                    existing_inner_map.insert(inner_key, value);
-                }
-            } else {
-                self.component_balances
-                    .insert(component_id, balance_by_token_map);
-            }
-        }
-
-        Ok(())
-    }
-}
-
 /// A container for account updates grouped by transaction.
 ///
 /// Hold the detailed state changes for a block alongside with protocol
@@ -396,9 +247,9 @@ impl StateUpdateBufferEntry for BlockContractChanges {
                 for (attr, val) in account_update
                     .slots
                     .iter()
-                    .filter(|(attr, _)| keys_set.contains(&(address, *attr)))
+                    .filter(|(attr, _)| keys_set.contains(&(&H160::from(address.clone()), *attr)))
                 {
-                    res.entry((*address, (*attr).clone()))
+                    res.entry((H160::from(address.clone()), (*attr).clone()))
                         .or_insert(val.clone().unwrap_or_default());
                 }
             }
@@ -421,11 +272,9 @@ impl StateUpdateBufferEntry for BlockContractChanges {
             for (component_id, balance_update) in update.component_balances.iter() {
                 for (token, value) in balance_update
                     .iter()
-                    .filter(|(token, _)| {
-                        keys_set.contains(&(component_id, &token.as_bytes().into()))
-                    })
+                    .filter(|(token, _)| keys_set.contains(&(component_id, token)))
                 {
-                    res.entry((component_id.clone(), token.as_bytes().into()))
+                    res.entry((component_id.clone(), token.clone()))
                         .or_insert(value.clone());
                 }
             }
@@ -633,7 +482,7 @@ impl BlockContractChanges {
                     let tx = Transaction::try_from_message((tx, &block.hash.clone().into()))?;
                     for contract_change in change.contract_changes.into_iter() {
                         let update = AccountUpdate::try_from_message((contract_change, chain))?;
-                        account_updates.insert(update.address.clone().into(), update);
+                        account_updates.insert(update.address.clone(), update);
                     }
                     for component_msg in change.component_changes.into_iter() {
                         let component = ProtocolComponent::try_from_message((
@@ -663,7 +512,17 @@ impl BlockContractChanges {
                     tx_updates.push(TransactionVMUpdates::new(
                         account_updates,
                         protocol_components,
-                        balances_changes,
+                        balances_changes
+                            .into_iter()
+                            .map(|(id, bals)| {
+                                (
+                                    id,
+                                    bals.into_iter()
+                                        .map(|(id, bal)| (Bytes::from(id), bal))
+                                        .collect(),
+                                )
+                            })
+                            .collect(),
                         tx,
                     ));
                 }
@@ -713,7 +572,9 @@ impl BlockContractChanges {
                 .ok_or(ExtractionError::Empty)?;
 
             for update in sorted_tx_updates.into_iter().skip(1) {
-                tx_update.merge(&update.clone())?;
+                tx_update
+                    .merge(&update.clone())
+                    .map_err(ExtractionError::MergeError)?;
             }
             (tx_update.account_updates, tx_update.protocol_components, tx_update.component_balances)
         } else {
@@ -726,11 +587,24 @@ impl BlockContractChanges {
             self.block,
             self.finalized_block_height,
             self.revert,
-            account_updates,
+            account_updates
+                .into_iter()
+                .map(|(k, v)| (k.into(), v))
+                .collect(),
             self.new_tokens,
             protocol_components,
             HashMap::new(),
-            component_balances,
+            component_balances
+                .into_iter()
+                .map(|(id, bals)| {
+                    (
+                        id,
+                        bals.into_iter()
+                            .map(|(id, bal)| (H160::from(id), bal))
+                            .collect(),
+                    )
+                })
+                .collect(),
         ))
     }
 
@@ -1411,9 +1285,24 @@ impl From<TransactionVMUpdates> for TxWithChanges {
     fn from(value: TransactionVMUpdates) -> Self {
         Self {
             protocol_components: value.protocol_components,
-            account_updates: value.account_updates,
+            account_updates: value
+                .account_updates
+                .into_iter()
+                .map(|(k, v)| (k.into(), v))
+                .collect(),
             state_updates: HashMap::new(),
-            balance_changes: value.component_balances,
+            balance_changes: value
+                .component_balances
+                .into_iter()
+                .map(|(id, bals)| {
+                    (
+                        id,
+                        bals.into_iter()
+                            .map(|(id, bal)| (H160::from(id), bal))
+                            .collect(),
+                    )
+                })
+                .collect(),
             tx: value.tx,
         }
     }
@@ -3455,6 +3344,7 @@ mod test {
     use prost::Message;
     use rstest::rstest;
 
+    use tycho_core::keccak256;
     use tycho_storage::postgres::db_fixtures::yesterday_midnight;
 
     use crate::extractor::evm::fixtures::transaction01;
@@ -3576,20 +3466,17 @@ mod test {
     #[rstest]
     #[case::diff_block(
     fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
-    Err(ExtractionError::MergeError(format ! ("Can't merge TransactionVMUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1)))
+    Err(format ! ("Can't merge TransactionVMUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1))
     )]
     #[case::same_tx(
     fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
-    Err(ExtractionError::MergeError(format ! ("Can't merge TransactionVMUpdates from the same transaction: 0x{:x}", H256::zero())))
+    Err(format ! ("Can't merge TransactionVMUpdates from the same transaction: 0x{:x}", H256::zero()))
     )]
     #[case::lower_idx(
     fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
-    Err(ExtractionError::MergeError("Can't merge TransactionVMUpdates with lower transaction index: 10 > 1".to_owned()))
+    Err("Can't merge TransactionVMUpdates with lower transaction index: 10 > 1".to_owned())
     )]
-    fn test_merge_account_update_w_tx(
-        #[case] tx: Transaction,
-        #[case] exp: Result<(), ExtractionError>,
-    ) {
+    fn test_merge_account_update_w_tx(#[case] tx: Transaction, #[case] exp: Result<(), String>) {
         let mut left = tx_update();
         let mut right = left.clone();
         right.tx = tx;
@@ -3676,7 +3563,7 @@ mod test {
             tx_updates: vec![
                 TransactionVMUpdates {
                     account_updates: [(
-                        H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                        H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
                         AccountUpdate::new(
                             Chain::Ethereum,
                             Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
@@ -3697,7 +3584,7 @@ mod test {
                     component_balances: [(
                         "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                         [(
-                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
                             ComponentBalance {
                                 token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
                                 new_balance: Bytes::from(50000000.encode_to_vec()),
@@ -3716,7 +3603,7 @@ mod test {
                 },
                 TransactionVMUpdates {
                     account_updates: [(
-                        H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                        H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
                         AccountUpdate::new(
                             Chain::Ethereum,
                             Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
@@ -3735,7 +3622,7 @@ mod test {
                     component_balances: [(
                         "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                         [(
-                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
                             ComponentBalance {
                                 token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
                                 new_balance: Bytes::from(10.encode_to_vec()),
@@ -4615,7 +4502,7 @@ mod test {
 
         let first_update = TransactionVMUpdates {
             account_updates: [(
-                H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
                 AccountUpdate::new(
                     Chain::Ethereum,
                     Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
@@ -4636,7 +4523,7 @@ mod test {
             component_balances: [(
                 protocol_component_first_tx.id.clone(),
                 [(
-                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
                     ComponentBalance {
                         token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666)
                             .into(),
@@ -4655,7 +4542,7 @@ mod test {
         };
         let second_update = TransactionVMUpdates {
             account_updates: [(
-                H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
                 AccountUpdate::new(
                     Chain::Ethereum,
                     Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
@@ -4676,7 +4563,7 @@ mod test {
             component_balances: [(
                 protocol_component_second_tx.id.clone(),
                 [(
-                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364),
+                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
                     ComponentBalance {
                         token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666)
                             .into(),
@@ -4722,7 +4609,7 @@ mod test {
             (2981278644, 3250766788),
         ]);
 
-        let acc_update = [(acc_update.address.clone().into(), acc_update)]
+        let acc_update = [(acc_update.address.clone(), acc_update)]
             .iter()
             .cloned()
             .collect();

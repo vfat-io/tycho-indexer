@@ -4,11 +4,14 @@ use tracing::warn;
 use crate::{
     keccak256,
     models::{Chain, ChangeType, ContractId, DeltaError},
+    Bytes,
 };
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use super::{
-    blockchain::Transaction, Address, Balance, Code, CodeHash, StoreKey, StoreVal, TxHash,
+    blockchain::Transaction,
+    protocol::{ComponentBalance, ProtocolComponent},
+    Address, Balance, Code, CodeHash, ComponentId, StoreKey, StoreVal, TxHash,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -233,5 +236,149 @@ impl From<Account> for AccountUpdate {
             code: Some(value.code),
             change: ChangeType::Creation,
         }
+    }
+}
+
+/// Updates grouped by their respective transaction.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransactionVMUpdates {
+    pub account_updates: HashMap<Bytes, AccountUpdate>,
+    pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
+    pub component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+    pub tx: Transaction,
+}
+
+impl TransactionVMUpdates {
+    pub fn new(
+        account_updates: HashMap<Bytes, AccountUpdate>,
+        protocol_components: HashMap<ComponentId, ProtocolComponent>,
+        component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+        tx: Transaction,
+    ) -> Self {
+        Self { account_updates, protocol_components, component_balances, tx }
+    }
+
+    /// Merges this update with another one.
+    ///
+    /// The method combines two `AccountUpdateWithTx` instances under certain
+    /// conditions:
+    /// - The block from which both updates came should be the same. If the updates are from
+    ///   different blocks, the method will return an error.
+    /// - The transactions for each of the updates should be distinct. If they come from the same
+    ///   transaction, the method will return an error.
+    /// - The order of the transaction matters. The transaction from `other` must have occurred
+    ///   later than the self transaction. If the self transaction has a higher index than `other`,
+    ///   the method will return an error.
+    ///
+    /// The merged update keeps the transaction of `other`.
+    ///
+    /// # Errors
+    /// This method will return `ExtractionError::MergeError` if any of the above
+    /// conditions is violated.
+    pub fn merge(&mut self, other: &TransactionVMUpdates) -> Result<(), String> {
+        if self.tx.block_hash != other.tx.block_hash {
+            return Err(format!(
+                "Can't merge TransactionVMUpdates from different blocks: {:x} != {:x}",
+                self.tx.block_hash, other.tx.block_hash,
+            ));
+        }
+        if self.tx.hash == other.tx.hash {
+            return Err(format!(
+                "Can't merge TransactionVMUpdates from the same transaction: {:x}",
+                self.tx.hash
+            ));
+        }
+        if self.tx.index > other.tx.index {
+            return Err(format!(
+                "Can't merge TransactionVMUpdates with lower transaction index: {} > {}",
+                self.tx.index, other.tx.index
+            ));
+        }
+        self.tx = other.tx.clone();
+
+        for (address, update) in other
+            .account_updates
+            .clone()
+            .into_iter()
+        {
+            match self.account_updates.entry(address) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().merge(update)?;
+                }
+                Entry::Vacant(e) => {
+                    e.insert(update);
+                }
+            }
+        }
+
+        // Add new protocol components
+        self.protocol_components
+            .extend(other.protocol_components.clone());
+
+        // Add new component balances and overwrite existing ones
+        for (component_id, balance_by_token_map) in other
+            .component_balances
+            .clone()
+            .into_iter()
+        {
+            // Check if the key exists in the first map
+            if let Some(existing_inner_map) = self
+                .component_balances
+                .get_mut(&component_id)
+            {
+                // Iterate through the inner map and update values
+                for (inner_key, value) in balance_by_token_map {
+                    existing_inner_map.insert(inner_key, value);
+                }
+            } else {
+                self.component_balances
+                    .insert(component_id, balance_by_token_map);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl From<&TransactionVMUpdates> for Vec<Account> {
+    /// Creates a full account from a change.
+    ///
+    /// This can be used to get an insertable an account if we know the update
+    /// is actually a creation.
+    ///
+    /// Assumes that all relevant changes are set on `self` if something is
+    /// missing, it will use the corresponding types default.
+    /// Will use the associated transaction as creation, balance and code modify
+    /// transaction.
+    fn from(value: &TransactionVMUpdates) -> Self {
+        value
+            .account_updates
+            .clone()
+            .into_values()
+            .map(|update| {
+                let acc = Account::new(
+                    update.chain,
+                    update.address.clone(),
+                    format!("{:#020x}", update.address),
+                    update
+                        .slots
+                        .into_iter()
+                        .map(|(k, v)| (k, v.unwrap_or_default())) //TODO: is default ok here or should it be Bytes::zero(32)
+                        .collect(),
+                    update.balance.unwrap_or_default(),
+                    update.code.clone().unwrap_or_default(),
+                    update
+                        .code
+                        .as_ref()
+                        .map(keccak256)
+                        .unwrap_or_default()
+                        .into(),
+                    value.tx.hash.clone(),
+                    value.tx.hash.clone(),
+                    Some(value.tx.hash.clone()),
+                );
+                acc
+            })
+            .collect()
     }
 }

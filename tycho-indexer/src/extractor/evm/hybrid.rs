@@ -1772,6 +1772,7 @@ mod test_serial_db {
     use ethers::abi::AbiEncode;
     use futures03::{stream, StreamExt};
 
+    use models::contract::TransactionVMUpdates;
     use tycho_core::{
         models::{ContractId, FinancialType, ImplementationType},
         storage::{BlockIdentifier, BlockOrTimestamp},
@@ -2139,9 +2140,9 @@ mod test_serial_db {
             finalized_block_height: 0,
             revert: false,
             new_tokens: HashMap::new(),
-            tx_updates: vec![evm::TransactionVMUpdates::new(
+            tx_updates: vec![TransactionVMUpdates::new(
                 [(
-                    H160(VM_CONTRACT),
+                    H160(VM_CONTRACT).into(),
                     AccountUpdate::new(
                         Chain::Ethereum,
                         VM_CONTRACT.into(),
