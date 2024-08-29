@@ -21,7 +21,7 @@ use tycho_core::{
 use crate::{
     extractor::{
         evm,
-        revert_buffer::{BlockNumberOrTimestamp, FinalityStatus},
+        reorg_buffer::{BlockNumberOrTimestamp, FinalityStatus},
     },
     services::deltas_buffer::{PendingDeltas, PendingDeltasError},
 };

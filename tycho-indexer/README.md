@@ -24,7 +24,7 @@ Tycho runs each extractor in a separate thread, allowing multiple extractors to 
 
 In the event of a chain reorganization (reorg), the extractor will build and emit a revert message containing information on how to reverse the changes that were previously emitted for the now-invalid blocks. This allows subscribers to restore their states to the block preceeding the fork. The extractor will then continue to process the subsequent blocks as usual, quickly catching up to the current block.
 
-To handle reverts efficiently, extractors utilize a *Revert Buffer*. This buffer minimizes database load and enhances performance by temporarily storing unfinalized blocks until they are confirmed.
+To handle reorgs efficiently, extractors utilize a *Reorg Buffer*. This buffer minimizes database load and enhances performance by temporarily storing unfinalized blocks until they are confirmed.
 
 ## Service
 
@@ -37,7 +37,7 @@ Tycho's WebSocket service allows clients to establish persistent connections to 
 #### Key Features:
 
 - Subscriptions: Clients can subscribe to various extractors based on their identity (e.g., a specific blockchain and protocol). Once subscribed, clients receive updates as soon as the extractor processes new data.
-- Reverts Handling: In case of blockchain reverts, the system ensures that clients are notified with revert messages, allowing them to adjust their states accordingly.
+- Reorg Handling: In case of blockchain reorganisations, the system ensures that clients are notified with revert messages, allowing them to adjust their states accordingly.
 - Heartbeat Mechanism: The WebSocket service includes a heartbeat mechanism to monitor client connection health. If the client fails to respond within a set timeout, the connection is automatically terminated.
 - Error Handling: The service provides clear error messages for common issues like subscription failures, parsing errors, and missing extractors.
 

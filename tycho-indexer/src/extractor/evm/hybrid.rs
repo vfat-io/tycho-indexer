@@ -39,7 +39,7 @@ use crate::{
             utils::format_duration,
             Block,
         },
-        revert_buffer::RevertBuffer,
+        reorg_buffer::ReorgBuffer,
         BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
     },
     pb,
@@ -69,7 +69,7 @@ pub struct HybridContractExtractor<G, T> {
     post_processor: Option<fn(evm::BlockChanges) -> evm::BlockChanges>,
     /// The number of blocks behind the current block to be considered as syncing.
     sync_threshold: u64,
-    revert_buffer: Mutex<RevertBuffer<BlockUpdateWithCursor<evm::BlockChanges>>>,
+    reorg_buffer: Mutex<ReorgBuffer<BlockUpdateWithCursor<evm::BlockChanges>>>,
 }
 
 impl<G, T> HybridContractExtractor<G, T>
@@ -112,7 +112,7 @@ where
                     protocol_types,
                     post_processor,
                     sync_threshold,
-                    revert_buffer: Mutex::new(RevertBuffer::new()),
+                    reorg_buffer: Mutex::new(ReorgBuffer::new()),
                 }
             }
             Ok(cursor) => {
@@ -141,7 +141,7 @@ where
                     protocol_types,
                     post_processor,
                     sync_threshold,
-                    revert_buffer: Mutex::new(RevertBuffer::new()),
+                    reorg_buffer: Mutex::new(ReorgBuffer::new()),
                 }
             }
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
@@ -236,7 +236,7 @@ where
 
         // Merge stored balances with new ones
         let balances = {
-            let rb = self.revert_buffer.lock().await;
+            let rb = self.reorg_buffer.lock().await;
             let mut balances = self
                 .get_balances(&rb, &balance_request)
                 .await?;
@@ -302,18 +302,18 @@ where
         Ok(())
     }
 
-    /// Returns balances at the tip of the revert buffer.
+    /// Returns balances at the tip of the reorg buffer.
     ///
-    /// Will return the requested balances at the tip of the revert buffer. Might need
+    /// Will return the requested balances at the tip of the reorg buffer. Might need
     /// to go to storage to retrieve balances that are not stored within the buffer.
     async fn get_balances(
         &self,
-        revert_buffer: &RevertBuffer<BlockUpdateWithCursor<evm::BlockChanges>>,
+        reorg_buffer: &ReorgBuffer<BlockUpdateWithCursor<evm::BlockChanges>>,
         reverted_balances_keys: &[(&String, &Bytes)],
     ) -> Result<HashMap<String, HashMap<H160, evm::ComponentBalance>>, ExtractionError> {
         // First search in the buffer
         let (buffered_balances, missing_balances_keys) =
-            revert_buffer.lookup_balances(reverted_balances_keys);
+            reorg_buffer.lookup_balances(reverted_balances_keys);
 
         let missing_balances_map: HashMap<String, Vec<Bytes>> = missing_balances_keys
             .into_iter()
@@ -609,14 +609,14 @@ where
         // block finality blockchains.
         let is_syncing = inp.final_block_height >= msg.block.number;
         {
-            // keep revert buffer guard within a limited scope
+            // keep reorg buffer guard within a limited scope
 
-            let mut revert_buffer = self.revert_buffer.lock().await;
-            revert_buffer
+            let mut reorg_buffer = self.reorg_buffer.lock().await;
+            reorg_buffer
                 .insert_block(BlockUpdateWithCursor::new(msg.clone(), inp.cursor.clone()))
                 .map_err(ExtractionError::Storage)?;
 
-            for msg in revert_buffer
+            for msg in reorg_buffer
                 .drain_new_finalized_blocks(inp.final_block_height)
                 .map_err(ExtractionError::Storage)?
             {
@@ -680,12 +680,12 @@ where
             return Ok(None);
         }
 
-        let mut revert_buffer = self.revert_buffer.lock().await;
+        let mut reorg_buffer = self.reorg_buffer.lock().await;
 
         // Purge the buffer
-        let reverted_state = revert_buffer
+        let reverted_state = reorg_buffer
             .purge(block_hash.into())
-            .map_err(|e| ExtractionError::RevertBufferError(e.to_string()))?;
+            .map_err(|e| ExtractionError::ReorgBufferError(e.to_string()))?;
 
         // Handle created and deleted components
         let (reverted_components_creations, reverted_components_deletions) =
@@ -769,7 +769,7 @@ where
         // Fetch previous values for every reverted states
         // First search in the buffer
         let (buffered_state, missing) =
-            revert_buffer.lookup_account_state(&reverted_account_state_keys_vec);
+            reorg_buffer.lookup_account_state(&reverted_account_state_keys_vec);
 
         // Then for every missing previous values in the buffer, get the data from our db
         let missing_map: HashMap<Bytes, Vec<Bytes>> =
@@ -890,7 +890,7 @@ where
         // Fetch previous values for every reverted states
         // First search in the buffer
         let (buffered_state, missing) =
-            revert_buffer.lookup_protocol_state(&reverted_protocol_state_keys_vec);
+            reorg_buffer.lookup_protocol_state(&reverted_protocol_state_keys_vec);
 
         // Then for every missing previous values in the buffer, get the data from our db
         let missing_map: HashMap<String, Vec<String>> =
@@ -995,13 +995,13 @@ where
         trace!("Reverted balance keys {:?}", &reverted_balances_keys_vec);
 
         let combined_balances = self
-            .get_balances(&revert_buffer, &reverted_balances_keys_vec)
+            .get_balances(&reorg_buffer, &reverted_balances_keys_vec)
             .await?;
 
         let revert_message = evm::AggregatedBlockChanges {
             extractor: self.name.clone(),
             chain: self.chain,
-            block: revert_buffer
+            block: reorg_buffer
                 .get_most_recent_block()
                 .expect("Couldn't find most recent block in buffer during revert")
                 .into(),
@@ -1815,9 +1815,7 @@ mod test_serial_db {
     // VM contract creation fixtures
     const VM_TX_HASH_0: &str = "0x2f6350a292c0fc918afe67cb893744a080dacb507b0cea4cc07437b8aff23cdb";
     const VM_TX_HASH_1: &str = "0x0d9e0da36cf9f305a189965b248fc79c923619801e8ab5ef158d4fd528a291ad";
-    const VM_TX_HASH_2: &str = "0xcf574444be25450fe26d16b85102b241e964a6e01d75dd962203d4888269be3d";
-    const VM_BLOCK_HASH_0: &str =
-        "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
+
     // Ambient Contract
     const VM_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
@@ -2151,44 +2149,6 @@ mod test_serial_db {
                     evm::fixtures::transaction02(VM_TX_HASH_1, evm::fixtures::HASH_256_0, 2),
                 ),
             ],
-        }
-    }
-
-    // Allow dead code until reverts are supported again
-    #[allow(dead_code)]
-    fn vm_update02() -> evm::BlockContractChanges {
-        let block = evm::Block {
-            number: 1,
-            chain: Chain::Ethereum,
-            hash: VM_BLOCK_HASH_0.parse().unwrap(),
-            parent_hash: H256::zero(),
-            ts: "2020-01-01T01:00:00".parse().unwrap(),
-        };
-        evm::BlockContractChanges {
-            extractor: "vm:ambient".to_owned(),
-            chain: Chain::Ethereum,
-            block,
-            finalized_block_height: 0,
-            revert: false,
-            new_tokens: HashMap::new(),
-            tx_updates: vec![evm::TransactionVMUpdates::new(
-                [(
-                    H160(VM_CONTRACT),
-                    AccountUpdate::new(
-                        H160(VM_CONTRACT),
-                        Chain::Ethereum,
-                        evm::fixtures::evm_slots([(42, 0xbadbabe)]),
-                        Some(U256::from(2000)),
-                        None,
-                        ChangeType::Update,
-                    ),
-                )]
-                .into_iter()
-                .collect(),
-                HashMap::new(),
-                HashMap::new(),
-                evm::fixtures::transaction02(VM_TX_HASH_2, VM_BLOCK_HASH_0, 1),
-            )],
         }
     }
 
