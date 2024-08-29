@@ -1,5 +1,4 @@
 use chrono::NaiveDateTime;
-use ethers::prelude::H160;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use tracing::{debug, trace, warn};
@@ -240,7 +239,7 @@ where
 pub type ProtocolStateIdType = ComponentId;
 pub type ProtocolStateKeyType = AttrStoreKey;
 pub type ProtocolStateValueType = StoreVal;
-pub type AccountStateIdType = H160;
+pub type AccountStateIdType = Bytes;
 pub type AccountStateKeyType = Bytes;
 pub type AccountStateValueType = Bytes;
 
@@ -325,7 +324,7 @@ where
         let mut remaining_keys: HashSet<(AccountStateIdType, AccountStateKeyType)> =
             HashSet::from_iter(
                 keys.iter()
-                    .map(|&(c_id, attr)| (*c_id, (*attr).clone())),
+                    .map(|&(c_id, attr)| (c_id.clone(), attr.clone())),
             );
 
         for block_message in self.block_messages.iter().rev() {
@@ -339,7 +338,7 @@ where
                     .map(|k| (&k.0, &k.1))
                     .collect(),
             ) {
-                if remaining_keys.remove(&(key.0, key.1.clone())) {
+                if remaining_keys.remove(&(key.0.clone(), key.1.clone())) {
                     res.insert(key, val);
                 }
             }

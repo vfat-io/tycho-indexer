@@ -97,14 +97,14 @@ mod test {
     };
     use tycho_core::{
         models::{
-            blockchain::{Block, Transaction},
+            blockchain::{Block, Transaction, TxWithChanges},
             protocol::{ProtocolComponent, ProtocolComponentStateDelta},
             Chain,
         },
         Bytes,
     };
 
-    use crate::extractor::{evm, evm::TxWithChanges};
+    use crate::extractor::evm;
 
     const BLOCK_HASH_0: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
     const CREATED_CONTRACT: &str = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc";

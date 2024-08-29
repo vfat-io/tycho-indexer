@@ -441,7 +441,7 @@ where
                                     // it's token
                                     .map(move |(token, balance)| {
                                         (
-                                            *token,
+                                            (token.clone()).into(),
                                             (addr, U256::from_big_endian(&balance.new_balance)),
                                         )
                                     })
@@ -767,9 +767,7 @@ where
             missing
                 .into_iter()
                 .fold(HashMap::new(), |mut acc, (addr, key)| {
-                    acc.entry(addr.into())
-                        .or_default()
-                        .push(key);
+                    acc.entry(addr).or_default().push(key);
                     acc
                 });
 
@@ -803,25 +801,17 @@ where
                                     state.slots.get(key).map_or_else(
                                         // If the value for this key is not found, return empty
                                         // Bytes
-                                        || {
-                                            (
-                                                (state.address.clone().into(), key.clone()),
-                                                Bytes::new(),
-                                            )
-                                        },
+                                        || ((state.address.clone(), key.clone()), Bytes::new()),
                                         // If the key is found, return its value
                                         |value| {
-                                            (
-                                                (state.address.clone().into(), key.clone()),
-                                                value.clone(),
-                                            )
+                                            ((state.address.clone(), key.clone()), value.clone())
                                         },
                                     )
                                 }
                                 None => {
                                     // If the whole account state is not found, return empty Bytes
                                     // for the key
-                                    (((*address).clone().into(), key.clone()), Bytes::new())
+                                    ((address.clone(), key.clone()), Bytes::new())
                                 }
                             }
                         })
@@ -833,9 +823,9 @@ where
             combined_states
                 .into_iter()
                 .fold(HashMap::new(), |mut acc, ((addr, key), value)| {
-                    acc.entry(Bytes::from(addr))
+                    acc.entry(addr.clone())
                         .or_insert_with(|| AccountUpdate {
-                            address: addr.into(),
+                            address: addr,
                             chain: self.chain,
                             slots: HashMap::new(),
                             balance: None, //TODO: handle balance changes
@@ -971,7 +961,7 @@ where
                             .flat_map(|(id, balance_change)| {
                                 balance_change
                                     .iter()
-                                    .map(move |(token, _)| (id, Bytes::from(token.as_bytes())))
+                                    .map(move |(token, _)| (id, token.clone()))
                             })
                     })
             })
@@ -2060,7 +2050,7 @@ mod test_serial_db {
                         },
                     )]),
                     [(
-                        H160(VM_CONTRACT),
+                        H160(VM_CONTRACT).into(),
                         AccountUpdate::new(
                             Chain::Ethereum,
                             VM_CONTRACT.into(),
@@ -2076,7 +2066,7 @@ mod test_serial_db {
                     HashMap::from([(
                         component_id.clone(),
                         HashMap::from([(
-                            base_token,
+                            base_token.into(),
                             ComponentBalance {
                                 token: base_token.into(),
                                 new_balance: Bytes::from(&[0u8]),
@@ -2091,7 +2081,7 @@ mod test_serial_db {
                 TxWithChanges::new(
                     HashMap::new(),
                     [(
-                        H160(VM_CONTRACT),
+                        H160(VM_CONTRACT).into(),
                         AccountUpdate::new(
                             Chain::Ethereum,
                             VM_CONTRACT.into(),
@@ -2107,7 +2097,7 @@ mod test_serial_db {
                     HashMap::from([(
                         component_id.clone(),
                         HashMap::from([(
-                            base_token,
+                            base_token.into(),
                             ComponentBalance {
                                 token: base_token.into(),
                                 new_balance: Bytes::from(&[0u8]),

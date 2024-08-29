@@ -10,7 +10,7 @@ use tracing::log::warn;
 
 use tycho_core::{
     models::{
-        blockchain::{AggregatedBlockChanges, Block, BlockScoped, Transaction},
+        blockchain::{AggregatedBlockChanges, Block, BlockScoped, Transaction, TxWithChanges},
         contract::{Account, AccountUpdate, TransactionVMUpdates},
         protocol::{
             self as tycho_core_protocol, ComponentBalance, ProtocolChangesWithTx,
@@ -247,9 +247,9 @@ impl StateUpdateBufferEntry for BlockContractChanges {
                 for (attr, val) in account_update
                     .slots
                     .iter()
-                    .filter(|(attr, _)| keys_set.contains(&(&H160::from(address.clone()), *attr)))
+                    .filter(|(attr, _)| keys_set.contains(&(address, *attr)))
                 {
-                    res.entry((H160::from(address.clone()), (*attr).clone()))
+                    res.entry((address.clone(), attr.clone()))
                         .or_insert(val.clone().unwrap_or_default());
                 }
             }
@@ -1012,39 +1012,12 @@ impl BlockEntityChanges {
     }
 }
 
-/// Changes grouped by their respective transaction.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct TxWithChanges {
-    pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub account_updates: HashMap<H160, AccountUpdate>,
-    pub state_updates: HashMap<ComponentId, ProtocolComponentStateDelta>,
-    pub balance_changes: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-    pub tx: Transaction,
-}
+impl TryFromMessage for TxWithChanges {
+    type Args<'a> =
+        (substreams::TransactionChanges, &'a Block, &'a str, &'a HashMap<String, ProtocolType>);
 
-impl TxWithChanges {
-    pub fn new(
-        protocol_components: HashMap<ComponentId, ProtocolComponent>,
-        account_updates: HashMap<H160, AccountUpdate>,
-        protocol_states: HashMap<ComponentId, ProtocolComponentStateDelta>,
-        balance_changes: HashMap<ComponentId, HashMap<H160, ComponentBalance>>,
-        tx: Transaction,
-    ) -> Self {
-        Self {
-            account_updates,
-            protocol_components,
-            state_updates: protocol_states,
-            balance_changes,
-            tx,
-        }
-    }
-
-    fn try_from_message(
-        msg: substreams::TransactionChanges,
-        block: &Block,
-        protocol_system: &str,
-        protocol_types: &HashMap<String, ProtocolType>,
-    ) -> Result<Self, ExtractionError> {
+    fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
+        let (msg, block, protocol_system, protocol_types) = args;
         let tx = Transaction::try_from_message((
             msg.tx
                 .expect("TransactionChanges should have a transaction"),
@@ -1052,9 +1025,9 @@ impl TxWithChanges {
         ))?;
 
         let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
-        let mut account_updates: HashMap<H160, AccountUpdate> = HashMap::new();
+        let mut account_updates: HashMap<Bytes, AccountUpdate> = HashMap::new();
         let mut state_updates: HashMap<String, ProtocolComponentStateDelta> = HashMap::new();
-        let mut balance_changes: HashMap<String, HashMap<H160, ComponentBalance>> = HashMap::new();
+        let mut balance_changes: HashMap<String, HashMap<Bytes, ComponentBalance>> = HashMap::new();
 
         // First, parse the new protocol components
         for change in msg.component_changes.into_iter() {
@@ -1072,7 +1045,7 @@ impl TxWithChanges {
         // Then, parse the account updates
         for contract_change in msg.contract_changes.into_iter() {
             let update = AccountUpdate::try_from_message((contract_change, block.chain))?;
-            account_updates.insert(update.address.clone().into(), update);
+            account_updates.insert(update.address.clone(), update);
         }
 
         // Then, parse the state updates
@@ -1095,7 +1068,7 @@ impl TxWithChanges {
         for balance_change in msg.balance_changes.into_iter() {
             let component_id = String::from_utf8(balance_change.component_id.clone())
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
-            let token_address = H160::from_slice(balance_change.token.as_slice());
+            let token_address = Bytes::from(balance_change.token.clone());
             let balance = ComponentBalance::try_from_message((balance_change, &tx))?;
 
             balance_changes
@@ -1111,153 +1084,6 @@ impl TxWithChanges {
             balance_changes,
             tx,
         })
-    }
-
-    /// Merges this update with another one.
-    ///
-    /// The method combines two `ChangesWithTx` instances if they are for the same
-    /// transaction.
-    ///
-    /// NB: It is assumed that `other` is a more recent update than `self` is and the two are
-    /// combined accordingly.
-    ///
-    /// # Errors
-    /// This method will return `ExtractionError::MergeError` if any of the above
-    /// conditions is violated.
-    pub fn merge(&mut self, other: TxWithChanges) -> Result<(), ExtractionError> {
-        if self.tx.block_hash != other.tx.block_hash {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge TxWithChanges from different blocks: 0x{:x} != 0x{:x}",
-                self.tx.block_hash, other.tx.block_hash,
-            )));
-        }
-        if self.tx.hash == other.tx.hash {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge TxWithChanges from the same transaction: 0x{:x}",
-                self.tx.hash
-            )));
-        }
-        if self.tx.index > other.tx.index {
-            return Err(ExtractionError::MergeError(format!(
-                "Can't merge TxWithChanges with lower transaction index: {} > {}",
-                self.tx.index, other.tx.index
-            )));
-        }
-
-        self.tx = other.tx;
-
-        // Merge new protocol components
-        // Log a warning if a new protocol component for the same id already exists, because this
-        // should never happen.
-        for (key, value) in other.protocol_components {
-            match self.protocol_components.entry(key) {
-                Entry::Occupied(mut entry) => {
-                    warn!(
-                        "Overwriting new protocol component for id {} with a new one. This should never happen! Please check logic",
-                        entry.get().id
-                    );
-                    entry.insert(value);
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(value);
-                }
-            }
-        }
-
-        // Merge Account Updates
-        for (address, update) in other
-            .account_updates
-            .clone()
-            .into_iter()
-        {
-            match self.account_updates.entry(address) {
-                Entry::Occupied(mut e) => {
-                    e.get_mut()
-                        .merge(update)
-                        .map_err(ExtractionError::MergeError)?;
-                }
-                Entry::Vacant(e) => {
-                    e.insert(update);
-                }
-            }
-        }
-
-        // Merge Protocol States
-        for (key, value) in other.state_updates {
-            match self.state_updates.entry(key) {
-                Entry::Occupied(mut entry) => {
-                    entry
-                        .get_mut()
-                        .merge(value)
-                        .map_err(ExtractionError::MergeError)?;
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(value);
-                }
-            }
-        }
-
-        // Merge Balance Changes
-        for (component_id, balance_changes) in other.balance_changes {
-            let token_balances = self
-                .balance_changes
-                .entry(component_id)
-                .or_default();
-            for (token, balance) in balance_changes {
-                token_balances.insert(token, balance);
-            }
-        }
-        Ok(())
-    }
-}
-
-impl From<TransactionVMUpdates> for TxWithChanges {
-    fn from(value: TransactionVMUpdates) -> Self {
-        Self {
-            protocol_components: value.protocol_components,
-            account_updates: value
-                .account_updates
-                .into_iter()
-                .map(|(k, v)| (k.into(), v))
-                .collect(),
-            state_updates: HashMap::new(),
-            balance_changes: value
-                .component_balances
-                .into_iter()
-                .map(|(id, bals)| {
-                    (
-                        id,
-                        bals.into_iter()
-                            .map(|(id, bal)| (H160::from(id), bal))
-                            .collect(),
-                    )
-                })
-                .collect(),
-            tx: value.tx,
-        }
-    }
-}
-
-impl From<ProtocolChangesWithTx> for TxWithChanges {
-    fn from(value: ProtocolChangesWithTx) -> TxWithChanges {
-        TxWithChanges {
-            protocol_components: value.new_protocol_components,
-            account_updates: HashMap::new(),
-            state_updates: value.protocol_states,
-            balance_changes: value
-                .balance_changes
-                .into_iter()
-                .map(|(id, bals)| {
-                    (
-                        id,
-                        bals.into_iter()
-                            .map(|(id, bal)| (H160::from(id), bal))
-                            .collect(),
-                    )
-                })
-                .collect(),
-            tx: value.tx,
-        }
     }
 }
 
@@ -1315,7 +1141,7 @@ impl StateUpdateBufferEntry for BlockChanges {
                     .iter()
                     .filter(|(slot, _)| keys_set.contains(&(address, *slot)))
                 {
-                    res.entry((*address, (*slot).clone()))
+                    res.entry((address.clone(), slot.clone()))
                         .or_insert(val.clone().unwrap_or_default());
                 }
             }
@@ -1338,11 +1164,9 @@ impl StateUpdateBufferEntry for BlockChanges {
             for (component_id, balance_update) in update.balance_changes.iter() {
                 for (token, value) in balance_update
                     .iter()
-                    .filter(|(token, _)| {
-                        keys_set.contains(&(component_id, &token.as_bytes().into()))
-                    })
+                    .filter(|(token, _)| keys_set.contains(&(component_id, token)))
                 {
-                    res.entry((component_id.clone(), token.as_bytes().into()))
+                    res.entry((component_id.clone(), token.clone()))
                         .or_insert(value.clone());
                 }
             }
@@ -1400,7 +1224,12 @@ impl BlockChanges {
                         )
                     })?;
 
-                    TxWithChanges::try_from_message(change, &block, protocol_system, protocol_types)
+                    TxWithChanges::try_from_message((
+                        change,
+                        &block,
+                        protocol_system,
+                        protocol_types,
+                    ))
                 })
                 .collect::<Result<Vec<TxWithChanges>, ExtractionError>>()?;
 
@@ -1444,7 +1273,9 @@ impl BlockChanges {
 
         let aggregated_changes = iter
             .try_fold(first_state, |mut acc_state, new_state| {
-                acc_state.merge(new_state.clone())?;
+                acc_state
+                    .merge(new_state.clone())
+                    .map_err(ExtractionError::MergeError)?;
                 Ok::<_, ExtractionError>(acc_state.clone())
             })
             .unwrap();
@@ -1459,23 +1290,8 @@ impl BlockChanges {
             new_tokens: self.new_tokens,
             deleted_protocol_components: HashMap::new(),
             state_updates: aggregated_changes.state_updates,
-            account_updates: aggregated_changes
-                .account_updates
-                .into_iter()
-                .map(|(k, v)| (k.into(), v))
-                .collect(),
-            component_balances: aggregated_changes
-                .balance_changes
-                .into_iter()
-                .map(|(id, bals)| {
-                    (
-                        id,
-                        bals.into_iter()
-                            .map(|(id, bal)| (Bytes::from(id), bal))
-                            .collect(),
-                    )
-                })
-                .collect(),
+            account_updates: aggregated_changes.account_updates,
+            component_balances: aggregated_changes.balance_changes,
             component_tvl: HashMap::new(),
         })
     }
@@ -3809,10 +3625,10 @@ mod test {
     fn test_block_contract_changes_state_filter() {
         let block = block_state_changes();
 
-        let account1 = H160::from_low_u64_be(0x0000000000000000000000000000000061626364);
+        let account1 = Bytes::from_str("0000000000000000000000000000000061626364").unwrap();
         let slot1 = Bytes::from(U256::from(2711790500_u64));
         let slot2 = Bytes::from(U256::from(3250766788_u64));
-        let account_missing = H160::from_low_u64_be(0x000000000000000000000000000000000badbabe);
+        let account_missing = Bytes::from_str("000000000000000000000000000000000badbabe").unwrap();
         let slot_missing = Bytes::from(U256::from(12345678_u64));
 
         let keys = vec![
@@ -3828,7 +3644,7 @@ mod test {
         assert_eq!(
             filtered,
             HashMap::from([
-                ((account1, slot1), U256::from(3250766788_u64).into()),
+                ((account1.clone(), slot1), U256::from(3250766788_u64).into()),
                 ((account1, slot2), U256::from(3520254932_u64).into())
             ])
         );
