@@ -17,13 +17,3 @@ pub trait AccountExtractor {
         account_addresses: Vec<Address>,
     ) -> Result<HashMap<Bytes, AccountUpdate>, Self::Error>;
 }
-
-// #[async_trait]
-// pub trait TokenPreProcessor: Send + Sync {
-//     async fn get_tokens(
-//         &self,
-//         addresses: Vec<Bytes>,
-//         token_finder: Arc<dyn TokenOwnerFinding>,
-//         block: BlockNumber,
-//     ) -> Vec<ERC20Token>;
-// }

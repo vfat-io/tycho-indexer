@@ -61,7 +61,7 @@ impl Account {
         self.balance_modify_tx = modified_at.clone();
     }
 
-    pub fn apply_contract_delta(&mut self, delta: &AccountUpdate) -> Result<(), DeltaError> {
+    pub fn apply_delta(&mut self, delta: &AccountUpdate) -> Result<(), DeltaError> {
         let self_id = (self.chain, &self.address);
         let other_id = (delta.chain, &delta.address);
         if self_id != other_id {

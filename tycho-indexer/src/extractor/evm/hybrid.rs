@@ -170,7 +170,7 @@ where
         state.last_processed_block = Some(block);
     }
 
-    async fn report_progress(&self, block: Block) {
+    async fn report_progress(&self, block: &Block) {
         let mut state = self.inner.lock().await;
         let now = chrono::Local::now().naive_utc();
         let time_passed = now
@@ -618,8 +618,7 @@ where
         self.update_last_processed_block(msg.block.clone())
             .await;
 
-        self.report_progress(msg.block.clone())
-            .await;
+        self.report_progress(&msg.block).await;
 
         self.update_cursor(inp.cursor).await;
 

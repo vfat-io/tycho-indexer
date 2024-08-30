@@ -186,7 +186,7 @@ impl PendingDeltas {
                     .account_updates
                     .get(&db_state.address)
                 {
-                    db_state.apply_contract_delta(delta)?;
+                    db_state.apply_delta(delta)?;
                     change_found = true;
                 }
                 // TODO: currently it is impossible to apply balance changes and state deltas since

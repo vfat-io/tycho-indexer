@@ -25,7 +25,7 @@ use tokio::{select, task::JoinHandle};
 use tracing::{info, instrument, warn};
 use tycho_core::{
     models::{
-        blockchain::{Block, Transaction as CoreTransaction},
+        blockchain::{Block, Transaction},
         contract::AccountUpdate,
         Address, Chain, ExtractionState, ImplementationType,
     },
@@ -333,7 +333,7 @@ async fn initialize_accounts(
 
     info!(block_number = block.number, "Initializing accounts");
 
-    let tx = CoreTransaction {
+    let tx = Transaction {
         hash: H256::random().into(),
         block_hash: block.hash.clone(),
         from: Bytes::from([0u8; 20]),

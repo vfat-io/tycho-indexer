@@ -1052,7 +1052,7 @@ pub mod fixtures {
             .collect()
     }
 
-    //Utils function that return slots that match `AccountUpdate` slots.
+    // Utils function that return slots that match `AccountUpdate` slots.
     // TODO: this is temporary, we shoud make AccountUpdate.slots use Bytes instead of Option<Bytes>
     pub fn slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<Bytes, Option<Bytes>> {
         data.into_iter()
