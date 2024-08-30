@@ -12,6 +12,16 @@ use super::{
     TxHash,
 };
 
+/// Represents the static parts of a protocol component.
+///
+/// `ProtocolComponent` provides detailed descriptions of a component of a protocol,
+/// for example, swap pools that enables the exchange of two tokens.
+///
+/// A `ProtocolComponent` can be associated with an `Account`, and it has an identifier (`id`) that
+/// can be either the on-chain address or a custom one. It belongs to a specific `ProtocolSystem`
+/// and has a `ProtocolTypeID` that associates it with a `ProtocolType` that describes its behaviour
+/// e.g., swap, lend, bridge. The component is associated with a specific `Chain` and holds
+/// information about tradable tokens, related contract IDs, and static attributes.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProtocolComponent {
     pub id: ComponentId,
