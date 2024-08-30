@@ -12,7 +12,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use tycho_core::{
     models::{
-        blockchain::AggregatedBlockChanges,
+        blockchain::BlockAggregatedChanges,
         contract::Account,
         protocol::{ProtocolComponent, ProtocolComponentState},
         DeltaError, NormalisedMessage,
@@ -22,7 +22,7 @@ use tycho_core::{
 
 #[derive(Default, Clone)]
 pub struct PendingDeltas {
-    buffers: HashMap<String, Arc<Mutex<RevertBuffer<AggregatedBlockChanges>>>>,
+    buffers: HashMap<String, Arc<Mutex<RevertBuffer<BlockAggregatedChanges>>>>,
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -55,9 +55,9 @@ impl PendingDeltas {
     }
 
     fn insert(&self, message: Arc<dyn NormalisedMessage>) -> Result<()> {
-        let maybe_convert: Option<AggregatedBlockChanges> = message
+        let maybe_convert: Option<BlockAggregatedChanges> = message
             .as_any()
-            .downcast_ref::<AggregatedBlockChanges>()
+            .downcast_ref::<BlockAggregatedChanges>()
             .cloned();
         match maybe_convert {
             Some(msg) => {
@@ -350,9 +350,9 @@ mod test {
         )
     }
 
-    fn vm_block_deltas() -> AggregatedBlockChanges {
+    fn vm_block_deltas() -> BlockAggregatedChanges {
         let address = H160::from_str("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05").unwrap();
-        AggregatedBlockChanges::new(
+        BlockAggregatedChanges::new(
             "vm:extractor",
             Chain::Ethereum,
             block(1),
@@ -409,8 +409,8 @@ mod test {
         )
     }
 
-    fn native_block_deltas() -> AggregatedBlockChanges {
-        AggregatedBlockChanges::new(
+    fn native_block_deltas() -> BlockAggregatedChanges {
+        BlockAggregatedChanges::new(
             "native:extractor",
             Chain::Ethereum,
             block(1),
@@ -506,7 +506,7 @@ mod test {
     #[test]
     fn test_insert_vm() {
         let buffer = PendingDeltas::new(["vm:extractor"]);
-        let exp: AggregatedBlockChanges = vm_block_deltas();
+        let exp: BlockAggregatedChanges = vm_block_deltas();
 
         buffer
             .insert(Arc::new(vm_block_deltas()))
@@ -527,7 +527,7 @@ mod test {
     #[test]
     fn test_insert_native() {
         let pending_buffer = PendingDeltas::new(["native:extractor"]);
-        let exp: AggregatedBlockChanges = native_block_deltas();
+        let exp: BlockAggregatedChanges = native_block_deltas();
 
         pending_buffer
             .insert(Arc::new(native_block_deltas()))

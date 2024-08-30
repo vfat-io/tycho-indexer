@@ -5,7 +5,7 @@ use tracing::log::warn;
 
 use tycho_core::{
     models::{
-        blockchain::{AggregatedBlockChanges, Block, BlockScoped, Transaction, TxWithChanges},
+        blockchain::{Block, BlockAggregatedChanges, BlockScoped, Transaction, TxWithChanges},
         contract::{AccountUpdate, TransactionVMUpdates},
         protocol::{
             self as tycho_core_protocol, ComponentBalance, ProtocolChangesWithTx,
@@ -934,7 +934,7 @@ impl BlockChanges {
     ///
     /// This returns an error if there was a problem during merge. The error
     /// type is `ExtractionError`.
-    pub fn aggregate_updates(self) -> Result<AggregatedBlockChanges, ExtractionError> {
+    pub fn aggregate_updates(self) -> Result<BlockAggregatedChanges, ExtractionError> {
         let mut iter = self.txs_with_update.into_iter();
 
         // Use unwrap_or_else to provide a default state if iter.next() is None
@@ -949,7 +949,7 @@ impl BlockChanges {
             })
             .unwrap();
 
-        Ok(AggregatedBlockChanges {
+        Ok(BlockAggregatedChanges {
             extractor: self.extractor,
             chain: self.chain,
             block: self.block,

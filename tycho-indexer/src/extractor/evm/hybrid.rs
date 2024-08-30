@@ -16,7 +16,7 @@ use token_analyzer::TokenFinder;
 use tycho_core::{
     models::{
         self,
-        blockchain::AggregatedBlockChanges,
+        blockchain::BlockAggregatedChanges,
         contract::{Account, AccountUpdate},
         protocol::{ComponentBalance, ProtocolComponentState, ProtocolComponentStateDelta},
         token::CurrencyToken,
@@ -211,7 +211,7 @@ where
     #[allow(clippy::mutable_key_type)]
     async fn handle_tvl_changes(
         &self,
-        msg: &mut AggregatedBlockChanges,
+        msg: &mut BlockAggregatedChanges,
     ) -> Result<(), ExtractionError> {
         trace!("Calculating tvl changes");
         if msg.component_balances.is_empty() {
@@ -977,7 +977,7 @@ where
             .get_balances(&revert_buffer, &reverted_balances_keys_vec)
             .await?;
 
-        let revert_message = AggregatedBlockChanges {
+        let revert_message = BlockAggregatedChanges {
             extractor: self.name.clone(),
             chain: self.chain,
             block: revert_buffer
@@ -1606,7 +1606,7 @@ mod test {
 
     #[test_log::test(tokio::test)]
     async fn test_handle_tvl_changes() {
-        let mut msg = AggregatedBlockChanges {
+        let mut msg = BlockAggregatedChanges {
             component_balances: HashMap::from([(
                 "comp1".to_string(),
                 HashMap::from([(
@@ -2354,10 +2354,10 @@ mod test_serial_db {
 
             let res = client_msg
                 .as_any()
-                .downcast_ref::<AggregatedBlockChanges>()
+                .downcast_ref::<BlockAggregatedChanges>()
                 .expect("not good type");
             let base_ts = yesterday_midnight().timestamp();
-            let block_entity_changes_result = AggregatedBlockChanges {
+            let block_entity_changes_result = BlockAggregatedChanges {
                 extractor: "native_name".to_string(),
                 chain: Chain::Ethereum,
                 block: Block::new(
@@ -2535,11 +2535,11 @@ mod test_serial_db {
 
             let res = client_msg
                 .as_any()
-                .downcast_ref::<AggregatedBlockChanges>()
+                .downcast_ref::<BlockAggregatedChanges>()
                 .expect("not good type");
 
             let base_ts = yesterday_midnight().timestamp();
-            let block_account_expected = AggregatedBlockChanges {
+            let block_account_expected = BlockAggregatedChanges {
                 extractor: "vm_name".to_string(),
                 chain: Chain::Ethereum,
                 block: Block::new(

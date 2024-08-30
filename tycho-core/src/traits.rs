@@ -15,5 +15,5 @@ pub trait AccountExtractor {
         &self,
         block: Block,
         account_addresses: Vec<Address>,
-    ) -> Result<HashMap<Bytes, AccountUpdate>, Self::Error>;
+    ) -> Result<HashMap<Bytes, AccountUpdate>, Self::Error>; //TODO: do not return `AccountUpdate` but `Account`
 }

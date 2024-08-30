@@ -74,7 +74,7 @@ pub struct TransactionDeltaGroup<T> {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AggregatedBlockChanges {
+pub struct BlockAggregatedChanges {
     pub extractor: String,
     pub chain: Chain,
     pub block: Block,
@@ -89,7 +89,7 @@ pub struct AggregatedBlockChanges {
     pub component_tvl: HashMap<String, f64>,
 }
 
-impl AggregatedBlockChanges {
+impl BlockAggregatedChanges {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor: &str,
@@ -122,14 +122,14 @@ impl AggregatedBlockChanges {
     }
 }
 
-impl std::fmt::Display for AggregatedBlockChanges {
+impl std::fmt::Display for BlockAggregatedChanges {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "block_number: {}, extractor: {}", self.block.number, self.extractor)
     }
 }
 
 #[typetag::serde]
-impl NormalisedMessage for AggregatedBlockChanges {
+impl NormalisedMessage for BlockAggregatedChanges {
     fn source(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.extractor)
     }
@@ -160,7 +160,7 @@ pub trait BlockScoped {
     fn block(&self) -> Block;
 }
 
-impl BlockScoped for AggregatedBlockChanges {
+impl BlockScoped for BlockAggregatedChanges {
     fn block(&self) -> Block {
         self.block.clone()
     }
