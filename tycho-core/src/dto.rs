@@ -518,7 +518,7 @@ impl ProtocolStateDelta {
 pub struct StateRequestBody {
     #[serde(alias = "contractIds")]
     pub contract_ids: Option<Vec<ContractId>>,
-    #[serde(rename = "protocolSystem", default)]
+    #[serde(alias = "protocolSystem", default)]
     pub protocol_system: Option<String>,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
@@ -697,10 +697,13 @@ impl Default for VersionParam {
 #[deprecated(note = "Use StateRequestBody instead")]
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct StateRequestParameters {
+    /// The minimum TVL of the protocol components to return, denoted in the chain's native token.
     #[param(default = 0)]
     pub tvl_gt: Option<u64>,
+    /// The minimum inertia of the protocol components to return.
     #[param(default = 0)]
     pub inertia_min_gt: Option<u64>,
+    /// Whether to include ERC20 balances in the response.
     #[serde(default = "default_include_balances_flag")]
     pub include_balances: bool,
 }
@@ -735,6 +738,13 @@ pub struct TokensRequestBody {
     #[serde(alias = "tokenAddresses")]
     #[schema(value_type=Option<Vec<String>>)]
     pub token_addresses: Option<Vec<Bytes>>,
+    /// Quality is between 0-100, where:
+    ///  - 100: Normal token
+    ///  - 75: Rebase token
+    ///  - 50: Fee token
+    ///  - 10: Token analysis failed at creation
+    ///  - 5: Token analysis failed on cronjob (after creation).
+    ///  - 0: Failed to extract decimals onchain
     #[serde(default)]
     pub min_quality: Option<i32>,
     #[serde(default)]
@@ -818,6 +828,7 @@ pub struct ProtocolComponentsRequestBody {
     pub protocol_system: Option<String>,
     #[serde(alias = "componentAddresses")]
     pub component_ids: Option<Vec<String>>,
+    /// The minimum TVL of the protocol components to return, denoted in the chain's native token.
     #[serde(default)]
     pub tvl_gt: Option<f64>,
     #[serde(default)]
@@ -848,6 +859,7 @@ impl ProtocolComponentsRequestBody {
 #[deprecated(note = "Use ProtocolComponentsRequestBody instead")]
 #[derive(Serialize, Deserialize, Default, Debug, IntoParams)]
 pub struct ProtocolComponentRequestParameters {
+    /// The minimum TVL of the protocol components to return, denoted in the chain's native token.
     #[param(default = 0)]
     pub tvl_gt: Option<f64>,
 }
@@ -922,6 +934,7 @@ pub struct ProtocolStateRequestBody {
     pub protocol_system: Option<String>,
     #[serde(default)]
     pub chain: Chain,
+    /// Whether to include account balances in the response. Defaults to true.
     #[serde(default = "default_include_balances_flag")]
     pub include_balances: bool,
     #[serde(default = "VersionParam::default")]

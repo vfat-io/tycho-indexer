@@ -509,6 +509,15 @@ pub async fn contract_state_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve contract states
+///
+/// This endpoint retrieves the state of contracts within a specific execution environment. If no
+/// contract ids are given, all contracts are returned. Note that `protocol_system` is not a filter;
+/// it's a way to specify the protocol system associated with the contracts requested and is used to
+/// ensure that the correct extractor's block status is used when querying the database. If omitted,
+/// the block status will be determined by a random extractor, which could be risky if the extractor
+/// is out of sync. Filtering by protocol system is not currently supported on this endpoint and
+/// should be done client side.
 #[utoipa::path(
     post,
     path = "/v1/contract_state",
@@ -521,6 +530,9 @@ pub async fn contract_state<G: Gateway>(
     body: web::Json<dto::StateRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
+    // Note - filtering by protocol system is not supported on this endpoint. This is due to the
+    // complexity of paginating this endpoint with the current design.
+
     // Call the handler to get the state
     let response = handler
         .into_inner()
@@ -573,6 +585,10 @@ pub async fn tokens_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve tokens
+///
+/// This endpoint retrieves tokens for a specific execution environment, filtered by various
+/// criteria. The tokens are returned in a paginated format.
 #[utoipa::path(
     post,
     path = "/v1/tokens",
@@ -640,6 +656,10 @@ pub async fn protocol_components_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve protocol components
+///
+/// This endpoint retrieves components within a specific execution environment, filtered by various
+/// criteria.
 #[utoipa::path(
     post,
     path = "/v1/protocol_components",
@@ -711,6 +731,16 @@ pub async fn protocol_state_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve protocol states
+///
+/// This endpoint retrieves the state of protocols within a specific execution environment.
+/// Currently, the filters are not compounded, meaning that if multiple filters are provided, one
+/// will be prioritised. The priority from highest to lowest is as follows: 'protocol_ids',
+/// 'protocol_system', 'chain'. Note that 'protocol_system' serves as both a filter and as a way
+/// to specify the protocol system associated with the components requested. This is used to ensure
+/// that the correct extractor's block status is used when querying the database. If omitted, the
+/// block status will be determined by a random extractor, which could be risky if the extractor is
+/// out of sync.
 #[utoipa::path(
     post,
     path = "/v1/protocol_state",
@@ -738,6 +768,9 @@ pub async fn protocol_state<G: Gateway>(
     }
 }
 
+/// Health check endpoint
+///
+/// This endpoint is used to check the health of the service.
 #[utoipa::path(
     get,
     path="/v1/health",
