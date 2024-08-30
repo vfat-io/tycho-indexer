@@ -14,7 +14,7 @@ use tracing::{debug, error, instrument};
 use tycho_core::{
     keccak256,
     models::{
-        self, contract::AccountUpdate, AccountToContractStore, Address, Balance, Chain, ChangeType,
+        self, contract::AccountDelta, AccountToContractStore, Address, Balance, Chain, ChangeType,
         Code, ContractId, ContractStore, StoreKey, StoreVal, TxHash,
     },
     storage::{BlockOrTimestamp, StorageError, Version},
@@ -313,7 +313,7 @@ impl PostgresGateway {
         start_version_ts: &NaiveDateTime,
         target_version_ts: &NaiveDateTime,
         conn: &mut AsyncPgConnection,
-    ) -> Result<CreatedOrDeleted<AccountUpdate>, StorageError> {
+    ) -> Result<CreatedOrDeleted<AccountDelta>, StorageError> {
         // Find created or deleted Accounts
         let cod_accounts: Vec<orm::Account> = {
             use schema::account::dsl::*;
@@ -395,7 +395,7 @@ impl PostgresGateway {
 
             // Restore full state delta at from target version for accounts that were deleted
             let version = Some(Version::from_ts(*target_version_ts));
-            let restored: HashMap<Address, AccountUpdate> = self
+            let restored: HashMap<Address, AccountDelta> = self
                 .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, conn)
                 .await
                 .map_err(PostgresError::from)?
@@ -410,7 +410,7 @@ impl PostgresGateway {
                         // assuming these have ChangeType created
                         update.clone()
                     } else {
-                        AccountUpdate::deleted(chain, &acc.address)
+                        AccountDelta::deleted(chain, &acc.address)
                     };
                     Ok((acc.address.clone(), update))
                 })
@@ -443,7 +443,7 @@ impl PostgresGateway {
             let deltas = deleted
                 .iter()
                 .map(|acc| {
-                    let update = AccountUpdate::deleted(chain, &acc.address);
+                    let update = AccountDelta::deleted(chain, &acc.address);
                     Ok((acc.address.clone(), update))
                 })
                 .collect::<Result<HashMap<_, _>, StorageError>>()?;
@@ -1036,7 +1036,7 @@ impl PostgresGateway {
     pub async fn update_contracts(
         &self,
         chain: &Chain,
-        new: &[(Address, &AccountUpdate)],
+        new: &[(Address, &AccountDelta)],
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let chain_id = self.get_chain_id(chain);
@@ -1259,7 +1259,7 @@ impl PostgresGateway {
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<AccountUpdate>, StorageError> {
+    ) -> Result<Vec<AccountDelta>, StorageError> {
         let chain_id = self.get_chain_id(chain);
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
@@ -1321,7 +1321,7 @@ impl PostgresGateway {
                     ChangeType::Update
                 };
 
-                let update = AccountUpdate::new(
+                let update = AccountDelta::new(
                     *chain,
                     address.clone(),
                     slots.cloned().unwrap_or_default(),
@@ -1814,7 +1814,7 @@ mod test {
         db_fixtures::insert_txns(&mut conn, &[(block.id, 100, modify_txhash)]).await;
         let mut account = account_c1(2);
         account.set_balance(&Bytes::from("0x2710"), &modify_txhash.parse().unwrap());
-        let update = AccountUpdate::new(
+        let update = AccountDelta::new(
             account.chain,
             account.address.clone(),
             HashMap::new(),
@@ -2280,7 +2280,7 @@ mod test {
         let gw = EvmGateway::from_connection(&mut conn).await;
         let exp = vec![
             // c0 had some changes which need to be reverted
-            AccountUpdate::new(
+            AccountDelta::new(
                 Chain::Ethereum,
                 Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f").expect("addr ok"),
                 contract_slots([(6, 0), (0, 1), (1, 5), (5, 0)]),
@@ -2289,7 +2289,7 @@ mod test {
                 ChangeType::Update,
             ),
             // c1 which was deployed on block 2 is deleted
-            AccountUpdate::new(
+            AccountDelta::new(
                 Chain::Ethereum,
                 Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee").expect("addr ok"),
                 HashMap::new(),
@@ -2298,7 +2298,7 @@ mod test {
                 ChangeType::Deletion,
             ),
             // c2 is recreated
-            AccountUpdate::new(
+            AccountDelta::new(
                 Chain::Ethereum,
                 Bytes::from_str("94a3f312366b8d0a32a00986194053c0ed0cddb1").expect("addr ok"),
                 contract_slots([(1, 2), (2, 4)]),
@@ -2329,7 +2329,7 @@ mod test {
         let gw = EvmGateway::from_connection(&mut conn).await;
         let exp = vec![
             // c0 updates some slots and balances
-            AccountUpdate::new(
+            AccountDelta::new(
                 Chain::Ethereum,
                 Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f").expect("addr ok"),
                 contract_slots([(6, 30), (0, 2), (1, 3), (5, 25)]),
@@ -2338,7 +2338,7 @@ mod test {
                 ChangeType::Update,
             ),
             // c1 was deployed
-            AccountUpdate::new(
+            AccountDelta::new(
                 Chain::Ethereum,
                 Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee").expect("addr ok"),
                 contract_slots([(0, 128), (1, 255)]),
@@ -2347,7 +2347,7 @@ mod test {
                 ChangeType::Creation,
             ),
             // c2 is deleted
-            AccountUpdate::new(
+            AccountDelta::new(
                 Chain::Ethereum,
                 Bytes::from_str("94a3f312366b8d0a32a00986194053c0ed0cddb1").expect("addr ok"),
                 HashMap::new(),

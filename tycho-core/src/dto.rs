@@ -378,8 +378,8 @@ impl AccountUpdate {
     }
 }
 
-impl From<models::contract::AccountUpdate> for AccountUpdate {
-    fn from(value: models::contract::AccountUpdate) -> Self {
+impl From<models::contract::AccountDelta> for AccountUpdate {
+    fn from(value: models::contract::AccountDelta) -> Self {
         AccountUpdate::new(
             value.address,
             value.chain.into(),

@@ -546,7 +546,7 @@ pub trait ContractStateGateway {
     /// the one specified.
     async fn update_contracts(
         &self,
-        new: &[(TxHash, models::contract::AccountUpdate)],
+        new: &[(TxHash, models::contract::AccountDelta)],
     ) -> Result<(), StorageError>;
 
     /// Mark a contract as deleted
@@ -609,7 +609,7 @@ pub trait ContractStateGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<Vec<models::contract::AccountUpdate>, StorageError>;
+    ) -> Result<Vec<models::contract::AccountDelta>, StorageError>;
 }
 
 pub trait Gateway:

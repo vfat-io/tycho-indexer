@@ -1,6 +1,6 @@
 use crate::{
     models::{
-        contract::AccountUpdate,
+        contract::AccountDelta,
         protocol::{ComponentBalance, ProtocolComponent, ProtocolComponentStateDelta},
         Chain, ComponentId,
     },
@@ -80,8 +80,8 @@ pub struct BlockAggregatedChanges {
     pub block: Block,
     pub finalized_block_height: u64,
     pub revert: bool,
-    pub state_updates: HashMap<String, ProtocolComponentStateDelta>,
-    pub account_updates: HashMap<Bytes, AccountUpdate>,
+    pub state_deltas: HashMap<String, ProtocolComponentStateDelta>,
+    pub account_deltas: HashMap<Bytes, AccountDelta>,
     pub new_tokens: HashMap<Address, CurrencyToken>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
@@ -98,7 +98,7 @@ impl BlockAggregatedChanges {
         finalised_block_height: u64,
         revert: bool,
         state_deltas: HashMap<String, ProtocolComponentStateDelta>,
-        account_deltas: HashMap<Bytes, AccountUpdate>,
+        account_deltas: HashMap<Bytes, AccountDelta>,
         new_tokens: HashMap<Address, CurrencyToken>,
         new_components: HashMap<String, ProtocolComponent>,
         deleted_components: HashMap<String, ProtocolComponent>,
@@ -111,8 +111,8 @@ impl BlockAggregatedChanges {
             block,
             finalized_block_height: finalised_block_height,
             revert,
-            state_updates: state_deltas,
-            account_updates: account_deltas,
+            state_deltas,
+            account_deltas,
             new_protocol_components: new_components,
             deleted_protocol_components: deleted_components,
             component_balances,
@@ -141,8 +141,8 @@ impl NormalisedMessage for BlockAggregatedChanges {
             block: self.block.clone(),
             finalized_block_height: self.finalized_block_height,
             revert: self.revert,
-            account_updates: HashMap::new(),
-            state_updates: HashMap::new(),
+            account_deltas: HashMap::new(),
+            state_deltas: HashMap::new(),
             new_tokens: self.new_tokens.clone(),
             new_protocol_components: self.new_protocol_components.clone(),
             deleted_protocol_components: self.deleted_protocol_components.clone(),
@@ -170,7 +170,7 @@ impl BlockScoped for BlockAggregatedChanges {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TxWithChanges {
     pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub account_updates: HashMap<Bytes, AccountUpdate>,
+    pub account_updates: HashMap<Bytes, AccountDelta>,
     pub state_updates: HashMap<ComponentId, ProtocolComponentStateDelta>,
     pub balance_changes: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
     pub tx: Transaction,
@@ -179,7 +179,7 @@ pub struct TxWithChanges {
 impl TxWithChanges {
     pub fn new(
         protocol_components: HashMap<ComponentId, ProtocolComponent>,
-        account_updates: HashMap<Bytes, AccountUpdate>,
+        account_updates: HashMap<Bytes, AccountDelta>,
         protocol_states: HashMap<ComponentId, ProtocolComponentStateDelta>,
         balance_changes: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
         tx: Transaction,

@@ -136,7 +136,7 @@ impl PendingDeltas {
 
             for entry in guard.get_block_range(None, version)? {
                 if let Some(delta) = entry
-                    .state_updates
+                    .state_deltas
                     .get(&db_state.component_id)
                 {
                     db_state.apply_state_delta(delta)?;
@@ -183,7 +183,7 @@ impl PendingDeltas {
                 .map_err(|e| PendingDeltasError::LockError("VM".to_string(), e.to_string()))?;
             for entry in guard.get_block_range(None, version)? {
                 if let Some(delta) = entry
-                    .account_updates
+                    .account_deltas
                     .get(&db_state.address)
                 {
                     db_state.apply_delta(delta)?;
@@ -328,7 +328,7 @@ mod test {
     use std::str::FromStr;
     use tycho_core::{
         models::{
-            contract::AccountUpdate,
+            contract::AccountDelta,
             protocol::{ComponentBalance, ProtocolComponentStateDelta},
             Chain, ChangeType,
         },
@@ -361,7 +361,7 @@ mod test {
             HashMap::new(),
             [(
                 address.into(),
-                AccountUpdate::new(
+                AccountDelta::new(
                     Chain::Ethereum,
                     address.into(),
                     evm::fixtures::slots([(1, 1), (2, 1)]),
@@ -469,7 +469,7 @@ mod test {
                                 .unwrap()
                                 .into(),
                             balance_float: 1.0,
-                            new_balance: Bytes::from("0x01"),
+                            balance: Bytes::from("0x01"),
                             modify_tx: H256::zero().into(),
                             component_id: "component1".to_string(),
                         },
@@ -488,7 +488,7 @@ mod test {
                                 .unwrap()
                                 .into(),
                             balance_float: 2.0,
-                            new_balance: Bytes::from("0x02"),
+                            balance: Bytes::from("0x02"),
                             modify_tx: H256::zero().into(),
                             component_id: "component3".to_string(),
                         },

@@ -6,7 +6,7 @@ use tracing::log::warn;
 use tycho_core::{
     models::{
         blockchain::{Block, BlockAggregatedChanges, BlockScoped, Transaction, TxWithChanges},
-        contract::{AccountUpdate, TransactionVMUpdates},
+        contract::{AccountDelta, TransactionVMUpdates},
         protocol::{
             self as tycho_core_protocol, ComponentBalance, ProtocolChangesWithTx,
             ProtocolComponent, ProtocolComponentStateDelta,
@@ -43,13 +43,13 @@ pub trait TryFromMessage {
         Self: Sized;
 }
 
-impl TryFromMessage for AccountUpdate {
+impl TryFromMessage for AccountDelta {
     type Args<'a> = (substreams::ContractChange, Chain);
 
     fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
         let (msg, chain) = args;
         let change = msg.change().into();
-        let update = AccountUpdate::new(
+        let update = AccountDelta::new(
             chain,
             pad_and_parse_h160(&msg.address.into()) //TODO: we shouldn't pad here, this is not blockchain agnostic
                 .map_err(ExtractionError::DecodeError)?
@@ -220,7 +220,7 @@ impl TryFromMessage for ComponentBalance {
         let balance_float = bytes_to_f64(&msg.balance).unwrap_or(f64::NAN);
         Ok(Self {
             token: pad_and_parse_20bytes(&msg.token).map_err(ExtractionError::DecodeError)?,
-            new_balance: Bytes::from(msg.balance),
+            balance: Bytes::from(msg.balance),
             balance_float,
             modify_tx: tx.hash.clone(),
             component_id: String::from_utf8(msg.component_id)
@@ -351,7 +351,7 @@ impl BlockContractChanges {
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message((tx, &block.hash.clone()))?;
                     for contract_change in change.contract_changes.into_iter() {
-                        let update = AccountUpdate::try_from_message((contract_change, chain))?;
+                        let update = AccountDelta::try_from_message((contract_change, chain))?;
                         account_updates.insert(update.address.clone(), update);
                     }
                     for component_msg in change.component_changes.into_iter() {
@@ -694,7 +694,7 @@ impl TryFromMessage for TxWithChanges {
         ))?;
 
         let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
-        let mut account_updates: HashMap<Bytes, AccountUpdate> = HashMap::new();
+        let mut account_updates: HashMap<Bytes, AccountDelta> = HashMap::new();
         let mut state_updates: HashMap<String, ProtocolComponentStateDelta> = HashMap::new();
         let mut balance_changes: HashMap<String, HashMap<Bytes, ComponentBalance>> = HashMap::new();
 
@@ -713,7 +713,7 @@ impl TryFromMessage for TxWithChanges {
 
         // Then, parse the account updates
         for contract_change in msg.contract_changes.into_iter() {
-            let update = AccountUpdate::try_from_message((contract_change, block.chain))?;
+            let update = AccountDelta::try_from_message((contract_change, block.chain))?;
             account_updates.insert(update.address.clone(), update);
         }
 
@@ -958,8 +958,8 @@ impl BlockChanges {
             new_protocol_components: aggregated_changes.protocol_components,
             new_tokens: self.new_tokens,
             deleted_protocol_components: HashMap::new(),
-            state_updates: aggregated_changes.state_updates,
-            account_updates: aggregated_changes.account_updates,
+            state_deltas: aggregated_changes.state_updates,
+            account_deltas: aggregated_changes.account_updates,
             component_balances: aggregated_changes.balance_changes,
             component_tvl: HashMap::new(),
         })
@@ -2806,7 +2806,7 @@ mod test {
             "0xe688b84b23f322a994A53dbF8E15FA82CDB71127"
                 .parse()
                 .unwrap(),
-            AccountUpdate::new(
+            AccountDelta::new(
                 Chain::Ethereum,
                 Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
                 HashMap::new(),
@@ -2824,8 +2824,8 @@ mod test {
         )
     }
 
-    fn update_balance() -> AccountUpdate {
-        AccountUpdate::new(
+    fn update_balance() -> AccountDelta {
+        AccountDelta::new(
             Chain::Ethereum,
             Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
             HashMap::new(),
@@ -2835,8 +2835,8 @@ mod test {
         )
     }
 
-    fn update_slots() -> AccountUpdate {
-        AccountUpdate::new(
+    fn update_slots() -> AccountDelta {
+        AccountDelta::new(
             Chain::Ethereum,
             Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
             fixtures::slots([(0, 1), (1, 2)]),
@@ -2990,7 +2990,7 @@ mod test {
                 TransactionVMUpdates {
                     account_updates: [(
                         H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
-                        AccountUpdate::new(
+                        AccountDelta::new(
                             Chain::Ethereum,
                             Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
                             fixtures::slots([
@@ -3013,7 +3013,7 @@ mod test {
                             H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
                             ComponentBalance {
                                 token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
-                                new_balance: Bytes::from(50000000.encode_to_vec()),
+                                balance: Bytes::from(50000000.encode_to_vec()),
                                 balance_float: 36522027799.0,
                                 modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000011121314).into(),
                                 component_id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
@@ -3030,7 +3030,7 @@ mod test {
                 TransactionVMUpdates {
                     account_updates: [(
                         H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
-                        AccountUpdate::new(
+                        AccountDelta::new(
                             Chain::Ethereum,
                             Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
                             fixtures::slots([
@@ -3051,7 +3051,7 @@ mod test {
                             H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
                             ComponentBalance {
                                 token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
-                                new_balance: Bytes::from(10.encode_to_vec()),
+                                balance: Bytes::from(10.encode_to_vec()),
                                 balance_float: 2058.0,
                                 modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000000000001).into(),
                                 component_id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
@@ -3228,7 +3228,7 @@ mod test {
                     token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
                         .unwrap()
                         .into(),
-                    new_balance: Bytes::from(10.encode_to_vec()),
+                    balance: Bytes::from(10.encode_to_vec()),
                     balance_float: 2058.0,
                     modify_tx: Bytes::from(
                         "0x0000000000000000000000000000000000000000000000000000000000000001"
@@ -3433,7 +3433,7 @@ mod test {
                     token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                         .unwrap()
                         .into(),
-                    new_balance: Bytes::from(1_i32.to_le_bytes()),
+                    balance: Bytes::from(1_i32.to_le_bytes()),
                     modify_tx: tx.hash.clone(),
                     component_id: "Balance1".to_string(),
                     balance_float: 16777216.0,
@@ -3526,7 +3526,7 @@ mod test {
                     token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                         .unwrap()
                         .into(),
-                    new_balance: Bytes::from(1_i32.to_le_bytes()),
+                    balance: Bytes::from(1_i32.to_le_bytes()),
                     balance_float: 16777216.0,
                     modify_tx: Bytes::from(
                         "0x0000000000000000000000000000000000000000000000000000000011121314"
@@ -3652,7 +3652,7 @@ mod test {
         };
         let from_message = ComponentBalance::try_from_message((msg, &tx)).unwrap();
 
-        assert_eq!(from_message.new_balance, msg_balance);
+        assert_eq!(from_message.balance, msg_balance);
         assert_eq!(from_message.modify_tx, tx.hash);
         assert_eq!(from_message.token, Bytes::from(expected_token));
         assert_eq!(from_message.component_id, expected_component_id);
@@ -3670,7 +3670,7 @@ mod test {
         let first_update = TransactionVMUpdates {
             account_updates: [(
                 H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
-                AccountUpdate::new(
+                AccountDelta::new(
                     Chain::Ethereum,
                     Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
                     fixtures::slots([(2711790500, 2981278644), (3250766788, 3520254932)]),
@@ -3694,7 +3694,7 @@ mod test {
                     ComponentBalance {
                         token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666)
                             .into(),
-                        new_balance: Bytes::from(0_i32.to_le_bytes()),
+                        balance: Bytes::from(0_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
                         balance_float: 0.0,
@@ -3710,7 +3710,7 @@ mod test {
         let second_update = TransactionVMUpdates {
             account_updates: [(
                 H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
-                AccountUpdate::new(
+                AccountDelta::new(
                     Chain::Ethereum,
                     Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
                     fixtures::slots([(2981278644, 3250766788), (2442302356, 2711790500)]),
@@ -3734,7 +3734,7 @@ mod test {
                     ComponentBalance {
                         token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666)
                             .into(),
-                        new_balance: Bytes::from(500000_i32.to_le_bytes()),
+                        balance: Bytes::from(500000_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
                         balance_float: 500000.0,

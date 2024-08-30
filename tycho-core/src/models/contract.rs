@@ -61,7 +61,7 @@ impl Account {
         self.balance_modify_tx = modified_at.clone();
     }
 
-    pub fn apply_delta(&mut self, delta: &AccountUpdate) -> Result<(), DeltaError> {
+    pub fn apply_delta(&mut self, delta: &AccountDelta) -> Result<(), DeltaError> {
         let self_id = (self.chain, &self.address);
         let other_id = (delta.chain, &delta.address);
         if self_id != other_id {
@@ -86,7 +86,7 @@ impl Account {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
-pub struct AccountUpdate {
+pub struct AccountDelta {
     pub chain: Chain,
     pub address: Address,
     pub slots: HashMap<StoreKey, Option<StoreVal>>,
@@ -95,7 +95,7 @@ pub struct AccountUpdate {
     pub change: ChangeType,
 }
 
-impl AccountUpdate {
+impl AccountDelta {
     pub fn deleted(chain: &Chain, address: &Address) -> Self {
         Self {
             chain: *chain,
@@ -195,7 +195,7 @@ impl AccountUpdate {
     ///
     /// * `other`: An instance of `AccountUpdate`. The attribute values and keys
     /// of `other` will overwrite those of `self`.
-    pub fn merge(&mut self, other: AccountUpdate) -> Result<(), String> {
+    pub fn merge(&mut self, other: AccountDelta) -> Result<(), String> {
         if self.address != other.address {
             return Err(format!(
                 "Can't merge AccountUpdates from differing identities; Expected {:#020x}, got {:#020x}",
@@ -222,7 +222,7 @@ impl AccountUpdate {
     }
 }
 
-impl From<Account> for AccountUpdate {
+impl From<Account> for AccountDelta {
     fn from(value: Account) -> Self {
         Self {
             chain: value.chain,
@@ -242,7 +242,7 @@ impl From<Account> for AccountUpdate {
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransactionVMUpdates {
-    pub account_updates: HashMap<Bytes, AccountUpdate>,
+    pub account_updates: HashMap<Bytes, AccountDelta>,
     pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
     pub component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
     pub tx: Transaction,
@@ -250,7 +250,7 @@ pub struct TransactionVMUpdates {
 
 impl TransactionVMUpdates {
     pub fn new(
-        account_updates: HashMap<Bytes, AccountUpdate>,
+        account_updates: HashMap<Bytes, AccountDelta>,
         protocol_components: HashMap<ComponentId, ProtocolComponent>,
         component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
         tx: Transaction,

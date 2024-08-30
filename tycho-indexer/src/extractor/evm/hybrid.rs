@@ -17,7 +17,7 @@ use tycho_core::{
     models::{
         self,
         blockchain::BlockAggregatedChanges,
-        contract::{Account, AccountUpdate},
+        contract::{Account, AccountDelta},
         protocol::{ComponentBalance, ProtocolComponentState, ProtocolComponentStateDelta},
         token::CurrencyToken,
         Address, Chain, ChangeType, ExtractionState, ExtractorIdentity, ProtocolType, TxHash,
@@ -350,7 +350,7 @@ where
                                 .cloned()
                                 .unwrap_or_else(|| ComponentBalance {
                                     token: token.clone(),
-                                    new_balance: Bytes::from(H256::zero()),
+                                    balance: Bytes::from(H256::zero()),
                                     balance_float: 0.0,
                                     modify_tx: H256::zero().into(),
                                     component_id: id.to_string(),
@@ -442,7 +442,7 @@ where
                                     .map(move |(token, balance)| {
                                         (
                                             (token.clone()).into(),
-                                            (addr, U256::from_big_endian(&balance.new_balance)),
+                                            (addr, U256::from_big_endian(&balance.balance)),
                                         )
                                     })
                             })
@@ -630,8 +630,8 @@ where
             debug!(
                 new_components = changes.new_protocol_components.len(),
                 new_tokens = changes.new_tokens.len(),
-                account_update = changes.account_updates.len(),
-                state_update = changes.state_updates.len(),
+                account_update = changes.account_deltas.len(),
+                state_update = changes.state_deltas.len(),
                 tvl_changes = changes.component_tvl.len(),
                 "ProcessedMessage"
             );
@@ -823,7 +823,7 @@ where
                 .into_iter()
                 .fold(HashMap::new(), |mut acc, ((addr, key), value)| {
                     acc.entry(addr.clone())
-                        .or_insert_with(|| AccountUpdate {
+                        .or_insert_with(|| AccountDelta {
                             address: addr,
                             chain: self.chain,
                             slots: HashMap::new(),
@@ -987,8 +987,8 @@ where
                 .block_update
                 .finalized_block_height,
             revert: true,
-            state_updates,
-            account_updates,
+            state_deltas,
+            account_deltas,
             new_tokens: HashMap::new(),
             new_protocol_components: reverted_components_deletions,
             deleted_protocol_components: reverted_components_creations,
@@ -1093,7 +1093,7 @@ impl HybridPgGateway {
         let mut new_protocol_components: Vec<models::protocol::ProtocolComponent> = vec![];
         let mut state_updates: Vec<(TxHash, models::protocol::ProtocolComponentStateDelta)> =
             vec![];
-        let mut account_changes: Vec<(Bytes, AccountUpdate)> = vec![];
+        let mut account_changes: Vec<(Bytes, AccountDelta)> = vec![];
 
         let mut balance_changes: Vec<models::protocol::ComponentBalance> = vec![];
         let mut protocol_tokens: HashSet<H160> = HashSet::new();
@@ -1614,7 +1614,7 @@ mod test {
                     ComponentBalance {
                         token: H160::from_str("0x0000000000000000000000000000000000000001")
                             .unwrap().into(),
-                        new_balance: Bytes::from(
+                        balance: Bytes::from(
                             "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
                         ),
                         balance_float: 11_304_207_639.4e18,
@@ -1627,7 +1627,7 @@ mod test {
                         ComponentBalance {
                             token: H160::from_str("0x0000000000000000000000000000000000000002")
                                 .unwrap().into(),
-                            new_balance: Bytes::from(
+                            balance: Bytes::from(
                                 "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
                             ),
                             balance_float: 100_000e6,
@@ -2051,7 +2051,7 @@ mod test_serial_db {
                     )]),
                     [(
                         H160(VM_CONTRACT).into(),
-                        AccountUpdate::new(
+                        AccountDelta::new(
                             Chain::Ethereum,
                             VM_CONTRACT.into(),
                             HashMap::new(),
@@ -2069,7 +2069,7 @@ mod test_serial_db {
                             base_token.into(),
                             ComponentBalance {
                                 token: base_token.into(),
-                                new_balance: Bytes::from(&[0u8]),
+                                balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
                                 modify_tx: VM_TX_HASH_0.parse().unwrap(),
                                 component_id: component_id.clone(),
@@ -2082,7 +2082,7 @@ mod test_serial_db {
                     HashMap::new(),
                     [(
                         H160(VM_CONTRACT).into(),
-                        AccountUpdate::new(
+                        AccountDelta::new(
                             Chain::Ethereum,
                             VM_CONTRACT.into(),
                             evm::fixtures::slots([(1, 200)]),
@@ -2100,7 +2100,7 @@ mod test_serial_db {
                             base_token.into(),
                             ComponentBalance {
                                 token: base_token.into(),
-                                new_balance: Bytes::from(&[0u8]),
+                                balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
                                 modify_tx: VM_TX_HASH_1.parse().unwrap(),
                                 component_id: component_id.clone(),
@@ -2133,7 +2133,7 @@ mod test_serial_db {
             tx_updates: vec![TransactionVMUpdates::new(
                 [(
                     H160(VM_CONTRACT).into(),
-                    AccountUpdate::new(
+                    AccountDelta::new(
                         Chain::Ethereum,
                         VM_CONTRACT.into(),
                         evm::fixtures::slots([(42, 0xbadbabe)]),
@@ -2369,7 +2369,7 @@ mod test_serial_db {
                 ),
                 finalized_block_height: 1,
                 revert: true,
-                state_updates: HashMap::from([
+                state_deltas: HashMap::from([
                     ("pc_1".to_string(), ProtocolComponentStateDelta {
                         component_id: "pc_1".to_string(),
                         updated_attributes: HashMap::from([
@@ -2418,14 +2418,14 @@ mod test_serial_db {
                     ("pc_1".to_string(), HashMap::from([
                         (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(), ComponentBalance {
                             token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
-                            new_balance: Bytes::from("0x00000001"),
+                            balance: Bytes::from("0x00000001"),
                             balance_float: 1.0,
                             modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
                             component_id: "pc_1".to_string(),
                         }),
                         (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(), ComponentBalance {
                             token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
-                            new_balance: Bytes::from("0x000003e8"),
+                            balance: Bytes::from("0x000003e8"),
                             balance_float: 1000.0,
                             modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007531").unwrap().into(),
                             component_id: "pc_1".to_string(),
@@ -2433,7 +2433,7 @@ mod test_serial_db {
                     ])),
                 ]),
                 component_tvl: HashMap::new(),
-                account_updates: Default::default(),
+                account_deltas: Default::default(),
             };
 
             assert_eq!(
@@ -2551,8 +2551,8 @@ mod test_serial_db {
                 ),
                 finalized_block_height: 1,
                 revert: true,
-                account_updates: HashMap::from([
-                    (H160::from_str("0x0000000000000000000000000000000000000001").unwrap().into(), AccountUpdate {
+                account_deltas: HashMap::from([
+                    (H160::from_str("0x0000000000000000000000000000000000000001").unwrap().into(), AccountDelta {
                         address: Bytes::from_str("0000000000000000000000000000000000000001").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
@@ -2563,7 +2563,7 @@ mod test_serial_db {
                         code: None,
                         change: ChangeType::Update,
                     }),
-                    (H160::from_str("0x0000000000000000000000000000000000000002").unwrap().into(), AccountUpdate {
+                    (H160::from_str("0x0000000000000000000000000000000000000002").unwrap().into(), AccountDelta {
                         address: Bytes::from_str("0000000000000000000000000000000000000002").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
@@ -2599,14 +2599,14 @@ mod test_serial_db {
                     ("pc_1".to_string(), HashMap::from([
                         (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(), ComponentBalance {
                             token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
-                            new_balance: Bytes::from("0x00000064"),
+                            balance: Bytes::from("0x00000064"),
                             balance_float: 100.0,
                             modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007532").unwrap().into(),
                             component_id: "pc_1".to_string(),
                         }),
                         (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(), ComponentBalance {
                             token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
-                            new_balance: Bytes::from("0x00000001"),
+                            balance: Bytes::from("0x00000001"),
                             balance_float: 1.0,
                             modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
                             component_id: "pc_1".to_string(),
@@ -2614,7 +2614,7 @@ mod test_serial_db {
                     ])),
                 ]),
                 component_tvl: HashMap::new(),
-                state_updates: Default::default(),
+                state_deltas: Default::default(),
             };
 
             assert_eq!(

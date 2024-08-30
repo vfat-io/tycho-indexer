@@ -104,7 +104,7 @@ impl ProtocolComponentState {
         self.balances.extend(
             delta
                 .iter()
-                .map(|(k, v)| (k.clone(), v.new_balance.clone())),
+                .map(|(k, v)| (k.clone(), v.balance.clone())),
         );
 
         Ok(())
@@ -162,7 +162,7 @@ impl ProtocolComponentStateDelta {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ComponentBalance {
     pub token: Address,
-    pub new_balance: Balance,
+    pub balance: Balance,
     pub balance_float: f64,
     pub modify_tx: TxHash,
     pub component_id: ComponentId,
@@ -178,7 +178,7 @@ impl ComponentBalance {
     ) -> Self {
         Self {
             token,
-            new_balance,
+            balance: new_balance,
             balance_float,
             modify_tx,
             component_id: component_id.to_string(),

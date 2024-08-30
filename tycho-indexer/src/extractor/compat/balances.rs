@@ -42,9 +42,9 @@ pub fn transcode_ambient_balances(mut changes: BlockChanges) -> BlockChanges {
                     balance
                         .iter_mut()
                         .for_each(|(_, value)| {
-                            value.new_balance = transcode_ascii_balance_to_be(&value.new_balance)
+                            value.balance = transcode_ascii_balance_to_be(&value.balance)
                                 .expect("Balance transcoding failed");
-                            value.balance_float = bytes_to_f64(value.new_balance.as_ref())
+                            value.balance_float = bytes_to_f64(value.balance.as_ref())
                                 .expect("failed converting balance to float");
                         });
                 });
@@ -84,9 +84,8 @@ pub fn transcode_usv2_balances(mut changes: BlockChanges) -> BlockChanges {
                     balance
                         .iter_mut()
                         .for_each(|(_, value)| {
-                            value.new_balance =
-                                transcode_le_balance_to_be(&value.new_balance).unwrap();
-                            value.balance_float = bytes_to_f64(value.new_balance.as_ref())
+                            value.balance = transcode_le_balance_to_be(&value.balance).unwrap();
+                            value.balance_float = bytes_to_f64(value.balance.as_ref())
                                 .expect("failed converting balance to float");
                         });
                 });
@@ -143,7 +142,7 @@ mod tests {
                             token: H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
                                 .unwrap()
                                 .into(),
-                            new_balance: Bytes::from(0_i32.to_le_bytes()),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
                             balance_float: 36522027799.0,
                             modify_tx: H256::from_low_u64_be(
                                 0x0000000000000000000000000000000000000000000000000000000011121314,
@@ -160,7 +159,7 @@ mod tests {
                             token: H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
                                 .unwrap()
                                 .into(),
-                            new_balance: Bytes::from(0_i32.to_le_bytes()),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
                             balance_float: 36522027799.0,
                             modify_tx: H256::from_low_u64_be(
                                 0x0000000000000000000000000000000000000000000000000000000011121314,
@@ -209,7 +208,7 @@ mod tests {
                             token: H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
                                 .unwrap()
                                 .into(),
-                            new_balance: Bytes::from(0_i32.to_le_bytes()),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
                             balance_float: 36522027799.0,
                             modify_tx: H256::from_low_u64_be(
                                 0x0000000000000000000000000000000000000000000000000000000011121314,

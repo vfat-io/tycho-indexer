@@ -72,7 +72,7 @@ impl PostgresGateway {
                 .remove(current_component_id)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(key, balance)| (key, balance.new_balance))
+                .map(|(key, balance)| (key, balance.balance))
                 .collect();
 
             let protocol_state = models::protocol::ProtocolComponentState::new(
@@ -94,7 +94,7 @@ impl PostgresGateway {
                 HashMap::new(),
                 balances
                     .into_iter()
-                    .map(|(key, balance)| (key, balance.new_balance))
+                    .map(|(key, balance)| (key, balance.balance))
                     .collect(),
             ))
         }
@@ -1089,7 +1089,7 @@ impl PostgresGateway {
 
             let new_component_balance = orm::NewComponentBalance::new(
                 *token_id,
-                component_balance.new_balance.clone(),
+                component_balance.balance.clone(),
                 component_balance.balance_float,
                 None,
                 *transaction_id,
@@ -2273,7 +2273,7 @@ mod test {
             vec![models::protocol::ComponentBalance {
                 component_id: protocol_external_id.clone(),
                 token: token_address.clone(),
-                new_balance: Balance::from(U256::from(2000)),
+                balance: Balance::from(U256::from(2000)),
                 balance_float: 2000.0,
                 modify_tx: to_tx_hash,
             }];
@@ -2295,7 +2295,7 @@ mod test {
         let expected_backward_deltas: Vec<models::protocol::ComponentBalance> = vec![
             models::protocol::ComponentBalance {
                 token: Bytes::from(DAI),
-                new_balance: Bytes::from(
+                balance: Bytes::from(
                     "0x0000000000000000000000000000000000000000000000000000000000000000",
                 ),
                 balance_float: 0.0,
@@ -2304,7 +2304,7 @@ mod test {
             },
             models::protocol::ComponentBalance {
                 token: Bytes::from(USDC),
-                new_balance: Bytes::from(
+                balance: Bytes::from(
                     "0x0000000000000000000000000000000000000000000000000000000000000000",
                 ),
                 balance_float: 0.0,
@@ -2313,7 +2313,7 @@ mod test {
             },
             models::protocol::ComponentBalance {
                 token: Bytes::from(WETH),
-                new_balance: Bytes::from(
+                balance: Bytes::from(
                     "0x0000000000000000000000000000000000000000000000000000000000000000",
                 ),
                 balance_float: 0.0,
@@ -2322,7 +2322,7 @@ mod test {
             },
             models::protocol::ComponentBalance {
                 token: Bytes::from(WETH),
-                new_balance: Bytes::from(
+                balance: Bytes::from(
                     "0x0000000000000000000000000000000000000000000000000000000000000000",
                 ),
                 balance_float: 0.0,
@@ -2875,7 +2875,7 @@ mod test {
         // Test the case where a previous balance doesn't exist
         let component_balance = models::protocol::ComponentBalance {
             token: base_token.clone(),
-            new_balance: Bytes::from(
+            balance: Bytes::from(
                 "0x000000000000000000000000000000000000000000000000000000000000000c",
             ),
             balance_float: 12.0,
@@ -2920,7 +2920,7 @@ mod test {
             Bytes::from("0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7");
         let updated_component_balance = models::protocol::ComponentBalance {
             token: base_token.clone(),
-            new_balance: Balance::from(U256::from(2000)),
+            balance: Balance::from(U256::from(2000)),
             balance_float: 2000.0,
             modify_tx: new_tx_hash,
             component_id: component_external_id.clone(),
