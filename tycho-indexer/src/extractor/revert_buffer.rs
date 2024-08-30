@@ -396,6 +396,7 @@ mod test {
     use ethers::types::{H160, H256};
     use rstest::rstest;
     use tycho_core::{
+        dto::Block,
         models::{
             blockchain::Transaction,
             protocol::{ComponentBalance, ProtocolChangesWithTx, ProtocolComponentStateDelta},
@@ -405,7 +406,7 @@ mod test {
         Bytes,
     };
 
-    use crate::{extractor::evm::BlockEntityChanges, testing};
+    use crate::{extractor::evm::BlockChanges, testing};
 
     use super::{BlockNumberOrTimestamp, FinalityStatus, RevertBuffer};
 
@@ -419,7 +420,7 @@ mod test {
         )
     }
 
-    fn get_block_entity(version: u8) -> BlockEntityChanges {
+    fn get_block_changes(version: u8) -> BlockChanges {
         match version {
             1 => {
                 let tx = transaction();
@@ -476,7 +477,7 @@ mod test {
                     ),
                 ]);
 
-                BlockEntityChanges::new(
+                BlockChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
                     testing::block(1),
@@ -487,7 +488,8 @@ mod test {
                         tx,
                         balance_changes: new_balances,
                         ..Default::default()
-                    }],
+                    }
+                    .into()],
                 )
             }
             2 => {
@@ -517,7 +519,7 @@ mod test {
                     ),
                 ]);
 
-                BlockEntityChanges::new(
+                BlockChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
                     testing::block(2),
@@ -527,7 +529,8 @@ mod test {
                         protocol_states: state_updates,
                         tx,
                         ..Default::default()
-                    }],
+                    }
+                    .into()],
                 )
             }
             3 => {
@@ -553,13 +556,13 @@ mod test {
                     .collect(),
                 )]);
 
-                BlockEntityChanges::new(
+                BlockChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
                     testing::block(3),
                     0,
                     false,
-                    vec![ProtocolChangesWithTx { tx, balance_changes, ..Default::default() }],
+                    vec![ProtocolChangesWithTx { tx, balance_changes, ..Default::default() }.into()],
                 )
             }
             _ => panic!("block entity version not implemented"),
@@ -569,10 +572,10 @@ mod test {
     fn test_revert_buffer_state_lookup() {
         let mut revert_buffer = RevertBuffer::new();
         revert_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
 
         let c_ids = ["State1".to_string(), "State2".to_string()];
@@ -610,13 +613,13 @@ mod test {
     fn test_revert_buffer_balance_lookup() {
         let mut revert_buffer = RevertBuffer::new();
         revert_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
 
         let c_ids = ["Balance1".to_string(), "Balance2".to_string()];
@@ -682,13 +685,13 @@ mod test {
         let mut revert_buffer = RevertBuffer::new();
         revert_buffer.strict = true;
         revert_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
 
         let finalized = revert_buffer
@@ -696,7 +699,7 @@ mod test {
             .unwrap();
 
         assert_eq!(revert_buffer.block_messages.len(), 1);
-        assert_eq!(finalized, vec![get_block_entity(1), get_block_entity(2)]);
+        assert_eq!(finalized, vec![get_block_changes(1), get_block_changes(2)]);
 
         let unknown = revert_buffer.drain_new_finalized_blocks(999);
 
@@ -707,13 +710,13 @@ mod test {
     fn test_purge() {
         let mut revert_buffer = RevertBuffer::new();
         revert_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
 
         let purged = revert_buffer
@@ -727,7 +730,7 @@ mod test {
 
         assert_eq!(revert_buffer.block_messages.len(), 1);
 
-        assert_eq!(purged, vec![get_block_entity(2), get_block_entity(3)]);
+        assert_eq!(purged, vec![get_block_changes(2), get_block_changes(3)]);
 
         let unknown = revert_buffer.purge(
             H256::from_low_u64_be(
@@ -744,10 +747,10 @@ mod test {
     fn test_insert_wrong_block() {
         let mut revert_buffer = RevertBuffer::new();
         revert_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
     }
 
@@ -765,13 +768,13 @@ mod test {
         let end = end.map(BlockNumberOrTimestamp::Timestamp);
         let mut revert_buffer = RevertBuffer::new();
         revert_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
 
         let blocks = revert_buffer
@@ -785,14 +788,14 @@ mod test {
 
     #[test]
     fn test_get_block_range_empty() {
-        let revert_buffer = RevertBuffer::<BlockEntityChanges>::new();
+        let revert_buffer = RevertBuffer::<BlockChanges>::new();
 
         let res = revert_buffer
             .get_block_range(None, None)
             .unwrap()
             .collect::<Vec<_>>();
 
-        assert_eq!(res, Vec::<&BlockEntityChanges>::new());
+        assert_eq!(res, Vec::<&BlockChanges>::new());
     }
 
     #[rstest]
@@ -807,10 +810,10 @@ mod test {
         let end = end.map(BlockNumberOrTimestamp::Timestamp);
         let mut revert_buffer = RevertBuffer::new();
         revert_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         revert_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
 
         let res = revert_buffer
@@ -843,13 +846,13 @@ mod test {
     ) {
         let mut buffer = RevertBuffer::new();
         buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
         buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
 
         let res = buffer.get_finality_status(version);
@@ -859,7 +862,7 @@ mod test {
 
     #[test]
     fn test_get_finality_status_empty() {
-        let buffer = RevertBuffer::<BlockEntityChanges>::new();
+        let buffer = RevertBuffer::<BlockChanges>::new();
 
         let res = buffer.get_finality_status(BlockNumberOrTimestamp::Number(2));
 

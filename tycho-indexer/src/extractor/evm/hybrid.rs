@@ -818,7 +818,7 @@ where
             )
             .collect::<Vec<_>>();
 
-        let account_updates =
+        let account_deltas =
             combined_states
                 .into_iter()
                 .fold(HashMap::new(), |mut acc, ((addr, key), value)| {
@@ -926,7 +926,7 @@ where
 
         let empty = HashSet::<String>::new();
 
-        let state_updates: HashMap<String, ProtocolComponentStateDelta> = db_states
+        let state_deltas: HashMap<String, ProtocolComponentStateDelta> = db_states
             .into_iter()
             .chain(buffered_state)
             .fold(HashMap::new(), |mut acc, ((c_id, key), value)| {

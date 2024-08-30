@@ -96,64 +96,6 @@ pub struct BlockContractChanges {
     pub tx_updates: Vec<TransactionVMUpdates>,
 }
 
-impl StateUpdateBufferEntry for BlockContractChanges {
-    fn get_filtered_protocol_state_update(
-        &self,
-        _: Vec<(&ProtocolStateIdType, &ProtocolStateKeyType)>,
-    ) -> HashMap<(ProtocolStateIdType, ProtocolStateKeyType), ProtocolStateValueType> {
-        todo!()
-    }
-
-    #[allow(clippy::mutable_key_type)]
-    fn get_filtered_account_state_update(
-        &self,
-        keys: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
-    ) -> HashMap<(AccountStateIdType, AccountStateKeyType), AccountStateValueType> {
-        let keys_set: HashSet<_> = keys.into_iter().collect();
-        let mut res = HashMap::new();
-
-        for update in self.tx_updates.iter().rev() {
-            for (address, account_update) in update.account_updates.iter() {
-                for (attr, val) in account_update
-                    .slots
-                    .iter()
-                    .filter(|(attr, _)| keys_set.contains(&(address, *attr)))
-                {
-                    res.entry((address.clone(), attr.clone()))
-                        .or_insert(val.clone().unwrap_or_default());
-                }
-            }
-        }
-
-        res
-    }
-
-    #[allow(clippy::mutable_key_type)] // Clippy thinks that tuple with Bytes are a mutable type.
-    fn get_filtered_balance_update(
-        &self,
-        keys: Vec<(&ComponentId, &Address)>,
-    ) -> HashMap<(String, Bytes), ComponentBalance> {
-        // Convert keys to a HashSet for faster lookups
-        let keys_set: HashSet<(&String, &Bytes)> = keys.into_iter().collect();
-
-        let mut res = HashMap::new();
-
-        for update in self.tx_updates.iter().rev() {
-            for (component_id, balance_update) in update.component_balances.iter() {
-                for (token, value) in balance_update
-                    .iter()
-                    .filter(|(token, _)| keys_set.contains(&(component_id, token)))
-                {
-                    res.entry((component_id.clone(), token.clone()))
-                        .or_insert(value.clone());
-                }
-            }
-        }
-
-        res
-    }
-}
-
 impl BlockScoped for BlockContractChanges {
     fn block(&self) -> tycho_core::models::blockchain::Block {
         self.block.clone()
@@ -536,64 +478,6 @@ pub struct BlockEntityChanges {
     pub new_tokens: HashMap<Address, CurrencyToken>,
     /// Vec of updates at this block, aggregated by tx and sorted by tx index in ascending order
     pub txs_with_update: Vec<ProtocolChangesWithTx>,
-}
-
-impl StateUpdateBufferEntry for BlockEntityChanges {
-    fn get_filtered_protocol_state_update(
-        &self,
-        keys: Vec<(&ProtocolStateIdType, &ProtocolStateKeyType)>,
-    ) -> HashMap<(ProtocolStateIdType, ProtocolStateKeyType), ProtocolStateValueType> {
-        // Convert keys to a HashSet for faster lookups
-        let keys_set: HashSet<(&ComponentId, &AttrStoreKey)> = keys.into_iter().collect();
-        let mut res = HashMap::new();
-
-        for update in self.txs_with_update.iter().rev() {
-            for (component_id, protocol_update) in update.protocol_states.iter() {
-                for (attr, val) in protocol_update
-                    .updated_attributes
-                    .iter()
-                    .filter(|(attr, _)| keys_set.contains(&(component_id, attr)))
-                {
-                    res.entry((component_id.clone(), attr.clone()))
-                        .or_insert(val.clone());
-                }
-            }
-        }
-
-        res
-    }
-
-    fn get_filtered_account_state_update(
-        &self,
-        _: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
-    ) -> HashMap<(AccountStateIdType, AccountStateKeyType), AccountStateValueType> {
-        todo!()
-    }
-
-    #[allow(clippy::mutable_key_type)] // Clippy thinks that tuple with Bytes are a mutable type.
-    fn get_filtered_balance_update(
-        &self,
-        keys: Vec<(&ComponentId, &Address)>,
-    ) -> HashMap<(String, Bytes), tycho_core_protocol::ComponentBalance> {
-        // Convert keys to a HashSet for faster lookups
-        let keys_set: HashSet<(&String, &Bytes)> = keys.into_iter().collect();
-
-        let mut res = HashMap::new();
-
-        for update in self.txs_with_update.iter().rev() {
-            for (component_id, protocol_update) in update.balance_changes.iter() {
-                for (token, value) in protocol_update
-                    .iter()
-                    .filter(|(token, _)| keys_set.contains(&(component_id, token)))
-                {
-                    res.entry((component_id.clone(), token.clone()))
-                        .or_insert(value.clone());
-                }
-            }
-        }
-
-        res
-    }
 }
 
 impl BlockScoped for BlockEntityChanges {
@@ -3187,7 +3071,7 @@ mod test {
         ];
 
         #[allow(clippy::mutable_key_type)]
-        let filtered = block.get_filtered_account_state_update(keys);
+        let filtered = BlockChanges::from(block).get_filtered_account_state_update(keys);
 
         assert_eq!(
             filtered,
@@ -3218,7 +3102,7 @@ mod test {
 
         #[allow(clippy::mutable_key_type)]
         // Clippy thinks that tuple with Bytes are a mutable type.
-        let filtered = block.get_filtered_balance_update(keys);
+        let filtered = BlockChanges::from(block).get_filtered_balance_update(keys);
 
         assert_eq!(
             filtered,
@@ -3487,7 +3371,7 @@ mod test {
             (&state1_key, &missing),
         ];
 
-        let filtered = block.get_filtered_protocol_state_update(keys);
+        let filtered = BlockChanges::from(block).get_filtered_protocol_state_update(keys);
         assert_eq!(
             filtered,
             HashMap::from([(
@@ -3516,7 +3400,7 @@ mod test {
 
         #[allow(clippy::mutable_key_type)]
         // Clippy thinks that tuple with Bytes are a mutable type.
-        let filtered = block.get_filtered_balance_update(keys);
+        let filtered = BlockChanges::from(block).get_filtered_balance_update(keys);
 
         assert_eq!(
             filtered,
