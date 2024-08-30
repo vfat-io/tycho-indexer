@@ -31,7 +31,10 @@ class HexBytes(_HexBytes):
         return cls(data)
 
     def __int__(self):
-        return int(self.hex(), 16)
+        if self.hex() != "0x":
+            return int(self.hex(), 16)
+        else:
+          return 0
 
 
 class Chain(str, Enum):
