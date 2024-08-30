@@ -396,7 +396,6 @@ mod test {
     use ethers::types::{H160, H256};
     use rstest::rstest;
     use tycho_core::{
-        dto::Block,
         models::{
             blockchain::Transaction,
             protocol::{ComponentBalance, ProtocolChangesWithTx, ProtocolComponentStateDelta},
