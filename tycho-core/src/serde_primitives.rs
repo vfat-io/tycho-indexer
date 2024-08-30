@@ -117,52 +117,6 @@ pub mod hex_bytes_vec {
     }
 }
 
-/// serde functions for handling Option<Vec<Bytes>>
-pub mod hex_bytes_vec_option {
-    use super::decode_hex_with_prefix;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    /// Serialize an Option<Vec<Bytes>> as an optional vector of hex strings with 0x prefix
-    pub fn serialize<S, T>(x: &Option<Vec<T>>, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-        T: AsRef<[u8]>,
-    {
-        if let Some(vec) = x {
-            let vec_str: Vec<String> = vec
-                .iter()
-                .map(|val| format!("0x{}", hex::encode(val.as_ref())))
-                .collect();
-            s.serialize_some(&vec_str)
-        } else {
-            s.serialize_none()
-        }
-    }
-
-    /// Deserialize an Option<Vec<Bytes>> from an optional vector of hex strings
-    /// Each string is a hex string with optional 0x prefix
-    pub fn deserialize<'de, T, D>(d: D) -> Result<Option<Vec<T>>, D::Error>
-    where
-        D: Deserializer<'de>,
-        T: From<Vec<u8>>,
-    {
-        let values: Option<Vec<String>> = Option::deserialize(d)?;
-
-        if let Some(values) = values {
-            let mut output = Vec::new();
-            for value in values {
-                let decoded_value = decode_hex_with_prefix(&value)
-                    .map(Into::into)
-                    .map_err(|e| serde::de::Error::custom(e.to_string()))?;
-                output.push(decoded_value);
-            }
-            Ok(Some(output))
-        } else {
-            Ok(None)
-        }
-    }
-}
-
 /// serde functions for handling HashMap with a bytes key
 pub mod hex_hashmap_key {
     use crate::Bytes;
@@ -294,9 +248,6 @@ mod tests {
 
         #[serde(with = "hex_bytes_vec")]
         bytes_vec: Vec<Vec<u8>>,
-
-        #[serde(with = "hex_bytes_vec_option")]
-        bytes_vec_option: Option<Vec<Vec<u8>>>,
     }
 
     #[test]
@@ -305,14 +256,13 @@ mod tests {
             bytes: vec![0u8; 10],
             bytes_option: Some(vec![0u8; 10]),
             bytes_vec: vec![vec![1u8; 10], vec![2u8; 10]],
-            bytes_vec_option: Some(vec![vec![3u8; 10], vec![4u8; 10]]),
         };
 
         // Serialize to JSON
         let serialized = serde_json::to_string(&test_struct).unwrap();
         assert_eq!(
             serialized,
-            "{\"bytes\":\"0x00000000000000000000\",\"bytes_option\":\"0x00000000000000000000\",\"bytes_vec\":[\"0x01010101010101010101\",\"0x02020202020202020202\"],\"bytes_vec_option\":[\"0x03030303030303030303\",\"0x04040404040404040404\"]}"
+            "{\"bytes\":\"0x00000000000000000000\",\"bytes_option\":\"0x00000000000000000000\",\"bytes_vec\":[\"0x01010101010101010101\",\"0x02020202020202020202\"]}"
         );
 
         // Deserialize from JSON
@@ -320,29 +270,23 @@ mod tests {
         assert_eq!(deserialized.bytes, vec![0u8; 10]);
         assert_eq!(deserialized.bytes_option, Some(vec![0u8; 10]));
         assert_eq!(deserialized.bytes_vec, vec![vec![1u8; 10], vec![2u8; 10]]);
-        assert_eq!(deserialized.bytes_vec_option, Some(vec![vec![3u8; 10], vec![4u8; 10]]));
     }
 
     #[test]
     fn hex_bytes_option_none() {
-        let test_struct = TestStruct {
-            bytes: vec![0u8; 10],
-            bytes_option: None,
-            bytes_vec: vec![],
-            bytes_vec_option: None,
-        };
+        let test_struct =
+            TestStruct { bytes: vec![0u8; 10], bytes_option: None, bytes_vec: vec![] };
 
         // Serialize to JSON
         let serialized = serde_json::to_string(&test_struct).unwrap();
         assert_eq!(
             serialized,
-            "{\"bytes\":\"0x00000000000000000000\",\"bytes_option\":null,\"bytes_vec\":[],\"bytes_vec_option\":null}"
+            "{\"bytes\":\"0x00000000000000000000\",\"bytes_option\":null,\"bytes_vec\":[]}"
         );
 
         // Deserialize from JSON
         let deserialized: TestStruct = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.bytes, vec![0u8; 10]);
         assert_eq!(deserialized.bytes_option, None);
-        assert_eq!(deserialized.bytes_vec_option, None);
     }
 }

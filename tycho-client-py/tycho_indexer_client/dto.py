@@ -283,7 +283,6 @@ class ContractStateParams(BaseModel):
         contract_ids: Optional[Union[List[ContractId], List[str]]] = None,
         protocol_system: Optional[str] = None,
         version: Optional[VersionParams] = None,
-        chain: Optional[str] = None,
     ):
         if contract_ids and isinstance(contract_ids[0], dict):
             # Handle old format: List of ContractId objects
@@ -293,7 +292,6 @@ class ContractStateParams(BaseModel):
 
         self.protocol_system = protocol_system
         self.version = version
-        self.chain = chain
 
     class Config:
         allow_population_by_field_name = True

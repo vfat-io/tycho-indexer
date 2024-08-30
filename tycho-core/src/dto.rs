@@ -26,8 +26,8 @@ use crate::{
         token::CurrencyToken,
     },
     serde_primitives::{
-        hex_bytes, hex_bytes_option, hex_bytes_vec, hex_bytes_vec_option, hex_hashmap_key,
-        hex_hashmap_key_value, hex_hashmap_value,
+        hex_bytes, hex_bytes_option, hex_bytes_vec, hex_hashmap_key, hex_hashmap_key_value,
+        hex_hashmap_value,
     },
     Bytes,
 };
@@ -519,8 +519,8 @@ impl ProtocolStateDelta {
 #[derive(Serialize, Debug, Default, PartialEq, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StateRequestBody {
-    #[serde(alias = "contractIds", with = "hex_bytes_vec_option")]
-    #[schema(value_type=String)]
+    #[serde(alias = "contractIds")]
+    #[schema(value_type=Option<Vec<String>>)]
     pub contract_ids: Option<Vec<Bytes>>,
     #[serde(alias = "protocolSystem", default)]
     pub protocol_system: Option<String>,
