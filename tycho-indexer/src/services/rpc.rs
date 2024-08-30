@@ -160,12 +160,7 @@ where
             .await?;
 
         // Get the contract IDs from the request
-        let contract_ids = request.contract_ids.clone();
-        let addresses: Option<Vec<Address>> = contract_ids.map(|ids| {
-            ids.into_iter()
-                .map(|id| Address::from(id.address))
-                .collect::<Vec<Address>>()
-        });
+        let addresses = request.contract_ids.clone();
         debug!(?addresses, "Getting contract states.");
         let addresses = addresses.as_deref();
 
@@ -859,10 +854,7 @@ mod tests {
         let json_str = r#"
     {
         "contractIds": [
-            {
-                "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
-                "chain": "ethereum"
-            }
+            "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092"
         ]
     }
     "#;
@@ -872,7 +864,7 @@ mod tests {
         let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092".into();
 
         let expected = dto::StateRequestBody {
-            contract_ids: Some(vec![dto::ContractId::new(dto::Chain::Ethereum, contract0)]),
+            contract_ids: Some(vec![contract0]),
             protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             chain: dto::Chain::Ethereum,
@@ -928,12 +920,9 @@ mod tests {
         let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::StateRequestBody {
-            contract_ids: Some(vec![dto::ContractId::new(
-                dto::Chain::Ethereum,
-                "6B175474E89094C44Da98b954EedeAC495271d0F"
-                    .parse::<Bytes>()
-                    .unwrap(),
-            )]),
+            contract_ids: Some(vec![
+                Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap()
+            ]),
             protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             chain: dto::Chain::Ethereum,
@@ -954,10 +943,9 @@ mod tests {
 
         // Create the request body using the dto::StateRequestBody struct
         let request_body = dto::StateRequestBody {
-            contract_ids: Some(vec![dto::ContractId::new(
-                dto::Chain::Ethereum,
-                Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap(),
-            )]),
+            contract_ids: Some(vec![
+                Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap()
+            ]),
             protocol_system: None,
             version: dto::VersionParam::default(),
             chain: dto::Chain::Ethereum,

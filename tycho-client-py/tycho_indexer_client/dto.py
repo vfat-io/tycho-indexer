@@ -272,9 +272,28 @@ class ProtocolStateParams(BaseModel):
 
 
 class ContractStateParams(BaseModel):
-    contract_ids: Optional[List[ContractId]] = Field(default=None)
+    contract_ids: Optional[List[str]] = Field(default=None)
     protocol_system: Optional[str] = Field(default=None)
     version: Optional[VersionParams] = None
+
+    # Backward compatibility with old ContractId format
+    # To be removed in the future
+    def __init__(
+        self,
+        contract_ids: Optional[Union[List[ContractId], List[str]]] = None,
+        protocol_system: Optional[str] = None,
+        version: Optional[VersionParams] = None,
+        chain: Optional[str] = None,
+    ):
+        if contract_ids and isinstance(contract_ids[0], dict):
+            # Handle old format: List of ContractId objects
+            self.contract_ids = [c["address"] for c in contract_ids]
+        else:
+            self.contract_ids = contract_ids
+
+        self.protocol_system = protocol_system
+        self.version = version
+        self.chain = chain
 
     class Config:
         allow_population_by_field_name = True

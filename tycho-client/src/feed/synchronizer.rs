@@ -18,7 +18,7 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::{
     dto::{
-        BlockChanges, BlockParam, ContractId, ExtractorIdentity, ProtocolComponent, ProtocolId,
+        BlockChanges, BlockParam, ExtractorIdentity, ProtocolComponent, ProtocolId,
         ResponseAccount, ResponseProtocolState, StateRequestBody, VersionParam,
     },
     Bytes,
@@ -247,7 +247,6 @@ where
                         contract_ids
                             .clone()
                             .into_iter()
-                            .map(|id| ContractId::new(self.extractor_id.chain, id))
                             .collect(),
                     ),
                     Some(self.extractor_id.name.clone()),
