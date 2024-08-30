@@ -1923,13 +1923,13 @@ mod test_serial_db {
         evm::BlockChanges {
             extractor: "native:test".to_owned(),
             chain: Chain::Ethereum,
-            block: Block {
-                number: 0,
-                chain: Chain::Ethereum,
-                hash: NATIVE_BLOCK_HASH_0.parse().unwrap(),
-                parent_hash: NATIVE_BLOCK_HASH_0.parse().unwrap(),
-                ts: "2020-01-01T01:00:00".parse().unwrap(),
-            },
+            block: Block::new(
+                0,
+                Chain::Ethereum,
+                NATIVE_BLOCK_HASH_0.parse().unwrap(),
+                NATIVE_BLOCK_HASH_0.parse().unwrap(),
+                "2020-01-01T01:00:00".parse().unwrap(),
+            ),
             finalized_block_height: 0,
             revert: false,
             new_tokens: HashMap::from([
@@ -2116,13 +2116,13 @@ mod test_serial_db {
     // Allow dead code until reverts are supported again
     #[allow(dead_code)]
     fn vm_update02() -> evm::BlockContractChanges {
-        let block = Block {
-            number: 1,
-            chain: Chain::Ethereum,
-            hash: VM_BLOCK_HASH_0.parse().unwrap(),
-            parent_hash: H256::zero().into(),
-            ts: "2020-01-01T01:00:00".parse().unwrap(),
-        };
+        let block = Block::new(
+            1,
+            Chain::Ethereum,
+            VM_BLOCK_HASH_0.parse().unwrap(),
+            H256::zero().into(),
+            "2020-01-01T01:00:00".parse().unwrap(),
+        );
         evm::BlockContractChanges {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
@@ -2360,13 +2360,13 @@ mod test_serial_db {
             let block_entity_changes_result = AggregatedBlockChanges {
                 extractor: "native_name".to_string(),
                 chain: Chain::Ethereum,
-                block: Block {
-                    number: 3,
-                    hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap().into(),
-                    parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap().into(),
-                    chain: Chain::Ethereum,
-                    ts: NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
-                },
+                block: Block::new(
+                    3,
+                    Chain::Ethereum,
+                    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap().into(),
+                    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap().into(),
+                    NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
+                ),
                 finalized_block_height: 1,
                 revert: true,
                 state_updates: HashMap::from([
@@ -2542,13 +2542,13 @@ mod test_serial_db {
             let block_account_expected = AggregatedBlockChanges {
                 extractor: "vm_name".to_string(),
                 chain: Chain::Ethereum,
-                block: Block {
-                    number: 3,
-                    hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap().into(),
-                    parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap().into(),
-                    chain: Chain::Ethereum,
-                    ts: NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
-                },
+                block: Block::new(
+                    3,
+                    Chain::Ethereum,
+                    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap().into(),
+                    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap().into(),
+                    NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
+                ),
                 finalized_block_height: 1,
                 revert: true,
                 account_updates: HashMap::from([

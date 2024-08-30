@@ -2972,17 +2972,17 @@ mod test {
         BlockContractChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
-            block: Block {
-                number: 1,
-                hash: H256::from_low_u64_be(
+            block: Block::new(
+                1,
+                Chain::Ethereum,
+                H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000031323334,
                 ).into(),
-                parent_hash: H256::from_low_u64_be(
+                H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000021222324,
                 ).into(),
-                chain: Chain::Ethereum,
-                ts: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
-            },
+                NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+            ),
             finalized_block_height: 0,
             revert: false,
             new_tokens: HashMap::new(),
@@ -3445,19 +3445,19 @@ mod test {
         BlockEntityChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
-            block: Block {
-                number: 1,
-                hash: H256::from_low_u64_be(
+            block: Block::new(
+                1,
+                Chain::Ethereum,
+                H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000000000000,
                 )
                 .into(),
-                parent_hash: H256::from_low_u64_be(
+                H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000021222324,
                 )
                 .into(),
-                chain: Chain::Ethereum,
-                ts: yesterday_midnight(),
-            },
+                yesterday_midnight(),
+            ),
             finalized_block_height: 420,
             revert: false,
             new_tokens: HashMap::new(),

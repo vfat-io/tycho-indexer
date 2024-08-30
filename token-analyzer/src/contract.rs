@@ -173,13 +173,13 @@ mod tests {
         let node = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
         println!("Using node: {}", node);
 
-        let block = Block {
-            number: block_number,
-            hash: block_hash.into(),
-            parent_hash: Default::default(),
-            chain: Chain::Ethereum,
-            ts: Default::default(),
-        };
+        let block = Block::new(
+            block_number,
+            Chain::Ethereum,
+            block_hash.into(),
+            Default::default(),
+            Default::default(),
+        );
         let extractor = EVMAccountExtractor::new(&node, Chain::Ethereum).await?;
         let updates = extractor
             .get_accounts(block, accounts)

@@ -1314,37 +1314,37 @@ mod test_serial_db {
         let ts2 = ts1 + Duration::from_secs(3600);
         let ts3 = ts2 + Duration::from_secs(3600);
         match version {
-            1 => models::blockchain::Block {
-                number: 1,
-                chain: Chain::Ethereum,
-                hash: "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
+            1 => models::blockchain::Block::new(
+                1,
+                Chain::Ethereum,
+                "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
                     .parse()
                     .expect("Invalid hash"),
-                parent_hash: Bytes::default(),
-                ts: ts1,
-            },
-            2 => models::blockchain::Block {
-                number: 2,
-                chain: Chain::Ethereum,
-                hash: "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
+                Bytes::default(),
+                ts1,
+            ),
+            2 => models::blockchain::Block::new(
+                2,
+                Chain::Ethereum,
+                "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
                     .parse()
                     .expect("Invalid hash"),
-                parent_hash: "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
+                "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
                     .parse()
                     .expect("Invalid hash"),
-                ts: ts2,
-            },
-            3 => models::blockchain::Block {
-                number: 3,
-                chain: Chain::Ethereum,
-                hash: "0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741"
+                ts2,
+            ),
+            3 => models::blockchain::Block::new(
+                3,
+                Chain::Ethereum,
+                "0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741"
                     .parse()
                     .expect("Invalid hash"),
-                parent_hash: "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
+                "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
                     .parse()
                     .expect("Invalid hash"),
-                ts: ts3,
-            },
+                ts3,
+            ),
             _ => panic!("Block version not found"),
         }
     }

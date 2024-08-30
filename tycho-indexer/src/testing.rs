@@ -489,11 +489,11 @@ pub fn block(version: u64) -> Block {
     let ts: NaiveDateTime = "2020-01-01T00:00:00"
         .parse()
         .expect("failed parsing block ts");
-    Block {
-        number: version,
-        hash: H256::from_low_u64_be(version).into(),
-        parent_hash: H256::from_low_u64_be(version - 1).into(),
-        chain: Chain::Ethereum,
-        ts: ts + Duration::from_secs(version * 12),
-    }
+    Block::new(
+        version,
+        Chain::Ethereum,
+        H256::from_low_u64_be(version).into(),
+        H256::from_low_u64_be(version - 1).into(),
+        ts + Duration::from_secs(version * 12),
+    )
 }

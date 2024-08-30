@@ -22,11 +22,23 @@ use super::{
 
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize, Debug)]
 pub struct Block {
-    pub hash: Bytes,
-    pub parent_hash: Bytes,
     pub number: u64,
     pub chain: Chain,
+    pub hash: Bytes,
+    pub parent_hash: Bytes,
     pub ts: NaiveDateTime,
+}
+
+impl Block {
+    pub fn new(
+        number: u64,
+        chain: Chain,
+        hash: Bytes,
+        parent_hash: Bytes,
+        ts: NaiveDateTime,
+    ) -> Self {
+        Block { hash, parent_hash, number, chain, ts }
+    }
 }
 
 #[derive(Clone, Default, PartialEq, Debug)]

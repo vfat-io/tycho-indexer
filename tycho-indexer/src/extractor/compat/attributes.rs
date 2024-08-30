@@ -116,13 +116,13 @@ mod test {
         let changes = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            Block {
-                number: 0,
-                chain: Chain::Ethereum,
-                hash: BLOCK_HASH_0.parse().unwrap(),
-                parent_hash: BLOCK_HASH_0.parse().unwrap(),
-                ts: "2020-01-01T01:00:00".parse().unwrap(),
-            },
+            Block::new(
+                0,
+                Chain::Ethereum,
+                BLOCK_HASH_0.parse().unwrap(),
+                BLOCK_HASH_0.parse().unwrap(),
+                "2020-01-01T01:00:00".parse().unwrap(),
+            ),
             0,
             false,
             vec![TxWithChanges {
@@ -218,13 +218,13 @@ mod test {
         let changes = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            Block {
-                number: 0,
-                chain: Chain::Ethereum,
-                hash: BLOCK_HASH_0.parse().unwrap(),
-                parent_hash: BLOCK_HASH_0.parse().unwrap(),
-                ts: "2020-01-01T01:00:00".parse().unwrap(),
-            },
+            Block::new(
+                0,
+                Chain::Ethereum,
+                BLOCK_HASH_0.parse().unwrap(),
+                BLOCK_HASH_0.parse().unwrap(),
+                "2020-01-01T01:00:00".parse().unwrap(),
+            ),
             0,
             false,
             vec![TxWithChanges {
@@ -262,13 +262,13 @@ mod test {
         let changes = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            Block {
-                number: 0,
-                chain: Chain::Ethereum,
-                hash: BLOCK_HASH_0.parse().unwrap(),
-                parent_hash: BLOCK_HASH_0.parse().unwrap(),
-                ts: "2020-01-01T01:00:00".parse().unwrap(),
-            },
+            Block::new(
+                0,
+                Chain::Ethereum,
+                BLOCK_HASH_0.parse().unwrap(),
+                BLOCK_HASH_0.parse().unwrap(),
+                "2020-01-01T01:00:00".parse().unwrap(),
+            ),
             0,
             false,
             vec![TxWithChanges {
@@ -319,13 +319,13 @@ mod test {
         let expected = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            Block {
-                number: 0,
-                chain: Chain::Ethereum,
-                hash: BLOCK_HASH_0.parse().unwrap(),
-                parent_hash: BLOCK_HASH_0.parse().unwrap(),
-                ts: "2020-01-01T01:00:00".parse().unwrap(),
-            },
+            Block::new(
+                0,
+                Chain::Ethereum,
+                BLOCK_HASH_0.parse().unwrap(),
+                BLOCK_HASH_0.parse().unwrap(),
+                "2020-01-01T01:00:00".parse().unwrap(),
+            ),
             0,
             false,
             vec![TxWithChanges {
