@@ -18,6 +18,7 @@ use diesel::{
     serialize::{self, ToSql},
     sql_types::Binary,
 };
+use rand::Rng;
 
 /// Wrapper type around Bytes to deserialize/serialize from/to hex
 #[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
@@ -148,6 +149,28 @@ impl Bytes {
     /// ```
     pub fn zero(length: usize) -> Bytes {
         Bytes::from(vec![0u8; length])
+    }
+
+    /// Creates a `Bytes` object of the specified length, filled with random bytes.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - The length of the `Bytes` object to be created.
+    ///
+    /// # Returns
+    ///
+    /// A `Bytes` object of the specified length, filled with random bytes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let random_bytes = Bytes::random(5);
+    /// assert_eq!(random_bytes.len(), 5);
+    /// ```
+    pub fn random(length: usize) -> Bytes {
+        let mut data = vec![0u8; length];
+        rand::thread_rng().fill(&mut data[..]);
+        Bytes::from(data)
     }
 }
 

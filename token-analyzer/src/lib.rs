@@ -1,18 +1,14 @@
 pub mod contract;
 pub mod ethrpc;
 pub mod http_client;
+pub mod rpc_client;
+pub mod token_pre_processor;
 pub mod trace_call;
 pub mod trace_many;
 
-use std::collections::HashMap;
-
-use anyhow::Result;
-use ethers::{
-    providers::ProviderError,
-    types::{H160, U256},
-};
+use ethers::providers::ProviderError;
 use thiserror::Error;
-use trace_call::TokenOwnerFinding;
+use tycho_core::models::{blockchain::BlockTag, token::TokenQuality};
 use web3::types::BlockNumber;
 
 #[derive(Error, Debug)]
@@ -23,48 +19,17 @@ pub enum RPCError {
     RequestError(#[from] ProviderError),
 }
 
-/// How well behaved a token is.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum TokenQuality {
-    Good,
-    Bad { reason: String },
-}
+pub struct BlockTagWrapper(BlockTag);
 
-impl TokenQuality {
-    pub fn is_good(&self) -> bool {
-        matches!(self, Self::Good { .. })
+impl From<BlockTagWrapper> for BlockNumber {
+    fn from(value: BlockTagWrapper) -> Self {
+        match value.0 {
+            BlockTag::Finalized => BlockNumber::Finalized,
+            BlockTag::Safe => BlockNumber::Safe,
+            BlockTag::Latest => BlockNumber::Latest,
+            BlockTag::Earliest => BlockNumber::Earliest,
+            BlockTag::Pending => BlockNumber::Pending,
+            BlockTag::Number(n) => BlockNumber::Number(n.into()),
+        }
     }
-
-    pub fn bad(reason: impl ToString) -> Self {
-        Self::Bad { reason: reason.to_string() }
-    }
-}
-
-#[derive(Debug)]
-pub struct TokenFinder {
-    values: HashMap<H160, (H160, U256)>,
-}
-
-impl TokenFinder {
-    pub fn new(values: HashMap<H160, (H160, U256)>) -> Self {
-        TokenFinder { values }
-    }
-}
-
-#[async_trait::async_trait]
-impl TokenOwnerFinding for TokenFinder {
-    async fn find_owner(&self, token: H160, _min_balance: U256) -> Result<Option<(H160, U256)>> {
-        Ok(self.values.get(&token).copied())
-    }
-}
-
-/// Detect how well behaved a token is.
-#[mockall::automock]
-#[async_trait::async_trait]
-pub trait BadTokenDetecting: Send + Sync {
-    async fn detect(
-        &self,
-        token: H160,
-        block: BlockNumber,
-    ) -> Result<(TokenQuality, Option<U256>, Option<U256>)>;
 }

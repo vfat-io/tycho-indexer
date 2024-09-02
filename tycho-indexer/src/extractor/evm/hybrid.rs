@@ -6,25 +6,26 @@ use std::{
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use ethers::prelude::{H160, H256, U256};
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use token_analyzer::TokenFinder;
+use token_analyzer::token_pre_processor::map_vault;
 use tycho_core::{
     models::{
         self,
-        blockchain::BlockAggregatedChanges,
+        blockchain::{BlockAggregatedChanges, BlockTag},
         contract::{Account, AccountDelta},
         protocol::{ComponentBalance, ProtocolComponentState, ProtocolComponentStateDelta},
-        token::CurrencyToken,
-        Address, Chain, ChangeType, ExtractionState, ExtractorIdentity, ProtocolType, TxHash,
+        token::{CurrencyToken, TokenFinderStore},
+        Address, Balance, Chain, ChangeType, ExtractionState, ExtractorIdentity, ProtocolType,
+        TxHash,
     },
     storage::{
         ChainGateway, ContractStateGateway, ExtractionStateGateway, ProtocolGateway, StorageError,
     },
+    traits::TokenPreProcessorTrait,
     Bytes,
 };
 use tycho_storage::postgres::cache::CachedGateway;
@@ -35,7 +36,6 @@ use crate::{
         evm::{
             chain_state::ChainState,
             protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
-            token_pre_processor::{map_vault, TokenPreProcessorTrait},
             utils::format_duration,
             Block,
         },
@@ -350,9 +350,9 @@ where
                                 .cloned()
                                 .unwrap_or_else(|| ComponentBalance {
                                     token: token.clone(),
-                                    balance: Bytes::from(H256::zero()),
+                                    balance: Bytes::new(),
                                     balance_float: 0.0,
-                                    modify_tx: H256::zero().into(),
+                                    modify_tx: Bytes::new(),
                                     component_id: id.to_string(),
                                 });
                             (token.clone(), balance)
@@ -401,12 +401,12 @@ where
             .into_iter()
             .map(|(addr, _)| addr)
             .collect::<Vec<_>>();
-        let unknown_tokens_h160 = unknown_tokens
+        let unknown_tokens = unknown_tokens
             .into_iter()
-            .map(|(addr, _)| H160::from(addr))
+            .map(|(addr, _)| addr)
             .collect::<Vec<_>>();
         // Construct unkown tokens using rpc
-        let balance_map: HashMap<H160, (H160, U256)> = msg
+        let balance_map: HashMap<Address, (Address, Balance)> = msg
             .txs_with_update
             .iter()
             .flat_map(|tx| {
@@ -427,7 +427,7 @@ where
                                     .first()
                                     .cloned()
                                     .map(Into::into)
-                                    .or_else(|| H160::from_str(&change.id).ok())
+                                    .or_else(|| Bytes::from_str(&change.id).ok())
                             })
                             .map(|owner| (c_id, owner))
                     })
@@ -440,17 +440,14 @@ where
                                     // We currently only keep the latest created pool for
                                     // it's token
                                     .map(move |(token, balance)| {
-                                        (
-                                            (token.clone()).into(),
-                                            (addr, U256::from_big_endian(&balance.balance)),
-                                        )
+                                        (token.clone(), (addr.clone(), balance.balance.clone()))
                                     })
                             })
                     })
                     .flatten()
             })
             .collect::<HashMap<_, _>>();
-        let tf = TokenFinder::new(balance_map);
+        let tf = TokenFinderStore::new(balance_map);
         let existing_tokens = self
             .protocol_cache
             .get_tokens(&known_tokens)
@@ -460,11 +457,7 @@ where
             .map(|t| (t.address.clone(), t));
         let new_tokens: HashMap<Address, CurrencyToken> = self
             .token_pre_processor
-            .get_tokens(
-                unknown_tokens_h160,
-                Arc::new(tf),
-                web3::types::BlockNumber::Number(msg.block.number.into()),
-            )
+            .get_tokens(unknown_tokens, Arc::new(tf), BlockTag::Number(msg.block.number))
             .await
             .into_iter()
             .map(|t| (t.address.clone(), t))
@@ -650,7 +643,7 @@ where
             .last_valid_block
             .ok_or_else(|| ExtractionError::DecodeError("Revert without block ref".into()))?;
 
-        let block_hash = H256::from_str(&block_ref.id).map_err(|err| {
+        let block_hash = Bytes::from_str(&block_ref.id).map_err(|err| {
             ExtractionError::DecodeError(format!(
                 "Failed to parse {} as block hash: {}",
                 block_ref.id, err
@@ -674,7 +667,7 @@ where
 
         // Purge the buffer
         let reverted_state = revert_buffer
-            .purge(block_hash.into())
+            .purge(block_hash)
             .map_err(|e| ExtractionError::RevertBufferError(e.to_string()))?;
 
         // Handle created and deleted components
@@ -1096,7 +1089,7 @@ impl HybridPgGateway {
         let mut account_changes: Vec<(Bytes, AccountDelta)> = vec![];
 
         let mut balance_changes: Vec<models::protocol::ComponentBalance> = vec![];
-        let mut protocol_tokens: HashSet<H160> = HashSet::new();
+        let mut protocol_tokens: HashSet<Bytes> = HashSet::new();
 
         for tx_update in changes.txs_with_update.iter() {
             trace!(tx_hash = ?tx_update.tx.hash, "Processing tx");
@@ -1111,12 +1104,7 @@ impl HybridPgGateway {
             // Map new protocol components
             for (_component_id, new_protocol_component) in tx_update.protocol_components.iter() {
                 new_protocol_components.push(new_protocol_component.clone());
-                protocol_tokens.extend(
-                    new_protocol_component
-                        .tokens
-                        .iter()
-                        .map(|t| H160::from(t.clone())),
-                );
+                protocol_tokens.extend(new_protocol_component.tokens.clone());
             }
 
             // Map new account / contracts
@@ -1262,26 +1250,41 @@ impl HybridGateway for HybridPgGateway {
 mod test {
     use super::*;
     use crate::{
-        extractor::evm::token_pre_processor::MockTokenPreProcessorTrait,
         pb::tycho::evm::v1::{BlockChanges, BlockContractChanges, BlockEntityChanges},
         testing::MockGateway,
     };
     use float_eq::assert_float_eq;
+    use mockall::mock;
     use models::blockchain::{Transaction, TxWithChanges};
-    use tycho_core::models::protocol::ProtocolComponent;
+    use tycho_core::{models::protocol::ProtocolComponent, traits::TokenOwnerFinding};
+    use web3::types::{H160, H256};
+
+    mock! {
+        pub TokenPreProcessor {}
+
+        #[async_trait::async_trait]
+        impl TokenPreProcessorTrait for TokenPreProcessor {
+            async fn get_tokens(
+                &self,
+                addresses: Vec<Bytes>,
+                token_finder: Arc<dyn TokenOwnerFinding>,
+                block: BlockTag,
+            ) -> Vec<CurrencyToken>;
+        }
+    }
 
     const EXTRACTOR_NAME: &str = "TestExtractor";
     const TEST_PROTOCOL: &str = "TestProtocol";
     async fn create_extractor(
         gw: MockHybridGateway,
-    ) -> HybridContractExtractor<MockHybridGateway, MockTokenPreProcessorTrait> {
+    ) -> HybridContractExtractor<MockHybridGateway, MockTokenPreProcessor> {
         let protocol_types = HashMap::from([("pt_1".to_string(), ProtocolType::default())]);
         let protocol_cache = ProtocolMemoryCache::new(
             Chain::Ethereum,
             chrono::Duration::seconds(900),
             Arc::new(MockGateway::new()),
         );
-        let mut preprocessor = MockTokenPreProcessorTrait::new();
+        let mut preprocessor = MockTokenPreProcessor::new();
         preprocessor
             .expect_get_tokens()
             .returning(|_, _, _| Vec::new());
@@ -1557,7 +1560,7 @@ mod test {
             .await
             .expect("adding tokens failed");
 
-        let mut preprocessor = MockTokenPreProcessorTrait::new();
+        let mut preprocessor = MockTokenPreProcessor::new();
         let t3 = CurrencyToken::new(
             &Bytes::from_str("0000000000000000000000000000000000000003").unwrap(),
             "TOK3",
@@ -1692,7 +1695,7 @@ mod test {
             .await
             .expect("adding tokens failed");
 
-        let preprocessor = MockTokenPreProcessorTrait::new();
+        let preprocessor = MockTokenPreProcessor::new();
         let mut extractor_gw = MockHybridGateway::new();
         extractor_gw
             .expect_ensure_protocol_types()
@@ -1752,20 +1755,19 @@ mod test {
 mod test_serial_db {
     use super::*;
     use crate::{
-        extractor::evm::{
-            token_pre_processor::MockTokenPreProcessorTrait, ProtocolComponent, Transaction,
-            TxWithChanges,
-        },
+        extractor::evm::{ProtocolComponent, Transaction, TxWithChanges},
         pb::sf::substreams::v1::BlockRef,
     };
     use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-    use ethers::abi::AbiEncode;
+    use ethers::{abi::AbiEncode, prelude::U256};
     use futures03::{stream, StreamExt};
 
+    use mockall::mock;
     use models::contract::TransactionVMUpdates;
     use tycho_core::{
         models::{ContractId, FinancialType, ImplementationType},
         storage::{BlockIdentifier, BlockOrTimestamp},
+        traits::TokenOwnerFinding,
     };
     use tycho_storage::{
         postgres,
@@ -1774,6 +1776,21 @@ mod test_serial_db {
             testing::run_against_db,
         },
     };
+    use web3::types::{H160, H256};
+
+    mock! {
+        pub TokenPreProcessor {}
+
+        #[async_trait::async_trait]
+        impl TokenPreProcessorTrait for TokenPreProcessor {
+            async fn get_tokens(
+                &self,
+                addresses: Vec<Bytes>,
+                token_finder: Arc<dyn TokenOwnerFinding>,
+                block: BlockTag,
+            ) -> Vec<CurrencyToken>;
+        }
+    }
 
     const WETH_ADDRESS: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC_ADDRESS: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -1793,8 +1810,8 @@ mod test_serial_db {
     const VM_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
     // SETUP
-    fn get_mocked_token_pre_processor() -> MockTokenPreProcessorTrait {
-        let mut mock_processor = MockTokenPreProcessorTrait::new();
+    fn get_mocked_token_pre_processor() -> MockTokenPreProcessor {
+        let mut mock_processor = MockTokenPreProcessor::new();
         let new_tokens = vec![
             CurrencyToken::new(
                 &Bytes::from_str("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")

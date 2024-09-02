@@ -5,9 +5,13 @@ use anyhow::Result;
 use ethers::types::{H160, U256};
 use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use reqwest::Client;
-use token_analyzer::{trace_call::TraceCallDetector, BadTokenDetecting, TokenFinder};
+use token_analyzer::trace_call::TraceCallDetector;
+use tycho_core::{
+    models::{blockchain::BlockTag, token::TokenFinderStore},
+    traits::TokenQualityAnalyzer,
+    Bytes,
+};
 use url::Url;
-use web3::types::BlockNumber;
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
@@ -20,11 +24,13 @@ async fn main() -> Result<(), ()> {
         "transport".to_owned(),
     ));
     let w3 = Web3::new(transport);
-    let tf = TokenFinder::new(HashMap::from([(
-        H160::from_str("0x3A9FfF453d50D4Ac52A6890647b823379ba36B9E").unwrap(),
+    let tf = TokenFinderStore::new(HashMap::from([(
+        Bytes::from_str("3A9FfF453d50D4Ac52A6890647b823379ba36B9E").unwrap(),
         (
-            H160::from_str("0x260E069deAd76baAC587B5141bB606Ef8b9Bab6c").unwrap(),
-            U256::from_dec_str("13042252617814040589").unwrap(),
+            Bytes::from_str("260E069deAd76baAC587B5141bB606Ef8b9Bab6c").unwrap(),
+            U256::from_dec_str("13042252617814040589")
+                .unwrap()
+                .into(),
         ),
     )]));
 
@@ -35,9 +41,11 @@ async fn main() -> Result<(), ()> {
     };
 
     let quality = trace_call
-        .detect(
-            H160::from_str("0x3A9FfF453d50D4Ac52A6890647b823379ba36B9E").unwrap(),
-            BlockNumber::Latest,
+        .analyze(
+            H160::from_str("0x3A9FfF453d50D4Ac52A6890647b823379ba36B9E")
+                .unwrap()
+                .into(),
+            BlockTag::Latest,
         )
         .await
         .unwrap();

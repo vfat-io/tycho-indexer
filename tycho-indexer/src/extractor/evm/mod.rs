@@ -32,7 +32,6 @@ pub mod chain_state;
 pub mod hybrid;
 pub mod protocol_cache;
 pub mod token_analysis_cron;
-pub mod token_pre_processor;
 mod utils;
 
 pub trait TryFromMessage {

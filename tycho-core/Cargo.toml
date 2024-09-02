@@ -25,6 +25,7 @@ tracing.workspace = true
 # share with workspace?
 typetag = "0.2"
 tiny-keccak = "2.0.2"
+rand = "0.8.5"
 
 [dev-dependencies]
 serde_json.workspace = true

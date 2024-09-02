@@ -6,6 +6,7 @@ use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::Client;
 use prost::Message;
 use serde::Deserialize;
+use token_analyzer::token_pre_processor::EthereumTokenPreProcessor;
 use tokio::{
     sync::{
         mpsc::{self, error::SendError, Receiver, Sender},
@@ -42,7 +43,7 @@ use super::{
         add_default_attributes_uniswapv2, add_default_attributes_uniswapv3, ignore_self_balances,
         transcode_ambient_balances, transcode_usv2_balances, trim_curve_component_token,
     },
-    evm::{chain_state::ChainState, token_pre_processor::TokenPreProcessor},
+    evm::chain_state::ChainState,
     Extractor, ExtractorMsg,
 };
 
@@ -396,7 +397,7 @@ impl ExtractorBuilder {
         mut self,
         chain_state: ChainState,
         cached_gw: &CachedGateway,
-        token_pre_processor: &TokenPreProcessor,
+        token_pre_processor: &EthereumTokenPreProcessor,
         protocol_cache: &ProtocolMemoryCache,
     ) -> Result<Self, ExtractionError> {
         let protocol_types = self

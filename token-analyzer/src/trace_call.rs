@@ -1,13 +1,21 @@
-use crate::trace_many;
+use crate::{trace_many, BlockTagWrapper};
 
-use super::{BadTokenDetecting, TokenQuality};
+use super::TokenQuality;
 use anyhow::{bail, ensure, Context, Result};
 use contracts::ERC20;
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, PrivateKey};
 use ethers::types::{H160, U256};
 use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use reqwest::Client;
-use std::{cmp, fmt::Debug, str::FromStr, sync::Arc};
+use std::{cmp, str::FromStr, sync::Arc};
+use tycho_core::{
+    models::{
+        blockchain::BlockTag,
+        token::{TransferCost, TransferTax},
+    },
+    traits::{TokenOwnerFinding, TokenQualityAnalyzer},
+    Bytes,
+};
 use url::Url;
 use web3::{
     signing::keccak256,
@@ -27,29 +35,26 @@ pub struct TraceCallDetector {
     pub settlement_contract: H160,
 }
 
-/// To detect bad tokens we need to find some address on the network that owns
-/// the token so that we can use it in our simulations.
 #[async_trait::async_trait]
-pub trait TokenOwnerFinding: Send + Sync + Debug {
-    /// Find an addresses with at least `min_balance` of tokens and return it,
-    /// along with its actual balance.
-    async fn find_owner(&self, token: H160, min_balance: U256) -> Result<Option<(H160, U256)>>;
-}
+impl TokenQualityAnalyzer for TraceCallDetector {
+    type Error = String;
 
-#[async_trait::async_trait]
-impl BadTokenDetecting for TraceCallDetector {
-    /// Detects token quality
-    ///
-    /// # Returns
-    /// (quality, tax, gas)
-    async fn detect(
+    async fn analyze(
         &self,
-        token: H160,
-        block: BlockNumber,
-    ) -> Result<(TokenQuality, Option<U256>, Option<U256>)> {
-        let quality = self.detect_impl(token, block).await?;
+        token: Bytes,
+        block: BlockTag,
+    ) -> std::result::Result<(TokenQuality, Option<TransferCost>, Option<TransferTax>), String>
+    {
+        let (quality, transfer_cost, tax) = self
+            .detect_impl(token.clone().into(), BlockTagWrapper(block).into())
+            .await
+            .map_err(|e| e.to_string())?;
         tracing::debug!(?token, ?quality, "determined token quality");
-        Ok(quality)
+        Ok((
+            quality,
+            transfer_cost.map(|cost| cost.try_into().unwrap_or(8_000_000)),
+            tax.map(|cost| cost.try_into().unwrap_or(10_000)),
+        ))
     }
 }
 
@@ -76,15 +81,15 @@ impl TraceCallDetector {
         &self,
         token: H160,
         block: BlockNumber,
-    ) -> Result<(TokenQuality, Option<U256>, Option<U256>)> {
+    ) -> Result<(TokenQuality, Option<U256>, Option<U256>), String> {
         // Arbitrary amount that is large enough that small relative fees should be
         // visible.
         const MIN_AMOUNT: u64 = 100_000;
         let (take_from, amount) = match self
             .finder
-            .find_owner(token, MIN_AMOUNT.into())
+            .find_owner(token.into(), MIN_AMOUNT.into())
             .await
-            .context("find_owner")?
+            .map_err(|e| e.to_string())?
         {
             Some((address, balance)) => {
                 // Don't use the full balance, but instead a portion of it. This
@@ -95,10 +100,10 @@ impl TraceCallDetector {
                 //   the past
                 // - New block observed - the trace_callMany is executed on a block that came in
                 //   since we read the balance
-                let amount = cmp::max(balance / 2, MIN_AMOUNT.into());
+                let amount = cmp::max(U256::from(balance) / 2, MIN_AMOUNT.into());
 
                 tracing::debug!(?token, ?address, ?amount, "found owner");
-                (address, amount)
+                (H160::from(address), amount)
             }
             None => {
                 return Ok((
@@ -121,7 +126,7 @@ impl TraceCallDetector {
             self.create_trace_request(token, amount, take_from, TraceRequestType::SimpleTransfer);
         let traces = trace_many::trace_many(request, &self.web3, block)
             .await
-            .context("trace_many")?;
+            .map_err(|e| e.to_string())?;
 
         let message = "\
         Failed to decode the token's balanceOf response because it did not \
@@ -144,8 +149,8 @@ impl TraceCallDetector {
         );
         let traces = trace_many::trace_many(request, &self.web3, block)
             .await
-            .context("trace_many")?;
-        Self::handle_response(&traces, amount, middle_balance, take_from)
+            .map_err(|e| e.to_string())?;
+        Self::handle_response(&traces, amount, middle_balance, take_from).map_err(|e| e.to_string())
     }
 
     // For the out transfer we use an arbitrary address without balance to detect

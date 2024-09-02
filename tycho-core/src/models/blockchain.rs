@@ -308,3 +308,19 @@ impl From<ProtocolChangesWithTx> for TxWithChanges {
         }
     }
 }
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum BlockTag {
+    /// Finalized block
+    Finalized,
+    /// Safe block
+    Safe,
+    /// Latest block
+    Latest,
+    /// Earliest block (genesis)
+    Earliest,
+    /// Pending block (not yet part of the blockchain)
+    Pending,
+    /// Block by number
+    Number(u64),
+}
