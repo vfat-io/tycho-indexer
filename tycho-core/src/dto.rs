@@ -26,8 +26,7 @@ use crate::{
         token::CurrencyToken,
     },
     serde_primitives::{
-        hex_bytes, hex_bytes_option, hex_bytes_vec, hex_hashmap_key, hex_hashmap_key_value,
-        hex_hashmap_value,
+        hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value, hex_hashmap_value,
     },
     Bytes,
 };
@@ -408,10 +407,8 @@ pub struct ProtocolComponent {
     pub protocol_system: String,
     pub protocol_type_name: String,
     pub chain: Chain,
-    #[serde(with = "hex_bytes_vec")]
     #[schema(value_type=Vec<String>)]
     pub tokens: Vec<Bytes>,
-    #[serde(with = "hex_bytes_vec")]
     #[schema(value_type=Vec<String>)]
     pub contract_ids: Vec<Bytes>,
     #[serde(with = "hex_hashmap_value")]
