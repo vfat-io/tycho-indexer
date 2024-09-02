@@ -1,4 +1,4 @@
-#![doc = include_str!("../../Readme.md")]
+#![doc = include_str!("../../README.md")]
 
 use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use futures03::future::select_all;
