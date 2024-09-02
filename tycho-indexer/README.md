@@ -86,3 +86,28 @@ Tycho utilises several special attributes to support specific functionality. Som
 - `balance_owner`: specifies the address of the account that owns the protocol component's tokens. Omitted if the tokens are owned by the component itself.
 - `stateless_contract_addr`: specifies the address of a stateless contract required by the component. An index is used if multiple stateless contracts are needed, for example `stateless_contract_addr_0`. For more complex protocols, a function could be defined here that should dynamically resolve and retrieve the stateless contract address.
 - `stateless_contract_code`: specifies the code for a given *stateless_contract_address*. An index is used if multiple stateless contracts are needed, for example `stateless_contract_code_0`. The index must match with the related *stateless_contract_address*.
+
+## Development
+
+### Run tycho-indexer locally
+
+The indexer services can be run using any of the following commands:
+
+- `index` : Run the indexer service for every extractor set in `./extractors.yaml`
+- `run` : Run the indexer service for a single extractor
+- `analyze-tokens` : Run the token analyzer cronjob
+- `rpc` : Run only the http RPC server
+
+Each command can be used with the following:
+
+```bash
+cargo run --bin tycho-indexer -- \
+    {your-command}
+```
+
+For more information about the flags, you can run:
+
+```bash
+cargo run --bin tycho-indexer -- \
+    {your-command} --help
+```
