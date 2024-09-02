@@ -96,6 +96,7 @@ pub struct ExtractionState {
     pub chain: Chain,
     pub attributes: serde_json::Value,
     pub cursor: Vec<u8>,
+    pub block_hash: Bytes,
 }
 
 impl ExtractionState {
@@ -104,12 +105,14 @@ impl ExtractionState {
         chain: Chain,
         attributes: Option<serde_json::Value>,
         cursor: &[u8],
+        block_hash: Bytes,
     ) -> Self {
         ExtractionState {
             name,
             chain,
             attributes: attributes.unwrap_or_default(),
             cursor: cursor.to_vec(),
+            block_hash,
         }
     }
 }

@@ -67,7 +67,7 @@ export ETH_RPC_URL="url-here"
 5. Setup/Update the Database:
 
 ```bash
-diesel migration run --migration-dir ./tycho-indexer/migrations
+diesel migration run --migration-dir ./tycho-storage/migrations
 ```
 
 ## Formatting

@@ -96,6 +96,7 @@ diesel::table! {
         version -> Varchar,
         cursor -> Nullable<Bytea>,
         chain_id -> Int8,
+        block_id -> Int8,
         attributes -> Nullable<Jsonb>,
         inserted_ts -> Timestamptz,
         modified_ts -> Timestamptz,
@@ -223,6 +224,7 @@ diesel::joinable!(component_tvl -> protocol_component (protocol_component_id));
 diesel::joinable!(contract_code -> account (account_id));
 diesel::joinable!(contract_code -> transaction (modify_tx));
 diesel::joinable!(extraction_state -> chain (chain_id));
+diesel::joinable!(extraction_state -> block (block_id));
 diesel::joinable!(protocol_calls_contract -> account (account_id));
 diesel::joinable!(protocol_calls_contract -> protocol_component (protocol_component_id));
 diesel::joinable!(protocol_component -> chain (chain_id));

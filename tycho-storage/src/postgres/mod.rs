@@ -617,6 +617,7 @@ pub mod testing {
         let tables = vec![
             // put block early so most FKs cascade, it would
             // be better to find the correct order tough.
+            "extraction_state",
             "block",
             "protocol_calls_contract",
             "contract_storage",
@@ -629,7 +630,6 @@ pub mod testing {
             "account",
             "protocol_state",
             "protocol_component",
-            "extraction_state",
             "protocol_type",
             "protocol_system",
             "transaction",
@@ -639,7 +639,7 @@ pub mod testing {
             sql_query(format!("DELETE FROM {};", t))
                 .execute(conn)
                 .await
-                .unwrap_or_else(|_| panic!("Error truncating {} table", t));
+                .unwrap_or_else(|e| panic!("Error truncating {} table: {}", t, e));
         }
         dbg!("Teardown completed");
     }

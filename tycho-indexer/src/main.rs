@@ -367,6 +367,7 @@ async fn initialize_accounts(
         chain,
         None,
         "account_cursor".as_bytes(),
+        block.hash.into(),
     );
 
     cached_gw
