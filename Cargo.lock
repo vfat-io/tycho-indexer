@@ -6482,6 +6482,7 @@ dependencies = [
  "hex",
  "maplit",
  "pretty_assertions",
+ "rstest",
  "serde",
  "serde_json",
  "strum",

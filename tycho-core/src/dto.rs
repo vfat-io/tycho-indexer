@@ -7,11 +7,14 @@
 #![allow(deprecated)]
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Display,
+    fmt,
 };
 
 use chrono::{NaiveDateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{self, MapAccess, Visitor},
+    Deserialize, Deserializer, Serialize,
+};
 use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -23,8 +26,7 @@ use crate::{
         token::CurrencyToken,
     },
     serde_primitives::{
-        hex_bytes, hex_bytes_option, hex_bytes_vec, hex_hashmap_key, hex_hashmap_key_value,
-        hex_hashmap_value,
+        hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value, hex_hashmap_value,
     },
     Bytes,
 };
@@ -122,8 +124,8 @@ impl ExtractorIdentity {
     }
 }
 
-impl std::fmt::Display for ExtractorIdentity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ExtractorIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.chain, self.name)
     }
 }
@@ -405,10 +407,8 @@ pub struct ProtocolComponent {
     pub protocol_system: String,
     pub protocol_type_name: String,
     pub chain: Chain,
-    #[serde(with = "hex_bytes_vec")]
     #[schema(value_type=Vec<String>)]
     pub tokens: Vec<Bytes>,
-    #[serde(with = "hex_bytes_vec")]
     #[schema(value_type=Vec<String>)]
     pub contract_ids: Vec<Bytes>,
     #[serde(with = "hex_hashmap_value")]
@@ -513,11 +513,12 @@ impl ProtocolStateDelta {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+#[derive(Serialize, Debug, Default, PartialEq, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StateRequestBody {
     #[serde(alias = "contractIds")]
-    pub contract_ids: Option<Vec<ContractId>>,
+    #[schema(value_type=Option<Vec<String>>)]
+    pub contract_ids: Option<Vec<Bytes>>,
     #[serde(alias = "protocolSystem", default)]
     pub protocol_system: Option<String>,
     #[serde(default = "VersionParam::default")]
@@ -528,7 +529,7 @@ pub struct StateRequestBody {
 
 impl StateRequestBody {
     pub fn new(
-        contract_ids: Option<Vec<ContractId>>,
+        contract_ids: Option<Vec<Bytes>>,
         protocol_system: Option<String>,
         version: VersionParam,
         chain: Chain,
@@ -552,6 +553,87 @@ impl StateRequestBody {
             version: VersionParam { timestamp: Some(timestamp), block: None },
             chain,
         }
+    }
+}
+
+/// Custom deserializer for StateRequestBody to support backwards compatibility with the old
+/// contractIds format.
+/// To be removed when the old format is no longer supported.
+impl<'de> Deserialize<'de> for StateRequestBody {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ContractIdOrBytes {
+            Old(Vec<ContractId>),
+            New(Vec<Bytes>),
+        }
+
+        struct StateRequestBodyVisitor;
+
+        impl<'de> Visitor<'de> for StateRequestBodyVisitor {
+            type Value = StateRequestBody;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct StateRequestBody")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<StateRequestBody, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut contract_ids = None;
+                let mut protocol_system = None;
+                let mut version = None;
+                let mut chain = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "contract_ids" | "contractIds" => {
+                            let value: ContractIdOrBytes = map.next_value()?;
+                            contract_ids = match value {
+                                ContractIdOrBytes::Old(ids) => Some(
+                                    ids.into_iter()
+                                        .map(|c| c.address)
+                                        .collect(),
+                                ),
+                                ContractIdOrBytes::New(bytes) => Some(bytes),
+                            };
+                        }
+                        "protocol_system" | "protocolSystem" => {
+                            protocol_system = Some(map.next_value()?);
+                        }
+                        "version" => {
+                            version = Some(map.next_value()?);
+                        }
+                        "chain" => {
+                            chain = Some(map.next_value()?);
+                        }
+                        _ => {
+                            return Err(de::Error::unknown_field(
+                                &key,
+                                &["contract_ids", "protocol_system", "version", "chain"],
+                            ))
+                        }
+                    }
+                }
+
+                Ok(StateRequestBody {
+                    contract_ids,
+                    protocol_system: protocol_system.unwrap_or_default(),
+                    version: version.unwrap_or_else(VersionParam::default),
+                    chain: chain.unwrap_or_else(Chain::default),
+                })
+            }
+        }
+
+        deserializer.deserialize_struct(
+            "StateRequestBody",
+            &["contract_ids", "protocol_system", "version", "chain"],
+            StateRequestBodyVisitor,
+        )
     }
 }
 
@@ -632,8 +714,8 @@ impl ResponseAccount {
 }
 
 /// Implement Debug for ResponseAccount manually to avoid printing the code field.
-impl std::fmt::Debug for ResponseAccount {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ResponseAccount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ResponseAccount")
             .field("chain", &self.chain)
             .field("address", &self.address)
@@ -669,8 +751,8 @@ impl ContractId {
     }
 }
 
-impl Display for ContractId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ContractId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}: 0x{}", self.chain, hex::encode(&self.address))
     }
 }
@@ -977,30 +1059,49 @@ pub enum Health {
 #[cfg(test)]
 mod test {
     use maplit::hashmap;
+    use rstest::rstest;
 
     use super::*;
 
-    #[test]
-    fn test_parse_state_request() {
-        let json_str = r#"
-        {
-            "contractIds": [
-                {
-                    "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
-                    "chain": "ethereum"
-                }
-            ],
-            "version": {
-                "timestamp": "2069-01-01T04:20:00",
-                "block": {
-                    "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
-                    "number": 213,
-                    "chain": "ethereum"
-                }
+    #[rstest]
+    #[case(
+        r#"
+    {
+        "contractIds": [
+            {
+                "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
+                "chain": "ethereum"
+            }
+        ],
+        "version": {
+            "timestamp": "2069-01-01T04:20:00",
+            "block": {
+                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                "number": 213,
+                "chain": "ethereum"
             }
         }
-        "#;
-
+    }
+    "#
+    )]
+    #[case(
+        r#"
+    {
+        "contractIds": [
+            "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092"
+        ],
+        "version": {
+            "timestamp": "2069-01-01T04:20:00",
+            "block": {
+                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#
+    )]
+    fn test_parse_state_request(#[case] json_str: &str) {
         let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092"
@@ -1015,7 +1116,7 @@ mod test {
             NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
 
         let expected = StateRequestBody {
-            contract_ids: Some(vec![ContractId::new(Chain::Ethereum, contract0)]),
+            contract_ids: Some(vec![contract0]),
             protocol_system: None,
             version: VersionParam {
                 timestamp: Some(expected_timestamp),
