@@ -12,11 +12,7 @@ use tracing::{debug, error, instrument, trace, warn};
 use async_trait::async_trait;
 use futures03::future::try_join_all;
 
-use tycho_core::dto::{
-    Chain, PaginationParams, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody,
-    ProtocolId, ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseToken,
-    StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
-};
+use tycho_core::dto::{Chain, ContractId, PaginationParams, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseToken, StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam};
 
 use reqwest::{
     header::{self, CONTENT_TYPE, USER_AGENT},
@@ -53,6 +49,52 @@ pub trait RPCClient {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError>;
 
+    #[allow(clippy::too_many_arguments)]
+    async fn get_contract_state_paginated(
+        &self,
+        chain: Chain,
+        ids: &[ContractId],
+        protocol_system: &Option<String>,
+        version: &VersionParam,
+        chunk_size: usize,
+        concurrency: usize,
+    ) -> Result<StateRequestResponse, RPCError> {
+        let semaphore = Arc::new(Semaphore::new(concurrency));
+        let chunked_bodies = ids
+            .chunks(chunk_size)
+            .map(|_| StateRequestBody {
+                contract_ids: Some(ids.to_vec()),
+                protocol_system: protocol_system.clone(),
+                chain,
+                version: version.clone(),
+                pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
+            })
+            .collect::<Vec<_>>();
+
+        let mut tasks = Vec::new();
+        for body in chunked_bodies.iter() {
+            let sem = semaphore.clone();
+            tasks.push(async move {
+                let _permit = sem
+                    .acquire()
+                    .await
+                    .map_err(|_| RPCError::Fatal("Semaphore dropped".to_string()))?;
+                self.get_contract_state(body).await
+            });
+        }
+
+        try_join_all(tasks)
+            .await
+            .map(|responses| StateRequestResponse {
+                accounts: responses
+                    .into_iter()
+                    .flat_map(|r| r.accounts.into_iter())
+                    .collect(),
+                // TODO: Should use the response from the task
+                pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
+            })
+    }
+
     async fn get_protocol_components(
         &self,
         request: &ProtocolComponentsRequestBody,
@@ -77,7 +119,7 @@ pub trait RPCClient {
         let semaphore = Arc::new(Semaphore::new(concurrency));
         let chunked_bodies = ids
             .chunks(chunk_size)
-            .map(|c| ProtocolStateRequestBody {
+            .map(|_| ProtocolStateRequestBody {
                 protocol_ids: Some(ids.to_vec()),
                 protocol_system: protocol_system.clone(),
                 chain,
