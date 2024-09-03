@@ -5,7 +5,8 @@
 
 use std::{cmp::max, panic};
 
-use ethers::types::U256;
+use num_bigint::BigInt;
+use num_traits::{One, ToPrimitive, Zero};
 use tracing::warn;
 
 /// Converts a U256 integer into it's closest floating point representation
@@ -36,9 +37,9 @@ pub fn bytes_to_f64(data: &[u8]) -> Option<f64> {
         warn!(?data, "Received invalid balance bytes!");
         return None;
     }
-    let x = U256::from(data);
+    let x = BigInt::from_bytes_be(num_bigint::Sign::Plus, data);
     let res = panic::catch_unwind(|| {
-        if x == U256::zero() {
+        if x == BigInt::zero() {
             return Some(0.0);
         }
 
@@ -48,7 +49,9 @@ pub fn bytes_to_f64(data: &[u8]) -> Option<f64> {
 
         let mut significant = if n_shifts >= 0 {
             // shift left if pos, no rounding needed
-            (x << n_shifts).as_u64()
+            (x << n_shifts)
+                .to_u64()
+                .expect("unable to convert to u64")
         } else {
             /*
             shift right if neg, dropping LSBs, round to nearest even
@@ -62,17 +65,21 @@ pub fn bytes_to_f64(data: &[u8]) -> Option<f64> {
             round to the number that has 0 at the n-th place.
             */
             // least significant bit is be used as tiebreaker
-            let lsb = (x >> n_shifts.abs()) & U256::one();
-            let round_bit = (x >> (n_shifts.abs() - 1)) & U256::one();
+            let lsb = (x.clone() >> n_shifts.abs()) & BigInt::one();
+            let round_bit = (x.clone() >> (n_shifts.abs() - 1)) & BigInt::one();
 
             // build mask for sticky bit, handle case when no data for sticky bit is available
-            let sticky_bit = x & ((U256::one() << max(n_shifts.abs() - 2, 0)) - U256::one());
+            let sticky_bit =
+                x.clone() & ((BigInt::one() << max(n_shifts.abs() - 2, 0)) - BigInt::one());
 
-            let rounded_torwards_zero = (x >> n_shifts.abs()).as_u64();
-            if round_bit == U256::one() {
-                if sticky_bit == U256::zero() {
+            let rounded_torwards_zero = (x.clone() >> n_shifts.abs())
+                .to_u64()
+                .expect("unable to convert to u64");
+
+            if round_bit == BigInt::one() {
+                if sticky_bit == BigInt::zero() {
                     // tiebreaker: round up if lsb is 1 and down if lsb is 0
-                    if lsb == U256::zero() {
+                    if lsb == BigInt::zero() {
                         rounded_torwards_zero
                     } else {
                         rounded_torwards_zero + 1
@@ -104,6 +111,7 @@ mod test {
     use super::*;
     use rstest::rstest;
     use tycho_core::Bytes;
+    use web3::types::U256;
 
     #[rstest]
     #[case::one(U256::one(), 1.0f64)]
