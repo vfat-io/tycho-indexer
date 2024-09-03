@@ -1,5 +1,5 @@
 use crate::{
-    extractor::revert_buffer::{
+    extractor::reorg_buffer::{
         AccountStateIdType, AccountStateKeyType, AccountStateValueType, ProtocolStateIdType,
         ProtocolStateKeyType, ProtocolStateValueType, StateUpdateBufferEntry,
     },
@@ -22,7 +22,7 @@ use tycho_core::{
 };
 
 pub mod evm;
-pub mod revert_buffer;
+pub mod reorg_buffer;
 pub mod runner;
 mod u256_num;
 
@@ -48,8 +48,8 @@ pub enum ExtractionError {
     ServiceError(String),
     #[error("Merge error: {0}")]
     MergeError(String),
-    #[error("Revert buffer error: {0}")]
-    RevertBufferError(String),
+    #[error("Reorg buffer error: {0}")]
+    ReorgBufferError(String),
 }
 
 #[derive(Error, Debug)]

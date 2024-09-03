@@ -48,14 +48,14 @@ impl TryFrom<BlockOrTimestamp> for BlockNumberOrTimestamp {
 }
 
 /// This buffer temporarily stores blockchain blocks that are not yet finalized. It allows for
-/// efficient handling of block reverts without requiring database rollbacks.
+/// efficient handling of chain reorganisations (reorg) without requiring database rollbacks.
 ///
-/// Everytime a new block is received by an extractor, it's pushed here. Then the extractor should
-/// check if the revert buffer contains newly finalized blocks, and send them to the db if there are
+/// Every time a new block is received by an extractor, it's pushed here. The extractor should then
+/// check if the reorg buffer contains newly finalized blocks, and send them to the db if there are
 /// some.
 ///
-/// In case of revert, we can just purge this buffer.
-pub(crate) struct RevertBuffer<B: BlockScoped> {
+/// In case of a chain reorg, we can just purge this buffer.
+pub(crate) struct ReorgBuffer<B: BlockScoped> {
     block_messages: VecDeque<B>,
     strict: bool,
 }
@@ -65,13 +65,13 @@ pub(crate) struct RevertBuffer<B: BlockScoped> {
 pub enum FinalityStatus {
     /// Versions at this status should have been committed to the db.
     Finalized,
-    /// Versions with this status should be in the revert buffer.
+    /// Versions with this status should be in the reorg buffer.
     Unfinalized,
     /// We have not seen this version yet.
     Unseen,
 }
 
-impl<B> RevertBuffer<B>
+impl<B> ReorgBuffer<B>
 where
     B: BlockScoped + std::fmt::Debug,
 {
@@ -115,10 +115,10 @@ where
             // Drain and return every block before the target index.
             let mut temp = self.block_messages.split_off(idx);
             std::mem::swap(&mut self.block_messages, &mut temp);
-            trace!(?temp, "RevertBuffer drained blocks");
+            trace!(?temp, "ReorgBuffer drained blocks");
             Ok(temp.into())
         } else if !self.strict && first.unwrap_or(0) < final_block_height {
-            warn!(?first, ?final_block_height, "Finalized block not found in RevertBuffer");
+            warn!(?first, ?final_block_height, "Finalized block not found in ReorgBuffer");
             Ok(Vec::new())
         } else {
             Err(StorageError::NotFound("block".into(), final_block_height.to_string()))
@@ -137,7 +137,7 @@ where
     /// Purges all blocks following the specified block hash from the buffer. Returns the purged
     /// blocks ordered by ascending number or an error if the target hash is not found.
     pub fn purge(&mut self, target_hash: Bytes) -> Result<Vec<B>, StorageError> {
-        debug!("Purging revert buffer... Target hash {}", target_hash.to_string());
+        debug!("Purging reorg buffer... Target hash {}", target_hash.to_string());
         let mut target_index = None;
 
         for (index, block_message) in self
@@ -156,7 +156,7 @@ where
                 .block_messages
                 .split_off(idx)
                 .into();
-            trace!(?purged, "RevertBuffer purged blocks");
+            trace!(?purged, "ReorgBuffer purged blocks");
             Ok(purged)
         } else {
             Err(StorageError::NotFound("block".into(), target_hash.to_string()))
@@ -200,7 +200,7 @@ where
 
             if end_idx < start_index {
                 return Err(StorageError::Unexpected(
-                    "RevertBuffer: Invalid block range".to_string(),
+                    "ReorgBuffer: Invalid block range".to_string(),
                 ));
             }
             end_idx + 1
@@ -244,7 +244,7 @@ pub type AccountStateIdType = H160;
 pub type AccountStateKeyType = U256;
 pub type AccountStateValueType = U256;
 
-/// A RevertBuffer entry containing state updates.
+/// A ReorgBuffer entry containing state updates.
 ///
 /// Enables additional state lookup methods within the buffer.
 pub(crate) trait StateUpdateBufferEntry: std::fmt::Debug {
@@ -265,7 +265,7 @@ pub(crate) trait StateUpdateBufferEntry: std::fmt::Debug {
     ) -> HashMap<(String, Bytes), ComponentBalance>;
 }
 
-impl<B> RevertBuffer<B>
+impl<B> ReorgBuffer<B>
 where
     B: BlockScoped + StateUpdateBufferEntry,
 {
@@ -404,7 +404,7 @@ mod test {
         testing,
     };
 
-    use super::{BlockNumberOrTimestamp, FinalityStatus, RevertBuffer};
+    use super::{BlockNumberOrTimestamp, FinalityStatus, ReorgBuffer};
 
     fn transaction() -> Transaction {
         Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10)
@@ -548,12 +548,12 @@ mod test {
         }
     }
     #[test]
-    fn test_revert_buffer_state_lookup() {
-        let mut revert_buffer = RevertBuffer::new();
-        revert_buffer
+    fn test_reorg_buffer_state_lookup() {
+        let mut reorg_buffer = ReorgBuffer::new();
+        reorg_buffer
             .insert_block(get_block_entity(1))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(2))
             .unwrap();
 
@@ -570,7 +570,7 @@ mod test {
             (&c_ids[0], &missing),
         ];
 
-        let (res, mut missing_keys) = revert_buffer.lookup_protocol_state(&keys);
+        let (res, mut missing_keys) = reorg_buffer.lookup_protocol_state(&keys);
 
         // Need to sort because collecting a HashSet is unstable.
         missing_keys.sort();
@@ -589,15 +589,15 @@ mod test {
     }
 
     #[test]
-    fn test_revert_buffer_balance_lookup() {
-        let mut revert_buffer = RevertBuffer::new();
-        revert_buffer
+    fn test_reorg_buffer_balance_lookup() {
+        let mut reorg_buffer = ReorgBuffer::new();
+        reorg_buffer
             .insert_block(get_block_entity(1))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(2))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(3))
             .unwrap();
 
@@ -615,7 +615,7 @@ mod test {
             (&missing_component, &token_key),
         ];
 
-        let (res, mut missing_keys) = revert_buffer.lookup_balances(&keys);
+        let (res, mut missing_keys) = reorg_buffer.lookup_balances(&keys);
 
         // Need to sort because collecting a HashSet is unstable.
         missing_keys.sort();
@@ -661,44 +661,44 @@ mod test {
 
     #[test]
     fn test_drain_finalized_blocks() {
-        let mut revert_buffer = RevertBuffer::new();
-        revert_buffer.strict = true;
-        revert_buffer
+        let mut reorg_buffer = ReorgBuffer::new();
+        reorg_buffer.strict = true;
+        reorg_buffer
             .insert_block(get_block_entity(1))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(2))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(3))
             .unwrap();
 
-        let finalized = revert_buffer
+        let finalized = reorg_buffer
             .drain_new_finalized_blocks(3)
             .unwrap();
 
-        assert_eq!(revert_buffer.block_messages.len(), 1);
+        assert_eq!(reorg_buffer.block_messages.len(), 1);
         assert_eq!(finalized, vec![get_block_entity(1), get_block_entity(2)]);
 
-        let unknown = revert_buffer.drain_new_finalized_blocks(999);
+        let unknown = reorg_buffer.drain_new_finalized_blocks(999);
 
         assert!(unknown.is_err());
     }
 
     #[test]
     fn test_purge() {
-        let mut revert_buffer = RevertBuffer::new();
-        revert_buffer
+        let mut reorg_buffer = ReorgBuffer::new();
+        reorg_buffer
             .insert_block(get_block_entity(1))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(2))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(3))
             .unwrap();
 
-        let purged = revert_buffer
+        let purged = reorg_buffer
             .purge(
                 H256::from_low_u64_be(
                     0x0000000000000000000000000000000000000000000000000000000000000001,
@@ -707,11 +707,11 @@ mod test {
             )
             .unwrap();
 
-        assert_eq!(revert_buffer.block_messages.len(), 1);
+        assert_eq!(reorg_buffer.block_messages.len(), 1);
 
         assert_eq!(purged, vec![get_block_entity(2), get_block_entity(3)]);
 
-        let unknown = revert_buffer.purge(
+        let unknown = reorg_buffer.purge(
             H256::from_low_u64_be(
                 0x0000000000000000000000000000000000000000000000000000000000000999,
             )
@@ -724,11 +724,11 @@ mod test {
     #[test]
     #[should_panic]
     fn test_insert_wrong_block() {
-        let mut revert_buffer = RevertBuffer::new();
-        revert_buffer
+        let mut reorg_buffer = ReorgBuffer::new();
+        reorg_buffer
             .insert_block(get_block_entity(1))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(3))
             .unwrap();
     }
@@ -745,18 +745,18 @@ mod test {
     ) {
         let start = start.map(BlockNumberOrTimestamp::Timestamp);
         let end = end.map(BlockNumberOrTimestamp::Timestamp);
-        let mut revert_buffer = RevertBuffer::new();
-        revert_buffer
+        let mut reorg_buffer = ReorgBuffer::new();
+        reorg_buffer
             .insert_block(get_block_entity(1))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(2))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(3))
             .unwrap();
 
-        let blocks = revert_buffer
+        let blocks = reorg_buffer
             .get_block_range(start, end)
             .unwrap()
             .map(|e| e.block.number)
@@ -767,9 +767,9 @@ mod test {
 
     #[test]
     fn test_get_block_range_empty() {
-        let revert_buffer = RevertBuffer::<BlockEntityChanges>::new();
+        let reorg_buffer = ReorgBuffer::<BlockEntityChanges>::new();
 
-        let res = revert_buffer
+        let res = reorg_buffer
             .get_block_range(None, None)
             .unwrap()
             .collect::<Vec<_>>();
@@ -779,7 +779,7 @@ mod test {
 
     #[rstest]
     #[case::not_found(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:36".parse::<NaiveDateTime>().unwrap()), StorageError::NotFound("Block".to_string(), "Timestamp(2020-01-01T00:00:36)".to_string()))]
-    #[case::invalid(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), StorageError::Unexpected("RevertBuffer: Invalid block range".to_string()))]
+    #[case::invalid(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), StorageError::Unexpected("ReorgBuffer: Invalid block range".to_string()))]
     fn test_get_block_range_invalid_range(
         #[case] start: Option<NaiveDateTime>,
         #[case] end: Option<NaiveDateTime>,
@@ -787,15 +787,15 @@ mod test {
     ) {
         let start = start.map(BlockNumberOrTimestamp::Timestamp);
         let end = end.map(BlockNumberOrTimestamp::Timestamp);
-        let mut revert_buffer = RevertBuffer::new();
-        revert_buffer
+        let mut reorg_buffer = ReorgBuffer::new();
+        reorg_buffer
             .insert_block(get_block_entity(1))
             .unwrap();
-        revert_buffer
+        reorg_buffer
             .insert_block(get_block_entity(2))
             .unwrap();
 
-        let res = revert_buffer
+        let res = reorg_buffer
             .get_block_range(start, end)
             .err()
             .unwrap();
@@ -823,27 +823,27 @@ mod test {
         #[case] version: BlockNumberOrTimestamp,
         #[case] exp: FinalityStatus,
     ) {
-        let mut buffer = RevertBuffer::new();
-        buffer
+        let mut reorg_buffer = ReorgBuffer::new();
+        reorg_buffer
             .insert_block(get_block_entity(1))
             .unwrap();
-        buffer
+        reorg_buffer
             .insert_block(get_block_entity(2))
             .unwrap();
-        buffer
+        reorg_buffer
             .insert_block(get_block_entity(3))
             .unwrap();
 
-        let res = buffer.get_finality_status(version);
+        let res = reorg_buffer.get_finality_status(version);
 
         assert_eq!(res, Some(exp));
     }
 
     #[test]
     fn test_get_finality_status_empty() {
-        let buffer = RevertBuffer::<BlockEntityChanges>::new();
+        let reorg_buffer = ReorgBuffer::<BlockEntityChanges>::new();
 
-        let res = buffer.get_finality_status(BlockNumberOrTimestamp::Number(2));
+        let res = reorg_buffer.get_finality_status(BlockNumberOrTimestamp::Number(2));
 
         assert_eq!(res, None);
     }

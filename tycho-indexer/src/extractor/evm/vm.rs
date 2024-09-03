@@ -33,7 +33,7 @@ use crate::{
             protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
             token_pre_processor::{map_vault, TokenPreProcessorTrait},
         },
-        revert_buffer::RevertBuffer,
+        reorg_buffer::ReorgBuffer,
         BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
     },
     pb::{
@@ -68,7 +68,7 @@ pub struct VmContractExtractor<G, T> {
     post_processor: Option<fn(evm::BlockContractChanges) -> evm::BlockContractChanges>,
     /// The number of blocks behind the current block to be considered as syncing.
     sync_threshold: u64,
-    revert_buffer: Mutex<RevertBuffer<BlockUpdateWithCursor<evm::BlockContractChanges>>>,
+    reorg_buffer: Mutex<ReorgBuffer<BlockUpdateWithCursor<evm::BlockContractChanges>>>,
 }
 
 impl<G, T> VmContractExtractor<G, T>
@@ -110,7 +110,7 @@ where
                     protocol_types,
                     post_processor,
                     sync_threshold,
-                    revert_buffer: Mutex::new(RevertBuffer::new()),
+                    reorg_buffer: Mutex::new(ReorgBuffer::new()),
                 }
             }
             Ok(cursor) => {
@@ -138,7 +138,7 @@ where
                     protocol_types,
                     post_processor,
                     sync_threshold,
-                    revert_buffer: Mutex::new(RevertBuffer::new()),
+                    reorg_buffer: Mutex::new(ReorgBuffer::new()),
                 }
             }
             Err(err) => return Err(ExtractionError::Setup(err.to_string())),
@@ -225,9 +225,9 @@ where
 
         // Merge stored balances with new ones
         let balances = {
-            let rb = self.revert_buffer.lock().await;
+            let reorg_buffer = self.reorg_buffer.lock().await;
             let mut balances = self
-                .get_balances(&rb, &balance_request)
+                .get_balances(&reorg_buffer, &balance_request)
                 .await?;
             // we assume the retrieved balances contain all tokens of the component
             // here, doing this merge the other way around would not be safe.
@@ -290,18 +290,18 @@ where
         Ok(())
     }
 
-    /// Returns balances at the tip of the revert buffer.
+    /// Returns balances at the tip of the reorg buffer.
     ///
-    /// Will return the requested balances at the tip of the revert buffer. Might need
+    /// Will return the requested balances at the tip of the reorg buffer. Might need
     /// to go to storage to retrieve balances that are not stored within the buffer.
     async fn get_balances(
         &self,
-        revert_buffer: &RevertBuffer<BlockUpdateWithCursor<evm::BlockContractChanges>>,
+        reorg_buffer: &ReorgBuffer<BlockUpdateWithCursor<evm::BlockContractChanges>>,
         reverted_balances_keys: &[(&String, &Bytes)],
     ) -> Result<HashMap<String, HashMap<H160, evm::ComponentBalance>>, ExtractionError> {
         // First search in the buffer
         let (buffered_balances, missing_balances_keys) =
-            revert_buffer.lookup_balances(reverted_balances_keys);
+            reorg_buffer.lookup_balances(reverted_balances_keys);
 
         let missing_balances_map: HashMap<String, Vec<Bytes>> = missing_balances_keys
             .into_iter()
@@ -564,15 +564,14 @@ where
         // block finality blockchains.
         let is_syncing = inp.final_block_height >= msg.block.number;
         {
-            // keep revert buffer guard within a limited scope
-
-            let mut revert_buffer = self.revert_buffer.lock().await;
-            revert_buffer
+            // keep reorg buffer guard within a limited scope
+            let mut reorg_buffer = self.reorg_buffer.lock().await;
+            reorg_buffer
                 .insert_block(BlockUpdateWithCursor::new(msg.clone(), inp.cursor.clone()))
-                .expect("Error while inserting a block into revert buffer");
-            for msg in revert_buffer
+                .expect("Error while inserting a block into reorg buffer");
+            for msg in reorg_buffer
                 .drain_new_finalized_blocks(inp.final_block_height)
-                .expect("Final block height not found in revert buffer")
+                .expect("Final block height not found in reorg buffer")
             {
                 self.gateway
                     .upsert_contract(msg.block_update(), msg.cursor(), is_syncing)
@@ -623,12 +622,12 @@ where
         tracing::Span::current().record("target_hash", format!("{:x}", block_hash));
         tracing::Span::current().record("target_number", block_ref.number);
 
-        let mut revert_buffer = self.revert_buffer.lock().await;
+        let mut reorg_buffer = self.reorg_buffer.lock().await;
 
         // Purge the buffer
-        let reverted_state = revert_buffer
+        let reverted_state = reorg_buffer
             .purge(block_hash.into())
-            .map_err(|e| ExtractionError::RevertBufferError(e.to_string()))?;
+            .map_err(|e| ExtractionError::ReorgBufferError(e.to_string()))?;
 
         // Handle created and deleted components
         let (reverted_components_creations, reverted_components_deletions) =
@@ -712,8 +711,7 @@ where
 
         // Fetch previous values for every reverted states
         // First search in the buffer
-        let (buffered_state, missing) =
-            revert_buffer.lookup_account_state(&reverted_state_keys_vec);
+        let (buffered_state, missing) = reorg_buffer.lookup_account_state(&reverted_state_keys_vec);
 
         // Then for every missing previous values in the buffer, get the data from our db
         let missing_map: HashMap<Bytes, Vec<Bytes>> =
@@ -831,13 +829,13 @@ where
         trace!(?reverted_balances_keys_vec, "Reverted balance keys");
 
         let combined_balances = self
-            .get_balances(&revert_buffer, &reverted_balances_keys_vec)
+            .get_balances(&reorg_buffer, &reverted_balances_keys_vec)
             .await?;
 
         let revert_message = evm::BlockAccountChanges {
             extractor: self.name.clone(),
             chain: self.chain,
-            block: revert_buffer
+            block: reorg_buffer
                 .get_most_recent_block()
                 .expect("Couldn't find most recent block in buffer during revert")
                 .into(),
