@@ -152,7 +152,6 @@ where
         &self,
         request: &dto::StateRequestBody,
     ) -> Result<dto::StateRequestResponse, RpcError> {
-        //TODO: set version to latest if we are targeting a version within pending deltas
         let at = BlockOrTimestamp::try_from(&request.version)?;
         let chain = request.chain.into();
         let (db_version, deltas_version) = self
@@ -224,12 +223,14 @@ where
                 warn!(?ordered_version, ?protocol_system, "No finality found for version.");
                 FinalityStatus::Finalized
             });
+
         debug!(
             ?request_version_finality,
             ?request_version,
             ?ordered_version,
             "Version finality calculated!"
         );
+
         match request_version_finality {
             FinalityStatus::Finalized => {
                 Ok((Version(request_version.clone(), VersionKind::Last), None))
@@ -238,10 +239,27 @@ where
                 Version(BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)), VersionKind::Last),
                 Some(ordered_version),
             )),
-            FinalityStatus::Unseen => Err(RpcError::Storage(StorageError::NotFound(
-                "Version".to_string(),
-                format!("{:?}", request_version),
-            ))),
+            FinalityStatus::Unseen => {
+                match request_version {
+                    BlockOrTimestamp::Timestamp(_) => {
+                        // If the request is based on a timestamp, return the latest valid version
+                        Ok((
+                            Version(
+                                BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)),
+                                VersionKind::Last,
+                            ),
+                            Some(ordered_version),
+                        ))
+                    }
+                    BlockOrTimestamp::Block(_) => {
+                        // If the request is based on a block and it's unseen, return an error
+                        Err(RpcError::Storage(StorageError::NotFound(
+                            "Version".to_string(),
+                            format!("{:?}", request_version),
+                        )))
+                    }
+                }
+            }
         }
     }
 
