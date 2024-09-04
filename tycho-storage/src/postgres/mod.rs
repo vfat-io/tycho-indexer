@@ -396,7 +396,10 @@ async fn maybe_lookup_version_ts(
     conn: &mut AsyncPgConnection,
 ) -> Result<NaiveDateTime, StorageError> {
     if !matches!(version.1, VersionKind::Last) {
-        return Err(StorageError::Unsupported(format!("Unsupported version kind: {:?}", version.1)));
+        return Err(StorageError::Unsupported(format!(
+            "Unsupported version kind: {:?}",
+            version.1
+        )));
     }
     maybe_lookup_block_ts(&version.0, conn).await
 }
@@ -619,7 +622,6 @@ pub mod testing {
             // be better to find the correct order tough.
             "extraction_state",
             "block",
-            "protocol_calls_contract",
             "contract_storage",
             "contract_code",
             "account_balance",
