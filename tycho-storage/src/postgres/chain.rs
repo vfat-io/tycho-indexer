@@ -239,15 +239,6 @@ impl PostgresGateway {
         .await
         .map_err(PostgresError::from)?;
 
-        diesel::update(
-            schema::protocol_calls_contract::table
-                .filter(schema::protocol_calls_contract::valid_to.gt(block.ts)),
-        )
-        .set(schema::protocol_calls_contract::valid_to.eq(MAX_TS))
-        .execute(conn)
-        .await
-        .map_err(PostgresError::from)?;
-
         // Any versioned table's rows, which have `deleted_at` set to "> block.ts"
         // need, to be updated to be valid again (thus, deleted_at = NULL).
         diesel::update(schema::account::table.filter(schema::account::deleted_at.gt(block.ts)))

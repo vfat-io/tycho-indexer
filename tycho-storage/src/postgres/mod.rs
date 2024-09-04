@@ -619,7 +619,6 @@ pub mod testing {
             // be better to find the correct order tough.
             "extraction_state",
             "block",
-            "protocol_calls_contract",
             "contract_storage",
             "contract_code",
             "account_balance",
