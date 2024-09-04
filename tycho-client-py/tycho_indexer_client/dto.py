@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Set, Union
 from uuid import UUID
 
 from hexbytes import HexBytes as _HexBytes
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, root_validator
 
 
 class HexBytes(_HexBytes):
@@ -278,20 +278,13 @@ class ContractStateParams(BaseModel):
 
     # Backward compatibility with old ContractId format
     # To be removed in the future
-    def __init__(
-        self,
-        contract_ids: Optional[Union[List[ContractId], List[str]]] = None,
-        protocol_system: Optional[str] = None,
-        version: Optional[VersionParams] = None,
-    ):
-        if contract_ids and isinstance(contract_ids[0], dict):
+    @root_validator(pre=True)
+    def handle_old_contract_id_format(cls, values):
+        contract_ids = values.get('contract_ids')
+        if contract_ids and isinstance(contract_ids[0], ContractId):
             # Handle old format: List of ContractId objects
-            self.contract_ids = [c["address"] for c in contract_ids]
-        else:
-            self.contract_ids = contract_ids
-
-        self.protocol_system = protocol_system
-        self.version = version
+            values['contract_ids'] = [c.address.hex() for c in contract_ids]
+        return values
 
     class Config:
         allow_population_by_field_name = True
