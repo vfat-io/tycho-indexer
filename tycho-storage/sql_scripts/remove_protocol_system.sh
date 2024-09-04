@@ -3,21 +3,22 @@
 #  Removes a protocol system and all related entries from the database.
 #  This includes all protocol components, protocol states, accounts and their histories.
 #  Note - linked blocks, transactions and accounts shared with other systems will not be removed.
-#  TO USE: run the following cli command: './remove_protocol_system.sh <database_name> <protocol_system_to_delete>'
+#  TO USE: run the following cli command: './remove_protocol_system.sh <database_name> <protocol_system_to_delete> [<port_number>]'
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <database_name> <protocol_system_to_delete>"
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+    echo "Usage: $0 <database_name> <protocol_system_to_delete> [<port_number>]"
     exit 1
 fi
 
-# Set the database and protocol system to delete
+# Set the database, protocol system, and optional port number
 db_name=$1
 protocol_system_to_delete=$2
+port_number=${3:-5432} # Default port is 5432 if not provided
 
 # Warning message
 echo ""
 echo 'RECOMMENDATION: As a precaution, please take a db snapshot before proceeding.'
-read -p 'Are you ready to to proceed? (y/n) ' -n 1 -r
+read -p 'Are you ready to proceed? (y/n) ' -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Exiting..."
@@ -25,7 +26,12 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 echo ""
-echo "Analysing $db_name..."
+echo "Connecting to $db_name..."
+
+# Prompt user for username and password
+read -p "Enter PostgreSQL username: " db_user
+read -s -p "Enter PostgreSQL password: " db_password
+echo
 
 # Create an audit file to log what will be deleted
 audit_file="audit_${protocol_system_to_delete}_deletion.log"
@@ -35,8 +41,15 @@ echo "Date: $current_date" >> "$audit_file"
 echo "-----------------------------------------" >> "$audit_file"
 echo "" >> "$audit_file"
 
+echo ""
+echo "Analysing $db_name..."
+
+
+# Export password to PGPASSWORD environment variable so psql doesn't prompt for it again
+export PGPASSWORD="$db_password"
+
 # Collect the list of component IDs and contract IDs that will be deleted
-psql -d "$db_name" <<EOF >> "$audit_file"
+psql -d "$db_name" -h localhost -p "$port_number" -U "$db_user" <<EOF >> "$audit_file"
 \set protocol_system_name '$protocol_system_to_delete'
 
 --- List of protocol components to be deleted
@@ -72,11 +85,11 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
 fi
 
-# Execute deletion
-psql -d "$db_name" <<EOF
-\set protocol_system_name '$protocol_system_to_delete'
+echo "Deleting all db entries related to $protocol_system_to_delete..."
 
-\echo 'Deleting all db entries related to :protocol_system_name'
+# Execute deletion
+psql -d "$db_name" -h localhost -p "$port_number" -U "$db_user" <<EOF
+\set protocol_system_name '$protocol_system_to_delete'
 
 BEGIN;
 
@@ -110,4 +123,3 @@ WHERE name = :'protocol_system_name';
 
 COMMIT;
 EOF
-
