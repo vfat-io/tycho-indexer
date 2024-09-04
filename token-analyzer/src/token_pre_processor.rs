@@ -13,7 +13,7 @@ use tycho_core::{
         token::{CurrencyToken, TokenQuality},
         Chain,
     },
-    traits::{TokenOwnerFinding, TokenPreProcessorTrait, TokenQualityAnalyzer},
+    traits::{TokenAnalyzer, TokenOwnerFinding, TokenPreProcessor},
     Bytes,
 };
 
@@ -78,7 +78,7 @@ pub fn map_vault(protocol_system: &str) -> Option<Bytes> {
 }
 
 #[async_trait]
-impl TokenPreProcessorTrait for EthereumTokenPreProcessor {
+impl TokenPreProcessor for EthereumTokenPreProcessor {
     #[instrument(skip_all, fields(n_addresses=addresses.len(), block = ?block))]
     async fn get_tokens(
         &self,
@@ -159,7 +159,7 @@ impl TokenPreProcessorTrait for EthereumTokenPreProcessor {
 mod tests {
     use super::*;
     use std::{collections::HashMap, env};
-    use tycho_core::models::token::TokenFinderStore;
+    use tycho_core::models::token::TokenOwnerStore;
 
     #[tokio::test]
     #[ignore]
@@ -178,7 +178,7 @@ mod tests {
 
         let processor = EthereumTokenPreProcessor::new(client, w3, Chain::Ethereum);
 
-        let tf = TokenFinderStore::new(HashMap::new());
+        let tf = TokenOwnerStore::new(HashMap::new());
 
         let weth_address: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
         let usdc_address: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";

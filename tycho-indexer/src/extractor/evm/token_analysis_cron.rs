@@ -7,11 +7,11 @@ use tracing::{debug, info, warn};
 use tycho_core::{
     models::{
         blockchain::BlockTag,
-        token::{CurrencyToken, TokenFinderStore, TokenQuality},
+        token::{CurrencyToken, TokenOwnerStore, TokenQuality},
         Chain, PaginationParams,
     },
     storage::ProtocolGateway,
-    traits::TokenQualityAnalyzer,
+    traits::TokenAnalyzer,
     Bytes,
 };
 
@@ -106,7 +106,7 @@ async fn analyze_batch(
         .collect::<HashMap<_, _>>();
     let analyzer = TraceCallDetector::new(
         eth_rpc_url.as_str(),
-        Arc::new(TokenFinderStore::new(liquidity_token_owners)),
+        Arc::new(TokenOwnerStore::new(liquidity_token_owners)),
     );
     for t in tokens.iter_mut() {
         // Skip tokens that failed previously and ones we already analyzed successfully.

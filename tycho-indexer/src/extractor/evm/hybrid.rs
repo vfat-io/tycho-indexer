@@ -18,14 +18,14 @@ use tycho_core::{
         blockchain::{BlockAggregatedChanges, BlockTag},
         contract::{Account, AccountDelta},
         protocol::{ComponentBalance, ProtocolComponentState, ProtocolComponentStateDelta},
-        token::{CurrencyToken, TokenFinderStore},
+        token::{CurrencyToken, TokenOwnerStore},
         Address, Balance, Chain, ChangeType, ExtractionState, ExtractorIdentity, ProtocolType,
         TxHash,
     },
     storage::{
         ChainGateway, ContractStateGateway, ExtractionStateGateway, ProtocolGateway, StorageError,
     },
-    traits::TokenPreProcessorTrait,
+    traits::TokenPreProcessor,
     Bytes,
 };
 use tycho_storage::postgres::cache::CachedGateway;
@@ -75,7 +75,7 @@ pub struct HybridContractExtractor<G, T> {
 impl<G, T> HybridContractExtractor<G, T>
 where
     G: HybridGateway,
-    T: TokenPreProcessorTrait,
+    T: TokenPreProcessor,
 {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
@@ -447,7 +447,7 @@ where
                     .flatten()
             })
             .collect::<HashMap<_, _>>();
-        let tf = TokenFinderStore::new(balance_map);
+        let tf = TokenOwnerStore::new(balance_map);
         let existing_tokens = self
             .protocol_cache
             .get_tokens(&known_tokens)
@@ -471,7 +471,7 @@ where
 impl<G, T> Extractor for HybridContractExtractor<G, T>
 where
     G: HybridGateway,
-    T: TokenPreProcessorTrait,
+    T: TokenPreProcessor,
 {
     fn get_id(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.name)
@@ -1263,7 +1263,7 @@ mod test {
         pub TokenPreProcessor {}
 
         #[async_trait::async_trait]
-        impl TokenPreProcessorTrait for TokenPreProcessor {
+        impl TokenPreProcessor for TokenPreProcessor {
             async fn get_tokens(
                 &self,
                 addresses: Vec<Bytes>,
@@ -1782,7 +1782,7 @@ mod test_serial_db {
         pub TokenPreProcessor {}
 
         #[async_trait::async_trait]
-        impl TokenPreProcessorTrait for TokenPreProcessor {
+        impl TokenPreProcessor for TokenPreProcessor {
             async fn get_tokens(
                 &self,
                 addresses: Vec<Bytes>,

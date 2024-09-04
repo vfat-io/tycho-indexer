@@ -13,7 +13,7 @@ use tycho_core::{
         blockchain::BlockTag,
         token::{TransferCost, TransferTax},
     },
-    traits::{TokenOwnerFinding, TokenQualityAnalyzer},
+    traits::{TokenOwnerFinding, TokenAnalyzer},
     Bytes,
 };
 use url::Url;
@@ -36,7 +36,7 @@ pub struct TraceCallDetector {
 }
 
 #[async_trait::async_trait]
-impl TokenQualityAnalyzer for TraceCallDetector {
+impl TokenAnalyzer for TraceCallDetector {
     type Error = String;
 
     async fn analyze(

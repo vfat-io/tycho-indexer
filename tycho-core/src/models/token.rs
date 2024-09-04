@@ -51,7 +51,15 @@ impl CurrencyToken {
     }
 }
 
-/// How well behaved a token is.
+/// Represents the quality of a token.
+///
+/// * `Good`: Indicates that the token has successfully passed the analysis process.
+/// * `Bad`: Indicates that the token has failed the analysis process. In this case, a detailed
+///   reason for the failure is provided.
+///
+/// Note: Transfer taxes do not impact the token's quality.
+/// Even if a token has transfer taxes, as long as it successfully passes the analysis,
+/// it will still be marked as `Good`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TokenQuality {
     Good,
@@ -68,19 +76,31 @@ impl TokenQuality {
     }
 }
 
+/// A store for tracking token owners and their balances.
+///
+/// The `TokenOwnerStore` maintains a mapping between token addresses and their respective
+/// owner's address and balance. It can be used to quickly retrieve token owner information
+/// without needing to query external sources.
+///
+/// # Fields
+/// * `values` - A `HashMap` where:
+///   * The key is the token `Address`, representing the address of the token being tracked.
+///   * The value is a tuple containing:
+///     * The owner `Address` of the token.
+///     * The `Balance` of the owner for the token.
 #[derive(Debug)]
-pub struct TokenFinderStore {
+pub struct TokenOwnerStore {
     values: HashMap<Address, (Address, Balance)>,
 }
 
-impl TokenFinderStore {
+impl TokenOwnerStore {
     pub fn new(values: HashMap<Address, (Address, Balance)>) -> Self {
-        TokenFinderStore { values }
+        TokenOwnerStore { values }
     }
 }
 
 #[async_trait::async_trait]
-impl TokenOwnerFinding for TokenFinderStore {
+impl TokenOwnerFinding for TokenOwnerStore {
     async fn find_owner(
         &self,
         token: Address,

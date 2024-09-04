@@ -7,8 +7,8 @@ use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use reqwest::Client;
 use token_analyzer::trace_call::TraceCallDetector;
 use tycho_core::{
-    models::{blockchain::BlockTag, token::TokenFinderStore},
-    traits::TokenQualityAnalyzer,
+    models::{blockchain::BlockTag, token::TokenOwnerStore},
+    traits::TokenAnalyzer,
     Bytes,
 };
 use url::Url;
@@ -24,7 +24,7 @@ async fn main() -> Result<(), ()> {
         "transport".to_owned(),
     ));
     let w3 = Web3::new(transport);
-    let tf = TokenFinderStore::new(HashMap::from([(
+    let tf = TokenOwnerStore::new(HashMap::from([(
         Bytes::from_str("3A9FfF453d50D4Ac52A6890647b823379ba36B9E").unwrap(),
         (
             Bytes::from_str("260E069deAd76baAC587B5141bB606Ef8b9Bab6c").unwrap(),
