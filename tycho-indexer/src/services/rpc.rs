@@ -5,7 +5,6 @@ use std::collections::HashSet;
 use actix_web::{web, HttpResponse};
 use anyhow::Error;
 use chrono::{Duration, Utc};
-use clap::builder::Str;
 use diesel_async::pooled_connection::deadpool;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -888,7 +887,7 @@ mod tests {
         let mut gw = MockGateway::new();
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_contracts()
-            .return_once(|_, _, _, _| Box::pin(async move { mock_response }));
+            .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::StateRequestBody {
@@ -993,7 +992,7 @@ mod tests {
         );
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_states()
-            .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
+            .return_once(|_, _, _, _, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::ProtocolStateRequestBody {
@@ -1043,7 +1042,7 @@ mod tests {
         );
         let mock_response = Ok(vec![expected.clone()]);
         gw.expect_get_protocol_components()
-            .return_once(|_, _, _, _| Box::pin(async move { mock_response }));
+            .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::ProtocolComponentsRequestBody {
