@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-const USER_AGENT: &str = "propeller-token-analyzer";
+const USER_AGENT: &str = "propeller-tycho-ethereum";
 
 /// An HTTP client factory.
 ///

@@ -13,7 +13,7 @@ use tycho_core::{
         blockchain::BlockTag,
         token::{TransferCost, TransferTax},
     },
-    traits::{TokenOwnerFinding, TokenAnalyzer},
+    traits::{TokenAnalyzer, TokenOwnerFinding},
     Bytes,
 };
 use url::Url;

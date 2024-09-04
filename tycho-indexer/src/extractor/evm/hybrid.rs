@@ -11,7 +11,6 @@ use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use token_analyzer::token_pre_processor::map_vault;
 use tycho_core::{
     models::{
         self,
@@ -28,6 +27,7 @@ use tycho_core::{
     traits::TokenPreProcessor,
     Bytes,
 };
+use tycho_ethereum::token_pre_processor::map_vault;
 use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{

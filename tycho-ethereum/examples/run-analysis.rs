@@ -5,12 +5,12 @@ use anyhow::Result;
 use ethers::types::{H160, U256};
 use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use reqwest::Client;
-use token_analyzer::trace_call::TraceCallDetector;
 use tycho_core::{
     models::{blockchain::BlockTag, token::TokenOwnerStore},
     traits::TokenAnalyzer,
     Bytes,
 };
+use tycho_ethereum::trace_call::TraceCallDetector;
 use url::Url;
 
 #[tokio::main]

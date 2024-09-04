@@ -3,11 +3,11 @@
 use futures03::future::select_all;
 use serde::Deserialize;
 use std::{collections::HashMap, fs::File, io::Read, str::FromStr, sync::Arc};
-use token_analyzer::{
+use tracing_subscriber::EnvFilter;
+use tycho_ethereum::{
     contract::EVMAccountExtractor, rpc_client::EthereumRpcClient,
     token_pre_processor::EthereumTokenPreProcessor,
 };
-use tracing_subscriber::EnvFilter;
 
 use extractor::runner::{ExtractorBuilder, ExtractorHandle};
 
@@ -101,7 +101,7 @@ async fn main() -> Result<(), anyhow::Error> {
             run_indexer(global_args, indexer_args).await?;
         }
         Command::AnalyzeTokens(analyze_args) => {
-            run_token_analyzer(global_args, analyze_args).await?;
+            run_tycho_ethereum(global_args, analyze_args).await?;
         }
         Command::Rpc => run_rpc(global_args).await?,
     }
@@ -407,7 +407,7 @@ async fn shutdown_handler(
     Ok(())
 }
 
-async fn run_token_analyzer(
+async fn run_tycho_ethereum(
     global_args: GlobalArgs,
     analyzer_args: AnalyzeTokenArgs,
 ) -> Result<(), anyhow::Error> {

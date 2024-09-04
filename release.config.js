@@ -40,7 +40,7 @@ const config = {
           'echo "NEXT_RELEASE_VERSION=${nextRelease.version}" >> $GITHUB_OUTPUT',
         prepareCmd: [
           "toml set --toml-path substreams/common/Cargo.toml package.version ${nextRelease.version}",
-          "toml set --toml-path token-analyzer/Cargo.toml package.version ${nextRelease.version}",
+          "toml set --toml-path tycho-ethereum/Cargo.toml package.version ${nextRelease.version}",
           "toml set --toml-path tycho-client/Cargo.toml package.version ${nextRelease.version}",
           "toml set --toml-path tycho-client-py/pyproject.toml project.version ${nextRelease.version}",
           "toml set --toml-path tycho-core/Cargo.toml package.version ${nextRelease.version}",
@@ -72,7 +72,7 @@ const branch = ref.split("/").pop();
 
 if (
   config.branches.some(
-    (it) => it === branch || (it.name === branch && !it.prerelease),
+    (it) => it === branch || (it.name === branch && !it.prerelease)
   )
 ) {
   config.plugins.push("@semantic-release/changelog", [
@@ -82,7 +82,7 @@ if (
       assets: [
         "CHANGELOG.md",
         "substreams/common/Cargo.toml",
-        "token-analyzer/Cargo.toml",
+        "tycho-ethereum/Cargo.toml",
         "tycho-client/Cargo.toml",
         "tycho-client-py/pyproject.toml",
         "tycho-core/Cargo.toml",

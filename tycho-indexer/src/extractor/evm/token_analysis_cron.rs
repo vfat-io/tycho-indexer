@@ -1,7 +1,6 @@
 use crate::cli::AnalyzeTokenArgs;
 use futures03::{future::try_join_all, FutureExt};
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::Instant};
-use token_analyzer::{token_pre_processor::map_vault, trace_call::TraceCallDetector};
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 use tycho_core::{
@@ -14,6 +13,7 @@ use tycho_core::{
     traits::TokenAnalyzer,
     Bytes,
 };
+use tycho_ethereum::{token_pre_processor::map_vault, trace_call::TraceCallDetector};
 
 pub async fn analyze_tokens(
     analyze_args: AnalyzeTokenArgs,

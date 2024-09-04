@@ -6,7 +6,6 @@ use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::Client;
 use prost::Message;
 use serde::Deserialize;
-use token_analyzer::token_pre_processor::EthereumTokenPreProcessor;
 use tokio::{
     sync::{
         mpsc::{self, error::SendError, Receiver, Sender},
@@ -16,6 +15,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
+use tycho_ethereum::token_pre_processor::EthereumTokenPreProcessor;
 
 use tycho_core::{
     models::{Chain, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType},

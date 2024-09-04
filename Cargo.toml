@@ -4,7 +4,7 @@ members = [
     "tycho-client",
     "tycho-core",
     "tycho-storage",
-    "token-analyzer",
+    "tycho-ethereum",
 ]
 resolver = "2"
 
@@ -36,7 +36,7 @@ uuid = { version = "1.4.1", features = [
 hex = "0.4.3"
 tycho-core = { path = "tycho-core" }
 tycho-storage = { path = "./tycho-storage" }
-token-analyzer = { path = "./token-analyzer" }
+tycho-ethereum = { path = "./tycho-ethereum" }
 futures03 = { version = "0.3.1", package = "futures", features = ["compat"] }
 thiserror = "1"
 tracing = "0.1.37"
@@ -74,4 +74,7 @@ url = "2"
 tracing-opentelemetry = { version = "0.22", default-features = false }
 opentelemetry = { version = "0.21" }
 opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.14", default-features = false, features = ["trace", "grpc-tonic"] }
+opentelemetry-otlp = { version = "0.14", default-features = false, features = [
+    "trace",
+    "grpc-tonic",
+] }

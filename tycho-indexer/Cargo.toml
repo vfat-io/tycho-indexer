@@ -25,7 +25,7 @@ ethers.workspace = true
 diesel-async.workspace = true
 tycho-core = { workspace = true }
 tycho-storage.workspace = true
-token-analyzer.workspace = true
+tycho-ethereum.workspace = true
 anyhow.workspace = true
 reqwest.workspace = true
 url.workspace = true
