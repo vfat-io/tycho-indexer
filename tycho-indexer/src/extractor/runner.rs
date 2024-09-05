@@ -15,7 +15,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
-use tycho_ethereum::token_pre_processor::token_pre_processor::EthereumTokenPreProcessor;
+use tycho_ethereum::token_pre_processor::EthereumTokenPreProcessor;
 
 use tycho_core::{
     models::{Chain, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType},

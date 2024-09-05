@@ -5,8 +5,8 @@ use serde::Deserialize;
 use std::{collections::HashMap, fs::File, io::Read, str::FromStr, sync::Arc};
 use tracing_subscriber::EnvFilter;
 use tycho_ethereum::{
-    contract::EVMAccountExtractor, rpc_client::EthereumRpcClient,
-    token_pre_processor::EthereumTokenPreProcessor,
+    account_extractor::contract::EVMAccountExtractor,
+    token_analyzer::rpc_client::EthereumRpcClient, token_pre_processor::EthereumTokenPreProcessor,
 };
 
 use extractor::runner::{ExtractorBuilder, ExtractorHandle};

@@ -4,7 +4,7 @@ pub mod token_pre_processor;
 
 use ethers::providers::ProviderError;
 use thiserror::Error;
-use tycho_core::models::{blockchain::BlockTag, token::TokenQuality};
+use tycho_core::models::blockchain::BlockTag;
 use web3::types::BlockNumber;
 
 #[derive(Error, Debug)]
