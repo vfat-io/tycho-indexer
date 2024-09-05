@@ -72,6 +72,16 @@ AND NOT EXISTS (
     WHERE pchc2.contract_code_id = cc.id
     AND ps2.name <> :'protocol_system_name'
 );
+
+--- List of tokens to be deleted
+SELECT t.symbol AS "Token Symbol", '0x' || encode(a.address::bytea, 'hex') AS "Token Address", t.id AS "Token ID"
+FROM token t
+JOIN account a ON t.account_id = a.id
+JOIN protocol_component_holds_token pcht ON t.id = pcht.token_id
+JOIN protocol_component pc ON pcht.protocol_component_id = pc.id
+JOIN protocol_system ps ON pc.protocol_system_id = ps.id
+GROUP BY t.symbol, a.address, t.id
+HAVING COUNT(DISTINCT CASE WHEN ps.name <> :'protocol_system_name' THEN ps.id END) = 0;
 EOF
 
 echo "Audit log written to $audit_file."
@@ -92,6 +102,26 @@ psql -d "$db_name" -h localhost -p "$port_number" -U "$db_user" <<EOF
 \set protocol_system_name '$protocol_system_to_delete'
 
 BEGIN;
+
+--- Find and remove all token tokens exclusively linked to the protocol components of the system being deleted. Accounts
+--- linked to these tokens will also be deleted.
+WITH tokens_to_delete AS (
+    --- Select the tokens that should be deleted
+    SELECT t.id, a.id AS account_id
+    FROM token t
+    JOIN account a ON t.account_id = a.id
+    JOIN protocol_component_holds_token pcht ON t.id = pcht.token_id
+    JOIN protocol_component pc ON pcht.protocol_component_id = pc.id
+    JOIN protocol_system ps ON pc.protocol_system_id = ps.id
+    GROUP BY t.id, a.id
+    HAVING COUNT(DISTINCT CASE WHEN ps.name <> :'protocol_system_name' THEN ps.id END) = 0
+)
+--- Delete the linked accounts
+DELETE FROM account
+WHERE id IN (SELECT account_id FROM tokens_to_delete);
+--- Delete the tokens
+DELETE FROM token
+WHERE id IN (SELECT id FROM tokens_to_delete);
 
 --- Find and remove all linked accounts (accounts are not cascade deleted). Note, this will cascade delete the linked contract
 --- code entries too.
