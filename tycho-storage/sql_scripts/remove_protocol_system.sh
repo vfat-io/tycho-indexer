@@ -81,8 +81,7 @@ JOIN protocol_component_holds_token pcht ON t.id = pcht.token_id
 JOIN protocol_component pc ON pcht.protocol_component_id = pc.id
 JOIN protocol_system ps ON pc.protocol_system_id = ps.id
 GROUP BY t.symbol, a.address, t.id
-HAVING COUNT(DISTINCT CASE WHEN ps.name <> :'protocol_system_name' THEN ps.id END) = 0
-AND COUNT(DISTINCT ps.id) > 0;
+HAVING COUNT(DISTINCT CASE WHEN ps.name <> :'protocol_system_name' THEN ps.id END) = 0;
 EOF
 
 echo "Audit log written to $audit_file."
@@ -116,7 +115,6 @@ WITH tokens_to_delete AS (
     JOIN protocol_system ps ON pc.protocol_system_id = ps.id
     GROUP BY t.id, a.id
     HAVING COUNT(DISTINCT CASE WHEN ps.name <> :'protocol_system_name' THEN ps.id END) = 0
-    AND COUNT(DISTINCT ps.id) > 0
 )
 --- Delete the linked accounts
 DELETE FROM account
