@@ -13,7 +13,10 @@ use tycho_core::{
     traits::TokenAnalyzer,
     Bytes,
 };
-use tycho_ethereum::{token_pre_processor::map_vault, trace_call::TraceCallDetector};
+use tycho_ethereum::{
+    token_analyzer::trace_call::TraceCallDetector,
+    token_pre_processor::token_pre_processor::map_vault,
+};
 
 pub async fn analyze_tokens(
     analyze_args: AnalyzeTokenArgs,

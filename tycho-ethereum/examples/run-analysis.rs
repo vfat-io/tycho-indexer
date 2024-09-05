@@ -10,7 +10,7 @@ use tycho_core::{
     traits::TokenAnalyzer,
     Bytes,
 };
-use tycho_ethereum::trace_call::TraceCallDetector;
+use tycho_ethereum::token_analyzer::trace_call::TraceCallDetector;
 use url::Url;
 
 #[tokio::main]

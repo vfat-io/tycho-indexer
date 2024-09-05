@@ -1,4 +1,3 @@
-use crate::http_client::HttpClientFactory;
 pub use ethrpc::{
     create_env_test_transport, create_test_transport, Web3, Web3CallBatch, Web3Transport,
 };
@@ -7,6 +6,8 @@ use std::{
     fmt::{self, Display, Formatter},
     time::Duration,
 };
+
+use super::http_client::HttpClientFactory;
 
 pub const MAX_BATCH_SIZE: usize = 100;
 

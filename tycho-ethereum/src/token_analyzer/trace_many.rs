@@ -1,5 +1,5 @@
-use crate::ethrpc::Web3;
 use anyhow::{Context, Result};
+use ethrpc::Web3;
 use web3::{
     types::{BlockNumber, BlockTrace, CallRequest, TraceType},
     Transport,

@@ -27,7 +27,7 @@ use tycho_core::{
     traits::TokenPreProcessor,
     Bytes,
 };
-use tycho_ethereum::token_pre_processor::map_vault;
+use tycho_ethereum::token_pre_processor::token_pre_processor::map_vault;
 use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{

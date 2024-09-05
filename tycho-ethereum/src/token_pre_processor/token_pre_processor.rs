@@ -17,7 +17,7 @@ use tycho_core::{
     Bytes,
 };
 
-use crate::trace_call::TraceCallDetector;
+use crate::token_analyzer::trace_call::TraceCallDetector;
 
 #[derive(Debug, Clone)]
 pub struct EthereumTokenPreProcessor {

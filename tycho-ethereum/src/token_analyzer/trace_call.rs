@@ -1,6 +1,5 @@
-use crate::{trace_many, BlockTagWrapper};
+use crate::{token_analyzer::trace_many, BlockTagWrapper};
 
-use super::TokenQuality;
 use anyhow::{bail, ensure, Context, Result};
 use contracts::ERC20;
 use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, PrivateKey};
@@ -11,7 +10,7 @@ use std::{cmp, str::FromStr, sync::Arc};
 use tycho_core::{
     models::{
         blockchain::BlockTag,
-        token::{TransferCost, TransferTax},
+        token::{TokenQuality, TransferCost, TransferTax},
     },
     traits::{TokenAnalyzer, TokenOwnerFinding},
     Bytes,
