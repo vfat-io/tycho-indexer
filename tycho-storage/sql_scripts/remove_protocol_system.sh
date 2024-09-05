@@ -104,19 +104,24 @@ psql -d "$db_name" -h localhost -p "$port_number" -U "$db_user" <<EOF
 
 BEGIN;
 
---- Delete tokens only if they are exclusively linked to the protocol components of the system being deleted.
+--- Find and remove all token tokens exclusively linked to the protocol components of the system being deleted. Accounts
+--- linked to these tokens will also be deleted.
 WITH tokens_to_delete AS (
     --- Select the tokens that should be deleted
-    SELECT t.id
+    SELECT t.id, a.id AS account_id
     FROM token t
     JOIN account a ON t.account_id = a.id
     JOIN protocol_component_holds_token pcht ON t.id = pcht.token_id
     JOIN protocol_component pc ON pcht.protocol_component_id = pc.id
     JOIN protocol_system ps ON pc.protocol_system_id = ps.id
-    GROUP BY t.id
+    GROUP BY t.id, a.id
     HAVING COUNT(DISTINCT CASE WHEN ps.name <> :'protocol_system_name' THEN ps.id END) = 0
     AND COUNT(DISTINCT ps.id) > 0
 )
+--- Delete the linked accounts
+DELETE FROM account
+WHERE id IN (SELECT account_id FROM tokens_to_delete);
+--- Delete the tokens
 DELETE FROM token
 WHERE id IN (SELECT id FROM tokens_to_delete);
 
