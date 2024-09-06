@@ -102,7 +102,6 @@ pub trait RPCClient {
                     .into_iter()
                     .flat_map(|r| r.accounts.into_iter())
                     .collect(),
-                // TODO: Should use the response from the task
                 pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
             })
     }
@@ -160,7 +159,6 @@ pub trait RPCClient {
                     .into_iter()
                     .flat_map(|r| r.states.into_iter())
                     .collect(),
-                // TODO: Should use the response from the task
                 pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
             })
     }
