@@ -116,12 +116,9 @@ WITH tokens_to_delete AS (
     GROUP BY t.id, a.id
     HAVING COUNT(DISTINCT CASE WHEN ps.name <> :'protocol_system_name' THEN ps.id END) = 0
 )
---- Delete the linked accounts
+--- Delete the linked accounts (tokens will be cascade deleted)
 DELETE FROM account
 WHERE id IN (SELECT account_id FROM tokens_to_delete);
---- Delete the tokens
-DELETE FROM token
-WHERE id IN (SELECT id FROM tokens_to_delete);
 
 --- Find and remove all linked accounts (accounts are not cascade deleted). Note, this will cascade delete the linked contract
 --- code entries too.
