@@ -269,7 +269,9 @@ impl PendingDeltas {
 
     /// Returns finality for any extractor, can error if lock is poisened. Returns None if buffer is
     /// empty.
-    /// Returns an error if the provided protocol system isn't found in the buffer.
+    /// Returns an error if the provided protocol system isn't found in the buffer or the specified
+    /// block version is unseen. If a timestamp version is provided, the latest block before that
+    /// timestamp is used.
     /// Note - if no protocol system is provided, we choose a random extractor to get the finality
     /// status from. This is particularly risky when there is an extractor syncing.
     pub fn get_block_finality(

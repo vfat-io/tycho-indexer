@@ -757,6 +757,12 @@ impl fmt::Display for ContractId {
     }
 }
 
+/// The version of the requested state, given as either a timestamp or a block.
+///
+/// If block is provided, the state at that exact block is returned. Will error if the block
+/// has not been processed yet. If timestamp is provided, the state at the latest block before
+/// that timestamp is returned.
+/// Defaults to the current time.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VersionParam {
