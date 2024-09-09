@@ -5949,32 +5949,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
-name = "token-analyzer"
-version = "0.12.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "clap",
- "contracts",
- "ethcontract",
- "ethers",
- "ethrpc",
- "humantime",
- "mockall",
- "primitive-types",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
- "tycho-core",
- "url",
- "web3",
-]
-
-[[package]]
 name = "tokio"
 version = "1.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6486,6 +6460,7 @@ dependencies = [
  "hex",
  "maplit",
  "pretty_assertions",
+ "rand",
  "serde",
  "serde_json",
  "strum",
@@ -6497,6 +6472,32 @@ dependencies = [
  "typetag",
  "utoipa",
  "uuid 1.7.0",
+]
+
+[[package]]
+name = "tycho-ethereum"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "clap",
+ "contracts",
+ "ethcontract",
+ "ethers",
+ "ethrpc",
+ "humantime",
+ "mockall",
+ "primitive-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tycho-core",
+ "url",
+ "web3",
 ]
 
 [[package]]
@@ -6542,7 +6543,6 @@ dependencies = [
  "serde_yaml",
  "test-log",
  "thiserror",
- "token-analyzer",
  "tokio",
  "tokio-retry",
  "tokio-stream",
@@ -6552,6 +6552,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "tycho-core",
+ "tycho-ethereum",
  "tycho-storage",
  "typetag",
  "url",

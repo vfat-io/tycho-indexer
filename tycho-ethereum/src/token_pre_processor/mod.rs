@@ -1,47 +1,57 @@
 use async_trait::async_trait;
-use ethers::{
-    abi::Abi,
-    contract::Contract,
-    prelude::Provider,
-    providers::Http,
-    types::{H160, U256},
-};
+use ethers::{abi::Abi, contract::Contract, prelude::Provider, providers::Http, types::H160};
+use reqwest::Client;
 use serde_json::from_str;
 use std::{str::FromStr, sync::Arc};
-use token_analyzer::{
-    trace_call::{TokenOwnerFinding, TraceCallDetector},
-    BadTokenDetecting, TokenQuality,
-};
 use tracing::{instrument, warn};
-use web3::types::BlockNumber;
+use url::Url;
 
-use ethrpc::Web3;
-use tycho_core::models::{token::CurrencyToken, Chain};
+use ethrpc::{http::HttpTransport, Web3, Web3Transport};
+use tycho_core::{
+    models::{
+        blockchain::BlockTag,
+        token::{CurrencyToken, TokenQuality},
+        Chain,
+    },
+    traits::{TokenAnalyzer, TokenOwnerFinding, TokenPreProcessor},
+    Bytes,
+};
+
+use crate::token_analyzer::trace_call::TraceCallDetector;
 
 #[derive(Debug, Clone)]
-pub struct TokenPreProcessor {
+pub struct EthereumTokenPreProcessor {
     ethers_client: Arc<Provider<Http>>,
     erc20_abi: Abi,
     web3_client: Web3,
     chain: Chain,
 }
-#[cfg_attr(test, mockall::automock)]
-#[async_trait]
-pub trait TokenPreProcessorTrait: Send + Sync {
-    async fn get_tokens(
-        &self,
-        addresses: Vec<H160>,
-        token_finder: Arc<dyn TokenOwnerFinding>,
-        block: BlockNumber,
-    ) -> Vec<CurrencyToken>;
-}
 
 const ABI_STR: &str = include_str!("./abi/erc20.json");
 
-impl TokenPreProcessor {
+impl EthereumTokenPreProcessor {
     pub fn new(ethers_client: Provider<Http>, web3_client: Web3, chain: Chain) -> Self {
         let abi = from_str::<Abi>(ABI_STR).expect("Unable to parse ABI");
-        TokenPreProcessor {
+        EthereumTokenPreProcessor {
+            ethers_client: Arc::new(ethers_client),
+            erc20_abi: abi,
+            web3_client,
+            chain,
+        }
+    }
+
+    pub fn new_from_url(rpc_url: &str, chain: Chain) -> Self {
+        let abi = from_str::<Abi>(ABI_STR).expect("Unable to parse ABI");
+        let ethers_client: Provider<Http> =
+            Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
+
+        let transport = Web3Transport::new(HttpTransport::new(
+            Client::new(),
+            Url::from_str(rpc_url).unwrap(),
+            "transport".to_owned(),
+        ));
+        let web3_client = Web3::new(transport);
+        EthereumTokenPreProcessor {
             ethers_client: Arc::new(ethers_client),
             erc20_abi: abi,
             web3_client,
@@ -51,14 +61,16 @@ impl TokenPreProcessor {
 }
 
 /// Map a protocol system into its vault
-pub fn map_vault(protocol_system: &str) -> Option<H160> {
+/// TODO: This is a hack until we can use the `balance_owner` attribute. Needs to be fixed once we
+/// emit this attribute for every protocol in Substreams
+pub fn map_vault(protocol_system: &str) -> Option<Bytes> {
     match protocol_system {
         "vm:balancer" => Some(
-            H160::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8")
+            Bytes::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8")
                 .expect("Unable to convert vault address into H160"),
         ),
         "vm:ambient" => Some(
-            H160::from_str("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688")
+            Bytes::from_str("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688")
                 .expect("Unable to convert vault address into H160"),
         ),
         _ => None,
@@ -66,19 +78,19 @@ pub fn map_vault(protocol_system: &str) -> Option<H160> {
 }
 
 #[async_trait]
-impl TokenPreProcessorTrait for TokenPreProcessor {
+impl TokenPreProcessor for EthereumTokenPreProcessor {
     #[instrument(skip_all, fields(n_addresses=addresses.len(), block = ?block))]
     async fn get_tokens(
         &self,
-        addresses: Vec<H160>,
+        addresses: Vec<Bytes>,
         token_finder: Arc<dyn TokenOwnerFinding>,
-        block: BlockNumber,
+        block: BlockTag,
     ) -> Vec<CurrencyToken> {
         let mut tokens_info = Vec::new();
 
         for address in addresses {
             let contract =
-                Contract::new(address, self.erc20_abi.clone(), self.ethers_client.clone());
+                Contract::new(address.clone(), self.erc20_abi.clone(), self.ethers_client.clone());
 
             let symbol = contract
                 .method("symbol", ())
@@ -100,7 +112,7 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
             };
 
             let (token_quality, gas, tax) = trace_call
-                .detect(address, block)
+                .analyze(address.clone(), block)
                 .await
                 .unwrap_or_else(|e| {
                     warn!(error=?e, "TokenDetectionFailure");
@@ -122,19 +134,18 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
             };
 
             // If quality is 100 but it's a fee token, set quality to 50
-            if quality == 100 && tax.map_or(false, |tax_value| tax_value > U256::zero()) {
+            if quality == 100 && tax.map_or(false, |tax_value| tax_value > 0) {
                 quality = 50;
             }
 
             tokens_info.push(CurrencyToken {
-                address: address.into(),
+                address,
                 symbol: symbol.replace('\0', ""),
                 decimals: decimals.into(),
-                tax: tax
-                    .unwrap_or(U256::zero())
-                    .try_into()
-                    .unwrap_or(10_000),
-                gas: gas.map_or_else(Vec::new, |g| vec![Some(g.try_into().unwrap_or(8_000_000))]),
+                tax: tax.unwrap_or(0),
+                gas: gas
+                    .map(|g| vec![Some(g)])
+                    .unwrap_or_else(Vec::new),
                 chain: self.chain,
                 quality,
             });
@@ -147,11 +158,8 @@ impl TokenPreProcessorTrait for TokenPreProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethrpc::{http::HttpTransport, Web3Transport};
-    use reqwest::Client;
     use std::{collections::HashMap, env};
-    use token_analyzer::TokenFinder;
-    use url::Url;
+    use tycho_core::models::token::TokenOwnerStore;
 
     #[tokio::test]
     #[ignore]
@@ -168,21 +176,27 @@ mod tests {
         ));
         let w3 = Web3::new(transport);
 
-        let processor = TokenPreProcessor::new(client, w3, Chain::Ethereum);
+        let processor = EthereumTokenPreProcessor::new(client, w3, Chain::Ethereum);
 
-        let tf = TokenFinder::new(HashMap::new());
+        let tf = TokenOwnerStore::new(HashMap::new());
 
         let weth_address: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
         let usdc_address: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
         let fake_address: &str = "0xA0b86991c7456b36c1d19D4a2e9Eb0cE3606eB48";
         let addresses = vec![
-            H160::from_str(weth_address).unwrap(),
-            H160::from_str(usdc_address).unwrap(),
-            H160::from_str(fake_address).unwrap(),
+            H160::from_str(weth_address)
+                .unwrap()
+                .into(),
+            H160::from_str(usdc_address)
+                .unwrap()
+                .into(),
+            H160::from_str(fake_address)
+                .unwrap()
+                .into(),
         ];
 
         let results = processor
-            .get_tokens(addresses, Arc::new(tf), web3::types::BlockNumber::Number(1.into()))
+            .get_tokens(addresses, Arc::new(tf), BlockTag::Number(1))
             .await;
         assert_eq!(results.len(), 3);
         let relevant_attrs: Vec<(String, u32, u32)> = results

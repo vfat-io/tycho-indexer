@@ -15,6 +15,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
+use tycho_ethereum::token_pre_processor::EthereumTokenPreProcessor;
 
 use tycho_core::{
     models::{Chain, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType},
@@ -42,7 +43,7 @@ use super::{
         add_default_attributes_uniswapv2, add_default_attributes_uniswapv3, ignore_self_balances,
         transcode_ambient_balances, transcode_usv2_balances, trim_curve_component_token,
     },
-    evm::{chain_state::ChainState, token_pre_processor::TokenPreProcessor},
+    evm::chain_state::ChainState,
     Extractor, ExtractorMsg,
 };
 
@@ -396,7 +397,7 @@ impl ExtractorBuilder {
         mut self,
         chain_state: ChainState,
         cached_gw: &CachedGateway,
-        token_pre_processor: &TokenPreProcessor,
+        token_pre_processor: &EthereumTokenPreProcessor,
         protocol_cache: &ProtocolMemoryCache,
     ) -> Result<Self, ExtractionError> {
         let protocol_types = self

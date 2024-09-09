@@ -184,6 +184,13 @@ Options:
 
           [default: 17362664]
 
+      --rpc-url <RPC_URL>
+          Blockchain RPC Connection Url.
+
+          Defaults to RPC_URL env var.
+
+          [env: RPC_URL]
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -330,4 +337,3 @@ Before moving to other chains the following things should be taken care of:
 
 - Correctly implement ChainState struct to return the latest block by querying the chains rpc.
 - Potentially fix assumption about fixed block times in the `tycho_client::feed`.
--

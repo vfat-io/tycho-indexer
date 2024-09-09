@@ -887,7 +887,7 @@ impl ProtocolGateway for CachedGateway {
 
     /// Updates tokens without using the write cache.
     ///
-    /// This method is currently only used by the token-analyzer job and therefore does
+    /// This method is currently only used by the tycho-ethereum job and therefore does
     /// not use the write cache. It creates a single transaction and executes all
     /// updates immediately.
     ///
