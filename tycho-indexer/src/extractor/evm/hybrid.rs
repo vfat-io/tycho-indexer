@@ -36,7 +36,6 @@ use crate::{
         evm::{
             chain_state::ChainState,
             protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
-            utils::format_duration,
             Block,
         },
         revert_buffer::RevertBuffer,
@@ -184,13 +183,15 @@ where
             let blocks_per_minute = blocks_processed as f64 * 60.0 / time_passed as f64;
             let time_remaining =
                 chrono::Duration::minutes((distance_to_current as f64 / blocks_per_minute) as i64);
+            let hours = time_remaining.num_hours();
+            let minutes = (time_remaining.num_minutes()) % 60;
             info!(
                 extractor_id = self.name,
                 blocks_per_minute = format!("{blocks_per_minute:.2}"),
                 blocks_processed,
                 height = block.number,
                 current = current_block,
-                time_remaining = format_duration(&time_remaining),
+                time_remaining = format!("{:02}h{:02}m", hours, minutes),
                 name = "SyncProgress"
             );
             state.last_report_ts = now;
@@ -2527,7 +2528,6 @@ mod test_serial_db {
                 .await
                 .expect("Failed to create extractor");
 
-            dbg!("starting input seq");
             // Send a sequence of block scoped data.
             stream::iter(get_vm_inp_sequence())
                 .for_each(|inp| async {
@@ -2573,8 +2573,8 @@ mod test_serial_db {
                         address: Bytes::from_str("0000000000000000000000000000000000000001").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
-                            (Bytes::from(3u128).lpad(32, 0), Some(Bytes::new())),
-                            (Bytes::from(1u128).lpad(32, 0), Some(Bytes::from(1u128).lpad(32, 0))),
+                            (Bytes::from("0x03"), Some(Bytes::new())),
+                            (Bytes::from("0x01"), Some(Bytes::from("0x01"))),
                         ]),
                         balance: None,
                         code: None,
@@ -2584,7 +2584,7 @@ mod test_serial_db {
                         address: Bytes::from_str("0000000000000000000000000000000000000002").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
-                            (Bytes::from(1u128).lpad(32, 0), Some(Bytes::from(2u128).lpad(32, 0))),
+                            (Bytes::from("0x01"), Some(Bytes::from("0x02"))),
                         ]),
                         balance: None,
                         code: None,
@@ -2633,7 +2633,6 @@ mod test_serial_db {
                 component_tvl: HashMap::new(),
                 state_deltas: Default::default(),
             };
-
             assert_eq!(
                 res,
                 &block_account_expected

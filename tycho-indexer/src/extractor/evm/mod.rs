@@ -16,7 +16,6 @@ use tycho_core::{
     },
     Bytes,
 };
-use utils::{pad_and_parse_20bytes, pad_and_parse_32bytes, pad_and_parse_h160};
 
 use crate::{
     extractor::revert_buffer::{
@@ -32,7 +31,6 @@ pub mod chain_state;
 pub mod hybrid;
 pub mod protocol_cache;
 pub mod token_analysis_cron;
-mod utils;
 
 pub trait TryFromMessage {
     type Args<'a>;
@@ -50,26 +48,12 @@ impl TryFromMessage for AccountDelta {
         let change = msg.change().into();
         let update = AccountDelta::new(
             chain,
-            pad_and_parse_h160(&msg.address.into()) //TODO: we shouldn't pad here, this is not blockchain agnostic
-                .map_err(ExtractionError::DecodeError)?
-                .into(),
+            msg.address.into(),
             msg.slots
                 .into_iter()
-                .map(|cs| {
-                    Ok((
-                        pad_and_parse_32bytes(&cs.slot).map_err(ExtractionError::DecodeError)?,
-                        Some(
-                            pad_and_parse_32bytes(&cs.value)
-                                .map_err(ExtractionError::DecodeError)?,
-                        ),
-                    ))
-                })
-                .collect::<Result<HashMap<_, _>, ExtractionError>>()?,
-            if !msg.balance.is_empty() {
-                Some(pad_and_parse_32bytes(&msg.balance).map_err(ExtractionError::DecodeError)?)
-            } else {
-                None
-            },
+                .map(|cs| (cs.slot.into(), Some(cs.value.into())))
+                .collect(),
+            if !msg.balance.is_empty() { Some(msg.balance.into()) } else { None },
             if !msg.code.is_empty() { Some(msg.code.into()) } else { None },
             change,
         );
@@ -118,9 +102,8 @@ impl TryFromMessage for Block {
         Ok(Self {
             chain,
             number: msg.number,
-            hash: pad_and_parse_32bytes(&msg.hash).map_err(ExtractionError::DecodeError)?,
-            parent_hash: pad_and_parse_32bytes(&msg.parent_hash)
-                .map_err(ExtractionError::DecodeError)?,
+            hash: msg.hash.into(),
+            parent_hash: msg.parent_hash.into(),
             ts: NaiveDateTime::from_timestamp_opt(msg.ts as i64, ts_nano).ok_or_else(|| {
                 ExtractionError::DecodeError(format!(
                     "Failed to convert timestamp {} to datetime!",
@@ -137,16 +120,12 @@ impl TryFromMessage for Transaction {
     fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
         let (msg, block_hash) = args;
 
-        let to = if !msg.to.is_empty() {
-            Some(pad_and_parse_20bytes(&msg.to).map_err(ExtractionError::DecodeError)?)
-        } else {
-            None
-        };
+        let to = if !msg.to.is_empty() { Some(msg.to.into()) } else { None };
 
         Ok(Self {
-            hash: pad_and_parse_32bytes(&msg.hash).map_err(ExtractionError::DecodeError)?,
+            hash: msg.hash.into(),
             block_hash: block_hash.clone(),
-            from: pad_and_parse_20bytes(&msg.from).map_err(ExtractionError::DecodeError)?,
+            from: msg.from.into(),
             to,
             index: msg.index,
         })
@@ -160,7 +139,7 @@ impl TryFromMessage for ComponentBalance {
         let (msg, tx) = args;
         let balance_float = bytes_to_f64(&msg.balance).unwrap_or(f64::NAN);
         Ok(Self {
-            token: pad_and_parse_20bytes(&msg.token).map_err(ExtractionError::DecodeError)?,
+            token: msg.token.into(),
             balance: Bytes::from(msg.balance),
             balance_float,
             modify_tx: tx.hash.clone(),
@@ -186,30 +165,22 @@ impl TryFromMessage for ProtocolComponent {
             .tokens
             .clone()
             .into_iter()
-            .map(|t| {
-                pad_and_parse_h160(&t.into())
-                    .map_err(ExtractionError::DecodeError)
-                    .map(Into::into)
-            })
-            .collect::<Result<Vec<_>, ExtractionError>>()?;
+            .map(Into::into)
+            .collect();
 
         let contract_ids = msg
             .contracts
             .clone()
             .into_iter()
-            .map(|c| {
-                pad_and_parse_h160(&c.into())
-                    .map_err(ExtractionError::DecodeError)
-                    .map(Into::into)
-            })
-            .collect::<Result<Vec<_>, ExtractionError>>()?;
+            .map(Into::into)
+            .collect();
 
         let static_attributes = msg
             .static_att
             .clone()
             .into_iter()
-            .map(|attribute| Ok((attribute.name, Bytes::from(attribute.value))))
-            .collect::<Result<HashMap<_, _>, ExtractionError>>()?;
+            .map(|attribute| (attribute.name, Bytes::from(attribute.value)))
+            .collect();
 
         let protocol_type = msg
             .protocol_type
@@ -981,8 +952,12 @@ pub mod fixtures {
         match version {
             0 => BlockContractChanges {
                 block: Some(Block {
-                    hash: vec![0x31, 0x32, 0x33, 0x34],
-                    parent_hash: vec![0x21, 0x22, 0x23, 0x24],
+                    hash: Bytes::from(vec![0x31, 0x32, 0x33, 0x34])
+                        .lpad(32, 0)
+                        .to_vec(),
+                    parent_hash: Bytes::from(vec![0x21, 0x22, 0x23, 0x24])
+                        .lpad(32, 0)
+                        .to_vec(),
                     number: 1,
                     ts: 1000,
                 }),
@@ -990,23 +965,41 @@ pub mod fixtures {
                 changes: vec![
                     TransactionContractChanges {
                         tx: Some(Transaction {
-                            hash: vec![0x11, 0x12, 0x13, 0x14],
-                            from: vec![0x41, 0x42, 0x43, 0x44],
-                            to: vec![0x51, 0x52, 0x53, 0x54],
+                            hash: Bytes::from(vec![0x11, 0x12, 0x13, 0x14])
+                                .lpad(32, 0)
+                                .to_vec(),
+                            from: Bytes::from(vec![0x41, 0x42, 0x43, 0x44])
+                                .lpad(20, 0)
+                                .to_vec(),
+                            to: Bytes::from(vec![0x51, 0x52, 0x53, 0x54])
+                                .lpad(20, 0)
+                                .to_vec(),
                             index: 2,
                         }),
                         contract_changes: vec![ContractChange {
-                            address: vec![0x61, 0x62, 0x63, 0x64],
-                            balance: vec![0x71, 0x72, 0x73, 0x74],
+                            address: Bytes::from(vec![0x61, 0x62, 0x63, 0x64])
+                                .lpad(20, 0)
+                                .to_vec(),
+                            balance: Bytes::from(vec![0x71, 0x72, 0x73, 0x74])
+                                .lpad(32, 0)
+                                .to_vec(),
                             code: vec![0x81, 0x82, 0x83, 0x84],
                             slots: vec![
                                 ContractSlot {
-                                    slot: vec![0xa1, 0xa2, 0xa3, 0xa4],
-                                    value: vec![0xb1, 0xb2, 0xb3, 0xb4],
+                                    slot: Bytes::from(vec![0xc1, 0xc2, 0xc3, 0xc4])
+                                        .lpad(32, 0)
+                                        .to_vec(),
+                                    value: Bytes::from(vec![0xd1, 0xd2, 0xd3, 0xd4])
+                                        .lpad(32, 0)
+                                        .to_vec(),
                                 },
                                 ContractSlot {
-                                    slot: vec![0xc1, 0xc2, 0xc3, 0xc4],
-                                    value: vec![0xd1, 0xd2, 0xd3, 0xd4],
+                                    slot: Bytes::from(vec![0xa1, 0xa2, 0xa3, 0xa4])
+                                        .lpad(32, 0)
+                                        .to_vec(),
+                                    value: Bytes::from(vec![0xb1, 0xb2, 0xb3, 0xb4])
+                                        .lpad(32, 0)
+                                        .to_vec(),
                                 },
                             ],
                             change: ChangeType::Update.into(),
@@ -1069,27 +1062,41 @@ pub mod fixtures {
                     },
                     TransactionContractChanges {
                         tx: Some(Transaction {
-                            hash: vec![
-                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-                            ],
-                            from: vec![0x41, 0x42, 0x43, 0x44],
-                            to: vec![0x51, 0x52, 0x53, 0x54],
+                            hash: Bytes::from(vec![0x01])
+                                .lpad(32, 0)
+                                .to_vec(),
+                            from: Bytes::from(vec![0x41, 0x42, 0x43, 0x44])
+                                .lpad(20, 0)
+                                .to_vec(),
+                            to: Bytes::from(vec![0x51, 0x52, 0x53, 0x54])
+                                .lpad(20, 0)
+                                .to_vec(),
                             index: 5,
                         }),
                         contract_changes: vec![ContractChange {
-                            address: vec![0x61, 0x62, 0x63, 0x64],
-                            balance: vec![0xf1, 0xf2, 0xf3, 0xf4],
+                            address: Bytes::from(vec![0x61, 0x62, 0x63, 0x64])
+                                .lpad(20, 0)
+                                .to_vec(),
+                            balance: Bytes::from(vec![0xf1, 0xf2, 0xf3, 0xf4])
+                                .lpad(32, 0)
+                                .to_vec(),
                             code: vec![0x01, 0x02, 0x03, 0x04],
                             slots: vec![
                                 ContractSlot {
-                                    slot: vec![0x91, 0x92, 0x93, 0x94],
-                                    value: vec![0xa1, 0xa2, 0xa3, 0xa4],
+                                    slot: Bytes::from(vec![0x91, 0x92, 0x93, 0x94])
+                                        .lpad(32, 0)
+                                        .to_vec(),
+                                    value: Bytes::from(vec![0xa1, 0xa2, 0xa3, 0xa4])
+                                        .lpad(32, 0)
+                                        .to_vec(),
                                 },
                                 ContractSlot {
-                                    slot: vec![0xa1, 0xa2, 0xa3, 0xa4],
-                                    value: vec![0xc1, 0xc2, 0xc3, 0xc4],
+                                    slot: Bytes::from(vec![0xa1, 0xa2, 0xa3, 0xa4])
+                                        .lpad(32, 0)
+                                        .to_vec(),
+                                    value: Bytes::from(vec![0xc1, 0xc2, 0xc3, 0xc4])
+                                        .lpad(32, 0)
+                                        .to_vec(),
                                 },
                             ],
                             change: ChangeType::Update.into(),
@@ -1176,7 +1183,7 @@ pub mod fixtures {
                             code: 123_i32.to_be_bytes().to_vec(),
                             slots: vec![
                                 ContractSlot {
-                                    slot: Bytes::from(U256::from(1)).into(),
+                                    slot: Bytes::from("0x01").into(),
                                     value: Bytes::from(U256::from(10)).into(),
                                 },
                                 ContractSlot {
@@ -1332,7 +1339,7 @@ pub mod fixtures {
                             balance: 1_i32.to_be_bytes().to_vec(),
                             code: 123_i32.to_le_bytes().to_vec(),
                             slots: vec![ContractSlot {
-                                slot: Bytes::from(U256::from(1)).into(),
+                                slot: Bytes::from("0x01").into(),
                                 value: Bytes::from(U256::from(10)).into(),
                             }],
                             change: ChangeType::Update.into(),
@@ -1342,7 +1349,7 @@ pub mod fixtures {
                             balance: 1_i32.to_be_bytes().to_vec(),
                             code: 123_i32.to_le_bytes().to_vec(),
                             slots: vec![ContractSlot {
-                                slot: Bytes::from(U256::from(1)).into(),
+                                slot: Bytes::from("0x01").into(),
                                 value: Bytes::from(U256::from(10)).into(),
                             }],
                             change: ChangeType::Update.into(),
@@ -1576,8 +1583,8 @@ pub mod fixtures {
                             code: 123_i32.to_be_bytes().to_vec(),
                             slots: vec![
                                 ContractSlot {
-                                    slot: Bytes::from(U256::from(1)).into(),
-                                    value: Bytes::from(U256::from(10)).into(),
+                                    slot: Bytes::from("0x01").into(),
+                                    value: Bytes::from("0x10").into(),
                                 },
                                 ContractSlot {
                                     slot: Bytes::from("0x02").into(),
@@ -1651,7 +1658,7 @@ pub mod fixtures {
                                 code: 123_i32.to_le_bytes().to_vec(),
                                 slots: vec![ContractSlot {
                                     slot: Bytes::from("0x02").into(),
-                                    value: Bytes::from(U256::from(200)).into(),
+                                    value: Bytes::from("0xc8").into(),
                                 }],
                                 change: ChangeType::Update.into(),
                             },
@@ -1702,8 +1709,8 @@ pub mod fixtures {
                         balance: 1_i32.to_be_bytes().to_vec(),
                         code: 123_i32.to_le_bytes().to_vec(),
                         slots: vec![ContractSlot {
-                            slot: Bytes::from(U256::from(3)).into(),
-                            value: Bytes::from(U256::from(10)).into(),
+                            slot: Bytes::from("0x03").into(),
+                            value: Bytes::from("0x10").into(),
                         }],
                         change: ChangeType::Update.into(),
                     }],
@@ -1736,8 +1743,8 @@ pub mod fixtures {
                             balance: 1_i32.to_be_bytes().to_vec(),
                             code: 123_i32.to_le_bytes().to_vec(),
                             slots: vec![ContractSlot {
-                                slot: Bytes::from(U256::from(1)).into(),
-                                value: Bytes::from(U256::from(10)).into(),
+                                slot: Bytes::from("0x01").into(),
+                                value: Bytes::from("0x10").into(),
                             }],
                             change: ChangeType::Update.into(),
                         },
@@ -1746,8 +1753,8 @@ pub mod fixtures {
                             balance: 1_i32.to_be_bytes().to_vec(),
                             code: 123_i32.to_le_bytes().to_vec(),
                             slots: vec![ContractSlot {
-                                slot: Bytes::from(U256::from(1)).into(),
-                                value: Bytes::from(U256::from(10)).into(),
+                                slot: Bytes::from("0x01").into(),
+                                value: Bytes::from("0x10").into(),
                             }],
                             change: ChangeType::Update.into(),
                         },
@@ -1849,17 +1856,19 @@ pub mod fixtures {
         match version {
             0 => BlockEntityChanges {
                 block: Some(Block {
-                    hash: vec![0x0, 0x0, 0x0, 0x0],
-                    parent_hash: vec![0x21, 0x22, 0x23, 0x24],
+                    hash: Bytes::zero(32).to_vec(),
+                    parent_hash: Bytes::from(vec![0x21, 0x22, 0x23, 0x24])
+                        .lpad(32, 0)
+                        .to_vec(),
                     number: 1,
                     ts: yesterday_midnight().timestamp() as u64,
                 }),
                 changes: vec![
                     TransactionEntityChanges {
                         tx: Some(Transaction {
-                            hash: vec![0x0, 0x0, 0x0, 0x0],
-                            from: vec![0x0, 0x0, 0x0, 0x0],
-                            to: vec![0x0, 0x0, 0x0, 0x0],
+                            hash: Bytes::zero(32).to_vec(),
+                            from: Bytes::zero(20).to_vec(),
+                            to: Bytes::zero(20).to_vec(),
                             index: 10,
                         }),
                         entity_changes: vec![
@@ -1899,9 +1908,15 @@ pub mod fixtures {
                     },
                     TransactionEntityChanges {
                         tx: Some(Transaction {
-                            hash: vec![0x11, 0x12, 0x13, 0x14],
-                            from: vec![0x41, 0x42, 0x43, 0x44],
-                            to: vec![0x51, 0x52, 0x53, 0x54],
+                            hash: Bytes::from(vec![0x11, 0x12, 0x13, 0x14])
+                                .lpad(32, 0)
+                                .to_vec(),
+                            from: Bytes::from(vec![0x41, 0x42, 0x43, 0x44])
+                                .lpad(20, 0)
+                                .to_vec(),
+                            to: Bytes::from(vec![0x51, 0x52, 0x53, 0x54])
+                                .lpad(20, 0)
+                                .to_vec(),
                             index: 11,
                         }),
                         entity_changes: vec![EntityChanges {
