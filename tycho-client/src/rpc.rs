@@ -13,10 +13,9 @@ use async_trait::async_trait;
 use futures03::future::try_join_all;
 
 use tycho_core::dto::{
-    Chain, ContractId, PaginationParams, ProtocolComponentRequestResponse,
-    ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
-    ProtocolStateRequestResponse, ResponseToken, StateRequestBody, StateRequestResponse,
-    TokensRequestBody, TokensRequestResponse, VersionParam,
+    Chain, PaginationParams, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody,
+    ProtocolId, ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseToken,
+    StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
 };
 
 use reqwest::{
