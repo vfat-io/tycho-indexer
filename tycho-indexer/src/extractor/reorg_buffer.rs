@@ -405,12 +405,9 @@ mod test {
         Bytes,
     };
 
-    use crate::{
-        extractor::{evm::BlockChanges, reorg_buffer::ReorgBuffer},
-        testing,
-    };
+    use crate::{extractor::evm::BlockChanges, testing};
 
-    use super::{BlockNumberOrTimestamp, FinalityStatus};
+    use super::{BlockNumberOrTimestamp, FinalityStatus, ReorgBuffer};
 
     fn transaction() -> Transaction {
         Transaction::new(
