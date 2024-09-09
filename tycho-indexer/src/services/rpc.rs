@@ -18,7 +18,7 @@ use tycho_core::{
 };
 
 use crate::{
-    extractor::revert_buffer::{BlockNumberOrTimestamp, FinalityStatus},
+    extractor::reorg_buffer::{BlockNumberOrTimestamp, FinalityStatus},
     services::deltas_buffer::{PendingDeltas, PendingDeltasError},
 };
 
@@ -76,7 +76,6 @@ where
         &self,
         request: &dto::StateRequestBody,
     ) -> Result<dto::StateRequestResponse, RpcError> {
-        //TODO: set version to latest if we are targeting a version within pending deltas
         let at = BlockOrTimestamp::try_from(&request.version)?;
         let chain = request.chain.into();
         let (db_version, deltas_version) = self
@@ -84,12 +83,7 @@ where
             .await?;
 
         // Get the contract IDs from the request
-        let contract_ids = request.contract_ids.clone();
-        let addresses: Option<Vec<Address>> = contract_ids.map(|ids| {
-            ids.into_iter()
-                .map(|id| Address::from(id.address))
-                .collect::<Vec<Address>>()
-        });
+        let addresses = request.contract_ids.clone();
         debug!(?addresses, "Getting contract states.");
         let addresses = addresses.as_deref();
 
@@ -153,12 +147,14 @@ where
                 warn!(?ordered_version, ?protocol_system, "No finality found for version.");
                 FinalityStatus::Finalized
             });
+
         debug!(
             ?request_version_finality,
             ?request_version,
             ?ordered_version,
             "Version finality calculated!"
         );
+
         match request_version_finality {
             FinalityStatus::Finalized => {
                 Ok((Version(request_version.clone(), VersionKind::Last), None))
@@ -167,10 +163,27 @@ where
                 Version(BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)), VersionKind::Last),
                 Some(ordered_version),
             )),
-            FinalityStatus::Unseen => Err(RpcError::Storage(StorageError::NotFound(
-                "Version".to_string(),
-                format!("{:?}", request_version),
-            ))),
+            FinalityStatus::Unseen => {
+                match request_version {
+                    BlockOrTimestamp::Timestamp(_) => {
+                        // If the request is based on a timestamp, return the latest valid version
+                        Ok((
+                            Version(
+                                BlockOrTimestamp::Block(BlockIdentifier::Latest(chain)),
+                                VersionKind::Last,
+                            ),
+                            Some(ordered_version),
+                        ))
+                    }
+                    BlockOrTimestamp::Block(_) => {
+                        // If the request is based on a block and it's unseen, return an error
+                        Err(RpcError::Storage(StorageError::NotFound(
+                            "Version".to_string(),
+                            format!("{:?}", request_version),
+                        )))
+                    }
+                }
+            }
         }
     }
 
@@ -433,6 +446,15 @@ pub async fn contract_state_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve contract states
+///
+/// This endpoint retrieves the state of contracts within a specific execution environment. If no
+/// contract ids are given, all contracts are returned. Note that `protocol_system` is not a filter;
+/// it's a way to specify the protocol system associated with the contracts requested and is used to
+/// ensure that the correct extractor's block status is used when querying the database. If omitted,
+/// the block status will be determined by a random extractor, which could be risky if the extractor
+/// is out of sync. Filtering by protocol system is not currently supported on this endpoint and
+/// should be done client side.
 #[utoipa::path(
     post,
     path = "/v1/contract_state",
@@ -445,6 +467,9 @@ pub async fn contract_state<G: Gateway>(
     body: web::Json<dto::StateRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
+    // Note - filtering by protocol system is not supported on this endpoint. This is due to the
+    // complexity of paginating this endpoint with the current design.
+
     // Call the handler to get the state
     let response = handler
         .into_inner()
@@ -497,6 +522,10 @@ pub async fn tokens_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve tokens
+///
+/// This endpoint retrieves tokens for a specific execution environment, filtered by various
+/// criteria. The tokens are returned in a paginated format.
 #[utoipa::path(
     post,
     path = "/v1/tokens",
@@ -564,6 +593,10 @@ pub async fn protocol_components_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve protocol components
+///
+/// This endpoint retrieves components within a specific execution environment, filtered by various
+/// criteria.
 #[utoipa::path(
     post,
     path = "/v1/protocol_components",
@@ -635,6 +668,16 @@ pub async fn protocol_state_deprecated<G: Gateway>(
     }
 }
 
+/// Retrieve protocol states
+///
+/// This endpoint retrieves the state of protocols within a specific execution environment.
+/// Currently, the filters are not compounded, meaning that if multiple filters are provided, one
+/// will be prioritised. The priority from highest to lowest is as follows: 'protocol_ids',
+/// 'protocol_system', 'chain'. Note that 'protocol_system' serves as both a filter and as a way
+/// to specify the protocol system associated with the components requested. This is used to ensure
+/// that the correct extractor's block status is used when querying the database. If omitted, the
+/// block status will be determined by a random extractor, which could be risky if the extractor is
+/// out of sync.
 #[utoipa::path(
     post,
     path = "/v1/protocol_state",
@@ -662,6 +705,9 @@ pub async fn protocol_state<G: Gateway>(
     }
 }
 
+/// Health check endpoint
+///
+/// This endpoint is used to check the health of the service.
 #[utoipa::path(
     get,
     path="/v1/health",
@@ -753,10 +799,7 @@ mod tests {
         let json_str = r#"
     {
         "contractIds": [
-            {
-                "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
-                "chain": "ethereum"
-            }
+            "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092"
         ]
     }
     "#;
@@ -766,7 +809,7 @@ mod tests {
         let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092".into();
 
         let expected = dto::StateRequestBody {
-            contract_ids: Some(vec![dto::ContractId::new(dto::Chain::Ethereum, contract0)]),
+            contract_ids: Some(vec![contract0]),
             protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             chain: dto::Chain::Ethereum,
@@ -822,12 +865,9 @@ mod tests {
         let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
 
         let request = dto::StateRequestBody {
-            contract_ids: Some(vec![dto::ContractId::new(
-                dto::Chain::Ethereum,
-                "6B175474E89094C44Da98b954EedeAC495271d0F"
-                    .parse::<Bytes>()
-                    .unwrap(),
-            )]),
+            contract_ids: Some(vec![
+                Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap()
+            ]),
             protocol_system: None,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             chain: dto::Chain::Ethereum,
@@ -848,10 +888,9 @@ mod tests {
 
         // Create the request body using the dto::StateRequestBody struct
         let request_body = dto::StateRequestBody {
-            contract_ids: Some(vec![dto::ContractId::new(
-                dto::Chain::Ethereum,
-                Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap(),
-            )]),
+            contract_ids: Some(vec![
+                Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap()
+            ]),
             protocol_system: None,
             version: dto::VersionParam::default(),
             chain: dto::Chain::Ethereum,

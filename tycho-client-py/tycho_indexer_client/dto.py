@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Set, Union
 from uuid import UUID
 
 from hexbytes import HexBytes as _HexBytes
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, root_validator
 
 
 class HexBytes(_HexBytes):
@@ -211,12 +211,12 @@ class StateSyncMessage(BaseModel):
 
 
 class SynchronizerStateEnum(str, Enum):
-    started = "Started"
-    ready = "Ready"
-    stale = "Stale"
-    delayed = "Delayed"
-    advanced = "Advanced"
-    ended = "Ended"
+    started = "started"
+    ready = "ready"
+    stale = "stale"
+    delayed = "delayed"
+    advanced = "advanced"
+    ended = "ended"
 
 
 class SynchronizerState(BaseModel):
@@ -275,9 +275,19 @@ class ProtocolStateParams(BaseModel):
 
 
 class ContractStateParams(BaseModel):
-    contract_ids: Optional[List[ContractId]] = Field(default=None)
+    contract_ids: Optional[List[str]] = Field(default=None)
     protocol_system: Optional[str] = Field(default=None)
     version: Optional[VersionParams] = None
+
+    # Backward compatibility with old ContractId format
+    # To be removed in the future
+    @root_validator(pre=True)
+    def handle_old_contract_id_format(cls, values):
+        contract_ids = values.get('contract_ids')
+        if contract_ids and isinstance(contract_ids[0], ContractId):
+            # Handle old format: List of ContractId objects
+            values['contract_ids'] = [c.address.hex() for c in contract_ids]
+        return values
 
     class Config:
         allow_population_by_field_name = True

@@ -1,6 +1,11 @@
 import json
 
+from hexbytes import HexBytes
+
 from tycho_indexer_client.dto import (
+    Chain,
+    ContractId,
+    ContractStateParams,
     FeedMessage,
     SynchronizerState,
     SynchronizerStateEnum,
@@ -40,3 +45,16 @@ def test_decode_deltas(asset_dir):
             revert=False,
         ),
     )
+
+
+def test_decode_contract_state_params_backward_compatibility():
+    data_new = {"contract_ids": ['0xba12222222228d8ba445958a75a0704d566bf2c8', '0xe96a45f66bdda121b24f0a861372a72e8889523d']}
+    msg_new = ContractStateParams(**data_new)
+    
+    data_old = {"contract_ids": [ContractId(chain=Chain.ethereum, address=HexBytes('0xba12222222228d8ba445958a75a0704d566bf2c8')), ContractId(chain=Chain.ethereum, address=HexBytes('0xe96a45f66bdda121b24f0a861372a72e8889523d'))]}
+    msg_old = ContractStateParams(**data_old)
+
+    assert msg_new == ContractStateParams(
+        contract_ids = ['0xba12222222228d8ba445958a75a0704d566bf2c8', '0xe96a45f66bdda121b24f0a861372a72e8889523d'])
+    assert msg_old == ContractStateParams(
+        contract_ids = ['0xba12222222228d8ba445958a75a0704d566bf2c8', '0xe96a45f66bdda121b24f0a861372a72e8889523d'])

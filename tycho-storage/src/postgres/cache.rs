@@ -1373,6 +1373,8 @@ mod test_serial_db {
                 Chain::Ethereum,
                 None,
                 "cursor@420".as_bytes(),
+                Bytes::from_str("88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6")
+                    .unwrap(),
             ),
             _ => panic!("Block version not found"),
         }

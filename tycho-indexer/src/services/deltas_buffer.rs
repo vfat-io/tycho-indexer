@@ -1,5 +1,5 @@
 use crate::extractor::{
-    revert_buffer::{BlockNumberOrTimestamp, FinalityStatus, RevertBuffer},
+    reorg_buffer::{BlockNumberOrTimestamp, FinalityStatus, ReorgBuffer},
     runner::MessageSender,
 };
 use futures03::{stream, StreamExt};
@@ -20,17 +20,25 @@ use tycho_core::{
     storage::StorageError,
 };
 
+/// The `PendingDeltas` struct manages access to the reorg buffers maintained by each extractor.
+///
+/// The main responsibilities of `PendingDeltas` include:
+/// - Inserting new blocks and deltas into the correct `ReorgBuffer`.
+/// - Managing and applying deltas to state data, which includes merging buffered changes with data
+///   fetched from the database.
+/// - Retrieving finality status for blocks, which is used to determine whether to fetch data from
+///   the database and/or from the buffer.
 #[derive(Default, Clone)]
 pub struct PendingDeltas {
-    buffers: HashMap<String, Arc<Mutex<RevertBuffer<BlockAggregatedChanges>>>>,
+    buffers: HashMap<String, Arc<Mutex<ReorgBuffer<BlockAggregatedChanges>>>>,
 }
 
 #[derive(Error, Debug, PartialEq)]
 pub enum PendingDeltasError {
     #[error("Failed to acquire {0} lock: {1}")]
     LockError(String, String),
-    #[error("RevertBufferError: {0}")]
-    RevertBufferError(#[from] StorageError),
+    #[error("ReorgBufferError: {0}")]
+    ReorgBufferError(#[from] StorageError),
     #[error("Downcast failed: Unknown message type")]
     UnknownMessageType,
     #[error("Unknown extractor: {0}")]
@@ -47,8 +55,8 @@ impl PendingDeltas {
             buffers: extractors
                 .into_iter()
                 .map(|e| {
-                    debug!("Creating new RevertBuffer for {}", e);
-                    (e.to_string(), Arc::new(Mutex::new(RevertBuffer::new())))
+                    debug!("Creating new ReorgBuffer for {}", e);
+                    (e.to_string(), Arc::new(Mutex::new(ReorgBuffer::new())))
                 })
                 .collect(),
         }
@@ -259,7 +267,9 @@ impl PendingDeltas {
 
     /// Returns finality for any extractor, can error if lock is poisened. Returns None if buffer is
     /// empty.
-    /// Returns an error if the provided protocol system isn't found in the buffer.
+    /// Returns an error if the provided protocol system isn't found in the buffer or the specified
+    /// block version is unseen. If a timestamp version is provided, the latest block before that
+    /// timestamp is used.
     /// Note - if no protocol system is provided, we choose a random extractor to get the finality
     /// status from. This is particularly risky when there is an extractor syncing.
     pub fn get_block_finality(
@@ -504,40 +514,19 @@ mod test {
     }
 
     #[test]
-    fn test_insert_vm() {
+    fn test_insert_extractor() {
         let buffer = PendingDeltas::new(["vm:extractor"]);
         let exp: BlockAggregatedChanges = vm_block_deltas();
 
         buffer
             .insert(Arc::new(vm_block_deltas()))
-            .expect("vm insert failed");
+            .expect("insert failed");
 
-        let revert_buffer = buffer
+        let reorg_buffer = buffer
             .buffers
             .get("vm:extractor")
-            .expect("vm:extractor buffer missing");
-        let binding = revert_buffer.lock().unwrap();
-        let res = binding
-            .get_block_range(None, None)
-            .expect("Failed to get block range")
-            .collect::<Vec<_>>();
-        assert_eq!(res[0], &exp);
-    }
-
-    #[test]
-    fn test_insert_native() {
-        let pending_buffer = PendingDeltas::new(["native:extractor"]);
-        let exp: BlockAggregatedChanges = native_block_deltas();
-
-        pending_buffer
-            .insert(Arc::new(native_block_deltas()))
-            .expect("native insert failed");
-
-        let native_revert_buffer = pending_buffer
-            .buffers
-            .get("native:extractor")
-            .expect("native:extractor buffer missing");
-        let binding = native_revert_buffer.lock().unwrap();
+            .expect("extractor buffer missing");
+        let binding = reorg_buffer.lock().unwrap();
         let res = binding
             .get_block_range(None, None)
             .expect("Failed to get block range")

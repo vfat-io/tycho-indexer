@@ -18,14 +18,14 @@ use tycho_core::{
 };
 
 use crate::{
-    extractor::revert_buffer::{
+    extractor::reorg_buffer::{
         AccountStateIdType, AccountStateKeyType, AccountStateValueType, ProtocolStateIdType,
         ProtocolStateKeyType, ProtocolStateValueType,
     },
     pb::tycho::evm::v1 as substreams,
 };
 
-use super::{revert_buffer::StateUpdateBufferEntry, u256_num::bytes_to_f64, ExtractionError};
+use super::{reorg_buffer::StateUpdateBufferEntry, u256_num::bytes_to_f64, ExtractionError};
 
 pub mod chain_state;
 pub mod hybrid;

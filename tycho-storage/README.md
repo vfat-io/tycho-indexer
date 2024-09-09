@@ -67,7 +67,7 @@ export ETH_RPC_URL="url-here"
 5. Setup/Update the Database:
 
 ```bash
-diesel migration run --migration-dir ./tycho-indexer/migrations
+diesel migration run --migration-dir ./tycho-storage/migrations
 ```
 
 ## Formatting
@@ -111,7 +111,7 @@ diesel migration redo --migration-dir ./tycho-storage/migrations
 If the schema.rs file does not automatically update after you've run a migration with table changes, you can trigger the update manually by executing:
 
 ```bash
-diesel print-schema > ./tycho-indexer/src/storage/postgres/schema.rs
+diesel print-schema > ./tycho-storage/src/postgres/schema.rs
 ```
 
 ## Tests

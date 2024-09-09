@@ -1,4 +1,4 @@
-#![doc = include_str!("../../Readme.md")]
+#![doc = include_str!("../../README.md")]
 
 use futures03::future::select_all;
 use serde::Deserialize;
@@ -355,6 +355,7 @@ async fn initialize_accounts(
         chain,
         None,
         "account_cursor".as_bytes(),
+        block.hash,
     );
 
     cached_gw
