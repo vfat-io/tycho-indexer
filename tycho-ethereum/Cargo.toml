@@ -11,13 +11,13 @@ serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 tokio.workspace = true
-ethers.workspace = true
 tycho-core.workspace = true
 serde.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 
 
+ethers = "^2.0.2"
 primitive-types = "0.12"
 contracts = { git = "https://github.com/cowprotocol/services", rev = "f3678428991e055ceb517f184d1b37244f2d8f51" }
 ethrpc = { git = "https://github.com/cowprotocol/services", rev = "f3678428991e055ceb517f184d1b37244f2d8f51" }
