@@ -725,7 +725,6 @@ mod tests {
 
     use actix_web::test;
     use chrono::NaiveDateTime;
-    use ethers::types::U256;
 
     use tycho_core::{
         models::{
@@ -841,7 +840,7 @@ mod tests {
                 .unwrap(),
             "account0".to_owned(),
             evm_contract_slots([(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
-            Bytes::from(U256::from(101)),
+            Bytes::from(101u8).lpad(32, 0),
             Bytes::from("C0C0C0"),
             "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                 .parse()
@@ -990,7 +989,7 @@ mod tests {
         data: impl IntoIterator<Item = (&'a str, i32)>,
     ) -> HashMap<String, Bytes> {
         data.into_iter()
-            .map(|(s, v)| (s.to_owned(), Bytes::from(U256::from(v))))
+            .map(|(s, v)| (s.to_owned(), Bytes::from(u32::try_from(v).unwrap()).lpad(32, 0)))
             .collect()
     }
 

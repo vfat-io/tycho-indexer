@@ -90,7 +90,6 @@ mod test {
         },
         trim_curve_component_token,
     };
-    use ethers::types::{H160, H256};
     use std::{
         collections::{HashMap, HashSet},
         str::FromStr,
@@ -153,12 +152,8 @@ mod test {
                         protocol_type_name: "Pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                                .unwrap()
-                                .into(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                                .unwrap()
-                                .into(),
+                            Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                            Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
                         ],
                         contract_addresses: vec![],
                         creation_tx: Default::default(),
@@ -190,8 +185,8 @@ mod test {
                         component_id: CREATED_CONTRACT.to_string(),
                         updated_attributes: HashMap::from([
                             ("tick".to_string(), Bytes::from(1_u64.to_be_bytes())),
-                            ("sqrt_price_x96".to_string(), Bytes::from(H256::zero())),
-                            ("liquidity".to_string(), Bytes::from(H256::zero())),
+                            ("sqrt_price_x96".to_string(), Bytes::zero(32)),
+                            ("liquidity".to_string(), Bytes::zero(32)),
                         ]),
                         deleted_attributes: HashSet::new(),
                     },
@@ -281,18 +276,10 @@ mod test {
                         protocol_type_name: "Pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                                .unwrap()
-                                .into(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                                .unwrap()
-                                .into(),
-                            H160::from_str("0x0000000000000000000000000000000000000000")
-                                .unwrap()
-                                .into(),
-                            H160::from_str("0x0000000000000000000000000000000000000000")
-                                .unwrap()
-                                .into(),
+                            Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                            Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                            Bytes::from_str("0x0000000000000000000000000000000000000000").unwrap(),
+                            Bytes::from_str("0x0000000000000000000000000000000000000000").unwrap(),
                         ],
                         contract_addresses: vec![],
                         creation_tx: Default::default(),
@@ -338,12 +325,8 @@ mod test {
                         protocol_type_name: "Pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                                .unwrap()
-                                .into(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                                .unwrap()
-                                .into(),
+                            Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                            Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
                         ],
                         contract_addresses: vec![],
                         creation_tx: Default::default(),

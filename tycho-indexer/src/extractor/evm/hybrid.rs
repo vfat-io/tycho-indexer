@@ -1268,7 +1268,6 @@ mod test {
     use mockall::mock;
     use models::blockchain::{Transaction, TxWithChanges};
     use tycho_core::{models::protocol::ProtocolComponent, traits::TokenOwnerFinding};
-    use web3::types::{H160, H256};
 
     mock! {
         pub TokenPreProcessor {}
@@ -1624,28 +1623,28 @@ mod test {
             component_balances: HashMap::from([(
                 "comp1".to_string(),
                 HashMap::from([(
-                    H160::from_str("0x0000000000000000000000000000000000000001").unwrap().into(),
+                    Bytes::from_str("0x0000000000000000000000000000000000000001").unwrap(),
                     ComponentBalance {
-                        token: H160::from_str("0x0000000000000000000000000000000000000001")
-                            .unwrap().into(),
+                        token: Bytes::from_str("0x0000000000000000000000000000000000000001")
+                            .unwrap(),
                         balance: Bytes::from(
                             "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
                         ),
                         balance_float: 11_304_207_639.4e18,
-                        modify_tx: H256::default().into(),
+                        modify_tx: Bytes::zero(32),
                         component_id: "comp1".to_string(),
                     },
                 ),
                     (
-                        H160::from_str("0x0000000000000000000000000000000000000002").unwrap().into(),
+                        Bytes::from_str("0x0000000000000000000000000000000000000002").unwrap(),
                         ComponentBalance {
-                            token: H160::from_str("0x0000000000000000000000000000000000000002")
-                                .unwrap().into(),
+                            token: Bytes::from_str("0x0000000000000000000000000000000000000002")
+                                .unwrap(),
                             balance: Bytes::from(
                                 "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
                             ),
                             balance_float: 100_000e6,
-                            modify_tx: H256::default().into(),
+                            modify_tx: Bytes::zero(32),
                             component_id: "comp1".to_string(),
                         },
                     )
@@ -1770,7 +1769,7 @@ mod test_serial_db {
         pb::sf::substreams::v1::BlockRef,
     };
     use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-    use ethers::{abi::AbiEncode, prelude::U256};
+    use ethers::abi::AbiEncode;
     use futures03::{stream, StreamExt};
 
     use mockall::mock;
@@ -1785,7 +1784,7 @@ mod test_serial_db {
         db_fixtures::{self, yesterday_midnight, yesterday_one_am},
         testing::run_against_db,
     };
-    use web3::types::{H160, H256};
+    use web3::types::H256;
 
     mock! {
         pub TokenPreProcessor {}
@@ -2015,12 +2014,8 @@ mod test_serial_db {
                         protocol_type_name: "pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                                .unwrap()
-                                .into(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                                .unwrap()
-                                .into(),
+                            Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                            Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
                         ],
                         contract_addresses: vec![],
                         creation_tx: Default::default(),
@@ -2043,7 +2038,7 @@ mod test_serial_db {
                     .unwrap(),
                 "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
                 evm::fixtures::evm_slots([(1, 200)]),
-                U256::from(1000).into(),
+                Bytes::from(1000_u64).lpad(32, 0),
                 vec![0, 0, 0, 0].into(),
                 "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
                     .parse()
@@ -2059,10 +2054,8 @@ mod test_serial_db {
     // Creates a BlockChanges object with a VM contract creation and an account update. Based on an
     // Ambient pool creation
     fn vm_creation_and_update() -> evm::BlockChanges {
-        let base_token = H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-            .expect("Invalid H160 address");
-        let quote_token = H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-            .expect("Invalid H160 address");
+        let base_token = Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
+        let quote_token = Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap();
         let component_id = "ambient_USDC_ETH".to_string();
         evm::BlockChanges {
             extractor: "vm:ambient".to_owned(),
@@ -2080,8 +2073,8 @@ mod test_serial_db {
                             protocol_system: "test".to_string(),
                             protocol_type_name: "vm:pool".to_string(),
                             chain: Chain::Ethereum,
-                            tokens: vec![base_token.into(), quote_token.into()],
-                            contract_addresses: vec![H160(VM_CONTRACT).into()],
+                            tokens: vec![base_token.clone(), quote_token],
+                            contract_addresses: vec![Bytes::from(VM_CONTRACT)],
                             static_attributes: Default::default(),
                             change: Default::default(),
                             creation_tx: VM_TX_HASH_0.parse().unwrap(),
@@ -2089,7 +2082,7 @@ mod test_serial_db {
                         },
                     )]),
                     [(
-                        H160(VM_CONTRACT).into(),
+                        Bytes::from(VM_CONTRACT),
                         AccountDelta::new(
                             Chain::Ethereum,
                             VM_CONTRACT.into(),
@@ -2105,9 +2098,9 @@ mod test_serial_db {
                     HashMap::from([(
                         component_id.clone(),
                         HashMap::from([(
-                            base_token.into(),
+                            base_token.clone(),
                             ComponentBalance {
-                                token: base_token.into(),
+                                token: base_token.clone(),
                                 balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
                                 modify_tx: VM_TX_HASH_0.parse().unwrap(),
@@ -2120,12 +2113,12 @@ mod test_serial_db {
                 TxWithChanges::new(
                     HashMap::new(),
                     [(
-                        H160(VM_CONTRACT).into(),
+                        Bytes::from(VM_CONTRACT),
                         AccountDelta::new(
                             Chain::Ethereum,
                             VM_CONTRACT.into(),
                             evm::fixtures::slots([(1, 200)]),
-                            Some(U256::from(1000).into()),
+                            Some(Bytes::from(1000_u64).lpad(32, 0)),
                             None,
                             ChangeType::Update,
                         ),
@@ -2136,9 +2129,9 @@ mod test_serial_db {
                     HashMap::from([(
                         component_id.clone(),
                         HashMap::from([(
-                            base_token.into(),
+                            base_token.clone(),
                             ComponentBalance {
-                                token: base_token.into(),
+                                token: base_token,
                                 balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
                                 modify_tx: VM_TX_HASH_1.parse().unwrap(),
@@ -2168,19 +2161,14 @@ mod test_serial_db {
                 protocol_type_name: "pool".to_string(),
                 chain: Chain::Ethereum,
                 tokens: vec![
-                    H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                        .unwrap()
-                        .into(),
-                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                        .unwrap()
-                        .into(),
+                    Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                    Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
                 ],
                 contract_addresses: vec![],
-                creation_tx: H256::from_str(
+                creation_tx: Bytes::from_str(
                     "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
                 )
-                .unwrap()
-                .into(),
+                .unwrap(),
                 static_attributes: Default::default(),
                 created_at: Default::default(),
                 change: Default::default(),
@@ -2364,8 +2352,8 @@ mod test_serial_db {
                 block: Block::new(
                     3,
                     Chain::Ethereum,
-                    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap().into(),
-                    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap().into(),
+                    Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
+                    Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
                     NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
                 ),
                 finalized_block_height: 1,
@@ -2388,13 +2376,13 @@ mod test_serial_db {
                         protocol_type_name: "pt_1".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap().into(),
-                            H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
+                            Bytes::from_str("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap(),
+                            Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
                         ],
                         contract_addresses: vec![],
                         static_attributes: HashMap::new(),
                         change: ChangeType::Creation,
-                        creation_tx: H256::from_str("0x000000000000000000000000000000000000000000000000000000000000c351").unwrap().into(),
+                        creation_tx: Bytes::from_str("0x000000000000000000000000000000000000000000000000000000000000c351").unwrap(),
                         created_at: NaiveDateTime::from_timestamp_opt(base_ts + 5000, 0).unwrap(),
                     }),
                 ]),
@@ -2405,30 +2393,30 @@ mod test_serial_db {
                         protocol_type_name: "pt_2".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap().into(),
-                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                            Bytes::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap(),
+                            Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                         ],
                         contract_addresses: vec![],
                         static_attributes: HashMap::new(),
                         change: ChangeType::Deletion,
-                        creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap().into(),
+                        creation_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
                         created_at: NaiveDateTime::from_timestamp_opt(base_ts + 4000, 0).unwrap(),
                     }),
                 ]),
                 component_balances: HashMap::from([
                     ("pc_1".to_string(), HashMap::from([
-                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(), ComponentBalance {
-                            token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
+                        (Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), ComponentBalance {
+                            token: Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
                             balance: Bytes::from("0x00000001"),
                             balance_float: 1.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
                             component_id: "pc_1".to_string(),
                         }),
-                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(), ComponentBalance {
-                            token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                        (Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), ComponentBalance {
+                            token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                             balance: Bytes::from("0x000003e8"),
                             balance_float: 1000.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007531").unwrap().into(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000007531").unwrap(),
                             component_id: "pc_1".to_string(),
                         }),
                     ])),
@@ -2545,14 +2533,14 @@ mod test_serial_db {
                 block: Block::new(
                     3,
                     Chain::Ethereum,
-                    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap().into(),
-                    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap().into(),
+                    Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
+                    Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
                     NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
                 ),
                 finalized_block_height: 1,
                 revert: true,
                 account_deltas: HashMap::from([
-                    (H160::from_str("0x0000000000000000000000000000000000000001").unwrap().into(), AccountDelta {
+                    (Bytes::from_str("0x0000000000000000000000000000000000000001").unwrap(), AccountDelta {
                         address: Bytes::from_str("0000000000000000000000000000000000000001").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
@@ -2563,7 +2551,7 @@ mod test_serial_db {
                         code: None,
                         change: ChangeType::Update,
                     }),
-                    (H160::from_str("0x0000000000000000000000000000000000000002").unwrap().into(), AccountDelta {
+                    (Bytes::from_str("0x0000000000000000000000000000000000000002").unwrap(), AccountDelta {
                         address: Bytes::from_str("0000000000000000000000000000000000000002").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
@@ -2583,32 +2571,32 @@ mod test_serial_db {
                         protocol_type_name: "pt_1".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap().into(),
-                            H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
+                            Bytes::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap(),
+                            Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
                         ],
                         contract_addresses: vec![
-                            H160::from_str("0x0000000000000000000000000000000000000001").unwrap().into(),
+                            Bytes::from_str("0x0000000000000000000000000000000000000001").unwrap(),
                         ],
                         static_attributes: HashMap::new(),
                         change: ChangeType::Deletion,
-                        creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap().into(),
+                        creation_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
                         created_at: NaiveDateTime::from_timestamp_opt(base_ts + 4000, 0).unwrap(),
                     }),
                 ]),
                 component_balances: HashMap::from([
                     ("pc_1".to_string(), HashMap::from([
-                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(), ComponentBalance {
-                            token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap().into(),
+                        (Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), ComponentBalance {
+                            token: Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
                             balance: Bytes::from("0x00000064"),
                             balance_float: 100.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007532").unwrap().into(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000007532").unwrap(),
                             component_id: "pc_1".to_string(),
                         }),
-                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(), ComponentBalance {
-                            token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                        (Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), ComponentBalance {
+                            token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                             balance: Bytes::from("0x00000001"),
                             balance_float: 1.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap().into(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
                             component_id: "pc_1".to_string(),
                         }),
                     ])),

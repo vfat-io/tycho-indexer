@@ -6456,7 +6456,6 @@ dependencies = [
  "chrono",
  "diesel",
  "diesel-async",
- "ethers",
  "hex",
  "maplit",
  "pretty_assertions",

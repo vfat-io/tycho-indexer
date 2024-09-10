@@ -990,8 +990,6 @@ impl Gateway for CachedGateway {}
 mod test_serial_db {
     use std::{collections::HashSet, str::FromStr, time::Duration};
 
-    use ethers::types::U256;
-
     use tycho_core::models::ChangeType;
 
     use crate::postgres::{db_fixtures, db_fixtures::yesterday_one_am, testing::run_against_db};
@@ -1125,7 +1123,7 @@ mod test_serial_db {
             // Send second block messages
             let block_2 = get_sample_block(2);
             let attributes: HashMap<String, Bytes> =
-                vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
+                vec![("reserve1".to_owned(), Bytes::from(1000u64).lpad(32, 0))]
                     .into_iter()
                     .collect();
             let protocol_state_delta = models::protocol::ProtocolComponentStateDelta::new(
@@ -1539,7 +1537,7 @@ mod test_serial_db {
             protocol_component_id,
             txn[0],
             "reserve1".to_owned(),
-            Bytes::from(U256::from(1100)),
+            Bytes::from(1100u64).lpad(32, 0),
             None,
             Some(txn[2]),
         )

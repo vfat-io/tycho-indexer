@@ -393,7 +393,6 @@ mod test {
     };
 
     use chrono::NaiveDateTime;
-    use ethers::types::{H160, H256};
     use rstest::rstest;
     use tycho_core::{
         models::{
@@ -439,13 +438,12 @@ mod test {
                     (
                         "Balance1".to_string(),
                         [(
-                            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                .unwrap()
-                                .into(),
+                            Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                             ComponentBalance {
-                                token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap()
-                                    .into(),
+                                token: Bytes::from_str(
+                                    "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+                                )
+                                .unwrap(),
                                 balance: Bytes::from(1_i32.to_le_bytes()),
                                 modify_tx: tx.hash.clone(),
                                 component_id: "Balance1".to_string(),
@@ -458,13 +456,12 @@ mod test {
                     (
                         "Balance2".to_string(),
                         [(
-                            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                .unwrap()
-                                .into(),
+                            Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                             ComponentBalance {
-                                token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap()
-                                    .into(),
+                                token: Bytes::from_str(
+                                    "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+                                )
+                                .unwrap(),
                                 balance: Bytes::from(30_i32.to_le_bytes()),
                                 modify_tx: tx.hash.clone(),
                                 component_id: "Balance2".to_string(),
@@ -538,13 +535,10 @@ mod test {
                 let balance_changes = HashMap::from([(
                     "Balance1".to_string(),
                     [(
-                        H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                            .unwrap()
-                            .into(),
+                        Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                         ComponentBalance {
-                            token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                .unwrap()
-                                .into(),
+                            token: Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                .unwrap(),
                             balance: Bytes::from(3_i32.to_le_bytes()),
                             modify_tx: tx.hash.clone(),
                             component_id: "Balance1".to_string(),
@@ -622,10 +616,8 @@ mod test {
             .unwrap();
 
         let c_ids = ["Balance1".to_string(), "Balance2".to_string()];
-        let token_key =
-            Bytes::from(H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap());
-        let missing_token =
-            Bytes::from(H160::from_str("0x0000000000000000000000000000000000000000").unwrap());
+        let token_key = Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
+        let missing_token = Bytes::from_str("0x0000000000000000000000000000000000000000").unwrap();
         let missing_component = "missing".to_string();
 
         let keys = vec![
@@ -720,10 +712,10 @@ mod test {
 
         let purged = reorg_buffer
             .purge(
-                H256::from_low_u64_be(
-                    0x0000000000000000000000000000000000000000000000000000000000000001,
+                Bytes::from_str(
+                    "0x0000000000000000000000000000000000000000000000000000000000000001",
                 )
-                .into(),
+                .unwrap(),
             )
             .unwrap();
 
@@ -732,10 +724,8 @@ mod test {
         assert_eq!(purged, vec![get_block_changes(2), get_block_changes(3)]);
 
         let unknown = reorg_buffer.purge(
-            H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000000000999,
-            )
-            .into(),
+            Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000999")
+                .unwrap(),
         );
 
         assert!(unknown.is_err());

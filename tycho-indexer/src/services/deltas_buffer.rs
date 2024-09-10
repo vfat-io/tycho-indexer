@@ -334,7 +334,6 @@ impl PendingDeltas {
 mod test {
     use super::*;
     use crate::{extractor::evm, testing::block};
-    use ethers::types::{H160, H256, U256};
     use std::str::FromStr;
     use tycho_core::{
         models::{
@@ -361,7 +360,7 @@ mod test {
     }
 
     fn vm_block_deltas() -> BlockAggregatedChanges {
-        let address = H160::from_str("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05").unwrap();
+        let address = Bytes::from_str("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05").unwrap();
         BlockAggregatedChanges::new(
             "vm:extractor",
             Chain::Ethereum,
@@ -370,12 +369,12 @@ mod test {
             false,
             HashMap::new(),
             [(
-                address.into(),
+                address.clone(),
                 AccountDelta::new(
                     Chain::Ethereum,
-                    address.into(),
+                    address.clone(),
                     evm::fixtures::slots([(1, 1), (2, 1)]),
-                    Some(U256::from(1999).into()),
+                    Some(Bytes::from(1999u32).lpad(32, 0)),
                     None,
                     ChangeType::Update,
                 ),
@@ -471,16 +470,13 @@ mod test {
                 (
                     "component1".to_string(),
                     [(
-                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                            .unwrap()
-                            .into(),
+                        Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
                         ComponentBalance {
-                            token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                                .unwrap()
-                                .into(),
+                            token: Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                                .unwrap(),
                             balance_float: 1.0,
                             balance: Bytes::from("0x01"),
-                            modify_tx: H256::zero().into(),
+                            modify_tx: Bytes::zero(32),
                             component_id: "component1".to_string(),
                         },
                     )]
@@ -490,16 +486,13 @@ mod test {
                 (
                     "component3".to_string(),
                     [(
-                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                            .unwrap()
-                            .into(),
+                        Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
                         ComponentBalance {
-                            token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                                .unwrap()
-                                .into(),
+                            token: Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                                .unwrap(),
                             balance_float: 2.0,
                             balance: Bytes::from("0x02"),
-                            modify_tx: H256::zero().into(),
+                            modify_tx: Bytes::zero(32),
                             component_id: "component3".to_string(),
                         },
                     )]

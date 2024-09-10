@@ -97,7 +97,6 @@ pub fn transcode_usv2_balances(mut changes: BlockChanges) -> BlockChanges {
 mod tests {
     use std::{collections::HashMap, str::FromStr};
 
-    use ethers::types::{H160, H256, U256};
     use tycho_core::models::{
         blockchain::{Transaction, TxWithChanges},
         protocol::ComponentBalance,
@@ -114,7 +113,7 @@ mod tests {
 
         let be_balance = transcode_ascii_balance_to_be(&ascii_balance).unwrap();
 
-        assert_eq!(be_balance, Bytes::from(U256::from(711840128)));
+        assert_eq!(be_balance, Bytes::from(711840128u128).lpad(32, 0));
     }
 
     #[test]
@@ -135,36 +134,24 @@ mod tests {
                 "0xabc".to_string(),
                 HashMap::from([
                     (
-                        H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
-                            .unwrap()
-                            .into(),
+                        Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
                         ComponentBalance {
-                            token: H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
-                                .unwrap()
-                                .into(),
+                            token: Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
+                                .unwrap(),
                             balance: Bytes::from(0_i32.to_le_bytes()),
                             balance_float: 36522027799.0,
-                            modify_tx: H256::from_low_u64_be(
-                                0x0000000000000000000000000000000000000000000000000000000011121314,
-                            )
-                            .into(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
                             component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
                         },
                     ),
                     (
-                        H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
-                            .unwrap()
-                            .into(),
+                        Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
                         ComponentBalance {
-                            token: H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
-                                .unwrap()
-                                .into(),
+                            token: Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
+                                .unwrap(),
                             balance: Bytes::from(0_i32.to_le_bytes()),
                             balance_float: 36522027799.0,
-                            modify_tx: H256::from_low_u64_be(
-                                0x0000000000000000000000000000000000000000000000000000000011121314,
-                            )
-                            .into(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
                             component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
                         },
                     ),
@@ -201,19 +188,13 @@ mod tests {
                 balance_changes: HashMap::from([(
                     "0xabc".to_string(),
                     HashMap::from([(
-                        H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
-                            .unwrap()
-                            .into(),
+                        Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
                         ComponentBalance {
-                            token: H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
-                                .unwrap()
-                                .into(),
+                            token: Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
+                                .unwrap(),
                             balance: Bytes::from(0_i32.to_le_bytes()),
                             balance_float: 36522027799.0,
-                            modify_tx: H256::from_low_u64_be(
-                                0x0000000000000000000000000000000000000000000000000000000011121314,
-                            )
-                            .into(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
                             component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
                         },
                     )]),

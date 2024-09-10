@@ -17,7 +17,7 @@ use tycho_core::{
     Bytes,
 };
 
-use crate::token_analyzer::trace_call::TraceCallDetector;
+use crate::{token_analyzer::trace_call::TraceCallDetector, BytesConvertible};
 
 #[derive(Debug, Clone)]
 pub struct EthereumTokenPreProcessor {
@@ -89,8 +89,11 @@ impl TokenPreProcessor for EthereumTokenPreProcessor {
         let mut tokens_info = Vec::new();
 
         for address in addresses {
-            let contract =
-                Contract::new(address.clone(), self.erc20_abi.clone(), self.ethers_client.clone());
+            let contract = Contract::new(
+                H160::from_bytes(&address),
+                self.erc20_abi.clone(),
+                self.ethers_client.clone(),
+            );
 
             let symbol = contract
                 .method("symbol", ())
@@ -184,15 +187,9 @@ mod tests {
         let usdc_address: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
         let fake_address: &str = "0xA0b86991c7456b36c1d19D4a2e9Eb0cE3606eB48";
         let addresses = vec![
-            H160::from_str(weth_address)
-                .unwrap()
-                .into(),
-            H160::from_str(usdc_address)
-                .unwrap()
-                .into(),
-            H160::from_str(fake_address)
-                .unwrap()
-                .into(),
+            Bytes::from_str(weth_address).unwrap(),
+            Bytes::from_str(usdc_address).unwrap(),
+            Bytes::from_str(fake_address).unwrap(),
         ];
 
         let results = processor

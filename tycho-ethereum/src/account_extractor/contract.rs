@@ -14,7 +14,7 @@ use tycho_core::{
     Bytes,
 };
 
-use crate::RPCError;
+use crate::{BytesConvertible, RPCError};
 
 pub struct EVMAccountExtractor {
     provider: Provider<Http>,
@@ -33,8 +33,7 @@ impl AccountExtractor for EVMAccountExtractor {
         let mut updates = HashMap::new();
 
         for address in account_addresses {
-            let address: H160 = address.into();
-
+            let address = H160::from_bytes(&address);
             trace!(contract=?address, block_number=?block.number, block_hash=?block.hash, "Extracting contract code and storage" );
             let block_id = Some(BlockId::from(block.number));
 
@@ -52,19 +51,19 @@ impl AccountExtractor for EVMAccountExtractor {
             let code: Option<Bytes> = Some(Bytes::from(code.to_vec()));
 
             let slots = self
-                .get_storage_range(address, block.hash.clone().into())
+                .get_storage_range(address, H256::from_bytes(&block.hash))
                 .await?
                 .into_iter()
-                .map(|(k, v)| (k.into(), Some(v.into())))
+                .map(|(k, v)| (k.to_bytes(), Some(v.to_bytes())))
                 .collect();
 
             updates.insert(
                 Bytes::from(address.to_fixed_bytes()),
                 AccountDelta {
-                    address: address.into(),
+                    address: address.to_bytes(),
                     chain: self.chain,
                     slots,
-                    balance: balance.map(Into::into),
+                    balance: balance.map(BytesConvertible::to_bytes),
                     code,
                     change: ChangeType::Creation,
                 },
@@ -131,8 +130,8 @@ impl EVMAccountExtractor {
 
         Ok(Block {
             number: block.number.unwrap().as_u64(),
-            hash: block.hash.unwrap().into(),
-            parent_hash: block.parent_hash.into(),
+            hash: block.hash.unwrap().to_bytes(),
+            parent_hash: block.parent_hash.to_bytes(),
             chain: Chain::Ethereum,
             ts: NaiveDateTime::from_timestamp_opt(block.timestamp.as_u64() as i64, 0)
                 .expect("Failed to convert timestamp"),
@@ -176,7 +175,7 @@ mod tests {
         let block = Block::new(
             block_number,
             Chain::Ethereum,
-            block_hash.into(),
+            block_hash.to_bytes(),
             Default::default(),
             Default::default(),
         );

@@ -4,10 +4,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-#[cfg(test)]
-use ethers::prelude::H256;
-#[cfg(test)]
-use ethers::types::U256;
 use mockall::mock;
 
 use tycho_core::{
@@ -475,7 +471,9 @@ mock! {
 #[cfg(test)]
 pub fn evm_contract_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap<Bytes, Bytes> {
     data.into_iter()
-        .map(|(s, v)| (Bytes::from(U256::from(s)), Bytes::from(U256::from(v))))
+        .map(|(s, v)| {
+            (Bytes::from(u32::try_from(s).unwrap()), Bytes::from(u32::try_from(v).unwrap()))
+        })
         .collect()
 }
 
@@ -492,8 +490,8 @@ pub fn block(version: u64) -> Block {
     Block::new(
         version,
         Chain::Ethereum,
-        H256::from_low_u64_be(version).into(),
-        H256::from_low_u64_be(version - 1).into(),
+        Bytes::from(version).lpad(32, 0),
+        Bytes::from(version - 1).lpad(32, 0),
         ts + Duration::from_secs(version * 12),
     )
 }

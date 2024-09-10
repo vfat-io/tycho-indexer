@@ -10,7 +10,7 @@ use tycho_core::{
     traits::TokenAnalyzer,
     Bytes,
 };
-use tycho_ethereum::token_analyzer::trace_call::TraceCallDetector;
+use tycho_ethereum::{token_analyzer::trace_call::TraceCallDetector, BytesConvertible};
 use url::Url;
 
 #[tokio::main]
@@ -30,7 +30,7 @@ async fn main() -> Result<(), ()> {
             Bytes::from_str("260E069deAd76baAC587B5141bB606Ef8b9Bab6c").unwrap(),
             U256::from_dec_str("13042252617814040589")
                 .unwrap()
-                .into(),
+                .to_bytes(),
         ),
     )]));
 
@@ -44,7 +44,7 @@ async fn main() -> Result<(), ()> {
         .analyze(
             H160::from_str("0x3A9FfF453d50D4Ac52A6890647b823379ba36B9E")
                 .unwrap()
-                .into(),
+                .to_bytes(),
             BlockTag::Latest,
         )
         .await

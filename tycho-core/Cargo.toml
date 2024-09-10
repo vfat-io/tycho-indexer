@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 # TODO: eventually remove this dependency, currently used only by hex_bytes.
-ethers.workspace = true
 serde.workspace = true
 diesel = { workspace = true, optional = true }
 thiserror.workspace = true

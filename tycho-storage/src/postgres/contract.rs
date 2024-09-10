@@ -1519,7 +1519,7 @@ mod test {
                     .into_iter()
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
-                Bytes::from(U256::from(100)),
+                Bytes::from(100u64).lpad(32, 0),
                 Bytes::from("C0C0C0"),
                 "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                     .parse()
@@ -1546,7 +1546,7 @@ mod test {
                     .into_iter()
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
-                Bytes::from(U256::from(101)),
+                Bytes::from(101u64).lpad(32, 0),
                 Bytes::from("C0C0C0"),
                 "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                     .parse()
@@ -1570,8 +1570,12 @@ mod test {
     fn contract_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap<Bytes, Option<Bytes>> {
         data.into_iter()
             .map(|(s, v)| {
-                let val = if v == 0 { None } else { Some(Bytes::from(U256::from(v))) };
-                (Bytes::from(U256::from(s)), val)
+                let val = if v == 0 {
+                    None
+                } else {
+                    Some(Bytes::from(u32::try_from(v).unwrap()).lpad(32, 0))
+                };
+                (Bytes::from(u32::try_from(s).unwrap()).lpad(32, 0), val)
             })
             .collect()
     }
@@ -1588,7 +1592,7 @@ mod test {
                     .into_iter()
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
-                Bytes::from(U256::from(50)),
+                Bytes::from(50u64).lpad(32, 0),
                 Bytes::from("C1C1C1"),
                 "0xa04b84acdf586a694085997f32c4aa11c2726a7f7e0b677a27d44d180c08e07f"
                     .parse()
@@ -1621,7 +1625,7 @@ mod test {
                     .into_iter()
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
-                Bytes::from(U256::from(25)),
+                Bytes::from(25u64).lpad(32, 0),
                 Bytes::from("C2C2C2"),
                 "0x7eb1e0ed9d018991eed6077f5be45b52347f6e5870728809d368ead5b96a1e96"
                     .parse()
@@ -2284,7 +2288,7 @@ mod test {
                 Chain::Ethereum,
                 Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f").expect("addr ok"),
                 contract_slots([(6, 0), (0, 1), (1, 5), (5, 0)]),
-                Some(Bytes::from(U256::from(100))),
+                Some(Bytes::from(100u64).lpad(32, 0)),
                 None,
                 ChangeType::Update,
             ),
@@ -2302,7 +2306,7 @@ mod test {
                 Chain::Ethereum,
                 Bytes::from_str("94a3f312366b8d0a32a00986194053c0ed0cddb1").expect("addr ok"),
                 contract_slots([(1, 2), (2, 4)]),
-                Some(Bytes::from(U256::from(25))),
+                Some(Bytes::from(25u64).lpad(32, 0)),
                 Some(Bytes::from("C2C2C2")),
                 ChangeType::Creation,
             ),
@@ -2333,7 +2337,7 @@ mod test {
                 Chain::Ethereum,
                 Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f").expect("addr ok"),
                 contract_slots([(6, 30), (0, 2), (1, 3), (5, 25)]),
-                Some(Bytes::from(U256::from(101))),
+                Some(Bytes::from(101u64).lpad(32, 0)),
                 None,
                 ChangeType::Update,
             ),
@@ -2342,7 +2346,7 @@ mod test {
                 Chain::Ethereum,
                 Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee").expect("addr ok"),
                 contract_slots([(0, 128), (1, 255)]),
-                Some(Bytes::from(U256::from(50))),
+                Some(Bytes::from(50u64).lpad(32, 0)),
                 Some(Bytes::from("C1C1C1")),
                 ChangeType::Creation,
             ),

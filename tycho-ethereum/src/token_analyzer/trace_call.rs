@@ -1,4 +1,4 @@
-use crate::{token_analyzer::trace_many, BlockTagWrapper};
+use crate::{token_analyzer::trace_many, BlockTagWrapper, BytesConvertible};
 
 use anyhow::{bail, ensure, Context, Result};
 use contracts::ERC20;
@@ -45,7 +45,7 @@ impl TokenAnalyzer for TraceCallDetector {
     ) -> std::result::Result<(TokenQuality, Option<TransferCost>, Option<TransferTax>), String>
     {
         let (quality, transfer_cost, tax) = self
-            .detect_impl(token.clone().into(), BlockTagWrapper(block).into())
+            .detect_impl(H160::from_bytes(&token), BlockTagWrapper(block).into())
             .await
             .map_err(|e| e.to_string())?;
         tracing::debug!(?token, ?quality, "determined token quality");
@@ -86,7 +86,7 @@ impl TraceCallDetector {
         const MIN_AMOUNT: u64 = 100_000;
         let (take_from, amount) = match self
             .finder
-            .find_owner(token.into(), MIN_AMOUNT.into())
+            .find_owner(token.to_bytes(), MIN_AMOUNT.into())
             .await
             .map_err(|e| e.to_string())?
         {
@@ -99,10 +99,10 @@ impl TraceCallDetector {
                 //   the past
                 // - New block observed - the trace_callMany is executed on a block that came in
                 //   since we read the balance
-                let amount = cmp::max(U256::from(balance) / 2, MIN_AMOUNT.into());
+                let amount = cmp::max(U256::from_bytes(&balance) / 2, MIN_AMOUNT.into());
 
                 tracing::debug!(?token, ?address, ?amount, "found owner");
-                (H160::from(address), amount)
+                (H160::from_bytes(&address), amount)
             }
             None => {
                 return Ok((

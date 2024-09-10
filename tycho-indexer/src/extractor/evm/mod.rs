@@ -868,7 +868,7 @@ impl From<BlockEntityChanges> for BlockChanges {
 }
 #[cfg(test)]
 pub mod fixtures {
-    use ethers::types::{H160, H256, U256};
+    use ethers::types::{H160, H256};
     use std::str::FromStr;
 
     use prost::Message;
@@ -902,7 +902,7 @@ pub mod fixtures {
 
     pub fn evm_slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<Bytes, Bytes> {
         data.into_iter()
-            .map(|(s, v)| (U256::from(s).into(), U256::from(v).into()))
+            .map(|(s, v)| (Bytes::from(s).lpad(32, 0), Bytes::from(v).lpad(32, 0)))
             .collect()
     }
 
@@ -910,7 +910,7 @@ pub mod fixtures {
     // TODO: this is temporary, we shoud make AccountUpdate.slots use Bytes instead of Option<Bytes>
     pub fn slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<Bytes, Option<Bytes>> {
         data.into_iter()
-            .map(|(s, v)| (U256::from(s).into(), Some(U256::from(v).into())))
+            .map(|(s, v)| (Bytes::from(s).lpad(32, 0), Some(Bytes::from(v).lpad(32, 0))))
             .collect()
     }
 
@@ -1184,7 +1184,7 @@ pub mod fixtures {
                             slots: vec![
                                 ContractSlot {
                                     slot: Bytes::from("0x01").into(),
-                                    value: Bytes::from(U256::from(10)).into(),
+                                    value: Bytes::from(10u8).lpad(32, 0).into(),
                                 },
                                 ContractSlot {
                                     slot: Bytes::from("0x02").into(),
@@ -1257,7 +1257,7 @@ pub mod fixtures {
                                 code: 123_i32.to_le_bytes().to_vec(),
                                 slots: vec![ContractSlot {
                                     slot: Bytes::from("0x02").into(),
-                                    value: Bytes::from(U256::from(200)).into(),
+                                    value: Bytes::from(200u8).lpad(32, 0).into(),
                                 }],
                                 change: ChangeType::Update.into(),
                             },
@@ -1306,8 +1306,8 @@ pub mod fixtures {
                         balance: 1_i32.to_be_bytes().to_vec(),
                         code: 123_i32.to_le_bytes().to_vec(),
                         slots: vec![ContractSlot {
-                            slot: Bytes::from(U256::from(3)).into(),
-                            value: Bytes::from(U256::from(10)).into(),
+                            slot: Bytes::from(3u8).lpad(32, 0).into(),
+                            value: Bytes::from(10u8).lpad(32, 0).into(),
                         }],
                         change: ChangeType::Update.into(),
                     }],
@@ -1340,7 +1340,7 @@ pub mod fixtures {
                             code: 123_i32.to_le_bytes().to_vec(),
                             slots: vec![ContractSlot {
                                 slot: Bytes::from("0x01").into(),
-                                value: Bytes::from(U256::from(10)).into(),
+                                value: Bytes::from(10u8).lpad(32, 0).into(),
                             }],
                             change: ChangeType::Update.into(),
                         },
@@ -1350,7 +1350,7 @@ pub mod fixtures {
                             code: 123_i32.to_le_bytes().to_vec(),
                             slots: vec![ContractSlot {
                                 slot: Bytes::from("0x01").into(),
-                                value: Bytes::from(U256::from(10)).into(),
+                                value: Bytes::from(10u8).lpad(32, 0).into(),
                             }],
                             change: ChangeType::Update.into(),
                         },
@@ -2664,7 +2664,7 @@ pub mod fixtures {
 mod test {
     use std::str::FromStr;
 
-    use ethers::types::{H160, H256, U256};
+    use ethers::types::H256;
     use prost::Message;
     use rstest::rstest;
 
@@ -2680,7 +2680,7 @@ mod test {
 
     fn account01() -> Account {
         let code = vec![0, 0, 0, 0];
-        let code_hash = H256(keccak256(&code));
+        let code_hash = Bytes::from(keccak256(&code));
         Account::new(
             Chain::Ethereum,
             "0xe688b84b23f322a994A53dbF8E15FA82CDB71127"
@@ -2688,12 +2688,12 @@ mod test {
                 .unwrap(),
             "0xe688b84b23f322a994a53dbf8e15fa82cdb71127".into(),
             HashMap::new(),
-            U256::from(10000).into(),
+            Bytes::from(10000u64).lpad(32, 0),
             code.into(),
-            code_hash.into(),
-            H256::zero().into(),
-            H256::zero().into(),
-            Some(H256::zero().into()),
+            code_hash,
+            Bytes::zero(32),
+            Bytes::zero(32),
+            Some(Bytes::zero(32)),
         )
     }
 
@@ -2708,7 +2708,7 @@ mod test {
                 Chain::Ethereum,
                 Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
                 HashMap::new(),
-                Some(U256::from(10000).into()),
+                Some(Bytes::from(10000u64).lpad(32, 0)),
                 Some(code.into()),
                 ChangeType::Update,
             ),
@@ -2727,7 +2727,7 @@ mod test {
             Chain::Ethereum,
             Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
             HashMap::new(),
-            Some(U256::from(420).into()),
+            Some(Bytes::from(420u64).lpad(32, 0)),
             None,
             ChangeType::Update,
         )
@@ -2765,7 +2765,7 @@ mod test {
         let mut update_left = update_balance();
         let update_right = update_slots();
         let mut exp = update_slots();
-        exp.balance = Some(U256::from(420).into());
+        exp.balance = Some(Bytes::from(420u64).lpad(32, 0));
 
         update_left.merge(update_right).unwrap();
 
@@ -2810,34 +2810,26 @@ mod test {
         assert_eq!(res, exp);
     }
 
-    fn create_protocol_component(tx_hash: H256) -> ProtocolComponent {
+    fn create_protocol_component(tx_hash: Bytes) -> ProtocolComponent {
         ProtocolComponent {
             id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_owned(),
             protocol_system: "ambient".to_string(),
             protocol_type_name: String::from("WeightedPool"),
             chain: Chain::Ethereum,
             tokens: vec![
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                    .unwrap()
-                    .into(),
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                    .unwrap()
-                    .into(),
+                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
             ],
             contract_addresses: vec![
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                    .unwrap()
-                    .into(),
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                    .unwrap()
-                    .into(),
+                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
             ],
             static_attributes: HashMap::from([
                 ("key1".to_string(), Bytes::from(b"value1".to_vec())),
                 ("key2".to_string(), Bytes::from(b"value2".to_vec())),
             ]),
             change: ChangeType::Creation,
-            creation_tx: tx_hash.into(),
+            creation_tx: tx_hash,
             created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
         }
     }
@@ -2866,19 +2858,15 @@ mod test {
             to: Some(Bytes::from_str("0000000000000000000000000000000051525354").unwrap()),
             index: 5,
         };
-        let protocol_component = create_protocol_component(tx.hash.clone().into());
+        let protocol_component = create_protocol_component(tx.hash.clone());
         BlockContractChanges {
             extractor: "test".to_string(),
             chain: Chain::Ethereum,
             block: Block::new(
                 1,
                 Chain::Ethereum,
-                H256::from_low_u64_be(
-                    0x0000000000000000000000000000000000000000000000000000000031323334,
-                ).into(),
-                H256::from_low_u64_be(
-                    0x0000000000000000000000000000000000000000000000000000000021222324,
-                ).into(),
+                Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000031323334").unwrap(),
+                Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000021222324").unwrap(),
                 NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
             ),
             finalized_block_height: 0,
@@ -2887,7 +2875,7 @@ mod test {
             tx_updates: vec![
                 TransactionVMUpdates {
                     account_updates: [(
-                        H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
+                        Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
                         AccountDelta::new(
                             Chain::Ethereum,
                             Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
@@ -2895,7 +2883,7 @@ mod test {
                                 (2711790500, 2981278644),
                                 (3250766788, 3520254932),
                             ]),
-                            Some(U256::from(1903326068).into()),
+                            Some(Bytes::from(1903326068u64).lpad(32,0)),
                             Some(vec![129, 130, 131, 132].into()),
                             ChangeType::Update,
                         ),
@@ -2908,12 +2896,12 @@ mod test {
                     component_balances: [(
                         "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                         [(
-                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                            Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                             ComponentBalance {
-                                token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                                token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                                 balance: Bytes::from(50000000.encode_to_vec()),
                                 balance_float: 36522027799.0,
-                                modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000011121314).into(),
+                                modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
                                 component_id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                             },
                         )]
@@ -2927,7 +2915,7 @@ mod test {
                 },
                 TransactionVMUpdates {
                     account_updates: [(
-                        H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
+                        Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
                         AccountDelta::new(
                             Chain::Ethereum,
                             Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
@@ -2935,7 +2923,7 @@ mod test {
                                 (2711790500, 3250766788),
                                 (2442302356, 2711790500),
                             ]),
-                            Some(U256::from(4059231220u64).into()),
+                            Some(Bytes::from(4059231220u64).lpad(32,0)),
                             Some(vec![1, 2, 3, 4].into()),
                             ChangeType::Update,
                         ),
@@ -2946,12 +2934,12 @@ mod test {
                     component_balances: [(
                         "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                         [(
-                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                            Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                             ComponentBalance {
-                                token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap().into(),
+                                token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                                 balance: Bytes::from(10.encode_to_vec()),
                                 balance_float: 2058.0,
-                                modify_tx: H256::from_low_u64_be(0x0000000000000000000000000000000000000000000000000000000000000001).into(),
+                                modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
                                 component_id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                             },
                         )]
@@ -2985,10 +2973,10 @@ mod test {
     #[test]
     fn test_merge_protocol_state_updates() {
         let up_attributes1: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
-            ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
-            ("to_be_removed".to_owned(), Bytes::from(U256::from(1))),
+            ("reserve1".to_owned(), Bytes::from(1000u64).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(500u64).lpad(32, 0)),
+            ("static_attribute".to_owned(), Bytes::from(1u64).lpad(32, 0)),
+            ("to_be_removed".to_owned(), Bytes::from(1u64).lpad(32, 0)),
         ]
         .into_iter()
         .collect();
@@ -3002,10 +2990,10 @@ mod test {
         };
 
         let up_attributes2: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(900))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(550))),
-            ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
-            ("to_add_back".to_owned(), Bytes::from(U256::from(200))),
+            ("reserve1".to_owned(), Bytes::from(900u64).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(550u64).lpad(32, 0)),
+            ("new_attribute".to_owned(), Bytes::from(1u64).lpad(32, 0)),
+            ("to_add_back".to_owned(), Bytes::from(200u64).lpad(32, 0)),
         ]
         .into_iter()
         .collect();
@@ -3022,11 +3010,11 @@ mod test {
 
         assert!(res.is_ok());
         let expected_up_attributes: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(900))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(550))),
-            ("static_attribute".to_owned(), Bytes::from(U256::from(1))),
-            ("new_attribute".to_owned(), Bytes::from(U256::from(1))),
-            ("to_add_back".to_owned(), Bytes::from(U256::from(200))),
+            ("reserve1".to_owned(), Bytes::from(900u64).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(550u64).lpad(32, 0)),
+            ("static_attribute".to_owned(), Bytes::from(1u64).lpad(32, 0)),
+            ("new_attribute".to_owned(), Bytes::from(1u64).lpad(32, 0)),
+            ("to_add_back".to_owned(), Bytes::from(200u64).lpad(32, 0)),
         ]
         .into_iter()
         .collect();
@@ -3072,10 +3060,10 @@ mod test {
         let block = block_state_changes();
 
         let account1 = Bytes::from_str("0000000000000000000000000000000061626364").unwrap();
-        let slot1 = Bytes::from(U256::from(2711790500_u64));
-        let slot2 = Bytes::from(U256::from(3250766788_u64));
+        let slot1 = Bytes::from(2711790500_u64).lpad(32, 0);
+        let slot2 = Bytes::from(3250766788_u64).lpad(32, 0);
         let account_missing = Bytes::from_str("000000000000000000000000000000000badbabe").unwrap();
-        let slot_missing = Bytes::from(U256::from(12345678_u64));
+        let slot_missing = Bytes::from(12345678_u64).lpad(32, 0);
 
         let keys = vec![
             (&account1, &slot1),
@@ -3090,8 +3078,8 @@ mod test {
         assert_eq!(
             filtered,
             HashMap::from([
-                ((account1.clone(), slot1), U256::from(3250766788_u64).into()),
-                ((account1, slot2), U256::from(3520254932_u64).into())
+                ((account1.clone(), slot1), Bytes::from(3250766788_u64).lpad(32, 0)),
+                ((account1, slot2), Bytes::from(3520254932_u64).lpad(32, 0))
             ])
         );
     }
@@ -3102,10 +3090,8 @@ mod test {
 
         let c_id_key =
             "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string();
-        let token_key =
-            Bytes::from(H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap());
-        let missing_token =
-            Bytes::from(H160::from_str("0x0000000000000000000000000000000000000000").unwrap());
+        let token_key = Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap();
+        let missing_token = Bytes::from_str("0x0000000000000000000000000000000000000000").unwrap();
         let missing_component = "missing".to_string();
 
         let keys = vec![
@@ -3123,9 +3109,7 @@ mod test {
             HashMap::from([(
                 (c_id_key.clone(), token_key.clone()),
                 tycho_core::models::protocol::ComponentBalance {
-                    token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
-                        .unwrap()
-                        .into(),
+                    token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                     balance: Bytes::from(10.encode_to_vec()),
                     balance_float: 2058.0,
                     modify_tx: Bytes::from(
@@ -3230,7 +3214,7 @@ mod test {
         let mut state1 = protocol_state();
 
         let attributes2: HashMap<String, Bytes> =
-            vec![("reserve".to_owned(), Bytes::from(U256::from(900)))]
+            vec![("reserve".to_owned(), Bytes::from(900u64).lpad(32, 0))]
                 .into_iter()
                 .collect();
         let state2 = ProtocolComponentStateDelta {
@@ -3301,19 +3285,14 @@ mod test {
                 protocol_type_name: "WeightedPool".to_owned(),
                 chain: Chain::Ethereum,
                 tokens: vec![
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                        .unwrap()
-                        .into(),
-                    H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                        .unwrap()
-                        .into(),
+                    Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                    Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                 ],
                 static_attributes: static_attr,
-                contract_addresses: vec![H160::from_str(
+                contract_addresses: vec![Bytes::from_str(
                     "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
                 )
-                .unwrap()
-                .into()],
+                .unwrap()],
                 change: ChangeType::Creation,
                 creation_tx: tx.hash.clone(),
                 created_at: yesterday_midnight(),
@@ -3324,13 +3303,9 @@ mod test {
         let new_balances = HashMap::from([(
             "Balance1".to_string(),
             [(
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                    .unwrap()
-                    .into(),
+                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                 ComponentBalance {
-                    token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                        .unwrap()
-                        .into(),
+                    token: Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                     balance: Bytes::from(1_i32.to_le_bytes()),
                     modify_tx: tx.hash.clone(),
                     component_id: "Balance1".to_string(),
@@ -3346,14 +3321,14 @@ mod test {
             block: Block::new(
                 1,
                 Chain::Ethereum,
-                H256::from_low_u64_be(
-                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                Bytes::from_str(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
                 )
-                .into(),
-                H256::from_low_u64_be(
-                    0x0000000000000000000000000000000000000000000000000000000021222324,
+                .unwrap(),
+                Bytes::from_str(
+                    "0x0000000000000000000000000000000000000000000000000000000021222324",
                 )
-                .into(),
+                .unwrap(),
                 yesterday_midnight(),
             ),
             finalized_block_height: 420,
@@ -3400,10 +3375,8 @@ mod test {
         let block = block_entity_changes();
 
         let c_id_key = "Balance1".to_string();
-        let token_key =
-            Bytes::from(H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap());
-        let missing_token =
-            Bytes::from(H160::from_str("0x0000000000000000000000000000000000000000").unwrap());
+        let token_key = Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
+        let missing_token = Bytes::from_str("0x0000000000000000000000000000000000000000").unwrap();
         let missing_component = "missing".to_string();
 
         let keys = vec![
@@ -3421,9 +3394,7 @@ mod test {
             HashMap::from([(
                 (c_id_key.clone(), token_key.clone()),
                 tycho_core::models::protocol::ComponentBalance {
-                    token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                        .unwrap()
-                        .into(),
+                    token: Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                     balance: Bytes::from(1_i32.to_le_bytes()),
                     balance_float: 16777216.0,
                     modify_tx: Bytes::from(
@@ -3493,9 +3464,8 @@ mod test {
             expected_chain,
             &expected_protocol_system,
             &protocol_types,
-            H256::from_str("0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac")
-                .unwrap()
-                .into(),
+            Bytes::from_str("0x0e22048af8040c102d96d14b0988c6195ffda24021de4d856801553aa468bcac")
+                .unwrap(),
             Default::default(),
         ));
 
@@ -3536,7 +3506,7 @@ mod test {
         let expected_balance: f64 = 3000.0;
         let msg_balance = expected_balance.to_le_bytes().to_vec();
 
-        let expected_token = H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
+        let expected_token = Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
         let msg_token = expected_token.0.to_vec();
         let expected_component_id =
             "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902";
@@ -3552,7 +3522,7 @@ mod test {
 
         assert_eq!(from_message.balance, msg_balance);
         assert_eq!(from_message.modify_tx, tx.hash);
-        assert_eq!(from_message.token, Bytes::from(expected_token));
+        assert_eq!(from_message.token, expected_token);
         assert_eq!(from_message.component_id, expected_component_id);
     }
 
@@ -3560,19 +3530,17 @@ mod test {
     fn test_merge() {
         let tx_first_update = fixtures::transaction01();
         let tx_second_update = fixtures::transaction02(HASH_256_1, HASH_256_0, 15);
-        let protocol_component_first_tx =
-            create_protocol_component(tx_first_update.hash.clone().into());
-        let protocol_component_second_tx =
-            create_protocol_component(tx_second_update.hash.clone().into());
+        let protocol_component_first_tx = create_protocol_component(tx_first_update.hash.clone());
+        let protocol_component_second_tx = create_protocol_component(tx_second_update.hash.clone());
 
         let first_update = TransactionVMUpdates {
             account_updates: [(
-                H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
+                Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
                 AccountDelta::new(
                     Chain::Ethereum,
                     Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
                     fixtures::slots([(2711790500, 2981278644), (3250766788, 3520254932)]),
-                    Some(U256::from(1903326068).into()),
+                    Some(Bytes::from(1903326068u64).lpad(32, 0)),
                     Some(vec![129, 130, 131, 132].into()),
                     ChangeType::Update,
                 ),
@@ -3588,10 +3556,10 @@ mod test {
             component_balances: [(
                 protocol_component_first_tx.id.clone(),
                 [(
-                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
+                    Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
                     ComponentBalance {
-                        token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666)
-                            .into(),
+                        token: Bytes::from_str("0x0000000000000000000000000000000066666666")
+                            .unwrap(),
                         balance: Bytes::from(0_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
@@ -3607,12 +3575,12 @@ mod test {
         };
         let second_update = TransactionVMUpdates {
             account_updates: [(
-                H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
+                Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
                 AccountDelta::new(
                     Chain::Ethereum,
                     Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
                     fixtures::slots([(2981278644, 3250766788), (2442302356, 2711790500)]),
-                    Some(U256::from(4059231220u64).into()),
+                    Some(Bytes::from(4059231220u64).lpad(32, 0)),
                     Some(vec![1, 2, 3, 4].into()),
                     ChangeType::Update,
                 ),
@@ -3628,10 +3596,10 @@ mod test {
             component_balances: [(
                 protocol_component_second_tx.id.clone(),
                 [(
-                    H160::from_low_u64_be(0x0000000000000000000000000000000061626364).into(),
+                    Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
                     ComponentBalance {
-                        token: H160::from_low_u64_be(0x0000000000000000000000000000000066666666)
-                            .into(),
+                        token: Bytes::from_str("0x0000000000000000000000000000000066666666")
+                            .unwrap(),
                         balance: Bytes::from(500000_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),

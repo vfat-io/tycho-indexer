@@ -1628,7 +1628,7 @@ mod test {
     use std::str::FromStr;
 
     use diesel_async::AsyncConnection;
-    use ethers::prelude::{H256, U256};
+    use ethers::prelude::H256;
     use rstest::rstest;
     use serde_json::json;
 
@@ -1779,8 +1779,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Balance::from(U256::exp10(18)),
-            Balance::from(U256::zero()),
+            Balance::from(10u128.pow(18)).lpad(32, 0),
+            Bytes::zero(32),
             1e18,
             weth_id,
             txn[0],
@@ -1790,8 +1790,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Balance::from(U256::from(2000) * U256::exp10(6)),
-            Balance::from(U256::zero()),
+            Balance::from(2000 * 10u128.pow(6)).lpad(32, 0),
+            Bytes::zero(32),
             2000.0 * 1e6,
             usdc_id,
             txn[0],
@@ -1813,8 +1813,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Balance::from(U256::exp10(18)),
-            Balance::from(U256::zero()),
+            Balance::from(10u128.pow(18)).lpad(32, 0),
+            Bytes::zero(32),
             1e18,
             weth_id,
             txn[0],
@@ -1824,8 +1824,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Balance::from(U256::from(2000) * U256::exp10(18)),
-            Balance::from(U256::zero()),
+            Balance::from(2000 * 10u128.pow(18)).lpad(32, 0),
+            Bytes::zero(32),
             2000.0 * 1e18,
             dai_id,
             txn[0],
@@ -1847,8 +1847,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Balance::from(U256::from(2000) * U256::exp10(18)),
-            Balance::from(U256::zero()),
+            Balance::from(2000 * 10u128.pow(18)).lpad(32, 0),
+            Bytes::zero(32),
             1e18,
             lusd_id,
             txn[1],
@@ -1858,8 +1858,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             conn,
-            Balance::from(U256::from(2000) * U256::exp10(6)),
-            Balance::from(U256::zero()),
+            Balance::from(2000 * 10u128.pow(6)).lpad(32, 0),
+            Bytes::zero(32),
             2000.0 * 1e6,
             usdc_id,
             txn[1],
@@ -1886,7 +1886,7 @@ mod test {
             protocol_component_id,
             txn[0],
             "reserve1".to_owned(),
-            Bytes::from(U256::from(1100)),
+            Bytes::from(1100u128).lpad(32, 0),
             None,
             Some(txn[2]),
         )
@@ -1898,7 +1898,7 @@ mod test {
             protocol_component_id,
             txn[0],
             "reserve2".to_owned(),
-            Bytes::from(U256::from(500)),
+            Bytes::from(500u128).lpad(32, 0),
             None,
             None,
         )
@@ -1910,16 +1910,16 @@ mod test {
             protocol_component_id,
             txn[3],
             "reserve1".to_owned(),
-            Bytes::from(U256::from(1000)),
-            Some(Bytes::from(U256::from(1100))),
+            Bytes::from(1000u128).lpad(32, 0),
+            Some(Bytes::from(1100u128).lpad(32, 0)),
             None,
         )
         .await;
 
         db_fixtures::insert_component_balance(
             conn,
-            Balance::from(U256::from(2000) * U256::exp10(18)),
-            Balance::from(U256::zero()),
+            Balance::from(2000 * 10u128.pow(18)).lpad(32, 0),
+            Bytes::zero(32),
             2100.0 * 1e18,
             dai_id,
             txn[2],
@@ -1933,8 +1933,8 @@ mod test {
 
     fn protocol_state() -> models::protocol::ProtocolComponentState {
         let attributes: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(1000))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+            ("reserve1".to_owned(), Bytes::from(1000u128).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(500u128).lpad(32, 0)),
         ]
         .into_iter()
         .collect();
@@ -1943,13 +1943,13 @@ mod test {
                 "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
                     .parse()
                     .unwrap(),
-                Balance::from(U256::exp10(18)),
+                Balance::from(10u128.pow(18)).lpad(32, 0),
             ),
             (
                 "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
                     .parse()
                     .unwrap(),
-                Balance::from(U256::from(2000) * U256::exp10(6)),
+                Balance::from(2000 * 10u128.pow(6)).lpad(32, 0),
             ),
         ]
         .into_iter()
@@ -1992,8 +1992,8 @@ mod test {
 
         let mut protocol_state = protocol_state();
         let attributes: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(1100))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(500))),
+            ("reserve1".to_owned(), Bytes::from(1100u128).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(500u128).lpad(32, 0)),
         ]
         .into_iter()
         .collect();
@@ -2009,13 +2009,13 @@ mod test {
                         "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
                             .parse()
                             .unwrap(),
-                        Balance::from(U256::exp10(18)),
+                        Balance::from(10u128.pow(18)).lpad(32, 0),
                     ),
                     (
                         "0x6b175474e89094c44da98b954eedeac495271d0f"
                             .parse()
                             .unwrap(),
-                        Balance::from(U256::from(2000) * U256::exp10(18)),
+                        Balance::from(2000 * 10u128.pow(18)).lpad(32, 0),
                     ),
                 ]),
             ),
@@ -2038,7 +2038,7 @@ mod test {
 
     fn protocol_state_delta() -> models::protocol::ProtocolComponentStateDelta {
         let attributes: HashMap<String, Bytes> =
-            vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
+            vec![("reserve1".to_owned(), Bytes::from(1000u128).lpad(32, 0))]
                 .into_iter()
                 .collect();
         models::protocol::ProtocolComponentStateDelta::new("state3", attributes, HashSet::new())
@@ -2077,7 +2077,7 @@ mod test {
             protocol_component_id,
             txn_id,
             "deletable".to_owned(),
-            Bytes::from(U256::from(1000)),
+            Bytes::from(1000u128).lpad(32, 0),
             None,
             None,
         )
@@ -2086,8 +2086,8 @@ mod test {
         // update
         let mut new_state1 = protocol_state_delta();
         let attributes1: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(700))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(700))),
+            ("reserve1".to_owned(), Bytes::from(700u128).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(700u128).lpad(32, 0)),
         ]
         .into_iter()
         .collect();
@@ -2097,30 +2097,30 @@ mod test {
         new_state1.deleted_attributes = vec!["deletable".to_owned()]
             .into_iter()
             .collect();
-        let tx_1: H256 = "0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7"
-            .parse()
-            .unwrap();
+        let tx_1 =
+            Bytes::from_str("0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7")
+                .unwrap();
 
         // newer update
         let mut new_state2 = protocol_state_delta();
         let attributes2: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(800))),
-            ("reserve2".to_owned(), Bytes::from(U256::from(800))),
+            ("reserve1".to_owned(), Bytes::from(800u128).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(800u128).lpad(32, 0)),
         ]
         .into_iter()
         .collect();
         new_state2
             .updated_attributes
             .clone_from(&attributes2);
-        let tx_2: H256 = "0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388"
-            .parse()
-            .unwrap();
+        let tx_2 =
+            Bytes::from_str("0x50449de1973d86f21bfafa7c72011854a7e33a226709dc3e2e4edcca34188388")
+                .unwrap();
 
         // update the protocol state
         gateway
             .update_protocol_states(
                 &chain,
-                &[(tx_1.into(), &new_state1), (tx_2.into(), &new_state2)],
+                &[(tx_1.clone(), &new_state1), (tx_2.clone(), &new_state2)],
                 &mut conn,
             )
             .await
@@ -2148,13 +2148,13 @@ mod test {
                 "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
                     .parse()
                     .unwrap(),
-                Balance::from(U256::exp10(18)),
+                Balance::from(10u128.pow(18)).lpad(32, 0),
             ),
             (
                 "0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
                     .unwrap(),
-                Balance::from(U256::from(2000) * U256::exp10(18)),
+                Balance::from(2000 * 10u128.pow(18)).lpad(32, 0),
             ),
         ]
         .into_iter()
@@ -2162,23 +2162,21 @@ mod test {
         assert_eq!(db_states[0], expected_state);
 
         // fetch the older state from the db and check it's valid_to is set correctly
-        let tx_hash1: Bytes = tx_1.as_bytes().into();
         let older_state = schema::protocol_state::table
             .inner_join(schema::protocol_component::table)
             .inner_join(schema::transaction::table)
-            .filter(schema::transaction::hash.eq(tx_hash1))
+            .filter(schema::transaction::hash.eq(tx_1))
             .filter(schema::protocol_component::external_id.eq(new_state1.component_id.as_str()))
             .select(orm::ProtocolState::as_select())
             .first::<orm::ProtocolState>(&mut conn)
             .await
             .expect("Failed to fetch protocol state");
-        assert_eq!(older_state.attribute_value, Bytes::from(U256::from(700)));
+        assert_eq!(older_state.attribute_value, Bytes::from(700u128).lpad(32, 0));
         // fetch the newer state from the db to compare the valid_from
-        let tx_hash2: Bytes = tx_2.as_bytes().into();
         let newer_state = schema::protocol_state::table
             .inner_join(schema::protocol_component::table)
             .inner_join(schema::transaction::table)
-            .filter(schema::transaction::hash.eq(tx_hash2))
+            .filter(schema::transaction::hash.eq(tx_2))
             .filter(schema::protocol_component::external_id.eq(new_state1.component_id.as_str()))
             .select(orm::ProtocolState::as_select())
             .first::<orm::ProtocolState>(&mut conn)
@@ -2246,8 +2244,8 @@ mod test {
 
         db_fixtures::insert_component_balance(
             &mut conn,
-            Balance::from(U256::from(1000)),
-            Balance::from(U256::from(0)),
+            Balance::from(1000u128).lpad(32, 0),
+            Balance::zero(32),
             1000.0,
             token_id,
             from_txn_id,
@@ -2257,8 +2255,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             &mut conn,
-            Balance::from(U256::from(2000)),
-            Balance::from(U256::from(1000)),
+            Balance::from(2000u128).lpad(32, 0),
+            Balance::from(1000u128).lpad(32, 0),
             2000.0,
             token_id,
             to_txn_id,
@@ -2273,7 +2271,7 @@ mod test {
             vec![models::protocol::ComponentBalance {
                 component_id: protocol_external_id.clone(),
                 token: token_address.clone(),
-                balance: Balance::from(U256::from(2000)),
+                balance: Balance::from(2000u128).lpad(32, 0),
                 balance_float: 2000.0,
                 modify_tx: to_tx_hash,
             }];
@@ -2393,7 +2391,7 @@ mod test {
             protocol_component_id,
             from_txn_id,
             "deleted".to_owned(),
-            Bytes::from(U256::from(1000)),
+            Bytes::from(1000u128).lpad(32, 0),
             None,
             Some(to_txn_id),
         )
@@ -2411,7 +2409,7 @@ mod test {
             protocol_component_id2,
             from_txn_id,
             "deleted2".to_owned(),
-            Bytes::from(U256::from(100)),
+            Bytes::from(100u128).lpad(32, 0),
             None,
             Some(to_txn_id),
         )
@@ -2481,7 +2479,7 @@ mod test {
             protocol_component_id,
             txn_id,
             "to_delete".to_owned(),
-            Bytes::from(U256::from(1000)),
+            Bytes::from(1000u128).lpad(32, 0),
             None,
             None,
         )
@@ -2519,7 +2517,7 @@ mod test {
             protocol_component_id,
             from_txn_id,
             "deleted".to_owned(),
-            Bytes::from(U256::from(1000)),
+            Bytes::from(1000u128).lpad(32, 0),
             None,
             Some(to_txn_id),
         )
@@ -2529,8 +2527,8 @@ mod test {
 
         // expected result
         let attributes: HashMap<String, Bytes> = vec![
-            ("reserve1".to_owned(), Bytes::from(U256::from(1100))),
-            ("deleted".to_owned(), Bytes::from(U256::from(1000))),
+            ("reserve1".to_owned(), Bytes::from(1100u128).lpad(32, 0)),
+            ("deleted".to_owned(), Bytes::from(1000u128).lpad(32, 0)),
         ]
         .into_iter()
         .collect();
@@ -2896,7 +2894,7 @@ mod test {
             .await
             .expect("retrieving inserted balance failed!");
 
-        assert_eq!(inserted_data.new_balance, Balance::from(U256::from(12)));
+        assert_eq!(inserted_data.new_balance, Balance::from(12u128).lpad(32, 0));
         assert_eq!(inserted_data.previous_value, Balance::from("0x00"),);
 
         let referenced_token = schema::token::table
@@ -2920,7 +2918,7 @@ mod test {
             Bytes::from("0x3108322284d0a89a7accb288d1a94384d499504fe7e04441b0706c7628dee7b7");
         let updated_component_balance = models::protocol::ComponentBalance {
             token: base_token.clone(),
-            balance: Balance::from(U256::from(2000)),
+            balance: Balance::from(2000u128).lpad(32, 0),
             balance_float: 2000.0,
             modify_tx: new_tx_hash,
             component_id: component_external_id.clone(),
@@ -2947,8 +2945,8 @@ mod test {
             .await
             .expect("retrieving inserted balance failed!");
 
-        assert_eq!(new_inserted_data.new_balance, Balance::from(U256::from(2000)));
-        assert_eq!(new_inserted_data.previous_value, Balance::from(U256::from(12)));
+        assert_eq!(new_inserted_data.new_balance, Balance::from(2000u128).lpad(32, 0));
+        assert_eq!(new_inserted_data.previous_value, Balance::from(12u128).lpad(32, 0));
     }
 
     #[tokio::test]
@@ -3306,9 +3304,9 @@ mod test {
                 Bytes::from(WETH),
                 models::protocol::ComponentBalance::new(
                     Bytes::from(WETH),
-                    Balance::from(U256::exp10(18)),
+                    Balance::from(10u128.pow(18)).lpad(32, 0),
                     1e18,
-                    Bytes::from(U256::zero()),
+                    Bytes::zero(32),
                     "state1",
                 ),
             ),
@@ -3317,9 +3315,9 @@ mod test {
                 Bytes::from(USDC),
                 models::protocol::ComponentBalance::new(
                     Bytes::from(USDC),
-                    Balance::from(U256::from(2000) * U256::exp10(6)),
+                    Balance::from(2000 * 10u128.pow(6)).lpad(32, 0),
                     2000000000.0,
-                    Bytes::from(U256::zero()),
+                    Bytes::zero(32),
                     "state1",
                 ),
             ),
@@ -3394,8 +3392,8 @@ mod test {
 
         db_fixtures::insert_component_balance(
             &mut conn,
-            Balance::from(U256::from(2) * U256::exp10(18)),
-            Balance::from(U256::exp10(18)),
+            Balance::from(2 * 10u128.pow(18)).lpad(32, 0),
+            Balance::from(10u128.pow(18)).lpad(32, 0),
             2e18,
             weth_id,
             txn_id,
@@ -3405,8 +3403,8 @@ mod test {
         .await;
         db_fixtures::insert_component_balance(
             &mut conn,
-            Balance::from(U256::from(3000) * U256::exp10(6)),
-            Balance::from(U256::from(2000) * U256::exp10(18)),
+            Balance::from(3000 * 10u128.pow(6)).lpad(32, 0),
+            Balance::from(2000 * 10u128.pow(18)).lpad(32, 0),
             3000.0 * 1e6,
             dai_id,
             txn_id,
@@ -3421,9 +3419,9 @@ mod test {
                 Bytes::from(WETH),
                 models::protocol::ComponentBalance::new(
                     Bytes::from(WETH),
-                    Balance::from(U256::exp10(18)),
+                    Balance::from(10u128.pow(18)).lpad(32, 0),
                     1e18,
-                    Bytes::from(U256::zero()),
+                    Bytes::zero(32),
                     "state3",
                 ),
             ),
@@ -3432,9 +3430,9 @@ mod test {
                 Bytes::from(DAI),
                 models::protocol::ComponentBalance::new(
                     Bytes::from(DAI),
-                    Balance::from(U256::from(2000) * U256::exp10(18)),
+                    Balance::from(2000 * 10u128.pow(18)).lpad(32, 0),
                     2000e18,
-                    Bytes::from(U256::zero()),
+                    Bytes::zero(32),
                     "state3",
                 ),
             ),

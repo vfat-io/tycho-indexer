@@ -110,7 +110,6 @@ mod test {
 
     use super::*;
     use rstest::rstest;
-    use tycho_core::Bytes;
     use web3::types::U256;
 
     #[rstest]
@@ -125,7 +124,9 @@ mod test {
     #[case::edge_53bits_trailing_zeros(U256::from(2u64.pow(52)), 2u64.pow(52) as f64)]
     #[case::edge_53bits_trailing_ones(U256::from(2u64.pow(53) - 1), (2u64.pow(53) - 1) as f64)]
     fn test_convert(#[case] inp: U256, #[case] out: f64) {
-        let data = Bytes::from(inp).to_vec();
+        let mut vec = [0u8; 32];
+        inp.to_big_endian(&mut vec);
+        let data = vec.to_vec();
         let res = bytes_to_f64(&data).unwrap();
 
         assert_eq!(res, out);
