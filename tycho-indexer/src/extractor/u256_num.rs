@@ -109,26 +109,23 @@ pub fn bytes_to_f64(data: &[u8]) -> Option<f64> {
 mod test {
 
     use super::*;
+    use num_bigint::BigUint;
     use rstest::rstest;
-    use web3::types::U256;
 
     #[rstest]
-    #[case::one(U256::one(), 1.0f64)]
-    #[case::two(U256::from(2), 2.0f64)]
-    #[case::zero(U256::zero(), 0.0f64)]
-    #[case::two_pow1024(U256::from(2).pow(U256::from(190)), 2.0f64.powi(190))]
-    #[case::max32(U256([u32::MAX as u64, 0, 0, 0]), u32::MAX as f64)]
-    #[case::max64(U256([u64::MAX, 0, 0, 0]), u64::MAX as f64)]
-    #[case::edge_54bits_trailing_zeros(U256::from(2u64.pow(53)), 2u64.pow(53) as f64)]
-    #[case::edge_54bits_trailing_ones(U256::from(2u64.pow(54) - 1), (2u64.pow(54) - 1) as f64)]
-    #[case::edge_53bits_trailing_zeros(U256::from(2u64.pow(52)), 2u64.pow(52) as f64)]
-    #[case::edge_53bits_trailing_ones(U256::from(2u64.pow(53) - 1), (2u64.pow(53) - 1) as f64)]
-    fn test_convert(#[case] inp: U256, #[case] out: f64) {
-        let mut vec = [0u8; 32];
-        inp.to_big_endian(&mut vec);
-        let data = vec.to_vec();
-        let res = bytes_to_f64(&data).unwrap();
-
+    #[case::one(BigUint::one(), 1.0f64)]
+    #[case::two(BigUint::from(2u64), 2.0f64)]
+    #[case::zero(BigUint::from(0u64), 0.0f64)]
+    #[case::two_pow1024(BigUint::from(2u64).pow(190), 2.0f64.powi(190))]
+    #[case::max32(BigUint::from(u32::MAX as u64), u32::MAX as f64)]
+    #[case::max64(BigUint::from(u64::MAX), u64::MAX as f64)]
+    #[case::edge_54bits_trailing_zeros(BigUint::from(2u64.pow(53)), 2u64.pow(53) as f64)]
+    #[case::edge_54bits_trailing_ones(BigUint::from(2u64.pow(54) - 1), (2u64.pow(54) - 1) as f64)]
+    #[case::edge_53bits_trailing_zeros(BigUint::from(2u64.pow(52)), 2u64.pow(52) as f64)]
+    #[case::edge_53bits_trailing_ones(BigUint::from(2u64.pow(53) - 1), (2u64.pow(53) - 1) as f64)]
+    fn test_convert(#[case] inp: BigUint, #[case] out: f64) {
+        let bytes = inp.to_bytes_be();
+        let res = bytes_to_f64(&bytes).unwrap();
         assert_eq!(res, out);
     }
 }

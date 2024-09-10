@@ -6519,7 +6519,6 @@ dependencies = [
  "clap",
  "console-subscriber",
  "diesel-async",
- "ethers",
  "ethrpc",
  "float_eq",
  "futures 0.3.30",
@@ -6559,7 +6558,6 @@ dependencies = [
  "utoipa",
  "utoipa-swagger-ui",
  "uuid 1.7.0",
- "web3",
 ]
 
 [[package]]
@@ -6572,7 +6570,6 @@ dependencies = [
  "diesel-async",
  "diesel-derive-enum",
  "diesel_migrations",
- "ethers",
  "hex",
  "itertools 0.12.1",
  "lazy_static",

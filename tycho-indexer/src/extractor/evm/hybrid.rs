@@ -1769,7 +1769,6 @@ mod test_serial_db {
         pb::sf::substreams::v1::BlockRef,
     };
     use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-    use ethers::abi::AbiEncode;
     use futures03::{stream, StreamExt};
 
     use mockall::mock;
@@ -1784,7 +1783,6 @@ mod test_serial_db {
         db_fixtures::{self, yesterday_midnight, yesterday_one_am},
         testing::run_against_db,
     };
-    use web3::types::H256;
 
     mock! {
         pub TokenPreProcessor {}
@@ -2331,7 +2329,7 @@ mod test_serial_db {
             let client_msg = extractor
                 .handle_revert(BlockUndoSignal {
                     last_valid_block: Some(BlockRef {
-                        id: H256::from_low_u64_be(3).encode_hex(),
+                        id: "0x0000000000000000000000000000000000000000000000000000000000000003".to_string(),
                         number: 3,
                     }),
                     last_valid_cursor: "cursor@3".into(),
@@ -2512,7 +2510,7 @@ mod test_serial_db {
             let client_msg = extractor
                 .handle_revert(BlockUndoSignal {
                     last_valid_block: Some(BlockRef {
-                        id: H256::from_low_u64_be(3).encode_hex(),
+                        id: "0x0000000000000000000000000000000000000000000000000000000000000003".to_string(),
                         number: 3,
                     }),
                     last_valid_cursor: "cursor@3".into(),

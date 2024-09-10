@@ -868,7 +868,6 @@ impl From<BlockEntityChanges> for BlockChanges {
 }
 #[cfg(test)]
 pub mod fixtures {
-    use ethers::types::{H160, H256};
     use std::str::FromStr;
 
     use prost::Message;
@@ -1008,23 +1007,19 @@ pub mod fixtures {
                             id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
                                 .to_owned(),
                             tokens: vec![
-                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                     .unwrap()
-                                    .0
                                     .to_vec(),
-                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                     .unwrap()
-                                    .0
                                     .to_vec(),
                             ],
                             contracts: vec![
-                                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
                                     .unwrap()
-                                    .0
                                     .to_vec(),
-                                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
                                     .unwrap()
-                                    .0
                                     .to_vec(),
                             ],
                             static_att: vec![
@@ -1420,21 +1415,21 @@ pub mod fixtures {
                             id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
                                 .to_owned(),
                             tokens: vec![
-                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                     .unwrap()
                                     .0
                                     .to_vec(),
-                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                     .unwrap()
                                     .0
                                     .to_vec(),
                             ],
                             contracts: vec![
-                                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
                                     .unwrap()
                                     .0
                                     .to_vec(),
-                                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
                                     .unwrap()
                                     .0
                                     .to_vec(),
@@ -1813,11 +1808,11 @@ pub mod fixtures {
 
         crate::pb::tycho::evm::v1::Block {
             number: version,
-            hash: H256::from_low_u64_be(version)
-                .as_bytes()
+            hash: Bytes::from(version)
+                .lpad(32, 0)
                 .to_vec(),
-            parent_hash: H256::from_low_u64_be(version - 1)
-                .as_bytes()
+            parent_hash: Bytes::from(version - 1)
+                .lpad(32, 0)
                 .to_vec(),
             ts: base_ts + version * 1000,
         }
@@ -1825,14 +1820,14 @@ pub mod fixtures {
 
     pub fn pb_transactions(version: u64, index: u64) -> crate::pb::tycho::evm::v1::Transaction {
         crate::pb::tycho::evm::v1::Transaction {
-            hash: H256::from_low_u64_be(version * 10_000 + index)
-                .as_bytes()
+            hash: Bytes::from(version * 10_000 + index)
+                .lpad(32, 0)
                 .to_vec(),
-            from: H160::from_low_u64_be(version * 100_000 + index)
-                .as_bytes()
+            from: Bytes::from(version * 100_000 + index)
+                .lpad(20, 0)
                 .to_vec(),
-            to: H160::from_low_u64_be(version * 1_000_000 + index)
-                .as_bytes()
+            to: Bytes::from(version * 1_000_000 + index)
+                .lpad(20, 0)
                 .to_vec(),
             index,
         }
@@ -1844,7 +1839,7 @@ pub mod fixtures {
     const USDT_ADDRESS: &str = "dAC17F958D2ee523a2206206994597C13D831ec7";
 
     pub fn address_from_str(token: &str) -> Vec<u8> {
-        H160::from_str(token)
+        Bytes::from_str(token)
             .unwrap()
             .0
             .to_vec()
@@ -1937,16 +1932,16 @@ pub mod fixtures {
                         component_changes: vec![ProtocolComponent {
                             id: "Pool".to_owned(),
                             tokens: vec![
-                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                     .unwrap()
                                     .0
                                     .to_vec(),
-                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                     .unwrap()
                                     .0
                                     .to_vec(),
                             ],
-                            contracts: vec![H160::from_str(
+                            contracts: vec![Bytes::from_str(
                                 "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
                             )
                             .unwrap()
@@ -1966,7 +1961,7 @@ pub mod fixtures {
                             }),
                         }],
                         balance_changes: vec![BalanceChange {
-                            token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                            token: Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                 .unwrap()
                                 .0
                                 .to_vec(),
@@ -2312,16 +2307,16 @@ pub mod fixtures {
                         component_changes: vec![ProtocolComponent {
                             id: "Pool".to_owned(),
                             tokens: vec![
-                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                     .unwrap()
                                     .0
                                     .to_vec(),
-                                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                     .unwrap()
                                     .0
                                     .to_vec(),
                             ],
-                            contracts: vec![H160::from_str(
+                            contracts: vec![Bytes::from_str(
                                 "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
                             )
                             .unwrap()
@@ -2341,7 +2336,7 @@ pub mod fixtures {
                             }),
                         }],
                         balance_changes: vec![BalanceChange {
-                            token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                            token: Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                 .unwrap()
                                 .0
                                 .to_vec(),
@@ -2618,21 +2613,21 @@ pub mod fixtures {
         ProtocolComponent {
             id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_owned(),
             tokens: vec![
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                     .unwrap()
                     .0
                     .to_vec(),
-                H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                     .unwrap()
                     .0
                     .to_vec(),
             ],
             contracts: vec![
-                H160::from_str("0x31fF2589Ee5275a2038beB855F44b9Be993aA804")
+                Bytes::from_str("0x31fF2589Ee5275a2038beB855F44b9Be993aA804")
                     .unwrap()
                     .0
                     .to_vec(),
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
                     .unwrap()
                     .0
                     .to_vec(),
@@ -2664,7 +2659,6 @@ pub mod fixtures {
 mod test {
     use std::str::FromStr;
 
-    use ethers::types::H256;
     use prost::Message;
     use rstest::rstest;
 
@@ -2790,11 +2784,11 @@ mod test {
     #[rstest]
     #[case::diff_block(
     fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
-    Err(format ! ("Can't merge TransactionVMUpdates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1))
+    Err(format ! ("Can't merge TransactionVMUpdates from different blocks: {:x} != {}", Bytes::zero(32), HASH_256_1))
     )]
     #[case::same_tx(
     fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
-    Err(format ! ("Can't merge TransactionVMUpdates from the same transaction: 0x{:x}", H256::zero()))
+    Err(format ! ("Can't merge TransactionVMUpdates from the same transaction: {:x}", Bytes::zero(32)))
     )]
     #[case::lower_idx(
     fixtures::transaction02(HASH_256_1, HASH_256_0, 1),
@@ -3170,11 +3164,11 @@ mod test {
     #[rstest]
     #[case::diff_block(
     fixtures::transaction02(HASH_256_1, HASH_256_1, 11),
-    Err(format ! ("Can't merge ProtocolStates from different blocks: 0x{:x} != {}", H256::zero(), HASH_256_1))
+    Err(format ! ("Can't merge ProtocolStates from different blocks: {:x} != {}", Bytes::zero(32), HASH_256_1))
     )]
     #[case::same_tx(
     fixtures::transaction02(HASH_256_0, HASH_256_0, 11),
-    Err(format ! ("Can't merge ProtocolStates from the same transaction: 0x{:x}", H256::zero()))
+    Err(format ! ("Can't merge ProtocolStates from the same transaction: {:x}", Bytes::zero(32)))
     )]
     #[case::lower_idx(
     fixtures::transaction02(HASH_256_1, HASH_256_0, 1),

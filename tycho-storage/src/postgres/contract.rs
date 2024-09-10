@@ -1353,7 +1353,6 @@ mod test {
         db_fixtures::{yesterday_midnight, yesterday_one_am},
     };
     use diesel_async::AsyncConnection;
-    use ethers::types::U256;
     use rstest::rstest;
     use std::{str::FromStr, time::Duration};
     use tycho_core::{
@@ -1766,7 +1765,7 @@ mod test {
         )
         .await;
         let code = Bytes::from("1234");
-        let code_hash = Bytes::from(&ethers::utils::keccak256(&code));
+        let code_hash = Bytes::from(&keccak256(&code));
         let expected = models::contract::Account::new(
             Chain::Ethereum,
             "6B175474E89094C44Da98b954EedeAC495271d0F"
@@ -2151,7 +2150,7 @@ mod test {
     }
 
     fn int_to_b256(s: u64) -> Bytes {
-        Bytes::from(format!("{:064x}", U256::from(s)).as_str())
+        Bytes::from(s).lpad(32, 0)
     }
 
     async fn setup_slots_delta(conn: &mut AsyncPgConnection) {

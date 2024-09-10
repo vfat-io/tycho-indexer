@@ -58,13 +58,11 @@ typetag = "0.2.16"
 utoipa = { version = "4.2.0", features = ["chrono"] }
 utoipa-swagger-ui = { version = "6.0.0", features = ["actix-web"] }
 ethrpc = { git = "https://github.com/cowprotocol/services", rev = "f3678428991e055ceb517f184d1b37244f2d8f51" }
-web3 = { version = "0.19", default-features = false }
 mini-moka = "0.10.3"
 num-bigint = "0.4.4"
 num-traits = "0.2.19"
 
 [dev-dependencies]
-ethers.workspace = true
 actix-rt = "2.9.0"
 actix-test = "0.1.2"
 rstest = "0.18.2"
