@@ -12,8 +12,6 @@ use super::{
     TxHash,
 };
 
-/// Represents the static parts of a protocol component.
-///
 /// `ProtocolComponent` provides detailed descriptions of a component of a protocol,
 /// for example, swap pools that enables the exchange of two tokens.
 ///
@@ -22,6 +20,9 @@ use super::{
 /// and has a `ProtocolTypeID` that associates it with a `ProtocolType` that describes its behaviour
 /// e.g., swap, lend, bridge. The component is associated with a specific `Chain` and holds
 /// information about tradable tokens, related contract IDs, and static attributes.
+///
+/// Every values of a `ProtocolComponent` must be static, they can't ever be changed after creation.
+/// The dynamic values associated to a component must be given using `ProtocolComponentState`.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProtocolComponent {
     pub id: ComponentId,

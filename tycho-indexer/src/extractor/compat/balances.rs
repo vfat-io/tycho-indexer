@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn test_ignore_self_balances() {
         let txs_with_update = vec![TxWithChanges {
-            account_updates: HashMap::new(),
+            account_deltas: HashMap::new(),
             protocol_components: HashMap::new(),
             balance_changes: HashMap::from([(
                 "0xabc".to_string(),
@@ -183,7 +183,7 @@ mod tests {
             0,
             false,
             vec![TxWithChanges {
-                account_updates: HashMap::new(),
+                account_deltas: HashMap::new(),
                 protocol_components: HashMap::new(),
                 balance_changes: HashMap::from([(
                     "0xabc".to_string(),

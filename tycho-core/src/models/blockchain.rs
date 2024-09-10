@@ -95,7 +95,7 @@ impl BlockAggregatedChanges {
         extractor: &str,
         chain: Chain,
         block: Block,
-        finalised_block_height: u64,
+        finalized_block_height: u64,
         revert: bool,
         state_deltas: HashMap<String, ProtocolComponentStateDelta>,
         account_deltas: HashMap<Bytes, AccountDelta>,
@@ -109,7 +109,7 @@ impl BlockAggregatedChanges {
             extractor: extractor.to_string(),
             chain,
             block,
-            finalized_block_height: finalised_block_height,
+            finalized_block_height,
             revert,
             state_deltas,
             account_deltas,
@@ -170,7 +170,7 @@ impl BlockScoped for BlockAggregatedChanges {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TxWithChanges {
     pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub account_updates: HashMap<Bytes, AccountDelta>,
+    pub account_deltas: HashMap<Bytes, AccountDelta>,
     pub state_updates: HashMap<ComponentId, ProtocolComponentStateDelta>,
     pub balance_changes: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
     pub tx: Transaction,
@@ -179,13 +179,13 @@ pub struct TxWithChanges {
 impl TxWithChanges {
     pub fn new(
         protocol_components: HashMap<ComponentId, ProtocolComponent>,
-        account_updates: HashMap<Bytes, AccountDelta>,
+        account_deltas: HashMap<Bytes, AccountDelta>,
         protocol_states: HashMap<ComponentId, ProtocolComponentStateDelta>,
         balance_changes: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
         tx: Transaction,
     ) -> Self {
         Self {
-            account_updates,
+            account_deltas,
             protocol_components,
             state_updates: protocol_states,
             balance_changes,
@@ -244,12 +244,8 @@ impl TxWithChanges {
         }
 
         // Merge Account Updates
-        for (address, update) in other
-            .account_updates
-            .clone()
-            .into_iter()
-        {
-            match self.account_updates.entry(address) {
+        for (address, update) in other.account_deltas.clone().into_iter() {
+            match self.account_deltas.entry(address) {
                 Entry::Occupied(mut e) => {
                     e.get_mut().merge(update)?;
                 }
@@ -289,7 +285,7 @@ impl From<TransactionVMUpdates> for TxWithChanges {
     fn from(value: TransactionVMUpdates) -> Self {
         Self {
             protocol_components: value.protocol_components,
-            account_updates: value.account_updates,
+            account_deltas: value.account_deltas,
             state_updates: HashMap::new(),
             balance_changes: value.component_balances,
             tx: value.tx,
@@ -301,7 +297,7 @@ impl From<ProtocolChangesWithTx> for TxWithChanges {
     fn from(value: ProtocolChangesWithTx) -> TxWithChanges {
         TxWithChanges {
             protocol_components: value.new_protocol_components,
-            account_updates: HashMap::new(),
+            account_deltas: HashMap::new(),
             state_updates: value.protocol_states,
             balance_changes: value.balance_changes,
             tx: value.tx,

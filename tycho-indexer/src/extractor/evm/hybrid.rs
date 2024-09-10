@@ -729,7 +729,7 @@ where
                     .iter()
                     .flat_map(|update| {
                         update
-                            .account_updates
+                            .account_deltas
                             .iter()
                             .filter(|(c_id, _)| {
                                 !reverted_components_creations.contains_key(&c_id.to_string())
@@ -1118,7 +1118,7 @@ impl HybridPgGateway {
             }
 
             // Map new account / contracts
-            for (_, account_update) in tx_update.account_updates.iter() {
+            for (_, account_update) in tx_update.account_deltas.iter() {
                 if account_update.is_creation() {
                     let new: Account = account_update.ref_into_account(&tx_update.tx);
                     info!(block_number = ?changes.block.number, contract_address = ?new.address, "NewContract");
@@ -1543,7 +1543,7 @@ mod test {
                         ..Default::default()
                     },
                 )]),
-                account_updates: HashMap::new(),
+                account_deltas: HashMap::new(),
                 state_updates: Default::default(),
                 balance_changes: HashMap::new(),
                 tx: Transaction::default(),
@@ -2022,7 +2022,7 @@ mod test_serial_db {
                         change: Default::default(),
                     },
                 )]),
-                account_updates: HashMap::new(),
+                account_deltas: HashMap::new(),
             }],
         }
     }

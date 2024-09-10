@@ -602,7 +602,7 @@ impl TryFromMessage for TxWithChanges {
 
         Ok(Self {
             protocol_components: new_protocol_components,
-            account_updates,
+            account_deltas: account_updates,
             state_updates,
             balance_changes,
             tx,
@@ -658,7 +658,7 @@ impl StateUpdateBufferEntry for BlockChanges {
         let mut res = HashMap::new();
 
         for update in self.txs_with_update.iter().rev() {
-            for (address, account_update) in update.account_updates.iter() {
+            for (address, account_update) in update.account_deltas.iter() {
                 for (slot, val) in account_update
                     .slots
                     .iter()
@@ -813,7 +813,7 @@ impl BlockChanges {
             new_tokens: self.new_tokens,
             deleted_protocol_components: HashMap::new(),
             state_deltas: aggregated_changes.state_updates,
-            account_deltas: aggregated_changes.account_updates,
+            account_deltas: aggregated_changes.account_deltas,
             component_balances: aggregated_changes.balance_changes,
             component_tvl: HashMap::new(),
         })
@@ -2745,7 +2745,7 @@ mod test {
 
         assert_eq!(
             update
-                .account_updates
+                .account_deltas
                 .values()
                 .next()
                 .unwrap()
@@ -2868,7 +2868,7 @@ mod test {
             new_tokens: HashMap::new(),
             tx_updates: vec![
                 TransactionVMUpdates {
-                    account_updates: [(
+                    account_deltas: [(
                         Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
                         AccountDelta::new(
                             Chain::Ethereum,
@@ -2908,7 +2908,7 @@ mod test {
                     tx,
                 },
                 TransactionVMUpdates {
-                    account_updates: [(
+                    account_deltas: [(
                         Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
                         AccountDelta::new(
                             Chain::Ethereum,
@@ -3528,7 +3528,7 @@ mod test {
         let protocol_component_second_tx = create_protocol_component(tx_second_update.hash.clone());
 
         let first_update = TransactionVMUpdates {
-            account_updates: [(
+            account_deltas: [(
                 Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
                 AccountDelta::new(
                     Chain::Ethereum,
@@ -3568,7 +3568,7 @@ mod test {
             tx: tx_first_update,
         };
         let second_update = TransactionVMUpdates {
-            account_updates: [(
+            account_deltas: [(
                 Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
                 AccountDelta::new(
                     Chain::Ethereum,
@@ -3623,7 +3623,7 @@ mod test {
         assert_eq!(to_merge_on.protocol_components, expected_protocol_components);
 
         let mut acc_update = second_update
-            .account_updates
+            .account_deltas
             .clone()
             .into_values()
             .next()
@@ -3641,6 +3641,6 @@ mod test {
             .cloned()
             .collect();
 
-        assert_eq!(to_merge_on.account_updates, acc_update);
+        assert_eq!(to_merge_on.account_deltas, acc_update);
     }
 }

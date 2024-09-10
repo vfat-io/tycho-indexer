@@ -176,8 +176,7 @@ impl AccountDelta {
     ///
     /// This function is utilized for aggregating multiple updates into a single
     /// update. The attribute values of `other` are set on `self`.
-    /// Meanwhile, contract storage maps are merged, in which keys from `other`
-    /// take precedence.
+    /// Meanwhile, contract storage maps are merged, with keys from `other` taking precedence.
     ///
     /// Be noted that, this function will mutate the state of the calling
     /// struct. An error will occur if merging updates from different accounts.
@@ -242,7 +241,7 @@ impl From<Account> for AccountDelta {
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransactionVMUpdates {
-    pub account_updates: HashMap<Bytes, AccountDelta>,
+    pub account_deltas: HashMap<Bytes, AccountDelta>,
     pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
     pub component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
     pub tx: Transaction,
@@ -250,12 +249,12 @@ pub struct TransactionVMUpdates {
 
 impl TransactionVMUpdates {
     pub fn new(
-        account_updates: HashMap<Bytes, AccountDelta>,
+        account_deltas: HashMap<Bytes, AccountDelta>,
         protocol_components: HashMap<ComponentId, ProtocolComponent>,
         component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
         tx: Transaction,
     ) -> Self {
-        Self { account_updates, protocol_components, component_balances, tx }
+        Self { account_deltas, protocol_components, component_balances, tx }
     }
 
     /// Merges this update with another one.
@@ -295,12 +294,8 @@ impl TransactionVMUpdates {
         }
         self.tx = other.tx.clone();
 
-        for (address, update) in other
-            .account_updates
-            .clone()
-            .into_iter()
-        {
-            match self.account_updates.entry(address) {
+        for (address, update) in other.account_deltas.clone().into_iter() {
+            match self.account_deltas.entry(address) {
                 Entry::Occupied(mut e) => {
                     e.get_mut().merge(update)?;
                 }
@@ -351,7 +346,7 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
     /// transaction.
     fn from(value: &TransactionVMUpdates) -> Self {
         value
-            .account_updates
+            .account_deltas
             .clone()
             .into_values()
             .map(|update| {

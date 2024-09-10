@@ -162,7 +162,7 @@ mod test {
                         change: Default::default(),
                     },
                 )]),
-                account_updates: Default::default(),
+                account_deltas: Default::default(),
             }],
         );
 
@@ -198,7 +198,7 @@ mod test {
                     .unwrap()
                     .protocol_components
                     .clone(),
-                account_updates: Default::default(),
+                account_deltas: Default::default(),
             }],
         );
 
@@ -243,7 +243,7 @@ mod test {
                 )]),
                 balance_changes: HashMap::new(),
                 protocol_components: HashMap::new(),
-                account_updates: Default::default(),
+                account_deltas: Default::default(),
             }],
         );
 
@@ -267,7 +267,7 @@ mod test {
             0,
             false,
             vec![TxWithChanges {
-                account_updates: HashMap::new(),
+                account_deltas: HashMap::new(),
                 protocol_components: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
                     ProtocolComponent {
@@ -316,7 +316,7 @@ mod test {
             0,
             false,
             vec![TxWithChanges {
-                account_updates: HashMap::new(),
+                account_deltas: HashMap::new(),
                 protocol_components: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
                     ProtocolComponent {
