@@ -105,7 +105,9 @@ class ComponentBalance(BaseModel):
 
 class TokenBalances(BaseModel):
     __root__: Dict[HexBytes, ComponentBalance]
-
+    
+    def items(self):
+            return self.__root__.items()
 
 class AccountUpdate(BaseModel):
     address: HexBytes
