@@ -53,7 +53,7 @@ where
 
     let batch_config = BatchConfig::default()
         .with_max_queue_size(20_480)
-        .with_max_export_batch_size(5_120);
+        .with_max_export_batch_size(2_560);
 
     let tracer = opentelemetry_otlp::new_pipeline()
         .tracing()
