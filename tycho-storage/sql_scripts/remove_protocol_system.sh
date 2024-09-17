@@ -57,7 +57,7 @@ SELECT external_id AS "Protocol components to delete" FROM protocol_component
 WHERE protocol_system_id = (SELECT id FROM protocol_system WHERE name = :'protocol_system_name');
 
 --- List of accounts to be deleted
-SELECT '0x' || encode(a.address::bytea, 'hex') AS "Contracts to delete"
+SELECT DISTINCT '0x' || encode(a.address::bytea, 'hex') AS "Contracts to delete"
 FROM account a
 JOIN contract_code cc ON a.id = cc.account_id
 JOIN protocol_component_holds_contract pchc ON pchc.contract_code_id = cc.id
@@ -70,6 +70,15 @@ AND NOT EXISTS (
     JOIN protocol_component pc2 ON pchc2.protocol_component_id = pc2.id
     JOIN protocol_system ps2 ON pc2.protocol_system_id = ps2.id
     WHERE pchc2.contract_code_id = cc.id
+    AND ps2.name <> :'protocol_system_name'
+)
+AND NOT EXISTS (
+    SELECT 1
+    FROM protocol_component_holds_token pcht
+    JOIN token t ON pcht.token_id = t.id 
+    JOIN protocol_component pc2 ON pcht.protocol_component_id = pc2.id
+    JOIN protocol_system ps2 ON pc2.protocol_system_id = ps2.id
+    WHERE t.account_id = a.id
     AND ps2.name <> :'protocol_system_name'
 );
 
@@ -124,7 +133,7 @@ WHERE id IN (SELECT account_id FROM tokens_to_delete);
 --- code entries too.
 DELETE FROM account
 WHERE id IN (
-    SELECT cc.account_id
+    SELECT DISTINCT cc.account_id
     FROM contract_code cc
     JOIN protocol_component_holds_contract pchc ON pchc.contract_code_id = cc.id
     JOIN protocol_component pc ON pchc.protocol_component_id = pc.id
@@ -136,6 +145,15 @@ WHERE id IN (
         JOIN protocol_component pc2 ON pchc2.protocol_component_id = pc2.id
         JOIN protocol_system ps2 ON pc2.protocol_system_id = ps2.id
         WHERE pchc2.contract_code_id = cc.id
+        AND ps2.name <> :'protocol_system_name'
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM protocol_component_holds_token pcht
+        JOIN token t ON pcht.token_id = t.id 
+        JOIN protocol_component pc2 ON pcht.protocol_component_id = pc2.id
+        JOIN protocol_system ps2 ON pc2.protocol_system_id = ps2.id
+        WHERE t.account_id = a.id
         AND ps2.name <> :'protocol_system_name'
     )
 );
