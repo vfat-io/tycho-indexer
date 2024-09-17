@@ -847,9 +847,9 @@ impl PostgresGateway {
         }
 
         if let Some(last_traded_ts_threshold) = last_traded_ts_threshold {
-            let active_tokens_subquery = schema::component_balance::table
-                .select(schema::component_balance::token_id)
-                .filter(schema::component_balance::valid_from.gt(last_traded_ts_threshold))
+            let active_tokens_subquery = schema::component_balance_default::table
+                .select(schema::component_balance_default::token_id)
+                .filter(schema::component_balance_default::valid_from.gt(last_traded_ts_threshold))
                 .distinct();
             query = query.filter(schema::token::id.eq_any(active_tokens_subquery));
         }
