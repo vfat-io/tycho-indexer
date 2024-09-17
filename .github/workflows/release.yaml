@@ -2,7 +2,7 @@ name: Release
 
 on:
   release:
-    types: [created]
+    types: [created, prereleased]
 
 permissions:
   id-token: write
