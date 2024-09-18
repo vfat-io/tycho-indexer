@@ -65,7 +65,10 @@ impl Account {
         let self_id = (self.chain, &self.address);
         let other_id = (delta.chain, &delta.address);
         if self_id != other_id {
-            return Err(DeltaError::IdMismatch(format!("{:?}", self_id), format!("{:?}", other_id)));
+            return Err(DeltaError::IdMismatch(
+                format!("{:?}", self_id),
+                format!("{:?}", other_id),
+            ));
         }
         if let Some(balance) = delta.balance.as_ref() {
             self.native_balance.clone_from(balance);
@@ -140,6 +143,31 @@ impl AccountDelta {
             tx.hash.clone(),
             tx.hash.clone(),
             Some(tx.hash.clone()),
+        )
+    }
+
+    /// Convert the delta into an account. Note that data not present in the delta, such as
+    /// creation_tx etc, will be initialized to default values.
+    pub fn into_account_without_tx(self) -> Account {
+        let empty_hash = keccak256(Vec::new());
+        Account::new(
+            self.chain,
+            self.address.clone(),
+            format!("{:#020x}", self.address),
+            self.slots
+                .into_iter()
+                .map(|(k, v)| (k, v.map(Into::into).unwrap_or_default()))
+                .collect(),
+            self.balance.unwrap_or_default(),
+            self.code.unwrap_or_default(),
+            self.code
+                .as_ref()
+                .map(keccak256)
+                .unwrap_or(empty_hash)
+                .into(),
+            empty_hash,
+            empty_hash,
+            None,
         )
     }
 
