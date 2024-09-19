@@ -1,3 +1,13 @@
+CREATE INDEX IF NOT EXISTS idx_contract_code_modify_tx ON contract_code (modify_tx);
+CREATE INDEX IF NOT EXISTS idx_protocol_component_creation_tx ON protocol_component (creation_tx);
+CREATE INDEX IF NOT EXISTS idx_protocol_component_deletion_tx ON protocol_component (deletion_tx);
+CREATE INDEX IF NOT EXISTS idx_account_creation_tx ON account (creation_tx);
+CREATE INDEX IF NOT EXISTS idx_account_deletion_tx ON account (deletion_tx);
+CREATE INDEX IF NOT EXISTS idx_account_balance_modify_tx ON account_balance (modify_tx);
+CREATE INDEX IF NOT EXISTS idx_component_balance_modify_tx ON component_balance (modify_tx);
+CREATE INDEX IF NOT EXISTS idx_protocol_state_modify_tx ON protocol_state (modify_tx);
+CREATE INDEX IF NOT EXISTS idx_contract_storage_modify_tx ON contract_storage (modify_tx);
+
 CREATE OR REPLACE FUNCTION clean_transaction_table() RETURNS void AS $$
 DECLARE
     batch_size INT := 10;
@@ -121,5 +131,5 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Schedule the cleanup function to run every Sunday at midnight
-SELECT cron.schedule('clean_transaction_table', '0 0 * * 0', 'SELECT clean_transaction_table();');
+-- Schedule the cleanup function to run daily at midnight
+SELECT cron.schedule('clean_transaction_table', '0 0 * * *', 'SELECT clean_transaction_table();');
