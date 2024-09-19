@@ -259,7 +259,6 @@ impl PendingDeltas {
                 }
             }
         }
-        dbg!(&contract);
 
         contract.ok_or(PendingDeltasError::ReorgBufferError(StorageError::NotFound(
             "Contract".to_string(),
@@ -392,13 +391,10 @@ mod test {
     use super::*;
     use crate::{extractor::evm, testing::block};
     use std::str::FromStr;
-    use tycho_core::{
-        models::{
-            contract::AccountDelta,
-            protocol::{ComponentBalance, ProtocolComponentStateDelta},
-            Chain, ChangeType,
-        },
-        Bytes,
+    use tycho_core::models::{
+        contract::AccountDelta,
+        protocol::{ComponentBalance, ProtocolComponentStateDelta},
+        Chain, ChangeType,
     };
 
     fn vm_state() -> Account {
