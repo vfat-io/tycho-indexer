@@ -10,7 +10,7 @@ CREATE INDEX IF NOT EXISTS idx_contract_storage_modify_tx ON contract_storage (m
 
 CREATE OR REPLACE FUNCTION clean_transaction_table() RETURNS void AS $$
 DECLARE
-    batch_size INT := 10;
+    batch_size INT := 1000;
     rows_deleted INT;
     offset_val INT := 0;
     orphaned_count INT;  -- Variable to store count of orphaned transactions
@@ -131,5 +131,5 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Schedule the cleanup function to run daily at midnight
-SELECT cron.schedule('clean_transaction_table', '0 0 * * *', 'SELECT clean_transaction_table();');
+-- Schedule the cleanup function to run daily at 12:30 AM (after partition pruning at midnight)
+SELECT cron.schedule('clean_transaction_table', '30 0 * * *', 'SELECT clean_transaction_table();');
