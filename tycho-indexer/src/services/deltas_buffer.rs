@@ -170,12 +170,12 @@ impl PendingDeltas {
         Ok(change_found)
     }
 
-    /// Updates the given db states with the buffered deltas. If a requested contract is not in the
+    /// Updates the given db states with the buffered deltas. If a requested account is not in the
     /// db yet, it creates a new state for it out of the buffered deltas.
     ///
     /// Arguments:
     ///
-    /// * `addresses`: A list of the requested contract addresses.
+    /// * `addresses`: A list of the requested account addresses.
     /// * `db_states`: A mutable reference to the states fetched from the db.
     /// * `version`: The version of the state to be fetched. If `None`, the latest state will be
     ///   fetched.
@@ -197,17 +197,17 @@ impl PendingDeltas {
             missing_addresses.remove(&state.address);
         }
 
-        // for new contracts (not in the db yet), build a new state from the buffered deltas
+        // for new accounts (not in the db yet), build a new state from the buffered deltas
         // and add it to the db states
         for address in missing_addresses {
-            let contract = self.get_contract(address, version)?;
-            db_states.push(contract);
+            let account = self.get_account(address, version)?;
+            db_states.push(account);
         }
 
         Ok(())
     }
 
-    // Updates a given db contract state with the buffered deltas.
+    // Updates a given db account state with the buffered deltas.
     fn update_vm_state(
         &self,
         db_state: &mut Account,
@@ -239,28 +239,28 @@ impl PendingDeltas {
         Ok(change_found)
     }
 
-    // Creates a new contract state from the buffered deltas only.
-    fn get_contract(
+    // Creates a new account state from the buffered deltas only.
+    fn get_account(
         &self,
         address: Bytes,
         version: Option<BlockNumberOrTimestamp>,
-    ) -> Result<Contract> {
-        let mut contract: Option<Contract> = None;
+    ) -> Result<Account> {
+        let mut account: Option<Account> = None;
         for buffer in self.buffers.values() {
             let guard = buffer
                 .lock()
                 .map_err(|e| PendingDeltasError::LockError("VM".to_string(), e.to_string()))?;
             for entry in guard.get_block_range(None, version)? {
                 if let Some(delta) = entry.account_deltas.get(&address) {
-                    // Update contract state or create a new one if not present
-                    let contract_ref =
-                        contract.get_or_insert_with(|| delta.clone().into_contract());
-                    contract_ref.apply_contract_delta(delta)?;
+                    // Update account state or create a new one if not present
+                    let account_ref =
+                        account.get_or_insert_with(|| delta.clone().into_account_without_tx());
+                    account_ref.apply_delta(delta)?;
                 }
             }
         }
 
-        contract.ok_or(PendingDeltasError::ReorgBufferError(StorageError::NotFound(
+        account.ok_or(PendingDeltasError::ReorgBufferError(StorageError::NotFound(
             "Contract".to_string(),
             address.to_string(),
         )))
@@ -423,23 +423,23 @@ mod test {
             HashMap::new(),
             [
                 (
-                    address,
-                    AccountUpdate::new(
-                        address,
+                    address.clone(),
+                    AccountDelta::new(
                         Chain::Ethereum,
-                        evm::fixtures::evm_slots([(1, 1), (2, 1)]),
-                        Some(U256::from(1999)),
+                        address,
+                        evm::fixtures::slots([(1, 1), (2, 1)]),
+                        Some(Bytes::from(1999u32).lpad(32, 0)),
                         None,
                         ChangeType::Update,
                     ),
                 ),
                 (
-                    H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                    AccountUpdate::new(
-                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                    Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                    AccountDelta::new(
                         Chain::Ethereum,
-                        evm::fixtures::evm_slots([(1, 1), (2, 1)]),
-                        Some(U256::from(200)),
+                        Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                        evm::fixtures::slots([(1, 1), (2, 1)]),
+                        Some(Bytes::from(200u32).lpad(32, 0)),
                         Some(Bytes::from("0x0c0c0c")),
                         ChangeType::Creation,
                     ),
@@ -661,13 +661,10 @@ mod test {
             Chain::Ethereum,
             address1.clone(),
             address1.clone().to_string(),
-            evm::fixtures::evm_slots([(1, 1), (2, 1)])
-                .into_iter()
-                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
-                .collect::<HashMap<_, _>>(),
+            evm::fixtures::evm_slots([(1, 1), (2, 1)]),
             Bytes::from("0x00000000000000000000000000000000000000000000000000000000000000c8"),
             Bytes::from("0x0c0c0c"),
-            Bytes::from("0x00"),
+            Bytes::from("0x58ca1e123f83094287ae82a842f4f49e064d6f2fa946a2130335ff131ebd010b"),
             Bytes::from("0x00"),
             Bytes::from("0x00"),
             None,
