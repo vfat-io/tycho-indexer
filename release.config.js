@@ -46,7 +46,7 @@ const config = {
           "toml set --toml-path tycho-core/Cargo.toml package.version ${nextRelease.version}",
           "toml set --toml-path tycho-indexer/Cargo.toml package.version ${nextRelease.version}",
           "toml set --toml-path tycho-storage/Cargo.toml package.version ${nextRelease.version}",
-          "cargo update -p token-ethereum",
+          "cargo update -p tycho-ethereum",
           "cargo update -p tycho-client",
           "cargo update -p tycho-core",
           "cargo update -p tycho-indexer",
