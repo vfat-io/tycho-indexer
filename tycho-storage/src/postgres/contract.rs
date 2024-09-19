@@ -1,6 +1,5 @@
 use super::{
-    keccak256, maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema,
-    storage_error_from_diesel,
+    maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema, storage_error_from_diesel,
     versioning::{apply_partitioned_versioning, apply_versioning},
     PostgresError, PostgresGateway, WithOrdinal, WithTxHash, MAX_TS,
 };
@@ -13,10 +12,10 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use tracing::{debug, error, instrument};
 use tycho_core::{
-    models,
+    keccak256,
     models::{
-        AccountToContractStore, Address, Balance, Chain, ChangeType, Code, ContractId,
-        ContractStore, StoreKey, StoreVal, TxHash,
+        self, contract::AccountDelta, AccountToContractStore, Address, Balance, Chain, ChangeType,
+        Code, ContractId, ContractStore, StoreKey, StoreVal, TxHash,
     },
     storage::{BlockOrTimestamp, StorageError, Version},
     Bytes,
@@ -314,7 +313,7 @@ impl PostgresGateway {
         start_version_ts: &NaiveDateTime,
         target_version_ts: &NaiveDateTime,
         conn: &mut AsyncPgConnection,
-    ) -> Result<CreatedOrDeleted<models::contract::ContractDelta>, StorageError> {
+    ) -> Result<CreatedOrDeleted<AccountDelta>, StorageError> {
         // Find created or deleted Accounts
         let cod_accounts: Vec<orm::Account> = {
             use schema::account::dsl::*;
@@ -396,7 +395,7 @@ impl PostgresGateway {
 
             // Restore full state delta at from target version for accounts that were deleted
             let version = Some(Version::from_ts(*target_version_ts));
-            let restored: HashMap<Address, models::contract::ContractDelta> = self
+            let restored: HashMap<Address, AccountDelta> = self
                 .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, conn)
                 .await
                 .map_err(PostgresError::from)?
@@ -411,7 +410,7 @@ impl PostgresGateway {
                         // assuming these have ChangeType created
                         update.clone()
                     } else {
-                        models::contract::ContractDelta::deleted(chain, &acc.address)
+                        AccountDelta::deleted(chain, &acc.address)
                     };
                     Ok((acc.address.clone(), update))
                 })
@@ -444,7 +443,7 @@ impl PostgresGateway {
             let deltas = deleted
                 .iter()
                 .map(|acc| {
-                    let update = models::contract::ContractDelta::deleted(chain, &acc.address);
+                    let update = AccountDelta::deleted(chain, &acc.address);
                     Ok((acc.address.clone(), update))
                 })
                 .collect::<Result<HashMap<_, _>, StorageError>>()?;
@@ -679,7 +678,7 @@ impl PostgresGateway {
         version: Option<&Version>,
         include_slots: bool,
         db: &mut AsyncPgConnection,
-    ) -> Result<models::contract::Contract, StorageError> {
+    ) -> Result<models::contract::Account, StorageError> {
         let account_orm: orm::Account = orm::Account::by_id(id, db)
             .await
             .map_err(|err| {
@@ -751,7 +750,7 @@ impl PostgresGateway {
                 .ok(),
             None => None,
         };
-        let mut account = models::contract::Contract::new(
+        let mut account = models::contract::Account::new(
             id.chain,
             account_orm.address,
             account_orm.title,
@@ -785,7 +784,7 @@ impl PostgresGateway {
         version: Option<&Version>,
         include_slots: bool,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<models::contract::Contract>, StorageError> {
+    ) -> Result<Vec<models::contract::Account>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
         let version_ts = match &version {
             Some(version) => maybe_lookup_version_ts(version, conn).await?,
@@ -893,7 +892,7 @@ impl PostgresGateway {
         accounts
             .into_iter()
             .zip(native_balances.into_iter().zip(codes))
-            .map(|(account, (balance, code))| -> Result<models::contract::Contract, StorageError> {
+            .map(|(account, (balance, code))| -> Result<models::contract::Account, StorageError> {
                 if !(account.id == balance.account_id && balance.account_id == code.account_id) {
                     return Err(StorageError::Unexpected(format!(
                         "Identity mismatch - while retrieving entries for account id: {} \
@@ -907,7 +906,7 @@ impl PostgresGateway {
                 let code_tx = code.tx.clone().unwrap();
                 let creation_tx = account.tx.clone();
 
-                let mut contract = models::contract::Contract::new(
+                let mut contract = models::contract::Account::new(
                     *chain,
                     account.entity.address.clone(),
                     account.entity.title.clone(),
@@ -942,7 +941,7 @@ impl PostgresGateway {
     /// method exists for updating these related components.
     pub async fn upsert_contract(
         &self,
-        new: &models::contract::Contract,
+        new: &models::contract::Account,
         db: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let (creation_tx_id, created_ts) = if let Some(h) = &new.creation_tx {
@@ -1037,7 +1036,7 @@ impl PostgresGateway {
     pub async fn update_contracts(
         &self,
         chain: &Chain,
-        new: &[(Address, &models::contract::ContractDelta)],
+        new: &[(Address, &AccountDelta)],
         conn: &mut AsyncPgConnection,
     ) -> Result<(), StorageError> {
         let chain_id = self.get_chain_id(chain);
@@ -1260,7 +1259,7 @@ impl PostgresGateway {
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<models::contract::ContractDelta>, StorageError> {
+    ) -> Result<Vec<AccountDelta>, StorageError> {
         let chain_id = self.get_chain_id(chain);
         // To support blocks as versions, we need to ingest all blocks, else the
         // below method can error for any blocks that are not present.
@@ -1322,12 +1321,12 @@ impl PostgresGateway {
                     ChangeType::Update
                 };
 
-                let update = models::contract::ContractDelta::new(
-                    chain,
-                    &address,
-                    slots,
-                    balance_deltas.get(&id),
-                    code_deltas.get(&id),
+                let update = AccountDelta::new(
+                    *chain,
+                    address.clone(),
+                    slots.cloned().unwrap_or_default(),
+                    balance_deltas.get(&id).cloned(),
+                    code_deltas.get(&id).cloned(),
                     state,
                 );
                 Ok((address, update))
@@ -1354,9 +1353,8 @@ mod test {
         db_fixtures::{yesterday_midnight, yesterday_one_am},
     };
     use diesel_async::AsyncConnection;
-    use ethers::types::U256;
     use rstest::rstest;
-    use std::time::Duration;
+    use std::{str::FromStr, time::Duration};
     use tycho_core::{
         storage::{BlockIdentifier, VersionKind},
         Bytes,
@@ -1508,9 +1506,9 @@ mod test {
         .await;
     }
 
-    fn account_c0(version: u64) -> models::contract::Contract {
+    fn account_c0(version: u64) -> models::contract::Account {
         match version {
-            1 => models::contract::Contract::new(
+            1 => models::contract::Account::new(
                 Chain::Ethereum,
                 "0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
@@ -1520,7 +1518,7 @@ mod test {
                     .into_iter()
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
-                Bytes::from(U256::from(100)),
+                Bytes::from(100u64).lpad(32, 0),
                 Bytes::from("C0C0C0"),
                 "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                     .parse()
@@ -1537,7 +1535,7 @@ mod test {
                         .unwrap(),
                 ),
             ),
-            2 => models::contract::Contract::new(
+            2 => models::contract::Account::new(
                 Chain::Ethereum,
                 "0x6b175474e89094c44da98b954eedeac495271d0f"
                     .parse()
@@ -1547,7 +1545,7 @@ mod test {
                     .into_iter()
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
-                Bytes::from(U256::from(101)),
+                Bytes::from(101u64).lpad(32, 0),
                 Bytes::from("C0C0C0"),
                 "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                     .parse()
@@ -1571,15 +1569,19 @@ mod test {
     fn contract_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap<Bytes, Option<Bytes>> {
         data.into_iter()
             .map(|(s, v)| {
-                let val = if v == 0 { None } else { Some(Bytes::from(U256::from(v))) };
-                (Bytes::from(U256::from(s)), val)
+                let val = if v == 0 {
+                    None
+                } else {
+                    Some(Bytes::from(u32::try_from(v).unwrap()).lpad(32, 0))
+                };
+                (Bytes::from(u32::try_from(s).unwrap()).lpad(32, 0), val)
             })
             .collect()
     }
 
-    fn account_c1(version: u64) -> models::contract::Contract {
+    fn account_c1(version: u64) -> models::contract::Account {
         match version {
-            2 => models::contract::Contract::new(
+            2 => models::contract::Account::new(
                 Chain::Ethereum,
                 "0x73bce791c239c8010cd3c857d96580037ccdd0ee"
                     .parse()
@@ -1589,7 +1591,7 @@ mod test {
                     .into_iter()
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
-                Bytes::from(U256::from(50)),
+                Bytes::from(50u64).lpad(32, 0),
                 Bytes::from("C1C1C1"),
                 "0xa04b84acdf586a694085997f32c4aa11c2726a7f7e0b677a27d44d180c08e07f"
                     .parse()
@@ -1610,9 +1612,9 @@ mod test {
         }
     }
 
-    fn account_c2(version: u64) -> models::contract::Contract {
+    fn account_c2(version: u64) -> models::contract::Account {
         match version {
-            1 => models::contract::Contract::new(
+            1 => models::contract::Account::new(
                 Chain::Ethereum,
                 "0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
                     .parse()
@@ -1622,7 +1624,7 @@ mod test {
                     .into_iter()
                     .map(|(k, v)| (k, v.unwrap_or(Bytes::from("0x00"))))
                     .collect(),
-                Bytes::from(U256::from(25)),
+                Bytes::from(25u64).lpad(32, 0),
                 Bytes::from("C2C2C2"),
                 "0x7eb1e0ed9d018991eed6077f5be45b52347f6e5870728809d368ead5b96a1e96"
                     .parse()
@@ -1706,7 +1708,7 @@ mod test {
     async fn test_get_contracts(
         #[case] ids: Option<Vec<Bytes>>,
         #[case] version: Option<Version>,
-        #[case] exp: Vec<models::contract::Contract>,
+        #[case] exp: Vec<models::contract::Account>,
     ) {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -1763,8 +1765,8 @@ mod test {
         )
         .await;
         let code = Bytes::from("1234");
-        let code_hash = Bytes::from(&ethers::utils::keccak256(&code));
-        let expected = models::contract::Contract::new(
+        let code_hash = Bytes::from(&keccak256(&code));
+        let expected = models::contract::Account::new(
             Chain::Ethereum,
             "6B175474E89094C44Da98b954EedeAC495271d0F"
                 .parse()
@@ -1815,11 +1817,11 @@ mod test {
         db_fixtures::insert_txns(&mut conn, &[(block.id, 100, modify_txhash)]).await;
         let mut account = account_c1(2);
         account.set_balance(&Bytes::from("0x2710"), &modify_txhash.parse().unwrap());
-        let update = models::contract::ContractDelta::new(
-            &account.chain,
-            &account.address,
-            None,
-            Some(Bytes::from("0x2710")).as_ref(),
+        let update = AccountDelta::new(
+            account.chain,
+            account.address.clone(),
+            HashMap::new(),
+            Some(Bytes::from("0x2710")),
             None,
             ChangeType::Update,
         );
@@ -2148,7 +2150,7 @@ mod test {
     }
 
     fn int_to_b256(s: u64) -> Bytes {
-        Bytes::from(format!("{:064x}", U256::from(s)).as_str())
+        Bytes::from(s).lpad(32, 0)
     }
 
     async fn setup_slots_delta(conn: &mut AsyncPgConnection) {
@@ -2274,41 +2276,37 @@ mod test {
     #[case::no_start_version(None)]
     #[tokio::test]
     async fn get_accounts_delta_backward(#[case] start_version: Option<BlockOrTimestamp>) {
+        use std::str::FromStr;
+
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EvmGateway::from_connection(&mut conn).await;
         let exp = vec![
             // c0 had some changes which need to be reverted
-            models::contract::ContractDelta::new(
-                &Chain::Ethereum,
-                &("0x6b175474e89094c44da98b954eedeac495271d0f"
-                    .parse()
-                    .expect("addr ok")),
-                Some(&contract_slots([(6, 0), (0, 1), (1, 5), (5, 0)])),
-                Some(Bytes::from(U256::from(100))).as_ref(),
+            AccountDelta::new(
+                Chain::Ethereum,
+                Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f").expect("addr ok"),
+                contract_slots([(6, 0), (0, 1), (1, 5), (5, 0)]),
+                Some(Bytes::from(100u64).lpad(32, 0)),
                 None,
                 ChangeType::Update,
             ),
             // c1 which was deployed on block 2 is deleted
-            models::contract::ContractDelta::new(
-                &Chain::Ethereum,
-                &("0x73bce791c239c8010cd3c857d96580037ccdd0ee"
-                    .parse()
-                    .expect("addr ok")),
-                Some(&contract_slots([])),
+            AccountDelta::new(
+                Chain::Ethereum,
+                Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee").expect("addr ok"),
+                HashMap::new(),
                 None,
                 None,
                 ChangeType::Deletion,
             ),
             // c2 is recreated
-            models::contract::ContractDelta::new(
-                &Chain::Ethereum,
-                &("0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
-                    .parse()
-                    .expect("addr ok")),
-                Some(&contract_slots([(1, 2), (2, 4)])),
-                Some(Bytes::from(U256::from(25))).as_ref(),
-                Some(Bytes::from("C2C2C2")).as_ref(),
+            AccountDelta::new(
+                Chain::Ethereum,
+                Bytes::from_str("94a3f312366b8d0a32a00986194053c0ed0cddb1").expect("addr ok"),
+                contract_slots([(1, 2), (2, 4)]),
+                Some(Bytes::from(25u64).lpad(32, 0)),
+                Some(Bytes::from("C2C2C2")),
                 ChangeType::Creation,
             ),
         ];
@@ -2334,34 +2332,28 @@ mod test {
         let gw = EvmGateway::from_connection(&mut conn).await;
         let exp = vec![
             // c0 updates some slots and balances
-            models::contract::ContractDelta::new(
-                &Chain::Ethereum,
-                &("0x6b175474e89094c44da98b954eedeac495271d0f"
-                    .parse()
-                    .expect("addr ok")),
-                Some(contract_slots([(6, 30), (0, 2), (1, 3), (5, 25)])).as_ref(),
-                Some(Bytes::from(U256::from(101))).as_ref(),
+            AccountDelta::new(
+                Chain::Ethereum,
+                Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f").expect("addr ok"),
+                contract_slots([(6, 30), (0, 2), (1, 3), (5, 25)]),
+                Some(Bytes::from(101u64).lpad(32, 0)),
                 None,
                 ChangeType::Update,
             ),
             // c1 was deployed
-            models::contract::ContractDelta::new(
-                &Chain::Ethereum,
-                &("0x73bce791c239c8010cd3c857d96580037ccdd0ee"
-                    .parse()
-                    .expect("addr ok")),
-                Some(contract_slots([(0, 128), (1, 255)])).as_ref(),
-                Some(Bytes::from(U256::from(50))).as_ref(),
-                Some(Bytes::from("C1C1C1")).as_ref(),
+            AccountDelta::new(
+                Chain::Ethereum,
+                Bytes::from_str("73bce791c239c8010cd3c857d96580037ccdd0ee").expect("addr ok"),
+                contract_slots([(0, 128), (1, 255)]),
+                Some(Bytes::from(50u64).lpad(32, 0)),
+                Some(Bytes::from("C1C1C1")),
                 ChangeType::Creation,
             ),
             // c2 is deleted
-            models::contract::ContractDelta::new(
-                &Chain::Ethereum,
-                &("0x94a3f312366b8d0a32a00986194053c0ed0cddb1"
-                    .parse()
-                    .expect("addr ok")),
-                None,
+            AccountDelta::new(
+                Chain::Ethereum,
+                Bytes::from_str("94a3f312366b8d0a32a00986194053c0ed0cddb1").expect("addr ok"),
+                HashMap::new(),
                 None,
                 None,
                 ChangeType::Deletion,

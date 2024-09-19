@@ -6,27 +6,28 @@ use std::{
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use ethers::prelude::{H160, H256, U256};
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use token_analyzer::TokenFinder;
 use tycho_core::{
     models::{
         self,
-        contract::Contract,
-        protocol::{ComponentBalance, ProtocolComponentState},
-        token::CurrencyToken,
-        Address, BlockHash, Chain, ChangeType, ExtractionState, ExtractorIdentity, ProtocolType,
-        TxHash,
+        blockchain::{BlockAggregatedChanges, BlockTag},
+        contract::{Account, AccountDelta},
+        protocol::{ComponentBalance, ProtocolComponentState, ProtocolComponentStateDelta},
+        token::{CurrencyToken, TokenOwnerStore},
+        Address, Balance, BlockHash, Chain, ChangeType, ExtractionState, ExtractorIdentity,
+        ProtocolType, TxHash,
     },
     storage::{
         ChainGateway, ContractStateGateway, ExtractionStateGateway, ProtocolGateway, StorageError,
     },
+    traits::TokenPreProcessor,
     Bytes,
 };
+use tycho_ethereum::token_pre_processor::map_vault;
 use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{
@@ -35,8 +36,6 @@ use crate::{
         evm::{
             chain_state::ChainState,
             protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
-            token_pre_processor::{map_vault, TokenPreProcessorTrait},
-            utils::format_duration,
             Block,
         },
         reorg_buffer::ReorgBuffer,
@@ -75,7 +74,7 @@ pub struct HybridContractExtractor<G, T> {
 impl<G, T> HybridContractExtractor<G, T>
 where
     G: HybridGateway,
-    T: TokenPreProcessorTrait,
+    T: TokenPreProcessor,
 {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
@@ -170,7 +169,7 @@ where
         state.last_processed_block = Some(block);
     }
 
-    async fn report_progress(&self, block: Block) {
+    async fn report_progress(&self, block: &Block) {
         let mut state = self.inner.lock().await;
         let now = chrono::Local::now().naive_utc();
         let time_passed = now
@@ -184,13 +183,15 @@ where
             let blocks_per_minute = blocks_processed as f64 * 60.0 / time_passed as f64;
             let time_remaining =
                 chrono::Duration::minutes((distance_to_current as f64 / blocks_per_minute) as i64);
+            let hours = time_remaining.num_hours();
+            let minutes = (time_remaining.num_minutes()) % 60;
             info!(
                 extractor_id = self.name,
                 blocks_per_minute = format!("{blocks_per_minute:.2}"),
                 blocks_processed,
                 height = block.number,
                 current = current_block,
-                time_remaining = format_duration(&time_remaining),
+                time_remaining = format!("{:02}h{:02}m", hours, minutes),
                 name = "SyncProgress"
             );
             state.last_report_ts = now;
@@ -211,7 +212,7 @@ where
     #[allow(clippy::mutable_key_type)]
     async fn handle_tvl_changes(
         &self,
-        msg: &mut evm::AggregatedBlockChanges,
+        msg: &mut BlockAggregatedChanges,
     ) -> Result<(), ExtractionError> {
         trace!("Calculating tvl changes");
         if msg.component_balances.is_empty() {
@@ -260,8 +261,7 @@ where
         // most of this data should be in the cache.
         let addresses = balances
             .values()
-            .flat_map(|b| b.keys())
-            .map(|addr| Bytes::from(addr.as_bytes()))
+            .flat_map(|b| b.clone().into_keys())
             .collect::<Vec<_>>();
 
         let prices = self
@@ -287,8 +287,7 @@ where
                 let component_tvl: f64 = bal
                     .iter()
                     .filter_map(|(addr, bal)| {
-                        let addr = Bytes::from(addr.as_bytes());
-                        let price = *prices.get(&addr)?;
+                        let price = *prices.get(addr)?;
                         let tvl = bal.balance_float / price;
                         Some(tvl)
                     })
@@ -310,7 +309,7 @@ where
         &self,
         reorg_buffer: &ReorgBuffer<BlockUpdateWithCursor<evm::BlockChanges>>,
         reverted_balances_keys: &[(&String, &Bytes)],
-    ) -> Result<HashMap<String, HashMap<H160, evm::ComponentBalance>>, ExtractionError> {
+    ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, ExtractionError> {
         // First search in the buffer
         let (buffered_balances, missing_balances_keys) =
             reorg_buffer.lookup_balances(reverted_balances_keys);
@@ -337,54 +336,46 @@ where
 
         let empty = HashMap::<Bytes, ComponentBalance>::new();
 
-        let combined_balances: HashMap<
-            String,
-            HashMap<H160, crate::extractor::evm::ComponentBalance>,
-        > = missing_balances_map
-            .iter()
-            .map(|(id, tokens)| {
-                let balances_for_id = missing_balances
-                    .get(id)
-                    .unwrap_or(&empty);
-                let filtered_balances: HashMap<_, _> = tokens
-                    .iter()
-                    .map(|token| {
-                        let balance = balances_for_id
-                            .get(token)
-                            .cloned()
-                            .unwrap_or_else(|| ComponentBalance {
-                                token: token.clone(),
-                                new_balance: Bytes::from(H256::zero()),
-                                balance_float: 0.0,
-                                modify_tx: H256::zero().into(),
-                                component_id: id.to_string(),
-                            });
-                        (token.clone(), balance)
-                    })
-                    .collect();
-                (id.clone(), filtered_balances)
-            })
-            .chain(buffered_balances)
-            .map(|(id, balances)| {
-                (
-                    id,
-                    balances
-                        .into_iter()
-                        .map(|(token, value)| {
-                            (
-                                H160::from(token),
-                                crate::extractor::evm::ComponentBalance::from(&value),
-                            )
+        let combined_balances: HashMap<String, HashMap<Bytes, ComponentBalance>> =
+            missing_balances_map
+                .iter()
+                .map(|(id, tokens)| {
+                    let balances_for_id = missing_balances
+                        .get(id)
+                        .unwrap_or(&empty);
+                    let filtered_balances: HashMap<_, _> = tokens
+                        .iter()
+                        .map(|token| {
+                            let balance = balances_for_id
+                                .get(token)
+                                .cloned()
+                                .unwrap_or_else(|| ComponentBalance {
+                                    token: token.clone(),
+                                    balance: Bytes::new(),
+                                    balance_float: 0.0,
+                                    modify_tx: Bytes::new(),
+                                    component_id: id.to_string(),
+                                });
+                            (token.clone(), balance)
                         })
-                        .collect::<HashMap<_, _>>(),
-                )
-            })
-            .fold(HashMap::new(), |mut acc, (c_id, b_changes)| {
-                acc.entry(c_id)
-                    .or_default()
-                    .extend(b_changes);
-                acc
-            });
+                        .collect();
+                    (id.clone(), filtered_balances)
+                })
+                .chain(buffered_balances)
+                .map(|(id, balances)| {
+                    (
+                        id,
+                        balances
+                            .into_iter()
+                            .collect::<HashMap<_, _>>(),
+                    )
+                })
+                .fold(HashMap::new(), |mut acc, (c_id, b_changes)| {
+                    acc.entry(c_id)
+                        .or_default()
+                        .extend(b_changes);
+                    acc
+                });
         Ok(combined_balances)
     }
 
@@ -396,7 +387,6 @@ where
             .protocol_components()
             .into_iter()
             .flat_map(|pc| pc.tokens.clone().into_iter())
-            .map(|addr| Bytes::from(addr.as_bytes()))
             .collect::<Vec<_>>();
 
         // Separate between known and unkown tokens
@@ -412,12 +402,12 @@ where
             .into_iter()
             .map(|(addr, _)| addr)
             .collect::<Vec<_>>();
-        let unknown_tokens_h160 = unknown_tokens
+        let unknown_tokens = unknown_tokens
             .into_iter()
-            .map(|(addr, _)| H160::from(addr))
+            .map(|(addr, _)| addr)
             .collect::<Vec<_>>();
         // Construct unkown tokens using rpc
-        let balance_map: HashMap<H160, (H160, U256)> = msg
+        let balance_map: HashMap<Address, (Address, Balance)> = msg
             .txs_with_update
             .iter()
             .flat_map(|tx| {
@@ -429,15 +419,16 @@ where
                         map_vault(&change.protocol_system)
                             .or_else(|| {
                                 change
-                                    .contract_ids
+                                    .contract_addresses
                                     // TODO: Currently, it's assumed that the pool is always the
                                     // first contract in the
                                     // protocol component. This approach is a temporary
                                     // workaround and needs to be revisited for a more robust
                                     // solution.
                                     .first()
-                                    .copied()
-                                    .or_else(|| H160::from_str(&change.id).ok())
+                                    .cloned()
+                                    .map(Into::into)
+                                    .or_else(|| Bytes::from_str(&change.id).ok())
                             })
                             .map(|owner| (c_id, owner))
                     })
@@ -450,14 +441,14 @@ where
                                     // We currently only keep the latest created pool for
                                     // it's token
                                     .map(move |(token, balance)| {
-                                        (*token, (addr, U256::from_big_endian(&balance.balance)))
+                                        (token.clone(), (addr.clone(), balance.balance.clone()))
                                     })
                             })
                     })
                     .flatten()
             })
             .collect::<HashMap<_, _>>();
-        let tf = TokenFinder::new(balance_map);
+        let tf = TokenOwnerStore::new(balance_map);
         let existing_tokens = self
             .protocol_cache
             .get_tokens(&known_tokens)
@@ -467,14 +458,10 @@ where
             .map(|t| (t.address.clone(), t));
         let new_tokens: HashMap<Address, CurrencyToken> = self
             .token_pre_processor
-            .get_tokens(
-                unknown_tokens_h160,
-                Arc::new(tf),
-                web3::types::BlockNumber::Number(msg.block.number.into()),
-            )
+            .get_tokens(unknown_tokens, Arc::new(tf), BlockTag::Number(msg.block.number))
             .await
-            .iter()
-            .map(|t| (Bytes::from(t.address.as_bytes()), t.into()))
+            .into_iter()
+            .map(|t| (t.address.clone(), t))
             .chain(existing_tokens)
             .collect();
         Ok(new_tokens)
@@ -485,7 +472,7 @@ where
 impl<G, T> Extractor for HybridContractExtractor<G, T>
 where
     G: HybridGateway,
-    T: TokenPreProcessorTrait,
+    T: TokenPreProcessor,
 {
     fn get_id(&self) -> ExtractorIdentity {
         ExtractorIdentity::new(self.chain, &self.name)
@@ -512,6 +499,7 @@ where
             .lock()
             .await
             .last_processed_block
+            .clone()
     }
 
     #[instrument(skip_all, fields(block_number))]
@@ -596,11 +584,7 @@ where
             .add_tokens(msg.new_tokens.values().cloned())
             .await?;
         self.protocol_cache
-            .add_components(
-                msg.protocol_components()
-                    .iter()
-                    .map(Into::into),
-            )
+            .add_components(msg.protocol_components())
             .await?;
 
         trace!(?msg, "Processing message");
@@ -625,10 +609,10 @@ where
                     .await?;
             }
         }
-        self.update_last_processed_block(msg.block)
+        self.update_last_processed_block(msg.block.clone())
             .await;
 
-        self.report_progress(msg.block).await;
+        self.report_progress(&msg.block).await;
 
         self.update_cursor(inp.cursor).await;
 
@@ -640,8 +624,8 @@ where
             debug!(
                 new_components = changes.new_protocol_components.len(),
                 new_tokens = changes.new_tokens.len(),
-                account_update = changes.account_updates.len(),
-                state_update = changes.state_updates.len(),
+                account_update = changes.account_deltas.len(),
+                state_update = changes.state_deltas.len(),
                 tvl_changes = changes.component_tvl.len(),
                 "ProcessedMessage"
             );
@@ -660,7 +644,7 @@ where
             .last_valid_block
             .ok_or_else(|| ExtractionError::DecodeError("Revert without block ref".into()))?;
 
-        let block_hash = H256::from_str(&block_ref.id).map_err(|err| {
+        let block_hash = Bytes::from_str(&block_ref.id).map_err(|err| {
             ExtractionError::DecodeError(format!(
                 "Failed to parse {} as block hash: {}",
                 block_ref.id, err
@@ -684,7 +668,7 @@ where
 
         // Purge the buffer
         let reverted_state = reorg_buffer
-            .purge(block_hash.into())
+            .purge(block_hash)
             .map_err(|e| ExtractionError::ReorgBufferError(e.to_string()))?;
 
         // Handle created and deleted components
@@ -745,7 +729,7 @@ where
                     .iter()
                     .flat_map(|update| {
                         update
-                            .account_updates
+                            .account_deltas
                             .iter()
                             .filter(|(c_id, _)| {
                                 !reverted_components_creations.contains_key(&c_id.to_string())
@@ -776,9 +760,7 @@ where
             missing
                 .into_iter()
                 .fold(HashMap::new(), |mut acc, (addr, key)| {
-                    acc.entry(addr.into())
-                        .or_default()
-                        .push(key.into());
+                    acc.entry(addr).or_default().push(key);
                     acc
                 });
 
@@ -810,28 +792,19 @@ where
                                 Some(state) => {
                                     // If the state is found, attempt to get the value for the key
                                     state.slots.get(key).map_or_else(
-                                        // If the key is not found, return 0
-                                        || {
-                                            (
-                                                (state.address.clone().into(), key.clone().into()),
-                                                0.into(),
-                                            )
-                                        },
+                                        // If the value for this key is not found, return empty
+                                        // Bytes
+                                        || ((state.address.clone(), key.clone()), Bytes::new()),
                                         // If the key is found, return its value
                                         |value| {
-                                            (
-                                                (
-                                                    state.address.clone().into(),
-                                                    U256::from_big_endian(key),
-                                                ),
-                                                U256::from_big_endian(value),
-                                            )
+                                            ((state.address.clone(), key.clone()), value.clone())
                                         },
                                     )
                                 }
                                 None => {
-                                    // If the state is not found, return 0 for the key
-                                    (((*address).clone().into(), key.clone().into()), 0.into())
+                                    // If the whole account state is not found, return empty Bytes
+                                    // for the key
+                                    ((address.clone(), key.clone()), Bytes::new())
                                 }
                             }
                         })
@@ -839,12 +812,12 @@ where
             )
             .collect::<Vec<_>>();
 
-        let account_updates =
+        let account_deltas =
             combined_states
                 .into_iter()
                 .fold(HashMap::new(), |mut acc, ((addr, key), value)| {
-                    acc.entry(addr)
-                        .or_insert_with(|| evm::AccountUpdate {
+                    acc.entry(addr.clone())
+                        .or_insert_with(|| AccountDelta {
                             address: addr,
                             chain: self.chain,
                             slots: HashMap::new(),
@@ -853,7 +826,7 @@ where
                             change: ChangeType::Update,
                         })
                         .slots
-                        .insert(key, value);
+                        .insert(key, Some(value));
                     acc
                 });
 
@@ -947,12 +920,12 @@ where
 
         let empty = HashSet::<String>::new();
 
-        let state_updates: HashMap<String, evm::ProtocolStateDelta> = db_states
+        let state_deltas: HashMap<String, ProtocolComponentStateDelta> = db_states
             .into_iter()
             .chain(buffered_state)
             .fold(HashMap::new(), |mut acc, ((c_id, key), value)| {
                 acc.entry(c_id.clone())
-                    .or_insert_with(|| evm::ProtocolStateDelta {
+                    .or_insert_with(|| ProtocolComponentStateDelta {
                         component_id: c_id.clone(),
                         updated_attributes: HashMap::new(),
                         deleted_attributes: not_found
@@ -981,7 +954,7 @@ where
                             .flat_map(|(id, balance_change)| {
                                 balance_change
                                     .iter()
-                                    .map(move |(token, _)| (id, Bytes::from(token.as_bytes())))
+                                    .map(move |(token, _)| (id, token.clone()))
                             })
                     })
             })
@@ -998,19 +971,18 @@ where
             .get_balances(&reorg_buffer, &reverted_balances_keys_vec)
             .await?;
 
-        let revert_message = evm::AggregatedBlockChanges {
+        let revert_message = BlockAggregatedChanges {
             extractor: self.name.clone(),
             chain: self.chain,
             block: reorg_buffer
                 .get_most_recent_block()
-                .expect("Couldn't find most recent block in buffer during revert")
-                .into(),
+                .expect("Couldn't find most recent block in buffer during revert"),
             finalized_block_height: reverted_state[0]
                 .block_update
                 .finalized_block_height,
             revert: true,
-            state_updates,
-            account_updates,
+            state_deltas,
+            account_deltas,
             new_tokens: HashMap::new(),
             new_protocol_components: reverted_components_deletions,
             deleted_protocol_components: reverted_components_creations,
@@ -1060,7 +1032,7 @@ pub trait HybridGateway: Send + Sync {
     async fn get_contracts(
         &self,
         component_ids: &[models::Address],
-    ) -> Result<Vec<Contract>, StorageError>;
+    ) -> Result<Vec<Account>, StorageError>;
 
     async fn get_components_balances<'a>(
         &self,
@@ -1104,7 +1076,7 @@ impl HybridPgGateway {
         syncing: bool,
     ) -> Result<(), StorageError> {
         self.state_gateway
-            .start_transaction(&(&changes.block).into(), Some(self.name.as_str()))
+            .start_transaction(&changes.block, Some(self.name.as_str()))
             .await;
         if !changes.new_tokens.is_empty() {
             let new_tokens = changes
@@ -1118,46 +1090,45 @@ impl HybridPgGateway {
                 .await?;
         }
         self.state_gateway
-            .upsert_block(&[(&changes.block).into()])
+            .upsert_block(&[changes.block.clone()])
             .await?;
 
         let mut new_protocol_components: Vec<models::protocol::ProtocolComponent> = vec![];
         let mut state_updates: Vec<(TxHash, models::protocol::ProtocolComponentStateDelta)> =
             vec![];
-        let mut account_changes: Vec<(Bytes, models::contract::ContractDelta)> = vec![];
+        let mut account_changes: Vec<(Bytes, AccountDelta)> = vec![];
 
         let mut balance_changes: Vec<models::protocol::ComponentBalance> = vec![];
-        let mut protocol_tokens: HashSet<H160> = HashSet::new();
+        let mut protocol_tokens: HashSet<Bytes> = HashSet::new();
 
         for tx_update in changes.txs_with_update.iter() {
             trace!(tx_hash = ?tx_update.tx.hash, "Processing tx");
 
             // Insert transaction
             self.state_gateway
-                .upsert_tx(&[(&tx_update.tx).into()])
+                .upsert_tx(&[tx_update.tx.clone()])
                 .await?;
 
-            let hash: TxHash = tx_update.tx.hash.into();
+            let hash: TxHash = tx_update.tx.hash.clone();
 
             // Map new protocol components
             for (_component_id, new_protocol_component) in tx_update.protocol_components.iter() {
-                new_protocol_components.push(new_protocol_component.into());
-                protocol_tokens.extend(new_protocol_component.tokens.iter());
+                new_protocol_components.push(new_protocol_component.clone());
+                protocol_tokens.extend(new_protocol_component.tokens.clone());
             }
 
             // Map new account / contracts
-            for (_, account_update) in tx_update.account_updates.iter() {
+            for (_, account_update) in tx_update.account_deltas.iter() {
                 if account_update.is_creation() {
-                    let new: evm::Account = account_update.ref_into_account(&tx_update.tx);
+                    let new: Account = account_update.ref_into_account(&tx_update.tx);
                     info!(block_number = ?changes.block.number, contract_address = ?new.address, "NewContract");
 
                     // Insert new accounts
                     self.state_gateway
-                        .upsert_contract(&(&new).into())
+                        .upsert_contract(&new)
                         .await?;
                 } else if account_update.is_update() {
-                    account_changes
-                        .push((tycho_core::Bytes::from(tx_update.tx.hash), account_update.into()));
+                    account_changes.push((tx_update.tx.hash.clone(), account_update.clone()));
                 } else {
                     // log error
                     error!(?account_update, "Invalid account update type");
@@ -1169,15 +1140,16 @@ impl HybridPgGateway {
                 tx_update
                     .state_updates
                     .values()
-                    .map(|state_change| (hash.clone(), state_change.into())),
+                    .map(|state_change| (hash.clone(), state_change.clone())),
             );
 
             // Map balance changes
             balance_changes.extend(
                 tx_update
                     .balance_changes
-                    .iter()
-                    .flat_map(|(_, tokens)| tokens.values().map(Into::into)),
+                    .clone()
+                    .into_iter()
+                    .flat_map(|(_, tokens)| tokens.into_values()),
             );
         }
 
@@ -1216,7 +1188,7 @@ impl HybridPgGateway {
                 .await?;
         }
 
-        self.save_cursor(new_cursor, changes.block.hash.into())
+        self.save_cursor(new_cursor, changes.block.hash.clone())
             .await?;
 
         let batch_size: usize = if syncing { self.sync_batch_size } else { 0 };
@@ -1269,7 +1241,7 @@ impl HybridGateway for HybridPgGateway {
     async fn get_contracts(
         &self,
         component_ids: &[models::Address],
-    ) -> Result<Vec<Contract>, StorageError> {
+    ) -> Result<Vec<Account>, StorageError> {
         self.state_gateway
             .get_contracts(&self.chain, Some(component_ids), None, true)
             .await
@@ -1289,25 +1261,40 @@ impl HybridGateway for HybridPgGateway {
 mod test {
     use super::*;
     use crate::{
-        extractor::evm::token_pre_processor::MockTokenPreProcessorTrait,
         pb::tycho::evm::v1::{BlockChanges, BlockContractChanges, BlockEntityChanges},
         testing::MockGateway,
     };
     use float_eq::assert_float_eq;
-    use tycho_core::models::protocol::ProtocolComponent;
+    use mockall::mock;
+    use models::blockchain::{Transaction, TxWithChanges};
+    use tycho_core::{models::protocol::ProtocolComponent, traits::TokenOwnerFinding};
+
+    mock! {
+        pub TokenPreProcessor {}
+
+        #[async_trait::async_trait]
+        impl TokenPreProcessor for TokenPreProcessor {
+            async fn get_tokens(
+                &self,
+                addresses: Vec<Bytes>,
+                token_finder: Arc<dyn TokenOwnerFinding>,
+                block: BlockTag,
+            ) -> Vec<CurrencyToken>;
+        }
+    }
 
     const EXTRACTOR_NAME: &str = "TestExtractor";
     const TEST_PROTOCOL: &str = "TestProtocol";
     async fn create_extractor(
         gw: MockHybridGateway,
-    ) -> HybridContractExtractor<MockHybridGateway, MockTokenPreProcessorTrait> {
+    ) -> HybridContractExtractor<MockHybridGateway, MockTokenPreProcessor> {
         let protocol_types = HashMap::from([("pt_1".to_string(), ProtocolType::default())]);
         let protocol_cache = ProtocolMemoryCache::new(
             Chain::Ethereum,
             chrono::Duration::seconds(900),
             Arc::new(MockGateway::new()),
         );
-        let mut preprocessor = MockTokenPreProcessorTrait::new();
+        let mut preprocessor = MockTokenPreProcessor::new();
         preprocessor
             .expect_get_tokens()
             .returning(|_, _, _| Vec::new());
@@ -1536,15 +1523,15 @@ mod test {
     async fn test_construct_tokens() {
         let msg = evm::BlockChanges {
             extractor: "ex".to_string(),
-            block: evm::Block::default(),
+            block: Block::default(),
             chain: Chain::Ethereum,
             finalized_block_height: 0,
             revert: false,
             new_tokens: HashMap::new(),
-            txs_with_update: vec![evm::TxWithChanges {
+            txs_with_update: vec![TxWithChanges {
                 protocol_components: HashMap::from([(
                     "TestProtocol".to_string(),
-                    evm::ProtocolComponent {
+                    ProtocolComponent {
                         tokens: vec![
                             "0x0000000000000000000000000000000000000001"
                                 .parse()
@@ -1556,10 +1543,10 @@ mod test {
                         ..Default::default()
                     },
                 )]),
-                account_updates: HashMap::new(),
+                account_deltas: HashMap::new(),
                 state_updates: Default::default(),
                 balance_changes: HashMap::new(),
-                tx: evm::Transaction::default(),
+                tx: Transaction::default(),
             }],
         };
 
@@ -1583,15 +1570,13 @@ mod test {
             .await
             .expect("adding tokens failed");
 
-        let mut preprocessor = MockTokenPreProcessorTrait::new();
-        let t3 = evm::ERC20Token::new(
-            "0x0000000000000000000000000000000000000003"
-                .parse()
-                .unwrap(),
-            "TOK3".to_string(),
+        let mut preprocessor = MockTokenPreProcessor::new();
+        let t3 = CurrencyToken::new(
+            &Bytes::from_str("0000000000000000000000000000000000000003").unwrap(),
+            "TOK3",
             18,
             0,
-            Vec::new(),
+            &[],
             Chain::Ethereum,
             100,
         );
@@ -1622,10 +1607,7 @@ mod test {
         )
         .await
         .expect("Extractor init failed");
-        let exp = HashMap::from([
-            (t1.address.clone(), t1),
-            (Bytes::from(t3.address.as_bytes()), (&t3).into()),
-        ]);
+        let exp = HashMap::from([(t1.address.clone(), t1), (t3.address.clone(), t3)]);
 
         let res = extractor
             .construct_currency_tokens(&msg)
@@ -1637,32 +1619,32 @@ mod test {
 
     #[test_log::test(tokio::test)]
     async fn test_handle_tvl_changes() {
-        let mut msg = evm::AggregatedBlockChanges {
+        let mut msg = BlockAggregatedChanges {
             component_balances: HashMap::from([(
                 "comp1".to_string(),
                 HashMap::from([(
-                    H160::from_str("0x0000000000000000000000000000000000000001").unwrap(),
-                    evm::ComponentBalance {
-                        token: H160::from_str("0x0000000000000000000000000000000000000001")
+                    Bytes::from_str("0x0000000000000000000000000000000000000001").unwrap(),
+                    ComponentBalance {
+                        token: Bytes::from_str("0x0000000000000000000000000000000000000001")
                             .unwrap(),
                         balance: Bytes::from(
                             "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
                         ),
                         balance_float: 11_304_207_639.4e18,
-                        modify_tx: H256::default(),
+                        modify_tx: Bytes::zero(32),
                         component_id: "comp1".to_string(),
                     },
                 ),
                     (
-                        H160::from_str("0x0000000000000000000000000000000000000002").unwrap(),
-                        evm::ComponentBalance {
-                            token: H160::from_str("0x0000000000000000000000000000000000000002")
+                        Bytes::from_str("0x0000000000000000000000000000000000000002").unwrap(),
+                        ComponentBalance {
+                            token: Bytes::from_str("0x0000000000000000000000000000000000000002")
                                 .unwrap(),
                             balance: Bytes::from(
                                 "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
                             ),
                             balance_float: 100_000e6,
-                            modify_tx: H256::default(),
+                            modify_tx: Bytes::zero(32),
                             component_id: "comp1".to_string(),
                         },
                     )
@@ -1723,7 +1705,7 @@ mod test {
             .await
             .expect("adding tokens failed");
 
-        let preprocessor = MockTokenPreProcessorTrait::new();
+        let preprocessor = MockTokenPreProcessor::new();
         let mut extractor_gw = MockHybridGateway::new();
         extractor_gw
             .expect_ensure_protocol_types()
@@ -1783,19 +1765,17 @@ mod test {
 mod test_serial_db {
     use super::*;
     use crate::{
-        extractor::evm::{
-            token_pre_processor::MockTokenPreProcessorTrait, AccountUpdate, ProtocolComponent,
-            Transaction, TxWithChanges,
-        },
+        extractor::evm::{ProtocolComponent, Transaction, TxWithChanges},
         pb::sf::substreams::v1::BlockRef,
     };
     use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
-    use ethers::abi::AbiEncode;
     use futures03::{stream, StreamExt};
 
+    use mockall::mock;
     use tycho_core::{
         models::{ContractId, FinancialType, ImplementationType},
         storage::{BlockIdentifier, BlockOrTimestamp},
+        traits::TokenOwnerFinding,
     };
     use tycho_storage::postgres::{
         self,
@@ -1803,6 +1783,20 @@ mod test_serial_db {
         db_fixtures::{self, yesterday_midnight, yesterday_one_am},
         testing::run_against_db,
     };
+
+    mock! {
+        pub TokenPreProcessor {}
+
+        #[async_trait::async_trait]
+        impl TokenPreProcessor for TokenPreProcessor {
+            async fn get_tokens(
+                &self,
+                addresses: Vec<Bytes>,
+                token_finder: Arc<dyn TokenOwnerFinding>,
+                block: BlockTag,
+            ) -> Vec<CurrencyToken>;
+        }
+    }
 
     const WETH_ADDRESS: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC_ADDRESS: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -1820,46 +1814,46 @@ mod test_serial_db {
     const VM_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
 
     // SETUP
-    fn get_mocked_token_pre_processor() -> MockTokenPreProcessorTrait {
-        let mut mock_processor = MockTokenPreProcessorTrait::new();
+    fn get_mocked_token_pre_processor() -> MockTokenPreProcessor {
+        let mut mock_processor = MockTokenPreProcessor::new();
         let new_tokens = vec![
-            evm::ERC20Token::new(
-                H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                    .expect("Invalid H160 address"),
-                "WETH".to_string(),
+            CurrencyToken::new(
+                &Bytes::from_str("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                    .expect("Invalid address"),
+                "WETH",
                 18,
                 0,
-                vec![],
+                &[],
                 Default::default(),
                 100,
             ),
-            evm::ERC20Token::new(
-                H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-                    .expect("Invalid H160 address"),
-                "USDC".to_string(),
+            CurrencyToken::new(
+                &Bytes::from_str("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                    .expect("Invalid address"),
+                "USDC",
                 6,
                 0,
-                vec![],
+                &[],
                 Default::default(),
                 100,
             ),
-            evm::ERC20Token::new(
-                H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f")
-                    .expect("Invalid H160 address"),
-                "DAI".to_string(),
+            CurrencyToken::new(
+                &Bytes::from_str("6b175474e89094c44da98b954eedeac495271d0f")
+                    .expect("Invalid address"),
+                "DAI",
                 18,
                 0,
-                vec![],
+                &[],
                 Default::default(),
                 100,
             ),
-            evm::ERC20Token::new(
-                H160::from_str("0xdAC17F958D2ee523a2206206994597C13D831ec7")
-                    .expect("Invalid H160 address"),
-                "USDT".to_string(),
+            CurrencyToken::new(
+                &Bytes::from_str("dAC17F958D2ee523a2206206994597C13D831ec7")
+                    .expect("Invalid address"),
+                "USDT",
                 6,
                 0,
-                vec![],
+                &[],
                 Default::default(),
                 100,
             ),
@@ -1965,13 +1959,13 @@ mod test_serial_db {
         evm::BlockChanges {
             extractor: "native:test".to_owned(),
             chain: Chain::Ethereum,
-            block: evm::Block {
-                number: 0,
-                chain: Chain::Ethereum,
-                hash: NATIVE_BLOCK_HASH_0.parse().unwrap(),
-                parent_hash: NATIVE_BLOCK_HASH_0.parse().unwrap(),
-                ts: "2020-01-01T01:00:00".parse().unwrap(),
-            },
+            block: Block::new(
+                0,
+                Chain::Ethereum,
+                NATIVE_BLOCK_HASH_0.parse().unwrap(),
+                NATIVE_BLOCK_HASH_0.parse().unwrap(),
+                "2020-01-01T01:00:00".parse().unwrap(),
+            ),
             finalized_block_height: 0,
             revert: false,
             new_tokens: HashMap::from([
@@ -2002,47 +1996,47 @@ mod test_serial_db {
             ]),
             txs_with_update: vec![TxWithChanges {
                 tx: Transaction::new(
-                    H256::zero(),
+                    Bytes::zero(32),
                     NATIVE_BLOCK_HASH_0.parse().unwrap(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: HashMap::new(),
                 balance_changes: HashMap::new(),
                 protocol_components: HashMap::from([(
                     "pool".to_string(),
-                    evm::ProtocolComponent {
+                    ProtocolComponent {
                         id: NATIVE_CREATED_CONTRACT.to_string(),
                         protocol_system: "test".to_string(),
                         protocol_type_name: "pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                            Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                            Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         creation_tx: Default::default(),
                         static_attributes: Default::default(),
                         created_at: Default::default(),
                         change: Default::default(),
                     },
                 )]),
-                account_updates: HashMap::new(),
+                account_deltas: HashMap::new(),
             }],
         }
     }
 
-    fn vm_account(at_version: u64) -> models::contract::Contract {
+    fn vm_account(at_version: u64) -> models::contract::Account {
         match at_version {
-            0 => (&evm::Account::new(
+            0 => Account::new(
                 Chain::Ethereum,
                 "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688"
                     .parse()
                     .unwrap(),
                 "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
                 evm::fixtures::evm_slots([(1, 200)]),
-                U256::from(1000),
+                Bytes::from(1000_u64).lpad(32, 0),
                 vec![0, 0, 0, 0].into(),
                 "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
                     .parse()
@@ -2050,8 +2044,7 @@ mod test_serial_db {
                 VM_TX_HASH_1.parse().unwrap(),
                 VM_TX_HASH_0.parse().unwrap(),
                 Some(VM_TX_HASH_0.parse().unwrap()),
-            ))
-                .into(),
+            ),
             _ => panic!("Unkown version"),
         }
     }
@@ -2059,15 +2052,13 @@ mod test_serial_db {
     // Creates a BlockChanges object with a VM contract creation and an account update. Based on an
     // Ambient pool creation
     fn vm_creation_and_update() -> evm::BlockChanges {
-        let base_token = H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-            .expect("Invalid H160 address");
-        let quote_token = H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-            .expect("Invalid H160 address");
+        let base_token = Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
+        let quote_token = Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap();
         let component_id = "ambient_USDC_ETH".to_string();
         evm::BlockChanges {
             extractor: "vm:ambient".to_owned(),
             chain: Chain::Ethereum,
-            block: evm::Block::default(),
+            block: Block { hash: Bytes::zero(32), ..Default::default() },
             finalized_block_height: 0,
             revert: false,
             new_tokens: HashMap::new(),
@@ -2080,8 +2071,8 @@ mod test_serial_db {
                             protocol_system: "test".to_string(),
                             protocol_type_name: "vm:pool".to_string(),
                             chain: Chain::Ethereum,
-                            tokens: vec![base_token, quote_token],
-                            contract_ids: vec![H160(VM_CONTRACT)],
+                            tokens: vec![base_token.clone(), quote_token],
+                            contract_addresses: vec![Bytes::from(VM_CONTRACT)],
                             static_attributes: Default::default(),
                             change: Default::default(),
                             creation_tx: VM_TX_HASH_0.parse().unwrap(),
@@ -2089,10 +2080,10 @@ mod test_serial_db {
                         },
                     )]),
                     [(
-                        H160(VM_CONTRACT),
-                        AccountUpdate::new(
-                            H160(VM_CONTRACT),
+                        Bytes::from(VM_CONTRACT),
+                        AccountDelta::new(
                             Chain::Ethereum,
+                            VM_CONTRACT.into(),
                             HashMap::new(),
                             None,
                             Some(vec![0, 0, 0, 0].into()),
@@ -2105,9 +2096,9 @@ mod test_serial_db {
                     HashMap::from([(
                         component_id.clone(),
                         HashMap::from([(
-                            base_token,
-                            crate::extractor::evm::ComponentBalance {
-                                token: base_token,
+                            base_token.clone(),
+                            ComponentBalance {
+                                token: base_token.clone(),
                                 balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
                                 modify_tx: VM_TX_HASH_0.parse().unwrap(),
@@ -2120,12 +2111,12 @@ mod test_serial_db {
                 TxWithChanges::new(
                     HashMap::new(),
                     [(
-                        H160(VM_CONTRACT),
-                        AccountUpdate::new(
-                            H160(VM_CONTRACT),
+                        Bytes::from(VM_CONTRACT),
+                        AccountDelta::new(
                             Chain::Ethereum,
-                            evm::fixtures::evm_slots([(1, 200)]),
-                            Some(U256::from(1000)),
+                            VM_CONTRACT.into(),
+                            evm::fixtures::slots([(1, 200)]),
+                            Some(Bytes::from(1000_u64).lpad(32, 0)),
                             None,
                             ChangeType::Update,
                         ),
@@ -2136,8 +2127,8 @@ mod test_serial_db {
                     HashMap::from([(
                         component_id.clone(),
                         HashMap::from([(
-                            base_token,
-                            crate::extractor::evm::ComponentBalance {
+                            base_token.clone(),
+                            ComponentBalance {
                                 token: base_token,
                                 balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
@@ -2168,11 +2159,11 @@ mod test_serial_db {
                 protocol_type_name: "pool".to_string(),
                 chain: Chain::Ethereum,
                 tokens: vec![
-                    H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                    H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                    Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                    Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
                 ],
-                contract_ids: vec![],
-                creation_tx: H256::from_str(
+                contract_addresses: vec![],
+                creation_tx: Bytes::from_str(
                     "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6",
                 )
                 .unwrap(),
@@ -2338,7 +2329,7 @@ mod test_serial_db {
             let client_msg = extractor
                 .handle_revert(BlockUndoSignal {
                     last_valid_block: Some(BlockRef {
-                        id: H256::from_low_u64_be(3).encode_hex(),
+                        id: "0x0000000000000000000000000000000000000000000000000000000000000003".to_string(),
                         number: 3,
                     }),
                     last_valid_cursor: "cursor@3".into(),
@@ -2350,23 +2341,23 @@ mod test_serial_db {
 
             let res = client_msg
                 .as_any()
-                .downcast_ref::<evm::AggregatedBlockChanges>()
+                .downcast_ref::<BlockAggregatedChanges>()
                 .expect("not good type");
             let base_ts = yesterday_midnight().timestamp();
-            let block_entity_changes_result = evm::AggregatedBlockChanges {
+            let block_entity_changes_result = BlockAggregatedChanges {
                 extractor: "native_name".to_string(),
                 chain: Chain::Ethereum,
-                block: Block {
-                    number: 3,
-                    hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
-                    parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
-                    chain: Chain::Ethereum,
-                    ts: NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
-                },
+                block: Block::new(
+                    3,
+                    Chain::Ethereum,
+                    Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
+                    Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
+                    NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
+                ),
                 finalized_block_height: 1,
                 revert: true,
-                state_updates: HashMap::from([
-                    ("pc_1".to_string(), evm::ProtocolStateDelta {
+                state_deltas: HashMap::from([
+                    ("pc_1".to_string(), ProtocolComponentStateDelta {
                         component_id: "pc_1".to_string(),
                         updated_attributes: HashMap::from([
                             ("attr_2".to_string(), Bytes::from("0x0000000000000002")),
@@ -2383,13 +2374,13 @@ mod test_serial_db {
                         protocol_type_name: "pt_1".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap(),
-                            H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+                            Bytes::from_str("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap(),
+                            Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         static_attributes: HashMap::new(),
                         change: ChangeType::Creation,
-                        creation_tx: H256::from_str("0x000000000000000000000000000000000000000000000000000000000000c351").unwrap(),
+                        creation_tx: Bytes::from_str("0x000000000000000000000000000000000000000000000000000000000000c351").unwrap(),
                         created_at: NaiveDateTime::from_timestamp_opt(base_ts + 5000, 0).unwrap(),
                     }),
                 ]),
@@ -2400,36 +2391,36 @@ mod test_serial_db {
                         protocol_type_name: "pt_2".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap(),
-                            H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                            Bytes::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap(),
+                            Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         static_attributes: HashMap::new(),
                         change: ChangeType::Deletion,
-                        creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
+                        creation_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
                         created_at: NaiveDateTime::from_timestamp_opt(base_ts + 4000, 0).unwrap(),
                     }),
                 ]),
                 component_balances: HashMap::from([
                     ("pc_1".to_string(), HashMap::from([
-                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), evm::ComponentBalance {
-                            token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+                        (Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), ComponentBalance {
+                            token: Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
                             balance: Bytes::from("0x00000001"),
                             balance_float: 1.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
                             component_id: "pc_1".to_string(),
                         }),
-                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), evm::ComponentBalance {
-                            token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                        (Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), ComponentBalance {
+                            token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                             balance: Bytes::from("0x000003e8"),
                             balance_float: 1000.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007531").unwrap(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000007531").unwrap(),
                             component_id: "pc_1".to_string(),
                         }),
                     ])),
                 ]),
                 component_tvl: HashMap::new(),
-                account_updates: Default::default(),
+                account_deltas: Default::default(),
             };
 
             assert_eq!(
@@ -2506,7 +2497,6 @@ mod test_serial_db {
                 .await
                 .expect("Failed to create extractor");
 
-            dbg!("starting input seq");
             // Send a sequence of block scoped data.
             stream::iter(get_vm_inp_sequence())
                 .for_each(|inp| async {
@@ -2520,7 +2510,7 @@ mod test_serial_db {
             let client_msg = extractor
                 .handle_revert(BlockUndoSignal {
                     last_valid_block: Some(BlockRef {
-                        id: H256::from_low_u64_be(3).encode_hex(),
+                        id: "0x0000000000000000000000000000000000000000000000000000000000000003".to_string(),
                         number: 3,
                     }),
                     last_valid_cursor: "cursor@3".into(),
@@ -2531,39 +2521,39 @@ mod test_serial_db {
 
             let res = client_msg
                 .as_any()
-                .downcast_ref::<evm::AggregatedBlockChanges>()
+                .downcast_ref::<BlockAggregatedChanges>()
                 .expect("not good type");
 
             let base_ts = yesterday_midnight().timestamp();
-            let block_account_expected = evm::AggregatedBlockChanges {
+            let block_account_expected = BlockAggregatedChanges {
                 extractor: "vm_name".to_string(),
                 chain: Chain::Ethereum,
-                block: Block {
-                    number: 3,
-                    hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
-                    parent_hash: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
-                    chain: Chain::Ethereum,
-                    ts: NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
-                },
+                block: Block::new(
+                    3,
+                    Chain::Ethereum,
+                    Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
+                    Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
+                    NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
+                ),
                 finalized_block_height: 1,
                 revert: true,
-                account_updates: HashMap::from([
-                    (H160::from_str("0x0000000000000000000000000000000000000001").unwrap(), AccountUpdate {
-                        address: H160::from_str("0x0000000000000000000000000000000000000001").unwrap(),
+                account_deltas: HashMap::from([
+                    (Bytes::from_str("0x0000000000000000000000000000000000000001").unwrap(), AccountDelta {
+                        address: Bytes::from_str("0000000000000000000000000000000000000001").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
-                            (U256::from_dec_str("1356938545749799165119972480570561420155507632800475359837393562592731987968").unwrap(), 0.into()),
-                            (1.into(), 1.into()),
+                            (Bytes::from("0x03"), Some(Bytes::new())),
+                            (Bytes::from("0x01"), Some(Bytes::from("0x01"))),
                         ]),
                         balance: None,
                         code: None,
                         change: ChangeType::Update,
                     }),
-                    (H160::from_str("0x0000000000000000000000000000000000000002").unwrap(), AccountUpdate {
-                        address: H160::from_str("0x0000000000000000000000000000000000000002").unwrap(),
+                    (Bytes::from_str("0x0000000000000000000000000000000000000002").unwrap(), AccountDelta {
+                        address: Bytes::from_str("0000000000000000000000000000000000000002").unwrap(),
                         chain: Chain::Ethereum,
                         slots: HashMap::from([
-                            (1.into(), 2.into()),
+                            (Bytes::from("0x01"), Some(Bytes::from("0x02"))),
                         ]),
                         balance: None,
                         code: None,
@@ -2579,40 +2569,39 @@ mod test_serial_db {
                         protocol_type_name: "pt_1".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap(),
-                            H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+                            Bytes::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap(),
+                            Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
                         ],
-                        contract_ids: vec![
-                            H160::from_str("0x0000000000000000000000000000000000000001").unwrap(),
+                        contract_addresses: vec![
+                            Bytes::from_str("0x0000000000000000000000000000000000000001").unwrap(),
                         ],
                         static_attributes: HashMap::new(),
                         change: ChangeType::Deletion,
-                        creation_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
+                        creation_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
                         created_at: NaiveDateTime::from_timestamp_opt(base_ts + 4000, 0).unwrap(),
                     }),
                 ]),
                 component_balances: HashMap::from([
                     ("pc_1".to_string(), HashMap::from([
-                        (H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), crate::extractor::evm::ComponentBalance {
-                            token: H160::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+                        (Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), ComponentBalance {
+                            token: Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
                             balance: Bytes::from("0x00000064"),
                             balance_float: 100.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000007532").unwrap(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000007532").unwrap(),
                             component_id: "pc_1".to_string(),
                         }),
-                        (H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), crate::extractor::evm::ComponentBalance {
-                            token: H160::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                        (Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), ComponentBalance {
+                            token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                             balance: Bytes::from("0x00000001"),
                             balance_float: 1.0,
-                            modify_tx: H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
                             component_id: "pc_1".to_string(),
                         }),
                     ])),
                 ]),
                 component_tvl: HashMap::new(),
-                state_updates: Default::default(),
+                state_deltas: Default::default(),
             };
-
             assert_eq!(
                 res,
                 &block_account_expected

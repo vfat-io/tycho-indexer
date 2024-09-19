@@ -9,55 +9,31 @@ use ethers::{
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 use tycho_core::{
-    models::{Address, Chain, ChangeType},
+    models::{blockchain::Block, contract::AccountDelta, Address, Chain, ChangeType},
+    traits::AccountExtractor,
     Bytes,
 };
 
-use crate::extractor::{
-    evm::{AccountUpdate, Block},
-    RPCError,
-};
-
-#[cfg_attr(test, mockall::automock)]
-#[async_trait]
-pub trait AccountExtractor {
-    async fn get_accounts(
-        &self,
-        block: Block,
-        account_addresses: Vec<Address>,
-    ) -> Result<HashMap<H160, AccountUpdate>, RPCError>;
-}
+use crate::{BytesConvertible, RPCError};
 
 pub struct EVMAccountExtractor {
     provider: Provider<Http>,
     chain: Chain,
 }
 
-impl<TX> From<ethers::core::types::Block<TX>> for Block {
-    fn from(value: ethers::core::types::Block<TX>) -> Self {
-        Block {
-            number: value.number.unwrap().as_u64(),
-            hash: value.hash.unwrap(),
-            parent_hash: value.parent_hash,
-            chain: Chain::Ethereum,
-            ts: NaiveDateTime::from_timestamp_opt(value.timestamp.as_u64() as i64, 0)
-                .expect("Failed to convert timestamp"),
-        }
-    }
-}
-
 #[async_trait]
 impl AccountExtractor for EVMAccountExtractor {
+    type Error = RPCError;
+
     async fn get_accounts(
         &self,
-        block: Block,
+        block: tycho_core::models::blockchain::Block,
         account_addresses: Vec<Address>,
-    ) -> Result<HashMap<H160, AccountUpdate>, RPCError> {
+    ) -> Result<HashMap<Bytes, AccountDelta>, RPCError> {
         let mut updates = HashMap::new();
 
         for address in account_addresses {
-            let address: H160 = address.into();
-
+            let address = H160::from_bytes(&address);
             trace!(contract=?address, block_number=?block.number, block_hash=?block.hash, "Extracting contract code and storage" );
             let block_id = Some(BlockId::from(block.number));
 
@@ -75,16 +51,19 @@ impl AccountExtractor for EVMAccountExtractor {
             let code: Option<Bytes> = Some(Bytes::from(code.to_vec()));
 
             let slots = self
-                .get_storage_range(address, block.hash)
-                .await?;
+                .get_storage_range(address, H256::from_bytes(&block.hash))
+                .await?
+                .into_iter()
+                .map(|(k, v)| (k.to_bytes(), Some(v.to_bytes())))
+                .collect();
 
             updates.insert(
-                address,
-                AccountUpdate {
-                    address,
+                Bytes::from(address.to_fixed_bytes()),
+                AccountDelta {
+                    address: address.to_bytes(),
                     chain: self.chain,
                     slots,
-                    balance,
+                    balance: balance.map(BytesConvertible::to_bytes),
                     code,
                     change: ChangeType::Creation,
                 },
@@ -148,7 +127,15 @@ impl EVMAccountExtractor {
             .get_block(BlockId::from(u64::try_from(block_id).expect("Invalid block number")))
             .await?
             .expect("Block not found");
-        Ok(Block::from(block))
+
+        Ok(Block {
+            number: block.number.unwrap().as_u64(),
+            hash: block.hash.unwrap().to_bytes(),
+            parent_hash: block.parent_hash.to_bytes(),
+            chain: Chain::Ethereum,
+            ts: NaiveDateTime::from_timestamp_opt(block.timestamp.as_u64() as i64, 0)
+                .expect("Failed to convert timestamp"),
+        })
     }
 }
 
@@ -185,13 +172,13 @@ mod tests {
         let node = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
         println!("Using node: {}", node);
 
-        let block = Block {
-            number: block_number,
-            hash: block_hash,
-            parent_hash: Default::default(),
-            chain: Chain::Ethereum,
-            ts: Default::default(),
-        };
+        let block = Block::new(
+            block_number,
+            Chain::Ethereum,
+            block_hash.to_bytes(),
+            Default::default(),
+            Default::default(),
+        );
         let extractor = EVMAccountExtractor::new(&node, Chain::Ethereum).await?;
         let updates = extractor
             .get_accounts(block, accounts)
@@ -200,7 +187,7 @@ mod tests {
         assert_eq!(updates.len(), 1);
         let update = updates
             .get(
-                &H160::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8")
+                &Bytes::from_str("ba12222222228d8ba445958a75a0704d566bf2c8")
                     .expect("valid address"),
             )
             .expect("update exists");

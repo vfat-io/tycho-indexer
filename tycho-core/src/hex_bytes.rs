@@ -1,5 +1,4 @@
 use crate::serde_primitives::hex_bytes;
-use ethers::types::{H160, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
@@ -18,6 +17,7 @@ use diesel::{
     serialize::{self, ToSql},
     sql_types::Binary,
 };
+use rand::Rng;
 
 /// Wrapper type around Bytes to deserialize/serialize from/to hex
 #[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
@@ -48,6 +48,9 @@ impl LowerHex for Bytes {
 }
 
 impl Bytes {
+    pub fn new() -> Self {
+        Self(bytes::Bytes::new())
+    }
     /// This function converts the internal byte array into a `Vec<u8>`
     ///
     /// # Returns
@@ -125,6 +128,48 @@ impl Bytes {
         padded_vec.resize(length, pad_byte);
 
         Bytes(bytes::Bytes::from(padded_vec))
+    }
+
+    /// Creates a `Bytes` object of the specified length, filled with zeros.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - The length of the `Bytes` object to be created.
+    ///
+    /// # Returns
+    ///
+    /// A `Bytes` object of the specified length, where each byte is set to zero.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let b = Bytes::zero(5);
+    /// assert_eq!(b, Bytes::from(vec![0, 0, 0, 0, 0]));
+    /// ```
+    pub fn zero(length: usize) -> Bytes {
+        Bytes::from(vec![0u8; length])
+    }
+
+    /// Creates a `Bytes` object of the specified length, filled with random bytes.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - The length of the `Bytes` object to be created.
+    ///
+    /// # Returns
+    ///
+    /// A `Bytes` object of the specified length, filled with random bytes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let random_bytes = Bytes::random(5);
+    /// assert_eq!(random_bytes.len(), 5);
+    /// ```
+    pub fn random(length: usize) -> Bytes {
+        let mut data = vec![0u8; length];
+        rand::thread_rng().fill(&mut data[..]);
+        Bytes::from(data)
     }
 }
 
@@ -281,25 +326,6 @@ impl FromSql<Binary, Pg> for Bytes {
     }
 }
 
-macro_rules! impl_from_for_ethers_fixed_hash {
-    ($($type:ident),+) => {
-        $(impl From<$type> for Bytes {
-            fn from(src: $type) -> Self {
-                Self(bytes::Bytes::from(src.0.to_vec()))
-            }
-        }
-
-        impl From<Bytes> for $type {
-            fn from(src: Bytes) -> Self {
-                let bytes = src.as_ref();
-                $type::from_slice(bytes)
-            }
-        })*
-    };
-}
-
-impl_from_for_ethers_fixed_hash!(H160, H256);
-
 macro_rules! impl_from_uint_for_bytes {
     ($($t:ty),*) => {
         $(
@@ -317,15 +343,6 @@ macro_rules! impl_from_uint_for_bytes {
 }
 
 impl_from_uint_for_bytes!(u8, u16, u32, u64, u128);
-
-impl From<U256> for Bytes {
-    fn from(src: U256) -> Self {
-        let mut buf = [0u8; 32];
-        src.to_big_endian(&mut buf);
-
-        Self(bytes::Bytes::from(buf.to_vec()))
-    }
-}
 
 impl From<Bytes> for u128 {
     fn from(src: Bytes) -> Self {
@@ -354,21 +371,6 @@ impl From<Bytes> for i128 {
 
         // Convert to i128 using little-endian
         i128::from_le_bytes(u128_bytes)
-    }
-}
-
-impl From<Bytes> for U256 {
-    fn from(src: Bytes) -> Self {
-        let bytes_slice = src.as_ref();
-
-        // Create an array with zeros.
-        let mut u256_bytes: [u8; 32] = [0; 32];
-
-        // Copy bytes from bytes_slice to u256_bytes.
-        u256_bytes[..bytes_slice.len()].copy_from_slice(bytes_slice);
-
-        // Convert the bytes array to U256 using little-endian.
-        U256::from_little_endian(&u256_bytes)
     }
 }
 
@@ -479,13 +481,6 @@ mod tests {
         let data = Bytes::from(vec![1, 2, 3, 4]);
         let result: i128 = i128::from(data.clone());
         assert_eq!(result, i128::from_str("67305985").unwrap());
-    }
-
-    #[test]
-    fn test_u256_from_bytes() {
-        let data = Bytes::from(vec![1, 2, 3, 4]);
-        let result: U256 = U256::from(data);
-        assert_eq!(result, U256::from_dec_str("67305985").unwrap());
     }
 
     #[test]

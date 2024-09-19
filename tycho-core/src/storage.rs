@@ -478,7 +478,7 @@ pub trait ContractStateGateway {
         id: &ContractId,
         version: Option<&Version>,
         include_slots: bool,
-    ) -> Result<models::contract::Contract, StorageError>;
+    ) -> Result<models::contract::Account, StorageError>;
 
     /// Get multiple contracts' states from storage.
     ///
@@ -505,7 +505,7 @@ pub trait ContractStateGateway {
         addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
-    ) -> Result<Vec<models::contract::Contract>, StorageError>;
+    ) -> Result<Vec<models::contract::Account>, StorageError>;
 
     /// Inserts a new contract into the database.
     ///
@@ -520,7 +520,7 @@ pub trait ContractStateGateway {
     /// - A Result with Ok if the operation was successful, and an Err containing `StorageError` if
     ///   there was an issue inserting the contract into the database. E.g. if the contract already
     ///   existed.
-    async fn upsert_contract(&self, new: &models::contract::Contract) -> Result<(), StorageError>;
+    async fn upsert_contract(&self, new: &models::contract::Account) -> Result<(), StorageError>;
 
     /// Update multiple contracts
     ///
@@ -546,7 +546,7 @@ pub trait ContractStateGateway {
     /// the one specified.
     async fn update_contracts(
         &self,
-        new: &[(TxHash, models::contract::ContractDelta)],
+        new: &[(TxHash, models::contract::AccountDelta)],
     ) -> Result<(), StorageError>;
 
     /// Mark a contract as deleted
@@ -609,7 +609,7 @@ pub trait ContractStateGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<Vec<models::contract::ContractDelta>, StorageError>;
+    ) -> Result<Vec<models::contract::AccountDelta>, StorageError>;
 }
 
 pub trait Gateway:

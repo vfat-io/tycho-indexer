@@ -1,41 +1,38 @@
 #![doc = include_str!("../../README.md")]
 
-use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use futures03::future::select_all;
-use reqwest::Client;
 use serde::Deserialize;
 use std::{collections::HashMap, fs::File, io::Read, str::FromStr, sync::Arc};
 use tracing_subscriber::EnvFilter;
-use url::Url;
-
-use extractor::{
-    evm::token_pre_processor::TokenPreProcessor,
-    runner::{ExtractorBuilder, ExtractorHandle},
+use tycho_ethereum::{
+    account_extractor::contract::EVMAccountExtractor,
+    token_analyzer::rpc_client::EthereumRpcClient, token_pre_processor::EthereumTokenPreProcessor,
 };
+
+use extractor::runner::{ExtractorBuilder, ExtractorHandle};
 
 use actix_web::dev::ServerHandle;
 use chrono::{NaiveDateTime, Utc};
 use clap::Parser;
-use ethers::{
-    prelude::{Http, Provider, H160, H256},
-    providers::Middleware,
-};
 use tokio::{select, task::JoinHandle};
 use tracing::{info, instrument, warn};
 use tycho_core::{
-    models::{Address, Chain, ExtractionState, ImplementationType},
+    models::{
+        blockchain::{Block, Transaction},
+        contract::AccountDelta,
+        Address, Chain, ExtractionState, ImplementationType,
+    },
     storage::{ChainGateway, ContractStateGateway, ExtractionStateGateway},
+    traits::AccountExtractor,
+    Bytes,
 };
 use tycho_indexer::{
     cli::{AnalyzeTokenArgs, Cli, Command, GlobalArgs, IndexArgs, RunSpkgArgs},
     extractor::{
-        self, evm,
+        self,
         evm::{
-            chain_state::ChainState,
-            contract::{AccountExtractor, EVMAccountExtractor},
-            protocol_cache::ProtocolMemoryCache,
+            chain_state::ChainState, protocol_cache::ProtocolMemoryCache,
             token_analysis_cron::analyze_tokens,
-            AccountUpdate, Block, Transaction,
         },
         runner::{ExtractorConfig, HandleResult, ProtocolTypeConfig},
         ExtractionError,
@@ -104,7 +101,7 @@ async fn main() -> Result<(), anyhow::Error> {
             run_indexer(global_args, indexer_args).await?;
         }
         Command::AnalyzeTokens(analyze_args) => {
-            run_token_analyzer(global_args, analyze_args).await?;
+            run_tycho_ethereum(global_args, analyze_args).await?;
         }
         Command::Rpc => run_rpc(global_args).await?,
     }
@@ -208,13 +205,11 @@ async fn create_indexing_tasks(
     retention_horizon: NaiveDateTime,
     extractors_config: ExtractorConfigs,
 ) -> Result<Vec<JoinHandle<Result<(), ExtractionError>>>, ExtractionError> {
-    let rpc_client: Provider<Http> =
-        Provider::<Http>::try_from(rpc_url).expect("Error creating HTTP provider");
+    let rpc_client = EthereumRpcClient::new_from_url(rpc_url);
     let block_number = rpc_client
         .get_block_number()
         .await
-        .expect("Error getting block number")
-        .as_u64();
+        .expect("Error getting block number");
 
     let chain_state = ChainState::new(chrono::Local::now().naive_utc(), block_number);
 
@@ -230,15 +225,8 @@ async fn create_indexing_tasks(
         .set_retention_horizon(retention_horizon)
         .build()
         .await?;
-    let transport = Web3Transport::new(HttpTransport::new(
-        Client::new(),
-        Url::from_str(rpc_url).unwrap(),
-        "transport".to_owned(),
-    ));
-    let w3 = Web3::new(transport);
-    let token_processor = TokenPreProcessor::new(
-        rpc_client,
-        w3,
+    let token_processor = EthereumTokenPreProcessor::new_from_url(
+        rpc_url,
         *chains
             .first()
             .expect("No chain provided"), //TODO: handle multichain?
@@ -274,7 +262,7 @@ async fn build_all_extractors(
     chains: &[Chain],
     endpoint_url: &str,
     cached_gw: &CachedGateway,
-    token_pre_processor: &TokenPreProcessor,
+    token_pre_processor: &EthereumTokenPreProcessor,
     rpc_url: &str,
 ) -> Result<Vec<HandleResult>, ExtractionError> {
     let mut extractor_handles = Vec::new();
@@ -330,34 +318,34 @@ async fn initialize_accounts(
     info!(block_number = block.number, "Initializing accounts");
 
     let tx = Transaction {
-        hash: H256::random(),
-        block_hash: block.hash,
-        from: H160::zero(),
+        hash: Bytes::random(32), //TODO: remove Bytes length assumption
+        block_hash: block.hash.clone(),
+        from: Bytes::from([0u8; 20]),
         to: None,
         index: 0,
     };
 
     cached_gw
-        .start_transaction(&(&block).into(), Some("accountExtractor"))
+        .start_transaction(&block, Some("accountExtractor"))
         .await;
 
     cached_gw
-        .upsert_block(&[(&block).into()])
+        .upsert_block(&[block.clone()])
         .await
         .expect("Failed to insert block");
 
     cached_gw
-        .upsert_tx(&[(&tx).into()])
+        .upsert_tx(&[tx.clone()])
         .await
         .expect("Failed to insert tx");
 
-    for account_update in extracted_accounts.values() {
-        let new_account: evm::Account = account_update.ref_into_account(&tx);
+    for account_update in extracted_accounts.into_values() {
+        let new_account = account_update.into_account(&tx);
         info!(block_number = block.number, contract_address = ?new_account.address, "NewContract");
 
         // Insert new accounts
         cached_gw
-            .upsert_contract(&(&new_account).into())
+            .upsert_contract(&new_account)
             .await
             .expect("Failed to insert contract");
     }
@@ -367,7 +355,7 @@ async fn initialize_accounts(
         chain,
         None,
         "account_cursor".as_bytes(),
-        block.hash.into(),
+        block.hash,
     );
 
     cached_gw
@@ -386,7 +374,7 @@ async fn get_accounts_data(
     block_id: i64,
     rpc_url: &str,
     chain: Chain,
-) -> (Block, HashMap<H160, AccountUpdate>) {
+) -> (Block, HashMap<Bytes, AccountDelta>) {
     let account_extractor = EVMAccountExtractor::new(rpc_url, chain)
         .await
         .expect("Failed to create account extractor");
@@ -396,8 +384,8 @@ async fn get_accounts_data(
         .await
         .expect("Failed to get block data");
 
-    let extracted_accounts: HashMap<H160, AccountUpdate> = account_extractor
-        .get_accounts(block, accounts)
+    let extracted_accounts: HashMap<Bytes, AccountDelta> = account_extractor
+        .get_accounts(block.clone(), accounts)
         .await
         .expect("Failed to extract accounts");
     (block, extracted_accounts)
@@ -420,7 +408,7 @@ async fn shutdown_handler(
     Ok(())
 }
 
-async fn run_token_analyzer(
+async fn run_tycho_ethereum(
     global_args: GlobalArgs,
     analyzer_args: AnalyzeTokenArgs,
 ) -> Result<(), anyhow::Error> {

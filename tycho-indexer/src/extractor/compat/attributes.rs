@@ -1,10 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use ethers::types::U256;
-use tycho_core::Bytes;
-use web3::types::H160;
+use tycho_core::{models::protocol::ProtocolComponentStateDelta, Bytes};
 
-use crate::extractor::evm::{BlockChanges, ProtocolStateDelta};
+use crate::extractor::evm::BlockChanges;
 
 const USV3_MANDATORY_ATTRIBUTES: [&str; 3] = ["liquidity", "tick", "sqrt_price_x96"];
 const USV2_MANDATORY_ATTRIBUTES: [&str; 2] = ["reserve0", "reserve1"];
@@ -23,17 +21,17 @@ pub fn add_default_attributes(mut changes: BlockChanges, attributes: &[&str]) ->
                     {
                         state
                             .updated_attributes
-                            .insert(mandatory_attr.to_string(), Bytes::from(U256::zero()));
+                            .insert(mandatory_attr.to_string(), Bytes::zero(32));
                     }
                 }
             } else {
                 let mut default_attr = HashMap::new();
                 for mandatory_attr in attributes {
-                    default_attr.insert(mandatory_attr.to_string(), Bytes::from(U256::zero()));
+                    default_attr.insert(mandatory_attr.to_string(), Bytes::zero(32));
                 }
                 tx.state_updates.insert(
                     c_id.clone(),
-                    ProtocolStateDelta {
+                    ProtocolComponentStateDelta {
                         component_id: c_id.clone(),
                         updated_attributes: default_attr,
                         deleted_attributes: HashSet::new(),
@@ -62,7 +60,7 @@ pub fn trim_curve_component_token(mut changes: BlockChanges) -> BlockChanges {
                         if pool_type == PLAIN_POOL {
                             component
                                 .tokens
-                                .retain(|token| token != &H160::zero());
+                                .retain(|token| token != &Bytes::zero(20));
                         }
                     }
                 }
@@ -86,23 +84,26 @@ pub fn add_default_attributes_uniswapv2(changes: BlockChanges) -> BlockChanges {
 
 #[cfg(test)]
 mod test {
-    use crate::extractor::{
-        compat::{
-            attributes::{
-                add_default_attributes, PLAIN_POOL, STABLE_SWAP_FACTORY, USV3_MANDATORY_ATTRIBUTES,
-            },
-            trim_curve_component_token,
+    use crate::extractor::compat::{
+        attributes::{
+            add_default_attributes, PLAIN_POOL, STABLE_SWAP_FACTORY, USV3_MANDATORY_ATTRIBUTES,
         },
-        evm::Transaction,
+        trim_curve_component_token,
     };
-    use ethers::types::{H160, H256};
     use std::{
         collections::{HashMap, HashSet},
         str::FromStr,
     };
-    use tycho_core::{models::Chain, Bytes};
+    use tycho_core::{
+        models::{
+            blockchain::{Block, Transaction, TxWithChanges},
+            protocol::{ProtocolComponent, ProtocolComponentStateDelta},
+            Chain,
+        },
+        Bytes,
+    };
 
-    use crate::extractor::{evm, evm::TxWithChanges};
+    use crate::extractor::evm;
 
     const BLOCK_HASH_0: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
     const CREATED_CONTRACT: &str = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc";
@@ -114,26 +115,26 @@ mod test {
         let changes = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            evm::Block {
-                number: 0,
-                chain: Chain::Ethereum,
-                hash: BLOCK_HASH_0.parse().unwrap(),
-                parent_hash: BLOCK_HASH_0.parse().unwrap(),
-                ts: "2020-01-01T01:00:00".parse().unwrap(),
-            },
+            Block::new(
+                0,
+                Chain::Ethereum,
+                BLOCK_HASH_0.parse().unwrap(),
+                BLOCK_HASH_0.parse().unwrap(),
+                "2020-01-01T01:00:00".parse().unwrap(),
+            ),
             0,
             false,
             vec![TxWithChanges {
                 tx: Transaction::new(
-                    H256::zero(),
+                    Bytes::zero(32),
                     BLOCK_HASH_0.parse().unwrap(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolStateDelta {
+                    ProtocolComponentStateDelta {
                         component_id: CREATED_CONTRACT.to_string(),
                         updated_attributes: HashMap::from([(
                             "tick".to_string(),
@@ -145,30 +146,30 @@ mod test {
                 balance_changes: HashMap::new(),
                 protocol_components: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolComponent {
+                    ProtocolComponent {
                         id: CREATED_CONTRACT.to_string(),
                         protocol_system: "test".to_string(),
                         protocol_type_name: "Pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                            Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                            Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         creation_tx: Default::default(),
                         static_attributes: Default::default(),
                         created_at: Default::default(),
                         change: Default::default(),
                     },
                 )]),
-                account_updates: Default::default(),
+                account_deltas: Default::default(),
             }],
         );
 
         let expected = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            changes.block,
+            changes.block.clone(),
             0,
             changes.revert,
             vec![TxWithChanges {
@@ -176,15 +177,16 @@ mod test {
                     .txs_with_update
                     .first()
                     .unwrap()
-                    .tx,
+                    .tx
+                    .clone(),
                 state_updates: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolStateDelta {
+                    ProtocolComponentStateDelta {
                         component_id: CREATED_CONTRACT.to_string(),
                         updated_attributes: HashMap::from([
                             ("tick".to_string(), Bytes::from(1_u64.to_be_bytes())),
-                            ("sqrt_price_x96".to_string(), Bytes::from(H256::zero())),
-                            ("liquidity".to_string(), Bytes::from(H256::zero())),
+                            ("sqrt_price_x96".to_string(), Bytes::zero(32)),
+                            ("liquidity".to_string(), Bytes::zero(32)),
                         ]),
                         deleted_attributes: HashSet::new(),
                     },
@@ -196,7 +198,7 @@ mod test {
                     .unwrap()
                     .protocol_components
                     .clone(),
-                account_updates: Default::default(),
+                account_deltas: Default::default(),
             }],
         );
 
@@ -211,26 +213,26 @@ mod test {
         let changes = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            evm::Block {
-                number: 0,
-                chain: Chain::Ethereum,
-                hash: BLOCK_HASH_0.parse().unwrap(),
-                parent_hash: BLOCK_HASH_0.parse().unwrap(),
-                ts: "2020-01-01T01:00:00".parse().unwrap(),
-            },
+            Block::new(
+                0,
+                Chain::Ethereum,
+                BLOCK_HASH_0.parse().unwrap(),
+                BLOCK_HASH_0.parse().unwrap(),
+                "2020-01-01T01:00:00".parse().unwrap(),
+            ),
             0,
             false,
             vec![TxWithChanges {
                 tx: Transaction::new(
-                    H256::zero(),
+                    Bytes::zero(32),
                     BLOCK_HASH_0.parse().unwrap(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolStateDelta {
+                    ProtocolComponentStateDelta {
                         component_id: CREATED_CONTRACT.to_string(),
                         updated_attributes: HashMap::from([(
                             "tick".to_string(),
@@ -241,7 +243,7 @@ mod test {
                 )]),
                 balance_changes: HashMap::new(),
                 protocol_components: HashMap::new(),
-                account_updates: Default::default(),
+                account_deltas: Default::default(),
             }],
         );
 
@@ -255,31 +257,31 @@ mod test {
         let changes = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            evm::Block {
-                number: 0,
-                chain: Chain::Ethereum,
-                hash: BLOCK_HASH_0.parse().unwrap(),
-                parent_hash: BLOCK_HASH_0.parse().unwrap(),
-                ts: "2020-01-01T01:00:00".parse().unwrap(),
-            },
+            Block::new(
+                0,
+                Chain::Ethereum,
+                BLOCK_HASH_0.parse().unwrap(),
+                BLOCK_HASH_0.parse().unwrap(),
+                "2020-01-01T01:00:00".parse().unwrap(),
+            ),
             0,
             false,
             vec![TxWithChanges {
-                account_updates: HashMap::new(),
+                account_deltas: HashMap::new(),
                 protocol_components: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolComponent {
+                    ProtocolComponent {
                         id: CREATED_CONTRACT.to_string(),
                         protocol_system: "test".to_string(),
                         protocol_type_name: "Pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-                            H160::from_str("0x0000000000000000000000000000000000000000").unwrap(),
-                            H160::from_str("0x0000000000000000000000000000000000000000").unwrap(),
+                            Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                            Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                            Bytes::from_str("0x0000000000000000000000000000000000000000").unwrap(),
+                            Bytes::from_str("0x0000000000000000000000000000000000000000").unwrap(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         creation_tx: Default::default(),
                         static_attributes: HashMap::from([
                             ("pool_type".to_string(), Bytes::from(PLAIN_POOL)),
@@ -290,10 +292,10 @@ mod test {
                     },
                 )]),
                 tx: Transaction::new(
-                    H256::zero(),
+                    Bytes::zero(32),
                     BLOCK_HASH_0.parse().unwrap(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: HashMap::new(),
@@ -304,29 +306,29 @@ mod test {
         let expected = evm::BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
-            evm::Block {
-                number: 0,
-                chain: Chain::Ethereum,
-                hash: BLOCK_HASH_0.parse().unwrap(),
-                parent_hash: BLOCK_HASH_0.parse().unwrap(),
-                ts: "2020-01-01T01:00:00".parse().unwrap(),
-            },
+            Block::new(
+                0,
+                Chain::Ethereum,
+                BLOCK_HASH_0.parse().unwrap(),
+                BLOCK_HASH_0.parse().unwrap(),
+                "2020-01-01T01:00:00".parse().unwrap(),
+            ),
             0,
             false,
             vec![TxWithChanges {
-                account_updates: HashMap::new(),
+                account_deltas: HashMap::new(),
                 protocol_components: HashMap::from([(
                     CREATED_CONTRACT.to_string(),
-                    evm::ProtocolComponent {
+                    ProtocolComponent {
                         id: CREATED_CONTRACT.to_string(),
                         protocol_system: "test".to_string(),
                         protocol_type_name: "Pool".to_string(),
                         chain: Chain::Ethereum,
                         tokens: vec![
-                            H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                            H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                            Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                            Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
                         ],
-                        contract_ids: vec![],
+                        contract_addresses: vec![],
                         creation_tx: Default::default(),
                         static_attributes: HashMap::from([
                             ("pool_type".to_string(), Bytes::from(PLAIN_POOL)),
@@ -337,10 +339,10 @@ mod test {
                     },
                 )]),
                 tx: Transaction::new(
-                    H256::zero(),
+                    Bytes::zero(32),
                     BLOCK_HASH_0.parse().unwrap(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: HashMap::new(),

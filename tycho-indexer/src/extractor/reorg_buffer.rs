@@ -1,5 +1,4 @@
 use chrono::NaiveDateTime;
-use ethers::prelude::{H160, U256};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use tracing::{debug, trace, warn};
@@ -240,9 +239,9 @@ where
 pub type ProtocolStateIdType = ComponentId;
 pub type ProtocolStateKeyType = AttrStoreKey;
 pub type ProtocolStateValueType = StoreVal;
-pub type AccountStateIdType = H160;
-pub type AccountStateKeyType = U256;
-pub type AccountStateValueType = U256;
+pub type AccountStateIdType = Bytes;
+pub type AccountStateKeyType = Bytes;
+pub type AccountStateValueType = Bytes;
 
 /// A ReorgBuffer entry containing state updates.
 ///
@@ -253,6 +252,7 @@ pub(crate) trait StateUpdateBufferEntry: std::fmt::Debug {
         keys: Vec<(&ProtocolStateIdType, &ProtocolStateKeyType)>,
     ) -> HashMap<(ProtocolStateIdType, ProtocolStateKeyType), ProtocolStateValueType>;
 
+    #[allow(clippy::mutable_key_type)]
     fn get_filtered_account_state_update(
         &self,
         keys: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
@@ -312,6 +312,7 @@ where
     ///
     /// Clippy thinks it is a complex type that is difficult to read
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::mutable_key_type)]
     pub fn lookup_account_state(
         &self,
         keys: &[(&AccountStateIdType, &AccountStateKeyType)],
@@ -323,7 +324,7 @@ where
         let mut remaining_keys: HashSet<(AccountStateIdType, AccountStateKeyType)> =
             HashSet::from_iter(
                 keys.iter()
-                    .map(|&(c_id, attr)| (*c_id, *attr)),
+                    .map(|&(c_id, attr)| (c_id.clone(), attr.clone())),
             );
 
         for block_message in self.block_messages.iter().rev() {
@@ -337,7 +338,7 @@ where
                     .map(|k| (&k.0, &k.1))
                     .collect(),
             ) {
-                if remaining_keys.remove(&(key.0, key.1)) {
+                if remaining_keys.remove(&(key.0.clone(), key.1.clone())) {
                     res.insert(key, val);
                 }
             }
@@ -392,25 +393,32 @@ mod test {
     };
 
     use chrono::NaiveDateTime;
-    use ethers::types::{H160, H256};
     use rstest::rstest;
-    use tycho_core::{models::Chain, storage::StorageError, Bytes};
-
-    use crate::{
-        extractor::evm::{
-            BlockEntityChanges, ComponentBalance, ProtocolChangesWithTx, ProtocolStateDelta,
-            Transaction,
+    use tycho_core::{
+        models::{
+            blockchain::Transaction,
+            protocol::{ComponentBalance, ProtocolChangesWithTx, ProtocolComponentStateDelta},
+            Chain,
         },
-        testing,
+        storage::StorageError,
+        Bytes,
     };
+
+    use crate::{extractor::evm::BlockChanges, testing};
 
     use super::{BlockNumberOrTimestamp, FinalityStatus, ReorgBuffer};
 
     fn transaction() -> Transaction {
-        Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10)
+        Transaction::new(
+            Bytes::zero(32),
+            Bytes::zero(32),
+            Bytes::zero(20),
+            Some(Bytes::zero(20)),
+            10,
+        )
     }
 
-    fn get_block_entity(version: u8) -> BlockEntityChanges {
+    fn get_block_changes(version: u8) -> BlockChanges {
         match version {
             1 => {
                 let tx = transaction();
@@ -420,7 +428,7 @@ mod test {
                 ]);
                 let state_updates = HashMap::from([(
                     "State1".to_owned(),
-                    ProtocolStateDelta {
+                    ProtocolComponentStateDelta {
                         component_id: "State1".to_owned(),
                         updated_attributes: attr,
                         deleted_attributes: HashSet::new(),
@@ -430,12 +438,14 @@ mod test {
                     (
                         "Balance1".to_string(),
                         [(
-                            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                            Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                             ComponentBalance {
-                                token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap(),
+                                token: Bytes::from_str(
+                                    "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+                                )
+                                .unwrap(),
                                 balance: Bytes::from(1_i32.to_le_bytes()),
-                                modify_tx: tx.hash,
+                                modify_tx: tx.hash.clone(),
                                 component_id: "Balance1".to_string(),
                                 balance_float: 1.0,
                             },
@@ -446,12 +456,14 @@ mod test {
                     (
                         "Balance2".to_string(),
                         [(
-                            H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                            Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                             ComponentBalance {
-                                token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap(),
+                                token: Bytes::from_str(
+                                    "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+                                )
+                                .unwrap(),
                                 balance: Bytes::from(30_i32.to_le_bytes()),
-                                modify_tx: tx.hash,
+                                modify_tx: tx.hash.clone(),
                                 component_id: "Balance2".to_string(),
                                 balance_float: 30.0,
                             },
@@ -461,10 +473,10 @@ mod test {
                     ),
                 ]);
 
-                BlockEntityChanges::new(
+                BlockChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    testing::evm_block(1),
+                    testing::block(1),
                     0,
                     false,
                     vec![ProtocolChangesWithTx {
@@ -472,7 +484,8 @@ mod test {
                         tx,
                         balance_changes: new_balances,
                         ..Default::default()
-                    }],
+                    }
+                    .into()],
                 )
             }
             2 => {
@@ -480,7 +493,7 @@ mod test {
                 let state_updates = HashMap::from([
                     (
                         "State1".to_owned(),
-                        ProtocolStateDelta {
+                        ProtocolComponentStateDelta {
                             component_id: "State1".to_owned(),
                             updated_attributes: HashMap::from([(
                                 "new".to_owned(),
@@ -491,7 +504,7 @@ mod test {
                     ),
                     (
                         "State2".to_owned(),
-                        ProtocolStateDelta {
+                        ProtocolComponentStateDelta {
                             component_id: "State2".to_owned(),
                             updated_attributes: HashMap::from([
                                 ("new".to_owned(), Bytes::from(3_u64.to_be_bytes().to_vec())),
@@ -502,17 +515,18 @@ mod test {
                     ),
                 ]);
 
-                BlockEntityChanges::new(
+                BlockChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    testing::evm_block(2),
+                    testing::block(2),
                     0,
                     false,
                     vec![ProtocolChangesWithTx {
                         protocol_states: state_updates,
                         tx,
                         ..Default::default()
-                    }],
+                    }
+                    .into()],
                 )
             }
             3 => {
@@ -521,12 +535,12 @@ mod test {
                 let balance_changes = HashMap::from([(
                     "Balance1".to_string(),
                     [(
-                        H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                        Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                         ComponentBalance {
-                            token: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+                            token: Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
                                 .unwrap(),
                             balance: Bytes::from(3_i32.to_le_bytes()),
-                            modify_tx: tx.hash,
+                            modify_tx: tx.hash.clone(),
                             component_id: "Balance1".to_string(),
                             balance_float: 3.0,
                         },
@@ -535,13 +549,13 @@ mod test {
                     .collect(),
                 )]);
 
-                BlockEntityChanges::new(
+                BlockChanges::new(
                     "test".to_string(),
                     Chain::Ethereum,
-                    testing::evm_block(3),
+                    testing::block(3),
                     0,
                     false,
-                    vec![ProtocolChangesWithTx { tx, balance_changes, ..Default::default() }],
+                    vec![ProtocolChangesWithTx { tx, balance_changes, ..Default::default() }.into()],
                 )
             }
             _ => panic!("block entity version not implemented"),
@@ -551,10 +565,10 @@ mod test {
     fn test_reorg_buffer_state_lookup() {
         let mut reorg_buffer = ReorgBuffer::new();
         reorg_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
 
         let c_ids = ["State1".to_string(), "State2".to_string()];
@@ -592,20 +606,18 @@ mod test {
     fn test_reorg_buffer_balance_lookup() {
         let mut reorg_buffer = ReorgBuffer::new();
         reorg_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
 
         let c_ids = ["Balance1".to_string(), "Balance2".to_string()];
-        let token_key =
-            Bytes::from(H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap());
-        let missing_token =
-            Bytes::from(H160::from_str("0x0000000000000000000000000000000000000000").unwrap());
+        let token_key = Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap();
+        let missing_token = Bytes::from_str("0x0000000000000000000000000000000000000000").unwrap();
         let missing_component = "missing".to_string();
 
         let keys = vec![
@@ -635,8 +647,8 @@ mod test {
                         token_key.clone(),
                         tycho_core::models::protocol::ComponentBalance {
                             token: token_key.clone(),
-                            new_balance: Bytes::from(3_i32.to_le_bytes()),
-                            modify_tx: transaction().hash.into(),
+                            balance: Bytes::from(3_i32.to_le_bytes()),
+                            modify_tx: transaction().hash,
                             component_id: c_ids[0].clone(),
                             balance_float: 3.0,
                         }
@@ -648,8 +660,8 @@ mod test {
                         token_key.clone(),
                         tycho_core::models::protocol::ComponentBalance {
                             token: token_key.clone(),
-                            new_balance: Bytes::from(30_i32.to_le_bytes()),
-                            modify_tx: transaction().hash.into(),
+                            balance: Bytes::from(30_i32.to_le_bytes()),
+                            modify_tx: transaction().hash,
                             component_id: c_ids[1].clone(),
                             balance_float: 30.0,
                         }
@@ -664,13 +676,13 @@ mod test {
         let mut reorg_buffer = ReorgBuffer::new();
         reorg_buffer.strict = true;
         reorg_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
 
         let finalized = reorg_buffer
@@ -678,7 +690,7 @@ mod test {
             .unwrap();
 
         assert_eq!(reorg_buffer.block_messages.len(), 1);
-        assert_eq!(finalized, vec![get_block_entity(1), get_block_entity(2)]);
+        assert_eq!(finalized, vec![get_block_changes(1), get_block_changes(2)]);
 
         let unknown = reorg_buffer.drain_new_finalized_blocks(999);
 
@@ -689,33 +701,31 @@ mod test {
     fn test_purge() {
         let mut reorg_buffer = ReorgBuffer::new();
         reorg_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
 
         let purged = reorg_buffer
             .purge(
-                H256::from_low_u64_be(
-                    0x0000000000000000000000000000000000000000000000000000000000000001,
+                Bytes::from_str(
+                    "0x0000000000000000000000000000000000000000000000000000000000000001",
                 )
-                .into(),
+                .unwrap(),
             )
             .unwrap();
 
         assert_eq!(reorg_buffer.block_messages.len(), 1);
 
-        assert_eq!(purged, vec![get_block_entity(2), get_block_entity(3)]);
+        assert_eq!(purged, vec![get_block_changes(2), get_block_changes(3)]);
 
         let unknown = reorg_buffer.purge(
-            H256::from_low_u64_be(
-                0x0000000000000000000000000000000000000000000000000000000000000999,
-            )
-            .into(),
+            Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000999")
+                .unwrap(),
         );
 
         assert!(unknown.is_err());
@@ -726,10 +736,10 @@ mod test {
     fn test_insert_wrong_block() {
         let mut reorg_buffer = ReorgBuffer::new();
         reorg_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
     }
 
@@ -747,13 +757,13 @@ mod test {
         let end = end.map(BlockNumberOrTimestamp::Timestamp);
         let mut reorg_buffer = ReorgBuffer::new();
         reorg_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
 
         let blocks = reorg_buffer
@@ -767,14 +777,14 @@ mod test {
 
     #[test]
     fn test_get_block_range_empty() {
-        let reorg_buffer = ReorgBuffer::<BlockEntityChanges>::new();
+        let reorg_buffer = ReorgBuffer::<BlockChanges>::new();
 
         let res = reorg_buffer
             .get_block_range(None, None)
             .unwrap()
             .collect::<Vec<_>>();
 
-        assert_eq!(res, Vec::<&BlockEntityChanges>::new());
+        assert_eq!(res, Vec::<&BlockChanges>::new());
     }
 
     #[rstest]
@@ -789,10 +799,10 @@ mod test {
         let end = end.map(BlockNumberOrTimestamp::Timestamp);
         let mut reorg_buffer = ReorgBuffer::new();
         reorg_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
 
         let res = reorg_buffer
@@ -825,13 +835,13 @@ mod test {
     ) {
         let mut reorg_buffer = ReorgBuffer::new();
         reorg_buffer
-            .insert_block(get_block_entity(1))
+            .insert_block(get_block_changes(1))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(2))
+            .insert_block(get_block_changes(2))
             .unwrap();
         reorg_buffer
-            .insert_block(get_block_entity(3))
+            .insert_block(get_block_changes(3))
             .unwrap();
 
         let res = reorg_buffer.get_finality_status(version);
@@ -841,7 +851,7 @@ mod test {
 
     #[test]
     fn test_get_finality_status_empty() {
-        let reorg_buffer = ReorgBuffer::<BlockEntityChanges>::new();
+        let reorg_buffer = ReorgBuffer::<BlockChanges>::new();
 
         let res = reorg_buffer.get_finality_status(BlockNumberOrTimestamp::Number(2));
 

@@ -30,13 +30,13 @@ and efficiency.
 #### Protocol Systems
 
 A protocol system is a financial protocol defined by its swapping logic.
-Tycho indexes entire protocol systems, including dynamically created components. 
+Tycho indexes entire protocol systems, including dynamically created components.
 This means that components such as Uniswap pairs, which were not predetermined, are included in the indexing logic. They are automatically
 added and indexed upon their creation/detection.
 
 #### Protocol Components
 
-A Protocol Component represents an entity that facilitates the swapping of two tokens. A component consists of static values that remain constant after creation. Separate to the *Protocol Component* is the *Protocol Component State*. This is used to track the dynamic values of the component, which Tycho uses to maintain a historical record. For VM-based protocols, *Accounts* (or Contracts) are also linked to the Protocol Component, providing contract code and storage values necessary for building historical states.
+A Protocol Component represents an entity that facilitates the swapping of two tokens. A component consists of static values that remain constant after creation. Separate to the _Protocol Component_ is the _Protocol Component State_. This is used to track the dynamic values of the component, which Tycho uses to maintain a historical record. For VM-based protocols, _Accounts_ (or Contracts) are also linked to the Protocol Component, providing contract code and storage values necessary for building historical states.
 
 ## Architecture
 
@@ -51,7 +51,7 @@ Tycho consists of several crates, each responsible for different aspects of the 
 - `tycho-storage`: manages the underlying database and provides gateways for data access. More detailed docs [here](./tycho-storage/README.md).
 - `tycho-client`: a rust client to simplify the start-up and managing of data from a Tycho connection. More detailed docs [here](./tycho-client/README.md).
 - `tycho-client-py`: a python interface for the rust client and RPC service. More detailed docs [here](./tycho-client-py/README.md).
-- `token-analyzer`: a simple tool used to analyse indexed tokens and determine their quality ranking.
+- `tycho-ethereum`: a module that integrates Ethereum-specific blockchain functionalities into Tycho. More detailed docs [here](./tycho-ethereum/README.md).
 
 ## Other Chains
 

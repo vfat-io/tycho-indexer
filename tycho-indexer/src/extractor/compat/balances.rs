@@ -1,18 +1,26 @@
 use crate::extractor::{evm::BlockChanges, u256_num::bytes_to_f64};
-use ethers::types::U256;
+use num_bigint::BigUint;
+use num_traits::Num;
 use tycho_core::Bytes;
 
 fn transcode_ascii_balance_to_be(ascii_encoded: &Bytes) -> anyhow::Result<Bytes> {
     let ascii_string = String::from_utf8(ascii_encoded.clone().to_vec())
         .map_err(|e| anyhow::format_err!("Invalid UTF-8 sequence: {ascii_encoded}: {e}"))?;
-    // Balances can go negative, so if the ascii string starts with a -, we default to
-    // U256::zero(), see WBTC/USDC pool at block 19297943
+
     if ascii_string.starts_with('-') {
-        Ok(Bytes::from(U256::zero()))
+        Ok(Bytes::zero(32))
     } else {
-        let as_integer = U256::from_dec_str(&ascii_string)
+        let as_integer = BigUint::from_str_radix(&ascii_string, 10)
             .map_err(|e| anyhow::format_err!("Invalid integer: {e}"))?;
-        Ok(Bytes::from(as_integer))
+
+        let mut result = [0u8; 32];
+        let integer_bytes = as_integer.to_bytes_be();
+
+        // Copy the bytes into the result array, starting from the right (big-endian)
+        let start = 32 - integer_bytes.len();
+        result[start..].copy_from_slice(&integer_bytes);
+
+        Ok(Bytes::from(result))
     }
 }
 
@@ -89,13 +97,13 @@ pub fn transcode_usv2_balances(mut changes: BlockChanges) -> BlockChanges {
 mod tests {
     use std::{collections::HashMap, str::FromStr};
 
-    use ethers::types::{H160, H256};
-    use tycho_core::models::Chain;
-
-    use crate::{
-        extractor::evm::{ComponentBalance, Transaction, TxWithChanges},
-        testing::evm_block,
+    use tycho_core::models::{
+        blockchain::{Transaction, TxWithChanges},
+        protocol::ComponentBalance,
+        Chain,
     };
+
+    use crate::testing::block;
 
     use super::*;
 
@@ -105,7 +113,7 @@ mod tests {
 
         let be_balance = transcode_ascii_balance_to_be(&ascii_balance).unwrap();
 
-        assert_eq!(be_balance, Bytes::from(U256::from(711840128)));
+        assert_eq!(be_balance, Bytes::from(711840128u128).lpad(32, 0));
     }
 
     #[test]
@@ -119,46 +127,50 @@ mod tests {
 
     #[test]
     fn test_ignore_self_balances() {
-        let txs_with_update =
-            vec![TxWithChanges {
-            account_updates: HashMap::new(),
+        let txs_with_update = vec![TxWithChanges {
+            account_deltas: HashMap::new(),
             protocol_components: HashMap::new(),
             balance_changes: HashMap::from([(
                 "0xabc".to_string(),
-                HashMap::from([(
-                    H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
-                    ComponentBalance {
-                        token: H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
-                            .unwrap(),
-                        balance: Bytes::from(0_i32.to_le_bytes()),
-                        balance_float: 36522027799.0,
-                        modify_tx: H256::from_low_u64_be(
-                            0x0000000000000000000000000000000000000000000000000000000011121314,
-                        ),
-                        component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
-                    },
-                ),(
-                    H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
-                    ComponentBalance {
-                        token: H160::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
-                            .unwrap(),
-                        balance: Bytes::from(0_i32.to_le_bytes()),
-                        balance_float: 36522027799.0,
-                        modify_tx: H256::from_low_u64_be(
-                            0x0000000000000000000000000000000000000000000000000000000011121314,
-                        ),
-                        component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
-                    },
-                )]),
+                HashMap::from([
+                    (
+                        Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
+                        ComponentBalance {
+                            token: Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
+                                .unwrap(),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
+                            balance_float: 36522027799.0,
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
+                            component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
+                        },
+                    ),
+                    (
+                        Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
+                        ComponentBalance {
+                            token: Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
+                                .unwrap(),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
+                            balance_float: 36522027799.0,
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
+                            component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
+                        },
+                    ),
+                ]),
             )]),
-            tx: Transaction::new(H256::zero(), H256::zero(), H160::zero(), Some(H160::zero()), 10),
-                state_updates: Default::default(),
-            }];
+            tx: Transaction::new(
+                Bytes::zero(32),
+                Bytes::zero(32),
+                Bytes::zero(20),
+                Some(Bytes::zero(20)),
+                10,
+            ),
+            state_updates: Default::default(),
+        }];
 
         let changes = BlockChanges::new(
             "test".to_string(),
             Chain::Ethereum,
-            evm_block(1),
+            block(1),
             0,
             false,
             txs_with_update.clone(),
@@ -167,33 +179,31 @@ mod tests {
         let expected = BlockChanges::new(
             "test".to_string(),
             Chain::Ethereum,
-            evm_block(1),
+            block(1),
             0,
             false,
             vec![TxWithChanges {
-                account_updates: HashMap::new(),
+                account_deltas: HashMap::new(),
                 protocol_components: HashMap::new(),
                 balance_changes: HashMap::from([(
                     "0xabc".to_string(),
                     HashMap::from([(
-                        H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
+                        Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
                         ComponentBalance {
-                            token: H160::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
+                            token: Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
                                 .unwrap(),
                             balance: Bytes::from(0_i32.to_le_bytes()),
                             balance_float: 36522027799.0,
-                            modify_tx: H256::from_low_u64_be(
-                                0x0000000000000000000000000000000000000000000000000000000011121314,
-                            ),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
                             component_id: "0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399".to_string(),
                         },
                     )]),
                 )]),
                 tx: Transaction::new(
-                    H256::zero(),
-                    H256::zero(),
-                    H160::zero(),
-                    Some(H160::zero()),
+                    Bytes::zero(32),
+                    Bytes::zero(32),
+                    Bytes::zero(20),
+                    Some(Bytes::zero(20)),
                     10,
                 ),
                 state_updates: Default::default(),

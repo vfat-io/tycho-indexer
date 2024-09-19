@@ -21,7 +21,7 @@ use tycho_core::{
     models::{
         self,
         blockchain::{Block, Transaction},
-        contract::{Contract, ContractDelta},
+        contract::{Account, AccountDelta},
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
             ProtocolComponentStateDelta,
@@ -49,9 +49,9 @@ pub(crate) enum WriteOp {
     // Simply keep last
     SaveExtractionState(ExtractionState),
     // Support saving a batch
-    UpsertContract(Vec<models::contract::Contract>),
+    UpsertContract(Vec<models::contract::Account>),
     // Simply merge
-    UpdateContracts(Vec<(TxHash, models::contract::ContractDelta)>),
+    UpdateContracts(Vec<(TxHash, models::contract::AccountDelta)>),
     // Simply merge
     InsertProtocolComponents(Vec<models::protocol::ProtocolComponent>),
     // Simply merge
@@ -389,7 +389,7 @@ impl DBCacheWriteExecutor {
                 }
             }
             WriteOp::UpdateContracts(contracts) => {
-                let collected_changes: Vec<(TxHash, &models::contract::ContractDelta)> = contracts
+                let collected_changes: Vec<(TxHash, &models::contract::AccountDelta)> = contracts
                     .iter()
                     .map(|(tx, update)| (tx.clone(), update))
                     .collect();
@@ -445,7 +445,7 @@ struct RevertParameters {
 type DeltasCache = LruCache<
     RevertParameters,
     (
-        Vec<models::contract::ContractDelta>,
+        Vec<models::contract::AccountDelta>,
         Vec<models::protocol::ProtocolComponentStateDelta>,
         Vec<models::protocol::ComponentBalance>,
     ),
@@ -570,7 +570,7 @@ impl CachedGateway {
         end_version: &BlockOrTimestamp,
     ) -> Result<
         (
-            Vec<models::contract::ContractDelta>,
+            Vec<models::contract::AccountDelta>,
             Vec<models::protocol::ProtocolComponentStateDelta>,
             Vec<models::protocol::ComponentBalance>,
         ),
@@ -690,7 +690,7 @@ impl ContractStateGateway for CachedGateway {
         id: &ContractId,
         version: Option<&Version>,
         include_slots: bool,
-    ) -> Result<Contract, StorageError> {
+    ) -> Result<Account, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
@@ -706,7 +706,7 @@ impl ContractStateGateway for CachedGateway {
         addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
-    ) -> Result<Vec<Contract>, StorageError> {
+    ) -> Result<Vec<Account>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
@@ -716,13 +716,13 @@ impl ContractStateGateway for CachedGateway {
             .await
     }
 
-    async fn upsert_contract(&self, new: &Contract) -> Result<(), StorageError> {
+    async fn upsert_contract(&self, new: &Account) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpsertContract(vec![new.clone()]))
             .await?;
         Ok(())
     }
 
-    async fn update_contracts(&self, new: &[(TxHash, ContractDelta)]) -> Result<(), StorageError> {
+    async fn update_contracts(&self, new: &[(TxHash, AccountDelta)]) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpdateContracts(new.to_vec()))
             .await?;
         Ok(())
@@ -743,7 +743,7 @@ impl ContractStateGateway for CachedGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<Vec<ContractDelta>, StorageError> {
+    ) -> Result<Vec<AccountDelta>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
@@ -887,7 +887,7 @@ impl ProtocolGateway for CachedGateway {
 
     /// Updates tokens without using the write cache.
     ///
-    /// This method is currently only used by the token-analyzer job and therefore does
+    /// This method is currently only used by the tycho-ethereum job and therefore does
     /// not use the write cache. It creates a single transaction and executes all
     /// updates immediately.
     ///
@@ -989,8 +989,6 @@ impl Gateway for CachedGateway {}
 #[cfg(test)]
 mod test_serial_db {
     use std::{collections::HashSet, str::FromStr, time::Duration};
-
-    use ethers::types::U256;
 
     use tycho_core::models::ChangeType;
 
@@ -1100,7 +1098,7 @@ mod test_serial_db {
             let component_balance = models::protocol::ComponentBalance {
                 token: usdc_address.clone(),
                 balance_float: 0.0,
-                new_balance: Bytes::from(&[0u8]),
+                balance: Bytes::from(&[0u8]),
                 modify_tx: tx_1.hash.clone(),
                 component_id: protocol_component_id.clone(),
             };
@@ -1125,7 +1123,7 @@ mod test_serial_db {
             // Send second block messages
             let block_2 = get_sample_block(2);
             let attributes: HashMap<String, Bytes> =
-                vec![("reserve1".to_owned(), Bytes::from(U256::from(1000)))]
+                vec![("reserve1".to_owned(), Bytes::from(1000u64).lpad(32, 0))]
                     .into_iter()
                     .collect();
             let protocol_state_delta = models::protocol::ProtocolComponentStateDelta::new(
@@ -1314,37 +1312,37 @@ mod test_serial_db {
         let ts2 = ts1 + Duration::from_secs(3600);
         let ts3 = ts2 + Duration::from_secs(3600);
         match version {
-            1 => models::blockchain::Block {
-                number: 1,
-                chain: Chain::Ethereum,
-                hash: "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
+            1 => models::blockchain::Block::new(
+                1,
+                Chain::Ethereum,
+                "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
                     .parse()
                     .expect("Invalid hash"),
-                parent_hash: Bytes::default(),
-                ts: ts1,
-            },
-            2 => models::blockchain::Block {
-                number: 2,
-                chain: Chain::Ethereum,
-                hash: "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
+                Bytes::default(),
+                ts1,
+            ),
+            2 => models::blockchain::Block::new(
+                2,
+                Chain::Ethereum,
+                "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
                     .parse()
                     .expect("Invalid hash"),
-                parent_hash: "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
+                "0x88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"
                     .parse()
                     .expect("Invalid hash"),
-                ts: ts2,
-            },
-            3 => models::blockchain::Block {
-                number: 3,
-                chain: Chain::Ethereum,
-                hash: "0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741"
+                ts2,
+            ),
+            3 => models::blockchain::Block::new(
+                3,
+                Chain::Ethereum,
+                "0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741"
                     .parse()
                     .expect("Invalid hash"),
-                parent_hash: "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
+                "0xb495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"
                     .parse()
                     .expect("Invalid hash"),
-                ts: ts3,
-            },
+                ts3,
+            ),
             _ => panic!("Block version not found"),
         }
     }
@@ -1539,7 +1537,7 @@ mod test_serial_db {
             protocol_component_id,
             txn[0],
             "reserve1".to_owned(),
-            Bytes::from(U256::from(1100)),
+            Bytes::from(1100u64).lpad(32, 0),
             None,
             Some(txn[2]),
         )

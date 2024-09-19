@@ -1,10 +1,8 @@
 use crate::extractor::{
-    evm::AggregatedBlockChanges,
     reorg_buffer::{BlockNumberOrTimestamp, FinalityStatus, ReorgBuffer},
     runner::MessageSender,
 };
-use ethers::prelude::StreamExt;
-use futures03::stream;
+use futures03::{stream, StreamExt};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
@@ -14,8 +12,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use tycho_core::{
     models::{
-        blockchain::BlockAggregatedDeltas,
-        contract::Contract,
+        blockchain::BlockAggregatedChanges,
+        contract::Account,
         protocol::{ProtocolComponent, ProtocolComponentState},
         DeltaError, NormalisedMessage,
     },
@@ -32,7 +30,7 @@ use tycho_core::{
 ///   the database and/or from the buffer.
 #[derive(Default, Clone)]
 pub struct PendingDeltas {
-    buffers: HashMap<String, Arc<Mutex<ReorgBuffer<BlockAggregatedDeltas>>>>,
+    buffers: HashMap<String, Arc<Mutex<ReorgBuffer<BlockAggregatedChanges>>>>,
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -65,10 +63,10 @@ impl PendingDeltas {
     }
 
     fn insert(&self, message: Arc<dyn NormalisedMessage>) -> Result<()> {
-        let maybe_convert: Option<BlockAggregatedDeltas> = message
+        let maybe_convert: Option<BlockAggregatedChanges> = message
             .as_any()
-            .downcast_ref::<AggregatedBlockChanges>()
-            .map(|msg| msg.into());
+            .downcast_ref::<BlockAggregatedChanges>()
+            .cloned();
         match maybe_convert {
             Some(msg) => {
                 let maybe_buffer = self.buffers.get(&msg.extractor);
@@ -82,7 +80,7 @@ impl PendingDeltas {
                             guard.purge(msg.block.hash.clone())?;
                         } else {
                             guard.insert_block(msg.clone())?;
-                            guard.drain_new_finalized_blocks(msg.finalised_block_height)?;
+                            guard.drain_new_finalized_blocks(msg.finalized_block_height)?;
                         }
                     }
                     _ => return Err(PendingDeltasError::UnknownExtractor(msg.extractor.clone())),
@@ -172,7 +170,7 @@ impl PendingDeltas {
 
     pub fn update_vm_states(
         &self,
-        db_states: &mut [Contract],
+        db_states: &mut [Account],
         version: Option<BlockNumberOrTimestamp>,
     ) -> Result<()> {
         for state in db_states {
@@ -183,7 +181,7 @@ impl PendingDeltas {
 
     fn update_vm_state(
         &self,
-        db_state: &mut Contract,
+        db_state: &mut Account,
         version: Option<BlockNumberOrTimestamp>,
     ) -> Result<bool> {
         let mut change_found = false;
@@ -196,7 +194,7 @@ impl PendingDeltas {
                     .account_deltas
                     .get(&db_state.address)
                 {
-                    db_state.apply_contract_delta(delta)?;
+                    db_state.apply_delta(delta)?;
                     change_found = true;
                 }
                 // TODO: currently it is impossible to apply balance changes and state deltas since
@@ -246,7 +244,7 @@ impl PendingDeltas {
             for entry in guard.get_block_range(None, None)? {
                 new_components.extend(
                     entry
-                        .new_components
+                        .new_protocol_components
                         .clone()
                         .into_values()
                         .filter(|comp| {
@@ -335,26 +333,23 @@ impl PendingDeltas {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        extractor::{evm, evm::AccountUpdate},
-        testing::evm_block,
-    };
-    use ethers::types::{H160, H256, U256};
+    use crate::{extractor::evm, testing::block};
     use std::str::FromStr;
     use tycho_core::{
-        models::{Chain, ChangeType},
+        models::{
+            contract::AccountDelta,
+            protocol::{ComponentBalance, ProtocolComponentStateDelta},
+            Chain, ChangeType,
+        },
         Bytes,
     };
 
-    fn vm_state() -> Contract {
-        Contract::new(
+    fn vm_state() -> Account {
+        Account::new(
             Chain::Ethereum,
             Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05"),
             "Contract1".to_string(),
-            evm::fixtures::evm_slots([(2, 2)])
-                .into_iter()
-                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
-                .collect::<HashMap<_, _>>(),
+            evm::fixtures::evm_slots([(2, 2)]),
             Bytes::from("0x1999"),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0xbabe"),
@@ -364,26 +359,41 @@ mod test {
         )
     }
 
-    fn vm_block_deltas() -> AggregatedBlockChanges {
-        let address = H160::from_str("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05").unwrap();
-        AggregatedBlockChanges::new(
+    fn vm_block_deltas() -> BlockAggregatedChanges {
+        let address = Bytes::from_str("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05").unwrap();
+        BlockAggregatedChanges::new(
             "vm:extractor",
             Chain::Ethereum,
-            evm_block(1),
+            block(1),
             1,
             false,
+            HashMap::new(),
+            [(
+                address.clone(),
+                AccountDelta::new(
+                    Chain::Ethereum,
+                    address.clone(),
+                    evm::fixtures::slots([(1, 1), (2, 1)]),
+                    Some(Bytes::from(1999u32).lpad(32, 0)),
+                    None,
+                    ChangeType::Update,
+                ),
+            )]
+            .into_iter()
+            .collect::<HashMap<_, _>>(),
+            HashMap::new(),
             [(
                 "component2".to_string(),
-                evm::ProtocolComponent {
+                ProtocolComponent {
                     id: "component2".to_string(),
                     protocol_system: "vm_swap".to_string(),
                     protocol_type_name: "swap".to_string(),
                     chain: Chain::Ethereum,
                     tokens: Vec::new(),
-                    contract_ids: Vec::new(),
+                    contract_addresses: Vec::new(),
                     static_attributes: HashMap::new(),
                     change: ChangeType::Creation,
-                    creation_tx: H256::zero(),
+                    creation_tx: Bytes::new(),
                     created_at: "2020-01-01T00:00:00".parse().unwrap(),
                 },
             )]
@@ -391,20 +401,6 @@ mod test {
             .collect::<HashMap<_, _>>(),
             HashMap::new(),
             HashMap::new(),
-            HashMap::new(),
-            [(
-                address,
-                AccountUpdate::new(
-                    address,
-                    Chain::Ethereum,
-                    evm::fixtures::evm_slots([(1, 1), (2, 1)]),
-                    Some(U256::from(1999)),
-                    None,
-                    ChangeType::Update,
-                ),
-            )]
-            .into_iter()
-            .collect::<HashMap<_, _>>(),
             HashMap::new(),
         )
     }
@@ -422,63 +418,65 @@ mod test {
         )
     }
 
-    fn native_block_deltas() -> AggregatedBlockChanges {
-        AggregatedBlockChanges::new(
+    fn native_block_deltas() -> BlockAggregatedChanges {
+        BlockAggregatedChanges::new(
             "native:extractor",
             Chain::Ethereum,
-            evm_block(1),
+            block(1),
             1,
             false,
-            [(
-                "component3".to_string(),
-                evm::ProtocolComponent {
-                    id: "component3".to_string(),
-                    protocol_system: "native_swap".to_string(),
-                    protocol_type_name: "swap".to_string(),
-                    chain: Chain::Ethereum,
-                    tokens: Vec::new(),
-                    contract_ids: Vec::new(),
-                    static_attributes: HashMap::new(),
-                    change: ChangeType::Creation,
-                    creation_tx: H256::zero(),
-                    created_at: "2020-01-01T00:00:00".parse().unwrap(),
-                },
-            )]
-            .into_iter()
-            .collect::<HashMap<_, _>>(),
-            HashMap::new(),
-            HashMap::new(),
             [
-                evm::ProtocolStateDelta::new(
-                    "component1".to_string(),
+                ProtocolComponentStateDelta::new(
+                    "component1",
                     [("attr1", Bytes::from("0x01"))]
                         .into_iter()
                         .map(|(k, v)| (k.to_string(), v))
                         .collect(),
+                    HashSet::new(),
                 ),
-                evm::ProtocolStateDelta::new(
-                    "component3".to_string(),
+                ProtocolComponentStateDelta::new(
+                    "component3",
                     [("attr2", Bytes::from("0x05"))]
                         .into_iter()
                         .map(|(k, v)| (k.to_string(), v))
                         .collect(),
+                    HashSet::new(),
                 ),
             ]
             .into_iter()
             .map(|v| (v.component_id.clone(), v))
             .collect(),
             HashMap::new(),
+            HashMap::new(),
+            [(
+                "component3".to_string(),
+                ProtocolComponent {
+                    id: "component3".to_string(),
+                    protocol_system: "native_swap".to_string(),
+                    protocol_type_name: "swap".to_string(),
+                    chain: Chain::Ethereum,
+                    tokens: Vec::new(),
+                    contract_addresses: Vec::new(),
+                    static_attributes: HashMap::new(),
+                    change: ChangeType::Creation,
+                    creation_tx: Bytes::new(),
+                    created_at: "2020-01-01T00:00:00".parse().unwrap(),
+                },
+            )]
+            .into_iter()
+            .collect::<HashMap<_, _>>(),
+            HashMap::new(),
             [
                 (
                     "component1".to_string(),
                     [(
-                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                        evm::ComponentBalance {
-                            token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                        Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                        ComponentBalance {
+                            token: Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
                                 .unwrap(),
                             balance_float: 1.0,
                             balance: Bytes::from("0x01"),
-                            modify_tx: H256::zero(),
+                            modify_tx: Bytes::zero(32),
                             component_id: "component1".to_string(),
                         },
                     )]
@@ -488,13 +486,13 @@ mod test {
                 (
                     "component3".to_string(),
                     [(
-                        H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                        evm::ComponentBalance {
-                            token: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                        Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                        ComponentBalance {
+                            token: Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
                                 .unwrap(),
                             balance_float: 2.0,
                             balance: Bytes::from("0x02"),
-                            modify_tx: H256::zero(),
+                            modify_tx: Bytes::zero(32),
                             component_id: "component3".to_string(),
                         },
                     )]
@@ -504,13 +502,14 @@ mod test {
             ]
             .into_iter()
             .collect(),
+            HashMap::new(),
         )
     }
 
     #[test]
     fn test_insert_extractor() {
         let buffer = PendingDeltas::new(["vm:extractor"]);
-        let exp: BlockAggregatedDeltas = (&vm_block_deltas()).into();
+        let exp: BlockAggregatedChanges = vm_block_deltas();
 
         buffer
             .insert(Arc::new(vm_block_deltas()))
@@ -578,14 +577,11 @@ mod test {
         buffer
             .insert(Arc::new(vm_block_deltas()))
             .unwrap();
-        let exp = Contract::new(
+        let exp = Account::new(
             Chain::Ethereum,
             Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05"),
             "Contract1".to_string(),
-            evm::fixtures::evm_slots([(1, 1), (2, 1)])
-                .into_iter()
-                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
-                .collect::<HashMap<_, _>>(),
+            evm::fixtures::evm_slots([(1, 1), (2, 1)]),
             Bytes::from("0x00000000000000000000000000000000000000000000000000000000000007cf"),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0xbabe"),
@@ -616,7 +612,7 @@ mod test {
                 Vec::new(),
                 HashMap::new(),
                 ChangeType::Creation,
-                Bytes::from("0x0000000000000000000000000000000000000000000000000000000000000000"),
+                Bytes::new(),
                 "2020-01-01T00:00:00".parse().unwrap(),
             ),
             ProtocolComponent::new(
@@ -628,7 +624,7 @@ mod test {
                 Vec::new(),
                 HashMap::new(),
                 ChangeType::Creation,
-                Bytes::from("0x0000000000000000000000000000000000000000000000000000000000000000"),
+                Bytes::new(),
                 "2020-01-01T00:00:00".parse().unwrap(),
             ),
         ];

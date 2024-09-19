@@ -4,16 +4,12 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-#[cfg(test)]
-use ethers::prelude::H256;
-#[cfg(test)]
-use ethers::types::U256;
 use mockall::mock;
 
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
-        contract::{Contract, ContractDelta},
+        contract::{Account, AccountDelta},
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
             ProtocolComponentStateDelta,
@@ -28,9 +24,6 @@ use tycho_core::{
     },
     Bytes,
 };
-
-#[cfg(test)]
-use crate::extractor::evm;
 
 mock! {
     pub Gateway {}
@@ -59,7 +52,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<Contract, StorageError>,
+                    Output = Result<Account, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >
@@ -79,7 +72,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<Vec<Contract>, StorageError>,
+                    Output = Result<Vec<Account>, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >
@@ -93,7 +86,7 @@ mock! {
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn upsert_contract<'life0, 'life1, 'async_trait>(
             &'life0 self,
-            new: &'life1 Contract,
+            new: &'life1 Account,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
@@ -109,7 +102,7 @@ mock! {
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn update_contracts<'life0, 'life1, 'async_trait>(
             &'life0 self,
-            new: &'life1 [(TxHash, ContractDelta)],
+            new: &'life1 [(TxHash, AccountDelta)],
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
@@ -149,7 +142,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<Vec<ContractDelta>, StorageError>,
+                    Output = Result<Vec<AccountDelta>, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >
@@ -478,13 +471,15 @@ mock! {
 #[cfg(test)]
 pub fn evm_contract_slots(data: impl IntoIterator<Item = (i32, i32)>) -> HashMap<Bytes, Bytes> {
     data.into_iter()
-        .map(|(s, v)| (Bytes::from(U256::from(s)), Bytes::from(U256::from(v))))
+        .map(|(s, v)| {
+            (Bytes::from(u32::try_from(s).unwrap()), Bytes::from(u32::try_from(v).unwrap()))
+        })
         .collect()
 }
 
-/// Creates an evm block for testing, version 0 is not allowed and will panic.
+/// Creates a block for testing, version 0 is not allowed and will panic.
 #[cfg(test)]
-pub fn evm_block(version: u64) -> evm::Block {
+pub fn block(version: u64) -> Block {
     if version == 0 {
         panic!("Block version 0 doesn't exist. Smallest version is 1");
     }
@@ -492,11 +487,11 @@ pub fn evm_block(version: u64) -> evm::Block {
     let ts: NaiveDateTime = "2020-01-01T00:00:00"
         .parse()
         .expect("failed parsing block ts");
-    evm::Block {
-        number: version,
-        hash: H256::from_low_u64_be(version),
-        parent_hash: H256::from_low_u64_be(version - 1),
-        chain: Chain::Ethereum,
-        ts: ts + Duration::from_secs(version * 12),
-    }
+    Block::new(
+        version,
+        Chain::Ethereum,
+        Bytes::from(version).lpad(32, 0),
+        Bytes::from(version - 1).lpad(32, 0),
+        ts + Duration::from_secs(version * 12),
+    )
 }

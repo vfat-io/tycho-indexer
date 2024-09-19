@@ -15,14 +15,10 @@ use tycho_core::{
     dto,
     models::{Address, Chain, PaginationParams},
     storage::{BlockIdentifier, BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
-    Bytes,
 };
 
 use crate::{
-    extractor::{
-        evm,
-        reorg_buffer::{BlockNumberOrTimestamp, FinalityStatus},
-    },
+    extractor::reorg_buffer::{BlockNumberOrTimestamp, FinalityStatus},
     services::deltas_buffer::{PendingDeltas, PendingDeltasError},
 };
 
@@ -44,78 +40,6 @@ pub enum RpcError {
 impl From<anyhow::Error> for RpcError {
     fn from(value: Error) -> Self {
         Self::Parse(value.to_string())
-    }
-}
-
-impl From<evm::ProtocolStateDelta> for dto::ProtocolStateDelta {
-    fn from(protocol_state: evm::ProtocolStateDelta) -> Self {
-        Self {
-            component_id: protocol_state.component_id,
-            updated_attributes: protocol_state.updated_attributes,
-            deleted_attributes: protocol_state.deleted_attributes,
-        }
-    }
-}
-
-impl From<evm::AccountUpdate> for dto::AccountUpdate {
-    fn from(account_update: evm::AccountUpdate) -> Self {
-        Self {
-            address: account_update.address.into(),
-            chain: account_update.chain.into(),
-            slots: account_update
-                .slots
-                .into_iter()
-                .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
-                .collect(),
-            balance: account_update.balance.map(Bytes::from),
-            code: account_update.code,
-            change: account_update.change.into(),
-        }
-    }
-}
-
-impl From<evm::ERC20Token> for dto::ResponseToken {
-    fn from(token: evm::ERC20Token) -> Self {
-        Self {
-            address: token.address.into(),
-            symbol: token.symbol,
-            decimals: token.decimals,
-            tax: token.tax,
-            chain: token.chain.into(),
-            gas: token.gas,
-            quality: token.quality,
-        }
-    }
-}
-
-impl From<evm::ProtocolComponent> for dto::ProtocolComponent {
-    fn from(protocol_component: evm::ProtocolComponent) -> Self {
-        Self {
-            chain: protocol_component.chain.into(),
-            id: protocol_component.id,
-            protocol_system: protocol_component.protocol_system,
-            protocol_type_name: protocol_component.protocol_type_name,
-            tokens: protocol_component
-                .tokens
-                .into_iter()
-                .map(|token| {
-                    let bytes = token.as_bytes().to_vec();
-                    Bytes::from(bytes)
-                })
-                .collect(),
-            contract_ids: protocol_component
-                .contract_ids
-                .into_iter()
-                .map(|h| {
-                    let bytes = h.as_bytes().to_vec();
-                    Bytes::from(bytes)
-                })
-                .collect(),
-            static_attributes: protocol_component.static_attributes,
-            creation_tx: protocol_component.creation_tx.into(),
-            created_at: protocol_component.created_at,
-            change: protocol_component.change.into(),
-        }
     }
 }
 
@@ -801,13 +725,15 @@ mod tests {
 
     use actix_web::test;
     use chrono::NaiveDateTime;
-    use ethers::types::U256;
 
-    use tycho_core::models::{
-        contract::Contract,
-        protocol::{ProtocolComponent, ProtocolComponentState},
-        token::CurrencyToken,
-        ChangeType,
+    use tycho_core::{
+        models::{
+            contract::Account,
+            protocol::{ProtocolComponent, ProtocolComponentState},
+            token::CurrencyToken,
+            ChangeType,
+        },
+        Bytes,
     };
 
     use crate::testing::{evm_contract_slots, MockGateway};
@@ -907,14 +833,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_state() {
-        let expected = Contract::new(
+        let expected = Account::new(
             Chain::Ethereum,
             "0x6b175474e89094c44da98b954eedeac495271d0f"
                 .parse()
                 .unwrap(),
             "account0".to_owned(),
             evm_contract_slots([(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
-            Bytes::from(U256::from(101)),
+            Bytes::from(101u8).lpad(32, 0),
             Bytes::from("C0C0C0"),
             "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                 .parse()
@@ -1063,7 +989,7 @@ mod tests {
         data: impl IntoIterator<Item = (&'a str, i32)>,
     ) -> HashMap<String, Bytes> {
         data.into_iter()
-            .map(|(s, v)| (s.to_owned(), Bytes::from(U256::from(v))))
+            .map(|(s, v)| (s.to_owned(), Bytes::from(u32::try_from(v).unwrap()).lpad(32, 0)))
             .collect()
     }
 

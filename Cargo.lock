@@ -3966,9 +3966,9 @@ dependencies = [
 
 [[package]]
 name = "num-traits"
-version = "0.2.17"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39e3200413f237f41ab11ad6d161bc7239c84dcb631773ccd7de3dfe4b5c267c"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
@@ -5949,28 +5949,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
-name = "token-analyzer"
-version = "0.17.3"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "contracts",
- "ethcontract",
- "ethers",
- "ethrpc",
- "humantime",
- "mockall",
- "primitive-types",
- "reqwest",
- "serde_json",
- "tokio",
- "tracing",
- "url",
- "web3",
-]
-
-[[package]]
 name = "tokio"
 version = "1.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6478,20 +6456,48 @@ dependencies = [
  "chrono",
  "diesel",
  "diesel-async",
- "ethers",
  "hex",
  "maplit",
  "pretty_assertions",
+ "rand",
  "rstest",
  "serde",
  "serde_json",
  "strum",
  "strum_macros",
  "thiserror",
+ "tiny-keccak",
  "tokio",
+ "tracing",
  "typetag",
  "utoipa",
  "uuid 1.7.0",
+]
+
+[[package]]
+name = "tycho-ethereum"
+version = "0.17.3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "clap",
+ "contracts",
+ "ethcontract",
+ "ethers",
+ "ethrpc",
+ "humantime",
+ "mockall",
+ "primitive-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tycho-core",
+ "url",
+ "web3",
 ]
 
 [[package]]
@@ -6513,7 +6519,6 @@ dependencies = [
  "clap",
  "console-subscriber",
  "diesel-async",
- "ethers",
  "ethrpc",
  "float_eq",
  "futures 0.3.30",
@@ -6521,6 +6526,8 @@ dependencies = [
  "hex-literal",
  "mini-moka",
  "mockall",
+ "num-bigint",
+ "num-traits",
  "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -6535,7 +6542,6 @@ dependencies = [
  "serde_yaml",
  "test-log",
  "thiserror",
- "token-analyzer",
  "tokio",
  "tokio-retry",
  "tokio-stream",
@@ -6545,13 +6551,13 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "tycho-core",
+ "tycho-ethereum",
  "tycho-storage",
  "typetag",
  "url",
  "utoipa",
  "utoipa-swagger-ui",
  "uuid 1.7.0",
- "web3",
 ]
 
 [[package]]
@@ -6564,7 +6570,6 @@ dependencies = [
  "diesel-async",
  "diesel-derive-enum",
  "diesel_migrations",
- "ethers",
  "hex",
  "itertools 0.12.1",
  "lazy_static",
@@ -6573,7 +6578,6 @@ dependencies = [
  "rstest",
  "serde_json",
  "test-log",
- "tiny-keccak",
  "tokio",
  "tracing",
  "tycho-core",

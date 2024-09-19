@@ -21,10 +21,7 @@ use uuid::Uuid;
 
 use crate::{
     models,
-    models::{
-        contract::{Contract, ContractDelta},
-        token::CurrencyToken,
-    },
+    models::{contract::Account, token::CurrencyToken},
     serde_primitives::{
         hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value, hex_hashmap_value,
     },
@@ -55,8 +52,8 @@ pub enum Chain {
     Arbitrum,
 }
 
-impl From<models::contract::Contract> for ResponseAccount {
-    fn from(value: Contract) -> Self {
+impl From<models::contract::Account> for ResponseAccount {
+    fn from(value: Account) -> Self {
         ResponseAccount::new(
             value.chain.into(),
             value.address,
@@ -223,8 +220,9 @@ pub struct BlockChanges {
     pub revert: bool,
     #[serde(with = "hex_hashmap_key", default)]
     pub new_tokens: HashMap<Bytes, ResponseToken>,
-    #[serde(with = "hex_hashmap_key")]
+    #[serde(alias = "account_deltas", with = "hex_hashmap_key")]
     pub account_updates: HashMap<Bytes, AccountUpdate>,
+    #[serde(alias = "state_deltas")]
     pub state_updates: HashMap<String, ProtocolStateDelta>,
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
@@ -383,8 +381,8 @@ impl AccountUpdate {
     }
 }
 
-impl From<models::contract::ContractDelta> for AccountUpdate {
-    fn from(value: ContractDelta) -> Self {
+impl From<models::contract::AccountDelta> for AccountUpdate {
+    fn from(value: models::contract::AccountDelta) -> Self {
         AccountUpdate::new(
             value.address,
             value.chain.into(),
@@ -409,6 +407,7 @@ pub struct ProtocolComponent {
     pub chain: Chain,
     #[schema(value_type=Vec<String>)]
     pub tokens: Vec<Bytes>,
+    #[serde(alias = "contract_addresses")]
     #[schema(value_type=Vec<String>)]
     pub contract_ids: Vec<Bytes>,
     #[serde(with = "hex_hashmap_value")]
@@ -1064,6 +1063,8 @@ pub enum Health {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
     use maplit::hashmap;
     use rstest::rstest;
 
@@ -1240,6 +1241,104 @@ mod test {
         };
 
         assert_eq!(result, expected);
+    }
+
+    fn create_models_block_entity_changes() -> crate::models::blockchain::BlockAggregatedChanges {
+        let base_ts = 1694534400; // Example base timestamp for 2023-09-14T00:00:00
+
+        crate::models::blockchain::BlockAggregatedChanges {
+            extractor: "native_name".to_string(),
+            chain: models::Chain::Ethereum,
+            block: models::blockchain::Block::new(
+                3,
+                models::Chain::Ethereum,
+                Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000003").unwrap(),
+                Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000002").unwrap(),
+                NaiveDateTime::from_timestamp_opt(base_ts + 3000, 0).unwrap(),
+            ),
+            finalized_block_height: 1,
+            revert: true,
+            state_deltas: HashMap::from([
+                ("pc_1".to_string(), models::protocol::ProtocolComponentStateDelta {
+                    component_id: "pc_1".to_string(),
+                    updated_attributes: HashMap::from([
+                        ("attr_2".to_string(), Bytes::from("0x0000000000000002")),
+                        ("attr_1".to_string(), Bytes::from("0x00000000000003e8")),
+                    ]),
+                    deleted_attributes: HashSet::new(),
+                }),
+            ]),
+            new_tokens: HashMap::new(),
+            new_protocol_components: HashMap::from([
+                ("pc_2".to_string(), crate::models::protocol::ProtocolComponent {
+                    id: "pc_2".to_string(),
+                    protocol_system: "native_protocol_system".to_string(),
+                    protocol_type_name: "pt_1".to_string(),
+                    chain: models::Chain::Ethereum,
+                    tokens: vec![
+                        Bytes::from_str("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap(),
+                        Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+                    ],
+                    contract_addresses: vec![],
+                    static_attributes: HashMap::new(),
+                    change: models::ChangeType::Creation,
+                    creation_tx: Bytes::from_str("0x000000000000000000000000000000000000000000000000000000000000c351").unwrap(),
+                    created_at: NaiveDateTime::from_timestamp_opt(base_ts + 5000, 0).unwrap(),
+                }),
+            ]),
+            deleted_protocol_components: HashMap::from([
+                ("pc_3".to_string(), crate::models::protocol::ProtocolComponent {
+                    id: "pc_3".to_string(),
+                    protocol_system: "native_protocol_system".to_string(),
+                    protocol_type_name: "pt_2".to_string(),
+                    chain: models::Chain::Ethereum,
+                    tokens: vec![
+                        Bytes::from_str("0x6b175474e89094c44da98b954eedeac495271d0f").unwrap(),
+                        Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                    ],
+                    contract_addresses: vec![],
+                    static_attributes: HashMap::new(),
+                    change: models::ChangeType::Deletion,
+                    creation_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000009c41").unwrap(),
+                    created_at: NaiveDateTime::from_timestamp_opt(base_ts + 4000, 0).unwrap(),
+                }),
+            ]),
+            component_balances: HashMap::from([
+                ("pc_1".to_string(), HashMap::from([
+                    (Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(), models::protocol::ComponentBalance {
+                        token: Bytes::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
+                        balance: Bytes::from("0x00000001"),
+                        balance_float: 1.0,
+                        modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+                        component_id: "pc_1".to_string(),
+                    }),
+                    (Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), models::protocol::ComponentBalance {
+                        token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                        balance: Bytes::from("0x000003e8"),
+                        balance_float: 1000.0,
+                        modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000007531").unwrap(),
+                        component_id: "pc_1".to_string(),
+                    }),
+                ])),
+            ]),
+            component_tvl: HashMap::new(),
+            account_deltas: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_serialize_deserialize_block_changes() {
+        // Test that models::BlockAggregatedChanges serialized as json can be deserialized as
+        // dto::BlockChanges.
+
+        // Create a models::BlockAggregatedChanges instance
+        let block_entity_changes = create_models_block_entity_changes();
+
+        // Serialize the struct into JSON
+        let json_data = serde_json::to_string(&block_entity_changes).expect("Failed to serialize");
+
+        // Deserialize the JSON back into a dto::BlockChanges struct
+        serde_json::from_str::<BlockChanges>(&json_data).expect("parsing failed");
     }
 
     #[test]
