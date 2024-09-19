@@ -168,14 +168,13 @@ mod test {
     #[ignore]
     #[test_log::test(tokio::test)]
     async fn test_analyze_tokens() {
+        let rpc = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
         let args = AnalyzeTokenArgs {
             chain: Chain::Ethereum,
             concurrency: 10,
             update_batch_size: 100,
             fetch_batch_size: 100,
-            rpc_url:
-                "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac"
-                    .to_string(),
+            rpc_url: rpc,
         };
         let mut gw = testing::MockGateway::new();
         gw.expect_get_tokens()
