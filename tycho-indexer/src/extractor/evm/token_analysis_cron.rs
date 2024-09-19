@@ -130,8 +130,8 @@ async fn analyze_batch(
 
         if let TokenQuality::Bad { reason } = token_quality {
             debug!(?t.address, ?reason, "Token quality detected as bad!");
-            // Don't try to analyze again.
-            t.quality = 5;
+            // Remove 1 to the quality for each attempt. If it fails 5 times we won't try again.
+            t.quality -= 1;
         };
 
         // If it's a fee token, set quality to 50

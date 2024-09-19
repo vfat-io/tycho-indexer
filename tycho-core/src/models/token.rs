@@ -24,7 +24,7 @@ pub struct CurrencyToken {
     ///  - 75: Rebase token
     ///  - 50: Fee token
     ///  - 10: Token analysis failed at creation
-    ///  - 5: Token analysis failed on cronjob (after creation).
+    ///  - 9-5: Token analysis failed on cronjob (after creation).
     ///  - 0: Failed to extract decimals onchain
     pub quality: u32,
 }
