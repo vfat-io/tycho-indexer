@@ -99,7 +99,7 @@ where
 
         if let Some(at) = deltas_version {
             self.pending_deltas
-                .update_vm_states(&mut accounts, Some(at))?;
+                .update_vm_states(addresses, &mut accounts, Some(at))?;
         }
         Ok(dto::StateRequestResponse::new(
             accounts

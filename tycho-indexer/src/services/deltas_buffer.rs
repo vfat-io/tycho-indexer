@@ -18,6 +18,7 @@ use tycho_core::{
         DeltaError, NormalisedMessage,
     },
     storage::StorageError,
+    Bytes,
 };
 
 /// The `PendingDeltas` struct manages access to the reorg buffers maintained by each extractor.
@@ -108,6 +109,7 @@ impl PendingDeltas {
         version: Option<BlockNumberOrTimestamp>,
     ) -> Result<()> {
         // TODO: handle when no id is specified with filters
+
         let mut missing_ids: HashSet<&str> = protocol_ids
             .unwrap_or_default()
             .iter()
@@ -168,17 +170,44 @@ impl PendingDeltas {
         Ok(change_found)
     }
 
+    /// Updates the given db states with the buffered deltas. If a requested account is not in the
+    /// db yet, it creates a new state for it out of the buffered deltas.
+    ///
+    /// Arguments:
+    ///
+    /// * `addresses`: A list of the requested account addresses.
+    /// * `db_states`: A mutable reference to the states fetched from the db.
+    /// * `version`: The version of the state to be fetched. If `None`, the latest state will be
+    ///   fetched.
     pub fn update_vm_states(
         &self,
-        db_states: &mut [Account],
+        addresses: Option<&[Bytes]>,
+        db_states: &mut Vec<Account>,
         version: Option<BlockNumberOrTimestamp>,
     ) -> Result<()> {
-        for state in db_states {
+        let mut missing_addresses: HashSet<Bytes> = addresses
+            .unwrap_or_default()
+            .iter()
+            .cloned()
+            .collect();
+
+        // update db states with buffered deltas
+        for state in db_states.iter_mut() {
             self.update_vm_state(state, version)?;
+            missing_addresses.remove(&state.address);
         }
+
+        // for new accounts (not in the db yet), build a new state from the buffered deltas
+        // and add it to the db states
+        for address in missing_addresses {
+            let account = self.get_account(address, version)?;
+            db_states.push(account);
+        }
+
         Ok(())
     }
 
+    // Updates a given db account state with the buffered deltas.
     fn update_vm_state(
         &self,
         db_state: &mut Account,
@@ -208,6 +237,33 @@ impl PendingDeltas {
         }
 
         Ok(change_found)
+    }
+
+    // Creates a new account state from the buffered deltas only.
+    fn get_account(
+        &self,
+        address: Bytes,
+        version: Option<BlockNumberOrTimestamp>,
+    ) -> Result<Account> {
+        let mut account: Option<Account> = None;
+        for buffer in self.buffers.values() {
+            let guard = buffer
+                .lock()
+                .map_err(|e| PendingDeltasError::LockError("VM".to_string(), e.to_string()))?;
+            for entry in guard.get_block_range(None, version)? {
+                if let Some(delta) = entry.account_deltas.get(&address) {
+                    // Update account state or create a new one if not present
+                    let account_ref =
+                        account.get_or_insert_with(|| delta.clone().into_account_without_tx());
+                    account_ref.apply_delta(delta)?;
+                }
+            }
+        }
+
+        account.ok_or(PendingDeltasError::ReorgBufferError(StorageError::NotFound(
+            "Contract".to_string(),
+            address.to_string(),
+        )))
     }
 
     /// Retrieves a list of new protocol components that match all the provided criteria.
@@ -335,13 +391,10 @@ mod test {
     use super::*;
     use crate::{extractor::evm, testing::block};
     use std::str::FromStr;
-    use tycho_core::{
-        models::{
-            contract::AccountDelta,
-            protocol::{ComponentBalance, ProtocolComponentStateDelta},
-            Chain, ChangeType,
-        },
-        Bytes,
+    use tycho_core::models::{
+        contract::AccountDelta,
+        protocol::{ComponentBalance, ProtocolComponentStateDelta},
+        Chain, ChangeType,
     };
 
     fn vm_state() -> Account {
@@ -368,17 +421,30 @@ mod test {
             1,
             false,
             HashMap::new(),
-            [(
-                address.clone(),
-                AccountDelta::new(
-                    Chain::Ethereum,
+            [
+                (
                     address.clone(),
-                    evm::fixtures::slots([(1, 1), (2, 1)]),
-                    Some(Bytes::from(1999u32).lpad(32, 0)),
-                    None,
-                    ChangeType::Update,
+                    AccountDelta::new(
+                        Chain::Ethereum,
+                        address,
+                        evm::fixtures::slots([(1, 1), (2, 1)]),
+                        Some(Bytes::from(1999u32).lpad(32, 0)),
+                        None,
+                        ChangeType::Update,
+                    ),
                 ),
-            )]
+                (
+                    Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                    AccountDelta::new(
+                        Chain::Ethereum,
+                        Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                        evm::fixtures::slots([(1, 1), (2, 1)]),
+                        Some(Bytes::from(200u32).lpad(32, 0)),
+                        Some(Bytes::from("0x0c0c0c")),
+                        ChangeType::Creation,
+                    ),
+                ),
+            ]
             .into_iter()
             .collect::<HashMap<_, _>>(),
             HashMap::new(),
@@ -572,14 +638,15 @@ mod test {
 
     #[test]
     fn test_update_vm_states() {
-        let mut state = [vm_state()];
+        let mut state = vec![vm_state()];
         let buffer = PendingDeltas::new(["vm:extractor"]);
         buffer
             .insert(Arc::new(vm_block_deltas()))
             .unwrap();
-        let exp = Account::new(
+        let address0 = Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05");
+        let exp0 = Account::new(
             Chain::Ethereum,
-            Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05"),
+            address0.clone(),
             "Contract1".to_string(),
             evm::fixtures::evm_slots([(1, 1), (2, 1)]),
             Bytes::from("0x00000000000000000000000000000000000000000000000000000000000007cf"),
@@ -589,15 +656,30 @@ mod test {
             Bytes::from("0x4200"),
             None,
         );
+        let address1 = Bytes::from("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+        let exp1 = Account::new(
+            Chain::Ethereum,
+            address1.clone(),
+            address1.clone().to_string(),
+            evm::fixtures::evm_slots([(1, 1), (2, 1)]),
+            Bytes::from("0x00000000000000000000000000000000000000000000000000000000000000c8"),
+            Bytes::from("0x0c0c0c"),
+            Bytes::from("0x58ca1e123f83094287ae82a842f4f49e064d6f2fa946a2130335ff131ebd010b"),
+            Bytes::from("0x00"),
+            Bytes::from("0x00"),
+            None,
+        );
 
         buffer
             .update_vm_states(
+                Some(&[address0, address1]),
                 &mut state,
                 Some(BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap())),
             )
             .unwrap();
 
-        assert_eq!(&state[0], &exp);
+        assert_eq!(&state[0], &exp0);
+        assert_eq!(&state[1], &exp1);
     }
 
     #[test]
