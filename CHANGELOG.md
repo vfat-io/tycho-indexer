@@ -1,3 +1,19 @@
+## [0.18.0](https://github.com/propeller-heads/tycho-indexer/compare/0.17.5...0.18.0) (2024-09-19)
+
+
+### Features
+
+* automate removal of orphaned transactions ([d0939a5](https://github.com/propeller-heads/tycho-indexer/commit/d0939a59bf2b1e05fe48ddec0d0a2af73980f79d))
+* Automate removal of orphaned transactions from the DB ([#349](https://github.com/propeller-heads/tycho-indexer/issues/349)) ([898460d](https://github.com/propeller-heads/tycho-indexer/commit/898460dfaf10d40f2f1c714d7deec6ca9fc73ae5))
+
+
+### Bug Fixes
+
+* delete transactions in batches ([fd128fd](https://github.com/propeller-heads/tycho-indexer/commit/fd128fd2a8bd600a7ae21ca9f0842d0ac38125f9))
+* improve transaction clean up script to minimise db locks ([fffe9cc](https://github.com/propeller-heads/tycho-indexer/commit/fffe9cc7d085a1f9633806ebe1664eb3d122600a))
+* skip batching on search phase ([ceb5376](https://github.com/propeller-heads/tycho-indexer/commit/ceb5376ed4da853ae80f00410e7c442f59a1cd4d))
+* speed up deletions with indexes ([ebea183](https://github.com/propeller-heads/tycho-indexer/commit/ebea1837a051bf36ac2252d6ecaadbc28beb0c23))
+
 ## [0.17.5](https://github.com/propeller-heads/tycho-indexer/compare/0.17.4...0.17.5) (2024-09-19)
 
 
