@@ -1,6 +1,6 @@
 specVersion: v0.1.0
 package:
-  name: "substreams_ethereum_sushiswap_v2"
+  name: "ethereum_sushiswap_v2"
   version: v0.2.0
 
 protobuf:
@@ -15,7 +15,7 @@ protobuf:
 binaries:
   default:
     type: wasm/rust-v1
-    file: ../../target/wasm32-unknown-unknown/substreams/substreams_ethereum_uniswap_v2.wasm
+    file: ../../target/wasm32-unknown-unknown/substreams/ethereum_uniswap_v2.wasm
 
 modules:
   - name: map_pools_created
