@@ -130,8 +130,8 @@ async fn analyze_batch(
 
         if let TokenQuality::Bad { reason } = token_quality {
             debug!(?t.address, ?reason, "Token quality detected as bad!");
-            // Don't try to analyze again.
-            t.quality = 5;
+            // Remove 1 to the quality for each attempt. If it fails 5 times we won't try again.
+            t.quality -= 1;
         };
 
         // If it's a fee token, set quality to 50
@@ -168,14 +168,13 @@ mod test {
     #[ignore]
     #[test_log::test(tokio::test)]
     async fn test_analyze_tokens() {
+        let rpc = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
         let args = AnalyzeTokenArgs {
             chain: Chain::Ethereum,
             concurrency: 10,
             update_batch_size: 100,
             fetch_batch_size: 100,
-            rpc_url:
-                "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac"
-                    .to_string(),
+            rpc_url: rpc,
         };
         let mut gw = testing::MockGateway::new();
         gw.expect_get_tokens()

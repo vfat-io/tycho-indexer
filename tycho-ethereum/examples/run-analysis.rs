@@ -15,12 +15,10 @@ use url::Url;
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
+    let rpc = std::env::var("RPC_URL").expect("RPC URL must be set for testing");
     let transport = Web3Transport::new(HttpTransport::new(
         Client::new(),
-        Url::from_str(
-            "https://ethereum-mainnet.core.chainstack.com/71bdd37d35f18d55fed5cc5d138a8fac",
-        )
-        .unwrap(),
+        Url::from_str(&rpc).unwrap(),
         "transport".to_owned(),
     ));
     let w3 = Web3::new(transport);

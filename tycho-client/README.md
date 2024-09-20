@@ -111,10 +111,10 @@ This will stream updates for all components whose TVL exceeds the minimum thresh
 
   2) Set a ranged TVL boundary:
 ```bash
-tycho-client --remove-tvl-threshold 95 --add_tvl_threshold 100 --exchange uniswap_v3
+tycho-client --remove-tvl-threshold 95 --add-tvl-threshold 100 --exchange uniswap_v3
 ```
 
-This will stream state updates for all components whose TVL exceeds the add_tvl_threshold. It will continue to track already added components if they drop below the add_tvl_threshold, only emitting a message to remove them if they drop below remove_tvl_threshold.
+This will stream state updates for all components whose TVL exceeds the add-tvl-threshold. It will continue to track already added components if they drop below the add-tvl-threshold, only emitting a message to remove them if they drop below remove-tvl-threshold.
 
 ### Message types
 
