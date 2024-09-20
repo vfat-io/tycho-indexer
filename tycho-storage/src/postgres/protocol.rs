@@ -817,6 +817,20 @@ impl PostgresGateway {
                 .execute(conn)
                 .await
                 .map_err(PostgresError::from)?;
+            // remove deleted attributes from the default table
+            let mut delete_query =
+                diesel::delete(schema::protocol_state_default::table).into_boxed();
+            for ((component_id, attr_name), _) in deleted_attributes {
+                delete_query = delete_query.or_filter(
+                    schema::protocol_state_default::protocol_component_id
+                        .eq(component_id)
+                        .and(schema::protocol_state_default::attribute_name.eq(attr_name)),
+                );
+            }
+            delete_query
+                .execute(conn)
+                .await
+                .map_err(PostgresError::from)?;
         }
         Ok(())
     }
@@ -2053,7 +2067,7 @@ mod test {
 
         // set up deletable attribute state
         let protocol_component_id = schema::protocol_component::table
-            .filter(schema::protocol_component::external_id.eq("state2"))
+            .filter(schema::protocol_component::external_id.eq("state3"))
             .select(schema::protocol_component::id)
             .first::<i64>(&mut conn)
             .await
@@ -2181,6 +2195,17 @@ mod test {
             .await
             .expect("Failed to fetch protocol state");
         assert_eq!(older_state.valid_to, newer_state.valid_from);
+
+        // check the deleted attribute is deleted (valid_to has been set correctly)
+        let deleted_state = schema::protocol_state::table
+            .inner_join(schema::protocol_component::table)
+            .filter(schema::protocol_component::external_id.eq(new_state2.component_id.as_str()))
+            .filter(schema::protocol_state::attribute_name.eq("deletable"))
+            .select(orm::ProtocolState::as_select())
+            .first::<orm::ProtocolState>(&mut conn)
+            .await
+            .expect("Failed to fetch protocol state");
+        assert_eq!(deleted_state.valid_to, older_state.valid_to);
     }
 
     #[tokio::test]
