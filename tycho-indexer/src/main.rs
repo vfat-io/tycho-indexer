@@ -211,7 +211,7 @@ async fn create_indexing_tasks(
         .await
         .expect("Error getting block number");
 
-    let chain_state = ChainState::new(chrono::Local::now().naive_utc(), block_number);
+    let chain_state = ChainState::new(chrono::Local::now().naive_utc(), block_number, 12); //TODO: remove hardcoded blocktime
 
     let protocol_systems: Vec<String> = extractors_config
         .extractors
