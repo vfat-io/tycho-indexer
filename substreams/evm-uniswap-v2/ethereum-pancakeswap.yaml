@@ -1,6 +1,6 @@
 specVersion: v0.1.0
 package:
-  name: "substreams_ethereum_pancakeswap"
+  name: "ethereum_pancakeswap"
   version: v0.2.0
 
 protobuf:
