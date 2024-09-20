@@ -1,6 +1,12 @@
 #!/bin/bash
 
-# eg. ./build_and_pack.sh ./evm-uniswap-v2/ethereum-uniswap-v2.yaml
+# This script builds the Wasm file and then packs it into a Substreams package.
+#
+# Usage: ./build_and_pack.sh <path-to-substreams-configs>
+# e.g. ./build_and_pack.sh ./evm-uniswap-v2/ethereum-uniswap-v2.yaml
+#
+# Note: you may need to temporarily add `substreams/evm-{protocol}` to the workspace 
+# members list in the main project’s Cargo.toml.
 
 # Check if the package path argument is provided
 if [ -z "$1" ]; then
