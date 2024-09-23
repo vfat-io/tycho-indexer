@@ -65,7 +65,7 @@ pub struct ExtractionState {
     /// Chain identifier that the extractor instance is scoped to.
     pub chain_id: i64,
 
-    /// Block identifier associated with the extraction state.
+    /// Last block processed by the extractor.
     pub block_id: i64,
 
     /// Last fully extracted cursor for the corresponding substream.
@@ -172,14 +172,6 @@ impl Block {
     pub async fn by_hash(block_hash: &[u8], conn: &mut AsyncPgConnection) -> QueryResult<Block> {
         block::table
             .filter(block::hash.eq(block_hash))
-            .select(Block::as_select())
-            .first::<Block>(conn)
-            .await
-    }
-
-    pub async fn by_db_id(id: i64, conn: &mut AsyncPgConnection) -> QueryResult<Block> {
-        block::table
-            .filter(block::id.eq(id))
             .select(Block::as_select())
             .first::<Block>(conn)
             .await
