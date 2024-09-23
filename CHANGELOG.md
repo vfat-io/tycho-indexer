@@ -1,3 +1,11 @@
+## [0.18.3](https://github.com/propeller-heads/tycho-indexer/compare/0.18.2...0.18.3) (2024-09-23)
+
+
+### Bug Fixes
+
+* add chain awareness to extraction state block migration ([ef92989](https://github.com/propeller-heads/tycho-indexer/commit/ef92989ee682003a6add6900a397f11cb0e7a9da))
+* add chain awareness to extraction state block migration ([#361](https://github.com/propeller-heads/tycho-indexer/issues/361)) ([7a509e1](https://github.com/propeller-heads/tycho-indexer/commit/7a509e10a5d708141d801c65b4c608b0b7a94f40))
+
 ## [0.18.2](https://github.com/propeller-heads/tycho-indexer/compare/0.18.1...0.18.2) (2024-09-23)
 
 ## [0.18.1](https://github.com/propeller-heads/tycho-indexer/compare/0.18.0...0.18.1) (2024-09-20)
