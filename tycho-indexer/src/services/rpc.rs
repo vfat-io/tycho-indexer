@@ -9,18 +9,19 @@ use diesel_async::pooled_connection::deadpool;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use tycho_core::{
-    dto,
-    models::{Address, Chain, PaginationParams},
-    storage::{BlockIdentifier, BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
-};
-
 use crate::{
     extractor::reorg_buffer::{BlockNumberOrTimestamp, FinalityStatus},
     services::{
         cache::RpcCache,
         deltas_buffer::{PendingDeltas, PendingDeltasError},
     },
+};
+use tycho_core::{
+    dto,
+    dto::PaginationResponse,
+    models::{Address, Chain, PaginationParams},
+    storage::{BlockIdentifier, BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
+    Bytes,
 };
 
 #[derive(Error, Debug)]
@@ -118,7 +119,7 @@ where
         let addresses = addresses.as_deref();
 
         // Get the contract states from the database
-        let mut accounts = self
+        let (total, mut accounts) = self
             .db_gateway
             .get_contracts(&chain, addresses, Some(&db_version), true, Some(&pagination_parameters))
             .await
@@ -136,7 +137,7 @@ where
                 .into_iter()
                 .map(dto::ResponseAccount::from)
                 .collect(),
-            request.pagination.clone(),
+            PaginationResponse::new(request.pagination.page_size, request.pagination.page, total),
         ))
     }
 
@@ -284,7 +285,7 @@ where
                 .into_iter()
                 .map(dto::ResponseProtocolState::from)
                 .collect(),
-            request.pagination.clone(),
+            PaginationResponse::new(request.pagination.page_size, request.pagination.page, 7171722),
         ))
     }
 
@@ -349,7 +350,11 @@ where
                     .into_iter()
                     .map(dto::ResponseToken::from)
                     .collect(),
-                &request.pagination,
+                &PaginationResponse::new(
+                    request.pagination.page_size,
+                    request.pagination.page,
+                    7171722,
+                ),
             )),
             Err(err) => {
                 error!(error = %err, "Error while getting tokens.");
@@ -400,7 +405,11 @@ where
 
                 return Ok(dto::ProtocolComponentRequestResponse::new(
                     response_components,
-                    request.pagination.clone(),
+                    PaginationResponse::new(
+                        request.pagination.page_size,
+                        request.pagination.page,
+                        7171722,
+                    ),
                 ));
             }
         }
@@ -424,7 +433,11 @@ where
                     .collect::<Vec<dto::ProtocolComponent>>();
                 Ok(dto::ProtocolComponentRequestResponse::new(
                     response_components,
-                    request.pagination.clone(),
+                    PaginationResponse::new(
+                        request.pagination.page_size,
+                        request.pagination.page,
+                        7171722,
+                    ),
                 ))
             }
             Err(err) => {
@@ -900,7 +913,7 @@ mod tests {
             ),
         );
         let mut gw = MockGateway::new();
-        let mock_response = Ok(vec![expected.clone()]);
+        let mock_response = Ok((10_i64, vec![expected.clone()]));
         gw.expect_get_contracts()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
         let req_handler = RpcHandler::new(gw, PendingDeltas::new([]));
