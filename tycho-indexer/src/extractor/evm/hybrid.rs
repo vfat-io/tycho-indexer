@@ -66,8 +66,6 @@ pub struct HybridContractExtractor<G, T> {
     protocol_types: HashMap<String, ProtocolType>,
     /// Allows to attach some custom logic, e.g. to fix encoding bugs without resync.
     post_processor: Option<fn(evm::BlockChanges) -> evm::BlockChanges>,
-    /// The number of blocks behind the current block to be considered as syncing.
-    sync_threshold: u64,
     reorg_buffer: Mutex<ReorgBuffer<BlockUpdateWithCursor<evm::BlockChanges>>>,
 }
 
@@ -87,7 +85,6 @@ where
         protocol_types: HashMap<String, ProtocolType>,
         token_pre_processor: T,
         post_processor: Option<fn(evm::BlockChanges) -> evm::BlockChanges>,
-        sync_threshold: u64,
     ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
@@ -110,7 +107,6 @@ where
                     })),
                     protocol_types,
                     post_processor,
-                    sync_threshold,
                     reorg_buffer: Mutex::new(ReorgBuffer::new()),
                 }
             }
@@ -139,7 +135,6 @@ where
                     token_pre_processor,
                     protocol_types,
                     post_processor,
-                    sync_threshold,
                     reorg_buffer: Mutex::new(ReorgBuffer::new()),
                 }
             }
@@ -168,15 +163,14 @@ where
         let mut state = self.inner.lock().await;
         state.last_processed_block = Some(block);
     }
-
-    async fn report_progress(&self, block: &Block) {
+    /// Reports sync progress if a minute has passed since the last report.
+    async fn maybe_report_progress(&self, block: &Block) {
         let mut state = self.inner.lock().await;
         let now = chrono::Local::now().naive_utc();
         let time_passed = now
             .signed_duration_since(state.last_report_ts)
             .num_seconds();
-        let is_syncing = self.is_syncing(block.number).await;
-        if is_syncing && time_passed >= 60 {
+        if time_passed >= 60 {
             let current_block = self.chain_state.current_block().await;
             let distance_to_current = current_block - block.number;
             let blocks_processed = block.number - state.last_report_block_number;
@@ -190,21 +184,12 @@ where
                 blocks_per_minute = format!("{blocks_per_minute:.2}"),
                 blocks_processed,
                 height = block.number,
-                current = current_block,
+                estimated_current = current_block,
                 time_remaining = format!("{:02}h{:02}m", hours, minutes),
                 name = "SyncProgress"
             );
             state.last_report_ts = now;
             state.last_report_block_number = block.number;
-        }
-    }
-
-    async fn is_syncing(&self, block_number: u64) -> bool {
-        let current_block = self.chain_state.current_block().await;
-        if current_block > block_number {
-            (current_block - block_number) > self.sync_threshold
-        } else {
-            false
         }
     }
 
@@ -612,7 +597,10 @@ where
         self.update_last_processed_block(msg.block.clone())
             .await;
 
-        self.report_progress(&msg.block).await;
+        if is_syncing {
+            self.maybe_report_progress(&msg.block)
+                .await;
+        }
 
         self.update_cursor(inp.cursor).await;
 
@@ -1308,7 +1296,6 @@ mod test {
             protocol_types,
             preprocessor,
             None,
-            5,
         )
         .await
         .expect("Failed to create extractor")
@@ -1603,7 +1590,6 @@ mod test {
             HashMap::from([("pt_1".to_string(), ProtocolType::default())]),
             preprocessor,
             None,
-            5,
         )
         .await
         .expect("Extractor init failed");
@@ -1729,7 +1715,6 @@ mod test {
             HashMap::from([("pt_1".to_string(), ProtocolType::default())]),
             preprocessor,
             None,
-            5,
         )
         .await
         .expect("extractor init failed");
@@ -2308,7 +2293,6 @@ mod test_serial_db {
                 protocol_types,
                 get_mocked_token_pre_processor(),
                 None,
-                5,
             )
                 .await
                 .expect("Failed to create extractor");
@@ -2492,7 +2476,6 @@ mod test_serial_db {
                 protocol_types,
                 preprocessor,
                 None,
-                5,
             )
                 .await
                 .expect("Failed to create extractor");

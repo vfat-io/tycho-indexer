@@ -448,7 +448,6 @@ impl ExtractorBuilder {
                     "vm:curve" => Some(trim_curve_component_token),
                     _ => None,
                 },
-                128,
             )
             .await?,
         ));
