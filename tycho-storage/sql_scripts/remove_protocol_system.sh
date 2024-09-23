@@ -153,7 +153,7 @@ WHERE id IN (
         JOIN token t ON pcht.token_id = t.id 
         JOIN protocol_component pc2 ON pcht.protocol_component_id = pc2.id
         JOIN protocol_system ps2 ON pc2.protocol_system_id = ps2.id
-        WHERE t.account_id = a.id
+        WHERE t.account_id = cc.account_id
         AND ps2.name <> :'protocol_system_name'
     )
 );
