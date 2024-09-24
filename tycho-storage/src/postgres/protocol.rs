@@ -900,9 +900,16 @@ impl PostgresGateway {
         last_traded_ts_threshold: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<models::token::CurrencyToken>, StorageError> {
+    ) -> Result<(i64, Vec<models::token::CurrencyToken>), StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
         let chain_db_id = self.get_chain_id(&chain);
+
+        let mut count_query = token
+            .inner_join(account)
+            .select(token::all_columns())
+            .filter(schema::account::chain_id.eq(chain_db_id))
+            .into_boxed();
+
         let mut query = token
             .inner_join(account)
             .select((token::all_columns(), schema::account::address))
@@ -911,10 +918,12 @@ impl PostgresGateway {
 
         if let Some(addrs) = addresses {
             query = query.filter(schema::account::address.eq_any(addrs));
+            count_query = count_query.filter(schema::account::address.eq_any(addrs));
         }
 
         if let Some(min_quality) = min_quality {
             query = query.filter(schema::token::quality.ge(min_quality));
+            count_query = count_query.filter(schema::token::quality.ge(min_quality));
         }
 
         if let Some(last_traded_ts_threshold) = last_traded_ts_threshold {
@@ -923,7 +932,15 @@ impl PostgresGateway {
                 .filter(schema::component_balance_default::valid_from.gt(last_traded_ts_threshold))
                 .distinct();
             query = query.filter(schema::token::id.eq_any(active_tokens_subquery));
+            count_query = count_query.filter(schema::token::id.eq_any(active_tokens_subquery));
         }
+
+        // TODO: Improve performance by running as subquery
+        let count = count_query
+            .count()
+            .get_result::<i64>(conn)
+            .await
+            .map_err(PostgresError::from)?;
 
         if let Some(pagination) = pagination_params {
             query = query
@@ -956,7 +973,8 @@ impl PostgresGateway {
                 ))
             })
             .collect();
-        tokens
+
+        Ok((count, tokens?))
     }
 
     pub async fn add_tokens(
@@ -2723,14 +2741,14 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         // get all eth tokens (no address filter)
-        let tokens = gw
+        let (_, tokens) = gw
             .get_tokens(Chain::Ethereum, None, None, None, None, &mut conn)
             .await
             .unwrap();
         assert_eq!(tokens.len(), 4);
 
         // get weth and usdc
-        let tokens = gw
+        let (_, tokens) = gw
             .get_tokens(
                 Chain::Ethereum,
                 Some(&[&WETH.into(), &USDC.into()]),
@@ -2747,7 +2765,8 @@ mod test {
         let tokens = gw
             .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), None, None, None, &mut conn)
             .await
-            .unwrap();
+            .unwrap()
+            .1;
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].symbol, "WETH".to_string());
         assert_eq!(tokens[0].decimals, 18);
@@ -2760,7 +2779,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         // get tokens with pagination
-        let tokens = gw
+        let (total, tokens) = gw
             .get_tokens(
                 Chain::Ethereum,
                 None,
@@ -2772,10 +2791,12 @@ mod test {
             .await
             .unwrap();
         assert_eq!(tokens.len(), 1);
+        assert_eq!(total, 4);
+
         let first_token_symbol = tokens[0].symbol.clone();
 
         // get tokens with 0 page_size
-        let tokens = gw
+        let (total, tokens) = gw
             .get_tokens(
                 Chain::Ethereum,
                 None,
@@ -2787,9 +2808,10 @@ mod test {
             .await
             .unwrap();
         assert_eq!(tokens.len(), 0);
+        assert_eq!(total, 4);
 
         // get tokens skipping page
-        let tokens = gw
+        let (total, tokens) = gw
             .get_tokens(
                 Chain::Ethereum,
                 None,
@@ -2801,6 +2823,7 @@ mod test {
             .await
             .unwrap();
         assert_eq!(tokens.len(), 1);
+        assert_eq!(total, 4);
         assert_ne!(tokens[0].symbol, first_token_symbol);
     }
 
@@ -2813,7 +2836,8 @@ mod test {
         let tokens = gw
             .get_tokens(Chain::ZkSync, None, None, None, None, &mut conn)
             .await
-            .unwrap();
+            .unwrap()
+            .1;
 
         assert_eq!(tokens.len(), 1);
         let expected_token = models::token::CurrencyToken::new(
@@ -2835,7 +2859,7 @@ mod test {
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
-        let tokens = gw
+        let (_, tokens) = gw
             .get_tokens(Chain::Ethereum, None, Some(80i32), None, None, &mut conn)
             .await
             .unwrap();
@@ -2863,7 +2887,7 @@ mod test {
 
         let days_cutoff: Option<NaiveDateTime> = Some(yesterday_half_past_midnight());
 
-        let tokens = gw
+        let (_, tokens) = gw
             .get_tokens(Chain::Ethereum, None, None, days_cutoff, None, &mut conn)
             .await
             .unwrap();
@@ -2959,6 +2983,7 @@ mod test {
             .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, None, None, &mut conn)
             .await
             .expect("failed to get old token")
+            .1
             .remove(0);
         prev.gas = vec![Some(20000)];
 
@@ -2969,6 +2994,7 @@ mod test {
             .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, None, None, &mut conn)
             .await
             .expect("failed to get updated token")
+            .1
             .remove(0);
 
         assert_eq!(updated, prev);
