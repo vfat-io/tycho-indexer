@@ -819,7 +819,7 @@ impl StateRequestParameters {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema, Eq, Hash, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct TokensRequestBody {
     #[serde(alias = "tokenAddresses")]
@@ -843,7 +843,7 @@ pub struct TokensRequestBody {
 }
 
 /// Response from Tycho server for a tokens request.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Eq, Hash)]
 pub struct TokensRequestResponse {
     pub tokens: Vec<ResponseToken>,
     pub pagination: PaginationParams,
@@ -855,7 +855,7 @@ impl TokensRequestResponse {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct PaginationParams {
     #[serde(default)]
@@ -879,7 +879,7 @@ impl Default for PaginationParams {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema, Eq, Hash)]
 #[serde(rename = "Token")]
 /// Token struct for the response from Tycho server for a tokens request.
 pub struct ResponseToken {
