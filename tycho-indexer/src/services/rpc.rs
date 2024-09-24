@@ -48,6 +48,7 @@ pub struct RpcHandler<G> {
     db_gateway: G,
     pending_deltas: PendingDeltas,
     token_cache: RpcCache<dto::TokensRequestBody, dto::TokensRequestResponse>,
+    contract_storage_cache: RpcCache<dto::StateRequestBody, dto::StateRequestResponse>,
 }
 
 impl<G> RpcHandler<G>
@@ -61,7 +62,14 @@ where
             7 * 60,
         );
 
-        Self { db_gateway, pending_deltas, token_cache }
+        let contract_storage_cache =
+            RpcCache::<dto::StateRequestBody, dto::StateRequestResponse>::new(
+                "contract_storage",
+                50,
+                7 * 60,
+            );
+
+        Self { db_gateway, pending_deltas, token_cache, contract_storage_cache }
     }
 
     #[instrument(skip(self, request))]
@@ -70,13 +78,18 @@ where
         request: &dto::StateRequestBody,
     ) -> Result<dto::StateRequestResponse, RpcError> {
         info!(?request, "Getting contract state.");
-        self.get_contract_state_inner(request)
+        self.contract_storage_cache
+            .get(request.clone(), |r| async {
+                self.get_contract_state_inner(r)
+                    .await
+                    .map(|res| (res, true))
+            })
             .await
     }
 
     async fn get_contract_state_inner(
         &self,
-        request: &dto::StateRequestBody,
+        request: dto::StateRequestBody,
     ) -> Result<dto::StateRequestResponse, RpcError> {
         let at = BlockOrTimestamp::try_from(&request.version)?;
         let chain = request.chain.into();
