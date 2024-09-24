@@ -1012,7 +1012,7 @@ fn default_include_balances_flag() -> bool {
     true
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema, Default, Eq, Hash)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Default, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolStateRequestBody {
     #[serde(alias = "protocolIds")]

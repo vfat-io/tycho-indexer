@@ -49,6 +49,8 @@ pub struct RpcHandler<G> {
     pending_deltas: PendingDeltas,
     token_cache: RpcCache<dto::TokensRequestBody, dto::TokensRequestResponse>,
     contract_storage_cache: RpcCache<dto::StateRequestBody, dto::StateRequestResponse>,
+    protocol_state_cache:
+        RpcCache<dto::ProtocolStateRequestBody, dto::ProtocolStateRequestResponse>,
 }
 
 impl<G> RpcHandler<G>
@@ -69,7 +71,18 @@ where
                 7 * 60,
             );
 
-        Self { db_gateway, pending_deltas, token_cache, contract_storage_cache }
+        let protocol_state_cache = RpcCache::<
+            dto::ProtocolStateRequestBody,
+            dto::ProtocolStateRequestResponse,
+        >::new("contract_storage", 50, 7 * 60);
+
+        Self {
+            db_gateway,
+            pending_deltas,
+            token_cache,
+            contract_storage_cache,
+            protocol_state_cache,
+        }
     }
 
     #[instrument(skip(self, request))]
@@ -208,13 +221,18 @@ where
         request: &dto::ProtocolStateRequestBody,
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
         debug!(?request, "Getting protocol state.");
-        self.get_protocol_state_inner(request)
+        self.protocol_state_cache
+            .get(request.clone(), |r| async {
+                self.get_protocol_state_inner(r)
+                    .await
+                    .map(|res| (res, true))
+            })
             .await
     }
 
     async fn get_protocol_state_inner(
         &self,
-        request: &dto::ProtocolStateRequestBody,
+        request: dto::ProtocolStateRequestBody,
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
         //TODO: handle when no id is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
