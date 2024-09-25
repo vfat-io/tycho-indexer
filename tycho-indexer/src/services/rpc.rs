@@ -136,7 +136,7 @@ where
                 .into_iter()
                 .map(dto::ResponseAccount::from)
                 .collect(),
-            PaginationResponse::new(request.pagination.page_size, request.pagination.page, total),
+            PaginationResponse::new(request.pagination.page, request.pagination.page_size, total),
         ))
     }
 
@@ -284,7 +284,7 @@ where
                 .into_iter()
                 .map(dto::ResponseProtocolState::from)
                 .collect(),
-            PaginationResponse::new(request.pagination.page_size, request.pagination.page, total),
+            PaginationResponse::new(request.pagination.page, request.pagination.page_size, total),
         ))
     }
 
@@ -350,8 +350,8 @@ where
                     .map(dto::ResponseToken::from)
                     .collect(),
                 &PaginationResponse::new(
-                    request.pagination.page_size,
                     request.pagination.page,
+                    request.pagination.page_size,
                     total,
                 ),
             )),
@@ -435,8 +435,8 @@ where
                 Ok(dto::ProtocolComponentRequestResponse::new(
                     response_components,
                     PaginationResponse::new(
-                        request.pagination.page_size,
-                        request.pagination.page,
+                        pagination_parameters.page,
+                        pagination_parameters.page_size,
                         total,
                     ),
                 ))
