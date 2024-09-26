@@ -26,6 +26,10 @@ struct CliArgs {
     #[clap(short = 'k', long, env = "TYCHO_AUTH_TOKEN")]
     auth_key: Option<String>,
 
+    /// If set, use unsecured transports: http and ws instead of https and wss.
+    #[clap(long)]
+    no_tls: bool,
+
     /// The blockchain to index on
     #[clap(long, default_value = "ethereum")]
     pub chain: String,
@@ -159,8 +163,17 @@ async fn main() {
 
 #[allow(deprecated)]
 async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
-    let tycho_ws_url = format!("wss://{}", &args.tycho_url);
-    let tycho_rpc_url = format!("https://{}", &args.tycho_url);
+    //TODO: remove "or args.auth_key.is_none()" when our internal client use the no_tls flag
+    let (tycho_ws_url, tycho_rpc_url) = if args.no_tls || args.auth_key.is_none() {
+        let tycho_ws_url = format!("ws://{}", &args.tycho_url);
+        let tycho_rpc_url = format!("http://{}", &args.tycho_url);
+        (tycho_ws_url, tycho_rpc_url)
+    } else {
+        let tycho_ws_url = format!("wss://{}", &args.tycho_url);
+        let tycho_rpc_url = format!("https://{}", &args.tycho_url);
+        (tycho_ws_url, tycho_rpc_url)
+    };
+
     let ws_client = WsDeltasClient::new(&tycho_ws_url, args.auth_key.as_deref()).unwrap();
     let ws_jh = ws_client
         .connect()
