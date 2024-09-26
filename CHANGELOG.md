@@ -1,3 +1,16 @@
+## [0.19.0](https://github.com/propeller-heads/tycho-indexer/compare/0.18.4...0.19.0) (2024-09-26)
+
+
+### Features
+
+* **tycho-client-py:** add no-tls flag to `TychoStream` ([68a184e](https://github.com/propeller-heads/tycho-indexer/commit/68a184e4f03654692444a93fa72bc22fed4757d8))
+* **tycho-client:** add `no-tls` flag to allow using unsecured transports ([2f56780](https://github.com/propeller-heads/tycho-indexer/commit/2f5678025418ee0066d079d531b790d0ea1075d0))
+* **tycho-client:** add `user-agent` to websocket connection requests ([008ab20](https://github.com/propeller-heads/tycho-indexer/commit/008ab20676b5021c5257988d076db547ffb9da5f))
+* **tycho-client:** add auth key and support for https ([#379](https://github.com/propeller-heads/tycho-indexer/issues/379)) ([c37c9ad](https://github.com/propeller-heads/tycho-indexer/commit/c37c9adc21c81ee241cd1affe0e7e3425272f485))
+* **tycho-client:** add Auth to websocket client ([e2e6ade](https://github.com/propeller-heads/tycho-indexer/commit/e2e6adefcb3e926111f3e0ab3fc75f1f603a7a5f))
+* **tycho-client:** enable HTTPS and add auth key ([bbd0eee](https://github.com/propeller-heads/tycho-indexer/commit/bbd0eee1af932ba84e913f5e173e08a3f43010c6))
+* **tycho-client:** get `auth-key` from env or cli ([37d02a0](https://github.com/propeller-heads/tycho-indexer/commit/37d02a0ce085eea1b32d7abc84800bdf0143937d))
+
 ## [0.18.4](https://github.com/propeller-heads/tycho-indexer/compare/0.18.3...0.18.4) (2024-09-26)
 
 
