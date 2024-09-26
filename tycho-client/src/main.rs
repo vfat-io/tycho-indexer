@@ -194,7 +194,7 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
             filter,
             3,
             !args.no_state,
-            HttpRPCClient::new(&tycho_rpc_url).unwrap(),
+            HttpRPCClient::new(&tycho_rpc_url, Some(api_key)).unwrap(),
             ws_client.clone(),
         );
         block_sync = block_sync.register_synchronizer(id, sync);
