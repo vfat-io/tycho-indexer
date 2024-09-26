@@ -21,6 +21,11 @@ struct CliArgs {
     #[clap(long, default_value = "localhost:4242")]
     tycho_url: String,
 
+    /// Tycho gateway API key, used as authentication for both websocket and http connections.
+    /// Can be set with TYCHO_AUTH_TOKEN env variable.
+    #[clap(short = 'k', long, env = "TYCHO_AUTH_TOKEN")]
+    auth_key: Option<String>,
+
     /// The blockchain to index on
     #[clap(long, default_value = "ethereum")]
     pub chain: String,
@@ -154,10 +159,9 @@ async fn main() {
 
 #[allow(deprecated)]
 async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
-    let tycho_ws_url = format!("ws://{}", &args.tycho_url);
-    let tycho_rpc_url = format!("http://{}", &args.tycho_url);
-    let api_key = "sampletoken";
-    let ws_client = WsDeltasClient::new(&tycho_ws_url, Some(api_key)).unwrap();
+    let tycho_ws_url = format!("wss://{}", &args.tycho_url);
+    let tycho_rpc_url = format!("https://{}", &args.tycho_url);
+    let ws_client = WsDeltasClient::new(&tycho_ws_url, args.auth_key.as_deref()).unwrap();
     let ws_jh = ws_client
         .connect()
         .await
@@ -194,7 +198,7 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
             filter,
             3,
             !args.no_state,
-            HttpRPCClient::new(&tycho_rpc_url, Some(api_key)).unwrap(),
+            HttpRPCClient::new(&tycho_rpc_url, args.auth_key.as_deref()).unwrap(),
             ws_client.clone(),
         );
         block_sync = block_sync.register_synchronizer(id, sync);
