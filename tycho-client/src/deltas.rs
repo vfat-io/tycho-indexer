@@ -629,7 +629,10 @@ impl DeltasClient for WsDeltasClient {
                         let mut guard = this.inner.as_ref().lock().await;
                         *guard = None;
 
-                        warn!(?e, "Failed to connect to WebSocket server; Reconnecting");
+                        warn!(
+                            e = e.to_string(),
+                            "Failed to connect to WebSocket server; Reconnecting"
+                        );
                         sleep(Duration::from_millis(500)).await;
 
                         continue 'retry;
