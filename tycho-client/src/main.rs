@@ -156,7 +156,8 @@ async fn main() {
 async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     let tycho_ws_url = format!("ws://{}", &args.tycho_url);
     let tycho_rpc_url = format!("http://{}", &args.tycho_url);
-    let ws_client = WsDeltasClient::new(&tycho_ws_url).unwrap();
+    let api_key = "sampletoken";
+    let ws_client = WsDeltasClient::new(&tycho_ws_url, Some(api_key)).unwrap();
     let ws_jh = ws_client
         .connect()
         .await
