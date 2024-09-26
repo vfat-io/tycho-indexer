@@ -2297,8 +2297,6 @@ mod test_serial_db {
                 .await
                 .expect("Failed to create extractor");
 
-            dbg!("Sending block scoped data");
-
             // Send a sequence of block scoped data.
             stream::iter(get_native_inp_sequence())
                 .for_each(|inp| async {
@@ -2306,7 +2304,6 @@ mod test_serial_db {
                         .handle_tick_scoped_data(inp)
                         .await
                         .unwrap();
-                    dbg!("+++");
                 })
                 .await;
 
