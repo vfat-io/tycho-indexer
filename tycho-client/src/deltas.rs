@@ -22,7 +22,10 @@
 use async_trait::async_trait;
 use futures03::{stream::SplitSink, SinkExt, StreamExt};
 use hyper::{
-    header::{CONNECTION, HOST, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE, USER_AGENT},
+    header::{
+        AUTHORIZATION, CONNECTION, HOST, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE,
+        USER_AGENT,
+    },
     Uri,
 };
 #[cfg(test)]
@@ -621,7 +624,7 @@ impl DeltasClient for WsDeltasClient {
 
                 // Add Authorization if one is given
                 if let Some(ref key) = this.auth_key {
-                    request_builder = request_builder.header("Authorization", key);
+                    request_builder = request_builder.header(AUTHORIZATION, key);
                 }
 
                 let request = request_builder.body(()).unwrap();

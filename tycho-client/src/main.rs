@@ -1,7 +1,7 @@
 use std::{str::FromStr, time::Duration};
 
 use clap::Parser;
-use tracing::debug;
+use tracing::{debug, info};
 use tracing_appender::rolling::{self};
 
 use tycho_client::{
@@ -165,10 +165,12 @@ async fn main() {
 async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     //TODO: remove "or args.auth_key.is_none()" when our internal client use the no_tls flag
     let (tycho_ws_url, tycho_rpc_url) = if args.no_tls || args.auth_key.is_none() {
+        info!("Using non-secure connection: ws:// and http://");
         let tycho_ws_url = format!("ws://{}", &args.tycho_url);
         let tycho_rpc_url = format!("http://{}", &args.tycho_url);
         (tycho_ws_url, tycho_rpc_url)
     } else {
+        info!("Using secure connection: wss:// and https://");
         let tycho_ws_url = format!("wss://{}", &args.tycho_url);
         let tycho_rpc_url = format!("https://{}", &args.tycho_url);
         (tycho_ws_url, tycho_rpc_url)
