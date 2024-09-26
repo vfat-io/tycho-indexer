@@ -21,7 +21,10 @@
 //! consumption, and enhances overall software scalability.
 use async_trait::async_trait;
 use futures03::{stream::SplitSink, SinkExt, StreamExt};
-use hyper::Uri;
+use hyper::{
+    header::{CONNECTION, HOST, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE, USER_AGENT},
+    Uri,
+};
 #[cfg(test)]
 use mockall::automock;
 use std::{
@@ -609,11 +612,12 @@ impl DeltasClient for WsDeltasClient {
                 // Create a WebSocket request
                 let mut request_builder = Request::builder()
                     .uri(&ws_uri)
-                    .header("Sec-WebSocket-Key", generate_key())
-                    .header("Host", "tycho-beta.propellerheads.xyz")
-                    .header("Connection", "Upgrade")
-                    .header("Upgrade", "websocket")
-                    .header("Sec-WebSocket-Version", 13);
+                    .header(SEC_WEBSOCKET_KEY, generate_key())
+                    .header(SEC_WEBSOCKET_VERSION, 13)
+                    .header(CONNECTION, "Upgrade")
+                    .header(UPGRADE, "websocket")
+                    .header(HOST, "tycho-beta.propellerheads.xyz")
+                    .header(USER_AGENT, format!("tycho-client-{}", env!("CARGO_PKG_VERSION")));
 
                 // Add Authorization if one is given
                 if let Some(ref key) = this.auth_key {
