@@ -2,10 +2,7 @@
 //!
 //! The objective of this module is to provide swift and simplified access to the Remote Procedure
 //! Call (RPC) endpoints of Tycho. These endpoints are chiefly responsible for facilitating data
-//! queries, especially querying snapshots of data.
-//!
-//! Currently we provide only a HTTP implementation.
-use hyper::{client::HttpConnector, Body, Client, Request, Uri};
+//! queries, especially querying snapshots of data.ß
 #[cfg(test)]
 use mockall::automock;
 use std::sync::Arc;
@@ -21,6 +18,10 @@ use tycho_core::dto::{
     StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
 };
 
+use reqwest::{
+    header::{self, CONTENT_TYPE, USER_AGENT},
+    Client, ClientBuilder, Url,
+};
 use tokio::sync::Semaphore;
 
 use crate::TYCHO_SERVER_VERSION;
@@ -28,8 +29,8 @@ use crate::TYCHO_SERVER_VERSION;
 #[derive(Error, Debug)]
 pub enum RPCError {
     /// The passed tycho url failed to parse.
-    #[error("Failed to parse URI: {0}. Error: {1}")]
-    UriParsing(String, String),
+    #[error("Failed to parse URL: {0}. Error: {1}")]
+    UrlParsing(String, String),
     /// The request data is not correctly formed.
     #[error("Failed to format request: {0}")]
     FormatRequest(String),
@@ -155,16 +156,37 @@ pub trait RPCClient {
 
 #[derive(Debug, Clone)]
 pub struct HttpRPCClient {
-    http_client: Client<HttpConnector>,
-    uri: Uri,
+    http_client: Client,
+    url: Url,
 }
 
 impl HttpRPCClient {
-    pub fn new(base_uri: &str) -> Result<Self, RPCError> {
+    pub fn new(base_uri: &str, auth_key: Option<&str>) -> Result<Self, RPCError> {
         let uri = base_uri
-            .parse::<Uri>()
-            .map_err(|e| RPCError::UriParsing(base_uri.to_string(), e.to_string()))?;
-        Ok(Self { http_client: Client::new(), uri })
+            .parse::<Url>()
+            .map_err(|e| RPCError::UrlParsing(base_uri.to_string(), e.to_string()))?;
+
+        // Add default headers
+        let mut headers = header::HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, header::HeaderValue::from_static("application/json"));
+        let user_agent = format!("tycho-client-{}", env!("CARGO_PKG_VERSION"));
+        headers.insert(
+            USER_AGENT,
+            header::HeaderValue::from_str(&user_agent).expect("invalid user agent format"),
+        );
+
+        // Add Authorization if one is given
+        if let Some(key) = auth_key {
+            let mut auth_value = header::HeaderValue::from_str(key).expect("invalid key format");
+            auth_value.set_sensitive(true);
+            headers.insert(header::AUTHORIZATION, auth_value);
+        }
+
+        let client = ClientBuilder::new()
+            .default_headers(headers)
+            .build()
+            .map_err(|e| RPCError::HttpClient(e.to_string()))?;
+        Ok(Self { http_client: client, url: uri })
     }
 }
 
@@ -188,40 +210,34 @@ impl RPCClient for HttpRPCClient {
 
         let uri = format!(
             "{}/{}/contract_state",
-            self.uri
+            self.url
                 .to_string()
                 .trim_end_matches('/'),
             TYCHO_SERVER_VERSION
         );
         debug!(%uri, "Sending contract_state request to Tycho server");
-        let body =
-            serde_json::to_string(&request).map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-
-        let header = hyper::header::HeaderValue::from_str("application/json")
-            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-
-        let req = Request::post(uri)
-            .header(hyper::header::CONTENT_TYPE, header)
-            .body(Body::from(body))
-            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-        trace!(?req, "Sending request to Tycho server");
+        trace!(?request, "Sending request to Tycho server");
 
         let response = self
             .http_client
-            .request(req)
+            .post(&uri)
+            .json(request)
+            .send()
             .await
             .map_err(|e| RPCError::HttpClient(e.to_string()))?;
         trace!(?response, "Received response from Tycho server");
 
-        let body = hyper::body::to_bytes(response.into_body())
+        let body = response
+            .text()
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         if body.is_empty() {
             // Pure native protocols will return empty contract states
             return Ok(StateRequestResponse { accounts: vec![] });
         }
-        let accounts: StateRequestResponse =
-            serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+
+        let accounts = serde_json::from_str::<StateRequestResponse>(&body)
+            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         trace!(?accounts, "Received contract_state response from Tycho server");
 
         Ok(accounts)
@@ -233,36 +249,31 @@ impl RPCClient for HttpRPCClient {
     ) -> Result<ProtocolComponentRequestResponse, RPCError> {
         let uri = format!(
             "{}/{}/protocol_components",
-            self.uri
+            self.url
                 .to_string()
                 .trim_end_matches('/'),
             TYCHO_SERVER_VERSION,
         );
         debug!(%uri, "Sending protocol_components request to Tycho server");
-
-        let body =
-            serde_json::to_string(&request).map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-        let header = hyper::header::HeaderValue::from_str("application/json")
-            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-
-        let req = Request::post(uri)
-            .header(hyper::header::CONTENT_TYPE, header)
-            .body(Body::from(body))
-            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-        trace!(?req, "Sending request to Tycho server");
+        trace!(?request, "Sending request to Tycho server");
 
         let response = self
             .http_client
-            .request(req)
+            .post(uri)
+            .header(CONTENT_TYPE, "application/json")
+            .json(request)
+            .send()
             .await
             .map_err(|e| RPCError::HttpClient(e.to_string()))?;
+
         trace!(?response, "Received response from Tycho server");
 
-        let body = hyper::body::to_bytes(response.into_body())
+        let body = response
+            .text()
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
-        let components: ProtocolComponentRequestResponse =
-            serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        let components = serde_json::from_str::<ProtocolComponentRequestResponse>(&body)
+            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         trace!(?components, "Received protocol_components response from Tycho server");
 
         Ok(components)
@@ -285,40 +296,35 @@ impl RPCClient for HttpRPCClient {
 
         let uri = format!(
             "{}/{}/protocol_state",
-            self.uri
+            self.url
                 .to_string()
                 .trim_end_matches('/'),
-            TYCHO_SERVER_VERSION,
+            TYCHO_SERVER_VERSION
         );
         debug!(%uri, "Sending protocol_states request to Tycho server");
-
-        let body =
-            serde_json::to_string(&request).map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-        let header = hyper::header::HeaderValue::from_str("application/json")
-            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-
-        let req = Request::post(uri)
-            .header(hyper::header::CONTENT_TYPE, header)
-            .body(Body::from(body))
-            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-        trace!(?req, "Sending request to Tycho server");
+        trace!(?request, "Sending request to Tycho server");
 
         let response = self
             .http_client
-            .request(req)
+            .post(&uri)
+            .json(request)
+            .send()
             .await
             .map_err(|e| RPCError::HttpClient(e.to_string()))?;
         trace!(?response, "Received response from Tycho server");
 
-        let body = hyper::body::to_bytes(response.into_body())
+        let body = response
+            .text()
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+
         if body.is_empty() {
             // Pure VM protocols will return empty states
             return Ok(ProtocolStateRequestResponse { states: vec![] });
         }
-        let states: ProtocolStateRequestResponse =
-            serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+
+        let states = serde_json::from_str::<ProtocolStateRequestResponse>(&body)
+            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         trace!(?states, "Received protocol_states response from Tycho server");
 
         Ok(states)
@@ -330,39 +336,29 @@ impl RPCClient for HttpRPCClient {
     ) -> Result<TokensRequestResponse, RPCError> {
         let uri = format!(
             "{}/{}/tokens",
-            self.uri
+            self.url
                 .to_string()
                 .trim_end_matches('/'),
-            TYCHO_SERVER_VERSION,
+            TYCHO_SERVER_VERSION
         );
-        debug!(%uri, "Sending token request to Tycho server");
-
-        let body =
-            serde_json::to_string(&request).map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-        let header = hyper::header::HeaderValue::from_str("application/json")
-            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-
-        let req = Request::post(uri)
-            .header(hyper::header::CONTENT_TYPE, header)
-            .body(Body::from(body))
-            .map_err(|e| RPCError::FormatRequest(e.to_string()))?;
-        trace!(?req, "Sending request to Tycho server");
+        debug!(%uri, "Sending tokens request to Tycho server");
 
         let response = self
             .http_client
-            .request(req)
+            .post(&uri)
+            .json(request)
+            .send()
             .await
             .map_err(|e| RPCError::HttpClient(e.to_string()))?;
-        trace!(?response, "Received response from Tycho server");
 
-        let body = hyper::body::to_bytes(response.into_body())
+        let body = response
+            .text()
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
-        let states: TokensRequestResponse =
-            serde_json::from_slice(&body).map_err(|e| RPCError::ParseResponse(e.to_string()))?;
-        trace!(?states, "Received tokens response from Tycho server");
+        let tokens = serde_json::from_str::<TokensRequestResponse>(&body)
+            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
 
-        Ok(states)
+        Ok(tokens)
     }
 }
 
@@ -407,7 +403,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
+        let client = HttpRPCClient::new(server.url().as_str(), None).expect("create client");
 
         let response = client
             .get_contract_state(&Default::default())
@@ -465,7 +461,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
+        let client = HttpRPCClient::new(server.url().as_str(), None).expect("create client");
 
         let response = client
             .get_protocol_components(&Default::default())
@@ -514,7 +510,7 @@ mod tests {
             .with_body(server_resp)
             .create_async()
             .await;
-        let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
+        let client = HttpRPCClient::new(server.url().as_str(), None).expect("create client");
 
         let response = client
             .get_protocol_states(&Default::default())
@@ -586,7 +582,7 @@ mod tests {
             .with_body(server_resp)
             .create_async()
             .await;
-        let client = HttpRPCClient::new(server.url().as_str()).expect("create client");
+        let client = HttpRPCClient::new(server.url().as_str(), None).expect("create client");
 
         let response = client
             .get_tokens(&Default::default())

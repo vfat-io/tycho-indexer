@@ -63,11 +63,12 @@ tycho-client \
     --exchange uniswap_v3 \
     --exchange vm:ambient \
     --exchange vm:balancer \
-    --min-tvl 100
+    --min-tvl 100 \
     --tycho-url {TYCHO_INDEXER_URL}
 ```
  - TYCHO_INDEXER_URL defaults to `localhost:4242`
 
+ Note: if an authentication is required by the gateway, you can set it via `export TYCHO_AUTH_TOKEN={your_token}`. 
 ## Usage
 
 The main use case of the Tycho Client is to provide a stream of protocol components,

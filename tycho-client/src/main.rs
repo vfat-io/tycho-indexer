@@ -1,7 +1,7 @@
 use std::{str::FromStr, time::Duration};
 
 use clap::Parser;
-use tracing::debug;
+use tracing::{debug, info};
 use tracing_appender::rolling::{self};
 
 use tycho_client::{
@@ -20,6 +20,15 @@ struct CliArgs {
     /// Tycho server URL, without protocol. Example: localhost:4242
     #[clap(long, default_value = "localhost:4242")]
     tycho_url: String,
+
+    /// Tycho gateway API key, used as authentication for both websocket and http connections.
+    /// Can be set with TYCHO_AUTH_TOKEN env variable.
+    #[clap(short = 'k', long, env = "TYCHO_AUTH_TOKEN")]
+    auth_key: Option<String>,
+
+    /// If set, use unsecured transports: http and ws instead of https and wss.
+    #[clap(long)]
+    no_tls: bool,
 
     /// The blockchain to index on
     #[clap(long, default_value = "ethereum")]
@@ -154,9 +163,20 @@ async fn main() {
 
 #[allow(deprecated)]
 async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
-    let tycho_ws_url = format!("ws://{}", &args.tycho_url);
-    let tycho_rpc_url = format!("http://{}", &args.tycho_url);
-    let ws_client = WsDeltasClient::new(&tycho_ws_url).unwrap();
+    //TODO: remove "or args.auth_key.is_none()" when our internal client use the no_tls flag
+    let (tycho_ws_url, tycho_rpc_url) = if args.no_tls || args.auth_key.is_none() {
+        info!("Using non-secure connection: ws:// and http://");
+        let tycho_ws_url = format!("ws://{}", &args.tycho_url);
+        let tycho_rpc_url = format!("http://{}", &args.tycho_url);
+        (tycho_ws_url, tycho_rpc_url)
+    } else {
+        info!("Using secure connection: wss:// and https://");
+        let tycho_ws_url = format!("wss://{}", &args.tycho_url);
+        let tycho_rpc_url = format!("https://{}", &args.tycho_url);
+        (tycho_ws_url, tycho_rpc_url)
+    };
+
+    let ws_client = WsDeltasClient::new(&tycho_ws_url, args.auth_key.as_deref()).unwrap();
     let ws_jh = ws_client
         .connect()
         .await
@@ -193,7 +213,7 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
             filter,
             3,
             !args.no_state,
-            HttpRPCClient::new(&tycho_rpc_url).unwrap(),
+            HttpRPCClient::new(&tycho_rpc_url, args.auth_key.as_deref()).unwrap(),
             ws_client.clone(),
         );
         block_sync = block_sync.register_synchronizer(id, sync);

@@ -21,7 +21,13 @@
 //! consumption, and enhances overall software scalability.
 use async_trait::async_trait;
 use futures03::{stream::SplitSink, SinkExt, StreamExt};
-use hyper::Uri;
+use hyper::{
+    header::{
+        AUTHORIZATION, CONNECTION, HOST, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE,
+        USER_AGENT,
+    },
+    Uri,
+};
 #[cfg(test)]
 use mockall::automock;
 use std::{
@@ -39,7 +45,14 @@ use tokio::{
     task::JoinHandle,
     time::sleep,
 };
-use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{
+        self,
+        handshake::client::{generate_key, Request},
+    },
+    MaybeTlsStream, WebSocketStream,
+};
 use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::dto::{BlockChanges, Command, ExtractorIdentity, Response, WebSocketMessage};
 use uuid::Uuid;
@@ -135,6 +148,8 @@ pub trait DeltasClient {
 pub struct WsDeltasClient {
     /// The tycho indexer websocket uri.
     uri: Uri,
+    /// Authorization key for the websocket connection.
+    auth_key: Option<String>,
     /// Maximum amount of reconnects to try before giving up.
     max_reconnects: u32,
     /// The client will buffer this many messages incoming from the websocket
@@ -336,13 +351,13 @@ impl Inner {
 /// Tycho client websocket implementation.
 impl WsDeltasClient {
     // Construct a new client with 5 reconnection attempts.
-    pub fn new(ws_uri: &str) -> Result<Self, DeltasError> {
+    pub fn new(ws_uri: &str, auth_key: Option<&str>) -> Result<Self, DeltasError> {
         let uri = ws_uri
             .parse::<Uri>()
             .map_err(|e| DeltasError::UriParsing(ws_uri.to_string(), e.to_string()))?;
-
         Ok(Self {
             uri,
+            auth_key: auth_key.map(|s| s.to_string()),
             inner: Arc::new(Mutex::new(None)),
             ws_buffer_size: 128,
             subscription_buffer_size: 128,
@@ -352,13 +367,18 @@ impl WsDeltasClient {
     }
 
     // Construct a new client with a custom number of reconnection attempts.
-    pub fn new_with_reconnects(ws_uri: &str, max_reconnects: u32) -> Result<Self, DeltasError> {
+    pub fn new_with_reconnects(
+        ws_uri: &str,
+        max_reconnects: u32,
+        auth_key: Option<&str>,
+    ) -> Result<Self, DeltasError> {
         let uri = ws_uri
             .parse::<Uri>()
             .map_err(|e| DeltasError::UriParsing(ws_uri.to_string(), e.to_string()))?;
 
         Ok(Self {
             uri,
+            auth_key: auth_key.map(|s| s.to_string()),
             inner: Arc::new(Mutex::new(None)),
             ws_buffer_size: 128,
             subscription_buffer_size: 128,
@@ -592,7 +612,23 @@ impl DeltasClient for WsDeltasClient {
             'retry: while retry_count < this.max_reconnects {
                 info!(?ws_uri, "Connecting to WebSocket server");
 
-                let (conn, _) = match connect_async(&ws_uri).await {
+                // Create a WebSocket request
+                let mut request_builder = Request::builder()
+                    .uri(&ws_uri)
+                    .header(SEC_WEBSOCKET_KEY, generate_key())
+                    .header(SEC_WEBSOCKET_VERSION, 13)
+                    .header(CONNECTION, "Upgrade")
+                    .header(UPGRADE, "websocket")
+                    .header(HOST, "tycho-beta.propellerheads.xyz")
+                    .header(USER_AGENT, format!("tycho-client-{}", env!("CARGO_PKG_VERSION")));
+
+                // Add Authorization if one is given
+                if let Some(ref key) = this.auth_key {
+                    request_builder = request_builder.header(AUTHORIZATION, key);
+                }
+
+                let request = request_builder.body(()).unwrap();
+                let (conn, _) = match connect_async(request).await {
                     Ok(conn) => conn,
                     Err(e) => {
                         // Prepare for reconnection
@@ -600,7 +636,10 @@ impl DeltasClient for WsDeltasClient {
                         let mut guard = this.inner.as_ref().lock().await;
                         *guard = None;
 
-                        warn!(?e, "Failed to connect to WebSocket server; Reconnecting");
+                        warn!(
+                            e = e.to_string(),
+                            "Failed to connect to WebSocket server; Reconnecting"
+                        );
                         sleep(Duration::from_millis(500)).await;
 
                         continue 'retry;
@@ -852,7 +891,7 @@ mod tests {
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
 
-        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
+        let client = WsDeltasClient::new(&format!("ws://{}", addr), None).unwrap();
         let jh = client
             .connect()
             .await
@@ -939,7 +978,7 @@ mod tests {
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
 
-        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
+        let client = WsDeltasClient::new(&format!("ws://{}", addr), None).unwrap();
         let jh = client
             .connect()
             .await
@@ -1020,7 +1059,7 @@ mod tests {
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 0).await;
 
-        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
+        let client = WsDeltasClient::new(&format!("ws://{}", addr), None).unwrap();
         let jh = client
             .connect()
             .await
@@ -1144,7 +1183,7 @@ mod tests {
             ))
         ];
         let (addr, server_thread) = mock_tycho_ws(&exp_comm, 1).await;
-        let client = WsDeltasClient::new(&format!("ws://{}", addr)).unwrap();
+        let client = WsDeltasClient::new(&format!("ws://{}", addr), None).unwrap();
         let jh: JoinHandle<Result<(), DeltasError>> = client
             .connect()
             .await
@@ -1198,7 +1237,8 @@ mod tests {
     #[tokio::test]
     async fn test_connect_max_attempts() {
         let (addr, _) = mock_bad_connection_tycho_ws().await;
-        let client = WsDeltasClient::new_with_reconnects(&format!("ws://{}", addr), 3).unwrap();
+        let client =
+            WsDeltasClient::new_with_reconnects(&format!("ws://{}", addr), 3, None).unwrap();
 
         let join_handle = client.connect().await;
 
