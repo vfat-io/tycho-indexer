@@ -22,7 +22,6 @@ use reqwest::{
     header::{self, CONTENT_TYPE, USER_AGENT},
     Client, ClientBuilder, Url,
 };
-use serde_json;
 use tokio::sync::Semaphore;
 
 use crate::TYCHO_SERVER_VERSION;
