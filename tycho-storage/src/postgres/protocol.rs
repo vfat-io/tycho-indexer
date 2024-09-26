@@ -818,19 +818,21 @@ impl PostgresGateway {
                 .await
                 .map_err(PostgresError::from)?;
             // remove deleted attributes from the default table
-            let mut delete_query =
-                diesel::delete(schema::protocol_state_default::table).into_boxed();
-            for ((component_id, attr_name), _) in deleted_attributes {
-                delete_query = delete_query.or_filter(
-                    schema::protocol_state_default::protocol_component_id
-                        .eq(component_id)
-                        .and(schema::protocol_state_default::attribute_name.eq(attr_name)),
-                );
+            if !deleted_attributes.is_empty() {
+                let mut delete_query =
+                    diesel::delete(schema::protocol_state_default::table).into_boxed();
+                for ((component_id, attr_name), _) in deleted_attributes {
+                    delete_query = delete_query.or_filter(
+                        schema::protocol_state_default::protocol_component_id
+                            .eq(component_id)
+                            .and(schema::protocol_state_default::attribute_name.eq(attr_name)),
+                    );
+                }
+                delete_query
+                    .execute(conn)
+                    .await
+                    .map_err(PostgresError::from)?;
             }
-            delete_query
-                .execute(conn)
-                .await
-                .map_err(PostgresError::from)?;
         }
         Ok(())
     }
