@@ -1,3 +1,13 @@
+## [0.18.4](https://github.com/propeller-heads/tycho-indexer/compare/0.18.3...0.18.4) (2024-09-26)
+
+
+### Bug Fixes
+
+* fix delete protocol script bug ([450e6c0](https://github.com/propeller-heads/tycho-indexer/commit/450e6c048337e40c65f40ef2eee0d91426f3611d))
+* remove deleted attributes from default table ([aab9a76](https://github.com/propeller-heads/tycho-indexer/commit/aab9a76ecdd3d87379e5caff80ae587aa0dd9d53))
+* Remove deleted attributes from default table ([#374](https://github.com/propeller-heads/tycho-indexer/issues/374)) ([a6b15b6](https://github.com/propeller-heads/tycho-indexer/commit/a6b15b63ca7e851300dde9a382ce66278c271ebc))
+* skip deleted attributes delete query if no attr are deleted ([0e7bb6c](https://github.com/propeller-heads/tycho-indexer/commit/0e7bb6cb5c6bbf4d1bd913e9848f81c8034c90ee))
+
 ## [0.18.3](https://github.com/propeller-heads/tycho-indexer/compare/0.18.2...0.18.3) (2024-09-23)
 
 
