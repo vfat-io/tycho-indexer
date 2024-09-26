@@ -1,3 +1,13 @@
+## [0.20.0](https://github.com/propeller-heads/tycho-indexer/compare/0.19.0...0.20.0) (2024-09-26)
+
+
+### Features
+
+* **rpc:** Add a cache for contract storage. ([8e9c6d3](https://github.com/propeller-heads/tycho-indexer/commit/8e9c6d3c2c6a2ed5f3d54e572b93979b63e14817))
+* **rpc:** Add a cache for protocol state. ([e020b08](https://github.com/propeller-heads/tycho-indexer/commit/e020b081f6102f97c40e3efea938af7e2aca81c5))
+* **rpc:** Generalize RPC caching strategy. ([e4e4226](https://github.com/propeller-heads/tycho-indexer/commit/e4e4226b44a5c9dda881a4627831e4c10391f18c))
+* **rpc:** Protocol state and contract storage rpc caching ([#378](https://github.com/propeller-heads/tycho-indexer/issues/378)) ([9cccd5d](https://github.com/propeller-heads/tycho-indexer/commit/9cccd5d0abf19d53d74ea07ad0ba6051f53a1d3c))
+
 ## [0.19.0](https://github.com/propeller-heads/tycho-indexer/compare/0.18.4...0.19.0) (2024-09-26)
 
 
