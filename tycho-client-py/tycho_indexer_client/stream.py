@@ -30,6 +30,7 @@ class TychoStream:
         include_state=True,
         logs_directory: str = None,
         tycho_client_path: str = None,
+        use_tls: bool = True
     ):
         """
         Initializes the TychoStream instance.
@@ -45,6 +46,7 @@ class TychoStream:
             include_state: Whether to include protocol states in the stream. Defaults to True.
             logs_directory: Directory to store log files. If not specified, a default directory based on the OS is used.
             tycho_client_path: Path to the Tycho client binary. If not specified, the binary is searched for in the system's PATH.
+            use_tls: Whether to use TLS connections with `tycho_url` or not. Defaults to `True`.
         """
         self.tycho_url = tycho_url
         self.min_tvl = min_tvl
@@ -55,6 +57,7 @@ class TychoStream:
         self._blockchain = blockchain
         self._logs_directory = logs_directory or get_default_log_directory()
         self._tycho_client_path = tycho_client_path or find_tycho_client()
+        self._use_tls = use_tls
 
     async def start(self):
         """Start the tycho-client Rust binary through subprocess"""
@@ -77,6 +80,9 @@ class TychoStream:
 
         if not self._include_state:
             cmd.append("--no-state")
+            
+        if not self._use_tls:
+            cmd.append("--no-tls")
 
         for exchange in self.exchanges:
             cmd.append("--exchange")
