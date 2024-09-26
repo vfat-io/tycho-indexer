@@ -618,5 +618,7 @@ pub trait Gateway:
     + ExtractionStateGateway
     + ProtocolGateway
     + ContractStateGateway
+    + Send
+    + Sync
 {
 }

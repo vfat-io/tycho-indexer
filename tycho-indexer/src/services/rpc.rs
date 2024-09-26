@@ -1,8 +1,6 @@
 //! This module contains Tycho RPC implementation
 #![allow(deprecated)]
-use mini_moka::sync::Cache;
-use std::{collections::HashSet, sync::Arc};
-use tokio::sync::RwLock;
+use std::collections::HashSet;
 
 use actix_web::{web, HttpResponse};
 use anyhow::Error;
@@ -19,7 +17,10 @@ use tycho_core::{
 
 use crate::{
     extractor::reorg_buffer::{BlockNumberOrTimestamp, FinalityStatus},
-    services::deltas_buffer::{PendingDeltas, PendingDeltasError},
+    services::{
+        cache::RpcCache,
+        deltas_buffer::{PendingDeltas, PendingDeltasError},
+    },
 };
 
 #[derive(Error, Debug)]
@@ -46,7 +47,10 @@ impl From<anyhow::Error> for RpcError {
 pub struct RpcHandler<G> {
     db_gateway: G,
     pending_deltas: PendingDeltas,
-    token_cache: Arc<RwLock<Cache<String, dto::TokensRequestResponse>>>,
+    token_cache: RpcCache<dto::TokensRequestBody, dto::TokensRequestResponse>,
+    contract_storage_cache: RpcCache<dto::StateRequestBody, dto::StateRequestResponse>,
+    protocol_state_cache:
+        RpcCache<dto::ProtocolStateRequestBody, dto::ProtocolStateRequestResponse>,
 }
 
 impl<G> RpcHandler<G>
@@ -54,12 +58,31 @@ where
     G: Gateway,
 {
     pub fn new(db_gateway: G, pending_deltas: PendingDeltas) -> Self {
-        let token_cache = Cache::builder()
-            .max_capacity(50)
-            .time_to_live(std::time::Duration::from_secs(7 * 60))
-            .build();
+        let token_cache = RpcCache::<dto::TokensRequestBody, dto::TokensRequestResponse>::new(
+            "token",
+            50,
+            7 * 60,
+        );
 
-        Self { db_gateway, pending_deltas, token_cache: Arc::new(RwLock::new(token_cache)) }
+        let contract_storage_cache =
+            RpcCache::<dto::StateRequestBody, dto::StateRequestResponse>::new(
+                "contract_storage",
+                50,
+                7 * 60,
+            );
+
+        let protocol_state_cache = RpcCache::<
+            dto::ProtocolStateRequestBody,
+            dto::ProtocolStateRequestResponse,
+        >::new("contract_storage", 50, 7 * 60);
+
+        Self {
+            db_gateway,
+            pending_deltas,
+            token_cache,
+            contract_storage_cache,
+            protocol_state_cache,
+        }
     }
 
     #[instrument(skip(self, request))]
@@ -68,13 +91,18 @@ where
         request: &dto::StateRequestBody,
     ) -> Result<dto::StateRequestResponse, RpcError> {
         info!(?request, "Getting contract state.");
-        self.get_contract_state_inner(request)
+        self.contract_storage_cache
+            .get(request.clone(), |r| async {
+                self.get_contract_state_inner(r)
+                    .await
+                    .map(|res| (res, true))
+            })
             .await
     }
 
     async fn get_contract_state_inner(
         &self,
-        request: &dto::StateRequestBody,
+        request: dto::StateRequestBody,
     ) -> Result<dto::StateRequestResponse, RpcError> {
         let at = BlockOrTimestamp::try_from(&request.version)?;
         let chain = request.chain.into();
@@ -193,13 +221,18 @@ where
         request: &dto::ProtocolStateRequestBody,
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
         debug!(?request, "Getting protocol state.");
-        self.get_protocol_state_inner(request)
+        self.protocol_state_cache
+            .get(request.clone(), |r| async {
+                self.get_protocol_state_inner(r)
+                    .await
+                    .map(|res| (res, true))
+            })
             .await
     }
 
     async fn get_protocol_state_inner(
         &self,
-        request: &dto::ProtocolStateRequestBody,
+        request: dto::ProtocolStateRequestBody,
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
         //TODO: handle when no id is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
@@ -252,54 +285,26 @@ where
         &self,
         request: &dto::TokensRequestBody,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
-        info!(?request, "Getting tokens.");
-
-        let cache_key = format!("{:?}", request);
-
-        // Cache entry count is only used for logging purposes
-        #[allow(unused_assignments)]
-        let mut cache_entry_count: u64 = 0;
-
-        // Check the cache for a cached response
-        {
-            let read_lock = self.token_cache.read().await;
-            cache_entry_count = read_lock.entry_count();
-            if let Some(cached_response) = read_lock.get(&cache_key) {
-                trace!("Returning cached response");
-                return Ok(cached_response);
-            }
-        }
-
-        trace!(
-            ?cache_key,
-            "Token cache missed. Cache size: {cache_size}",
-            cache_size = cache_entry_count
-        );
-        // Acquire a write lock before querying the database (prevents concurrent db queries)
-        let write_lock = self.token_cache.write().await;
-
-        // Double-check if another thread has already fetched and cached the data
-        if let Some(cached_response) = write_lock.get(&cache_key) {
-            trace!("Returning cached response after re-check");
-            return Ok(cached_response);
-        }
-
-        let response = self.get_tokens_inner(request).await?;
+        let response = self
+            .token_cache
+            .get(request.clone(), |r: dto::TokensRequestBody| async {
+                self.get_tokens_inner(r)
+                    .await
+                    .map(|res| {
+                        let n_tokens = res.tokens.len();
+                        (res, n_tokens == request.pagination.page_size as usize)
+                    })
+            })
+            .await?;
 
         trace!(n_tokens_received=?response.tokens.len(), "Retrieved tokens from DB");
-
-        // Cache the response if it contains a full page of tokens
-        if response.tokens.len() == request.pagination.page_size as usize {
-            trace!("Caching response");
-            write_lock.insert(cache_key, response.clone());
-        };
 
         Ok(response)
     }
 
     async fn get_tokens_inner(
         &self,
-        request: &dto::TokensRequestBody,
+        request: dto::TokensRequestBody,
     ) -> Result<dto::TokensRequestResponse, RpcError> {
         let address_refs: Option<Vec<&Address>> = request
             .token_addresses
@@ -872,7 +877,7 @@ mod tests {
             chain: dto::Chain::Ethereum,
         };
         let state = req_handler
-            .get_contract_state_inner(&request)
+            .get_contract_state_inner(request)
             .await
             .unwrap();
 
@@ -977,7 +982,7 @@ mod tests {
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
         };
         let res = req_handler
-            .get_protocol_state_inner(&request)
+            .get_protocol_state_inner(request)
             .await
             .unwrap();
 

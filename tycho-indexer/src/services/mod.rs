@@ -22,6 +22,7 @@ use tycho_core::{
     storage::Gateway,
 };
 
+mod cache;
 mod deltas_buffer;
 mod rpc;
 mod ws;

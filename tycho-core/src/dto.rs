@@ -162,7 +162,7 @@ pub struct Block {
     pub ts: NaiveDateTime,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct BlockParam {
     #[schema(value_type=Option<String>)]
@@ -512,7 +512,7 @@ impl ProtocolStateDelta {
     }
 }
 
-#[derive(Serialize, Debug, Default, PartialEq, ToSchema)]
+#[derive(Clone, Serialize, Debug, Default, PartialEq, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct StateRequestBody {
     #[serde(alias = "contractIds")]
@@ -762,7 +762,7 @@ impl fmt::Display for ContractId {
 /// has not been processed yet. If timestamp is provided, the state at the latest block before
 /// that timestamp is returned.
 /// Defaults to the current time.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct VersionParam {
     pub timestamp: Option<NaiveDateTime>,
@@ -819,7 +819,7 @@ impl StateRequestParameters {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema, Eq, Hash, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct TokensRequestBody {
     #[serde(alias = "tokenAddresses")]
@@ -843,7 +843,7 @@ pub struct TokensRequestBody {
 }
 
 /// Response from Tycho server for a tokens request.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Eq, Hash)]
 pub struct TokensRequestResponse {
     pub tokens: Vec<ResponseToken>,
     pub pagination: PaginationParams,
@@ -855,7 +855,7 @@ impl TokensRequestResponse {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct PaginationParams {
     #[serde(default)]
@@ -879,7 +879,7 @@ impl Default for PaginationParams {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema, Eq, Hash)]
 #[serde(rename = "Token")]
 /// Token struct for the response from Tycho server for a tokens request.
 pub struct ResponseToken {
@@ -978,7 +978,7 @@ impl ProtocolComponentRequestResponse {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolId {
     pub id: String,
@@ -1012,7 +1012,7 @@ fn default_include_balances_flag() -> bool {
     true
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Default, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolStateRequestBody {
     #[serde(alias = "protocolIds")]
@@ -1034,7 +1034,7 @@ impl ProtocolStateRequestBody {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct ProtocolStateRequestResponse {
     pub states: Vec<ResponseProtocolState>,
 }
