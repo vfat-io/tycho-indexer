@@ -15,7 +15,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{debug, info, instrument, trace};
+use tracing::{debug, info, info_span, instrument, trace, Instrument};
 
 use tycho_core::{
     models::{
@@ -521,24 +521,31 @@ impl CachedGateway {
             }
             Some((mut db_txn, rx)) => {
                 if db_txn.size > min_ops_batch_size {
-                    db_txn
-                        .operations
-                        .sort_by_key(|e| e.order_key());
-                    debug!(
-                        size = db_txn.size,
-                        ops = ?db_txn
+                    let span = info_span!("DatabaseCommit", size = db_txn.size);
+                    async move {
+                        db_txn
                             .operations
-                            .iter()
-                            .map(WriteOp::variant_name)
-                            .collect::<Vec<_>>(),
-                        "Submitting db operation batch!"
-                    );
-                    self.tx
-                        .send(DBCacheMessage::Write(db_txn))
-                        .await
-                        .expect("Send message to receiver ok");
-                    rx.await
-                        .map_err(|_| StorageError::WriteCacheGoneAway())??;
+                            .sort_by_key(|e| e.order_key());
+                        debug!(
+                            size = db_txn.size,
+                            ops = ?db_txn
+                                .operations
+                                .iter()
+                                .map(WriteOp::variant_name)
+                                .collect::<Vec<_>>(),
+                            "Submitting db operation batch!"
+                        );
+                        self.tx
+                            .send(DBCacheMessage::Write(db_txn))
+                            .await
+                            .expect("Send message to receiver ok");
+                        rx.await
+                            .map_err(|_| StorageError::WriteCacheGoneAway())??;
+
+                        Ok::<(), StorageError>(())
+                    }
+                    .instrument(span)
+                    .await?;
                 } else {
                     // if we are not ready to commit, give the OpenTx struct back.
                     *open_tx = Some((db_txn, rx));
