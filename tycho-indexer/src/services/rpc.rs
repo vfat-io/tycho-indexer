@@ -1,6 +1,6 @@
 //! This module contains Tycho RPC implementation
 #![allow(deprecated)]
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use actix_web::{web, HttpResponse};
 use anyhow::Error;
@@ -74,7 +74,7 @@ where
         let protocol_state_cache = RpcCache::<
             dto::ProtocolStateRequestBody,
             dto::ProtocolStateRequestResponse,
-        >::new("contract_storage", 50, 7 * 60);
+        >::new("protocol_state", 50, 7 * 60);
 
         Self {
             db_gateway,

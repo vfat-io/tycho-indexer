@@ -12,22 +12,20 @@ use tracing::{debug, error, instrument, trace, warn};
 use async_trait::async_trait;
 use futures03::future::try_join_all;
 
+use crate::TYCHO_SERVER_VERSION;
 use tycho_core::dto::{
     Chain, PaginationParams, PaginationResponse, ProtocolComponentRequestResponse,
     ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
     ProtocolStateRequestResponse, ResponseToken, StateRequestBody, StateRequestResponse,
     TokensRequestBody, TokensRequestResponse, VersionParam,
 };
+use tycho_core::Bytes;
 
 use reqwest::{
     header::{self, CONTENT_TYPE, USER_AGENT},
     Client, ClientBuilder, Url,
 };
 use tokio::sync::Semaphore;
-
-use crate::TYCHO_SERVER_VERSION;
-use tokio::sync::Semaphore;
-use tycho_core::Bytes;
 
 #[derive(Error, Debug)]
 pub enum RPCError {

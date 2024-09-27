@@ -890,7 +890,7 @@ impl Default for PaginationParams {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct PaginationResponse {
     pub page: i64,
