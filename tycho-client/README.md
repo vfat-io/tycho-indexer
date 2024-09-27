@@ -6,7 +6,7 @@ Tycho Client is the main consumer-facing component of the Tycho indexing system.
 
 ### Using the Installation Script
 
-An installation script is provided for convenience. It optionally accepts a version argument; if not provided, the latest available version (ignoring pre releases) will be installed. The script will automatically detect your operating system and architecture, download the appropriate binary, unpack it, and move it to a directory in your PATH.
+An installation script is provided for convenience for those with access to PropellerHeads AWS S3 storage. It optionally accepts a version argument; if not provided, the latest available version (ignoring pre releases) will be installed. The script will automatically detect your operating system and architecture, download the appropriate binary, unpack it, and move it to a directory in your PATH.
 
 To install Tycho Client using the script:
 
@@ -55,9 +55,9 @@ This should display the version of the Tycho client installed.
 
 ## Quickstart
 
-To use the Tycho Client, you will need a connection to the Tycho Indexer. Once you have a connection to an indexer instance, you can simply create a stream using:
+To use the Tycho Client, you will need a connection to the Tycho Indexer: either by hosting your own tycho instance or via a [hosted endpoint](#hosted-endpoints). After this, you can simply create a stream using:
 
-```
+```bash
 tycho-client \
     --exchange uniswap_v2 \
     --exchange uniswap_v3 \
@@ -68,7 +68,14 @@ tycho-client \
 ```
  - TYCHO_INDEXER_URL defaults to `localhost:4242`
 
- Note: if an authentication is required by the gateway, you can set it via `export TYCHO_AUTH_TOKEN={your_token}`. 
+ Note: if an authentication is required by the gateway, you can set it via an enviroment variable:
+ ```bash
+ export TYCHO_AUTH_TOKEN={your_token}
+ ```
+ or by using the `--auth-key {your_token}` flag.
+
+ If you wish to use unsecure transports, you may omit setting the auth-key and instead use the `--no-tls` flag. This is useful if you are hosting your own instance of tycho and do not require the added security.
+
 ## Usage
 
 The main use case of the Tycho Client is to provide a stream of protocol components,
@@ -161,6 +168,8 @@ current header.
 #### Snapshots
 
 Snapshots are simple messages that contain the complete state of a component (ComponentWithState) along with the related contract data (ResponseAccount). Contract data is only emitted for protocols that require vm simulations, it is omitted for more simple protocols such as uniswap v2 etc.
+
+Note: for related tokens, only their addresses are emitted with the component snapshots. If you require more token information you may utilise the tycho rpc.
 
 [Link to structs](https://github.com/propeller-heads/tycho-indexer/blob/main/tycho-client/src/feed/synchronizer.rs#L63)
 
@@ -272,3 +281,12 @@ For use cases that do not require snapshots or state updates, we provide a light
 In this mode tycho will not emit any snapshots or state updates, it will only emit
 newly created component, associated tokens, tvl changes, balance changes and removed
 components. This mode can be turned on via the `--no-state` flag.
+
+# Hosted Endpoints
+
+If you wish to use tycho as a service instead of hosting it yourself, the following endpoints are available:
+
+### PropellerHeads (beta)
+URL: `tycho-beta.propellerheads.xyz/v1`
+
+Auth-key: Please contact `@AdeelFarouk` on telegram to request a beta auth-key.
