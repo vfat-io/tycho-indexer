@@ -1057,7 +1057,29 @@ impl HybridPgGateway {
         Ok(())
     }
 
-    async fn forward(
+    async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
+        let state = self
+            .state_gateway
+            .get_state(&self.name, &self.chain)
+            .await?;
+        Ok(state.cursor)
+    }
+}
+
+#[async_trait]
+impl HybridGateway for HybridPgGateway {
+    async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
+        self.get_last_cursor().await
+    }
+
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
+        self.state_gateway
+            .add_protocol_types(new_protocol_types)
+            .await
+            .expect("Couldn't insert protocol types");
+    }
+
+    async fn advance(
         &self,
         changes: &evm::BlockChanges,
         new_cursor: &str,
@@ -1182,38 +1204,6 @@ impl HybridPgGateway {
         let batch_size: usize = if syncing { self.sync_batch_size } else { 0 };
         self.state_gateway
             .commit_transaction(batch_size)
-            .await
-    }
-
-    async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
-        let state = self
-            .state_gateway
-            .get_state(&self.name, &self.chain)
-            .await?;
-        Ok(state.cursor)
-    }
-}
-
-#[async_trait]
-impl HybridGateway for HybridPgGateway {
-    async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
-        self.get_last_cursor().await
-    }
-
-    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
-        self.state_gateway
-            .add_protocol_types(new_protocol_types)
-            .await
-            .expect("Couldn't insert protocol types");
-    }
-
-    async fn advance(
-        &self,
-        changes: &evm::BlockChanges,
-        new_cursor: &str,
-        syncing: bool,
-    ) -> Result<(), StorageError> {
-        self.forward(changes, new_cursor, syncing)
             .await
     }
 
@@ -2157,7 +2147,7 @@ mod test_serial_db {
                 change: Default::default(),
             }];
 
-            gw.forward(&msg, "cursor@500", false)
+            gw.advance(&msg, "cursor@500", false)
                 .await
                 .expect("upsert should succeed");
 
@@ -2187,7 +2177,7 @@ mod test_serial_db {
             let msg = vm_creation_and_update();
             let exp = vm_account(0);
 
-            gw.forward(&msg, "cursor@500", false)
+            gw.advance(&msg, "cursor@500", false)
                 .await
                 .expect("upsert should succeed");
 
