@@ -13,13 +13,15 @@ use async_trait::async_trait;
 use futures03::future::try_join_all;
 
 use crate::TYCHO_SERVER_VERSION;
-use tycho_core::dto::{
-    Chain, PaginationParams, PaginationResponse, ProtocolComponentRequestResponse,
-    ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
-    ProtocolStateRequestResponse, ResponseToken, StateRequestBody, StateRequestResponse,
-    TokensRequestBody, TokensRequestResponse, VersionParam,
+use tycho_core::{
+    dto::{
+        Chain, PaginationParams, PaginationResponse, ProtocolComponentRequestResponse,
+        ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
+        ProtocolStateRequestResponse, ResponseToken, StateRequestBody, StateRequestResponse,
+        TokensRequestBody, TokensRequestResponse, VersionParam,
+    },
+    Bytes,
 };
-use tycho_core::Bytes;
 
 use reqwest::{
     header::{self, CONTENT_TYPE, USER_AGENT},
@@ -263,8 +265,8 @@ impl RPCClient for HttpRPCClient {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.contract_ids.is_none()
-            || request
+        if request.contract_ids.is_none() ||
+            request
                 .contract_ids
                 .as_ref()
                 .unwrap()
@@ -356,8 +358,8 @@ impl RPCClient for HttpRPCClient {
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.protocol_ids.is_none()
-            || request
+        if request.protocol_ids.is_none() ||
+            request
                 .protocol_ids
                 .as_ref()
                 .unwrap()

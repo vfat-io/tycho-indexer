@@ -998,8 +998,8 @@ mod tests {
             .version
             .timestamp
             .unwrap()
-            .timestamp_millis()
-            - result
+            .timestamp_millis() -
+            result
                 .version
                 .timestamp
                 .unwrap()
@@ -1290,7 +1290,7 @@ mod tests {
             component_ids: None,
             tvl_gt: None,
             chain: dto::Chain::Ethereum,
-            pagination: dto::PaginationParams::default(),
+            pagination: dto::PaginationParams::new(0, 2),
         };
 
         let components = req_handler
