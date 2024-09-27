@@ -20,7 +20,7 @@ use tycho_core::{
     },
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
-        ExtractionStateGateway, Gateway, ProtocolGateway, StorageError, Version,
+        ExtractionStateGateway, Gateway, ProtocolGateway, StorageError, Version, WithTotal,
     },
     Bytes,
 };
@@ -73,7 +73,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<(i64, Vec<Account>), StorageError>,
+                    Output = Result<WithTotal<Vec<Account>>, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >
@@ -170,8 +170,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<(i64,
-                        Vec<ProtocolComponent>),
+                    Output = Result<WithTotal<Vec<ProtocolComponent>>,
                         StorageError,
                     >,
                 > + ::core::marker::Send + 'async_trait,
@@ -268,8 +267,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<(i64,
-                        Vec<ProtocolComponentState>),
+                    Output = Result<WithTotal<Vec<ProtocolComponentState>>,
                         StorageError,
                     >,
                 > + ::core::marker::Send + 'async_trait,
@@ -310,7 +308,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<(i64, Vec<CurrencyToken>), StorageError>,
+                    Output = Result<WithTotal<Vec<CurrencyToken>>, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >

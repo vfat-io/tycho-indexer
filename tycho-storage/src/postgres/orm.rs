@@ -28,7 +28,7 @@ use tycho_core::{
         Address, AttrStoreKey, Balance, BlockHash, Code, CodeHash, ComponentId, ContractId,
         PaginationParams, StoreVal, TxHash,
     },
-    storage::{BlockIdentifier, StorageError},
+    storage::{BlockIdentifier, StorageError, WithTotal},
     Bytes,
 };
 
@@ -627,7 +627,7 @@ impl ProtocolState {
         version_ts: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
-    ) -> (i64, QueryResult<Vec<(Self, ComponentId)>>) {
+    ) -> WithTotal<QueryResult<Vec<(Self, ComponentId)>>> {
         // Count the total number of matching components
         let count: i64 = protocol_component::table
             .filter(protocol_component::external_id.eq_any(component_ids))
@@ -672,7 +672,7 @@ impl ProtocolState {
             .get_results::<(Self, String)>(conn)
             .await;
 
-        (count, res)
+        WithTotal { entity: res, total: Some(count) }
     }
 
     /// Used to fetch the full state of a component at a given version, filtered by protocol system.
@@ -690,7 +690,7 @@ impl ProtocolState {
         version_ts: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
-    ) -> (i64, QueryResult<Vec<(Self, ComponentId)>>) {
+    ) -> WithTotal<QueryResult<Vec<(Self, ComponentId)>>> {
         let count: i64 = protocol_component::table
             .inner_join(
                 protocol_system::table
@@ -742,7 +742,7 @@ impl ProtocolState {
             .get_results::<(Self, String)>(conn)
             .await;
 
-        (count, res)
+        WithTotal { entity: res, total: Some(count) }
     }
 
     /// Used to fetch the full state of a component at a given version, filtered by chain.
@@ -758,7 +758,7 @@ impl ProtocolState {
         version_ts: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
-    ) -> (i64, QueryResult<Vec<(Self, ComponentId)>>) {
+    ) -> WithTotal<QueryResult<Vec<(Self, ComponentId)>>> {
         let mut count_query = protocol_component::table
             .filter(protocol_component::chain_id.eq(chain_id))
             .filter(exists(
@@ -816,13 +816,13 @@ impl ProtocolState {
         let component_ids = match component_ids {
             Ok(ids) => ids,
             Err(err) => {
-                return (0, Err(err));
+                return WithTotal { entity: Err(err), total: None };
             }
         };
 
         // If no components found, return empty result
         if component_ids.is_empty() {
-            return (0, Ok(Vec::new()));
+            return WithTotal { entity: Ok(Vec::new()), total: Some(0) };
         }
 
         // Step 4: Fetch all ProtocolStates for the selected components
@@ -847,7 +847,7 @@ impl ProtocolState {
             .get_results::<(Self, String)>(conn)
             .await;
 
-        (count, res)
+        WithTotal { entity: res, total: Some(count) }
     }
 
     /// Used to fetch all protocol state changes within the given timeframe.

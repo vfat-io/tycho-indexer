@@ -886,10 +886,7 @@ impl PaginationParams {
 
 impl Default for PaginationParams {
     fn default() -> Self {
-        PaginationParams {
-            page: 0,       // Default page number
-            page_size: 20, // Default page size
-        }
+        PaginationParams { page: 0, page_size: 20 }
     }
 }
 
@@ -898,8 +895,10 @@ impl Default for PaginationParams {
 pub struct PaginationResponse {
     pub page: i64,
     pub page_size: i64,
+    /// The total number of items available across all pages of results
     pub total: i64,
 }
+
 impl PaginationResponse {
     pub fn new(page: i64, page_size: i64, total: i64) -> Self {
         Self { page, page_size, total }

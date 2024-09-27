@@ -84,7 +84,7 @@ impl ProtocolMemoryCache {
             self.gateway
                 .get_tokens(self.chain, None, None, None, None)
                 .await?
-                .1
+                .entity
                 .into_iter()
                 .for_each(|t| {
                     n_tokens += 1;
@@ -96,7 +96,7 @@ impl ProtocolMemoryCache {
             self.gateway
                 .get_protocol_components(&self.chain, None, None, None, None)
                 .await?
-                .1
+                .entity
                 .into_iter()
                 .for_each(|pc| {
                     n_components += 1;
@@ -167,7 +167,7 @@ impl ProtocolDataCache for ProtocolMemoryCache {
             self.gateway
                 .get_tokens(self.chain, Some(&missing), None, None, None)
                 .await?
-                .1
+                .entity
                 .into_iter()
                 .for_each(|t| {
                     n_fetched += 1;
@@ -238,7 +238,7 @@ impl ProtocolDataCache for ProtocolMemoryCache {
                     None,
                 )
                 .await?
-                .1
+                .entity
                 .into_iter()
                 .for_each(|c| {
                     n_fetched += 1;
@@ -276,7 +276,7 @@ mod tests {
     use crate::testing::MockGateway;
     use chrono::Duration;
     use mockall::predicate::*;
-    use tycho_core::models::ChangeType;
+    use tycho_core::{models::ChangeType, storage::WithTotal};
 
     #[tokio::test]
     async fn test_get_token_prices() {
@@ -316,7 +316,9 @@ mod tests {
         let ret_tokens = tokens.clone();
         gateway
             .expect_get_tokens()
-            .return_once(|_, _, _, _, _| Box::pin(async move { Ok((2, ret_tokens)) }));
+            .return_once(|_, _, _, _, _| {
+                Box::pin(async move { Ok(WithTotal { entity: ret_tokens, total: Some(2) }) })
+            });
         let cache = ProtocolMemoryCache::new(chain, max_price_age, Arc::new(gateway));
 
         let addresses = tokens
@@ -391,7 +393,9 @@ mod tests {
         let ret_components = components.clone();
         gateway
             .expect_get_protocol_components()
-            .return_once(move |_, _, _, _, _| Box::pin(async { Ok((10, ret_components)) }));
+            .return_once(move |_, _, _, _, _| {
+                Box::pin(async { Ok(WithTotal { entity: ret_components, total: Some(10) }) })
+            });
 
         let cache = ProtocolMemoryCache::new(chain, max_price_age, Arc::new(gateway));
         let component_ids = components
@@ -415,10 +419,14 @@ mod tests {
         let mut gateway = MockGateway::new();
         gateway
             .expect_get_tokens()
-            .return_once(|_, _, _, _, _| Box::pin(async { Ok((2, tokens())) }));
+            .return_once(|_, _, _, _, _| {
+                Box::pin(async { Ok(WithTotal { entity: tokens(), total: Some(2) }) })
+            });
         gateway
             .expect_get_protocol_components()
-            .return_once(|_, _, _, _, _| Box::pin(async { Ok((10, components())) }));
+            .return_once(|_, _, _, _, _| {
+                Box::pin(async { Ok(WithTotal { entity: components(), total: Some(10) }) })
+            });
         gateway
             .expect_get_token_prices()
             .with(eq(chain))

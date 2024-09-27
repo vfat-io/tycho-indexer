@@ -130,7 +130,7 @@ where
         }
 
         // Get the contract states from the database
-        let (db_total, mut accounts) = self
+        let account_data = self
             .db_gateway
             .get_contracts(
                 &chain,
@@ -144,6 +144,7 @@ where
                 error!(error = %err, "Error while getting contract states.");
                 err
             })?;
+        let mut accounts = account_data.entity;
 
         if let Some(at) = deltas_version {
             self.pending_deltas.update_vm_states(
@@ -158,7 +159,8 @@ where
                 // If contract addresses are specified, the total count is the number of addresses
                 adrs.len() as i64
             }
-            None => db_total, // TODO: handle case where contract addresses are not specified
+            None => account_data.total.unwrap_or_default(), /* TODO: handle case where contract
+                                                             * addresses are not specified */
         };
 
         Ok(dto::StateRequestResponse::new(
@@ -300,7 +302,7 @@ where
         }
 
         // Get the protocol states from the database
-        let (db_total, mut states) = self
+        let state_data = self
             .db_gateway
             .get_protocol_states(
                 &chain,
@@ -315,6 +317,7 @@ where
                 error!(error = %err, "Error while getting protocol states.");
                 err
             })?;
+        let mut states = state_data.entity;
 
         // merge db states with pending deltas
         if let Some(at) = deltas_version {
@@ -327,7 +330,8 @@ where
                 // If protocol IDs are specified, the total count is the number of IDs
                 ids.len() as i64
             }
-            None => db_total, // TODO: handle case where protocol ids are not specified
+            None => state_data.total.unwrap_or_default(), /* TODO: handle case where protocol ids
+                                                           * are not specified */
         };
 
         Ok(dto::ProtocolStateRequestResponse::new(
@@ -395,15 +399,16 @@ where
             )
             .await
         {
-            Ok((total, tokens)) => Ok(dto::TokensRequestResponse::new(
-                tokens
+            Ok(token_data) => Ok(dto::TokensRequestResponse::new(
+                token_data
+                    .entity
                     .into_iter()
                     .map(dto::ResponseToken::from)
                     .collect(),
                 &PaginationResponse::new(
                     request.pagination.page,
                     request.pagination.page_size,
-                    total,
+                    token_data.total.unwrap_or_default(),
                 ),
             )),
             Err(err) => {
@@ -482,8 +487,10 @@ where
             )
             .await
         {
-            Ok((db_total, mut components)) => {
+            Ok(component_data) => {
+                let db_total = component_data.total.unwrap_or_default();
                 let total = db_total + buffered_components.len() as i64;
+                let mut components = component_data.entity;
 
                 // Handle adding buffered components to the response
                 let buffer_offset = pagination_params.offset() - db_total;
@@ -869,6 +876,7 @@ mod tests {
             token::CurrencyToken,
             ChangeType,
         },
+        storage::WithTotal,
         Bytes,
     };
 
@@ -1030,7 +1038,7 @@ mod tests {
             ),
         );
         let mut gw = MockGateway::new();
-        let mock_response = Ok((10_i64, vec![expected.clone()]));
+        let mock_response = Ok(WithTotal { entity: vec![expected.clone()], total: Some(10) });
         gw.expect_get_contracts()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
 
@@ -1128,7 +1136,7 @@ mod tests {
             CurrencyToken::new(&(WETH.parse().unwrap()), "WETH", 18, 0, &[], Chain::Ethereum, 100),
         ];
         let mut gw = MockGateway::new();
-        let mock_response = Ok((2, expected.clone()));
+        let mock_response = Ok(WithTotal { entity: expected.clone(), total: Some(2) });
         // ensure the gateway is only accessed once - the second request should hit cache
         gw.expect_get_tokens()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
@@ -1177,7 +1185,7 @@ mod tests {
             protocol_attributes([("reserve1", 1000), ("reserve2", 500)]),
             HashMap::new(),
         );
-        let mock_response = Ok((1, vec![expected.clone()]));
+        let mock_response = Ok(WithTotal { entity: vec![expected.clone()], total: Some(1) });
         gw.expect_get_protocol_states()
             .return_once(|_, _, _, _, _, _| Box::pin(async move { mock_response }));
 
@@ -1249,7 +1257,7 @@ mod tests {
                 .unwrap(),
             NaiveDateTime::default(),
         );
-        let mock_response = Ok((1, vec![expected.clone()]));
+        let mock_response = Ok(WithTotal { entity: vec![expected.clone()], total: Some(1) });
         gw.expect_get_protocol_components()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
 
@@ -1321,7 +1329,9 @@ mod tests {
                     Ok((1, vec![expected.clone()]));
                 move |_, _, _, _, _| {
                     let mock_response_clone = match &mock_response {
-                        Ok((num, components)) => Ok((*num, components.clone())),
+                        Ok((num, components)) => {
+                            Ok(WithTotal { entity: components.clone(), total: Some(*num) })
+                        }
                         Err(_) => Err(StorageError::Unexpected("Mock Error".to_string())),
                     };
                     Box::pin(async move { mock_response_clone })

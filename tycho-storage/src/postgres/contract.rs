@@ -17,7 +17,7 @@ use tycho_core::{
         self, contract::AccountDelta, AccountToContractStore, Address, Balance, Chain, ChangeType,
         Code, ContractId, ContractStore, PaginationParams, StoreKey, StoreVal, TxHash,
     },
-    storage::{BlockOrTimestamp, StorageError, Version},
+    storage::{BlockOrTimestamp, StorageError, Version, WithTotal},
     Bytes,
 };
 
@@ -399,7 +399,7 @@ impl PostgresGateway {
                 .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, None, conn)
                 .await
                 .map_err(PostgresError::from)?
-                .1
+                .entity
                 .into_iter()
                 .map(|acc| (acc.address.clone(), acc.into()))
                 .collect();
@@ -786,7 +786,7 @@ impl PostgresGateway {
         include_slots: bool,
         pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<(i64, Vec<models::contract::Account>), StorageError> {
+    ) -> Result<WithTotal<Vec<models::contract::Account>>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
         let version_ts = match &version {
             Some(version) => maybe_lookup_version_ts(version, conn).await?,
@@ -973,7 +973,7 @@ impl PostgresGateway {
                 Ok(contract)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((total_count, res))
+        Ok(WithTotal { entity: res, total: Some(total_count) })
     }
 
     /// Upsert contract
@@ -1756,10 +1756,11 @@ mod test {
         let gw = EvmGateway::from_connection(&mut conn).await;
         let addresses = ids.as_deref();
 
-        let (_, results) = gw
+        let results = gw
             .get_contracts(&Chain::Ethereum, addresses, version.as_ref(), true, None, &mut conn)
             .await
-            .unwrap();
+            .unwrap()
+            .entity;
 
         assert_eq!(results, exp);
     }
@@ -1815,7 +1816,7 @@ mod test {
         let gw = EvmGateway::from_connection(&mut conn).await;
         let addresses = ids.as_deref();
 
-        let (total, results) = gw
+        let result = gw
             .get_contracts(
                 &Chain::Ethereum,
                 addresses,
@@ -1827,9 +1828,9 @@ mod test {
             .await
             .unwrap();
 
-        assert!(results.len() <= 1);
-        assert_eq!(total, exp_total);
-        assert_eq!(results, exp);
+        assert!(result.entity.len() <= 1);
+        assert_eq!(result.total, Some(exp_total));
+        assert_eq!(result.entity, exp);
     }
 
     #[tokio::test]

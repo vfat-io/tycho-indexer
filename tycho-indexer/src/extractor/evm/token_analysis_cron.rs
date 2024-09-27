@@ -30,7 +30,7 @@ pub async fn analyze_tokens(
         tokens.clone_from(
             &(gw.get_tokens(analyze_args.chain, None, None, None, Some(&pagination_params))
                 .await?
-                .1),
+                .entity),
         );
         let sem = Arc::new(Semaphore::new(analyze_args.concurrency));
         let tasks = tokens
@@ -82,7 +82,7 @@ async fn analyze_batch(
     let components = gw
         .get_protocol_components(&chain, None, Some(&component_ids), None, None)
         .await?
-        .1
+        .entity
         .into_iter()
         .map(|pc| (pc.id.clone(), pc))
         .collect::<HashMap<_, _>>();
@@ -163,6 +163,7 @@ mod test {
     use std::{collections::HashMap, sync::Arc};
     use tycho_core::{
         models::{protocol::ProtocolComponent, token::CurrencyToken, Chain, ChangeType},
+        storage::WithTotal,
         Bytes,
     };
 
@@ -182,9 +183,8 @@ mod test {
         gw.expect_get_tokens()
             .returning(|_, _, _, _, _| {
                 Box::pin(async {
-                    Ok((
-                        1,
-                        vec![CurrencyToken::new(
+                    Ok(WithTotal {
+                        entity: vec![CurrencyToken::new(
                             &Bytes::from("0x45804880de22913dafe09f4980848ece6ecbaf78"),
                             "PAXG",
                             18,
@@ -193,7 +193,8 @@ mod test {
                             Chain::Ethereum,
                             10,
                         )],
-                    ))
+                        total: Some(1),
+                    })
                 })
             });
         let exp = vec![CurrencyToken::new(
@@ -220,9 +221,8 @@ mod test {
         gw.expect_get_protocol_components()
             .returning(|_, _, _, _, _| {
                 Box::pin(async move {
-                    Ok((
-                        1,
-                        vec![ProtocolComponent::new(
+                    Ok(WithTotal {
+                        entity: vec![ProtocolComponent::new(
                             "0xe25a329d385f77df5d4ed56265babe2b99a5436e",
                             "uniswap_v2",
                             "pool",
@@ -234,7 +234,8 @@ mod test {
                             Bytes::from("0x00"),
                             NaiveDateTime::default(),
                         )],
-                    ))
+                        total: Some(1),
+                    })
                 })
             });
         gw.expect_update_tokens()

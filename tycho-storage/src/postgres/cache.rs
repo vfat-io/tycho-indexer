@@ -32,7 +32,7 @@ use tycho_core::{
     },
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
-        ExtractionStateGateway, Gateway, ProtocolGateway, StorageError, Version,
+        ExtractionStateGateway, Gateway, ProtocolGateway, StorageError, Version, WithTotal,
     },
     Bytes,
 };
@@ -707,7 +707,7 @@ impl ContractStateGateway for CachedGateway {
         version: Option<&Version>,
         include_slots: bool,
         pagination_params: Option<&PaginationParams>,
-    ) -> Result<(i64, Vec<Account>), StorageError> {
+    ) -> Result<WithTotal<Vec<Account>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
@@ -764,7 +764,7 @@ impl ProtocolGateway for CachedGateway {
         ids: Option<&[&str]>,
         min_tvl: Option<f64>,
         pagination_params: Option<&PaginationParams>,
-    ) -> Result<(i64, Vec<ProtocolComponent>), StorageError> {
+    ) -> Result<WithTotal<Vec<ProtocolComponent>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
@@ -830,7 +830,7 @@ impl ProtocolGateway for CachedGateway {
         id: Option<&[&str]>,
         retrieve_balances: bool,
         pagination_params: Option<&PaginationParams>,
-    ) -> Result<(i64, Vec<ProtocolComponentState>), StorageError> {
+    ) -> Result<WithTotal<Vec<ProtocolComponentState>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
@@ -864,7 +864,7 @@ impl ProtocolGateway for CachedGateway {
         min_quality: Option<i32>,
         traded_n_days_ago: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
-    ) -> Result<(i64, Vec<CurrencyToken>), StorageError> {
+    ) -> Result<WithTotal<Vec<CurrencyToken>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
