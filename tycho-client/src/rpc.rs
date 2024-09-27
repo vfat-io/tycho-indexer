@@ -274,8 +274,8 @@ pub trait RPCClient: Send + Sync {
         let semaphore = Arc::new(Semaphore::new(concurrency));
         let chunked_bodies = ids
             .chunks(chunk_size)
-            .map(|_| ProtocolStateRequestBody {
-                protocol_ids: Some(ids.to_vec()),
+            .map(|c| ProtocolStateRequestBody {
+                protocol_ids: Some(c.to_vec()),
                 protocol_system: protocol_system.clone(),
                 chain,
                 include_balances,
