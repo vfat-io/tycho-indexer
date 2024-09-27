@@ -162,19 +162,23 @@ pub trait RPCClient: Send + Sync {
                             .into_iter()
                             .flat_map(|r| r.protocol_components.into_iter())
                             .collect(),
-                        pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
+                        pagination: PaginationResponse {
+                            page: 0,
+                            page_size: chunk_size as i64,
+                            total: ids.len() as i64,
+                        },
                     })
             }
             _ => {
-                // If no component ids is specified, we need to make the requests considering the
-                // concurrency limit and abort when we receive an empty response.
+                // If no component ids are specified, we need to make requests based on the total
+                // number of results from the first response.
 
                 let mut ans: Option<ProtocolComponentRequestResponse> = None;
                 let mut page: i64 = 0;
+                let mut total_pages: Option<i64> = None;
 
                 loop {
-                    // Create request bodies in chunks with adjusted page numbers for parallel
-                    // requests
+                    // Create request bodies for parallel requests, respecting the concurrency limit
                     let chunked_bodies = (0..concurrency)
                         .map(|iter| ProtocolComponentsRequestBody {
                             protocol_system: request.protocol_system.clone(),
@@ -203,18 +207,31 @@ pub trait RPCClient: Send + Sync {
 
                     let responses = try_join_all(tasks)
                         .await
-                        .map(|responses| ProtocolComponentRequestResponse {
-                            protocol_components: responses
-                                .into_iter()
-                                .flat_map(|r| r.protocol_components.into_iter())
-                                .collect(),
-                            pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
+                        .map(|responses| {
+                            let total = responses[0].pagination.total;
+                            ProtocolComponentRequestResponse {
+                                protocol_components: responses
+                                    .into_iter()
+                                    .flat_map(|r| r.protocol_components.into_iter())
+                                    .collect(),
+                                pagination: PaginationResponse {
+                                    page,
+                                    page_size: chunk_size as i64,
+                                    total,
+                                },
+                            }
                         });
 
                     // Update the accumulated response or set the initial response
                     match responses {
                         Ok(mut resp) => {
-                            let is_finished = resp.protocol_components.len() < chunk_size;
+                            // Set total pages on the first response, based on the total number of
+                            // components
+                            if total_pages.is_none() {
+                                let total_items = resp.pagination.total;
+                                total_pages =
+                                    Some((total_items as f64 / chunk_size as f64).ceil() as i64);
+                            }
 
                             if let Some(ref mut a) = ans {
                                 a.protocol_components
@@ -223,9 +240,8 @@ pub trait RPCClient: Send + Sync {
                                 ans = Some(resp);
                             }
 
-                            // If the response is less than the chunk size, we have reached the end
-                            // of the list
-                            if is_finished {
+                            // Check if we've reached the last page
+                            if page >= total_pages.unwrap() - 1 {
                                 break;
                             }
                         }

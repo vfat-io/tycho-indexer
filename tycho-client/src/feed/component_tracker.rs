@@ -238,8 +238,8 @@ mod test {
         let exp_component = component.clone();
         tracker
             .rpc_client
-            .expect_get_protocol_components()
-            .returning(move |_| {
+            .expect_get_protocol_components_paginated()
+            .returning(move |_, _, _| {
                 Ok(ProtocolComponentRequestResponse {
                     protocol_components: vec![component.clone()],
                     pagination: PaginationResponse { page: 0, page_size: 20, total: 1 },
