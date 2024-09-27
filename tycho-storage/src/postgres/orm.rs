@@ -636,21 +636,23 @@ impl ProtocolState {
             .into_boxed();
 
         // Apply pagination and fetch total count
-        let count: i64 = if let Some(pagination) = pagination_params {
+        let count: Option<i64> = if let Some(pagination) = pagination_params {
             component_query = component_query
                 .limit(pagination.page_size)
                 .offset(pagination.page * pagination.page_size);
 
             // Count the total number of matching components
-            protocol_component::table
-                .filter(protocol_component::external_id.eq_any(component_ids))
-                .filter(protocol_component::chain_id.eq(chain_id))
-                .count()
-                .get_result::<i64>(conn)
-                .await
-                .unwrap_or(0)
+            Some(
+                protocol_component::table
+                    .filter(protocol_component::external_id.eq_any(component_ids))
+                    .filter(protocol_component::chain_id.eq(chain_id))
+                    .count()
+                    .get_result::<i64>(conn)
+                    .await
+                    .unwrap_or(0),
+            )
         } else {
-            0
+            None
         };
 
         // Main query to get ProtocolStates for the selected component external IDs
@@ -675,7 +677,7 @@ impl ProtocolState {
             .get_results::<(Self, String)>(conn)
             .await;
 
-        WithTotal { entity: res, total: Some(count) }
+        WithTotal { entity: res, total: count }
     }
 
     /// Used to fetch the full state of a component at a given version, filtered by protocol system.
@@ -706,24 +708,26 @@ impl ProtocolState {
             .into_boxed();
 
         // Apply pagination and fetch total count
-        let count: i64 = if let Some(pagination) = pagination_params {
+        let count: Option<i64> = if let Some(pagination) = pagination_params {
             component_query = component_query
                 .limit(pagination.page_size)
                 .offset(pagination.page * pagination.page_size);
 
-            protocol_component::table
-                .inner_join(
-                    protocol_system::table
-                        .on(protocol_component::protocol_system_id.eq(protocol_system::id)),
-                )
-                .filter(protocol_system::name.eq(system))
-                .filter(protocol_component::chain_id.eq(chain_id))
-                .count()
-                .get_result::<i64>(conn)
-                .await
-                .unwrap_or(0)
+            Some(
+                protocol_component::table
+                    .inner_join(
+                        protocol_system::table
+                            .on(protocol_component::protocol_system_id.eq(protocol_system::id)),
+                    )
+                    .filter(protocol_system::name.eq(system))
+                    .filter(protocol_component::chain_id.eq(chain_id))
+                    .count()
+                    .get_result::<i64>(conn)
+                    .await
+                    .unwrap_or(0),
+            )
         } else {
-            0
+            None
         };
 
         // Main query to get ProtocolStates for the selected components
@@ -748,7 +752,7 @@ impl ProtocolState {
             .get_results::<(Self, String)>(conn)
             .await;
 
-        WithTotal { entity: res, total: Some(count) }
+        WithTotal { entity: res, total: count }
     }
 
     /// Used to fetch the full state of a component at a given version, filtered by chain.
@@ -802,17 +806,19 @@ impl ProtocolState {
         }
 
         // Step 3: Apply pagination and fetch total count
-        let count: i64 = if let Some(pagination) = pagination_params {
+        let count: Option<i64> = if let Some(pagination) = pagination_params {
             component_ids_query = component_ids_query
                 .limit(pagination.page_size)
                 .offset(pagination.page * pagination.page_size);
-            count_query
-                .count()
-                .get_result::<i64>(conn)
-                .await
-                .unwrap_or(0)
+            Some(
+                count_query
+                    .count()
+                    .get_result::<i64>(conn)
+                    .await
+                    .unwrap_or(0),
+            )
         } else {
-            0
+            None
         };
 
         // Fetch the component IDs
@@ -854,7 +860,7 @@ impl ProtocolState {
             .get_results::<(Self, String)>(conn)
             .await;
 
-        WithTotal { entity: res, total: Some(count) }
+        WithTotal { entity: res, total: count }
     }
 
     /// Used to fetch all protocol state changes within the given timeframe.
