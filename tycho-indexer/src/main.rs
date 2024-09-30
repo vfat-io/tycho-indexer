@@ -278,6 +278,7 @@ async fn create_indexing_tasks(
     Ok((tasks, vec![server_task, shutdown_task]))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn build_all_extractors(
     config: &ExtractorConfigs,
     chain_state: ChainState,
