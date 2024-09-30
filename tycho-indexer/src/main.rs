@@ -2,7 +2,7 @@
 
 use futures03::future::select_all;
 use serde::Deserialize;
-use std::{collections::HashMap, fs::File, io::Read, str::FromStr, sync::Arc};
+use std::{collections::HashMap, fs::File, io::Read, str::FromStr, sync::Arc, thread};
 use tracing_subscriber::EnvFilter;
 use tycho_ethereum::{
     account_extractor::contract::EVMAccountExtractor,
@@ -14,7 +14,7 @@ use extractor::runner::{ExtractorBuilder, ExtractorHandle};
 use actix_web::dev::ServerHandle;
 use chrono::{NaiveDateTime, Utc};
 use clap::Parser;
-use tokio::{select, task::JoinHandle};
+use tokio::{runtime::Handle, select, task::JoinHandle};
 use tracing::{info, instrument, warn};
 use tycho_core::{
     models::{
@@ -67,6 +67,9 @@ impl ExtractorConfigs {
         Ok(config)
     }
 }
+
+type ExtractionTasks = Vec<JoinHandle<Result<(), ExtractionError>>>;
+type ServerTasks = Vec<JoinHandle<Result<(), ExtractionError>>>; //TODO: introduce an error type for it
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -121,7 +124,12 @@ async fn run_indexer(
         .parse()
         .expect("Failed to parse retention horizon");
 
-    let tasks = create_indexing_tasks(
+    let extraction_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let (extraction_tasks, other_tasks) = create_indexing_tasks(
         &global_args,
         &index_args.substreams_args.rpc_url,
         &index_args
@@ -133,11 +141,21 @@ async fn run_indexer(
             .collect::<Vec<_>>(),
         retention_horizon,
         extractors_config,
+        Some(extraction_runtime.handle()),
     )
     .await?;
 
-    let (res, _, _) = select_all(tasks).await;
-    res.expect("Extractor- nor ServiceTasks should panic!")
+    let handle_extractor =
+        thread::spawn(move || extraction_runtime.block_on(select_all(extraction_tasks)));
+
+    let (res, _, _) = handle_extractor
+        .join()
+        .expect("Extractor thread shouldn't panic!");
+
+    res.expect("Extractor task shouldn't panic!")?;
+
+    let (res, _, _) = select_all(other_tasks).await;
+    res.expect("ServiceTasks shouldn't panic!")
 }
 
 async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), ExtractionError> {
@@ -165,16 +183,20 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
         ),
     )]));
 
-    let tasks = create_indexing_tasks(
+    let (extraction_tasks, mut other_tasks) = create_indexing_tasks(
         &global_args,
         &run_args.substreams_args.rpc_url,
         &[Chain::from_str(&run_args.chain).unwrap()],
         Utc::now().naive_utc(),
         config,
+        None,
     )
     .await?;
 
-    let (res, _, _) = select_all(tasks).await;
+    let mut all_tasks = extraction_tasks;
+    all_tasks.append(&mut other_tasks);
+
+    let (res, _, _) = select_all(all_tasks).await;
     res.expect("Extractor- nor ServiceTasks should panic!")
 }
 
@@ -204,7 +226,8 @@ async fn create_indexing_tasks(
     chains: &[Chain],
     retention_horizon: NaiveDateTime,
     extractors_config: ExtractorConfigs,
-) -> Result<Vec<JoinHandle<Result<(), ExtractionError>>>, ExtractionError> {
+    extraction_runtime: Option<&Handle>,
+) -> Result<(ExtractionTasks, ServerTasks), ExtractionError> {
     let rpc_client = EthereumRpcClient::new_from_url(rpc_url);
     let block_number = rpc_client
         .get_block_number()
@@ -231,9 +254,10 @@ async fn create_indexing_tasks(
             .first()
             .expect("No chain provided"), //TODO: handle multichain?
     );
-    let (mut tasks, extractor_handles): (Vec<_>, Vec<_>) =
+
+    let (tasks, extractor_handles): (Vec<_>, Vec<_>) =
         // TODO: accept substreams configuration from cli.
-        build_all_extractors(&extractors_config, chain_state, chains, &global_args.endpoint_url, &cached_gw, &token_processor, rpc_url)
+        build_all_extractors(&extractors_config, chain_state, chains, &global_args.endpoint_url, &cached_gw, &token_processor, rpc_url, extraction_runtime)
             .await
             .map_err(|e| ExtractionError::Setup(format!("Failed to create extractors: {}", e)))?
             .into_iter()
@@ -251,9 +275,7 @@ async fn create_indexing_tasks(
     let shutdown_task =
         tokio::spawn(shutdown_handler(server_handle, extractor_handles, Some(gw_writer_handle)));
 
-    tasks.extend(vec![server_task, shutdown_task]);
-
-    Ok(tasks)
+    Ok((tasks, vec![server_task, shutdown_task]))
 }
 
 async fn build_all_extractors(
@@ -264,6 +286,7 @@ async fn build_all_extractors(
     cached_gw: &CachedGateway,
     token_pre_processor: &EthereumTokenPreProcessor,
     rpc_url: &str,
+    runtime: Option<&tokio::runtime::Handle>,
 ) -> Result<Vec<HandleResult>, ExtractionError> {
     let mut extractor_handles = Vec::new();
 
@@ -289,9 +312,14 @@ async fn build_all_extractors(
         )
         .await;
 
+        let runtime = runtime
+            .cloned()
+            .unwrap_or_else(|| tokio::runtime::Handle::current());
+
         let (task, handle) = ExtractorBuilder::new(extractor_config, endpoint_url)
             .build(chain_state, cached_gw, token_pre_processor, &protocol_cache)
             .await?
+            .set_runtime(runtime)
             .run()
             .await?;
 
