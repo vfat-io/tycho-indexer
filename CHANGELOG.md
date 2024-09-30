@@ -1,3 +1,11 @@
+## [0.22.1](https://github.com/propeller-heads/tycho-indexer/compare/0.22.0...0.22.1) (2024-09-30)
+
+
+### Bug Fixes
+
+* **client:** use new tokens endpoint ([02fb389](https://github.com/propeller-heads/tycho-indexer/commit/02fb389a648e46eb26199d2108c844934a6c9271))
+* **client:** use new tokens endpoint ([#384](https://github.com/propeller-heads/tycho-indexer/issues/384)) ([5d568cd](https://github.com/propeller-heads/tycho-indexer/commit/5d568cd8bd55cac7fa787c0f3c8f68db09400d07))
+
 ## [0.22.0](https://github.com/propeller-heads/tycho-indexer/compare/0.21.0...0.22.0) (2024-09-30)
 
 
