@@ -86,7 +86,7 @@ class TychoRPCClient:
         params = params.dict(exclude_none=True)
         params["chain"] = self._chain
 
-        res = self._post_request(f"/v1/{self._chain}/tokens", body=params)
+        res = self._post_request(f"/v1/tokens", body=params)
         return [ResponseToken(**t) for t in res["tokens"]]
 
 
