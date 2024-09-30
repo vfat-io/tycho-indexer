@@ -4,29 +4,7 @@ Tycho Client is the main consumer-facing component of the Tycho indexing system.
 
 ## Installation
 
-### Using the Installation Script
-
-An installation script is provided for convenience for those with access to PropellerHeads AWS S3 storage. It optionally accepts a version argument; if not provided, the latest available version (ignoring pre releases) will be installed. The script will automatically detect your operating system and architecture, download the appropriate binary, unpack it, and move it to a directory in your PATH.
-
-To install Tycho Client using the script:
-
-```bash
-./get-tycho.sh [VERSION]
-```
-- VERSION: The specific version you want to install (e.g., `0.9.2`). If omitted, the script will install the latest available version.
-
-Note: The script requires a writable directory in your PATH to install the binary. It will check the following directories for write permissions:
-
-- `/usr/local/bin`
-- `/usr/bin`
-- `/bin`
-- `$HOME/bin`
-
-If none of these directories are writable, you may need to create one or modify the permissions of an existing directory.
-
-### Manual Installation
-
-Alternatively, you can manually download the correct binary from the [latest release](https://github.com/propeller-heads/tycho-indexer/releases) on GitHub.
+You can download the correct binary from the [latest release](https://github.com/propeller-heads/tycho-indexer/releases) on GitHub.
 
 Once you have downloaded the binary, follow these steps to install it:
 
