@@ -637,7 +637,7 @@ impl ExtractionStateGateway for CachedGateway {
             .get_state(name, chain, &mut conn)
             .await
     }
-
+    #[instrument(skip_all)]
     async fn save_state(&self, new: &ExtractionState) -> Result<(), StorageError> {
         self.add_op(WriteOp::SaveExtractionState(new.clone()))
             .await?;
@@ -647,6 +647,7 @@ impl ExtractionStateGateway for CachedGateway {
 
 #[async_trait]
 impl ChainGateway for CachedGateway {
+    #[instrument(skip_all)]
     async fn upsert_block(&self, new: &[Block]) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpsertBlock(new.to_vec()))
             .await?;
@@ -663,6 +664,7 @@ impl ChainGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn upsert_tx(&self, new: &[Transaction]) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpsertTx(new.to_vec()))
             .await?;
@@ -723,18 +725,21 @@ impl ContractStateGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn upsert_contract(&self, new: &Account) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpsertContract(vec![new.clone()]))
             .await?;
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn update_contracts(&self, new: &[(TxHash, AccountDelta)]) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpdateContracts(new.to_vec()))
             .await?;
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn delete_contract(&self, id: &ContractId, at_tx: &TxHash) -> Result<(), StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
@@ -794,12 +799,14 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn add_protocol_components(&self, new: &[ProtocolComponent]) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertProtocolComponents(new.to_vec()))
             .await?;
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn delete_protocol_components(
         &self,
         to_delete: &[ProtocolComponent],
@@ -814,6 +821,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn add_protocol_types(
         &self,
         new_protocol_types: &[ProtocolType],
@@ -844,6 +852,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn update_protocol_states(
         &self,
         new: &[(TxHash, ProtocolComponentStateDelta)],
@@ -877,6 +886,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn add_component_balances(
         &self,
         component_balances: &[ComponentBalance],
@@ -886,6 +896,7 @@ impl ProtocolGateway for CachedGateway {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn add_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertTokens(tokens.to_vec()))
             .await?;
