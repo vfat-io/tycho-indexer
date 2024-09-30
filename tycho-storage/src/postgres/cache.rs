@@ -15,7 +15,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{debug, info, instrument, trace};
+use tracing::{debug, info, info_span, instrument, trace, Instrument};
 
 use tycho_core::{
     models::{
@@ -521,24 +521,31 @@ impl CachedGateway {
             }
             Some((mut db_txn, rx)) => {
                 if db_txn.size > min_ops_batch_size {
-                    db_txn
-                        .operations
-                        .sort_by_key(|e| e.order_key());
-                    debug!(
-                        size = db_txn.size,
-                        ops = ?db_txn
+                    let span = info_span!("DatabaseCommit", size = db_txn.size);
+                    async move {
+                        db_txn
                             .operations
-                            .iter()
-                            .map(WriteOp::variant_name)
-                            .collect::<Vec<_>>(),
-                        "Submitting db operation batch!"
-                    );
-                    self.tx
-                        .send(DBCacheMessage::Write(db_txn))
-                        .await
-                        .expect("Send message to receiver ok");
-                    rx.await
-                        .map_err(|_| StorageError::WriteCacheGoneAway())??;
+                            .sort_by_key(|e| e.order_key());
+                        debug!(
+                            size = db_txn.size,
+                            ops = ?db_txn
+                                .operations
+                                .iter()
+                                .map(WriteOp::variant_name)
+                                .collect::<Vec<_>>(),
+                            "Submitting db operation batch!"
+                        );
+                        self.tx
+                            .send(DBCacheMessage::Write(db_txn))
+                            .await
+                            .expect("Send message to receiver ok");
+                        rx.await
+                            .map_err(|_| StorageError::WriteCacheGoneAway())??;
+
+                        Ok::<(), StorageError>(())
+                    }
+                    .instrument(span)
+                    .await?;
                 } else {
                     // if we are not ready to commit, give the OpenTx struct back.
                     *open_tx = Some((db_txn, rx));
@@ -621,6 +628,7 @@ impl CachedGateway {
 
 #[async_trait]
 impl ExtractionStateGateway for CachedGateway {
+    #[instrument(skip_all)]
     async fn get_state(&self, name: &str, chain: &Chain) -> Result<ExtractionState, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
@@ -630,7 +638,7 @@ impl ExtractionStateGateway for CachedGateway {
             .get_state(name, chain, &mut conn)
             .await
     }
-
+    #[instrument(skip_all)]
     async fn save_state(&self, new: &ExtractionState) -> Result<(), StorageError> {
         self.add_op(WriteOp::SaveExtractionState(new.clone()))
             .await?;
@@ -640,12 +648,14 @@ impl ExtractionStateGateway for CachedGateway {
 
 #[async_trait]
 impl ChainGateway for CachedGateway {
+    #[instrument(skip_all)]
     async fn upsert_block(&self, new: &[Block]) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpsertBlock(new.to_vec()))
             .await?;
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn get_block(&self, id: &BlockIdentifier) -> Result<Block, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
@@ -656,12 +666,14 @@ impl ChainGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn upsert_tx(&self, new: &[Transaction]) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpsertTx(new.to_vec()))
             .await?;
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn get_tx(&self, hash: &TxHash) -> Result<Transaction, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
@@ -672,6 +684,7 @@ impl ChainGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn revert_state(&self, to: &BlockIdentifier) -> Result<(), StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
@@ -685,6 +698,7 @@ impl ChainGateway for CachedGateway {
 
 #[async_trait]
 impl ContractStateGateway for CachedGateway {
+    #[instrument(skip_all)]
     async fn get_contract(
         &self,
         id: &ContractId,
@@ -700,6 +714,7 @@ impl ContractStateGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn get_contracts(
         &self,
         chain: &Chain,
@@ -717,18 +732,21 @@ impl ContractStateGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn upsert_contract(&self, new: &Account) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpsertContract(vec![new.clone()]))
             .await?;
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn update_contracts(&self, new: &[(TxHash, AccountDelta)]) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpdateContracts(new.to_vec()))
             .await?;
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn delete_contract(&self, id: &ContractId, at_tx: &TxHash) -> Result<(), StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
@@ -739,6 +757,7 @@ impl ContractStateGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn get_accounts_delta(
         &self,
         chain: &Chain,
@@ -757,6 +776,7 @@ impl ContractStateGateway for CachedGateway {
 
 #[async_trait]
 impl ProtocolGateway for CachedGateway {
+    #[instrument(skip_all)]
     async fn get_protocol_components(
         &self,
         chain: &Chain,
@@ -774,6 +794,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn get_token_owners(
         &self,
         chain: &Chain,
@@ -789,12 +810,14 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn add_protocol_components(&self, new: &[ProtocolComponent]) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertProtocolComponents(new.to_vec()))
             .await?;
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn delete_protocol_components(
         &self,
         to_delete: &[ProtocolComponent],
@@ -809,6 +832,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn add_protocol_types(
         &self,
         new_protocol_types: &[ProtocolType],
@@ -822,6 +846,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn get_protocol_states(
         &self,
         chain: &Chain,
@@ -848,6 +873,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn update_protocol_states(
         &self,
         new: &[(TxHash, ProtocolComponentStateDelta)],
@@ -857,6 +883,7 @@ impl ProtocolGateway for CachedGateway {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn get_tokens(
         &self,
         chain: Chain,
@@ -881,6 +908,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn add_component_balances(
         &self,
         component_balances: &[ComponentBalance],
@@ -890,6 +918,7 @@ impl ProtocolGateway for CachedGateway {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn add_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError> {
         self.add_op(WriteOp::InsertTokens(tokens.to_vec()))
             .await?;
@@ -905,6 +934,7 @@ impl ProtocolGateway for CachedGateway {
     /// ## Note
     /// This is a short term solution. Ideally we should have a simple gateway version
     /// for these use cases that creates a single transactions and emits them immediately.
+    #[instrument(skip_all)]
     async fn update_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
@@ -924,6 +954,7 @@ impl ProtocolGateway for CachedGateway {
         .map_err(|e| StorageError::Unexpected(format!("Failed to update tokens: {}", e.0)))
     }
 
+    #[instrument(skip_all)]
     async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
@@ -939,6 +970,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn get_balance_deltas(
         &self,
         chain: &Chain,
@@ -954,6 +986,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn get_balances(
         &self,
         chain: &Chain,
@@ -969,6 +1002,7 @@ impl ProtocolGateway for CachedGateway {
             .await
     }
 
+    #[instrument(skip_all)]
     async fn get_token_prices(&self, chain: &Chain) -> Result<HashMap<Bytes, f64>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
@@ -980,6 +1014,7 @@ impl ProtocolGateway for CachedGateway {
     }
 
     /// TODO: add to transaction instead
+    #[instrument(skip_all)]
     async fn upsert_component_tvl(
         &self,
         chain: &Chain,

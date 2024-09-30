@@ -302,7 +302,7 @@ impl ExtractorConfig {
         spkg: String,
         module_name: String,
         initialized_accounts: Vec<Bytes>,
-        initialization_block: i64,
+        initialized_accounts_block: i64,
     ) -> Self {
         Self {
             name,
@@ -315,7 +315,7 @@ impl ExtractorConfig {
             spkg,
             module_name,
             initialized_accounts,
-            initialized_accounts_block: initialization_block,
+            initialized_accounts_block,
         }
     }
 }

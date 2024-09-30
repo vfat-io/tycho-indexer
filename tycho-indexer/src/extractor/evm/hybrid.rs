@@ -585,12 +585,20 @@ where
                 .insert_block(BlockUpdateWithCursor::new(msg.clone(), inp.cursor.clone()))
                 .map_err(ExtractionError::Storage)?;
 
-            for msg in reorg_buffer
+            let mut msgs = reorg_buffer
                 .drain_new_finalized_blocks(inp.final_block_height)
                 .map_err(ExtractionError::Storage)?
-            {
+                .into_iter()
+                .peekable();
+
+            while let Some(msg) = msgs.next() {
+                // Force a database commit if we're not syncing and this is the last block to be
+                // sent. Otherwise, wait to accumulate a full batch before
+                // committing.
+                let force_db_commit = if is_syncing { false } else { msgs.peek().is_none() };
+
                 self.gateway
-                    .advance(msg.block_update(), msg.cursor(), is_syncing)
+                    .advance(msg.block_update(), msg.cursor(), force_db_commit)
                     .await?;
             }
         }
@@ -994,7 +1002,7 @@ where
 pub struct HybridPgGateway {
     name: String,
     chain: Chain,
-    sync_batch_size: usize,
+    db_tx_batch_size: usize,
     state_gateway: CachedGateway,
 }
 
@@ -1009,7 +1017,7 @@ pub trait HybridGateway: Send + Sync {
         &self,
         changes: &evm::BlockChanges,
         new_cursor: &str,
-        syncing: bool,
+        force_commit: bool,
     ) -> Result<(), StorageError>;
 
     async fn get_protocol_states<'a>(
@@ -1032,10 +1040,10 @@ impl HybridPgGateway {
     pub fn new(
         name: &str,
         chain: Chain,
-        sync_batch_size: usize,
+        db_tx_batch_size: usize,
         state_gateway: CachedGateway,
     ) -> Self {
-        Self { name: name.to_owned(), chain, sync_batch_size, state_gateway }
+        Self { name: name.to_owned(), chain, db_tx_batch_size, state_gateway }
     }
 
     #[instrument(skip_all)]
@@ -1057,11 +1065,33 @@ impl HybridPgGateway {
         Ok(())
     }
 
-    async fn forward(
+    async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
+        let state = self
+            .state_gateway
+            .get_state(&self.name, &self.chain)
+            .await?;
+        Ok(state.cursor)
+    }
+}
+
+#[async_trait]
+impl HybridGateway for HybridPgGateway {
+    async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
+        self.get_last_cursor().await
+    }
+
+    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
+        self.state_gateway
+            .add_protocol_types(new_protocol_types)
+            .await
+            .expect("Couldn't insert protocol types");
+    }
+
+    async fn advance(
         &self,
         changes: &evm::BlockChanges,
         new_cursor: &str,
-        syncing: bool,
+        force_commit: bool,
     ) -> Result<(), StorageError> {
         self.state_gateway
             .start_transaction(&changes.block, Some(self.name.as_str()))
@@ -1179,41 +1209,9 @@ impl HybridPgGateway {
         self.save_cursor(new_cursor, changes.block.hash.clone())
             .await?;
 
-        let batch_size: usize = if syncing { self.sync_batch_size } else { 0 };
+        let batch_size = if force_commit { 0 } else { self.db_tx_batch_size };
         self.state_gateway
             .commit_transaction(batch_size)
-            .await
-    }
-
-    async fn get_last_cursor(&self) -> Result<Vec<u8>, StorageError> {
-        let state = self
-            .state_gateway
-            .get_state(&self.name, &self.chain)
-            .await?;
-        Ok(state.cursor)
-    }
-}
-
-#[async_trait]
-impl HybridGateway for HybridPgGateway {
-    async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
-        self.get_last_cursor().await
-    }
-
-    async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]) {
-        self.state_gateway
-            .add_protocol_types(new_protocol_types)
-            .await
-            .expect("Couldn't insert protocol types");
-    }
-
-    async fn advance(
-        &self,
-        changes: &evm::BlockChanges,
-        new_cursor: &str,
-        syncing: bool,
-    ) -> Result<(), StorageError> {
-        self.forward(changes, new_cursor, syncing)
             .await
     }
 
@@ -2159,7 +2157,7 @@ mod test_serial_db {
                 change: Default::default(),
             }];
 
-            gw.forward(&msg, "cursor@500", false)
+            gw.advance(&msg, "cursor@500", false)
                 .await
                 .expect("upsert should succeed");
 
@@ -2191,7 +2189,7 @@ mod test_serial_db {
             let msg = vm_creation_and_update();
             let exp = vm_account(0);
 
-            gw.forward(&msg, "cursor@500", false)
+            gw.advance(&msg, "cursor@500", true)
                 .await
                 .expect("upsert should succeed");
 
