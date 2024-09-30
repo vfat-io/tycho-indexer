@@ -88,10 +88,6 @@ where
                 rpc::protocol_components,
                 rpc::protocol_state,
                 rpc::health,
-                rpc::contract_state_deprecated,
-                rpc::tokens_deprecated,
-                rpc::protocol_components_deprecated,
-                rpc::protocol_state_deprecated,
             ),
             components(
                 schemas(VersionParam),
@@ -148,35 +144,16 @@ where
                         .route(web::post().to(rpc::contract_state::<G>)),
                 )
                 .service(
-                    web::resource(format!("/{}/{{execution_env}}/contract_state", self.prefix))
-                        .route(web::post().to(rpc::contract_state_deprecated::<G>)),
-                )
-                .service(
                     web::resource(format!("/{}/protocol_state", self.prefix))
                         .route(web::post().to(rpc::protocol_state::<G>)),
-                )
-                .service(
-                    web::resource(format!("/{}/{{execution_env}}/protocol_state", self.prefix))
-                        .route(web::post().to(rpc::protocol_state_deprecated::<G>)),
                 )
                 .service(
                     web::resource(format!("/{}/tokens", self.prefix))
                         .route(web::post().to(rpc::tokens::<G>)),
                 )
                 .service(
-                    web::resource(format!("/{}/{{execution_env}}/tokens", self.prefix))
-                        .route(web::post().to(rpc::tokens_deprecated::<G>)),
-                )
-                .service(
                     web::resource(format!("/{}/protocol_components", self.prefix))
                         .route(web::post().to(rpc::protocol_components::<G>)),
-                )
-                .service(
-                    web::resource(format!(
-                        "/{}/{{execution_env}}/protocol_components",
-                        self.prefix
-                    ))
-                    .route(web::post().to(rpc::protocol_components_deprecated::<G>)),
                 )
                 .service(
                     web::resource(format!("/{}/health", self.prefix))
