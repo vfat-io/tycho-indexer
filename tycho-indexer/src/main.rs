@@ -219,7 +219,7 @@ async fn create_indexing_tasks(
         .cloned()
         .collect();
 
-    let (cached_gw, gw_writer_thread) = GatewayBuilder::new(&global_args.database_url)
+    let (cached_gw, gw_writer_handle) = GatewayBuilder::new(&global_args.database_url)
         .set_chains(chains)
         .set_protocol_systems(&protocol_systems)
         .set_retention_horizon(retention_horizon)
@@ -249,7 +249,7 @@ async fn create_indexing_tasks(
     info!(server_url, "Http and Ws server started");
 
     let shutdown_task =
-        tokio::spawn(shutdown_handler(server_handle, extractor_handles, Some(gw_writer_thread)));
+        tokio::spawn(shutdown_handler(server_handle, extractor_handles, Some(gw_writer_handle)));
 
     tasks.extend(vec![server_task, shutdown_task]);
 
