@@ -265,6 +265,8 @@ components. This mode can be turned on via the `--no-state` flag.
 If you wish to use tycho as a service instead of hosting it yourself, the following endpoints are available:
 
 ### PropellerHeads (beta)
-URL: `tycho-beta.propellerheads.xyz/v1`
+- URL: `tycho-beta.propellerheads.xyz/v1`
 
-Auth-key: Please contact `@AdeelFarouk` on telegram to request a beta auth-key.
+- RPC docs: `https://tycho-beta.propellerheads.xyz/docs/`
+
+- Auth-key: Please contact `@AdeelFarouk` on telegram to request a beta auth-key.
