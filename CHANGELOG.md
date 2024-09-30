@@ -1,3 +1,13 @@
+## [0.22.0](https://github.com/propeller-heads/tycho-indexer/compare/0.21.0...0.22.0) (2024-09-30)
+
+
+### Features
+
+* **cache:** add tracing spans for every read methods ([be40f4c](https://github.com/propeller-heads/tycho-indexer/commit/be40f4cc1d2c5614d5ecd0a59ee4617edbfec894))
+* **cache:** add tracing spans for every write methods on the 'CachedGateway' ([88ac98e](https://github.com/propeller-heads/tycho-indexer/commit/88ac98e61e895a6ac0c3fd3e566cb672c0761e87))
+* **extractor:** improve database commits ([4a431df](https://github.com/propeller-heads/tycho-indexer/commit/4a431dfe3e88a3e642cf76455bc3e974dafa5cdd))
+* **indexing:** Improve database commits logic ([#380](https://github.com/propeller-heads/tycho-indexer/issues/380)) ([55d40b9](https://github.com/propeller-heads/tycho-indexer/commit/55d40b9df1e315e77b4ea44647ba550412fb4582))
+
 ## [0.21.0](https://github.com/propeller-heads/tycho-indexer/compare/0.20.0...0.21.0) (2024-09-30)
 
 
