@@ -539,43 +539,6 @@ where
     }
 }
 
-/// Deprecated endpoint
-///
-/// Path params will override the request body.
-#[utoipa::path(
-    post,
-    path = "/v1/{execution_env}/contract_state",
-    responses(
-        (status = 200, description = "OK", body = StateRequestResponse),
-    ),
-    request_body = StateRequestBody,
-    params(
-        ("execution_env" = Chain, description = "Execution environment")
-    ),
-)]
-pub async fn contract_state_deprecated<G: Gateway>(
-    execution_env: web::Path<dto::Chain>,
-    body: web::Json<dto::StateRequestBody>,
-    handler: web::Data<RpcHandler<G>>,
-) -> HttpResponse {
-    let mut request = body.into_inner();
-    request.chain = execution_env.into_inner();
-
-    // Call the handler to get the state
-    let response = handler
-        .into_inner()
-        .get_contract_state(&request)
-        .await;
-
-    match response {
-        Ok(state) => HttpResponse::Ok().json(state),
-        Err(err) => {
-            error!(error = %err, ?request, "Error while getting contract state.");
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
 /// Retrieve contract states
 ///
 /// This endpoint retrieves the state of contracts within a specific execution environment. If no
@@ -618,43 +581,6 @@ pub async fn contract_state<G: Gateway>(
     }
 }
 
-/// Deprecated endpoint
-///
-/// Path params will override the request body.
-#[utoipa::path(
-    post,
-    path = "/v1/{execution_env}/tokens",
-    responses(
-        (status = 200, description = "OK", body = TokensRequestResponse),
-    ),
-    request_body = TokensRequestBody,
-    params(
-        ("execution_env" = Chain, description = "Execution environment"),
-    ),
-)]
-pub async fn tokens_deprecated<G: Gateway>(
-    execution_env: web::Path<Chain>,
-    body: web::Json<dto::TokensRequestBody>,
-    handler: web::Data<RpcHandler<G>>,
-) -> HttpResponse {
-    let mut request = body.into_inner();
-    request.chain = execution_env.into_inner().into();
-
-    // Call the handler to get tokens
-    let response = handler
-        .into_inner()
-        .get_tokens(&request)
-        .await;
-
-    match response {
-        Ok(state) => HttpResponse::Ok().json(state),
-        Err(err) => {
-            error!(error = %err, ?request, "Error while getting tokens.");
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
 /// Retrieve tokens
 ///
 /// This endpoint retrieves tokens for a specific execution environment, filtered by various
@@ -690,46 +616,6 @@ pub async fn tokens<G: Gateway>(
     }
 }
 
-/// Deprecated endpoint
-///
-/// Path params will override the request body.
-#[utoipa::path(
-    post,
-    path = "/v1/{execution_env}/protocol_components",
-    responses(
-        (status = 200, description = "OK", body = ProtocolComponentRequestResponse),
-    ),
-    request_body = ProtocolComponentsRequestBody,
-    params(
-        ("execution_env" = Chain, description = "Execution environment"),
-        ("tvl_gt" = Option<f64>, Query, description = "Filter components by TVL greater than this value")
-    ),
-)]
-pub async fn protocol_components_deprecated<G: Gateway>(
-    execution_env: web::Path<dto::Chain>,
-    body: web::Json<dto::ProtocolComponentsRequestBody>,
-    params: web::Query<dto::ProtocolComponentRequestParameters>,
-    handler: web::Data<RpcHandler<G>>,
-) -> HttpResponse {
-    let mut request = body.into_inner();
-    request.chain = execution_env.into_inner();
-    request.tvl_gt = params.tvl_gt.or(request.tvl_gt);
-
-    // Call the handler to get tokens
-    let response = handler
-        .into_inner()
-        .get_protocol_components(&request)
-        .await;
-
-    match response {
-        Ok(state) => HttpResponse::Ok().json(state),
-        Err(err) => {
-            error!(error = %err, ?request, "Error while getting tokens.");
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
 /// Retrieve protocol components
 ///
 /// This endpoint retrieves components within a specific execution environment, filtered by various
@@ -760,50 +646,6 @@ pub async fn protocol_components<G: Gateway>(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, "Error while getting tokens.");
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
-/// Deprecated endpoint
-///
-/// Path params will override the request body.
-#[utoipa::path(
-    post,
-    path = "/v1/{execution_env}/protocol_state",
-    responses(
-        (status = 200, description = "OK", body = ProtocolStateRequestResponse),
-    ),
-    request_body = ProtocolStateRequestBody,
-    params(
-        ("execution_env" = Chain, description = "Execution environment"),
-        ("include_balances" = Option<bool>, Query, description = "Include account balances in the response", example=true),
-        ("tvl_gt" = Option<f64>, Query, description = "Note - not supported."),
-        ("inertia_min_gt" = Option<f64>, Query, description = "Note - not supported.")
-    ),
-)]
-pub async fn protocol_state_deprecated<G: Gateway>(
-    execution_env: web::Path<dto::Chain>,
-    body: web::Json<dto::ProtocolStateRequestBody>,
-    params: web::Query<dto::StateRequestParameters>,
-    handler: web::Data<RpcHandler<G>>,
-) -> HttpResponse {
-    let mut request = body.into_inner();
-    request.chain = execution_env.into_inner();
-    request.include_balances = params.include_balances;
-
-    info!(?request, "Getting protocol state.");
-
-    // Call the handler to get protocol states
-    let response = handler
-        .into_inner()
-        .get_protocol_state(&request)
-        .await;
-
-    match response {
-        Ok(state) => HttpResponse::Ok().json(state),
-        Err(err) => {
-            error!(error = %err, ?request, "Error while getting protocol states.");
             HttpResponse::InternalServerError().finish()
         }
     }

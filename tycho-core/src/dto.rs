@@ -11,10 +11,7 @@ use std::{
 };
 
 use chrono::{NaiveDateTime, Utc};
-use serde::{
-    de::{self, MapAccess, Visitor},
-    Deserialize, Deserializer, Serialize,
-};
+use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -512,7 +509,7 @@ impl ProtocolStateDelta {
     }
 }
 
-#[derive(Clone, Serialize, Debug, Default, PartialEq, ToSchema, Eq, Hash)]
+#[derive(Clone, Serialize, Debug, Default, Deserialize, PartialEq, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct StateRequestBody {
     #[serde(alias = "contractIds")]
@@ -557,88 +554,6 @@ impl StateRequestBody {
             chain,
             pagination: PaginationParams::default(),
         }
-    }
-}
-
-/// Custom deserializer for StateRequestBody to support backwards compatibility with the old
-/// contractIds format.
-/// To be removed when the old format is no longer supported.
-impl<'de> Deserialize<'de> for StateRequestBody {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum ContractIdOrBytes {
-            Old(Vec<ContractId>),
-            New(Vec<Bytes>),
-        }
-
-        struct StateRequestBodyVisitor;
-
-        impl<'de> Visitor<'de> for StateRequestBodyVisitor {
-            type Value = StateRequestBody;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("struct StateRequestBody")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<StateRequestBody, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut contract_ids = None;
-                let mut protocol_system = None;
-                let mut version = None;
-                let mut chain = None;
-
-                while let Some(key) = map.next_key::<String>()? {
-                    match key.as_str() {
-                        "contract_ids" | "contractIds" => {
-                            let value: ContractIdOrBytes = map.next_value()?;
-                            contract_ids = match value {
-                                ContractIdOrBytes::Old(ids) => Some(
-                                    ids.into_iter()
-                                        .map(|c| c.address)
-                                        .collect(),
-                                ),
-                                ContractIdOrBytes::New(bytes) => Some(bytes),
-                            };
-                        }
-                        "protocol_system" | "protocolSystem" => {
-                            protocol_system = Some(map.next_value()?);
-                        }
-                        "version" => {
-                            version = Some(map.next_value()?);
-                        }
-                        "chain" => {
-                            chain = Some(map.next_value()?);
-                        }
-                        _ => {
-                            return Err(de::Error::unknown_field(
-                                &key,
-                                &["contract_ids", "protocol_system", "version", "chain"],
-                            ))
-                        }
-                    }
-                }
-
-                Ok(StateRequestBody {
-                    contract_ids,
-                    protocol_system: protocol_system.unwrap_or_default(),
-                    version: version.unwrap_or_else(VersionParam::default),
-                    chain: chain.unwrap_or_else(Chain::default),
-                    pagination: Default::default(),
-                })
-            }
-        }
-
-        deserializer.deserialize_struct(
-            "StateRequestBody",
-            &["contract_ids", "protocol_system", "version", "chain"],
-            StateRequestBodyVisitor,
-        )
     }
 }
 
@@ -1114,33 +1029,12 @@ mod test {
     use std::str::FromStr;
 
     use maplit::hashmap;
-    use rstest::rstest;
 
     use super::*;
 
-    #[rstest]
-    #[case(
-        r#"
-    {
-        "contractIds": [
-            {
-                "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
-                "chain": "ethereum"
-            }
-        ],
-        "version": {
-            "timestamp": "2069-01-01T04:20:00",
-            "block": {
-                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
-                "number": 213,
-                "chain": "ethereum"
-            }
-        }
-    }
-    "#
-    )]
-    #[case(
-        r#"
+    #[test]
+    fn test_parse_state_request() {
+        let json_str = r#"
     {
         "contractIds": [
             "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092"
@@ -1154,9 +1048,8 @@ mod test {
             }
         }
     }
-    "#
-    )]
-    fn test_parse_state_request(#[case] json_str: &str) {
+    "#;
+
         let result: StateRequestBody = serde_json::from_str(json_str).unwrap();
 
         let contract0 = "b4eccE46b8D4e4abFd03C9B806276A6735C9c092"
@@ -1193,10 +1086,7 @@ mod test {
         let json_common = r#"
     {
         "__CONTRACT_IDS__": [
-            {
-                "address": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
-                "chain": "ethereum"
-            }
+            "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092"
         ],
         "version": {
             "timestamp": "2069-01-01T04:20:00",
