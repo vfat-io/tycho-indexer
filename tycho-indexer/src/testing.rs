@@ -20,7 +20,7 @@ use tycho_core::{
     },
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
-        ExtractionStateGateway, Gateway, ProtocolGateway, StorageError, Version,
+        ExtractionStateGateway, Gateway, ProtocolGateway, StorageError, Version, WithTotal,
     },
     Bytes,
 };
@@ -63,16 +63,17 @@ mock! {
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-        fn get_contracts<'life0, 'life1, 'life2, 'life3, 'async_trait>(
+        fn get_contracts<'life0, 'life1, 'life2, 'life3, 'life4, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
             addresses: Option<&'life2 [Address]>,
             version: Option<&'life3 Version>,
             include_slots: bool,
+            pagination_params: Option<&'life4 PaginationParams>,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<Vec<Account>, StorageError>,
+                    Output = Result<WithTotal<Vec<Account>>, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >
@@ -81,6 +82,7 @@ mock! {
             'life1: 'async_trait,
             'life2: 'async_trait,
             'life3: 'async_trait,
+            'life4: 'async_trait,
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
@@ -158,17 +160,17 @@ mock! {
     impl ProtocolGateway for Gateway {
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-        fn get_protocol_components<'life0, 'life1, 'life2, 'life3, 'async_trait>(
+        fn get_protocol_components<'life0, 'life1, 'life2, 'life3, 'life4, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
             system: Option<String>,
             ids: Option<&'life2 [&'life3 str]>,
             min_tvl: Option<f64>,
+            pagination_params: Option<&'life4 PaginationParams>,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<
-                        Vec<ProtocolComponent>,
+                    Output = Result<WithTotal<Vec<ProtocolComponent>>,
                         StorageError,
                     >,
                 > + ::core::marker::Send + 'async_trait,
@@ -179,6 +181,7 @@ mock! {
             'life1: 'async_trait,
             'life2: 'async_trait,
             'life3: 'async_trait,
+            'life4: 'async_trait,
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
@@ -253,18 +256,18 @@ mock! {
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-        fn get_protocol_states<'life0, 'life1, 'life2, 'life3, 'async_trait>(
+        fn get_protocol_states<'life0, 'life1, 'life2, 'life3, 'life4, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
             at: Option<Version>,
             system: Option<String>,
             id: Option<&'life2 [&'life3 str]>,
             retrieve_balances: bool,
+            pagination_params: Option<&'life4 PaginationParams>,
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<
-                        Vec<ProtocolComponentState>,
+                    Output = Result<WithTotal<Vec<ProtocolComponentState>>,
                         StorageError,
                     >,
                 > + ::core::marker::Send + 'async_trait,
@@ -275,6 +278,7 @@ mock! {
             'life1: 'async_trait,
             'life2: 'async_trait,
             'life3: 'async_trait,
+            'life4: 'async_trait,
             Self: 'async_trait;
 
         #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
@@ -304,7 +308,7 @@ mock! {
         ) -> ::core::pin::Pin<
             Box<
                 dyn ::core::future::Future<
-                    Output = Result<Vec<CurrencyToken>, StorageError>,
+                    Output = Result<WithTotal<Vec<CurrencyToken>>, StorageError>,
                 > + ::core::marker::Send + 'async_trait,
             >,
         >

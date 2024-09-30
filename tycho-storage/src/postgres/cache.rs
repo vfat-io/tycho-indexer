@@ -32,7 +32,7 @@ use tycho_core::{
     },
     storage::{
         BlockIdentifier, BlockOrTimestamp, ChainGateway, ContractStateGateway,
-        ExtractionStateGateway, Gateway, ProtocolGateway, StorageError, Version,
+        ExtractionStateGateway, Gateway, ProtocolGateway, StorageError, Version, WithTotal,
     },
     Bytes,
 };
@@ -706,13 +706,14 @@ impl ContractStateGateway for CachedGateway {
         addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
-    ) -> Result<Vec<Account>, StorageError> {
+        pagination_params: Option<&PaginationParams>,
+    ) -> Result<WithTotal<Vec<Account>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_contracts(chain, addresses, version, include_slots, &mut conn)
+            .get_contracts(chain, addresses, version, include_slots, pagination_params, &mut conn)
             .await
     }
 
@@ -762,13 +763,14 @@ impl ProtocolGateway for CachedGateway {
         system: Option<String>,
         ids: Option<&[&str]>,
         min_tvl: Option<f64>,
-    ) -> Result<Vec<ProtocolComponent>, StorageError> {
+        pagination_params: Option<&PaginationParams>,
+    ) -> Result<WithTotal<Vec<ProtocolComponent>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_protocol_components(chain, system, ids, min_tvl, &mut conn)
+            .get_protocol_components(chain, system, ids, min_tvl, pagination_params, &mut conn)
             .await
     }
 
@@ -827,13 +829,22 @@ impl ProtocolGateway for CachedGateway {
         system: Option<String>,
         id: Option<&[&str]>,
         retrieve_balances: bool,
-    ) -> Result<Vec<ProtocolComponentState>, StorageError> {
+        pagination_params: Option<&PaginationParams>,
+    ) -> Result<WithTotal<Vec<ProtocolComponentState>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_protocol_states(chain, at, system, id, retrieve_balances, &mut conn)
+            .get_protocol_states(
+                chain,
+                at,
+                system,
+                id,
+                retrieve_balances,
+                pagination_params,
+                &mut conn,
+            )
             .await
     }
 
@@ -853,7 +864,7 @@ impl ProtocolGateway for CachedGateway {
         min_quality: Option<i32>,
         traded_n_days_ago: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
-    ) -> Result<Vec<CurrencyToken>, StorageError> {
+    ) -> Result<WithTotal<Vec<CurrencyToken>>, StorageError> {
         let mut conn =
             self.pool.get().await.map_err(|e| {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))

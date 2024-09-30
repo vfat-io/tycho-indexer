@@ -15,9 +15,9 @@ use tycho_core::{
     keccak256,
     models::{
         self, contract::AccountDelta, AccountToContractStore, Address, Balance, Chain, ChangeType,
-        Code, ContractId, ContractStore, StoreKey, StoreVal, TxHash,
+        Code, ContractId, ContractStore, PaginationParams, StoreKey, StoreVal, TxHash,
     },
-    storage::{BlockOrTimestamp, StorageError, Version},
+    storage::{BlockOrTimestamp, StorageError, Version, WithTotal},
     Bytes,
 };
 
@@ -281,13 +281,13 @@ impl PostgresGateway {
     /// Fetch deleted or created account deltas
     ///
     /// # Operations
-    ///   
+    ///
     /// 1. Going Forward (`start < target`):
     ///     - a) If an account was deleted, emit an empty delta with [ChangeType::Deletion].
     ///     - b) If an account was created, emit an already collected update delta but with
     ///       [ChangeType::Creation].. No need to fetch the state at the `target_version` as by
     ///       design we emit newly created contracts and their components when going forward.
-    ///  
+    ///
     /// 2. Going Backward (`target < start`):
     ///     - a) If an account was deleted, it restores the account. Therefore, it needs to retrieve
     ///       the account state at `target` and emits the account with [ChangeType::Creation].
@@ -301,7 +301,7 @@ impl PostgresGateway {
     ///     (1a & 2b)
     ///
     /// # Returns
-    ///     
+    ///
     /// The CreatedOrDeleted struct. It contains accounts that fall under 1a within it's created
     /// attribute. We can use this attribute to satisfy the first operation. It also contains new
     /// restored / deleted delta structs withing the `restored` attribute with which we can satisfy
@@ -396,9 +396,10 @@ impl PostgresGateway {
             // Restore full state delta at from target version for accounts that were deleted
             let version = Some(Version::from_ts(*target_version_ts));
             let restored: HashMap<Address, AccountDelta> = self
-                .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, conn)
+                .get_contracts(chain, Some(&deleted_addresses), version.as_ref(), true, None, conn)
                 .await
                 .map_err(PostgresError::from)?
+                .entity
                 .into_iter()
                 .map(|acc| (acc.address.clone(), acc.into()))
                 .collect();
@@ -783,13 +784,45 @@ impl PostgresGateway {
         ids: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
+        pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<models::contract::Account>, StorageError> {
+    ) -> Result<WithTotal<Vec<models::contract::Account>>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
         let version_ts = match &version {
             Some(version) => maybe_lookup_version_ts(version, conn).await?,
             None => Utc::now().naive_utc(),
         };
+
+        // TODO: Try to reduce the duplication
+        // Total number of items, required for pagination.
+        let total_count = {
+            use schema::account::dsl::*;
+            let mut count_q = account
+                .left_join(
+                    schema::transaction::table
+                        .on(creation_tx.eq(schema::transaction::id.nullable())),
+                )
+                .filter(chain_id.eq(chain_db_id))
+                .filter(created_at.le(version_ts))
+                .filter(
+                    deleted_at
+                        .is_null()
+                        .or(deleted_at.gt(version_ts)),
+                )
+                .select(diesel::dsl::count_star())
+                .into_boxed();
+
+            // Apply contract id filters if provided
+            if let Some(contract_ids) = ids {
+                count_q = count_q.filter(address.eq_any(contract_ids));
+            }
+
+            count_q
+                .get_result::<i64>(conn)
+                .await
+                .map_err(PostgresError::from)?
+        };
+
         let accounts = {
             use schema::account::dsl::*;
             let mut q = account
@@ -813,6 +846,14 @@ impl PostgresGateway {
             if let Some(contract_ids) = ids {
                 q = q.filter(address.eq_any(contract_ids));
             }
+
+            // Apply pagination if provided
+            if let Some(pagination) = pagination_params {
+                q = q
+                    .limit(pagination.page_size)
+                    .offset(pagination.offset());
+            }
+
             q.get_results::<(orm::Account, Option<Bytes>)>(conn)
                 .await
                 .map_err(PostgresError::from)?
@@ -889,7 +930,7 @@ impl PostgresGateway {
             )));
         }
 
-        accounts
+        let res = accounts
             .into_iter()
             .zip(native_balances.into_iter().zip(codes))
             .map(|(account, (balance, code))| -> Result<models::contract::Account, StorageError> {
@@ -931,7 +972,8 @@ impl PostgresGateway {
 
                 Ok(contract)
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(WithTotal { entity: res, total: Some(total_count) })
     }
 
     /// Upsert contract
@@ -1347,7 +1389,6 @@ impl PostgresGateway {
 /// The tests below test the functionality using the concrete EVM types.
 #[cfg(test)]
 mod test {
-
     use crate::postgres::{
         db_fixtures,
         db_fixtures::{yesterday_midnight, yesterday_one_am},
@@ -1716,11 +1757,80 @@ mod test {
         let addresses = ids.as_deref();
 
         let results = gw
-            .get_contracts(&Chain::Ethereum, addresses, version.as_ref(), true, &mut conn)
+            .get_contracts(&Chain::Ethereum, addresses, version.as_ref(), true, None, &mut conn)
+            .await
+            .unwrap()
+            .entity;
+
+        assert_eq!(results, exp);
+    }
+
+    #[rstest]
+    #[case::empty(
+    None,
+    Some(Version::from_ts("2019-01-01T00:00:00".parse().unwrap())),
+    vec ! [],
+    0
+    )]
+    #[case::only_c2_block_1(
+    Some(vec ! [Bytes::from("94a3f312366b8d0a32a00986194053c0ed0cddb1")]),
+    Some(Version::from_block_number(Chain::Ethereum, 1)),
+    vec ! [
+    account_c2(1)
+    ],
+    1
+    )]
+    #[case::all_ids_block_1(
+    None,
+    Some(Version::from_block_number(Chain::Ethereum, 1)),
+    vec ! [
+    account_c0(1),
+    ],
+    2
+    )]
+    #[case::only_c0_latest(
+    Some(vec ! [Bytes::from("6B175474E89094C44Da98b954EedeAC495271d0F")]),
+    None,
+    vec ! [
+    account_c0(2)
+    ],
+    1
+    )]
+    #[case::all_ids_latest(
+    None,
+    None,
+    vec ! [
+    account_c0(2),
+    ],
+    2
+    )]
+    #[tokio::test]
+    async fn test_get_contracts_with_pagination(
+        #[case] ids: Option<Vec<Bytes>>,
+        #[case] version: Option<Version>,
+        #[case] exp: Vec<models::contract::Account>,
+        #[case] exp_total: i64,
+    ) {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EvmGateway::from_connection(&mut conn).await;
+        let addresses = ids.as_deref();
+
+        let result = gw
+            .get_contracts(
+                &Chain::Ethereum,
+                addresses,
+                version.as_ref(),
+                true,
+                Some(&PaginationParams { page: 0, page_size: 1 }),
+                &mut conn,
+            )
             .await
             .unwrap();
 
-        assert_eq!(results, exp);
+        assert!(result.entity.len() <= 1);
+        assert_eq!(result.total, Some(exp_total));
+        assert_eq!(result.entity, exp);
     }
 
     #[tokio::test]
@@ -1973,9 +2083,12 @@ mod test {
     .collect::< HashMap < _, _ >> ()
     )]
     #[case::before_block_one(
-    Some(Version(BlockOrTimestamp::Timestamp("2019-01-01T00:00:00".parse().unwrap()), VersionKind::Last)),
-    None,
-    HashMap::new())
+        Some(Version(
+            BlockOrTimestamp::Timestamp("2019-01-01T00:00:00".parse().unwrap()),
+            VersionKind::Last
+        )),
+        None,
+        HashMap::new())
     ]
     #[tokio::test]
     async fn test_get_slots(
@@ -2271,7 +2384,7 @@ mod test {
 
     #[rstest]
     #[case::with_start_version(
-    Some(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))))
+        Some(BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 2))))
     )]
     #[case::no_start_version(None)]
     #[tokio::test]

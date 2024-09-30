@@ -15,7 +15,7 @@ use tycho_core::{
         self, Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType,
         PaginationParams, StoreVal, TxHash,
     },
-    storage::{BlockOrTimestamp, StorageError, Version},
+    storage::{BlockOrTimestamp, StorageError, Version, WithTotal},
     Bytes,
 };
 
@@ -136,10 +136,16 @@ impl PostgresGateway {
         system: Option<String>,
         ids: Option<&[&str]>,
         min_tvl: Option<f64>,
+        pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError> {
+    ) -> Result<WithTotal<Vec<models::protocol::ProtocolComponent>>, StorageError> {
         use super::schema::{protocol_component::dsl::*, transaction::dsl::*};
         let chain_id_value = self.get_chain_id(chain);
+
+        let mut count_query = protocol_component
+            .inner_join(transaction.on(creation_tx.eq(schema::transaction::id)))
+            .left_join(schema::component_tvl::table)
+            .into_boxed();
 
         let mut query = protocol_component
             .inner_join(transaction.on(creation_tx.eq(schema::transaction::id)))
@@ -155,9 +161,19 @@ impl PostgresGateway {
                         .eq(chain_id_value)
                         .and(protocol_system_id.eq(protocol_system)),
                 );
+                count_query = count_query.filter(
+                    chain_id
+                        .eq(chain_id_value)
+                        .and(protocol_system_id.eq(protocol_system)),
+                );
             }
             (None, Some(external_ids)) => {
                 query = query.filter(
+                    chain_id
+                        .eq(chain_id_value)
+                        .and(external_id.eq_any(external_ids)),
+                );
+                count_query = count_query.filter(
                     chain_id
                         .eq(chain_id_value)
                         .and(external_id.eq_any(external_ids)),
@@ -172,14 +188,36 @@ impl PostgresGateway {
                             .and(protocol_system_id.eq(protocol_system)),
                     ),
                 );
+                count_query = count_query.filter(
+                    chain_id.eq(chain_id_value).and(
+                        external_id
+                            .eq_any(external_ids)
+                            .and(protocol_system_id.eq(protocol_system)),
+                    ),
+                );
             }
             (_, _) => {
                 query = query.filter(chain_id.eq(chain_id_value));
+                count_query = count_query.filter(chain_id.eq(chain_id_value));
             }
         }
 
         if let Some(thr) = min_tvl {
             query = query.filter(schema::component_tvl::tvl.gt(thr));
+            count_query = count_query.filter(schema::component_tvl::tvl.gt(thr));
+        }
+
+        let count = count_query
+            .count()
+            .get_result::<i64>(conn)
+            .await
+            .map_err(PostgresError::from)?;
+
+        // Apply optional pagination when loading protocol components to ensure consistency
+        if let Some(pagination) = pagination_params {
+            query = query
+                .limit(pagination.page_size)
+                .offset(pagination.offset());
         }
 
         let orm_protocol_components = query
@@ -190,8 +228,11 @@ impl PostgresGateway {
             .map(|(pc, txh)| (pc, Some(txh)))
             .collect();
 
-        self.build_protocol_components(orm_protocol_components, chain, conn)
-            .await
+        let res = self
+            .build_protocol_components(orm_protocol_components, chain, conn)
+            .await?;
+
+        Ok(WithTotal { entity: res, total: Some(count) })
     }
 
     async fn build_protocol_components(
@@ -632,6 +673,7 @@ impl PostgresGateway {
     // The filters are applied in the following order: component ids, protocol system, chain. If
     // component ids are provided, the protocol system filter is ignored. The chain filter is
     // always applied.
+    #[allow(clippy::too_many_arguments)]
     pub async fn get_protocol_states(
         &self,
         chain: &Chain,
@@ -640,8 +682,9 @@ impl PostgresGateway {
         system: Option<String>,
         ids: Option<&[&str]>,
         retrieve_balances: bool,
+        pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError> {
+    ) -> Result<WithTotal<Vec<models::protocol::ProtocolComponentState>>, StorageError> {
         let chain_db_id = self.get_chain_id(chain);
         let version_ts = match &at {
             Some(version) => Some(maybe_lookup_version_ts(version, conn).await?),
@@ -658,33 +701,64 @@ impl PostgresGateway {
         match (ids, system) {
             (Some(ids), Some(_)) => {
                 warn!("Both protocol IDs and system were provided. System will be ignored.");
-                self._decode_protocol_states(
-                    balances,
-                    orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
-                    ids.join(",").as_str(),
-                )
-            }
-            (Some(ids), _) => self._decode_protocol_states(
-                balances,
-                orm::ProtocolState::by_id(ids, chain_db_id, version_ts, conn).await,
-                ids.join(",").as_str(),
-            ),
-            (_, Some(system)) => self._decode_protocol_states(
-                balances,
-                orm::ProtocolState::by_protocol_system(
-                    system.clone(),
-                    chain_db_id,
+                let state_data = orm::ProtocolState::by_id(
+                    ids,
+                    &chain_db_id,
                     version_ts,
+                    pagination_params,
                     conn,
                 )
-                .await,
-                system.to_string().as_str(),
-            ),
-            _ => self._decode_protocol_states(
-                balances,
-                orm::ProtocolState::by_chain(chain_db_id, version_ts, conn).await,
-                chain.to_string().as_str(),
-            ),
+                .await;
+                let protocol_states = self._decode_protocol_states(
+                    balances,
+                    state_data.entity,
+                    ids.join(",").as_str(),
+                )?;
+                Ok(WithTotal { entity: protocol_states, total: state_data.total })
+            }
+            (Some(ids), _) => {
+                let state_data = orm::ProtocolState::by_id(
+                    ids,
+                    &chain_db_id,
+                    version_ts,
+                    pagination_params,
+                    conn,
+                )
+                .await;
+                let protocol_states = self._decode_protocol_states(
+                    balances,
+                    state_data.entity,
+                    ids.join(",").as_str(),
+                )?;
+                Ok(WithTotal { entity: protocol_states, total: state_data.total })
+            }
+            (_, Some(system)) => {
+                let state_data = orm::ProtocolState::by_protocol_system(
+                    &system.to_string(),
+                    &chain_db_id,
+                    version_ts,
+                    pagination_params,
+                    conn,
+                )
+                .await;
+                let protocol_states = self._decode_protocol_states(
+                    balances,
+                    state_data.entity,
+                    system.to_string().as_str(),
+                )?;
+                Ok(WithTotal { entity: protocol_states, total: state_data.total })
+            }
+            _ => {
+                let state_data =
+                    orm::ProtocolState::by_chain(&chain_db_id, version_ts, pagination_params, conn)
+                        .await;
+                let protocol_states = self._decode_protocol_states(
+                    balances,
+                    state_data.entity,
+                    chain.to_string().as_str(),
+                )?;
+                Ok(WithTotal { entity: protocol_states, total: state_data.total })
+            }
         }
     }
 
@@ -845,9 +919,16 @@ impl PostgresGateway {
         last_traded_ts_threshold: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
-    ) -> Result<Vec<models::token::CurrencyToken>, StorageError> {
+    ) -> Result<WithTotal<Vec<models::token::CurrencyToken>>, StorageError> {
         use super::schema::{account::dsl::*, token::dsl::*};
         let chain_db_id = self.get_chain_id(&chain);
+
+        let mut count_query = token
+            .inner_join(account)
+            .select(token::all_columns())
+            .filter(schema::account::chain_id.eq(chain_db_id))
+            .into_boxed();
+
         let mut query = token
             .inner_join(account)
             .select((token::all_columns(), schema::account::address))
@@ -856,10 +937,12 @@ impl PostgresGateway {
 
         if let Some(addrs) = addresses {
             query = query.filter(schema::account::address.eq_any(addrs));
+            count_query = count_query.filter(schema::account::address.eq_any(addrs));
         }
 
         if let Some(min_quality) = min_quality {
             query = query.filter(schema::token::quality.ge(min_quality));
+            count_query = count_query.filter(schema::token::quality.ge(min_quality));
         }
 
         if let Some(last_traded_ts_threshold) = last_traded_ts_threshold {
@@ -868,13 +951,20 @@ impl PostgresGateway {
                 .filter(schema::component_balance_default::valid_from.gt(last_traded_ts_threshold))
                 .distinct();
             query = query.filter(schema::token::id.eq_any(active_tokens_subquery));
+            count_query = count_query.filter(schema::token::id.eq_any(active_tokens_subquery));
         }
 
+        // TODO: Improve performance by running as subquery
+        let count = count_query
+            .count()
+            .get_result::<i64>(conn)
+            .await
+            .map_err(PostgresError::from)?;
+
         if let Some(pagination) = pagination_params {
-            let offset = pagination.page * pagination.page_size;
             query = query
                 .limit(pagination.page_size)
-                .offset(offset);
+                .offset(pagination.offset());
         }
 
         let results = query
@@ -883,7 +973,7 @@ impl PostgresGateway {
             .await
             .map_err(|err| storage_error_from_diesel(err, "Token", &chain.to_string(), None))?;
 
-        let tokens: Result<Vec<models::token::CurrencyToken>, StorageError> = results
+        let tokens: Vec<models::token::CurrencyToken> = results
             .into_iter()
             .map(|(orm_token, address_)| {
                 let gas_usage: Vec<_> = orm_token
@@ -891,7 +981,7 @@ impl PostgresGateway {
                     .iter()
                     .map(|u| u.map(|g| g as u64))
                     .collect();
-                Ok(models::token::CurrencyToken::new(
+                models::token::CurrencyToken::new(
                     &address_,
                     orm_token.symbol.as_str(),
                     orm_token.decimals as u32,
@@ -899,10 +989,11 @@ impl PostgresGateway {
                     gas_usage.as_slice(),
                     chain,
                     orm_token.quality as u32,
-                ))
+                )
             })
             .collect();
-        tokens
+
+        Ok(WithTotal { entity: tokens, total: Some(count) })
     }
 
     pub async fn add_tokens(
@@ -1991,11 +2082,48 @@ mod test {
         let gateway = EVMGateway::from_connection(&mut conn).await;
 
         let result = gateway
-            .get_protocol_states(&Chain::Ethereum, None, system, ids.as_deref(), false, &mut conn)
+            .get_protocol_states(
+                &Chain::Ethereum,
+                None,
+                system,
+                ids.as_deref(),
+                false,
+                None,
+                &mut conn,
+            )
+            .await
+            .unwrap()
+            .entity;
+
+        assert_eq!(result, expected)
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_states_with_pagination() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+
+        let mut protocol_state = protocol_state();
+        protocol_state.balances = HashMap::new();
+        let expected = vec![protocol_state];
+
+        let gateway = EVMGateway::from_connection(&mut conn).await;
+
+        let result = gateway
+            .get_protocol_states(
+                &Chain::Ethereum,
+                None,
+                None,
+                None,
+                false,
+                Some(&PaginationParams { page: 0, page_size: 1 }),
+                &mut conn,
+            )
             .await
             .unwrap();
 
-        assert_eq!(result, expected)
+        assert_eq!(result.entity, expected);
+        assert_eq!(result.total.unwrap(), 1);
     }
 
     #[tokio::test]
@@ -2043,10 +2171,12 @@ mod test {
                 None,
                 None,
                 true,
+                None,
                 &mut conn,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .entity;
 
         assert_eq!(result, expected)
     }
@@ -2148,10 +2278,12 @@ mod test {
                 None,
                 Some(&[new_state1.component_id.as_str()]),
                 true,
+                None,
                 &mut conn,
             )
             .await
-            .expect("Failed ");
+            .expect("Failed ")
+            .entity;
         let mut expected_state = protocol_state();
         expected_state.attributes = attributes2;
         expected_state
@@ -2633,7 +2765,8 @@ mod test {
         let tokens = gw
             .get_tokens(Chain::Ethereum, None, None, None, None, &mut conn)
             .await
-            .unwrap();
+            .unwrap()
+            .entity;
         assert_eq!(tokens.len(), 4);
 
         // get weth and usdc
@@ -2647,14 +2780,16 @@ mod test {
                 &mut conn,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .entity;
         assert_eq!(tokens.len(), 2);
 
         // get weth
         let tokens = gw
             .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), None, None, None, &mut conn)
             .await
-            .unwrap();
+            .unwrap()
+            .entity;
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].symbol, "WETH".to_string());
         assert_eq!(tokens[0].decimals, 18);
@@ -2667,7 +2802,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         // get tokens with pagination
-        let tokens = gw
+        let result = gw
             .get_tokens(
                 Chain::Ethereum,
                 None,
@@ -2678,11 +2813,13 @@ mod test {
             )
             .await
             .unwrap();
-        assert_eq!(tokens.len(), 1);
-        let first_token_symbol = tokens[0].symbol.clone();
+        assert_eq!(result.entity.len(), 1);
+        assert_eq!(result.total, Some(4));
+
+        let first_token_symbol = result.entity[0].symbol.clone();
 
         // get tokens with 0 page_size
-        let tokens = gw
+        let result = gw
             .get_tokens(
                 Chain::Ethereum,
                 None,
@@ -2693,10 +2830,11 @@ mod test {
             )
             .await
             .unwrap();
-        assert_eq!(tokens.len(), 0);
+        assert_eq!(result.entity.len(), 0);
+        assert_eq!(result.total, Some(4));
 
         // get tokens skipping page
-        let tokens = gw
+        let result = gw
             .get_tokens(
                 Chain::Ethereum,
                 None,
@@ -2707,8 +2845,9 @@ mod test {
             )
             .await
             .unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_ne!(tokens[0].symbol, first_token_symbol);
+        assert_eq!(result.entity.len(), 1);
+        assert_eq!(result.total, Some(4));
+        assert_ne!(result.entity[0].symbol, first_token_symbol);
     }
 
     #[tokio::test]
@@ -2720,7 +2859,8 @@ mod test {
         let tokens = gw
             .get_tokens(Chain::ZkSync, None, None, None, None, &mut conn)
             .await
-            .unwrap();
+            .unwrap()
+            .entity;
 
         assert_eq!(tokens.len(), 1);
         let expected_token = models::token::CurrencyToken::new(
@@ -2745,7 +2885,8 @@ mod test {
         let tokens = gw
             .get_tokens(Chain::Ethereum, None, Some(80i32), None, None, &mut conn)
             .await
-            .unwrap();
+            .unwrap()
+            .entity;
 
         assert_eq!(tokens.len(), 1);
 
@@ -2773,7 +2914,8 @@ mod test {
         let tokens = gw
             .get_tokens(Chain::Ethereum, None, None, days_cutoff, None, &mut conn)
             .await
-            .unwrap();
+            .unwrap()
+            .entity;
 
         assert_eq!(tokens.len(), 1);
         let expected_token = models::token::CurrencyToken::new(
@@ -2866,6 +3008,7 @@ mod test {
             .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, None, None, &mut conn)
             .await
             .expect("failed to get old token")
+            .entity
             .remove(0);
         prev.gas = vec![Some(20000)];
 
@@ -2876,6 +3019,7 @@ mod test {
             .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, None, None, &mut conn)
             .await
             .expect("failed to get updated token")
+            .entity
             .remove(0);
 
         assert_eq!(updated, prev);
@@ -3113,6 +3257,29 @@ mod test {
             .for_each(|ts| assert!(ts.is_some(), "Found None in updated_ts"));
     }
 
+    #[tokio::test]
+    async fn test_get_protocol_components_with_pagination() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let result = gw
+            .get_protocol_components(
+                &Chain::Ethereum,
+                None,
+                None,
+                None,
+                // Without pagination should return 3 components
+                Some(&PaginationParams { page: 0, page_size: 2 }),
+                &mut conn,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.entity.len(), 2);
+        assert_eq!(result.total, Some(3));
+    }
+
     #[rstest]
     #[case::get_one(Some("zigzag".to_string()))]
     #[case::get_none(Some("ambient".to_string()))]
@@ -3125,14 +3292,14 @@ mod test {
         let chain = Chain::Starknet;
 
         let result = gw
-            .get_protocol_components(&chain, system.clone(), None, None, &mut conn)
+            .get_protocol_components(&chain, system.clone(), None, None, None, &mut conn)
             .await;
 
         assert!(result.is_ok());
 
         match system.unwrap().as_str() {
             "zigzag" => {
-                let components = result.unwrap();
+                let components = result.unwrap().entity;
                 assert_eq!(components.len(), 1);
 
                 let pc = &components[0];
@@ -3142,7 +3309,7 @@ mod test {
                 assert_eq!(pc.creation_tx, Bytes::from(tx_hashes.get(1).unwrap().as_str()));
             }
             "ambient" => {
-                let components = result.unwrap();
+                let components = result.unwrap().entity;
                 assert_eq!(components.len(), 0)
             }
             _ => {}
@@ -3163,23 +3330,23 @@ mod test {
         let chain = Chain::Ethereum;
 
         let result = gw
-            .get_protocol_components(&chain, None, ids, None, &mut conn)
-            .await;
+            .get_protocol_components(&chain, None, ids, None, None, &mut conn)
+            .await
+            .unwrap()
+            .entity;
 
         match external_id.as_str() {
             "state1" => {
-                let components = result.unwrap();
-                assert_eq!(components.len(), 1);
+                assert_eq!(result.len(), 1);
 
-                let pc = &components[0];
+                let pc = &result[0];
                 assert_eq!(pc.id, external_id.to_string());
                 assert_eq!(pc.protocol_system, "ambient");
                 assert_eq!(pc.chain, Chain::Ethereum);
                 assert_eq!(pc.creation_tx, Bytes::from(tx_hashes[0].as_str()));
             }
             "state2" => {
-                let components = result.unwrap();
-                assert_eq!(components.len(), 0)
+                assert_eq!(result.len(), 0)
             }
             _ => {}
         }
@@ -3195,10 +3362,10 @@ mod test {
         let ids = Some(["state1", "state2"].as_slice());
         let chain = Chain::Ethereum;
         let result = gw
-            .get_protocol_components(&chain, Some(system), ids, None, &mut conn)
+            .get_protocol_components(&chain, Some(system), ids, None, None, &mut conn)
             .await;
 
-        let components = result.unwrap();
+        let components = result.unwrap().entity;
         assert_eq!(components.len(), 1);
 
         let pc = &components[0];
@@ -3225,9 +3392,10 @@ mod test {
             .collect::<HashSet<_>>();
 
         let components = gw
-            .get_protocol_components(&chain, None, None, None, &mut conn)
+            .get_protocol_components(&chain, None, None, None, None, &mut conn)
             .await
             .expect("failed retrieving components")
+            .entity
             .into_iter()
             .map(|c| c.id)
             .collect::<HashSet<_>>();
@@ -3254,9 +3422,10 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let res = gw
-            .get_protocol_components(&Chain::Ethereum, None, None, min_tvl, &mut conn)
+            .get_protocol_components(&Chain::Ethereum, None, None, min_tvl, None, &mut conn)
             .await
             .expect("failed retrieving components")
+            .entity
             .into_iter()
             .map(|comp| comp.id)
             .collect::<HashSet<_>>();

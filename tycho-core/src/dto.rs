@@ -524,6 +524,8 @@ pub struct StateRequestBody {
     pub version: VersionParam,
     #[serde(default)]
     pub chain: Chain,
+    #[serde(default)]
+    pub pagination: PaginationParams,
 }
 
 impl StateRequestBody {
@@ -532,8 +534,9 @@ impl StateRequestBody {
         protocol_system: Option<String>,
         version: VersionParam,
         chain: Chain,
+        pagination: PaginationParams,
     ) -> Self {
-        Self { contract_ids, protocol_system, version, chain }
+        Self { contract_ids, protocol_system, version, chain, pagination }
     }
 
     pub fn from_block(block: BlockParam) -> Self {
@@ -542,6 +545,7 @@ impl StateRequestBody {
             protocol_system: None,
             version: VersionParam { timestamp: None, block: Some(block.clone()) },
             chain: block.chain.unwrap_or_default(),
+            pagination: PaginationParams::default(),
         }
     }
 
@@ -551,6 +555,7 @@ impl StateRequestBody {
             protocol_system: None,
             version: VersionParam { timestamp: Some(timestamp), block: None },
             chain,
+            pagination: PaginationParams::default(),
         }
     }
 }
@@ -624,6 +629,7 @@ impl<'de> Deserialize<'de> for StateRequestBody {
                     protocol_system: protocol_system.unwrap_or_default(),
                     version: version.unwrap_or_else(VersionParam::default),
                     chain: chain.unwrap_or_else(Chain::default),
+                    pagination: Default::default(),
                 })
             }
         }
@@ -640,11 +646,12 @@ impl<'de> Deserialize<'de> for StateRequestBody {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct StateRequestResponse {
     pub accounts: Vec<ResponseAccount>,
+    pub pagination: PaginationResponse,
 }
 
 impl StateRequestResponse {
-    pub fn new(accounts: Vec<ResponseAccount>) -> Self {
-        Self { accounts }
+    pub fn new(accounts: Vec<ResponseAccount>, pagination: PaginationResponse) -> Self {
+        Self { accounts, pagination }
     }
 }
 
@@ -793,11 +800,18 @@ pub struct StateRequestParameters {
     /// Whether to include ERC20 balances in the response.
     #[serde(default = "default_include_balances_flag")]
     pub include_balances: bool,
+    #[serde(default)]
+    pub pagination: PaginationParams,
 }
 
 impl StateRequestParameters {
     pub fn new(include_balances: bool) -> Self {
-        Self { tvl_gt: None, inertia_min_gt: None, include_balances }
+        Self {
+            tvl_gt: None,
+            inertia_min_gt: None,
+            include_balances,
+            pagination: PaginationParams::default(),
+        }
     }
 
     pub fn to_query_string(&self) -> String {
@@ -846,11 +860,11 @@ pub struct TokensRequestBody {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Eq, Hash)]
 pub struct TokensRequestResponse {
     pub tokens: Vec<ResponseToken>,
-    pub pagination: PaginationParams,
+    pub pagination: PaginationResponse,
 }
 
 impl TokensRequestResponse {
-    pub fn new(tokens: Vec<ResponseToken>, pagination_request: &PaginationParams) -> Self {
+    pub fn new(tokens: Vec<ResponseToken>, pagination_request: &PaginationResponse) -> Self {
         Self { tokens, pagination: pagination_request.clone() }
     }
 }
@@ -872,10 +886,22 @@ impl PaginationParams {
 
 impl Default for PaginationParams {
     fn default() -> Self {
-        PaginationParams {
-            page: 0,       // Default page number
-            page_size: 20, // Default page size
-        }
+        PaginationParams { page: 0, page_size: 20 }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Eq, Hash)]
+#[serde(deny_unknown_fields)]
+pub struct PaginationResponse {
+    pub page: i64,
+    pub page_size: i64,
+    /// The total number of items available across all pages of results
+    pub total: i64,
+}
+
+impl PaginationResponse {
+    pub fn new(page: i64, page_size: i64, total: i64) -> Self {
+        Self { page, page_size, total }
     }
 }
 
@@ -920,15 +946,29 @@ pub struct ProtocolComponentsRequestBody {
     pub tvl_gt: Option<f64>,
     #[serde(default)]
     pub chain: Chain,
+    #[serde(default)]
+    pub pagination: PaginationParams,
 }
 
 impl ProtocolComponentsRequestBody {
     pub fn system_filtered(system: &str, tvl_gt: Option<f64>, chain: Chain) -> Self {
-        Self { protocol_system: Some(system.to_string()), component_ids: None, tvl_gt, chain }
+        Self {
+            protocol_system: Some(system.to_string()),
+            component_ids: None,
+            tvl_gt,
+            chain,
+            pagination: Default::default(),
+        }
     }
 
     pub fn id_filtered(ids: Vec<String>, chain: Chain) -> Self {
-        Self { protocol_system: None, component_ids: Some(ids), tvl_gt: None, chain }
+        Self {
+            protocol_system: None,
+            component_ids: Some(ids),
+            tvl_gt: None,
+            chain,
+            pagination: Default::default(),
+        }
     }
 }
 
@@ -938,8 +978,9 @@ impl ProtocolComponentsRequestBody {
         component_ids: Option<Vec<String>>,
         tvl_gt: Option<f64>,
         chain: Chain,
+        pagination: PaginationParams,
     ) -> Self {
-        Self { protocol_system, component_ids, tvl_gt, chain }
+        Self { protocol_system, component_ids, tvl_gt, chain, pagination }
     }
 }
 
@@ -970,11 +1011,15 @@ impl ProtocolComponentRequestParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct ProtocolComponentRequestResponse {
     pub protocol_components: Vec<ProtocolComponent>,
+    pub pagination: PaginationResponse,
 }
 
 impl ProtocolComponentRequestResponse {
-    pub fn new(protocol_components: Vec<ProtocolComponent>) -> Self {
-        Self { protocol_components }
+    pub fn new(
+        protocol_components: Vec<ProtocolComponent>,
+        pagination: PaginationResponse,
+    ) -> Self {
+        Self { protocol_components, pagination }
     }
 }
 
@@ -1026,6 +1071,8 @@ pub struct ProtocolStateRequestBody {
     pub include_balances: bool,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
+    #[serde(default)]
+    pub pagination: PaginationParams,
 }
 
 impl ProtocolStateRequestBody {
@@ -1037,11 +1084,12 @@ impl ProtocolStateRequestBody {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct ProtocolStateRequestResponse {
     pub states: Vec<ResponseProtocolState>,
+    pub pagination: PaginationResponse,
 }
 
 impl ProtocolStateRequestResponse {
-    pub fn new(states: Vec<ResponseProtocolState>) -> Self {
-        Self { states }
+    pub fn new(states: Vec<ResponseProtocolState>, pagination: PaginationResponse) -> Self {
+        Self { states, pagination }
     }
 }
 
@@ -1054,7 +1102,7 @@ pub struct ProtocolComponentId {
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(tag = "status", content = "message")]
-#[schema(example=json!({"status": "NotReady", "message": "No db connection"}))]
+#[schema(example = json!({"status": "NotReady", "message": "No db connection"}))]
 pub enum Health {
     Ready,
     Starting(String),
@@ -1134,6 +1182,7 @@ mod test {
                 }),
             },
             chain: Chain::Ethereum,
+            pagination: PaginationParams::default(),
         };
 
         assert_eq!(result, expected);
@@ -1238,6 +1287,7 @@ mod test {
                 }),
             },
             chain: Chain::Ethereum,
+            pagination: PaginationParams { page: 0, page_size: 20 },
         };
 
         assert_eq!(result, expected);

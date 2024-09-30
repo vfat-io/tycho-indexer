@@ -1222,8 +1222,9 @@ impl HybridGateway for HybridPgGateway {
         component_ids: &[&'a str],
     ) -> Result<Vec<ProtocolComponentState>, StorageError> {
         self.state_gateway
-            .get_protocol_states(&self.chain, None, None, Some(component_ids), false)
+            .get_protocol_states(&self.chain, None, None, Some(component_ids), false, None)
             .await
+            .map(|state_data| state_data.entity)
     }
 
     async fn get_contracts(
@@ -1231,8 +1232,9 @@ impl HybridGateway for HybridPgGateway {
         component_ids: &[models::Address],
     ) -> Result<Vec<Account>, StorageError> {
         self.state_gateway
-            .get_contracts(&self.chain, Some(component_ids), None, true)
+            .get_contracts(&self.chain, Some(component_ids), None, true, None)
             .await
+            .map(|contract_data| contract_data.entity)
     }
 
     async fn get_components_balances<'a>(
@@ -2168,9 +2170,11 @@ mod test_serial_db {
                     None,
                     Some([NATIVE_CREATED_CONTRACT].as_slice()),
                     None,
+                    None,
                 )
                 .await
-                .expect("test successfully inserted native contract");
+                .expect("test successfully inserted native contract")
+                .entity;
             println!("{:?}", res);
 
             // TODO: This is failing because protocol_type_name is wrong in the gateway - waiting
@@ -2202,13 +2206,15 @@ mod test_serial_db {
             let tokens = cached_gw
                 .get_tokens(Chain::Ethereum, None, None, None, None)
                 .await
-                .unwrap();
+                .unwrap()
+                .entity;
             assert_eq!(tokens.len(), 2);
 
             let protocol_components = cached_gw
-                .get_protocol_components(&Chain::Ethereum, None, None, None)
+                .get_protocol_components(&Chain::Ethereum, None, None, None, None)
                 .await
-                .unwrap();
+                .unwrap()
+                .entity;
             assert_eq!(protocol_components.len(), 1);
             assert_eq!(protocol_components[0].creation_tx, Bytes::from(VM_TX_HASH_0));
 

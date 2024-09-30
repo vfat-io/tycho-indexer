@@ -91,7 +91,7 @@ where
 
         self.components = self
             .rpc_client
-            .get_protocol_components(&body)
+            .get_protocol_components_paginated(&body, 50, 4)
             .await?
             .protocol_components
             .into_iter()
@@ -204,7 +204,10 @@ mod test {
         rpc::MockRPCClient,
     };
     use tycho_core::{
-        dto::{Chain, ProtocolComponent, ProtocolComponentRequestResponse, ProtocolId},
+        dto::{
+            Chain, PaginationResponse, ProtocolComponent, ProtocolComponentRequestResponse,
+            ProtocolId,
+        },
         Bytes,
     };
 
@@ -235,10 +238,11 @@ mod test {
         let exp_component = component.clone();
         tracker
             .rpc_client
-            .expect_get_protocol_components()
-            .returning(move |_| {
+            .expect_get_protocol_components_paginated()
+            .returning(move |_, _, _| {
                 Ok(ProtocolComponentRequestResponse {
                     protocol_components: vec![component.clone()],
+                    pagination: PaginationResponse { page: 0, page_size: 20, total: 1 },
                 })
             });
 
@@ -270,6 +274,7 @@ mod test {
             .returning(move |_| {
                 Ok(ProtocolComponentRequestResponse {
                     protocol_components: vec![component.clone()],
+                    pagination: PaginationResponse { page: 0, page_size: 20, total: 1 },
                 })
             });
 

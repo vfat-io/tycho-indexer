@@ -14,10 +14,11 @@ use crate::services::deltas_buffer::PendingDeltas;
 use tycho_core::{
     dto::{
         AccountUpdate, BlockParam, Chain, ChangeType, ContractId, Health, PaginationParams,
-        ProtocolComponent, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody,
-        ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody, ProtocolStateRequestResponse,
-        ResponseAccount, ResponseProtocolState, ResponseToken, StateRequestBody,
-        StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
+        PaginationResponse, ProtocolComponent, ProtocolComponentRequestResponse,
+        ProtocolComponentsRequestBody, ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody,
+        ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState, ResponseToken,
+        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
+        VersionParam,
     },
     storage::Gateway,
 };
@@ -103,6 +104,7 @@ where
                 schemas(TokensRequestBody),
                 schemas(TokensRequestResponse),
                 schemas(PaginationParams),
+                schemas(PaginationResponse),
                 schemas(ResponseToken),
                 schemas(ProtocolComponentsRequestBody),
                 schemas(ProtocolComponentRequestResponse),
@@ -136,7 +138,8 @@ where
             }
         });
         let ws_data = web::Data::new(ws::WsData::new(self.extractor_handles));
-        let rpc_data = web::Data::new(rpc::RpcHandler::new(self.db_gateway, pending_deltas));
+        let rpc_data =
+            web::Data::new(rpc::RpcHandler::new(self.db_gateway, Arc::new(pending_deltas)));
         let server = HttpServer::new(move || {
             App::new()
                 .app_data(rpc_data.clone())

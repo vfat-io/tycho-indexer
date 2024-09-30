@@ -2,7 +2,7 @@
 //!
 //! The objective of this module is to provide swift and simplified access to the Remote Procedure
 //! Call (RPC) endpoints of Tycho. These endpoints are chiefly responsible for facilitating data
-//! queries, especially querying snapshots of data.ß
+//! queries, especially querying snapshots of data.
 #[cfg(test)]
 use mockall::automock;
 use std::sync::Arc;
@@ -12,10 +12,15 @@ use tracing::{debug, error, instrument, trace, warn};
 use async_trait::async_trait;
 use futures03::future::try_join_all;
 
-use tycho_core::dto::{
-    Chain, PaginationParams, ProtocolComponentRequestResponse, ProtocolComponentsRequestBody,
-    ProtocolId, ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseToken,
-    StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
+use crate::TYCHO_SERVER_VERSION;
+use tycho_core::{
+    dto::{
+        Chain, PaginationParams, PaginationResponse, ProtocolComponentRequestResponse,
+        ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
+        ProtocolStateRequestResponse, ResponseToken, StateRequestBody, StateRequestResponse,
+        TokensRequestBody, TokensRequestResponse, VersionParam,
+    },
+    Bytes,
 };
 
 use reqwest::{
@@ -23,8 +28,6 @@ use reqwest::{
     Client, ClientBuilder, Url,
 };
 use tokio::sync::Semaphore;
-
-use crate::TYCHO_SERVER_VERSION;
 
 #[derive(Error, Debug)]
 pub enum RPCError {
@@ -46,17 +49,211 @@ pub enum RPCError {
 
 #[cfg_attr(test, automock)]
 #[async_trait]
-pub trait RPCClient {
+pub trait RPCClient: Send + Sync {
     /// Retrieves a snapshot of contract state.
     async fn get_contract_state(
         &self,
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError>;
 
+    #[allow(clippy::too_many_arguments)]
+    async fn get_contract_state_paginated(
+        &self,
+        chain: Chain,
+        ids: &[Bytes],
+        protocol_system: &Option<String>,
+        version: &VersionParam,
+        chunk_size: usize,
+        concurrency: usize,
+    ) -> Result<StateRequestResponse, RPCError> {
+        let semaphore = Arc::new(Semaphore::new(concurrency));
+
+        let chunked_bodies = ids
+            .chunks(chunk_size)
+            .map(|chunk| StateRequestBody {
+                contract_ids: Some(chunk.to_vec()),
+                protocol_system: protocol_system.clone(),
+                chain,
+                version: version.clone(),
+                pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
+            })
+            .collect::<Vec<_>>();
+
+        let mut tasks = Vec::new();
+        for body in chunked_bodies.iter() {
+            let sem = semaphore.clone();
+            tasks.push(async move {
+                let _permit = sem
+                    .acquire()
+                    .await
+                    .map_err(|_| RPCError::Fatal("Semaphore dropped".to_string()))?;
+                self.get_contract_state(body).await
+            });
+        }
+
+        // Execute all tasks concurrently with the defined concurrency limit.
+        let responses = try_join_all(tasks).await?;
+
+        // Aggregate the responses into a single result.
+        let accounts = responses
+            .iter()
+            .flat_map(|r| r.accounts.clone())
+            .collect();
+        let total: i64 = responses
+            .iter()
+            .map(|r| r.pagination.total)
+            .sum();
+
+        Ok(StateRequestResponse {
+            accounts,
+            pagination: PaginationResponse { page: 0, page_size: chunk_size as i64, total },
+        })
+    }
+
     async fn get_protocol_components(
         &self,
         request: &ProtocolComponentsRequestBody,
     ) -> Result<ProtocolComponentRequestResponse, RPCError>;
+
+    async fn get_protocol_components_paginated(
+        &self,
+        request: &ProtocolComponentsRequestBody,
+        chunk_size: usize,
+        concurrency: usize,
+    ) -> Result<ProtocolComponentRequestResponse, RPCError> {
+        let semaphore = Arc::new(Semaphore::new(concurrency));
+
+        // If a set of component IDs is specified, the maximum return size is already known,
+        // allowing us to pre-compute the number of requests to be made.
+        match request.component_ids {
+            Some(ref ids) => {
+                // We can divide the component_ids into chunks of size chunk_size
+                let chunked_bodies = ids
+                    .chunks(chunk_size)
+                    .enumerate()
+                    .map(|(index, _)| ProtocolComponentsRequestBody {
+                        protocol_system: request.protocol_system.clone(),
+                        component_ids: request.component_ids.clone(),
+                        tvl_gt: request.tvl_gt,
+                        chain: request.chain,
+                        pagination: PaginationParams {
+                            page: index as i64,
+                            page_size: chunk_size as i64,
+                        },
+                    })
+                    .collect::<Vec<_>>();
+
+                let mut tasks = Vec::new();
+                for body in chunked_bodies.iter() {
+                    let sem = semaphore.clone();
+                    tasks.push(async move {
+                        let _permit = sem
+                            .acquire()
+                            .await
+                            .map_err(|_| RPCError::Fatal("Semaphore dropped".to_string()))?;
+                        self.get_protocol_components(body).await
+                    });
+                }
+
+                try_join_all(tasks)
+                    .await
+                    .map(|responses| ProtocolComponentRequestResponse {
+                        protocol_components: responses
+                            .into_iter()
+                            .flat_map(|r| r.protocol_components.into_iter())
+                            .collect(),
+                        pagination: PaginationResponse {
+                            page: 0,
+                            page_size: chunk_size as i64,
+                            total: ids.len() as i64,
+                        },
+                    })
+            }
+            _ => {
+                // If no component ids are specified, we need to make requests based on the total
+                // number of results from the first response.
+
+                let mut ans: Option<ProtocolComponentRequestResponse> = None;
+                let mut page: i64 = 0;
+                let mut total_pages: Option<i64> = None;
+
+                loop {
+                    // Create request bodies for parallel requests, respecting the concurrency limit
+                    let chunked_bodies = (0..concurrency)
+                        .map(|iter| ProtocolComponentsRequestBody {
+                            protocol_system: request.protocol_system.clone(),
+                            component_ids: request.component_ids.clone(),
+                            tvl_gt: request.tvl_gt,
+                            chain: request.chain,
+                            pagination: PaginationParams {
+                                page: page + iter as i64,
+                                page_size: chunk_size as i64,
+                            },
+                        })
+                        .collect::<Vec<_>>();
+
+                    let tasks: Vec<_> = chunked_bodies
+                        .iter()
+                        .map(|body| {
+                            let sem = semaphore.clone();
+                            async move {
+                                let _permit = sem.acquire().await.map_err(|_| {
+                                    RPCError::Fatal("Semaphore dropped".to_string())
+                                })?;
+                                self.get_protocol_components(body).await
+                            }
+                        })
+                        .collect();
+
+                    let responses = try_join_all(tasks)
+                        .await
+                        .map(|responses| {
+                            let total = responses[0].pagination.total;
+                            ProtocolComponentRequestResponse {
+                                protocol_components: responses
+                                    .into_iter()
+                                    .flat_map(|r| r.protocol_components.into_iter())
+                                    .collect(),
+                                pagination: PaginationResponse {
+                                    page,
+                                    page_size: chunk_size as i64,
+                                    total,
+                                },
+                            }
+                        });
+
+                    // Update the accumulated response or set the initial response
+                    match responses {
+                        Ok(mut resp) => {
+                            // Set total pages on the first response, based on the total number of
+                            // components
+                            if total_pages.is_none() {
+                                let total_items = resp.pagination.total;
+                                total_pages =
+                                    Some((total_items as f64 / chunk_size as f64).ceil() as i64);
+                            }
+
+                            if let Some(ref mut a) = ans {
+                                a.protocol_components
+                                    .append(&mut resp.protocol_components);
+                            } else {
+                                ans = Some(resp);
+                            }
+
+                            // Check if we've reached the last page
+                            if page >= total_pages.unwrap() - 1 {
+                                break;
+                            }
+                        }
+                        Err(e) => return Err(e),
+                    }
+
+                    page += concurrency as i64;
+                }
+                ans.ok_or_else(|| RPCError::Fatal("No response received".to_string()))
+            }
+        }
+    }
 
     async fn get_protocol_states(
         &self,
@@ -83,6 +280,7 @@ pub trait RPCClient {
                 chain,
                 include_balances,
                 version: version.clone(),
+                pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
             })
             .collect::<Vec<_>>();
 
@@ -100,11 +298,20 @@ pub trait RPCClient {
 
         try_join_all(tasks)
             .await
-            .map(|responses| ProtocolStateRequestResponse {
-                states: responses
+            .map(|responses| {
+                let states = responses
+                    .clone()
                     .into_iter()
-                    .flat_map(|r| r.states.into_iter())
-                    .collect(),
+                    .flat_map(|r| r.states)
+                    .collect();
+                let total = responses
+                    .iter()
+                    .map(|r| r.pagination.total)
+                    .sum();
+                ProtocolStateRequestResponse {
+                    states,
+                    pagination: PaginationResponse { page: 0, page_size: chunk_size as i64, total },
+                }
             })
     }
 
@@ -233,7 +440,14 @@ impl RPCClient for HttpRPCClient {
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         if body.is_empty() {
             // Pure native protocols will return empty contract states
-            return Ok(StateRequestResponse { accounts: vec![] });
+            return Ok(StateRequestResponse {
+                accounts: vec![],
+                pagination: PaginationResponse {
+                    page: request.pagination.page,
+                    page_size: request.pagination.page,
+                    total: 0,
+                },
+            });
         }
 
         let accounts = serde_json::from_str::<StateRequestResponse>(&body)
@@ -320,7 +534,14 @@ impl RPCClient for HttpRPCClient {
 
         if body.is_empty() {
             // Pure VM protocols will return empty states
-            return Ok(ProtocolStateRequestResponse { states: vec![] });
+            return Ok(ProtocolStateRequestResponse {
+                states: vec![],
+                pagination: PaginationResponse {
+                    page: request.pagination.page,
+                    page_size: request.pagination.page_size,
+                    total: 0,
+                },
+            });
         }
 
         let states = serde_json::from_str::<ProtocolStateRequestResponse>(&body)
@@ -364,8 +585,6 @@ impl RPCClient for HttpRPCClient {
 
 #[cfg(test)]
 mod tests {
-    use tycho_core::Bytes;
-
     use super::*;
 
     use mockito::Server;
@@ -390,7 +609,12 @@ mod tests {
                     "code_modify_tx": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "creation_tx": null
                 }
-            ]
+            ],
+            "pagination": {
+                "page": 0,
+                "page_size": 20,
+                "total": 10
+            }
         }
         "#;
         // test that the response is deserialized correctly
@@ -448,7 +672,12 @@ mod tests {
                     "creation_tx": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "created_at": "2022-01-01T00:00:00"
                 }
-            ]
+            ],
+            "pagination": {
+                "page": 0,
+                "page_size": 20,
+                "total": 10
+            }
         }
         "#;
         // test that the response is deserialized correctly
@@ -498,7 +727,12 @@ mod tests {
                         "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": "0x01f4"
                     }
                 }
-            ]
+            ],
+            "pagination": {
+                "page": 0,
+                "page_size": 20,
+                "total": 10
+            }
         }
         "#;
         // test that the response is deserialized correctly
@@ -569,7 +803,8 @@ mod tests {
             ],
             "pagination": {
               "page": 0,
-              "page_size": 2
+              "page_size": 20,
+              "total": 10
             }
           }
         "#;
@@ -612,6 +847,6 @@ mod tests {
 
         mocked_server.assert();
         assert_eq!(response.tokens, expected);
-        assert_eq!(response.pagination, PaginationParams { page: 0, page_size: 2 });
+        assert_eq!(response.pagination, PaginationResponse { page: 0, page_size: 20, total: 10 });
     }
 }

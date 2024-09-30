@@ -249,6 +249,13 @@ impl Version {
     }
 }
 
+// Helper type to retrieve entities with their total retrievable count.
+#[derive(Debug)]
+pub struct WithTotal<T> {
+    pub entity: T,
+    pub total: Option<i64>,
+}
+
 /// Store and retrieve protocol related structs.
 ///
 /// This trait defines how to retrieve protocol components, state as well as
@@ -270,7 +277,8 @@ pub trait ProtocolGateway {
         system: Option<String>,
         ids: Option<&[&str]>,
         min_tvl: Option<f64>,
-    ) -> Result<Vec<models::protocol::ProtocolComponent>, StorageError>;
+        pagination_params: Option<&PaginationParams>,
+    ) -> Result<WithTotal<Vec<models::protocol::ProtocolComponent>>, StorageError>;
 
     /// Retrieves owners of tokens
     ///
@@ -301,6 +309,7 @@ pub trait ProtocolGateway {
         to_delete: &[models::protocol::ProtocolComponent],
         block_ts: NaiveDateTime,
     ) -> Result<(), StorageError>;
+
     /// Stores new found ProtocolTypes.
     ///
     /// # Parameters
@@ -336,7 +345,8 @@ pub trait ProtocolGateway {
         system: Option<String>,
         id: Option<&[&str]>,
         retrieve_balances: bool,
-    ) -> Result<Vec<models::protocol::ProtocolComponentState>, StorageError>;
+        pagination_params: Option<&PaginationParams>,
+    ) -> Result<WithTotal<Vec<models::protocol::ProtocolComponentState>>, StorageError>;
 
     async fn update_protocol_states(
         &self,
@@ -358,7 +368,7 @@ pub trait ProtocolGateway {
         min_quality: Option<i32>,
         traded_n_days_ago: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
-    ) -> Result<Vec<models::token::CurrencyToken>, StorageError>;
+    ) -> Result<WithTotal<Vec<models::token::CurrencyToken>>, StorageError>;
 
     /// Saves multiple component balances to storage.
     ///
@@ -505,7 +515,8 @@ pub trait ContractStateGateway {
         addresses: Option<&[Address]>,
         version: Option<&Version>,
         include_slots: bool,
-    ) -> Result<Vec<models::contract::Account>, StorageError>;
+        pagination_params: Option<&PaginationParams>,
+    ) -> Result<WithTotal<Vec<models::contract::Account>>, StorageError>;
 
     /// Inserts a new contract into the database.
     ///
