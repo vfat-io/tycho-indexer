@@ -46,6 +46,9 @@ impl From<anyhow::Error> for RpcError {
 
 pub struct RpcHandler<G> {
     db_gateway: G,
+    // TODO: remove use of Arc. It was introduced for ease of testing this deltas buffer, however
+    // it potentially could make this slow. We should consider refactoring this and maybe use
+    // generics
     pending_deltas: Arc<dyn PendingDeltasBuffer + Send + Sync>,
     token_cache: RpcCache<dto::TokensRequestBody, dto::TokensRequestResponse>,
     contract_storage_cache: RpcCache<dto::StateRequestBody, dto::StateRequestResponse>,
