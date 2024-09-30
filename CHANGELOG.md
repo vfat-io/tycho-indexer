@@ -1,3 +1,38 @@
+## [0.21.0](https://github.com/propeller-heads/tycho-indexer/compare/0.20.0...0.21.0) (2024-09-30)
+
+
+### Features
+
+* add method to get protocol components paginated ([7ce3cbe](https://github.com/propeller-heads/tycho-indexer/commit/7ce3cbe56305de3b821cf9b615718182997b3fc3))
+* limit the page size for paginated endpoints ([26e8767](https://github.com/propeller-heads/tycho-indexer/commit/26e876767292a8d2751dfd651ff6f018d4c3fec5))
+* more fixes ([29f1117](https://github.com/propeller-heads/tycho-indexer/commit/29f1117cb392b6b3cb113d0dd240ac0708828913))
+* Return total count to pagination responses, get_contract_state ([d780212](https://github.com/propeller-heads/tycho-indexer/commit/d780212739025d6cda52b55fda82d9e04332857e))
+* Return total count to pagination responses, get_protocol_components ([8115c9b](https://github.com/propeller-heads/tycho-indexer/commit/8115c9b41e7ff0e38c568cecb6ddeb5adcc1da1b))
+* Return total count to pagination responses, get_protocol_state ([cfafb70](https://github.com/propeller-heads/tycho-indexer/commit/cfafb70c2ce38da01203c5f4a90d62c4815e2413))
+* Return total count to pagination responses, get_tokens ([69ab6f7](https://github.com/propeller-heads/tycho-indexer/commit/69ab6f758f5be67c4f0007230ce43bbb5c2cf242))
+* **rpc:** add pagination to all rpc endpoints ([39107f3](https://github.com/propeller-heads/tycho-indexer/commit/39107f36ffbd0c47609cb72977a67c3e68acf813))
+* **rpc:** add pagination to all rpc endpoints ([#345](https://github.com/propeller-heads/tycho-indexer/issues/345)) ([f945d75](https://github.com/propeller-heads/tycho-indexer/commit/f945d753ed6da04a1b643e517db4949b981a9550))
+* use pagination on rpc sync ([fd10192](https://github.com/propeller-heads/tycho-indexer/commit/fd1019207ab391c50f678afc1aefd35c2f2d269a))
+
+
+### Bug Fixes
+
+* bug with page and page_size swapped ([0aa2afd](https://github.com/propeller-heads/tycho-indexer/commit/0aa2afdd6e8079ee87422529d7c563d7a3891f87))
+* correctly handle buffered components in pagination ([9f7bdbc](https://github.com/propeller-heads/tycho-indexer/commit/9f7bdbc01350627aebf0e5d2fdf49d856929c51f))
+* correctly handle buffered contract states in pagination ([57209aa](https://github.com/propeller-heads/tycho-indexer/commit/57209aa9250790e6e126ff4c3a17be946dbfdb91))
+* correctly handle buffered protocol states in pagination ([6afcc63](https://github.com/propeller-heads/tycho-indexer/commit/6afcc63bfd5c7779de8aa83787b80c3fe748f8a1))
+* correctly pass state request ids chunk ([d5282cb](https://github.com/propeller-heads/tycho-indexer/commit/d5282cb9575c202b7353a63f20436c26bb01012c))
+* fix pagination for contract_state ([22c8497](https://github.com/propeller-heads/tycho-indexer/commit/22c8497a0e9d1266102997f3bb44f617ac389977))
+* fix pagination for contract_state by chain ([3e543e4](https://github.com/propeller-heads/tycho-indexer/commit/3e543e4fc99d1bb3518eee63e6e44a8a9e5d7639))
+* fix pagination for fetching ProtocolState, add tests ([0ba95d9](https://github.com/propeller-heads/tycho-indexer/commit/0ba95d9bbbada13db9ccde5617e47383ab8f90a4))
+* paginate contract_state using chunked ids ([87e702e](https://github.com/propeller-heads/tycho-indexer/commit/87e702e3ebcaff14633772ec210c9c276ebe6989))
+* post rebase fixes, use Bytes instead of contractId ([ae57952](https://github.com/propeller-heads/tycho-indexer/commit/ae57952f6409923001222469eecf536617df4aef))
+* rebased contract struct name change ([d04a519](https://github.com/propeller-heads/tycho-indexer/commit/d04a5192354dd5e14754bbaa2ed96bcc16e655a3))
+* remove unnecessary filters ([c94be3f](https://github.com/propeller-heads/tycho-indexer/commit/c94be3fc650ce7e104b4d7221eabcbd588fac940))
+* remove unnecessary uniqueness constraints ([7187f70](https://github.com/propeller-heads/tycho-indexer/commit/7187f70c8f42a09f178ef6b6bc91c543d9252661))
+* undo formatting errors and typos ([dc68a61](https://github.com/propeller-heads/tycho-indexer/commit/dc68a6103e31eb3451a375f526f76bda531679b3))
+* use total from pagination response to end pagination looping ([c763f96](https://github.com/propeller-heads/tycho-indexer/commit/c763f96c9cb599844178e3900b2954b84c4c1307))
+
 ## [0.20.0](https://github.com/propeller-heads/tycho-indexer/compare/0.19.0...0.20.0) (2024-09-26)
 
 
