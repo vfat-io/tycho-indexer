@@ -1,3 +1,11 @@
+## [0.22.3](https://github.com/propeller-heads/tycho-indexer/compare/0.22.2...0.22.3) (2024-10-01)
+
+
+### Bug Fixes
+
+* **client:** populating python client error log bug ([#386](https://github.com/propeller-heads/tycho-indexer/issues/386)) ([87bcae5](https://github.com/propeller-heads/tycho-indexer/commit/87bcae5c37ef5c1d2a422ebbee53e64ed0d3d2e4))
+* populating python client error log bug ([e6d9682](https://github.com/propeller-heads/tycho-indexer/commit/e6d9682704bae29e04d4dc4bac356866a4e42d1d))
+
 ## [0.22.2](https://github.com/propeller-heads/tycho-indexer/compare/0.22.1...0.22.2) (2024-10-01)
 
 
