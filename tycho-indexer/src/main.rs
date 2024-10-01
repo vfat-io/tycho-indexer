@@ -2,7 +2,14 @@
 
 use futures03::future::select_all;
 use serde::Deserialize;
-use std::{collections::HashMap, fs::File, io::Read, str::FromStr, sync::Arc, thread};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::Read,
+    process,
+    str::FromStr,
+    sync::{mpsc, Arc},
+};
 use tracing_subscriber::EnvFilter;
 use tycho_ethereum::{
     account_extractor::contract::EVMAccountExtractor,
@@ -15,7 +22,7 @@ use actix_web::dev::ServerHandle;
 use chrono::{NaiveDateTime, Utc};
 use clap::Parser;
 use tokio::{runtime::Handle, select, task::JoinHandle};
-use tracing::{info, instrument, warn};
+use tracing::{error, info, instrument, warn};
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
@@ -70,9 +77,7 @@ impl ExtractorConfigs {
 
 type ExtractionTasks = Vec<JoinHandle<Result<(), ExtractionError>>>;
 type ServerTasks = Vec<JoinHandle<Result<(), ExtractionError>>>; //TODO: introduce an error type for it
-
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+fn main() {
     let cli: Cli = Cli::parse();
     let global_args = cli.args();
 
@@ -84,7 +89,7 @@ async fn main() -> Result<(), anyhow::Error> {
         // OTLP endpoint is set, construct OTLP pipeline
         if let Ok(otlp_exporter_endpoint) = std::env::var("OTLP_EXPORTER_ENDPOINT") {
             let config = ot::TracingConfig { otlp_exporter_endpoint };
-            ot::init_tracing(config)?;
+            ot::init_tracing(config).unwrap();
         } else {
             warn!("OTLP_EXPORTER_ENDPOINT not set defaulting to stdout subscriber!");
             let format = tracing_subscriber::fmt::format()
@@ -99,65 +104,105 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     match cli.command() {
-        Command::Run(run_args) => run_spkg(global_args, run_args).await?,
+        Command::Run(run_args) => run_spkg(global_args, run_args).unwrap(),
         Command::Index(indexer_args) => {
-            run_indexer(global_args, indexer_args).await?;
+            run_indexer(global_args, indexer_args).unwrap();
         }
         Command::AnalyzeTokens(analyze_args) => {
-            run_tycho_ethereum(global_args, analyze_args).await?;
+            run_tycho_ethereum(global_args, analyze_args).unwrap();
         }
-        Command::Rpc => run_rpc(global_args).await?,
+        Command::Rpc => run_rpc(global_args).unwrap(),
     }
-    Ok(())
 }
 
-async fn run_indexer(
-    global_args: GlobalArgs,
-    index_args: IndexArgs,
-) -> Result<(), ExtractionError> {
-    info!("Starting Tycho");
-    let extractors_config = ExtractorConfigs::from_yaml(&index_args.extractors_config)
-        .map_err(|e| ExtractionError::Setup(format!("Failed to load extractors.yaml. {}", e)))?;
-
-    let retention_horizon: NaiveDateTime = index_args
-        .retention_horizon
-        .parse()
-        .expect("Failed to parse retention horizon");
-
-    let extraction_runtime = tokio::runtime::Builder::new_current_thread()
+/// Executes all extractors configured in the extractor configuration file and starts the server.
+///
+/// Note: This function utilizes two distinct runtimes: one for extraction tasks and another
+/// for others operations such as server and gateway.
+///
+/// By using separate runtimes, extraction processes in Tycho can run independently, ensuring
+/// that server-related tasks do not interfere with the extraction workflow, and overall
+/// system performance is maintained.
+fn run_indexer(global_args: GlobalArgs, index_args: IndexArgs) -> Result<(), ExtractionError> {
+    // We spawn a dedicated runtime for extraction
+    let extraction_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
         .enable_all()
         .build()
         .unwrap();
 
-    let (extraction_tasks, other_tasks) = create_indexing_tasks(
-        &global_args,
-        &index_args.substreams_args.rpc_url,
-        &index_args
-            .chains
-            .iter()
-            .map(|chain_str| {
-                Chain::from_str(chain_str).unwrap_or_else(|_| panic!("Unknown chain {}", chain_str))
-            })
-            .collect::<Vec<_>>(),
-        retention_horizon,
-        extractors_config,
-        Some(extraction_runtime.handle()),
-    )
-    .await?;
+    let main_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(3)
+        .enable_all()
+        .build()
+        .unwrap();
 
-    let handle_extractor =
-        thread::spawn(move || extraction_runtime.block_on(select_all(extraction_tasks)));
+    let (control_tx, control_rx) = mpsc::channel();
 
-    let (res, _, _) = handle_extractor
-        .join()
-        .expect("Extractor thread shouldn't panic!");
+    let (extraction_tasks, other_tasks) = main_runtime
+        .block_on(async {
+            info!("Starting Tycho");
+            let extractors_config = ExtractorConfigs::from_yaml(&index_args.extractors_config)
+                .map_err(|e| {
+                    ExtractionError::Setup(format!("Failed to load extractors.yaml. {}", e))
+                })?;
 
-    res.expect("Extractor task shouldn't panic!")?;
+            let retention_horizon: NaiveDateTime = index_args
+                .retention_horizon
+                .parse()
+                .expect("Failed to parse retention horizon");
 
-    let (res, _, _) = select_all(other_tasks).await;
-    res.expect("ServiceTasks shouldn't panic!")
+            let (extraction_tasks, other_tasks) = create_indexing_tasks(
+                &global_args,
+                &index_args.substreams_args.rpc_url,
+                &index_args
+                    .chains
+                    .iter()
+                    .map(|chain_str| {
+                        Chain::from_str(chain_str)
+                            .unwrap_or_else(|_| panic!("Unknown chain {}", chain_str))
+                    })
+                    .collect::<Vec<_>>(),
+                retention_horizon,
+                extractors_config,
+                Some(extraction_runtime.handle()),
+            )
+            .await?;
+
+            Ok::<_, ExtractionError>((extraction_tasks, other_tasks))
+        })
+        .expect("Should not fail during tasks creation");
+
+    let extractor_ctrl_tx = control_tx.clone();
+    extraction_runtime.spawn(async move {
+        let (res, _, _) = select_all(extraction_tasks).await;
+
+        if extractor_ctrl_tx.send(res).is_err() {
+            error!(
+                "Fatal execution task exited and failed trying to communicate with main thread. Exiting the process..."
+            );
+            process::exit(1);
+        }
+    });
+
+    let services_ctrl_tx = control_tx.clone();
+    main_runtime.spawn(async move {
+        let (res, _, _) = select_all(other_tasks).await;
+
+        if services_ctrl_tx.send(res).is_err() {
+            error!("Fatal service task exited and failed trying to communicate with main thread. Exiting the process...");
+            process::exit(1);
+        }
+    });
+
+    let res = control_rx
+        .recv()
+        .expect("Control channel unexpectedly closed");
+
+    res.expect("A thread panicked. Shutting down Tycho.")
 }
 
+#[tokio::main]
 async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), ExtractionError> {
     info!("Starting Tycho");
 
@@ -200,6 +245,7 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
     res.expect("Extractor- nor ServiceTasks should panic!")
 }
 
+#[tokio::main]
 async fn run_rpc(global_args: GlobalArgs) -> Result<(), ExtractionError> {
     let cached_gw = GatewayBuilder::new(&global_args.database_url)
         .build_gw()
@@ -437,6 +483,7 @@ async fn shutdown_handler(
     Ok(())
 }
 
+#[tokio::main]
 async fn run_tycho_ethereum(
     global_args: GlobalArgs,
     analyzer_args: AnalyzeTokenArgs,
