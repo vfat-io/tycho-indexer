@@ -81,6 +81,19 @@ fn main() {
     let cli: Cli = Cli::parse();
     let global_args = cli.args();
 
+    match cli.command() {
+        Command::Run(run_args) => run_spkg(global_args, run_args).unwrap(),
+        Command::Index(indexer_args) => {
+            run_indexer(global_args, indexer_args).unwrap();
+        }
+        Command::AnalyzeTokens(analyze_args) => {
+            run_tycho_ethereum(global_args, analyze_args).unwrap();
+        }
+        Command::Rpc => run_rpc(global_args).unwrap(),
+    }
+}
+
+fn create_tracing_subscriber() {
     // Set up the subscriber
     let console_flag = std::env::var("ENABLE_CONSOLE").unwrap_or_else(|_| "false".to_string());
     if console_flag == "true" {
@@ -101,17 +114,6 @@ fn main() {
                 .with_env_filter(EnvFilter::from_default_env())
                 .init();
         }
-    }
-
-    match cli.command() {
-        Command::Run(run_args) => run_spkg(global_args, run_args).unwrap(),
-        Command::Index(indexer_args) => {
-            run_indexer(global_args, indexer_args).unwrap();
-        }
-        Command::AnalyzeTokens(analyze_args) => {
-            run_tycho_ethereum(global_args, analyze_args).unwrap();
-        }
-        Command::Rpc => run_rpc(global_args).unwrap(),
     }
 }
 
@@ -141,6 +143,7 @@ fn run_indexer(global_args: GlobalArgs, index_args: IndexArgs) -> Result<(), Ext
 
     let (extraction_tasks, other_tasks) = main_runtime
         .block_on(async {
+            create_tracing_subscriber();
             info!("Starting Tycho");
             let extractors_config = ExtractorConfigs::from_yaml(&index_args.extractors_config)
                 .map_err(|e| {
@@ -204,6 +207,7 @@ fn run_indexer(global_args: GlobalArgs, index_args: IndexArgs) -> Result<(), Ext
 
 #[tokio::main]
 async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), ExtractionError> {
+    create_tracing_subscriber();
     info!("Starting Tycho");
 
     let config = ExtractorConfigs::new(HashMap::from([(
@@ -247,6 +251,7 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
 
 #[tokio::main]
 async fn run_rpc(global_args: GlobalArgs) -> Result<(), ExtractionError> {
+    create_tracing_subscriber();
     let cached_gw = GatewayBuilder::new(&global_args.database_url)
         .build_gw()
         .await?;
@@ -488,6 +493,7 @@ async fn run_tycho_ethereum(
     global_args: GlobalArgs,
     analyzer_args: AnalyzeTokenArgs,
 ) -> Result<(), anyhow::Error> {
+    create_tracing_subscriber();
     let (cached_gw, gw_writer_thread) = GatewayBuilder::new(&global_args.database_url)
         .set_chains(&[analyzer_args.chain])
         .build()
