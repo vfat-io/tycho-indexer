@@ -7,6 +7,7 @@ use aws_sdk_s3::Client;
 use prost::Message;
 use serde::Deserialize;
 use tokio::{
+    runtime::Handle,
     sync::{
         mpsc::{self, error::SendError, Receiver, Sender},
         Mutex,
@@ -119,6 +120,9 @@ pub struct ExtractorRunner {
     subscriptions: Arc<Mutex<SubscriptionsMap>>,
     next_subscriber_id: u64,
     control_rx: Receiver<ControlMessage>,
+    /// Handle of the tokio runtime on which the extraction tasks will be run.
+    /// If 'None' the default runtime will be used.
+    runtime_handle: Option<Handle>,
 }
 
 impl ExtractorRunner {
@@ -127,11 +131,24 @@ impl ExtractorRunner {
         substreams: SubstreamsStream,
         subscriptions: Arc<Mutex<SubscriptionsMap>>,
         control_rx: Receiver<ControlMessage>,
+        runtime_handle: Option<Handle>,
     ) -> Self {
-        ExtractorRunner { extractor, substreams, subscriptions, next_subscriber_id: 0, control_rx }
+        ExtractorRunner {
+            extractor,
+            substreams,
+            subscriptions,
+            next_subscriber_id: 0,
+            control_rx,
+            runtime_handle,
+        }
     }
     pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
-        tokio::spawn(async move {
+        let runtime = self
+            .runtime_handle
+            .clone()
+            .unwrap_or_else(|| tokio::runtime::Handle::current());
+
+        runtime.spawn(async move {
             let id = self.extractor.get_id();
             loop {
                 // this is the main info span of an extractor
@@ -326,6 +343,9 @@ pub struct ExtractorBuilder {
     token: String,
     extractor: Option<Arc<dyn Extractor>>,
     final_block_only: bool,
+    /// Handle of the tokio runtime on which the extraction tasks will be run.
+    /// If 'None' the default runtime will be used.
+    runtime_handle: Option<Handle>,
 }
 
 pub type HandleResult = (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle);
@@ -338,6 +358,7 @@ impl ExtractorBuilder {
             token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
             extractor: None,
             final_block_only: false,
+            runtime_handle: None,
         }
     }
 
@@ -365,6 +386,11 @@ impl ExtractorBuilder {
 
     pub fn only_final_blocks(mut self) -> Self {
         self.final_block_only = true;
+        self
+    }
+
+    pub fn set_runtime(mut self, runtime: Handle) -> Self {
+        self.runtime_handle = Some(runtime);
         self
     }
 
@@ -491,8 +517,13 @@ impl ExtractorBuilder {
 
         let id = extractor.get_id();
         let (ctrl_tx, ctrl_rx) = mpsc::channel(128);
-        let runner =
-            ExtractorRunner::new(extractor, stream, Arc::new(Mutex::new(HashMap::new())), ctrl_rx);
+        let runner = ExtractorRunner::new(
+            extractor,
+            stream,
+            Arc::new(Mutex::new(HashMap::new())),
+            ctrl_rx,
+            self.runtime_handle,
+        );
 
         let handle = runner.run();
         Ok((handle, ExtractorHandle::new(id, ctrl_tx)))
