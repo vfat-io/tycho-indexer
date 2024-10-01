@@ -30,7 +30,7 @@ class TychoStream:
         include_state=True,
         logs_directory: str = None,
         tycho_client_path: str = None,
-        use_tls: bool = True
+        use_tls: bool = True,
     ):
         """
         Initializes the TychoStream instance.
@@ -80,7 +80,7 @@ class TychoStream:
 
         if not self._include_state:
             cmd.append("--no-state")
-            
+
         if not self._use_tls:
             cmd.append("--no-tls")
 
@@ -92,7 +92,12 @@ class TychoStream:
             f"Starting tycho-client binary at {self._tycho_client_path}. CMD: {cmd}"
         )
         self.tycho_client = await asyncio.create_subprocess_exec(
-            self._tycho_client_path, *cmd, stdout=PIPE, stderr=STDOUT, limit=2**64
+            self._tycho_client_path,
+            *cmd,
+            stdout=PIPE,
+            stderr=STDOUT,
+            limit=2**64,
+            env={**os.environ, "NO_COLOR": "true"},
         )
 
     def __aiter__(self):
@@ -123,7 +128,7 @@ class TychoStream:
             with open(Path(self._logs_directory) / "dev_logs.log", "r") as f:
                 lines = f.readlines()
                 last_lines = lines[-10:]
-                error_msg += f" Tycho logs: {last_lines}"
+                error_msg += f" Tycho logs:\n{'\n'.join(last_lines)}"
             log.exception(error_msg)
             raise Exception("Tycho-client failed.")
         return self._process_message(msg)
