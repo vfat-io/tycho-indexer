@@ -1,3 +1,11 @@
+## [0.22.2](https://github.com/propeller-heads/tycho-indexer/compare/0.22.1...0.22.2) (2024-10-01)
+
+
+### Bug Fixes
+
+* **client:** improve python client stream error logging ([#385](https://github.com/propeller-heads/tycho-indexer/issues/385)) ([5a243de](https://github.com/propeller-heads/tycho-indexer/commit/5a243dec32f9fda31cdb3cc3cf6d97e12897d63e))
+* **client:** make python client error logs more readable ([baa1fa2](https://github.com/propeller-heads/tycho-indexer/commit/baa1fa20175d6a8b53b64aeec75e71c107d7889a))
+
 ## [0.22.1](https://github.com/propeller-heads/tycho-indexer/compare/0.22.0...0.22.1) (2024-09-30)
 
 
