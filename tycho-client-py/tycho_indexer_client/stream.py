@@ -128,7 +128,7 @@ class TychoStream:
             with open(Path(self._logs_directory) / "dev_logs.log", "r") as f:
                 lines = f.readlines()
                 last_lines = lines[-10:]
-                error_msg += f" Tycho logs:\n{'\n'.join(last_lines)}"
+                error_msg += " Tycho logs:\n" + "\n".join(last_lines)
             log.exception(error_msg)
             raise Exception("Tycho-client failed.")
         return self._process_message(msg)
