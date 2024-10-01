@@ -1,3 +1,11 @@
+## [0.22.5](https://github.com/propeller-heads/tycho-indexer/compare/0.22.4...0.22.5) (2024-10-01)
+
+
+### Bug Fixes
+
+* **otel:** create tracing subscriber inside the runtime ([65c3a02](https://github.com/propeller-heads/tycho-indexer/commit/65c3a02601b8b2cba53ecb8b70c905da2841f87a))
+* Tokio runtime issue ([#387](https://github.com/propeller-heads/tycho-indexer/issues/387)) ([40ec9b2](https://github.com/propeller-heads/tycho-indexer/commit/40ec9b2ad29f7fe3f4ee98533fc5dac261b9d669))
+
 ## [0.22.4](https://github.com/propeller-heads/tycho-indexer/compare/0.22.3...0.22.4) (2024-10-01)
 
 ## [0.22.3](https://github.com/propeller-heads/tycho-indexer/compare/0.22.2...0.22.3) (2024-10-01)
