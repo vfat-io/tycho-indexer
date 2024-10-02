@@ -1,3 +1,11 @@
+## [0.23.1](https://github.com/propeller-heads/tycho-indexer/compare/0.23.0...0.23.1) (2024-10-02)
+
+
+### Bug Fixes
+
+* increase protocol component pagination page size ([2565c05](https://github.com/propeller-heads/tycho-indexer/commit/2565c051eb971aa697128c41a64a9e45913c1b13))
+* increase protocol component pagination page size ([#389](https://github.com/propeller-heads/tycho-indexer/issues/389)) ([a90cad6](https://github.com/propeller-heads/tycho-indexer/commit/a90cad6998a357a259e115e4265b4759bc82699f))
+
 ## [0.23.0](https://github.com/propeller-heads/tycho-indexer/compare/0.22.5...0.23.0) (2024-10-02)
 
 
