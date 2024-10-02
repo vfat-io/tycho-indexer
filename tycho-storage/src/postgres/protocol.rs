@@ -216,6 +216,7 @@ impl PostgresGateway {
         // Apply optional pagination when loading protocol components to ensure consistency
         if let Some(pagination) = pagination_params {
             query = query
+                .order(schema::protocol_component::id)
                 .limit(pagination.page_size)
                 .offset(pagination.offset());
         }
