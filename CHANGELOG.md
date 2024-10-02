@@ -1,3 +1,11 @@
+## [0.23.0](https://github.com/propeller-heads/tycho-indexer/compare/0.22.5...0.23.0) (2024-10-02)
+
+
+### Features
+
+* **tycho-indexer:** make number of worker parametrable ([fc6e334](https://github.com/propeller-heads/tycho-indexer/commit/fc6e334b7b81d9e37076127038ff45c5fcb7518c))
+* **tycho-indexer:** make number of worker parametrable ([#388](https://github.com/propeller-heads/tycho-indexer/issues/388)) ([f59397a](https://github.com/propeller-heads/tycho-indexer/commit/f59397a6ad0833ce67d2cc40e80a8746bad21b95))
+
 ## [0.22.5](https://github.com/propeller-heads/tycho-indexer/compare/0.22.4...0.22.5) (2024-10-01)
 
 
