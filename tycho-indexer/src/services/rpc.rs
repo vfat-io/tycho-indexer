@@ -632,8 +632,8 @@ pub async fn protocol_components<G: Gateway>(
     body: web::Json<dto::ProtocolComponentsRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
-    if body.pagination.page_size > 100 {
-        return HttpResponse::BadRequest().body("Page size must be less than or equal to 100.");
+    if body.pagination.page_size > 500 {
+        return HttpResponse::BadRequest().body("Page size must be less than or equal to 500.");
     }
 
     // Call the handler to get tokens
