@@ -54,6 +54,8 @@ pub struct RpcHandler<G> {
     contract_storage_cache: RpcCache<dto::StateRequestBody, dto::StateRequestResponse>,
     protocol_state_cache:
         RpcCache<dto::ProtocolStateRequestBody, dto::ProtocolStateRequestResponse>,
+    component_cache:
+        RpcCache<dto::ProtocolComponentsRequestBody, dto::ProtocolComponentRequestResponse>,
 }
 
 impl<G> RpcHandler<G>
@@ -79,12 +81,18 @@ where
             dto::ProtocolStateRequestResponse,
         >::new("protocol_state", 50, 7 * 60);
 
+        let component_cache = RpcCache::<
+            dto::ProtocolComponentsRequestBody,
+            dto::ProtocolComponentRequestResponse,
+        >::new("protocol_components", 50, 7 * 60);
+
         Self {
             db_gateway,
             pending_deltas,
             token_cache,
             contract_storage_cache,
             protocol_state_cache,
+            component_cache,
         }
     }
 
@@ -426,13 +434,18 @@ where
         request: &dto::ProtocolComponentsRequestBody,
     ) -> Result<dto::ProtocolComponentRequestResponse, RpcError> {
         info!(?request, "Getting protocol components.");
-        self.get_protocol_components_inner(request)
+        self.component_cache
+            .get(request.clone(), |r| async {
+                self.get_protocol_components_inner(r)
+                    .await
+                    .map(|res| (res, true))
+            })
             .await
     }
 
     async fn get_protocol_components_inner(
         &self,
-        request: &dto::ProtocolComponentsRequestBody,
+        request: dto::ProtocolComponentsRequestBody,
     ) -> Result<dto::ProtocolComponentRequestResponse, RpcError> {
         let system = request.protocol_system.clone();
         let pagination_params: PaginationParams = (&request.pagination).into();
@@ -1139,7 +1152,7 @@ mod tests {
         };
 
         let components = req_handler
-            .get_protocol_components_inner(&request)
+            .get_protocol_components_inner(request)
             .await
             .unwrap();
 
@@ -1232,7 +1245,7 @@ mod tests {
         };
 
         let response1 = req_handler
-            .get_protocol_components_inner(&request)
+            .get_protocol_components_inner(request)
             .await
             .unwrap();
 
@@ -1250,7 +1263,7 @@ mod tests {
         };
 
         let response2 = req_handler
-            .get_protocol_components_inner(&request)
+            .get_protocol_components_inner(request)
             .await
             .unwrap();
 

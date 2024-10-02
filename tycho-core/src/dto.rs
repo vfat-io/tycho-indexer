@@ -8,6 +8,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    hash::{Hash, Hasher},
 };
 
 use chrono::{NaiveDateTime, Utc};
@@ -850,7 +851,7 @@ impl From<models::token::CurrencyToken> for ResponseToken {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema)]
+#[derive(Serialize, Deserialize, Debug, Default, ToSchema, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolComponentsRequestBody {
     pub protocol_system: Option<String>,
@@ -863,6 +864,45 @@ pub struct ProtocolComponentsRequestBody {
     pub chain: Chain,
     #[serde(default)]
     pub pagination: PaginationParams,
+}
+
+// Implement PartialEq where tvl is considered equal if the difference is less than 1e-6
+impl PartialEq for ProtocolComponentsRequestBody {
+    fn eq(&self, other: &Self) -> bool {
+        let tvl_close_enough = match (self.tvl_gt, other.tvl_gt) {
+            (Some(a), Some(b)) => (a - b).abs() < 1e-6,
+            (None, None) => true,
+            _ => false,
+        };
+
+        self.protocol_system == other.protocol_system &&
+            self.component_ids == other.component_ids &&
+            tvl_close_enough &&
+            self.chain == other.chain &&
+            self.pagination == other.pagination
+    }
+}
+
+// Implement Eq without any new logic
+impl Eq for ProtocolComponentsRequestBody {}
+
+impl Hash for ProtocolComponentsRequestBody {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.protocol_system.hash(state);
+        self.component_ids.hash(state);
+
+        // Handle the f64 `tvl_gt` field by converting it into a hashable integer
+        if let Some(tvl) = self.tvl_gt {
+            // Convert f64 to bits and hash those bits
+            tvl.to_bits().hash(state);
+        } else {
+            // Use a constant value to represent None
+            state.write_u8(0);
+        }
+
+        self.chain.hash(state);
+        self.pagination.hash(state);
+    }
 }
 
 impl ProtocolComponentsRequestBody {
@@ -1031,6 +1071,50 @@ mod test {
     use maplit::hashmap;
 
     use super::*;
+
+    #[test]
+    fn test_protocol_components_equality() {
+        let body1 = ProtocolComponentsRequestBody {
+            protocol_system: Some("protocol1".to_string()),
+            component_ids: Some(vec!["component1".to_string(), "component2".to_string()]),
+            tvl_gt: Some(1000.0),
+            chain: Chain::Ethereum,
+            pagination: PaginationParams::default(),
+        };
+
+        let body2 = ProtocolComponentsRequestBody {
+            protocol_system: Some("protocol1".to_string()),
+            component_ids: Some(vec!["component1".to_string(), "component2".to_string()]),
+            tvl_gt: Some(1000.0 + 1e-7), // Within the tolerance ±1e-6
+            chain: Chain::Ethereum,
+            pagination: PaginationParams::default(),
+        };
+
+        // These should be considered equal due to the tolerance in tvl_gt
+        assert_eq!(body1, body2);
+    }
+
+    #[test]
+    fn test_protocol_components_inequality() {
+        let body1 = ProtocolComponentsRequestBody {
+            protocol_system: Some("protocol1".to_string()),
+            component_ids: Some(vec!["component1".to_string(), "component2".to_string()]),
+            tvl_gt: Some(1000.0),
+            chain: Chain::Ethereum,
+            pagination: PaginationParams::default(),
+        };
+
+        let body2 = ProtocolComponentsRequestBody {
+            protocol_system: Some("protocol1".to_string()),
+            component_ids: Some(vec!["component1".to_string(), "component2".to_string()]),
+            tvl_gt: Some(1000.0 + 1e-5), // Outside the tolerance ±1e-6
+            chain: Chain::Ethereum,
+            pagination: PaginationParams::default(),
+        };
+
+        // These should not be equal due to the difference in tvl_gt
+        assert_ne!(body1, body2);
+    }
 
     #[test]
     fn test_parse_state_request() {
