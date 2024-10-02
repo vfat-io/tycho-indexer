@@ -1,3 +1,16 @@
+## [0.24.0](https://github.com/propeller-heads/tycho-indexer/compare/0.23.1...0.24.0) (2024-10-02)
+
+
+### Features
+
+* Add component cache to rpc ([#390](https://github.com/propeller-heads/tycho-indexer/issues/390)) ([8dfc004](https://github.com/propeller-heads/tycho-indexer/commit/8dfc00430f4a8c0bb0cd4f152c640f91ef58b6b8))
+* **rpc:** add component cache ([c7a1894](https://github.com/propeller-heads/tycho-indexer/commit/c7a189430df09aa1c8d517e0fe0a2468f0127cb9))
+
+
+### Bug Fixes
+
+* order components before pagination ([9eee0af](https://github.com/propeller-heads/tycho-indexer/commit/9eee0afd36706cae0c6a70679491d935664f6327))
+
 ## [0.23.1](https://github.com/propeller-heads/tycho-indexer/compare/0.23.0...0.23.1) (2024-10-02)
 
 
