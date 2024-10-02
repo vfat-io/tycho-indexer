@@ -22,7 +22,7 @@ use actix_web::dev::ServerHandle;
 use chrono::{NaiveDateTime, Utc};
 use clap::Parser;
 use tokio::{runtime::Handle, select, task::JoinHandle};
-use tracing::{error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
@@ -126,15 +126,23 @@ fn create_tracing_subscriber() {
 /// that server-related tasks do not interfere with the extraction workflow, and overall
 /// system performance is maintained.
 fn run_indexer(global_args: GlobalArgs, index_args: IndexArgs) -> Result<(), ExtractionError> {
+    let extraction_threads = std::env::var("EXTRACTION_WORKER_THREADS")
+        .unwrap_or_else(|_| "2".to_string())
+        .parse()
+        .expect("EXTRACTION_WORKER_THREADS must be a number");
+    let main_threads = std::env::var("MAIN_WORKER_THREADS")
+        .unwrap_or_else(|_| "3".to_string())
+        .parse()
+        .expect("MAIN_WORKER_THREADS must be a number");
     // We spawn a dedicated runtime for extraction
     let extraction_runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+        .worker_threads(extraction_threads)
         .enable_all()
         .build()
         .unwrap();
 
     let main_runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(3)
+        .worker_threads(main_threads)
         .enable_all()
         .build()
         .unwrap();
@@ -145,6 +153,7 @@ fn run_indexer(global_args: GlobalArgs, index_args: IndexArgs) -> Result<(), Ext
         .block_on(async {
             create_tracing_subscriber();
             info!("Starting Tycho");
+            debug!("{} CPUs detected", num_cpus::get());
             let extractors_config = ExtractorConfigs::from_yaml(&index_args.extractors_config)
                 .map_err(|e| {
                     ExtractionError::Setup(format!("Failed to load extractors.yaml. {}", e))
