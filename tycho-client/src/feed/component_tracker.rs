@@ -91,7 +91,7 @@ where
 
         self.components = self
             .rpc_client
-            .get_protocol_components_paginated(&body, 50, 4)
+            .get_protocol_components_paginated(&body, 500, 4)
             .await?
             .protocol_components
             .into_iter()
