@@ -666,7 +666,6 @@ impl ChainGateway for CachedGateway {
             .await
     }
 
-    #[instrument(skip_all)]
     async fn upsert_tx(&self, new: &[Transaction]) -> Result<(), StorageError> {
         self.add_op(WriteOp::UpsertTx(new.to_vec()))
             .await?;
