@@ -1,3 +1,11 @@
+## [0.24.1](https://github.com/propeller-heads/tycho-indexer/compare/0.24.0...0.24.1) (2024-10-02)
+
+
+### Bug Fixes
+
+* add order by to paginated queries ([b198f07](https://github.com/propeller-heads/tycho-indexer/commit/b198f07a3a05af4376c056b1925bbf80c38b63e6))
+* add order by to paginated queries ([#391](https://github.com/propeller-heads/tycho-indexer/issues/391)) ([1db42b1](https://github.com/propeller-heads/tycho-indexer/commit/1db42b187daaee72d9a4be278b05270c523a6414))
+
 ## [0.24.0](https://github.com/propeller-heads/tycho-indexer/compare/0.23.1...0.24.0) (2024-10-02)
 
 
