@@ -1,7 +1,7 @@
 use futures03::Future;
 use mini_moka::sync::Cache;
 use std::{error::Error, fmt::Debug, hash::Hash, sync::Arc};
-use tracing::{debug, instrument, Level};
+use tracing::{instrument, trace, Level};
 
 pub struct RpcCache<R, V> {
     name: String,
@@ -23,7 +23,12 @@ where
         Self { name: name.to_string(), cache }
     }
 
-    #[instrument(level = Level::TRACE, skip_all)]
+    #[instrument(
+        name = "rpc.cache.get",
+        level = Level::TRACE,
+        fields(miss, should_cache, size, resource = self.name),
+        skip(self, fallback))
+    ]
     pub async fn get<
         'a,
         E: Error,
@@ -34,24 +39,22 @@ where
         request: R,
         fallback: F,
     ) -> Result<V, E> {
+        tracing::Span::current().record("size", self.cache.entry_count());
         // Check the cache for a cached response
         if let Some(inflight_val) = self.cache.get(&request) {
             // the value is present or is being written to
             // If the values is None, we likely hit a should_cache = false entry while in-flight,
             //  so we simply behave as if it was a cache miss.
             if let Some(res) = inflight_val.lock().await.clone() {
-                debug!(
-                    cache = self.name,
-                    ?request,
-                    cache_size = self.cache.entry_count(),
-                    "CacheHit"
-                );
+                tracing::Span::current().record("miss", false);
+                trace!("CacheHit");
                 return Ok(res);
             }
         }
 
         // the value has never been written
-        debug!(?request, cache_size = self.cache.entry_count(), cache = self.name, "CacheMiss");
+        tracing::Span::current().record("miss", true);
+        trace!("CacheMiss");
         let lock = Arc::new(tokio::sync::Mutex::new(None));
         let mut guard = lock.lock().await;
         // We insert a None value here to indicate that this request is in flight.
@@ -64,13 +67,16 @@ where
             .map_err(|e| {
                 // invalidate the cache if the fallback errors
                 self.cache.invalidate(&request);
+                trace!("FallbackFailure");
                 e
             })?;
 
         // PERF: unnecessary lock if we don't cache the value, could be improved
         //  if `should_cache` value can be determined beforehand.
         if should_cache {
-            *guard = Some(response.clone())
+            tracing::Span::current().record("should_cache", true);
+            *guard = Some(response.clone());
+            trace!("EntrySaved")
         } else {
             self.cache.invalidate(&request);
         }
@@ -85,7 +91,7 @@ mod test {
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn test_sequential_access() {
         let access_counter = Arc::new(Mutex::new(0));
         let cache = RpcCache::<String, i32>::new("test", 100, 3600);
@@ -110,7 +116,7 @@ mod test {
         Ok((1, true))
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn test_parallel_access() {
         let access_counter = Arc::new(Mutex::new(0));
         let cache = RpcCache::<String, i32>::new("test", 100, 3600);
@@ -138,7 +144,7 @@ mod test {
         Ok((1, false))
     }
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn test_parallel_access_unsafe_cache() {
         let access_counter = Arc::new(Mutex::new(0));
         let cache = RpcCache::<usize, i32>::new("test", 100, 3600);
