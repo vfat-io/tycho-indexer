@@ -173,20 +173,44 @@ pub trait RPCClient: Send + Sync {
                 // If no component ids are specified, we need to make requests based on the total
                 // number of results from the first response.
 
-                let mut ans: Option<ProtocolComponentRequestResponse> = None;
-                let mut page: i64 = 0;
-                let mut total_pages: Option<i64> = None;
+                let initial_request = ProtocolComponentsRequestBody {
+                    protocol_system: request.protocol_system.clone(),
+                    component_ids: request.component_ids.clone(),
+                    tvl_gt: request.tvl_gt,
+                    chain: request.chain,
+                    pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
+                };
+                let first_response = self
+                    .get_protocol_components(&initial_request)
+                    .await
+                    .map_err(|_| RPCError::Fatal("No response received".to_string()))?;
 
-                loop {
+                let total_items = first_response.pagination.total;
+                let total_pages = (total_items as f64 / chunk_size as f64).ceil() as i64;
+
+                // Initialize the final response accumulator
+                let mut accumulated_response = ProtocolComponentRequestResponse {
+                    protocol_components: first_response.protocol_components,
+                    pagination: PaginationResponse {
+                        page: 0,
+                        page_size: chunk_size as i64,
+                        total: total_items,
+                    },
+                };
+
+                let mut page = 1;
+                while page < total_pages {
+                    let requests_in_this_iteration = (total_pages - page).min(concurrency as i64);
+
                     // Create request bodies for parallel requests, respecting the concurrency limit
-                    let chunked_bodies = (0..concurrency)
+                    let chunked_bodies = (0..requests_in_this_iteration)
                         .map(|iter| ProtocolComponentsRequestBody {
                             protocol_system: request.protocol_system.clone(),
                             component_ids: request.component_ids.clone(),
                             tvl_gt: request.tvl_gt,
                             chain: request.chain,
                             pagination: PaginationParams {
-                                page: page + iter as i64,
+                                page: page + iter,
                                 page_size: chunk_size as i64,
                             },
                         })
@@ -225,32 +249,16 @@ pub trait RPCClient: Send + Sync {
                     // Update the accumulated response or set the initial response
                     match responses {
                         Ok(mut resp) => {
-                            // Set total pages on the first response, based on the total number of
-                            // components
-                            if total_pages.is_none() {
-                                let total_items = resp.pagination.total;
-                                total_pages =
-                                    Some((total_items as f64 / chunk_size as f64).ceil() as i64);
-                            }
-
-                            if let Some(ref mut a) = ans {
-                                a.protocol_components
-                                    .append(&mut resp.protocol_components);
-                            } else {
-                                ans = Some(resp);
-                            }
-
-                            // Check if we've reached the last page
-                            if page >= total_pages.unwrap() - 1 {
-                                break;
-                            }
+                            accumulated_response
+                                .protocol_components
+                                .append(&mut resp.protocol_components);
                         }
                         Err(e) => return Err(e),
                     }
 
                     page += concurrency as i64;
                 }
-                ans.ok_or_else(|| RPCError::Fatal("No response received".to_string()))
+                Ok(accumulated_response)
             }
         }
     }

@@ -819,6 +819,11 @@ impl PaginationResponse {
     pub fn new(page: i64, page_size: i64, total: i64) -> Self {
         Self { page, page_size, total }
     }
+
+    pub fn total_pages(&self) -> i64 {
+        // ceil(total / page_size)
+        (self.total + self.page_size - 1) / self.page_size
+    }
 }
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default, ToSchema, Eq, Hash)]

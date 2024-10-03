@@ -143,7 +143,6 @@ impl PostgresGateway {
         let chain_id_value = self.get_chain_id(chain);
 
         let mut count_query = protocol_component
-            .inner_join(transaction.on(creation_tx.eq(schema::transaction::id)))
             .left_join(schema::component_tvl::table)
             .into_boxed();
 
