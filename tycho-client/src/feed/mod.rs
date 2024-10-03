@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
 use chrono::{Local, NaiveDateTime};
-use futures03::{future::join_all, stream::FuturesUnordered, StreamExt};
-
+use futures03::{
+    future::{join_all, try_join_all},
+    stream::FuturesUnordered,
+    StreamExt,
+};
 use serde::Serialize;
 use tokio::{
     select,
@@ -342,6 +345,13 @@ where
             .synchronizers
             .take()
             .expect("No synchronizers set!");
+        // init synchronizers
+        let init_tasks = synchronizers
+            .values()
+            .map(|s| s.initialize())
+            .collect::<Vec<_>>();
+        try_join_all(init_tasks).await?;
+
         let mut sync_streams = HashMap::with_capacity(synchronizers.len());
         let mut sync_handles = Vec::new();
         for (extractor_id, synchronizer) in synchronizers.drain() {
@@ -546,6 +556,10 @@ mod tests {
 
     #[async_trait]
     impl StateSynchronizer for MockStateSync {
+        async fn initialize(&self) -> SyncResult<()> {
+            Ok(())
+        }
+
         async fn start(
             &self,
         ) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<StateSyncMessage>)> {

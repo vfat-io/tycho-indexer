@@ -41,7 +41,7 @@ pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
     deltas_client: D,
     max_retries: u64,
     include_snapshots: bool,
-    component_filter: ComponentFilter,
+    component_tracker: Arc<Mutex<ComponentTracker<R>>>,
     shared: Arc<Mutex<SharedState>>,
     end_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
@@ -125,6 +125,7 @@ impl StateSyncMessage {
 /// delivering delta messages for the components that have changed.
 #[async_trait]
 pub trait StateSynchronizer: Send + Sync + 'static {
+    async fn initialize(&self) -> SyncResult<()>;
     /// Starts the state synchronization.
     async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<StateSyncMessage>)>;
     /// Ends the sychronization loop.
@@ -150,12 +151,17 @@ where
         deltas_client: D,
     ) -> Self {
         Self {
-            extractor_id,
+            extractor_id: extractor_id.clone(),
             retrieve_balances,
-            rpc_client,
+            rpc_client: rpc_client.clone(),
             include_snapshots,
             deltas_client,
-            component_filter,
+            component_tracker: Arc::new(Mutex::new(ComponentTracker::new(
+                extractor_id.chain,
+                extractor_id.name.as_str(),
+                component_filter,
+                rpc_client,
+            ))),
             max_retries,
             shared: Arc::new(Mutex::new(SharedState::default())),
             end_tx: Arc::new(Mutex::new(None)),
@@ -321,20 +327,8 @@ where
     #[instrument(skip(self, block_tx), fields(extractor_id = %self.extractor_id))]
     async fn state_sync(self, block_tx: &mut Sender<StateSyncMessage>) -> SyncResult<()> {
         // initialisation
-        let mut tracker = ComponentTracker::new(
-            self.extractor_id.chain,
-            self.extractor_id.name.as_str(),
-            self.component_filter.clone(),
-            self.rpc_client.clone(),
-        );
-        info!("Retrieving relevant protocol components");
-        tracker.initialise_components().await?;
+        let mut tracker = self.component_tracker.lock().await;
 
-        info!(
-            n_components = tracker.components.len(),
-            n_contracts = tracker.contracts.len(),
-            "Finished retrieving components",
-        );
         let subscription_options = SubscriptionOptions::new().with_state(self.include_snapshots);
         let (_, mut msg_rx) = self
             .deltas_client
@@ -451,6 +445,18 @@ where
     R: RPCClient + Clone + Send + Sync + 'static,
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
+    async fn initialize(&self) -> SyncResult<()> {
+        let mut tracker = self.component_tracker.lock().await;
+        info!("Retrieving relevant protocol components");
+        tracker.initialise_components().await?;
+        info!(
+            n_components = tracker.components.len(),
+            n_contracts = tracker.contracts.len(),
+            "Finished retrieving components",
+        );
+
+        Ok(())
+    }
     async fn start(&self) -> SyncResult<(JoinHandle<SyncResult<()>>, Receiver<StateSyncMessage>)> {
         let (mut tx, rx) = channel(15);
 
@@ -930,6 +936,10 @@ mod test {
             },
         ];
         let mut state_sync = with_mocked_clients(true, Some(rpc_client), Some(deltas_client));
+        state_sync
+            .initialize()
+            .await
+            .expect("Init failed");
 
         // Test starts here
         let (jh, mut rx) = state_sync
@@ -1162,6 +1172,10 @@ mod test {
             ArcRPCClient(Arc::new(rpc_client)),
             ArcDeltasClient(Arc::new(deltas_client)),
         );
+        state_sync
+            .initialize()
+            .await
+            .expect("Init failed");
 
         // Simulate the incoming BlockChanges
         let deltas = [
