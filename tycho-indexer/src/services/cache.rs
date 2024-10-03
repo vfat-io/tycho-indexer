@@ -2,7 +2,7 @@ use futures03::Future;
 use mini_moka::sync::Cache;
 use std::{error::Error, fmt::Debug, hash::Hash, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, instrument, Level};
 
 pub struct RpcCache<R, V> {
     name: String,
@@ -23,6 +23,8 @@ where
         ));
         Self { name: name.to_string(), cache }
     }
+
+    #[instrument(level = Level::TRACE, skip_all)]
     pub async fn get<
         'a,
         E: Error,

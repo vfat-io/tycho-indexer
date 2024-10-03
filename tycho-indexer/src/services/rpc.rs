@@ -354,6 +354,7 @@ where
         ))
     }
 
+    #[instrument(skip(self, request))]
     async fn get_tokens(
         &self,
         request: &dto::TokensRequestBody,
@@ -429,6 +430,7 @@ where
         }
     }
 
+    #[instrument(skip(self, request))]
     async fn get_protocol_components(
         &self,
         request: &dto::ProtocolComponentsRequestBody,
@@ -460,6 +462,7 @@ where
         let buffered_components = self
             .pending_deltas
             .get_new_components(ids_slice, system.as_deref())?;
+        debug!(n_components = buffered_components.len(), "RetrievedBufferedComponents");
 
         // Check if we have all requested components in the cache
         if let Some(requested_ids) = ids_slice {
