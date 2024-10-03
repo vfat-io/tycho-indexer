@@ -354,6 +354,7 @@ where
         ))
     }
 
+    #[instrument(skip(self, request))]
     async fn get_tokens(
         &self,
         request: &dto::TokensRequestBody,
@@ -429,6 +430,7 @@ where
         }
     }
 
+    #[instrument(skip(self, request))]
     async fn get_protocol_components(
         &self,
         request: &dto::ProtocolComponentsRequestBody,
