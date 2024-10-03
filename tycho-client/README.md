@@ -93,7 +93,7 @@ If you wish to track all pools with a minimum TVL (denominated in native token),
 ```bash
 tycho-client --min-tvl 100 --exchange uniswap_v3 --exchange uniswap_v2
 ```
-This will stream updates for all components whose TVL exceeds the minimum threshold set. Note: if a pool fluctuates in tvl close to this boundary the client will emit a message to add/remove that pool every time it crosses that boundary. To mitegate this please use the ranged tvl boundary decribed below.
+This will stream updates for all components whose TVL exceeds the minimum threshold set. Note: if a pool fluctuates in tvl close to this boundary the client will emit a message to add/remove that pool every time it crosses that boundary. To mitigate this please use the ranged tvl boundary decribed below.
 
   2) Set a ranged TVL boundary:
 ```bash
@@ -108,9 +108,7 @@ For each block, the tycho-client will emit a FeedMessage. Each message is emitte
 
 #### FeedMessage
 
-The main outer message type. It contains both the individual SynchronizerState (one per extractor) and the StateSyncMessage (also one per extractor). Each extractor is supposed to emit one message per block even if no changes happened in that block.
-
-and metadata about the extractors block synchronisation state. The latter
+The main outer message type. It contains both the individual SynchronizerState (one per extractor) and the StateSyncMessage (also one per extractor). Each extractor is supposed to emit one message per block even if no changes happened in that block and metadata about the extractors block synchronisation state. The latter
 allows consumers to handle delayed extractors gracefully. 
 
 [Link to structs](https://github.com/propeller-heads/tycho-indexer/blob/main/tycho-client/src/feed/mod.rs#L305)
@@ -135,11 +133,11 @@ This struct, as the name states, serves to synchronize the state of any consumer
 The attributes of this struct include the header (block information), snapshots, deltas and removed components. 
 
  - *Snapshots* are provided for any components that have NOT been observed yet by the client. A snapshot contains the entire state at the header.
- - Deltas contain state updates, observed after or at the snapshot. Any components
+ - *Deltas* contain state updates, observed after or at the snapshot. Any components
 mentioned in the snapshots and in deltas within the same StateSynchronization message,
 must have the deltas applied to their snapshot to arrive at a correct state for the
 current header.
-- Removed components is map of components that should be removed by consumers. Any components mentioned here will not appear in any further messages/updates.
+- *Removed components* is a map of components that should be removed by consumers. Any components mentioned here will not appear in any further messages/updates.
 
 [Link to structs](https://github.com/propeller-heads/tycho-indexer/blob/main/tycho-client/src/feed/synchronizer.rs#L80)
 
