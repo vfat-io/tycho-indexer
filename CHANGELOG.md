@@ -1,3 +1,11 @@
+## [0.27.0](https://github.com/propeller-heads/tycho-indexer/compare/0.26.0...0.27.0) (2024-10-03)
+
+
+### Features
+
+* **rpc:** Implement per-key sharded locking in RpcCache ([ef68ca2](https://github.com/propeller-heads/tycho-indexer/commit/ef68ca2491e5fb7c1be58148b8b7e19bb092100b))
+* **rpc:** Implement per-key sharded locking in RpcCache ([#396](https://github.com/propeller-heads/tycho-indexer/issues/396)) ([f0337bf](https://github.com/propeller-heads/tycho-indexer/commit/f0337bf2fb01aab478eb7f41c47c9d3f8718b8f6))
+
 ## [0.26.0](https://github.com/propeller-heads/tycho-indexer/compare/0.25.1...0.26.0) (2024-10-03)
 
 
