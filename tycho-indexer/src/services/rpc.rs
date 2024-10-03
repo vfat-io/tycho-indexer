@@ -365,7 +365,7 @@ where
                     .await
                     .map(|res| {
                         let last_page = res.pagination.total_pages() - 1;
-                        (res, request.pagination.page >= last_page)
+                        (res, request.pagination.page < last_page)
                     })
             })
             .await?;
@@ -440,7 +440,7 @@ where
                     .await
                     .map(|res| {
                         let last_page = res.pagination.total_pages() - 1;
-                        (res, request.pagination.page >= last_page)
+                        (res, request.pagination.page < last_page)
                     })
             })
             .await
@@ -997,7 +997,7 @@ mod tests {
             CurrencyToken::new(&(WETH.parse().unwrap()), "WETH", 18, 0, &[], Chain::Ethereum, 100),
         ];
         let mut gw = MockGateway::new();
-        let mock_response = Ok(WithTotal { entity: expected.clone(), total: Some(2) });
+        let mock_response = Ok(WithTotal { entity: expected.clone(), total: Some(3) });
         // ensure the gateway is only accessed once - the second request should hit cache
         gw.expect_get_tokens()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
@@ -1025,6 +1025,8 @@ mod tests {
         assert_eq!(tokens.tokens.len(), 2);
         assert_eq!(tokens.tokens[0].symbol, "USDC");
         assert_eq!(tokens.tokens[1].symbol, "WETH");
+        assert_eq!(tokens.pagination.total, 3);
+        assert_eq!(tokens.pagination.total_pages(), 2);
 
         // Second request (should hit cache and not increase gateway access count)
 
