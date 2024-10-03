@@ -9,7 +9,7 @@ use std::{
 };
 use thiserror::Error;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::debug;
+use tracing::{debug, instrument, Level};
 use tycho_core::{
     models::{
         blockchain::BlockAggregatedChanges,
@@ -252,6 +252,7 @@ impl PendingDeltasBuffer for PendingDeltas {
     /// * `db_states`: A mutable reference to the states fetched from the db.
     /// * `version`: The version of the state to be fetched. If `None`, the latest state will be
     ///   fetched.
+    #[instrument(level = Level::TRACE, skip_all)]
     fn merge_native_states(
         &self,
         protocol_ids: Option<&[&str]>,
@@ -292,6 +293,7 @@ impl PendingDeltasBuffer for PendingDeltas {
     /// * `db_states`: A mutable reference to the states fetched from the db.
     /// * `version`: The version of the state to be fetched. If `None`, the latest state will be
     ///   fetched.
+    #[instrument(level = Level::TRACE, skip_all)]
     fn update_vm_states(
         &self,
         addresses: Option<&[Bytes]>,
@@ -340,6 +342,7 @@ impl PendingDeltasBuffer for PendingDeltas {
     /// ```
     /// let components = get_new_components(Some(&["id1", "id2"]), Some("system1"))?;
     /// ```
+    #[instrument(level = Level::TRACE, skip_all)]
     fn get_new_components(
         &self,
         ids: Option<&[&str]>,
@@ -382,6 +385,7 @@ impl PendingDeltasBuffer for PendingDeltas {
     /// timestamp is used.
     /// Note - if no protocol system is provided, we choose a random extractor to get the finality
     /// status from. This is particularly risky when there is an extractor syncing.
+    #[instrument(level = Level::TRACE, skip_all)]
     fn get_block_finality(
         &self,
         version: BlockNumberOrTimestamp,
