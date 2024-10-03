@@ -1,3 +1,14 @@
+## [0.25.1](https://github.com/propeller-heads/tycho-indexer/compare/0.25.0...0.25.1) (2024-10-03)
+
+
+### Bug Fixes
+
+* avoid concurrent requests for empty pages ([a881bba](https://github.com/propeller-heads/tycho-indexer/commit/a881bba3f780d86928d5b119acf9f973f2fb7513))
+* avoid concurrent requests for empty pages ([#392](https://github.com/propeller-heads/tycho-indexer/issues/392)) ([681ae7e](https://github.com/propeller-heads/tycho-indexer/commit/681ae7e145403fc7e876d2216ff215f466ecd075))
+* cache condition was reversed ([6f45a26](https://github.com/propeller-heads/tycho-indexer/commit/6f45a2639ca23c8f0447c8d263c02dde58e32f17))
+* **client:** only apply concurrency once total is known ([82a65f1](https://github.com/propeller-heads/tycho-indexer/commit/82a65f13c5551ac6061fc38008c1c898e036789c))
+* skip caching last page of components response ([7eff7bf](https://github.com/propeller-heads/tycho-indexer/commit/7eff7bfa91fc0229daaf86e158c82f2a7e9caddf))
+
 ## [0.25.0](https://github.com/propeller-heads/tycho-indexer/compare/0.24.1...0.25.0) (2024-10-03)
 
 
