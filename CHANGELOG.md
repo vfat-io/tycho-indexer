@@ -1,3 +1,11 @@
+## [0.26.0](https://github.com/propeller-heads/tycho-indexer/compare/0.25.1...0.26.0) (2024-10-03)
+
+
+### Features
+
+* **client:** Ensure StateSynchronizer waits for initialization ([a378483](https://github.com/propeller-heads/tycho-indexer/commit/a378483a73b70d184f25e1093fe256ef0f383437))
+* **client:** Ensure StateSynchronizer waits for initialization ([#393](https://github.com/propeller-heads/tycho-indexer/issues/393)) ([7852e43](https://github.com/propeller-heads/tycho-indexer/commit/7852e432f77a41dac6dc6dacba64e4bab9e68153))
+
 ## [0.25.1](https://github.com/propeller-heads/tycho-indexer/compare/0.25.0...0.25.1) (2024-10-03)
 
 
