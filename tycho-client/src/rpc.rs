@@ -178,15 +178,18 @@ pub trait RPCClient: Send + Sync {
                 let mut total_pages: Option<i64> = None;
 
                 loop {
+                    let remaining_pages = total_pages.unwrap_or(i64::MAX) - page;
+                    let requests_in_this_iteration = remaining_pages.min(concurrency as i64);
+
                     // Create request bodies for parallel requests, respecting the concurrency limit
-                    let chunked_bodies = (0..concurrency)
+                    let chunked_bodies = (0..requests_in_this_iteration)
                         .map(|iter| ProtocolComponentsRequestBody {
                             protocol_system: request.protocol_system.clone(),
                             component_ids: request.component_ids.clone(),
                             tvl_gt: request.tvl_gt,
                             chain: request.chain,
                             pagination: PaginationParams {
-                                page: page + iter as i64,
+                                page: page + iter,
                                 page_size: chunk_size as i64,
                             },
                         })
