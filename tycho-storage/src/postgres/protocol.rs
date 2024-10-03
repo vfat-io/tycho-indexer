@@ -700,7 +700,6 @@ impl PostgresGateway {
 
         match (ids, system) {
             (Some(ids), Some(_)) => {
-                warn!("Both protocol IDs and system were provided. System will be ignored.");
                 let state_data = orm::ProtocolState::by_id(
                     ids,
                     &chain_db_id,
