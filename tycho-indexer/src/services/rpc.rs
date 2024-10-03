@@ -364,8 +364,8 @@ where
                 self.get_tokens_inner(r)
                     .await
                     .map(|res| {
-                        let n_tokens = res.tokens.len();
-                        (res, n_tokens == request.pagination.page_size as usize)
+                        let last_page = res.pagination.total_pages() - 1;
+                        (res, request.pagination.page >= last_page)
                     })
             })
             .await?;
@@ -438,7 +438,10 @@ where
             .get(request.clone(), |r| async {
                 self.get_protocol_components_inner(r)
                     .await
-                    .map(|res| (res, true))
+                    .map(|res| {
+                        let last_page = res.pagination.total_pages() - 1;
+                        (res, request.pagination.page >= last_page)
+                    })
             })
             .await
     }
