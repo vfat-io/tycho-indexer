@@ -1,3 +1,12 @@
+## [0.25.0](https://github.com/propeller-heads/tycho-indexer/compare/0.24.1...0.25.0) (2024-10-03)
+
+
+### Features
+
+* **rpc:** add spans and event around the delta buffer and components query ([fe1a1f4](https://github.com/propeller-heads/tycho-indexer/commit/fe1a1f48e1a9d6ece1a540dc440847e71be5af54))
+* **rpc:** add spans for cache, tokens and components requests ([e7112b0](https://github.com/propeller-heads/tycho-indexer/commit/e7112b0ebea8533b0ed9c3cc78741734e57a61e9))
+* **rpc:** add spans for cache, tokens and components requests ([#394](https://github.com/propeller-heads/tycho-indexer/issues/394)) ([0c67a3d](https://github.com/propeller-heads/tycho-indexer/commit/0c67a3d329a19cb62953a31e9032d3da66bc2836))
+
 ## [0.24.1](https://github.com/propeller-heads/tycho-indexer/compare/0.24.0...0.24.1) (2024-10-02)
 
 
