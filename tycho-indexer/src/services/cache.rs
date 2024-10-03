@@ -1,12 +1,11 @@
 use futures03::Future;
 use mini_moka::sync::Cache;
 use std::{error::Error, fmt::Debug, hash::Hash, sync::Arc};
-use tokio::sync::RwLock;
 use tracing::{debug, instrument, Level};
 
 pub struct RpcCache<R, V> {
     name: String,
-    cache: Arc<RwLock<Cache<R, V>>>,
+    cache: Arc<Cache<R, Arc<tokio::sync::Mutex<Option<V>>>>>,
 }
 
 impl<R, V> RpcCache<R, V>
@@ -15,12 +14,12 @@ where
     V: Clone + Send + Sync + 'static,
 {
     pub fn new(name: &str, capacity: u64, ttl: u64) -> Self {
-        let cache = Arc::new(RwLock::new(
+        let cache = Arc::new(
             Cache::builder()
                 .max_capacity(capacity)
                 .time_to_live(std::time::Duration::from_secs(ttl))
                 .build(),
-        ));
+        );
         Self { name: name.to_string(), cache }
     }
 
@@ -35,35 +34,46 @@ where
         request: R,
         fallback: F,
     ) -> Result<V, E> {
-        #[allow(unused_assignments)]
-        let mut cache_entry_count: u64 = 0;
-
         // Check the cache for a cached response
-        {
-            let read_lock = self.cache.read().await;
-            cache_entry_count = read_lock.entry_count();
-            if let Some(cached_response) = read_lock.get(&request) {
-                debug!(cache = self.name, ?request, "CacheHit");
-                return Ok(cached_response);
+        if let Some(inflight_val) = self.cache.get(&request) {
+            // the value is present or is being written to
+            // If the values is None, we likely hit a should_cache = false entry while in-flight,
+            //  so we simply behave as if it was a cache miss.
+            if let Some(res) = inflight_val.lock().await.clone() {
+                debug!(
+                    cache = self.name,
+                    ?request,
+                    cache_size = self.cache.entry_count(),
+                    "CacheHit"
+                );
+                return Ok(res);
             }
         }
 
-        debug!(?request, cache_size = cache_entry_count, cache = self.name, "CacheMiss");
-        // Acquire a write lock before querying the database (prevents concurrent db queries)
-        let write_lock = self.cache.write().await;
+        // the value has never been written
+        debug!(?request, cache_size = self.cache.entry_count(), cache = self.name, "CacheMiss");
+        let lock = Arc::new(tokio::sync::Mutex::new(None));
+        let mut guard = lock.lock().await;
+        // We insert a None value here to indicate that this request is in flight.
+        //  In some cases this None value may leak to the reading part above, e.g.
+        //  if the fallback failed or if the value is not safe to be cached.
+        self.cache
+            .insert(request.clone(), lock.clone());
+        let (response, should_cache) = (fallback)(request.clone())
+            .await
+            .map_err(|e| {
+                // invalidate the cache if the fallback errors
+                self.cache.invalidate(&request);
+                e
+            })?;
 
-        // Double-check if another thread has already fetched and cached the data
-        if let Some(cached_response) = write_lock.get(&request) {
-            return Ok(cached_response);
-        }
-
-        let (response, should_cache) = (fallback)(request.clone()).await?;
-
+        // PERF: unnecessary lock if we don't cache the value, could be improved
+        //  if `should_cache` value can be determined beforehand.
         if should_cache {
-            debug!(?request, name = self.name, "IncompleteCacheValue");
-            write_lock.insert(request, response.clone());
+            *guard = Some(response.clone())
+        } else {
+            self.cache.invalidate(&request);
         }
-
         Ok(response)
     }
 }
@@ -118,5 +128,33 @@ mod test {
 
         let v = *access_counter.lock().await;
         assert_eq!(v, 1);
+    }
+
+    async fn increment_counter_unsafe_value(
+        access_counter: Arc<Mutex<i32>>,
+    ) -> Result<(i32, bool), RpcError> {
+        let mut guard = access_counter.lock().await;
+        *guard += 1;
+        Ok((1, false))
+    }
+
+    #[tokio::test]
+    async fn test_parallel_access_unsafe_cache() {
+        let access_counter = Arc::new(Mutex::new(0));
+        let cache = RpcCache::<usize, i32>::new("test", 100, 3600);
+        let tasks: Vec<_> = (0..10)
+            .map(|i| {
+                cache.get(i % 2, |_| async {
+                    increment_counter_unsafe_value(access_counter.clone()).await
+                })
+            })
+            .collect();
+
+        try_join_all(tasks)
+            .await
+            .expect("a task failed");
+
+        let v = *access_counter.lock().await;
+        assert_eq!(v, 10);
     }
 }
