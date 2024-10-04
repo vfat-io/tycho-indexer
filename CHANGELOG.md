@@ -1,3 +1,11 @@
+## [0.29.0](https://github.com/propeller-heads/tycho-indexer/compare/0.28.0...0.29.0) (2024-10-04)
+
+
+### Features
+
+* **rpc:** add events in delta buffer ([9047b7c](https://github.com/propeller-heads/tycho-indexer/commit/9047b7ce473478ee6cad50a584bcc0c96b972729))
+* **rpc:** add events in delta buffer ([#398](https://github.com/propeller-heads/tycho-indexer/issues/398)) ([8bbe273](https://github.com/propeller-heads/tycho-indexer/commit/8bbe273697b6f760db645a7e3695b0eb55ca512b))
+
 ## [0.28.0](https://github.com/propeller-heads/tycho-indexer/compare/0.27.0...0.28.0) (2024-10-04)
 
 
