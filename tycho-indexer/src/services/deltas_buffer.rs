@@ -9,7 +9,7 @@ use std::{
 };
 use thiserror::Error;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, instrument, Level};
+use tracing::{debug, instrument, trace, Level};
 use tycho_core::{
     models::{
         blockchain::BlockAggregatedChanges,
@@ -107,8 +107,19 @@ impl PendingDeltas {
                             PendingDeltasError::LockError(msg.extractor.to_string(), e.to_string())
                         })?;
                         if msg.revert {
+                            trace!(
+                                block_number = msg.block.number,
+                                extractor = msg.extractor,
+                                "DeltaBufferPurge"
+                            );
                             guard.purge(msg.block.hash.clone())?;
                         } else {
+                            trace!(
+                                block_number = msg.block.number,
+                                finality = msg.finalized_block_height,
+                                extractor = msg.extractor,
+                                "DeltaBufferInsertion"
+                            );
                             guard.insert_block(msg.clone())?;
                             guard.drain_new_finalized_blocks(msg.finalized_block_height)?;
                         }
