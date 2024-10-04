@@ -581,6 +581,11 @@ pub async fn contract_state<G: Gateway>(
 ) -> HttpResponse {
     // Note - filtering by protocol system is not supported on this endpoint. This is due to the
     // complexity of paginating this endpoint with the current design.
+
+    tracing::Span::current().record("page", body.pagination.page);
+    tracing::Span::current().record("page.size", body.pagination.page_size);
+    tracing::Span::current().record("protocol.system", &body.protocol_system);
+
     if body.pagination.page_size > 100 {
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 100.");
     }
@@ -616,6 +621,9 @@ pub async fn tokens<G: Gateway>(
     body: web::Json<dto::TokensRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
+    tracing::Span::current().record("page", body.pagination.page);
+    tracing::Span::current().record("page.size", body.pagination.page_size);
+
     if body.pagination.page_size > 3000 {
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 3000.");
     }
@@ -651,6 +659,10 @@ pub async fn protocol_components<G: Gateway>(
     body: web::Json<dto::ProtocolComponentsRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
+    tracing::Span::current().record("page", body.pagination.page);
+    tracing::Span::current().record("page.size", body.pagination.page_size);
+    tracing::Span::current().record("protocol.system", &body.protocol_system);
+
     if body.pagination.page_size > 500 {
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 500.");
     }
@@ -692,6 +704,10 @@ pub async fn protocol_state<G: Gateway>(
     body: web::Json<dto::ProtocolStateRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
+    tracing::Span::current().record("page", body.pagination.page);
+    tracing::Span::current().record("page.size", body.pagination.page_size);
+    tracing::Span::current().record("protocol.system", &body.protocol_system);
+
     if body.pagination.page_size > 100 {
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 100.");
     }
