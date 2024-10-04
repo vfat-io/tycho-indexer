@@ -1,3 +1,12 @@
+## [0.28.0](https://github.com/propeller-heads/tycho-indexer/compare/0.27.0...0.28.0) (2024-10-04)
+
+
+### Features
+
+* improve rpc spans ([#397](https://github.com/propeller-heads/tycho-indexer/issues/397)) ([296b71c](https://github.com/propeller-heads/tycho-indexer/commit/296b71c09f37222aed7b54756e7098c0af212099))
+* **rpc:** Add pagination and protocol attributes to rpc spans. ([5119d44](https://github.com/propeller-heads/tycho-indexer/commit/5119d446417612684547d9bbc7d90378effca0f3))
+* **rpc:** Improve cache tracing spans. ([9241119](https://github.com/propeller-heads/tycho-indexer/commit/9241119353bb4c6c50aa65d8088002a32fc75afd))
+
 ## [0.27.0](https://github.com/propeller-heads/tycho-indexer/compare/0.26.0...0.27.0) (2024-10-03)
 
 
