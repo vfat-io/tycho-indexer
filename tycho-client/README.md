@@ -108,7 +108,7 @@ For each block, the tycho-client will emit a FeedMessage. Each message is emitte
 
 #### FeedMessage
 
-The main outer message type. It contains both the individual SynchronizerState (one per extractor) and the StateSyncMessage (also one per extractor). Each extractor is supposed to emit one message per block even if no changes happened in that block and metadata about the extractors block synchronisation state. The latter
+The main outer message type. It contains both the individual SynchronizerState (one per extractor) and the StateSyncMessage (also one per extractor). Each extractor is supposed to emit one message per block (even if no changes happened in that block) and metadata about the extractors block synchronisation state. The latter
 allows consumers to handle delayed extractors gracefully. 
 
 [Link to structs](https://github.com/propeller-heads/tycho-indexer/blob/main/tycho-client/src/feed/mod.rs#L305)
@@ -263,7 +263,7 @@ components. This mode can be turned on via the `--no-state` flag.
 If you wish to use tycho as a service instead of hosting it yourself, the following endpoints are available:
 
 ### PropellerHeads (beta)
-- URL: `tycho-beta.propellerheads.xyz/v1`
+- URL: `tycho-beta.propellerheads.xyz`
 
 - RPC docs: `https://tycho-beta.propellerheads.xyz/docs/`
 
