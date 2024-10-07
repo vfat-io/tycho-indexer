@@ -9,7 +9,7 @@ use std::{
 };
 use thiserror::Error;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, instrument, trace, Level};
+use tracing::{debug, error, instrument, trace, Level};
 use tycho_core::{
     models::{
         blockchain::BlockAggregatedChanges,
@@ -31,6 +31,7 @@ use tycho_core::{
 ///   the database and/or from the buffer.
 #[derive(Default, Clone)]
 pub struct PendingDeltas {
+    // Map with the protocol system name as key and a `ReorgBuffer` as value.
     buffers: HashMap<String, Arc<Mutex<ReorgBuffer<BlockAggregatedChanges>>>>,
 }
 
@@ -361,7 +362,12 @@ impl PendingDeltasBuffer for PendingDeltas {
     ) -> Result<Vec<ProtocolComponent>> {
         let requested_ids: Option<HashSet<&str>> = ids.map(|ids| ids.iter().cloned().collect());
         let mut new_components = Vec::new();
-        for (name, buffer) in self.buffers.iter() {
+
+        let collect_components = |name: &str,
+                                  buffer: &Arc<Mutex<ReorgBuffer<BlockAggregatedChanges>>>,
+                                  new_components: &mut Vec<ProtocolComponent>,
+                                  requested_ids: &Option<HashSet<&str>>|
+         -> Result<()> {
             let guard = buffer
                 .lock()
                 .map_err(|e| PendingDeltasError::LockError(name.to_string(), e.to_string()))?;
@@ -380,10 +386,22 @@ impl PendingDeltasBuffer for PendingDeltas {
                         }),
                 );
             }
-        }
+            Ok(())
+        };
 
-        if let Some(system) = protocol_system {
-            new_components.retain(|c| c.protocol_system == system);
+        if let Some(ps) = protocol_system {
+            // If a protocol system is given, only search into its buffer
+            let buffer = self.buffers.get(ps).ok_or_else(|| {
+                error!("Missing reorg buffer for {}", ps);
+                PendingDeltasError::UnknownExtractor(ps.to_string())
+            })?;
+            collect_components(ps, buffer, &mut new_components, &requested_ids)?;
+        } else {
+            // If no protocol system is provided, the function iterates through all buffers,
+            // which is inefficient.
+            for (name, buffer) in self.buffers.iter() {
+                collect_components(name, buffer, &mut new_components, &requested_ids)?;
+            }
         }
 
         Ok(new_components)
@@ -779,7 +797,7 @@ mod test {
         assert_eq!(new_components, vec![exp[0].clone()]);
 
         let new_components = buffer
-            .get_new_components(None, Some("vm_swap"))
+            .get_new_components(None, Some("vm:extractor"))
             .unwrap();
 
         assert_eq!(new_components, vec![exp[1].clone()]);
