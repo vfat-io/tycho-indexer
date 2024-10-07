@@ -25,6 +25,7 @@ class TychoStream:
         tycho_url: str,
         exchanges: list[str],
         blockchain: Chain,
+        auth_token: str = None,
         min_tvl: Decimal = None,
         min_tvl_range: tuple[Decimal, Decimal] = None,
         include_state=True,
@@ -49,6 +50,7 @@ class TychoStream:
             use_tls: Whether to use TLS connections with `tycho_url` or not. Defaults to `True`.
         """
         self.tycho_url = tycho_url
+        self.auth_token = auth_token
         self.min_tvl = min_tvl
         self.min_tvl_range = min_tvl_range
         self.tycho_client = None
@@ -77,6 +79,9 @@ class TychoStream:
                     str(self.min_tvl_range[1]),
                 ]
             )
+
+        if self.auth_token:
+            cmd.extend(["--auth-key", self.auth_token])
 
         if not self._include_state:
             cmd.append("--no-state")

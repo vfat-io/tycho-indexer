@@ -29,13 +29,18 @@ class TychoRPCClient:
     """
 
     def __init__(
-        self, rpc_url: str = "http://0.0.0.0:4242", chain: Chain = Chain.ethereum
+        self,
+        rpc_url: str = "http://0.0.0.0:4242",
+        auth_token: str = None,
+        chain: Chain = Chain.ethereum,
     ):
         self.rpc_url = rpc_url
         self._headers = {
             "accept": "application/json",
             "Content-Type": "application/json",
         }
+        if auth_token:
+            self._headers["Authorization"] = auth_token
         self._chain = chain
 
     def _post_request(

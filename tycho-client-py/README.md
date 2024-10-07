@@ -77,6 +77,7 @@ from decimal import Decimal
 async def main():
     stream = TychoStream(
         tycho_url="localhost:8888",
+        auth_token="secret_token",
         exchanges=["uniswap_v2"],
         min_tvl=Decimal(100),
         blockchain=Chain.ethereum,
