@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tycho-indexer-client"
 # this is versioned in lockstep with all other tycho packages
-version = "0.29.0"
+version = "0.29.1"
 description = "A package for interacting with the Tycho API."
 readme = "README.md"
 authors = [

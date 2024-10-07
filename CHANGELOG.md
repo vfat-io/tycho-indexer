@@ -1,3 +1,11 @@
+## [0.29.1](https://github.com/propeller-heads/tycho-indexer/compare/0.29.0...0.29.1) (2024-10-07)
+
+
+### Bug Fixes
+
+* increase component cache capacity ([4c2c611](https://github.com/propeller-heads/tycho-indexer/commit/4c2c611cbe4176b0d8797ad57a6b19587c5e16d4))
+* increase component cache capacity ([#402](https://github.com/propeller-heads/tycho-indexer/issues/402)) ([501afbc](https://github.com/propeller-heads/tycho-indexer/commit/501afbc9303ff9e06af7beb222a561b8c5d8a16c))
+
 ## [0.29.0](https://github.com/propeller-heads/tycho-indexer/compare/0.28.0...0.29.0) (2024-10-04)
 
 
