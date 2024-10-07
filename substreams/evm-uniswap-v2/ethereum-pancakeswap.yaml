@@ -1,6 +1,6 @@
 specVersion: v0.1.0
 package:
-  name: "substreams_arbitrum_uniswap_v3"
+  name: "ethereum_pancakeswap"
   version: v0.2.0
 
 protobuf:
@@ -15,12 +15,12 @@ protobuf:
 binaries:
   default:
     type: wasm/rust-v1
-    file: ../../target/wasm32-unknown-unknown/substreams/substreams_ethereum_uniswap_v3.wasm
+    file: ../../target/wasm32-unknown-unknown/substreams/ethereum_uniswap_v2.wasm
 
 modules:
   - name: map_pools_created
     kind: map
-    initialBlock: 37418321
+    initialBlock: 15614590
     inputs:
       - params: string
       - source: sf.ethereum.type.v2.Block
@@ -29,39 +29,21 @@ modules:
 
   - name: store_pools
     kind: store
-    initialBlock: 37418321
+    initialBlock: 15614590
     updatePolicy: set_if_not_exists
-    valueType: proto:uniswap.v3.Pool
+    valueType: proto:tycho.evm.v1.ProtocolComponent
     inputs:
       - map: map_pools_created
-
-  - name: map_balance_changes
-    kind: map
-    initialBlock: 37418321
-    inputs:
-      - source: sf.ethereum.type.v2.Block
-      - store: store_pools
-    output:
-      type: proto:tycho.evm.uniswap.v3.BalanceDeltas
-
-  - name: store_pools_balances
-    kind: store
-    initialBlock: 37418321
-    updatePolicy: add
-    valueType: bigint
-    inputs:
-      - map: map_balance_changes
 
   - name: map_pool_events
     kind: map
-    initialBlock: 37418321
+    initialBlock: 15614590
     inputs:
       - source: sf.ethereum.type.v2.Block
       - map: map_pools_created
       - store: store_pools
-      - store: store_pools_balances
     output:
       type: proto:tycho.evm.v1.BlockChanges
 
 params:
-  map_pools_created: "1F98431c8aD98523631AE4a59f267346ea31F984"
+  map_pools_created: factory_address=1097053fd2ea711dad45caccc45eff7548fcb362&protocol_type_name=pancakeswap_pool
