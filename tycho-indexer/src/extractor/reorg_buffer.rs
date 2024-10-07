@@ -1,7 +1,7 @@
 use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use tracing::{debug, trace, warn};
+use tracing::{debug, instrument, trace, warn, Level};
 use tycho_core::{
     models::{
         blockchain::{Block, BlockScoped},
@@ -176,11 +176,20 @@ where
     /// The retrieved iterator will include both the start and end block of specified range. In case
     /// either start or end block are None, the iterator will start the range at the oldest / end
     /// the range at the latest block.
+    #[instrument(skip(self), level = Level::DEBUG)]
     pub fn get_block_range(
         &self,
         start_version: Option<BlockNumberOrTimestamp>,
         end_version: Option<BlockNumberOrTimestamp>,
     ) -> Result<impl Iterator<Item = &B>, StorageError> {
+        let buffered_range = match (self.block_messages.front(), self.block_messages.back()) {
+            (Some(front), Some(back)) => {
+                format!("{}-{}", front.block().number, back.block().number)
+            }
+            _ => "None".to_string(),
+        };
+        tracing::Span::current().record("buffered_range", buffered_range.as_str());
+
         let start_index = if let Some(version) = start_version {
             self.find_index(|b| !version.greater_than(&b.block()))
                 .ok_or_else(|| {
