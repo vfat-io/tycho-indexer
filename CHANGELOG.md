@@ -1,3 +1,12 @@
+## [0.31.0](https://github.com/propeller-heads/tycho-indexer/compare/0.30.2...0.31.0) (2024-10-07)
+
+
+### Features
+
+* Add auth token support to tycho python client ([#406](https://github.com/propeller-heads/tycho-indexer/issues/406)) ([85376a6](https://github.com/propeller-heads/tycho-indexer/commit/85376a624da4d91eef52c584602727cf2a7bf44e))
+* add auth token to tycho python client rpc ([1033802](https://github.com/propeller-heads/tycho-indexer/commit/1033802b1c852b87d0e9b0761ad08be79855a8ce))
+* add auth token to tycho python client stream constructor ([d1f21bc](https://github.com/propeller-heads/tycho-indexer/commit/d1f21bc18af60e309f289b9f652a031a9d7c9f47))
+
 ## [0.30.2](https://github.com/propeller-heads/tycho-indexer/compare/0.30.1...0.30.2) (2024-10-07)
 
 
