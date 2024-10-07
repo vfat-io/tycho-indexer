@@ -1,3 +1,10 @@
+## [0.31.1](https://github.com/propeller-heads/tycho-indexer/compare/0.31.0...0.31.1) (2024-10-07)
+
+
+### Bug Fixes
+
+* exit build_wheel script on failed internal command ([47c30c7](https://github.com/propeller-heads/tycho-indexer/commit/47c30c7c66d0d32b4a8a2922e8e9bf06a37acb11))
+
 ## [0.31.0](https://github.com/propeller-heads/tycho-indexer/compare/0.30.2...0.31.0) (2024-10-07)
 
 
