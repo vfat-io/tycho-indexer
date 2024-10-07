@@ -1,3 +1,11 @@
+## [0.30.0](https://github.com/propeller-heads/tycho-indexer/compare/0.29.1...0.30.0) (2024-10-07)
+
+
+### Features
+
+* **tycho-indexer:** add span for `get_block_range` ([40d3c30](https://github.com/propeller-heads/tycho-indexer/commit/40d3c30b07f52719a64b7906a670e680af9cc8a8))
+* **tycho-indexer:** add span for `get_block_range` ([#403](https://github.com/propeller-heads/tycho-indexer/issues/403)) ([a3df5b4](https://github.com/propeller-heads/tycho-indexer/commit/a3df5b416623dc1329375cbe1e4d03c6e7250375))
+
 ## [0.29.1](https://github.com/propeller-heads/tycho-indexer/compare/0.29.0...0.29.1) (2024-10-07)
 
 
