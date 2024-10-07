@@ -1,3 +1,11 @@
+## [0.31.2](https://github.com/propeller-heads/tycho-indexer/compare/0.31.1...0.31.2) (2024-10-07)
+
+
+### Bug Fixes
+
+* **substreams:** output type in Substreams modules ([7d62512](https://github.com/propeller-heads/tycho-indexer/commit/7d625128d5242f2e7b589bff19e863af06070580))
+* **uniswap-v2-substreams:** use correct strucs in store pools module. ([16bbfc3](https://github.com/propeller-heads/tycho-indexer/commit/16bbfc3ce4805b8e5c6fce74c43d0e7f09eb266b))
+
 ## [0.31.1](https://github.com/propeller-heads/tycho-indexer/compare/0.31.0...0.31.1) (2024-10-07)
 
 
