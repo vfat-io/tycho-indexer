@@ -517,7 +517,7 @@ pub struct StateRequestBody {
     #[schema(value_type=Option<Vec<String>>)]
     pub contract_ids: Option<Vec<Bytes>>,
     #[serde(alias = "protocolSystem", default)]
-    pub protocol_system: Option<String>,
+    pub protocol_system: String,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
     #[serde(default)]
@@ -529,7 +529,7 @@ pub struct StateRequestBody {
 impl StateRequestBody {
     pub fn new(
         contract_ids: Option<Vec<Bytes>>,
-        protocol_system: Option<String>,
+        protocol_system: String,
         version: VersionParam,
         chain: Chain,
         pagination: PaginationParams,
@@ -537,20 +537,20 @@ impl StateRequestBody {
         Self { contract_ids, protocol_system, version, chain, pagination }
     }
 
-    pub fn from_block(block: BlockParam) -> Self {
+    pub fn from_block(protocol_system: &str, block: BlockParam) -> Self {
         Self {
             contract_ids: None,
-            protocol_system: None,
+            protocol_system: protocol_system.to_string(),
             version: VersionParam { timestamp: None, block: Some(block.clone()) },
             chain: block.chain.unwrap_or_default(),
             pagination: PaginationParams::default(),
         }
     }
 
-    pub fn from_timestamp(timestamp: NaiveDateTime, chain: Chain) -> Self {
+    pub fn from_timestamp(protocol_system: &str, timestamp: NaiveDateTime, chain: Chain) -> Self {
         Self {
             contract_ids: None,
-            protocol_system: None,
+            protocol_system: protocol_system.to_string(),
             version: VersionParam { timestamp: Some(timestamp), block: None },
             chain,
             pagination: PaginationParams::default(),
@@ -859,7 +859,7 @@ impl From<models::token::CurrencyToken> for ResponseToken {
 #[derive(Serialize, Deserialize, Debug, Default, ToSchema, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolComponentsRequestBody {
-    pub protocol_system: Option<String>,
+    pub protocol_system: String,
     #[serde(alias = "componentAddresses")]
     pub component_ids: Option<Vec<String>>,
     /// The minimum TVL of the protocol components to return, denoted in the chain's native token.
@@ -913,7 +913,7 @@ impl Hash for ProtocolComponentsRequestBody {
 impl ProtocolComponentsRequestBody {
     pub fn system_filtered(system: &str, tvl_gt: Option<f64>, chain: Chain) -> Self {
         Self {
-            protocol_system: Some(system.to_string()),
+            protocol_system: system.to_string(),
             component_ids: None,
             tvl_gt,
             chain,
@@ -921,9 +921,9 @@ impl ProtocolComponentsRequestBody {
         }
     }
 
-    pub fn id_filtered(ids: Vec<String>, chain: Chain) -> Self {
+    pub fn id_filtered(system: &str, ids: Vec<String>, chain: Chain) -> Self {
         Self {
-            protocol_system: None,
+            protocol_system: system.to_string(),
             component_ids: Some(ids),
             tvl_gt: None,
             chain,
@@ -934,7 +934,7 @@ impl ProtocolComponentsRequestBody {
 
 impl ProtocolComponentsRequestBody {
     pub fn new(
-        protocol_system: Option<String>,
+        protocol_system: String,
         component_ids: Option<Vec<String>>,
         tvl_gt: Option<f64>,
         chain: Chain,
@@ -1023,7 +1023,7 @@ pub struct ProtocolStateRequestBody {
     #[serde(alias = "protocolIds")]
     pub protocol_ids: Option<Vec<ProtocolId>>,
     #[serde(alias = "protocolSystem")]
-    pub protocol_system: Option<String>,
+    pub protocol_system: String,
     #[serde(default)]
     pub chain: Chain,
     /// Whether to include account balances in the response. Defaults to true.
@@ -1080,7 +1080,7 @@ mod test {
     #[test]
     fn test_protocol_components_equality() {
         let body1 = ProtocolComponentsRequestBody {
-            protocol_system: Some("protocol1".to_string()),
+            protocol_system: "protocol1".to_string(),
             component_ids: Some(vec!["component1".to_string(), "component2".to_string()]),
             tvl_gt: Some(1000.0),
             chain: Chain::Ethereum,
@@ -1088,7 +1088,7 @@ mod test {
         };
 
         let body2 = ProtocolComponentsRequestBody {
-            protocol_system: Some("protocol1".to_string()),
+            protocol_system: "protocol1".to_string(),
             component_ids: Some(vec!["component1".to_string(), "component2".to_string()]),
             tvl_gt: Some(1000.0 + 1e-7), // Within the tolerance ±1e-6
             chain: Chain::Ethereum,
@@ -1102,7 +1102,7 @@ mod test {
     #[test]
     fn test_protocol_components_inequality() {
         let body1 = ProtocolComponentsRequestBody {
-            protocol_system: Some("protocol1".to_string()),
+            protocol_system: "protocol1".to_string(),
             component_ids: Some(vec!["component1".to_string(), "component2".to_string()]),
             tvl_gt: Some(1000.0),
             chain: Chain::Ethereum,
@@ -1110,7 +1110,7 @@ mod test {
         };
 
         let body2 = ProtocolComponentsRequestBody {
-            protocol_system: Some("protocol1".to_string()),
+            protocol_system: "protocol1".to_string(),
             component_ids: Some(vec!["component1".to_string(), "component2".to_string()]),
             tvl_gt: Some(1000.0 + 1e-5), // Outside the tolerance ±1e-6
             chain: Chain::Ethereum,
@@ -1128,6 +1128,7 @@ mod test {
         "contractIds": [
             "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092"
         ],
+        "protocol_system": "uniswap_v2",
         "version": {
             "timestamp": "2069-01-01T04:20:00",
             "block": {
@@ -1154,7 +1155,7 @@ mod test {
 
         let expected = StateRequestBody {
             contract_ids: Some(vec![contract0]),
-            protocol_system: None,
+            protocol_system: "uniswap_v2".to_string(),
             version: VersionParam {
                 timestamp: Some(expected_timestamp),
                 block: Some(BlockParam {
@@ -1236,6 +1237,7 @@ mod test {
     fn test_parse_state_request_no_contract_specified() {
         let json_str = r#"
     {
+        "protocol_system": "uniswap_v2",
         "version": {
             "timestamp": "2069-01-01T04:20:00",
             "block": {
@@ -1256,7 +1258,7 @@ mod test {
 
         let expected = StateRequestBody {
             contract_ids: None,
-            protocol_system: None,
+            protocol_system: "uniswap_v2".to_string(),
             version: VersionParam {
                 timestamp: Some(expected_timestamp),
                 block: Some(BlockParam {

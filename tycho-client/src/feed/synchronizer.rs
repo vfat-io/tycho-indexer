@@ -216,7 +216,7 @@ where
             .get_protocol_states_paginated(
                 self.extractor_id.chain,
                 &request_ids,
-                &Some(self.extractor_id.name.clone()),
+                &self.extractor_id.name,
                 self.retrieve_balances,
                 &version,
                 50,
@@ -260,7 +260,7 @@ where
                 .get_contract_state_paginated(
                     self.extractor_id.chain,
                     ids.as_slice(),
-                    &Some(self.extractor_id.name.clone()),
+                    &self.extractor_id.name,
                     &version,
                     50,
                     4,

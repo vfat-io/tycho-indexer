@@ -61,7 +61,7 @@ pub trait RPCClient: Send + Sync {
         &self,
         chain: Chain,
         ids: &[Bytes],
-        protocol_system: &Option<String>,
+        protocol_system: &str,
         version: &VersionParam,
         chunk_size: usize,
         concurrency: usize,
@@ -72,7 +72,7 @@ pub trait RPCClient: Send + Sync {
             .chunks(chunk_size)
             .map(|chunk| StateRequestBody {
                 contract_ids: Some(chunk.to_vec()),
-                protocol_system: protocol_system.clone(),
+                protocol_system: protocol_system.to_string(),
                 chain,
                 version: version.clone(),
                 pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
@@ -273,7 +273,7 @@ pub trait RPCClient: Send + Sync {
         &self,
         chain: Chain,
         ids: &[ProtocolId],
-        protocol_system: &Option<String>,
+        protocol_system: &str,
         include_balances: bool,
         version: &VersionParam,
         chunk_size: usize,
@@ -284,7 +284,7 @@ pub trait RPCClient: Send + Sync {
             .chunks(chunk_size)
             .map(|c| ProtocolStateRequestBody {
                 protocol_ids: Some(c.to_vec()),
-                protocol_system: protocol_system.clone(),
+                protocol_system: protocol_system.to_string(),
                 chain,
                 include_balances,
                 version: version.clone(),

@@ -58,7 +58,7 @@ pub trait PendingDeltasBuffer {
         protocol_ids: Option<&[&str]>,
         db_states: &mut Vec<ProtocolComponentState>,
         version: Option<BlockNumberOrTimestamp>,
-        protocol_system: Option<&str>,
+        protocol_system: &str,
     ) -> Result<()>;
 
     fn update_vm_states(
@@ -66,19 +66,19 @@ pub trait PendingDeltasBuffer {
         addresses: Option<&[Bytes]>,
         db_states: &mut Vec<Account>,
         version: Option<BlockNumberOrTimestamp>,
-        protocol_system: Option<&str>,
+        protocol_system: &str,
     ) -> Result<()>;
 
     fn get_new_components(
         &self,
         ids: Option<&[&str]>,
-        protocol_system: Option<&str>,
+        protocol_system: &str,
     ) -> Result<Vec<ProtocolComponent>>;
 
     fn get_block_finality(
         &self,
         version: BlockNumberOrTimestamp,
-        protocol_system: Option<String>,
+        protocol_system: &str,
     ) -> Result<Option<FinalityStatus>>;
 }
 
@@ -140,61 +140,39 @@ impl PendingDeltas {
         &self,
         db_state: &mut ProtocolComponentState,
         version: Option<BlockNumberOrTimestamp>,
-        protocol_system: Option<&str>,
+        protocol_system: &str,
     ) -> Result<bool> {
         let mut change_found = false;
 
-        let update_state = |name: &str,
-                            buffer: &Arc<Mutex<ReorgBuffer<BlockAggregatedChanges>>>,
-                            db_state: &mut ProtocolComponentState|
-         -> Result<bool> {
-            let guard = buffer
-                .lock()
-                .map_err(|e| PendingDeltasError::LockError(name.to_string(), e.to_string()))?;
+        let buffer = self
+            .buffers
+            .get(protocol_system)
+            .ok_or_else(|| {
+                error!("Missing reorg buffer for {}", protocol_system);
+                PendingDeltasError::UnknownExtractor(protocol_system.to_string())
+            })?;
 
-            for entry in guard.get_block_range(None, version)? {
-                let mut found_change = false;
+        let guard = buffer.lock().map_err(|e| {
+            PendingDeltasError::LockError(protocol_system.to_string(), e.to_string())
+        })?;
 
-                // Apply state deltas if found
-                if let Some(delta) = entry
-                    .state_deltas
-                    .get(&db_state.component_id)
-                {
-                    db_state.apply_state_delta(delta)?;
-                    found_change = true;
-                }
-
-                // Apply balance deltas if found
-                if let Some(delta) = entry
-                    .component_balances
-                    .get(&db_state.component_id)
-                {
-                    db_state.apply_balance_delta(delta)?;
-                    found_change = true;
-                }
-
-                if found_change {
-                    return Ok(true); // Return early if a change is found
-                }
+        for entry in guard.get_block_range(None, version)? {
+            // Apply state deltas if found
+            if let Some(delta) = entry
+                .state_deltas
+                .get(&db_state.component_id)
+            {
+                db_state.apply_state_delta(delta)?;
+                change_found = true;
             }
 
-            Ok(false)
-        };
-
-        if let Some(ps) = protocol_system {
-            // If a protocol system is provided, only search into its buffer
-            let buffer = self.buffers.get(ps).ok_or_else(|| {
-                error!("Missing reorg buffer for {}", ps);
-                PendingDeltasError::UnknownExtractor(ps.to_string())
-            })?;
-            change_found = update_state(ps, buffer, db_state)?;
-        } else {
-            // If no protocol system is provided, iterate through all buffers
-            for (name, buffer) in self.buffers.iter() {
-                change_found = update_state(name, buffer, db_state)?;
-                if change_found {
-                    break; // Stop once a change is found
-                }
+            // Apply balance deltas if found
+            if let Some(delta) = entry
+                .component_balances
+                .get(&db_state.component_id)
+            {
+                db_state.apply_balance_delta(delta)?;
+                change_found = true;
             }
         }
 
@@ -206,45 +184,33 @@ impl PendingDeltas {
         &self,
         db_state: &mut Account,
         version: Option<BlockNumberOrTimestamp>,
-        protocol_system: Option<&str>,
+        protocol_system: &str,
     ) -> Result<bool> {
         let mut change_found = false;
 
-        // Closure to apply deltas from a buffer
-        let update_state = |name: &str,
-                            buffer: &Arc<Mutex<ReorgBuffer<BlockAggregatedChanges>>>,
-                            db_state: &mut Account|
-         -> Result<bool> {
-            let guard = buffer
-                .lock()
-                .map_err(|e| PendingDeltasError::LockError(name.to_string(), e.to_string()))?;
-            for entry in guard.get_block_range(None, version)? {
-                if let Some(delta) = entry
-                    .account_deltas
-                    .get(&db_state.address)
-                {
-                    db_state.apply_delta(delta)?;
-                    return Ok(true); // Return early if a change is found
-                }
-            }
-            Ok(false)
-        };
-
-        if let Some(ps) = protocol_system {
-            // If a protocol system is provided, only search into its buffer
-            let buffer = self.buffers.get(ps).ok_or_else(|| {
-                error!("Missing reorg buffer for {}", ps);
-                PendingDeltasError::UnknownExtractor(ps.to_string())
+        let buffer = self
+            .buffers
+            .get(protocol_system)
+            .ok_or_else(|| {
+                error!("Missing reorg buffer for {}", protocol_system);
+                PendingDeltasError::UnknownExtractor(protocol_system.to_string())
             })?;
-            change_found = update_state(ps, buffer, db_state)?;
-        } else {
-            // If no protocol system is provided, iterate through all buffers
-            for (name, buffer) in self.buffers.iter() {
-                change_found = update_state(name, buffer, db_state)?;
-                if change_found {
-                    break; // Stop once a change is found
-                }
+
+        let guard = buffer.lock().map_err(|e| {
+            PendingDeltasError::LockError(protocol_system.to_string(), e.to_string())
+        })?;
+
+        for entry in guard.get_block_range(None, version)? {
+            if let Some(delta) = entry
+                .account_deltas
+                .get(&db_state.address)
+            {
+                db_state.apply_delta(delta)?;
+                change_found = true
             }
+
+            // TODO: currently it is impossible to apply balance changes and state deltas since
+            //  we don't know the component_id of the contract.
         }
 
         Ok(change_found)
@@ -317,7 +283,7 @@ impl PendingDeltasBuffer for PendingDeltas {
         protocol_ids: Option<&[&str]>,
         db_states: &mut Vec<ProtocolComponentState>,
         version: Option<BlockNumberOrTimestamp>,
-        protocol_system: Option<&str>,
+        protocol_system: &str,
     ) -> Result<()> {
         // TODO: handle when no id is specified with filters
 
@@ -359,7 +325,7 @@ impl PendingDeltasBuffer for PendingDeltas {
         addresses: Option<&[Bytes]>,
         db_states: &mut Vec<Account>,
         version: Option<BlockNumberOrTimestamp>,
-        protocol_system: Option<&str>,
+        protocol_system: &str,
     ) -> Result<()> {
         let mut missing_addresses: HashSet<Bytes> = addresses
             .unwrap_or_default()
@@ -407,50 +373,35 @@ impl PendingDeltasBuffer for PendingDeltas {
     fn get_new_components(
         &self,
         ids: Option<&[&str]>,
-        protocol_system: Option<&str>,
+        protocol_system: &str,
     ) -> Result<Vec<ProtocolComponent>> {
         let requested_ids: Option<HashSet<&str>> = ids.map(|ids| ids.iter().cloned().collect());
         let mut new_components = Vec::new();
 
-        let collect_components = |name: &str,
-                                  buffer: &Arc<Mutex<ReorgBuffer<BlockAggregatedChanges>>>,
-                                  new_components: &mut Vec<ProtocolComponent>,
-                                  requested_ids: &Option<HashSet<&str>>|
-         -> Result<()> {
-            let guard = buffer
-                .lock()
-                .map_err(|e| PendingDeltasError::LockError(name.to_string(), e.to_string()))?;
-            for entry in guard.get_block_range(None, None)? {
-                new_components.extend(
-                    entry
-                        .new_protocol_components
-                        .clone()
-                        .into_values()
-                        .filter(|comp| {
-                            if let Some(ids) = requested_ids.as_ref() {
-                                ids.contains(comp.id.as_str())
-                            } else {
-                                true
-                            }
-                        }),
-                );
-            }
-            Ok(())
-        };
-
-        if let Some(ps) = protocol_system {
-            // If a protocol system is given, only search into its buffer
-            let buffer = self.buffers.get(ps).ok_or_else(|| {
-                error!("Missing reorg buffer for {}", ps);
-                PendingDeltasError::UnknownExtractor(ps.to_string())
+        let buffer = self
+            .buffers
+            .get(protocol_system)
+            .ok_or_else(|| {
+                error!("Missing reorg buffer for {}", protocol_system);
+                PendingDeltasError::UnknownExtractor(protocol_system.to_string())
             })?;
-            collect_components(ps, buffer, &mut new_components, &requested_ids)?;
-        } else {
-            // If no protocol system is provided, the function iterates through all buffers,
-            // which is inefficient.
-            for (name, buffer) in self.buffers.iter() {
-                collect_components(name, buffer, &mut new_components, &requested_ids)?;
-            }
+
+        let guard = buffer.lock().map_err(|e| {
+            PendingDeltasError::LockError(protocol_system.to_string(), e.to_string())
+        })?;
+
+        for entry in guard.get_block_range(None, None)? {
+            new_components.extend(
+                entry
+                    .new_protocol_components
+                    .clone()
+                    .into_values()
+                    .filter(|comp| {
+                        requested_ids
+                            .as_ref()
+                            .map_or(true, |ids| ids.contains(comp.id.as_str()))
+                    }),
+            );
         }
 
         Ok(new_components)
@@ -467,35 +418,20 @@ impl PendingDeltasBuffer for PendingDeltas {
     fn get_block_finality(
         &self,
         version: BlockNumberOrTimestamp,
-        protocol_system: Option<String>,
+        protocol_system: &str,
     ) -> Result<Option<FinalityStatus>> {
-        match protocol_system {
-            Some(system) => {
-                if let Some(buffer) = self.buffers.get(&system) {
-                    let guard = buffer
-                        .lock()
-                        .map_err(|e| PendingDeltasError::LockError(system, e.to_string()))?;
-                    Ok(guard.get_finality_status(version))
-                } else {
-                    debug!(?system, "Missing requested protocol system in pending deltas");
-                    Err(PendingDeltasError::UnknownExtractor(system))
-                }
-            }
-            None => {
-                // Use any extractor to get the finality status
-                let maybe_buffer = self.buffers.iter().next();
+        let buffer = self
+            .buffers
+            .get(protocol_system)
+            .ok_or_else(|| {
+                error!("Missing reorg buffer for {}", protocol_system);
+                PendingDeltasError::UnknownExtractor(protocol_system.to_string())
+            })?;
+        let guard = buffer.lock().map_err(|e| {
+            PendingDeltasError::LockError(protocol_system.to_string(), e.to_string())
+        })?;
 
-                match maybe_buffer {
-                    Some((name, buffer)) => {
-                        let guard = buffer.lock().map_err(|e| {
-                            PendingDeltasError::LockError(name.to_string(), e.to_string())
-                        })?;
-                        Ok(guard.get_finality_status(version))
-                    }
-                    _ => Ok(None),
-                }
-            }
-        }
+        Ok(guard.get_finality_status(version))
     }
 }
 
@@ -627,21 +563,38 @@ mod test {
             .collect(),
             HashMap::new(),
             HashMap::new(),
-            [(
-                "component3".to_string(),
-                ProtocolComponent {
-                    id: "component3".to_string(),
-                    protocol_system: "native_swap".to_string(),
-                    protocol_type_name: "swap".to_string(),
-                    chain: Chain::Ethereum,
-                    tokens: Vec::new(),
-                    contract_addresses: Vec::new(),
-                    static_attributes: HashMap::new(),
-                    change: ChangeType::Creation,
-                    creation_tx: Bytes::new(),
-                    created_at: "2020-01-01T00:00:00".parse().unwrap(),
-                },
-            )]
+            [
+                (
+                    "component3".to_string(),
+                    ProtocolComponent {
+                        id: "component3".to_string(),
+                        protocol_system: "native_swap".to_string(),
+                        protocol_type_name: "swap".to_string(),
+                        chain: Chain::Ethereum,
+                        tokens: Vec::new(),
+                        contract_addresses: Vec::new(),
+                        static_attributes: HashMap::new(),
+                        change: ChangeType::Creation,
+                        creation_tx: Bytes::new(),
+                        created_at: "2020-01-01T00:00:00".parse().unwrap(),
+                    },
+                ),
+                (
+                    "component4".to_string(),
+                    ProtocolComponent {
+                        id: "component4".to_string(),
+                        protocol_system: "native_swap".to_string(),
+                        protocol_type_name: "swap".to_string(),
+                        chain: Chain::Ethereum,
+                        tokens: Vec::new(),
+                        contract_addresses: Vec::new(),
+                        static_attributes: HashMap::new(),
+                        change: ChangeType::Creation,
+                        creation_tx: Bytes::new(),
+                        created_at: "2020-01-01T00:00:00".parse().unwrap(),
+                    },
+                ),
+            ]
             .into_iter()
             .collect::<HashMap<_, _>>(),
             HashMap::new(),
@@ -741,7 +694,7 @@ mod test {
                 Some(&["component1", "component3"]),
                 &mut state,
                 Some(BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap())),
-                None,
+                "native:extractor",
             )
             .unwrap();
 
@@ -789,7 +742,7 @@ mod test {
                 Some(&[address0, address1]),
                 &mut state,
                 Some(BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap())),
-                None,
+                "vm:extractor",
             )
             .unwrap();
 
@@ -834,21 +787,13 @@ mod test {
             .unwrap();
 
         let new_components = buffer
-            .get_new_components(None, None)
-            .unwrap();
-
-        for expected in &exp {
-            assert!(new_components.contains(expected));
-        }
-
-        let new_components = buffer
-            .get_new_components(Some(&["component3"]), None)
+            .get_new_components(Some(&["component3"]), "native:extractor")
             .unwrap();
 
         assert_eq!(new_components, vec![exp[0].clone()]);
 
         let new_components = buffer
-            .get_new_components(None, Some("vm:extractor"))
+            .get_new_components(None, "vm:extractor")
             .unwrap();
 
         assert_eq!(new_components, vec![exp[1].clone()]);
@@ -858,16 +803,13 @@ mod test {
 
     #[rstest]
     // native extractor
-    #[case(Some("native:extractor".to_string()), None)]
+    #[case("native:extractor".to_string(), None)]
     // vm extractor
-    #[case(Some("vm:extractor".to_string()), None)]
+    #[case("vm:extractor".to_string(), None)]
     // bad input
-    #[case(Some("unknown_system".to_string()), Some(PendingDeltasError::UnknownExtractor("unknown_system".to_string())))]
-    // no extractor provided
-    #[allow(clippy::duplicated_attributes)]
-    #[case(None, None)]
+    #[case("unknown_system".to_string(), Some(PendingDeltasError::UnknownExtractor("unknown_system".to_string())))]
     fn test_get_block_finality(
-        #[case] protocol_system: Option<String>,
+        #[case] protocol_system: String,
         #[case] expected_error: Option<PendingDeltasError>,
     ) {
         let buffer = PendingDeltas::new(["vm:extractor", "native:extractor"]);
@@ -880,7 +822,7 @@ mod test {
 
         let version = BlockNumberOrTimestamp::Timestamp("2020-01-01T00:00:00".parse().unwrap());
 
-        let result = buffer.get_block_finality(version, protocol_system.clone());
+        let result = buffer.get_block_finality(version, &protocol_system);
 
         match expected_error {
             Some(expected_err) => {
