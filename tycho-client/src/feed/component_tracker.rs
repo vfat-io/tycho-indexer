@@ -77,9 +77,11 @@ where
     /// Retrieve all components that belong to the system we are extracing and have sufficient tvl.
     pub async fn initialise_components(&mut self) -> Result<(), RPCError> {
         let body = match &self.filter.variant {
-            ComponentFilterVariant::Ids(ids) => {
-                ProtocolComponentsRequestBody::id_filtered(ids.clone(), self.chain)
-            }
+            ComponentFilterVariant::Ids(ids) => ProtocolComponentsRequestBody::id_filtered(
+                &self.protocol_system,
+                ids.clone(),
+                self.chain,
+            ),
             ComponentFilterVariant::MinimumTVLRange((_, upper_tvl_threshold)) => {
                 ProtocolComponentsRequestBody::system_filtered(
                     &self.protocol_system,
@@ -116,6 +118,7 @@ where
             return Ok(());
         }
         let request = ProtocolComponentsRequestBody::id_filtered(
+            &self.protocol_system,
             new_components
                 .iter()
                 .map(|pc_id| pc_id.to_string())

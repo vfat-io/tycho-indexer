@@ -162,6 +162,7 @@ where
                 Some(&paginated_addrs),
                 &mut accounts,
                 Some(at),
+                &request.protocol_system,
             )?;
         }
 
@@ -198,7 +199,7 @@ where
     async fn calculate_versions(
         &self,
         request_version: &BlockOrTimestamp,
-        protocol_system: &Option<String>,
+        protocol_system: &str,
         chain: Chain,
     ) -> Result<(Version, Option<BlockNumberOrTimestamp>), RpcError> {
         let ordered_version = match request_version {
@@ -215,7 +216,7 @@ where
         };
         let request_version_finality = self
             .pending_deltas
-            .get_block_finality(ordered_version, protocol_system.clone())
+            .get_block_finality(ordered_version, protocol_system)
             .unwrap_or(None)
             .unwrap_or_else(|| {
                 warn!(?ordered_version, ?protocol_system, "No finality found for version.");
@@ -318,7 +319,7 @@ where
             .get_protocol_states(
                 &chain,
                 Some(db_version),
-                request.protocol_system.clone(),
+                Some(request.protocol_system.clone()),
                 Some(&paginated_ids),
                 request.include_balances,
                 Some(&pagination_params),
@@ -333,7 +334,12 @@ where
         // merge db states with pending deltas
         if let Some(at) = deltas_version {
             self.pending_deltas
-                .merge_native_states(Some(&paginated_ids), &mut states, Some(at))?;
+                .merge_native_states(
+                    Some(&paginated_ids),
+                    &mut states,
+                    Some(at),
+                    &request.protocol_system,
+                )?;
         }
 
         let total = match ids {
@@ -475,7 +481,7 @@ where
 
         let buffered_components = self
             .pending_deltas
-            .get_new_components(ids_slice, system.as_deref())?;
+            .get_new_components(ids_slice, &system)?;
         debug!(n_components = buffered_components.len(), "RetrievedBufferedComponents");
 
         // Check if we have all requested components in the cache
@@ -513,7 +519,7 @@ where
             .db_gateway
             .get_protocol_components(
                 &request.chain.into(),
-                system,
+                Some(system),
                 ids_slice,
                 request.tvl_gt,
                 Some(&pagination_params),
@@ -790,6 +796,7 @@ mod tests {
                 protocol_ids: Option<&'a [&'a str]>,
                 db_states: &mut Vec<ProtocolComponentState>,
                 version: Option<BlockNumberOrTimestamp>,
+                protocol_system: &'a str,
             ) -> Result<(), PendingDeltasError>;
 
             fn update_vm_states<'a>(
@@ -797,18 +804,19 @@ mod tests {
                 addresses: Option<&'a [Bytes]>,
                 db_states: &mut Vec<Account>,
                 version: Option<BlockNumberOrTimestamp>,
+                protocol_system: &'a str,
             ) -> Result<(), PendingDeltasError>;
 
             fn get_new_components<'a>(
                 &self,
                 ids: Option<&'a [&'a str]>,
-                protocol_system: Option<&'a str>,
+                protocol_system: &'a str,
             ) -> Result<Vec<ProtocolComponent>, PendingDeltasError>;
 
-            fn get_block_finality(
+            fn get_block_finality<'a>(
                 &self,
                 version: BlockNumberOrTimestamp,
-                protocol_system: Option<String>,
+                protocol_system: &'a str,
             ) -> Result<Option<FinalityStatus>, PendingDeltasError>;
         }
     }
@@ -867,6 +875,7 @@ mod tests {
     async fn test_parse_state_request_no_version_specified() {
         let json_str = r#"
     {
+        "protocol_system": "uniswap_v2",
         "contractIds": [
             "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092"
         ]
@@ -879,7 +888,7 @@ mod tests {
 
         let expected = dto::StateRequestBody {
             contract_ids: Some(vec![contract0]),
-            protocol_system: None,
+            protocol_system: "uniswap_v2".to_string(),
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             chain: dto::Chain::Ethereum,
             pagination: dto::PaginationParams::default(),
@@ -962,7 +971,7 @@ mod tests {
             .expect_update_vm_states()
             .return_once({
                 let buf_expected_clone = buf_expected.clone();
-                move |_, db_states: &mut Vec<Account>, _| {
+                move |_, db_states: &mut Vec<Account>, _, _| {
                     db_states.push(buf_expected_clone);
                     Ok(())
                 }
@@ -978,7 +987,7 @@ mod tests {
                 Bytes::from_str("6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                 Bytes::from_str("388C818CA8B9251b393131C08a736A67ccB19297").unwrap(),
             ]),
-            protocol_system: None,
+            protocol_system: "uniswap_v2".to_string(),
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             chain: dto::Chain::Ethereum,
             pagination: dto::PaginationParams::default(),
@@ -1004,7 +1013,7 @@ mod tests {
             contract_ids: Some(vec![
                 Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap()
             ]),
-            protocol_system: None,
+            protocol_system: "uniswap_v2".to_string(),
             version: dto::VersionParam::default(),
             chain: dto::Chain::Ethereum,
             pagination: dto::PaginationParams::default(),
@@ -1092,7 +1101,7 @@ mod tests {
             .expect_merge_native_states()
             .return_once({
                 let buf_expected_clone = buf_expected.clone();
-                move |_, db_states: &mut Vec<ProtocolComponentState>, _| {
+                move |_, db_states: &mut Vec<ProtocolComponentState>, _, _| {
                     db_states.push(buf_expected_clone);
                     Ok(())
                 }
@@ -1108,7 +1117,7 @@ mod tests {
                 dto::ProtocolId { id: "state1".to_owned(), chain: dto::Chain::Ethereum },
                 dto::ProtocolId { id: "state_buff".to_owned(), chain: dto::Chain::Ethereum },
             ]),
-            protocol_system: None,
+            protocol_system: "uniswap_v2".to_string(),
             chain: dto::Chain::Ethereum,
             include_balances: true,
             version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
@@ -1179,7 +1188,7 @@ mod tests {
         let req_handler = RpcHandler::new(gw, Arc::new(mock_buffer));
 
         let request = dto::ProtocolComponentsRequestBody {
-            protocol_system: Option::from("ambient".to_string()),
+            protocol_system: "ambient".to_string(),
             component_ids: None,
             tvl_gt: None,
             chain: dto::Chain::Ethereum,
@@ -1272,7 +1281,7 @@ mod tests {
         let req_handler = RpcHandler::new(gw, Arc::new(mock_buffer));
 
         let request = dto::ProtocolComponentsRequestBody {
-            protocol_system: Option::from("ambient".to_string()),
+            protocol_system: "ambient".to_string(),
             component_ids: None,
             tvl_gt: None,
             chain: dto::Chain::Ethereum,
@@ -1290,7 +1299,7 @@ mod tests {
         assert_eq!(response1.pagination.total, 3);
 
         let request = dto::ProtocolComponentsRequestBody {
-            protocol_system: Option::from("ambient".to_string()),
+            protocol_system: "ambient".to_string(),
             component_ids: None,
             tvl_gt: None,
             chain: dto::Chain::Ethereum,
