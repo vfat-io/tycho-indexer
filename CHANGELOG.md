@@ -1,3 +1,11 @@
+## [0.30.2](https://github.com/propeller-heads/tycho-indexer/compare/0.30.1...0.30.2) (2024-10-07)
+
+
+### Bug Fixes
+
+* also cache component requests for specified components ([ce0f559](https://github.com/propeller-heads/tycho-indexer/commit/ce0f55937dc4eda18d5c74df0a2f6aa50d253ee3))
+* Also cache component requests for specified components ([#404](https://github.com/propeller-heads/tycho-indexer/issues/404)) ([ff49333](https://github.com/propeller-heads/tycho-indexer/commit/ff49333416299b5b2c58976236baab08d29cee0e))
+
 ## [0.30.1](https://github.com/propeller-heads/tycho-indexer/compare/0.30.0...0.30.1) (2024-10-07)
 
 
