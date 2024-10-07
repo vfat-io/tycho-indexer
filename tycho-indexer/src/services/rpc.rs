@@ -162,6 +162,7 @@ where
                 Some(&paginated_addrs),
                 &mut accounts,
                 Some(at),
+                request.protocol_system.as_deref(),
             )?;
         }
 
@@ -333,7 +334,12 @@ where
         // merge db states with pending deltas
         if let Some(at) = deltas_version {
             self.pending_deltas
-                .merge_native_states(Some(&paginated_ids), &mut states, Some(at))?;
+                .merge_native_states(
+                    Some(&paginated_ids),
+                    &mut states,
+                    Some(at),
+                    request.protocol_system.as_deref(),
+                )?;
         }
 
         let total = match ids {
@@ -790,6 +796,7 @@ mod tests {
                 protocol_ids: Option<&'a [&'a str]>,
                 db_states: &mut Vec<ProtocolComponentState>,
                 version: Option<BlockNumberOrTimestamp>,
+                protocol_system: Option<&'a str>,
             ) -> Result<(), PendingDeltasError>;
 
             fn update_vm_states<'a>(
@@ -797,6 +804,7 @@ mod tests {
                 addresses: Option<&'a [Bytes]>,
                 db_states: &mut Vec<Account>,
                 version: Option<BlockNumberOrTimestamp>,
+                protocol_system: Option<&'a str>,
             ) -> Result<(), PendingDeltasError>;
 
             fn get_new_components<'a>(
@@ -962,7 +970,7 @@ mod tests {
             .expect_update_vm_states()
             .return_once({
                 let buf_expected_clone = buf_expected.clone();
-                move |_, db_states: &mut Vec<Account>, _| {
+                move |_, db_states: &mut Vec<Account>, _, _| {
                     db_states.push(buf_expected_clone);
                     Ok(())
                 }
@@ -1092,7 +1100,7 @@ mod tests {
             .expect_merge_native_states()
             .return_once({
                 let buf_expected_clone = buf_expected.clone();
-                move |_, db_states: &mut Vec<ProtocolComponentState>, _| {
+                move |_, db_states: &mut Vec<ProtocolComponentState>, _, _| {
                     db_states.push(buf_expected_clone);
                     Ok(())
                 }
