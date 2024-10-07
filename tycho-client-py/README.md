@@ -32,7 +32,7 @@ The TychoRPCClient class allows you to interact with the Tycho RPC server. You c
 
 #### Example
 ```python
-from tycho_client_py import (
+from tycho_indexer_client import (
     TychoRPCClient,
     ProtocolComponentsParams,
     ProtocolStateParams,
@@ -71,7 +71,7 @@ The TychoStream class allows you to start the Tycho client binary and stream dat
 
 ```python
 import asyncio
-from tycho_client_py import Chain, TychoStream
+from tycho_indexer_client import Chain, TychoStream
 from decimal import Decimal
 
 async def main():
