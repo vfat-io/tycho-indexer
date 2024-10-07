@@ -176,7 +176,7 @@ where
     /// The retrieved iterator will include both the start and end block of specified range. In case
     /// either start or end block are None, the iterator will start the range at the oldest / end
     /// the range at the latest block.
-    #[instrument(skip(self), level = Level::DEBUG)]
+    #[instrument(skip(self), level = Level::DEBUG, fields(buffered_range))]
     pub fn get_block_range(
         &self,
         start_version: Option<BlockNumberOrTimestamp>,
