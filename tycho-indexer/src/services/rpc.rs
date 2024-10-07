@@ -441,6 +441,17 @@ where
                 self.get_protocol_components_inner(r)
                     .await
                     .map(|res| {
+                        // If component ids were specified, check if we have all requested
+                        // components are in the response (should cache)
+                        if let Some(component_ids) = &request.component_ids {
+                            let all_found = component_ids.len() == res.pagination.total as usize;
+                            if all_found {
+                                return (res, true);
+                            } else {
+                                return (res, false);
+                            }
+                        }
+                        // Otherwise check if request is for the last page (shouldn't cache)
                         let last_page = res.pagination.total_pages() - 1;
                         (res, request.pagination.page < last_page)
                     })
