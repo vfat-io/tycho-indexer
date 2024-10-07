@@ -1,3 +1,11 @@
+## [0.30.1](https://github.com/propeller-heads/tycho-indexer/compare/0.30.0...0.30.1) (2024-10-07)
+
+
+### Bug Fixes
+
+* **tycho-indexer:** correctly `buffered_range` to the span ([761eb72](https://github.com/propeller-heads/tycho-indexer/commit/761eb722a048dc93817e0db6f323d7e7cf5c1de7))
+* **tycho-indexer:** correctly `buffered_range` to the span ([#405](https://github.com/propeller-heads/tycho-indexer/issues/405)) ([9adfcf7](https://github.com/propeller-heads/tycho-indexer/commit/9adfcf71f11dd4790c0b557772d60544a88b0fdf))
+
 ## [0.30.0](https://github.com/propeller-heads/tycho-indexer/compare/0.29.1...0.30.0) (2024-10-07)
 
 
