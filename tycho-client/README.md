@@ -262,9 +262,11 @@ components. This mode can be turned on via the `--no-state` flag.
 
 If you wish to use tycho as a service instead of hosting it yourself, the following endpoints are available:
 
-### PropellerHeads (beta)
-- URL: `tycho-beta.propellerheads.xyz`
+### PropellerHeads (Beta)
 
-- RPC docs: `https://tycho-beta.propellerheads.xyz/docs/`
-
-- Auth-key: Please contact `@AdeelFarouk` on telegram to request a beta auth-key.
+|                        |                                                         |
+|------------------------|---------------------------------------------------------|
+| **URL**                | *tycho-beta.propellerheads.xyz*                         |
+| **RPC Docs**           | *[View Documentation](https://tycho-beta.propellerheads.xyz/docs/)* |
+| **Auth Key**           | *Please contact `@AdeelFarouk` on Telegram to request a beta auth key. <br> Note: Use the `Authorization` header for this key in your RPC requests.* |
+| **Supported Protocols** | *uniswap_v2, uniswap_v3, sushiswap, vm:balancer, vm:ambient*                    |
