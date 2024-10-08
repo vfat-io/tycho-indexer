@@ -458,8 +458,10 @@ impl RPCClient for HttpRPCClient {
             });
         }
 
-        let accounts = serde_json::from_str::<StateRequestResponse>(&body)
-            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        let accounts = serde_json::from_str::<StateRequestResponse>(&body).map_err(|e| {
+            error!("Failed to parse contract state response {:?}", &body);
+            RPCError::ParseResponse(e.to_string())
+        })?;
         trace!(?accounts, "Received contract_state response from Tycho server");
 
         Ok(accounts)
@@ -494,8 +496,11 @@ impl RPCClient for HttpRPCClient {
             .text()
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
-        let components = serde_json::from_str::<ProtocolComponentRequestResponse>(&body)
-            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        let components =
+            serde_json::from_str::<ProtocolComponentRequestResponse>(&body).map_err(|e| {
+                error!("Failed to parse protocol component response {:?}", &body);
+                RPCError::ParseResponse(e.to_string())
+            })?;
         trace!(?components, "Received protocol_components response from Tycho server");
 
         Ok(components)
@@ -552,8 +557,10 @@ impl RPCClient for HttpRPCClient {
             });
         }
 
-        let states = serde_json::from_str::<ProtocolStateRequestResponse>(&body)
-            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        let states = serde_json::from_str::<ProtocolStateRequestResponse>(&body).map_err(|e| {
+            error!("Failed to parse protocol state response {:?}", &body);
+            RPCError::ParseResponse(e.to_string())
+        })?;
         trace!(?states, "Received protocol_states response from Tycho server");
 
         Ok(states)
@@ -584,8 +591,10 @@ impl RPCClient for HttpRPCClient {
             .text()
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
-        let tokens = serde_json::from_str::<TokensRequestResponse>(&body)
-            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        let tokens = serde_json::from_str::<TokensRequestResponse>(&body).map_err(|e| {
+            error!("Failed to parse tokens response {:?}", &body);
+            RPCError::ParseResponse(e.to_string())
+        })?;
 
         Ok(tokens)
     }
