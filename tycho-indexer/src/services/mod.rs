@@ -35,7 +35,6 @@ pub struct ServicesBuilder<G> {
     port: u16,
     bind: String,
     extractor_handles: ws::MessageSenderMap,
-    extractors: Vec<String>,
     db_gateway: G,
 }
 
@@ -49,7 +48,6 @@ where
             port: 4242,
             bind: "0.0.0.0".to_owned(),
             extractor_handles: HashMap::new(),
-            extractors: Vec::new(),
             db_gateway,
         }
     }
@@ -57,7 +55,6 @@ where
     pub fn register_extractors(mut self, handle: Vec<ExtractorHandle>) -> Self {
         for e in handle {
             let id = e.get_id();
-            self.extractors.push(id.name.clone());
             self.extractor_handles
                 .insert(id, Arc::new(e));
         }
@@ -121,9 +118,9 @@ where
 
         let openapi = ApiDoc::openapi();
         let pending_deltas = PendingDeltas::new(
-            self.extractors
-                .iter()
-                .map(String::as_str),
+            self.extractor_handles
+                .keys()
+                .map(|e_id| e_id.name.as_str()),
         );
         let deltas_task = tokio::spawn({
             let pending_deltas = pending_deltas.clone();
