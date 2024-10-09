@@ -818,10 +818,7 @@ mod tests {
         Bytes,
     };
 
-    use crate::{
-        services::deltas_buffer::PendingDeltas,
-        testing::{evm_contract_slots, MockGateway},
-    };
+    use crate::testing::{evm_contract_slots, MockGateway};
 
     use super::*;
 
