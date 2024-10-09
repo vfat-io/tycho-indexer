@@ -1,3 +1,11 @@
+## [0.32.0](https://github.com/propeller-heads/tycho-indexer/compare/0.31.3...0.32.0) (2024-10-09)
+
+
+### Features
+
+* **tycho-client:** publicly expose snapshot vm storage ([55e7875](https://github.com/propeller-heads/tycho-indexer/commit/55e78752627dc1ee36f45eeaf7f56797b704f2ee))
+* **tycho-client:** publicly expose snapshot vm storage ([#413](https://github.com/propeller-heads/tycho-indexer/issues/413)) ([ca2a3e7](https://github.com/propeller-heads/tycho-indexer/commit/ca2a3e7aef90a4aeee5c4b5d96741fc0aeb6db50))
+
 ## [0.31.3](https://github.com/propeller-heads/tycho-indexer/compare/0.31.2...0.31.3) (2024-10-07)
 
 ## [0.31.2](https://github.com/propeller-heads/tycho-indexer/compare/0.31.1...0.31.2) (2024-10-07)
