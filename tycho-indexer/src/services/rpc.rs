@@ -155,14 +155,16 @@ where
 
         // Apply pagination to the contract addresses. This is done so that we can determine which
         // contracts were not returned from the db and get them from the buffer instead.
-        let mut paginated_addrs: Vec<Bytes> = Vec::new();
-        if let Some(adrs) = addresses {
-            paginated_addrs = adrs
-                .iter()
-                .skip(pagination_params.offset() as usize)
-                .take(pagination_params.page_size as usize)
-                .cloned()
-                .collect();
+        let mut paginated_addrs: Option<Vec<Bytes>> = None;
+        if let Some(addrs) = addresses {
+            paginated_addrs = Some(
+                addrs
+                    .iter()
+                    .skip(pagination_params.offset() as usize)
+                    .take(pagination_params.page_size as usize)
+                    .cloned()
+                    .collect(),
+            );
         }
 
         // Get the contract states from the database
@@ -170,7 +172,7 @@ where
             .db_gateway
             .get_contracts(
                 &chain,
-                Some(&paginated_addrs),
+                paginated_addrs.as_deref(),
                 Some(&db_version),
                 true,
                 Some(&pagination_params),
@@ -185,7 +187,7 @@ where
         if let Some(at) = deltas_version {
             if let Some(pending_deltas) = &self.pending_deltas {
                 pending_deltas.update_vm_states(
-                    Some(&paginated_addrs),
+                    paginated_addrs.as_deref(),
                     &mut accounts,
                     Some(at),
                     &request.protocol_system,
@@ -327,8 +329,8 @@ where
         let pagination_params: PaginationParams = (&request.pagination).into();
 
         // Get the protocol IDs from the request
-        let protocol_ids: Option<Vec<dto::ProtocolId>> = request.protocol_ids.clone();
-        let ids: Option<Vec<&str>> = protocol_ids.as_ref().map(|ids| {
+        let protocol_ids = request.protocol_ids.clone();
+        let ids = protocol_ids.as_ref().map(|ids| {
             ids.iter()
                 .map(|id| id.id.as_str())
                 .collect::<Vec<&str>>()
@@ -339,14 +341,15 @@ where
         // Apply pagination to the protocol ids. This is done so that we can determine which ids
         // were not returned from the db and get them from the buffer instead. For component ids
         // that do not exist in either the db or the buffer, we will return an empty state.
-        let mut paginated_ids: Vec<&str> = Vec::new();
+        let mut paginated_ids: Option<Vec<&str>> = None;
         if let Some(ids) = ids {
-            paginated_ids = ids
-                .iter()
-                .skip(pagination_params.offset() as usize)
-                .take(pagination_params.page_size as usize)
-                .cloned()
-                .collect();
+            paginated_ids = Some(
+                ids.iter()
+                    .skip(pagination_params.offset() as usize)
+                    .take(pagination_params.page_size as usize)
+                    .cloned()
+                    .collect(),
+            );
         }
 
         // Get the protocol states from the database
@@ -356,7 +359,7 @@ where
                 &chain,
                 Some(db_version),
                 Some(request.protocol_system.clone()),
-                Some(&paginated_ids),
+                paginated_ids.as_deref(),
                 request.include_balances,
                 Some(&pagination_params),
             )
@@ -371,7 +374,7 @@ where
         if let Some(at) = deltas_version {
             if let Some(pending_deltas) = &self.pending_deltas {
                 pending_deltas.merge_native_states(
-                    Some(&paginated_ids),
+                    paginated_ids.as_deref(),
                     &mut states,
                     Some(at),
                     &request.protocol_system,
