@@ -72,6 +72,10 @@ impl Snapshot {
     pub fn get_states(&self) -> &HashMap<String, ComponentWithState> {
         &self.states
     }
+
+    pub fn get_vm_storage(&self) -> &HashMap<Bytes, ResponseAccount> {
+        &self.vm_storage
+    }
 }
 
 #[derive(Clone, PartialEq, Debug, Default, Serialize)]
