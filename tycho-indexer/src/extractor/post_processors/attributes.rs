@@ -84,7 +84,7 @@ pub fn add_default_attributes_uniswapv2(changes: BlockChanges) -> BlockChanges {
 
 #[cfg(test)]
 mod test {
-    use crate::extractor::compat::{
+    use crate::extractor::post_processors::{
         attributes::{
             add_default_attributes, PLAIN_POOL, STABLE_SWAP_FACTORY, USV3_MANDATORY_ATTRIBUTES,
         },

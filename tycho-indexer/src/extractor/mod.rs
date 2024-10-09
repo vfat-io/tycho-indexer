@@ -25,7 +25,7 @@ pub mod reorg_buffer;
 pub mod runner;
 mod u256_num;
 
-pub mod compat;
+pub mod post_processors;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ExtractionError {

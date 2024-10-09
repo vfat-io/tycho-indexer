@@ -40,11 +40,11 @@ use crate::{
 };
 
 use super::{
-    compat::{
+    evm::chain_state::ChainState,
+    post_processors::{
         add_default_attributes_uniswapv2, add_default_attributes_uniswapv3, ignore_self_balances,
         transcode_ambient_balances, transcode_usv2_balances, trim_curve_component_token,
     },
-    evm::chain_state::ChainState,
     Extractor, ExtractorMsg,
 };
 
