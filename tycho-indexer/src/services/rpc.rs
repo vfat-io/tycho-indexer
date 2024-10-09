@@ -71,7 +71,7 @@ pub struct RpcHandler<G> {
     // TODO: remove use of Arc. It was introduced for ease of testing this deltas buffer, however
     // it potentially could make this slow. We should consider refactoring this and maybe use
     // generics
-    pending_deltas: Arc<dyn PendingDeltasBuffer + Send + Sync>,
+    pending_deltas: Option<Arc<dyn PendingDeltasBuffer + Send + Sync>>,
     token_cache: RpcCache<dto::TokensRequestBody, dto::TokensRequestResponse>,
     contract_storage_cache: RpcCache<dto::StateRequestBody, dto::StateRequestResponse>,
     protocol_state_cache:
@@ -84,7 +84,10 @@ impl<G> RpcHandler<G>
 where
     G: Gateway,
 {
-    pub fn new(db_gateway: G, pending_deltas: Arc<dyn PendingDeltasBuffer + Send + Sync>) -> Self {
+    pub fn new(
+        db_gateway: G,
+        pending_deltas: Option<Arc<dyn PendingDeltasBuffer + Send + Sync>>,
+    ) -> Self {
         let token_cache = RpcCache::<dto::TokensRequestBody, dto::TokensRequestResponse>::new(
             "token",
             50,
@@ -180,12 +183,14 @@ where
         let mut accounts = account_data.entity;
 
         if let Some(at) = deltas_version {
-            self.pending_deltas.update_vm_states(
-                Some(&paginated_addrs),
-                &mut accounts,
-                Some(at),
-                &request.protocol_system,
-            )?;
+            if let Some(pending_deltas) = &self.pending_deltas {
+                pending_deltas.update_vm_states(
+                    Some(&paginated_addrs),
+                    &mut accounts,
+                    Some(at),
+                    &request.protocol_system,
+                )?;
+            }
         }
 
         let total = match addresses {
@@ -236,14 +241,23 @@ where
                     .number,
             ),
         };
-        let request_version_finality = self
-            .pending_deltas
-            .get_block_finality(ordered_version, protocol_system)
-            .unwrap_or(None)
-            .unwrap_or_else(|| {
-                warn!(?ordered_version, ?protocol_system, "No finality found for version.");
-                FinalityStatus::Finalized
-            });
+        let request_version_finality =
+            self.pending_deltas
+                .as_ref()
+                .map_or(FinalityStatus::Finalized, |pending| {
+                    pending
+                        .get_block_finality(ordered_version, protocol_system)
+                        .ok()
+                        .and_then(|finality| finality)
+                        .unwrap_or_else(|| {
+                            warn!(
+                                ?ordered_version,
+                                ?protocol_system,
+                                "No finality found for version."
+                            );
+                            FinalityStatus::Finalized
+                        })
+                });
 
         debug!(
             ?request_version_finality,
@@ -355,13 +369,14 @@ where
 
         // merge db states with pending deltas
         if let Some(at) = deltas_version {
-            self.pending_deltas
-                .merge_native_states(
+            if let Some(pending_deltas) = &self.pending_deltas {
+                pending_deltas.merge_native_states(
                     Some(&paginated_ids),
                     &mut states,
                     Some(at),
                     &request.protocol_system,
                 )?;
+            }
         }
 
         let total = match ids {
@@ -503,7 +518,11 @@ where
 
         let buffered_components = self
             .pending_deltas
-            .get_new_components(ids_slice, &system)?;
+            .as_ref()
+            .map_or(Ok(Vec::new()), |pending_delta| {
+                pending_delta.get_new_components(ids_slice, &system)
+            })?;
+
         debug!(n_components = buffered_components.len(), "RetrievedBufferedComponents");
 
         // Check if we have all requested components in the cache
@@ -1002,7 +1021,7 @@ mod tests {
             .expect_get_block_finality()
             .return_once(|_, _| Ok(Some(FinalityStatus::Unfinalized)));
 
-        let req_handler = RpcHandler::new(gw, Arc::new(mock_buffer));
+        let req_handler = RpcHandler::new(gw, Some(Arc::new(mock_buffer)));
 
         let request = dto::StateRequestBody {
             contract_ids: Some(vec![
@@ -1062,7 +1081,7 @@ mod tests {
         // ensure the gateway is only accessed once - the second request should hit cache
         gw.expect_get_tokens()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
-        let req_handler = RpcHandler::new(gw, Arc::new(PendingDeltas::new([])));
+        let req_handler = RpcHandler::new(gw, None);
 
         // request for 2 tokens that are in the DB (WETH and USDC)
         let request = dto::TokensRequestBody {
@@ -1132,7 +1151,7 @@ mod tests {
             .expect_get_block_finality()
             .return_once(|_, _| Ok(Some(FinalityStatus::Unfinalized)));
 
-        let req_handler = RpcHandler::new(gw, Arc::new(mock_buffer));
+        let req_handler = RpcHandler::new(gw, Some(Arc::new(mock_buffer)));
 
         let request = dto::ProtocolStateRequestBody {
             protocol_ids: Some(vec![
@@ -1207,7 +1226,7 @@ mod tests {
                 move |_, _| Ok(vec![buf_expected_clone])
             });
 
-        let req_handler = RpcHandler::new(gw, Arc::new(mock_buffer));
+        let req_handler = RpcHandler::new(gw, Some(Arc::new(mock_buffer)));
 
         let request = dto::ProtocolComponentsRequestBody {
             protocol_system: "ambient".to_string(),
@@ -1300,7 +1319,7 @@ mod tests {
                 move |_, _| Ok(vec![buf_expected1_clone.clone(), buf_expected2_clone.clone()])
             });
 
-        let req_handler = RpcHandler::new(gw, Arc::new(mock_buffer));
+        let req_handler = RpcHandler::new(gw, Some(Arc::new(mock_buffer)));
 
         let request = dto::ProtocolComponentsRequestBody {
             protocol_system: "ambient".to_string(),
