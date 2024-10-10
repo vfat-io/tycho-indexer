@@ -2,10 +2,11 @@
 #![allow(deprecated)]
 use std::{collections::HashSet, sync::Arc};
 
-use actix_web::{web, HttpResponse};
+use actix_web::{web, HttpResponse, ResponseError};
 use anyhow::Error;
 use chrono::{Duration, Utc};
 use diesel_async::pooled_connection::deadpool;
+use reqwest::StatusCode;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -41,6 +42,26 @@ pub enum RpcError {
 impl From<anyhow::Error> for RpcError {
     fn from(value: Error) -> Self {
         Self::Parse(value.to_string())
+    }
+}
+
+impl ResponseError for RpcError {
+    fn error_response(&self) -> HttpResponse {
+        match self {
+            RpcError::Storage(e) => HttpResponse::NotFound().body(e.to_string()),
+            RpcError::Parse(e) => HttpResponse::BadRequest().body(e.to_string()),
+            RpcError::Connection(e) => HttpResponse::InternalServerError().body(e.to_string()),
+            RpcError::DeltasError(e) => HttpResponse::InternalServerError().body(e.to_string()),
+        }
+    }
+
+    fn status_code(&self) -> StatusCode {
+        match self {
+            RpcError::Storage(_) => StatusCode::NOT_FOUND,
+            RpcError::Parse(_) => StatusCode::BAD_REQUEST,
+            RpcError::Connection(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            RpcError::DeltasError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
     }
 }
 
@@ -617,7 +638,7 @@ pub async fn contract_state<G: Gateway>(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, "Error while getting contract state.");
-            HttpResponse::InternalServerError().finish()
+            HttpResponse::from_error(err)
         }
     }
 }
@@ -655,7 +676,7 @@ pub async fn tokens<G: Gateway>(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, "Error while getting tokens.");
-            HttpResponse::InternalServerError().finish()
+            HttpResponse::from_error(err)
         }
     }
 }
@@ -694,7 +715,7 @@ pub async fn protocol_components<G: Gateway>(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, "Error while getting tokens.");
-            HttpResponse::InternalServerError().finish()
+            HttpResponse::from_error(err)
         }
     }
 }
@@ -739,7 +760,7 @@ pub async fn protocol_state<G: Gateway>(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, "Error while getting protocol states.");
-            HttpResponse::InternalServerError().finish()
+            HttpResponse::from_error(err)
         }
     }
 }
