@@ -38,18 +38,18 @@ struct CliArgs {
     #[clap(long, number_of_values = 1)]
     exchange: Vec<String>,
 
-    /// Specifies the minimum TVL to filter the components. Denoted in the native token. Ignored if
-    /// addresses or range tvl values are provided.
+    /// Specifies the minimum TVL to filter the components. Denoted in the native token (e.g.
+    /// Mainnet -> ETH). Ignored if addresses or range tvl values are provided.
     #[clap(long, default_value = "10")]
     min_tvl: u32,
 
-    /// Specifies the lower bound of the TVL threshold range. Denoted in the native token.
-    /// Components below this TVL will be removed from tracking.
+    /// Specifies the lower bound of the TVL threshold range. Denoted in the native token (e.g.
+    /// Mainnet -> ETH). Components below this TVL will be removed from tracking.
     #[clap(long)]
     remove_tvl_threshold: Option<u32>,
 
-    /// Specifies the upper bound of the TVL threshold range. Denoted in the native token.
-    /// Components above this TVL will be added to tracking.
+    /// Specifies the upper bound of the TVL threshold range. Denoted in the native token (e.g.
+    /// Mainnet -> ETH). Components above this TVL will be added to tracking.
     #[clap(long)]
     add_tvl_threshold: Option<u32>,
 
