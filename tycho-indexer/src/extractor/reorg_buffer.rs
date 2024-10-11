@@ -413,7 +413,7 @@ mod test {
         Bytes,
     };
 
-    use crate::{extractor::evm::BlockChanges, testing};
+    use crate::{extractor::models::BlockChanges, testing};
 
     use super::{BlockNumberOrTimestamp, FinalityStatus, ReorgBuffer};
 

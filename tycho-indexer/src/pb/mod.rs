@@ -2,6 +2,8 @@ use std::fmt::Display;
 
 use crate::pb::sf::substreams::rpc::v2::BlockRange;
 
+pub mod testing;
+
 include!("pb.rs");
 
 impl Display for BlockRange {

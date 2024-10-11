@@ -21,6 +21,8 @@ use tycho_core::{
 };
 
 pub mod evm;
+pub mod message_conversions;
+pub mod models;
 pub mod protocol_extractor;
 pub mod reorg_buffer;
 pub mod runner;

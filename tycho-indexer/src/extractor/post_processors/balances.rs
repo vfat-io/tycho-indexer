@@ -1,4 +1,4 @@
-use crate::extractor::{evm::BlockChanges, u256_num::bytes_to_f64};
+use crate::extractor::{models::BlockChanges, u256_num::bytes_to_f64};
 use num_bigint::BigUint;
 use num_traits::Num;
 use tycho_core::Bytes;
