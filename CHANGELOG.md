@@ -1,3 +1,11 @@
+## [0.33.0](https://github.com/propeller-heads/tycho-indexer/compare/0.32.0...0.33.0) (2024-10-11)
+
+
+### Features
+
+* **rpc:** return custom message for RPC error ([02daedb](https://github.com/propeller-heads/tycho-indexer/commit/02daedb1a8fc66d7d0847eaa81f589f020a77881))
+* **rpc:** return custom message for RPC error ([#414](https://github.com/propeller-heads/tycho-indexer/issues/414)) ([6a51645](https://github.com/propeller-heads/tycho-indexer/commit/6a51645e986c14b1d9a9ec00dcbae3dd2cca746d))
+
 ## [0.32.0](https://github.com/propeller-heads/tycho-indexer/compare/0.31.3...0.32.0) (2024-10-09)
 
 
