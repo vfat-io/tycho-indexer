@@ -35,8 +35,8 @@ use tycho_storage::postgres::cache::CachedGateway;
 use crate::{
     extractor::{
         chain_state::ChainState,
-        message_conversions::TryFromMessage,
         models::{BlockChanges, BlockContractChanges, BlockEntityChanges},
+        protobuf_deserialisation::TryFromMessage,
         protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
         reorg_buffer::ReorgBuffer,
         BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,

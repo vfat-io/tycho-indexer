@@ -21,8 +21,8 @@ use tycho_core::{
 };
 
 pub mod chain_state;
-pub mod message_conversions;
 pub mod models;
+pub mod protobuf_deserialisation;
 pub mod protocol_cache;
 pub mod protocol_extractor;
 pub mod reorg_buffer;
