@@ -14,7 +14,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::{
     models::{
         self,
-        blockchain::{BlockAggregatedChanges, BlockTag},
+        blockchain::{Block, BlockAggregatedChanges, BlockTag},
         contract::{Account, AccountDelta},
         protocol::{ComponentBalance, ProtocolComponentState, ProtocolComponentStateDelta},
         token::{CurrencyToken, TokenOwnerStore},
@@ -36,7 +36,6 @@ use crate::{
         evm::{
             chain_state::ChainState,
             protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
-            Block,
         },
         reorg_buffer::ReorgBuffer,
         BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
@@ -54,7 +53,7 @@ pub struct Inner {
     first_message_processed: bool,
 }
 
-pub struct HybridContractExtractor<G, T> {
+pub struct ProtocolExtractor<G, T> {
     gateway: G,
     name: String,
     chain: Chain,
@@ -69,9 +68,9 @@ pub struct HybridContractExtractor<G, T> {
     reorg_buffer: Mutex<ReorgBuffer<BlockUpdateWithCursor<evm::BlockChanges>>>,
 }
 
-impl<G, T> HybridContractExtractor<G, T>
+impl<G, T> ProtocolExtractor<G, T>
 where
-    G: HybridGateway,
+    G: ExtractorGateway,
     T: TokenPreProcessor,
 {
     #[allow(clippy::too_many_arguments)]
@@ -90,7 +89,7 @@ where
         let res = match gateway.get_cursor().await {
             Err(StorageError::NotFound(_, _)) => {
                 warn!(?name, ?chain, "No cursor found, starting from the beginning");
-                HybridContractExtractor {
+                ProtocolExtractor {
                     gateway,
                     name: name.to_string(),
                     chain,
@@ -118,7 +117,7 @@ where
                     cursor = &cursor_hex,
                     "Found existing cursor! Resuming extractor.."
                 );
-                HybridContractExtractor {
+                ProtocolExtractor {
                     gateway,
                     name: name.to_string(),
                     chain,
@@ -454,9 +453,9 @@ where
 }
 
 #[async_trait]
-impl<G, T> Extractor for HybridContractExtractor<G, T>
+impl<G, T> Extractor for ProtocolExtractor<G, T>
 where
-    G: HybridGateway,
+    G: ExtractorGateway,
     T: TokenPreProcessor,
 {
     fn get_id(&self) -> ExtractorIdentity {
@@ -507,41 +506,41 @@ where
             url if url.ends_with("BlockChanges") => {
                 let raw_msg = pb::tycho::evm::v1::BlockChanges::decode(data.value.as_slice())?;
                 trace!(?raw_msg, "Received BlockChanges message");
-                evm::BlockChanges::try_from_message(
+                evm::BlockChanges::try_from_message((
                     raw_msg,
                     &self.name,
                     self.chain,
                     &self.protocol_system,
                     &self.protocol_types,
                     inp.final_block_height,
-                )
+                ))
             }
             url if url.ends_with("BlockContractChanges") => {
                 let raw_msg =
                     pb::tycho::evm::v1::BlockContractChanges::decode(data.value.as_slice())?;
                 trace!(?raw_msg, "Received BlockContractChanges message");
-                evm::BlockContractChanges::try_from_message(
+                evm::BlockContractChanges::try_from_message((
                     raw_msg,
                     &self.name,
                     self.chain,
                     self.protocol_system.clone(),
                     &self.protocol_types,
                     inp.final_block_height,
-                )
+                ))
                 .map(Into::into)
             }
             url if url.ends_with("BlockEntityChanges") => {
                 let raw_msg =
                     pb::tycho::evm::v1::BlockEntityChanges::decode(data.value.as_slice())?;
                 trace!(?raw_msg, "Received BlockEntityChanges message");
-                evm::BlockEntityChanges::try_from_message(
+                evm::BlockEntityChanges::try_from_message((
                     raw_msg,
                     &self.name,
                     self.chain,
                     &self.protocol_system,
                     &self.protocol_types,
                     inp.final_block_height,
-                )
+                ))
                 .map(Into::into)
             }
             _ => return Err(ExtractionError::DecodeError("Unknown message type".into())),
@@ -999,7 +998,7 @@ where
         todo!()
     }
 }
-pub struct HybridPgGateway {
+pub struct ExtractorPgGateway {
     name: String,
     chain: Chain,
     db_tx_batch_size: usize,
@@ -1008,7 +1007,7 @@ pub struct HybridPgGateway {
 
 #[automock]
 #[async_trait]
-pub trait HybridGateway: Send + Sync {
+pub trait ExtractorGateway: Send + Sync {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
 
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]);
@@ -1036,7 +1035,7 @@ pub trait HybridGateway: Send + Sync {
     ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, StorageError>;
 }
 
-impl HybridPgGateway {
+impl ExtractorPgGateway {
     pub fn new(
         name: &str,
         chain: Chain,
@@ -1075,7 +1074,7 @@ impl HybridPgGateway {
 }
 
 #[async_trait]
-impl HybridGateway for HybridPgGateway {
+impl ExtractorGateway for ExtractorPgGateway {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
         self.get_last_cursor().await
     }
@@ -1249,6 +1248,7 @@ impl HybridGateway for HybridPgGateway {
 mod test {
     use super::*;
     use crate::{
+        extractor::message_conversions::fixtures as pb_fixtures,
         pb::tycho::evm::v1::{BlockChanges, BlockContractChanges, BlockEntityChanges},
         testing::MockGateway,
     };
@@ -1274,8 +1274,8 @@ mod test {
     const EXTRACTOR_NAME: &str = "TestExtractor";
     const TEST_PROTOCOL: &str = "TestProtocol";
     async fn create_extractor(
-        gw: MockHybridGateway,
-    ) -> HybridContractExtractor<MockHybridGateway, MockTokenPreProcessor> {
+        gw: MockExtractorGateway,
+    ) -> ProtocolExtractor<MockExtractorGateway, MockTokenPreProcessor> {
         let protocol_types = HashMap::from([("pt_1".to_string(), ProtocolType::default())]);
         let protocol_cache = ProtocolMemoryCache::new(
             Chain::Ethereum,
@@ -1286,7 +1286,7 @@ mod test {
         preprocessor
             .expect_get_tokens()
             .returning(|_, _, _| Vec::new());
-        HybridContractExtractor::new(
+        ProtocolExtractor::new(
             gw,
             EXTRACTOR_NAME,
             Chain::Ethereum,
@@ -1303,7 +1303,7 @@ mod test {
 
     #[tokio::test]
     async fn test_get_cursor() {
-        let mut gw = MockHybridGateway::new();
+        let mut gw = MockExtractorGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -1319,7 +1319,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data() {
-        let mut gw = MockHybridGateway::new();
+        let mut gw = MockExtractorGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -1334,7 +1334,7 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
-                BlockChanges { block: Some(evm::fixtures::pb_blocks(1)), changes: vec![] },
+                BlockChanges { block: Some(pb_fixtures::pb_blocks(1)), changes: vec![] },
                 Some(format!("cursor@{}", 1).as_str()),
                 Some(1),
             ))
@@ -1345,7 +1345,7 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
-                BlockChanges { block: Some(evm::fixtures::pb_blocks(2)), changes: vec![] },
+                BlockChanges { block: Some(pb_fixtures::pb_blocks(2)), changes: vec![] },
                 Some(format!("cursor@{}", 2).as_str()),
                 Some(2),
             ))
@@ -1359,7 +1359,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data_old_native_msg() {
-        let mut gw = MockHybridGateway::new();
+        let mut gw = MockExtractorGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -1375,9 +1375,9 @@ mod test {
         extractor
             .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
                 BlockEntityChanges {
-                    block: Some(evm::fixtures::pb_blocks(1)),
+                    block: Some(pb_fixtures::pb_blocks(1)),
                     changes: vec![crate::pb::tycho::evm::v1::TransactionEntityChanges {
-                        tx: Some(evm::fixtures::pb_transactions(1, 1)),
+                        tx: Some(pb_fixtures::pb_transactions(1, 1)),
                         entity_changes: vec![],
                         component_changes: vec![],
                         balance_changes: vec![],
@@ -1394,9 +1394,9 @@ mod test {
         extractor
             .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
                 BlockEntityChanges {
-                    block: Some(evm::fixtures::pb_blocks(2)),
+                    block: Some(pb_fixtures::pb_blocks(2)),
                     changes: vec![crate::pb::tycho::evm::v1::TransactionEntityChanges {
-                        tx: Some(evm::fixtures::pb_transactions(2, 1)),
+                        tx: Some(pb_fixtures::pb_transactions(2, 1)),
                         entity_changes: vec![],
                         component_changes: vec![],
                         balance_changes: vec![],
@@ -1415,7 +1415,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data_old_vm_msg() {
-        let mut gw = MockHybridGateway::new();
+        let mut gw = MockExtractorGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -1431,9 +1431,9 @@ mod test {
         extractor
             .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
                 BlockContractChanges {
-                    block: Some(evm::fixtures::pb_blocks(1)),
+                    block: Some(pb_fixtures::pb_blocks(1)),
                     changes: vec![crate::pb::tycho::evm::v1::TransactionContractChanges {
-                        tx: Some(evm::fixtures::pb_transactions(1, 1)),
+                        tx: Some(pb_fixtures::pb_transactions(1, 1)),
                         contract_changes: vec![],
                         component_changes: vec![],
                         balance_changes: vec![],
@@ -1450,9 +1450,9 @@ mod test {
         extractor
             .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
                 BlockContractChanges {
-                    block: Some(evm::fixtures::pb_blocks(2)),
+                    block: Some(pb_fixtures::pb_blocks(2)),
                     changes: vec![crate::pb::tycho::evm::v1::TransactionContractChanges {
-                        tx: Some(evm::fixtures::pb_transactions(2, 1)),
+                        tx: Some(pb_fixtures::pb_transactions(2, 1)),
                         contract_changes: vec![],
                         component_changes: vec![],
                         balance_changes: vec![],
@@ -1470,7 +1470,7 @@ mod test {
     }
     #[tokio::test]
     async fn test_handle_tick_scoped_data_skip() {
-        let mut gw = MockHybridGateway::new();
+        let mut gw = MockExtractorGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -1508,14 +1508,13 @@ mod test {
 
     #[test_log::test(tokio::test)]
     async fn test_construct_tokens() {
-        let msg = evm::BlockChanges {
-            extractor: "ex".to_string(),
-            block: Block::default(),
-            chain: Chain::Ethereum,
-            finalized_block_height: 0,
-            revert: false,
-            new_tokens: HashMap::new(),
-            txs_with_update: vec![TxWithChanges {
+        let msg = evm::BlockChanges::new(
+            "ex".to_string(),
+            Chain::Ethereum,
+            Block::default(),
+            0,
+            false,
+            vec![TxWithChanges {
                 protocol_components: HashMap::from([(
                     "TestProtocol".to_string(),
                     ProtocolComponent {
@@ -1535,7 +1534,7 @@ mod test {
                 balance_changes: HashMap::new(),
                 tx: Transaction::default(),
             }],
-        };
+        );
 
         let protocol_gw = MockGateway::new();
         let protocol_cache = ProtocolMemoryCache::new(
@@ -1571,7 +1570,7 @@ mod test {
         preprocessor
             .expect_get_tokens()
             .return_once(|_, _, _| ret);
-        let mut extractor_gw = MockHybridGateway::new();
+        let mut extractor_gw = MockGateway::new();
         extractor_gw
             .expect_ensure_protocol_types()
             .times(1)
@@ -1580,7 +1579,7 @@ mod test {
             .expect_get_cursor()
             .times(1)
             .returning(|| Ok("cursor".into()));
-        let extractor = HybridContractExtractor::new(
+        let extractor = ProtocolExtractor::new(
             extractor_gw,
             EXTRACTOR_NAME,
             Chain::Ethereum,
@@ -1692,7 +1691,7 @@ mod test {
             .expect("adding tokens failed");
 
         let preprocessor = MockTokenPreProcessor::new();
-        let mut extractor_gw = MockHybridGateway::new();
+        let mut extractor_gw = MockGateway::new();
         extractor_gw
             .expect_ensure_protocol_types()
             .times(1)
@@ -1705,7 +1704,7 @@ mod test {
             .expect_get_components_balances()
             .return_once(|_| Ok(HashMap::new()));
 
-        let extractor = HybridContractExtractor::new(
+        let extractor = ProtocolExtractor::new(
             extractor_gw,
             "vm_name",
             Chain::Ethereum,
@@ -1749,10 +1748,7 @@ mod test {
 #[cfg(test)]
 mod test_serial_db {
     use super::*;
-    use crate::{
-        extractor::evm::{ProtocolComponent, Transaction, TxWithChanges},
-        pb::sf::substreams::v1::BlockRef,
-    };
+    use crate::pb::sf::substreams::v1::BlockRef;
     use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
     use futures03::{stream, StreamExt};
 
@@ -1853,7 +1849,7 @@ mod test_serial_db {
     async fn setup_gw(
         pool: Pool<AsyncPgConnection>,
         implementation_type: ImplementationType,
-    ) -> (HybridPgGateway, i64) {
+    ) -> (ExtractorPgGateway, i64) {
         let mut conn = pool
             .get()
             .await
@@ -1888,7 +1884,7 @@ mod test_serial_db {
             .await
             .expect("failed to build postgres gateway");
 
-        let gw = HybridPgGateway::new("test", Chain::Ethereum, 1000, cached_gw);
+        let gw = ExtractorPgGateway::new("test", Chain::Ethereum, 1000, cached_gw);
         (gw, chain_id)
     }
 
@@ -2271,7 +2267,7 @@ mod test_serial_db {
                 .await
                 .unwrap();
 
-            let gw = HybridPgGateway::new(
+            let gw = ExtractorPgGateway::new(
                 "native_name",
                 Chain::Ethereum,
                 0,
@@ -2287,7 +2283,7 @@ mod test_serial_db {
                 chrono::Duration::seconds(900),
                 Arc::new(cached_gw),
             );
-            let extractor = HybridContractExtractor::new(
+            let extractor = ProtocolExtractor::new(
                 gw,
                 "native_name",
                 Chain::Ethereum,
@@ -2451,7 +2447,7 @@ mod test_serial_db {
                 .await
                 .unwrap();
 
-            let gw = HybridPgGateway::new(
+            let gw = ExtractorPgGateway::new(
                 "vm_name",
                 Chain::Ethereum,
                 0,
@@ -2467,7 +2463,7 @@ mod test_serial_db {
                 Arc::new(cached_gw),
             );
             let preprocessor = get_mocked_token_pre_processor();
-            let extractor = HybridContractExtractor::new(
+            let extractor = ProtocolExtractor::new(
                 gw,
                 "vm_name",
                 Chain::Ethereum,

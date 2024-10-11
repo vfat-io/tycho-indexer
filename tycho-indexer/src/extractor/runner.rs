@@ -26,10 +26,8 @@ use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{
     extractor::{
-        evm::{
-            hybrid::{HybridContractExtractor, HybridPgGateway},
-            protocol_cache::ProtocolMemoryCache,
-        },
+        evm::protocol_cache::ProtocolMemoryCache,
+        protocol_extractor::{ExtractorPgGateway, ProtocolExtractor},
         ExtractionError,
     },
     pb::sf::substreams::v1::Package,
@@ -443,7 +441,7 @@ impl ExtractorBuilder {
             })
             .collect();
 
-        let gw = HybridPgGateway::new(
+        let gw = ExtractorPgGateway::new(
             &self.config.name,
             self.config.chain,
             self.config.sync_batch_size,
@@ -451,7 +449,7 @@ impl ExtractorBuilder {
         );
 
         self.extractor = Some(Arc::new(
-            HybridContractExtractor::new(
+            ProtocolExtractor::new(
                 gw,
                 &self.config.name,
                 self.config.chain,

@@ -21,6 +21,7 @@ use tycho_core::{
 };
 
 pub mod evm;
+pub mod protocol_extractor;
 pub mod reorg_buffer;
 pub mod runner;
 mod u256_num;

@@ -28,7 +28,6 @@ use crate::{
 use super::{reorg_buffer::StateUpdateBufferEntry, u256_num::bytes_to_f64, ExtractionError};
 
 pub mod chain_state;
-pub mod hybrid;
 pub mod protocol_cache;
 pub mod token_analysis_cron;
 
