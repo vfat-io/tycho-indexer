@@ -38,7 +38,8 @@ struct CliArgs {
     #[clap(long, number_of_values = 1)]
     exchange: Vec<String>,
 
-    /// Specifies the minimum TVL to filter the components. Ignored if addresses are provided.
+    /// Specifies the minimum TVL to filter the components. Denoted in the native token. Ignored if
+    /// addresses or range tvl values are provided.
     #[clap(long, default_value = "10")]
     min_tvl: u32,
 

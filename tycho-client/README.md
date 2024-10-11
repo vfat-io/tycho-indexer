@@ -46,13 +46,23 @@ tycho-client \
 ```
  - TYCHO_INDEXER_URL defaults to `localhost:4242`
 
- Note: if an authentication is required by the gateway, you can set it via an enviroment variable:
+#### Authentication
+
+If the gateway requires authentication you can provide it one of two ways: 
+- Set it via an enviroment variable:
  ```bash
  export TYCHO_AUTH_TOKEN={your_token}
  ```
- or by using the `--auth-key {your_token}` flag.
+- Use the `--auth-key {your_token}` flag directly in the command.
 
  If you wish to use unsecure transports, you may omit setting the auth-key and instead use the `--no-tls` flag. This is useful if you are hosting your own instance of tycho and do not require the added security.
+
+#### Help and More Information
+
+ For more details on using the CLI, run:
+ ```bash
+ tycho client --help
+ ```
 
 ## Usage
 
@@ -88,7 +98,9 @@ tycho-client --exchange uniswap_v3-0x....
 This will stream all relevant messages for this particular uniswap v3 pool.
 
 ##### To filter by TVL:
-If you wish to track all pools with a minimum TVL (denominated in native token), you have 2 options:
+
+If you wish to track all pools with a minimum TVL (denominated in the chain's native token), you have 2 options:
+
   1) Set an exact tvl boundary:
 ```bash
 tycho-client --min-tvl 100 --exchange uniswap_v3 --exchange uniswap_v2
