@@ -577,7 +577,7 @@ mod test {
         let expected_chain = Chain::Ethereum;
         let expected_protocol_system = "ambient".to_string();
         let expected_attribute_map: HashMap<String, Bytes> = vec![
-            ("balance".to_string(), Bytes::from(100_u64.to_be_bytes().to_vec())),
+            ("balance".to_string(), Bytes::from(100u64).lpad(32, 0)),
             ("factory_address".to_string(), Bytes::from(b"0x0fwe0g240g20".to_vec())),
         ]
         .into_iter()

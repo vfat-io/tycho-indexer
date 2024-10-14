@@ -1247,10 +1247,7 @@ mod test {
 
     use crate::{pb::testing::fixtures as pb_fixtures, testing::MockGateway};
     use tycho_core::{
-        models::{
-            blockchain::{Transaction, TxWithChanges},
-            protocol::ProtocolComponent,
-        },
+        models::blockchain::{Transaction, TxWithChanges},
         traits::TokenOwnerFinding,
     };
 
@@ -1761,11 +1758,7 @@ mod test_serial_db {
         pb::{sf::substreams::v1::BlockRef, testing::fixtures as pb_fixtures},
     };
     use tycho_core::{
-        models::{
-            blockchain::{Block, TxWithChanges},
-            contract::Account,
-            ContractId, FinancialType, ImplementationType,
-        },
+        models::{blockchain::TxWithChanges, ContractId, FinancialType, ImplementationType},
         storage::{BlockIdentifier, BlockOrTimestamp},
         traits::TokenOwnerFinding,
     };
@@ -2345,8 +2338,8 @@ mod test_serial_db {
                     ("pc_1".to_string(), ProtocolComponentStateDelta {
                         component_id: "pc_1".to_string(),
                         updated_attributes: HashMap::from([
-                            ("attr_2".to_string(), Bytes::from("0x0000000000000002")),
-                            ("attr_1".to_string(), Bytes::from("0x00000000000003e8")),
+                            ("attr_2".to_string(), Bytes::from(2_u64).lpad(32, 0)),
+                            ("attr_1".to_string(), Bytes::from(1000_u64).lpad(32, 0)),
                         ]),
                         deleted_attributes: HashSet::new(),
                     }),

@@ -377,8 +377,8 @@ mod test {
         let mut base_state = protocol_state_with_tx();
 
         let new_attributes: HashMap<String, Bytes> = vec![
-            ("reserve".to_owned(), Bytes::from(900_u64.to_be_bytes().to_vec())),
-            ("new_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
+            ("reserve1".to_owned(), Bytes::from(600u64).lpad(32, 0)),
+            ("new_attribute".to_owned(), Bytes::from(10u64).lpad(32, 0)),
         ]
         .into_iter()
         .collect();
@@ -402,9 +402,10 @@ mod test {
         assert!(res.is_ok());
         assert_eq!(base_state.protocol_states.len(), 2);
         let expected_attributes: HashMap<String, Bytes> = vec![
-            ("reserve".to_owned(), Bytes::from(900_u64.to_be_bytes().to_vec())),
-            ("static_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
-            ("new_attribute".to_owned(), Bytes::from(1_u64.to_be_bytes().to_vec())),
+            ("reserve1".to_owned(), Bytes::from(600u64).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(500u64).lpad(32, 0)),
+            ("static_attribute".to_owned(), Bytes::from(1u64).lpad(32, 0)),
+            ("new_attribute".to_owned(), Bytes::from(10u64).lpad(32, 0)),
         ]
         .into_iter()
         .collect();

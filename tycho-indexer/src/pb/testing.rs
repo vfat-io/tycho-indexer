@@ -11,8 +11,10 @@ pub mod fixtures {
 
     pub fn pb_state_changes() -> crate::pb::tycho::evm::v1::EntityChanges {
         use crate::pb::tycho::evm::v1::*;
-        let res1_value = 1000_u64.to_be_bytes().to_vec();
-        let res2_value = 500_u64.to_be_bytes().to_vec();
+        let res1_value = Bytes::from(1_000u64)
+            .lpad(32, 0)
+            .to_vec();
+        let res2_value = Bytes::from(500u64).lpad(32, 0).to_vec();
         EntityChanges {
             component_id: "State1".to_owned(),
             attributes: vec![
@@ -31,8 +33,10 @@ pub mod fixtures {
     }
 
     pub fn protocol_state_delta() -> ProtocolComponentStateDelta {
-        let res1_value = 1000_u64.to_be_bytes().to_vec();
-        let res2_value = 500_u64.to_be_bytes().to_vec();
+        let res1_value = Bytes::from(1_000u64)
+            .lpad(32, 0)
+            .to_vec();
+        let res2_value = Bytes::from(500u64).lpad(32, 0).to_vec();
         ProtocolComponentStateDelta {
             component_id: "State1".to_string(),
             updated_attributes: vec![
@@ -72,7 +76,7 @@ pub mod fixtures {
             static_att: vec![
                 Attribute {
                     name: "balance".to_owned(),
-                    value: 100_u64.to_be_bytes().to_vec(),
+                    value: Bytes::from(100u64).lpad(32, 0).to_vec(),
                     change: ChangeType::Creation.into(),
                 },
                 Attribute {
@@ -593,13 +597,20 @@ pub mod fixtures {
                                 component_id: "State1".to_owned(),
                                 attributes: vec![
                                     Attribute {
-                                        name: "reserve".to_owned(),
-                                        value: 1000_u64.to_be_bytes().to_vec(),
+                                        name: "reserve1".to_owned(),
+                                        value: Bytes::from(1000u64)
+                                            .lpad(32, 0)
+                                            .to_vec(),
+                                        change: ChangeType::Update.into(),
+                                    },
+                                    Attribute {
+                                        name: "reserve2".to_owned(),
+                                        value: Bytes::from(500u64).lpad(32, 0).to_vec(),
                                         change: ChangeType::Update.into(),
                                     },
                                     Attribute {
                                         name: "static_attribute".to_owned(),
-                                        value: 1_u64.to_be_bytes().to_vec(),
+                                        value: Bytes::from(1u64).lpad(32, 0).to_vec(),
                                         change: ChangeType::Update.into(),
                                     },
                                 ],
@@ -608,13 +619,20 @@ pub mod fixtures {
                                 component_id: "State2".to_owned(),
                                 attributes: vec![
                                     Attribute {
-                                        name: "reserve".to_owned(),
-                                        value: 1000_u64.to_be_bytes().to_vec(),
+                                        name: "reserve1".to_owned(),
+                                        value: Bytes::from(1000u64)
+                                            .lpad(32, 0)
+                                            .to_vec(),
+                                        change: ChangeType::Update.into(),
+                                    },
+                                    Attribute {
+                                        name: "reserve2".to_owned(),
+                                        value: Bytes::from(500u64).lpad(32, 0).to_vec(),
                                         change: ChangeType::Update.into(),
                                     },
                                     Attribute {
                                         name: "static_attribute".to_owned(),
-                                        value: 1_u64.to_be_bytes().to_vec(),
+                                        value: Bytes::from(1u64).lpad(32, 0).to_vec(),
                                         change: ChangeType::Update.into(),
                                     },
                                 ],
@@ -641,12 +659,12 @@ pub mod fixtures {
                             attributes: vec![
                                 Attribute {
                                     name: "reserve".to_owned(),
-                                    value: 600_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::from(600u64).lpad(32, 0).to_vec(),
                                     change: ChangeType::Update.into(),
                                 },
                                 Attribute {
                                     name: "new".to_owned(),
-                                    value: 0_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::zero(32).to_vec(),
                                     change: ChangeType::Update.into(),
                                 },
                             ],
@@ -671,7 +689,7 @@ pub mod fixtures {
                             .to_vec()],
                             static_att: vec![Attribute {
                                 name: "key".to_owned(),
-                                value: 600_u64.to_be_bytes().to_vec(),
+                                value: Bytes::from(600u64).lpad(32, 0).to_vec(),
                                 change: ChangeType::Creation.into(),
                             }],
                             change: ChangeType::Creation.into(),
@@ -702,12 +720,12 @@ pub mod fixtures {
                         attributes: vec![
                             Attribute {
                                 name: "attr_1".to_owned(),
-                                value: 1_u64.to_be_bytes().to_vec(),
+                                value: Bytes::from(1u64).lpad(32, 0).to_vec(),
                                 change: ChangeType::Update.into(),
                             },
                             Attribute {
                                 name: "attr_2".to_owned(),
-                                value: 2_u64.to_be_bytes().to_vec(),
+                                value: Bytes::from(2u64).lpad(32, 0).to_vec(),
                                 change: ChangeType::Update.into(),
                             },
                         ],
@@ -721,7 +739,7 @@ pub mod fixtures {
                         contracts: vec![],
                         static_att: vec![Attribute {
                             name: "st_attr_1".to_owned(),
-                            value: 1_u64.to_be_bytes().to_vec(),
+                            value: Bytes::from(1u64).lpad(32, 0).to_vec(),
                             change: ChangeType::Creation.into(),
                         }],
                         change: ChangeType::Creation.into(),
@@ -747,7 +765,7 @@ pub mod fixtures {
                         component_id: "pc_1".to_owned(),
                         attributes: vec![Attribute {
                             name: "attr_1".to_owned(),
-                            value: 10_u64.to_be_bytes().to_vec(),
+                            value: Bytes::from(10u64).lpad(32, 0).to_vec(),
                             change: ChangeType::Update.into(),
                         }],
                     }],
@@ -795,7 +813,9 @@ pub mod fixtures {
                             component_id: "pc_1".to_owned(),
                             attributes: vec![Attribute {
                                 name: "attr_1".to_owned(),
-                                value: 1000_u64.to_be_bytes().to_vec(),
+                                value: Bytes::from(1000u64)
+                                    .lpad(32, 0)
+                                    .to_vec(),
                                 change: ChangeType::Update.into(),
                             }],
                         }],
@@ -812,7 +832,9 @@ pub mod fixtures {
                             component_id: "pc_1".to_owned(),
                             attributes: vec![Attribute {
                                 name: "attr_1".to_owned(),
-                                value: 99999_u64.to_be_bytes().to_vec(),
+                                value: Bytes::from(99999u64)
+                                    .lpad(32, 0)
+                                    .to_vec(),
                                 change: ChangeType::Update.into(),
                             }],
                         }],
@@ -842,7 +864,9 @@ pub mod fixtures {
                                 component_id: "pc_1".to_owned(),
                                 attributes: vec![Attribute {
                                     name: "attr_1".to_owned(),
-                                    value: 10000_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::from(10_000u64)
+                                        .lpad(32, 0)
+                                        .to_vec(),
                                     change: ChangeType::Update.into(),
                                 }],
                             },
@@ -850,7 +874,7 @@ pub mod fixtures {
                                 component_id: "pc_3".to_owned(),
                                 attributes: vec![Attribute {
                                     name: "attr_1".to_owned(),
-                                    value: 3_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::from(3u64).lpad(32, 0).to_vec(),
                                     change: ChangeType::Update.into(),
                                 }],
                             },
@@ -880,7 +904,7 @@ pub mod fixtures {
                                 component_id: "pc_3".to_owned(),
                                 attributes: vec![Attribute {
                                     name: "attr_1".to_owned(),
-                                    value: 30_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::from(300u64).lpad(32, 0).to_vec(),
                                     change: ChangeType::Update.into(),
                                 }],
                             },
@@ -888,7 +912,9 @@ pub mod fixtures {
                                 component_id: "pc_1".to_owned(),
                                 attributes: vec![Attribute {
                                     name: "attr_1".to_owned(),
-                                    value: 100000_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::from(100_000u64)
+                                        .lpad(32, 0)
+                                        .to_vec(),
                                     change: ChangeType::Update.into(),
                                 }],
                             },
@@ -917,7 +943,9 @@ pub mod fixtures {
                         component_id: "pc_1".to_owned(),
                         attributes: vec![Attribute {
                             name: "attr_2".to_owned(),
-                            value: 1000000_u64.to_be_bytes().to_vec(),
+                            value: Bytes::from(1_000_000u64)
+                                .lpad(32, 0)
+                                .to_vec(),
                             change: ChangeType::Update.into(),
                         }],
                     }],
@@ -1409,12 +1437,14 @@ pub mod fixtures {
                                 attributes: vec![
                                     Attribute {
                                         name: "reserve".to_owned(),
-                                        value: 1000_u64.to_be_bytes().to_vec(),
+                                        value: Bytes::from(1_000u64)
+                                            .lpad(32, 0)
+                                            .to_vec(),
                                         change: ChangeType::Update.into(),
                                     },
                                     Attribute {
                                         name: "static_attribute".to_owned(),
-                                        value: 1_u64.to_be_bytes().to_vec(),
+                                        value: Bytes::from(1u64).lpad(32, 0).to_vec(),
                                         change: ChangeType::Update.into(),
                                     },
                                 ],
@@ -1424,12 +1454,14 @@ pub mod fixtures {
                                 attributes: vec![
                                     Attribute {
                                         name: "reserve".to_owned(),
-                                        value: 1000_u64.to_be_bytes().to_vec(),
+                                        value: Bytes::from(1_000u64)
+                                            .lpad(32, 0)
+                                            .to_vec(),
                                         change: ChangeType::Update.into(),
                                     },
                                     Attribute {
                                         name: "static_attribute".to_owned(),
-                                        value: 1_u64.to_be_bytes().to_vec(),
+                                        value: Bytes::from(1u64).lpad(32, 0).to_vec(),
                                         change: ChangeType::Update.into(),
                                     },
                                 ],
@@ -1451,12 +1483,12 @@ pub mod fixtures {
                             attributes: vec![
                                 Attribute {
                                     name: "reserve".to_owned(),
-                                    value: 600_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::from(600u64).lpad(32, 0).to_vec(),
                                     change: ChangeType::Update.into(),
                                 },
                                 Attribute {
                                     name: "new".to_owned(),
-                                    value: 0_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::zero(32).to_vec(),
                                     change: ChangeType::Update.into(),
                                 },
                             ],
@@ -1481,7 +1513,7 @@ pub mod fixtures {
                             .to_vec()],
                             static_att: vec![Attribute {
                                 name: "key".to_owned(),
-                                value: 600_u64.to_be_bytes().to_vec(),
+                                value: Bytes::from(600u64).lpad(32, 0).to_vec(),
                                 change: ChangeType::Creation.into(),
                             }],
                             change: ChangeType::Creation.into(),
@@ -1513,12 +1545,12 @@ pub mod fixtures {
                         attributes: vec![
                             Attribute {
                                 name: "attr_1".to_owned(),
-                                value: 1_u64.to_be_bytes().to_vec(),
+                                value: Bytes::from(1u64).lpad(32, 0).to_vec(),
                                 change: ChangeType::Update.into(),
                             },
                             Attribute {
                                 name: "attr_2".to_owned(),
-                                value: 2_u64.to_be_bytes().to_vec(),
+                                value: Bytes::from(2u64).lpad(32, 0).to_vec(),
                                 change: ChangeType::Update.into(),
                             },
                         ],
@@ -1532,7 +1564,7 @@ pub mod fixtures {
                         contracts: vec![],
                         static_att: vec![Attribute {
                             name: "st_attr_1".to_owned(),
-                            value: 1_u64.to_be_bytes().to_vec(),
+                            value: Bytes::from(1u64).lpad(32, 0).to_vec(),
                             change: ChangeType::Creation.into(),
                         }],
                         change: ChangeType::Creation.into(),
@@ -1559,7 +1591,7 @@ pub mod fixtures {
                         component_id: "pc_1".to_owned(),
                         attributes: vec![Attribute {
                             name: "attr_1".to_owned(),
-                            value: 10_u64.to_be_bytes().to_vec(),
+                            value: Bytes::from(10u64).lpad(32, 0).to_vec(),
                             change: ChangeType::Update.into(),
                         }],
                     }],
@@ -1608,7 +1640,9 @@ pub mod fixtures {
                             component_id: "pc_1".to_owned(),
                             attributes: vec![Attribute {
                                 name: "attr_1".to_owned(),
-                                value: 1000_u64.to_be_bytes().to_vec(),
+                                value: Bytes::from(1_000u64)
+                                    .lpad(32, 0)
+                                    .to_vec(),
                                 change: ChangeType::Update.into(),
                             }],
                         }],
@@ -1626,7 +1660,9 @@ pub mod fixtures {
                             component_id: "pc_1".to_owned(),
                             attributes: vec![Attribute {
                                 name: "attr_1".to_owned(),
-                                value: 99999_u64.to_be_bytes().to_vec(),
+                                value: Bytes::from(99_999u64)
+                                    .lpad(32, 0)
+                                    .to_vec(),
                                 change: ChangeType::Update.into(),
                             }],
                         }],
@@ -1657,7 +1693,9 @@ pub mod fixtures {
                                 component_id: "pc_1".to_owned(),
                                 attributes: vec![Attribute {
                                     name: "attr_1".to_owned(),
-                                    value: 10000_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::from(10_000u64)
+                                        .lpad(32, 0)
+                                        .to_vec(),
                                     change: ChangeType::Update.into(),
                                 }],
                             },
@@ -1665,7 +1703,7 @@ pub mod fixtures {
                                 component_id: "pc_3".to_owned(),
                                 attributes: vec![Attribute {
                                     name: "attr_1".to_owned(),
-                                    value: 3_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::from(3u64).lpad(32, 0).to_vec(),
                                     change: ChangeType::Update.into(),
                                 }],
                             },
@@ -1696,7 +1734,7 @@ pub mod fixtures {
                                 component_id: "pc_3".to_owned(),
                                 attributes: vec![Attribute {
                                     name: "attr_1".to_owned(),
-                                    value: 30_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::from(30u64).lpad(32, 0).to_vec(),
                                     change: ChangeType::Update.into(),
                                 }],
                             },
@@ -1704,7 +1742,9 @@ pub mod fixtures {
                                 component_id: "pc_1".to_owned(),
                                 attributes: vec![Attribute {
                                     name: "attr_1".to_owned(),
-                                    value: 100000_u64.to_be_bytes().to_vec(),
+                                    value: Bytes::from(100_000u64)
+                                        .lpad(32, 0)
+                                        .to_vec(),
                                     change: ChangeType::Update.into(),
                                 }],
                             },
@@ -1734,7 +1774,9 @@ pub mod fixtures {
                         component_id: "pc_1".to_owned(),
                         attributes: vec![Attribute {
                             name: "attr_2".to_owned(),
-                            value: 1000000_u64.to_be_bytes().to_vec(),
+                            value: Bytes::from(1_000_000u64)
+                                .lpad(32, 0)
+                                .to_vec(),
                             change: ChangeType::Update.into(),
                         }],
                     }],

@@ -413,6 +413,22 @@ pub mod fixtures {
         )
     }
 
+    pub fn create_full_transaction(
+        hash: &str,
+        block: &str,
+        from: &str,
+        to: &str,
+        index: u64,
+    ) -> Transaction {
+        Transaction::new(
+            hash.parse().unwrap(),
+            block.parse().unwrap(),
+            from.parse().unwrap(),
+            Some(to.parse().unwrap()),
+            index,
+        )
+    }
+
     fn create_protocol_component(tx_hash: Bytes) -> ProtocolComponent {
         ProtocolComponent {
             id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_owned(),
@@ -438,14 +454,18 @@ pub mod fixtures {
     }
 
     pub fn block_state_changes() -> BlockContractChanges {
-        let tx = create_transaction(
+        let tx = create_full_transaction(
             "0000000000000000000000000000000000000000000000000000000011121314",
             "0000000000000000000000000000000000000000000000000000000031323334",
+            "0x0000000000000000000000000000000041424344",
+            "0x0000000000000000000000000000000051525354",
             2,
         );
-        let tx_5 = create_transaction(
+        let tx_5 = create_full_transaction(
             HASH_256_1,
             "0000000000000000000000000000000000000000000000000000000031323334",
+            "0x0000000000000000000000000000000041424344",
+            "0x0000000000000000000000000000000051525354",
             5,
         );
         let protocol_component = create_protocol_component(tx.hash.clone());
@@ -569,14 +589,16 @@ pub mod fixtures {
     }
 
     pub fn block_entity_changes() -> BlockEntityChanges {
-        let tx = create_transaction(
+        let tx = create_full_transaction(
             "0x0000000000000000000000000000000000000000000000000000000011121314",
             "0000000000000000000000000000000000000000000000000000000000000000",
+            "0x0000000000000000000000000000000041424344",
+            "0x0000000000000000000000000000000051525354",
             11,
         );
         let attr: HashMap<String, Bytes> = vec![
-            ("reserve".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec())),
-            ("new".to_owned(), Bytes::from(0_u64.to_be_bytes().to_vec())),
+            ("reserve".to_owned(), Bytes::from(600u64).lpad(32, 0)),
+            ("new".to_owned(), Bytes::zero(32)),
         ]
         .into_iter()
         .collect();
@@ -591,7 +613,7 @@ pub mod fixtures {
         .into_iter()
         .collect();
         let static_attr: HashMap<String, Bytes> =
-            vec![("key".to_owned(), Bytes::from(600_u64.to_be_bytes().to_vec()))]
+            vec![("key".to_owned(), Bytes::from(600u64).lpad(32, 0))]
                 .into_iter()
                 .collect();
         let new_protocol_components: HashMap<String, ProtocolComponent> = vec![(
@@ -755,7 +777,7 @@ mod test {
             filtered,
             HashMap::from([(
                 (state1_key.clone(), reserve_value.clone()),
-                Bytes::from(600_u64.to_be_bytes().to_vec())
+                Bytes::from(600u64).lpad(32, 0),
             )])
         );
     }
