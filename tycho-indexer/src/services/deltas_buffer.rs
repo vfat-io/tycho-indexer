@@ -442,6 +442,7 @@ mod test {
     use super::*;
 
     use crate::{extractor::models::fixtures, testing::block};
+
     use tycho_core::models::{
         contract::AccountDelta,
         protocol::{ComponentBalance, ProtocolComponentStateDelta},

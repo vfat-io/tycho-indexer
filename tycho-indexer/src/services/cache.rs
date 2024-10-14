@@ -86,10 +86,11 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::services::{cache::RpcCache, rpc::RpcError};
     use futures03::future::try_join_all;
     use std::sync::Arc;
     use tokio::sync::Mutex;
+
+    use crate::services::{cache::RpcCache, rpc::RpcError};
 
     #[test_log::test(tokio::test)]
     async fn test_sequential_access() {

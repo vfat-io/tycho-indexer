@@ -1246,6 +1246,7 @@ mod test {
     use super::*;
 
     use crate::{pb::testing::fixtures as pb_fixtures, testing::MockGateway};
+
     use tycho_core::{
         models::blockchain::{Transaction, TxWithChanges},
         traits::TokenOwnerFinding,
@@ -1753,20 +1754,17 @@ mod test_serial_db {
     use futures03::{stream, StreamExt};
 
     use super::*;
-    use crate::{
-        extractor::models::fixtures,
-        pb::{sf::substreams::v1::BlockRef, testing::fixtures as pb_fixtures},
-    };
+
     use tycho_core::{
         models::{blockchain::TxWithChanges, ContractId, FinancialType, ImplementationType},
         storage::{BlockIdentifier, BlockOrTimestamp},
         traits::TokenOwnerFinding,
     };
-    use tycho_storage::postgres::{
-        self,
-        builder::GatewayBuilder,
-        db_fixtures::{self, yesterday_midnight, yesterday_one_am},
-        testing::run_against_db,
+    use tycho_storage::postgres::{builder::GatewayBuilder, db_fixtures, testing::run_against_db};
+
+    use crate::{
+        extractor::models::fixtures,
+        pb::{sf::substreams::v1::BlockRef, testing::fixtures as pb_fixtures},
     };
 
     mock! {
@@ -1858,11 +1856,11 @@ mod test_serial_db {
             .get()
             .await
             .expect("pool should get a connection");
-        let chain_id = postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
 
         match implementation_type {
             ImplementationType::Custom => {
-                postgres::db_fixtures::insert_protocol_type(
+                db_fixtures::insert_protocol_type(
                     &mut conn,
                     "pool",
                     Some(FinancialType::Swap),
@@ -1872,8 +1870,7 @@ mod test_serial_db {
                 .await;
             }
             ImplementationType::Vm => {
-                postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None)
-                    .await;
+                db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None).await;
             }
         }
 
@@ -1917,7 +1914,7 @@ mod test_serial_db {
                     )
                     .unwrap(),
                     parent_hash: Bytes::default(),
-                    ts: yesterday_one_am(),
+                    ts: db_fixtures::yesterday_one_am(),
                 }])
                 .await
                 .expect("block insertion succeeded");
@@ -2321,7 +2318,7 @@ mod test_serial_db {
                 .as_any()
                 .downcast_ref::<BlockAggregatedChanges>()
                 .expect("not good type");
-            let base_ts = yesterday_midnight().timestamp();
+            let base_ts = db_fixtures::yesterday_midnight().timestamp();
             let block_entity_changes_result = BlockAggregatedChanges {
                 extractor: "native_name".to_string(),
                 chain: Chain::Ethereum,
@@ -2408,6 +2405,7 @@ mod test_serial_db {
         })
             .await;
     }
+
     #[test_log::test(tokio::test)]
     async fn test_handle_vm_revert() {
         run_against_db(|pool| async move {
@@ -2501,7 +2499,7 @@ mod test_serial_db {
                 .downcast_ref::<BlockAggregatedChanges>()
                 .expect("not good type");
 
-            let base_ts = yesterday_midnight().timestamp();
+            let base_ts = db_fixtures::yesterday_midnight().timestamp();
             let block_account_expected = BlockAggregatedChanges {
                 extractor: "vm_name".to_string(),
                 chain: Chain::Ethereum,

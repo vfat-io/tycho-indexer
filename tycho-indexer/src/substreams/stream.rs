@@ -12,12 +12,13 @@ use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, trace, warn};
 
-use crate::pb::sf::substreams::{
-    rpc::v2::{response::Message, BlockScopedData, BlockUndoSignal, Request, Response},
-    v1::Modules,
+use crate::{
+    pb::sf::substreams::{
+        rpc::v2::{response::Message, BlockScopedData, BlockUndoSignal, Request, Response},
+        v1::Modules,
+    },
+    substreams::SubstreamsEndpoint,
 };
-
-use crate::substreams::SubstreamsEndpoint;
 
 pub enum BlockResponse {
     New(BlockScopedData),

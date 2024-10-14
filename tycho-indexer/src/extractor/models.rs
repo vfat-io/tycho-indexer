@@ -1,10 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::extractor::{
-    reorg_buffer::ProtocolStateIdType, AccountStateIdType, AccountStateKeyType,
-    AccountStateValueType, ExtractionError, ProtocolStateKeyType, ProtocolStateValueType,
-    StateUpdateBufferEntry,
-};
 use tycho_core::{
     models::{
         blockchain::{Block, BlockAggregatedChanges, BlockScoped, TxWithChanges},
@@ -14,6 +9,12 @@ use tycho_core::{
         Address, AttrStoreKey, Chain, ComponentId,
     },
     Bytes,
+};
+
+use crate::extractor::{
+    reorg_buffer::ProtocolStateIdType, AccountStateIdType, AccountStateKeyType,
+    AccountStateValueType, ExtractionError, ProtocolStateKeyType, ProtocolStateValueType,
+    StateUpdateBufferEntry,
 };
 
 /// A container for account updates grouped by transaction.

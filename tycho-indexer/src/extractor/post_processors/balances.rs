@@ -1,7 +1,9 @@
-use crate::extractor::{models::BlockChanges, u256_num::bytes_to_f64};
 use num_bigint::BigUint;
 use num_traits::Num;
+
 use tycho_core::Bytes;
+
+use crate::extractor::{models::BlockChanges, u256_num::bytes_to_f64};
 
 fn transcode_ascii_balance_to_be(ascii_encoded: &Bytes) -> anyhow::Result<Bytes> {
     let ascii_string = String::from_utf8(ascii_encoded.clone().to_vec())

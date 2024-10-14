@@ -3,14 +3,6 @@ use std::collections::{hash_map::Entry, HashMap, HashSet};
 use chrono::NaiveDateTime;
 use tracing::warn;
 
-use crate::{
-    extractor::{
-        models::{BlockChanges, BlockContractChanges, BlockEntityChanges},
-        u256_num::bytes_to_f64,
-        ExtractionError,
-    },
-    pb::tycho::evm::v1 as substreams,
-};
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction, TxWithChanges},
@@ -21,6 +13,15 @@ use tycho_core::{
         Chain, ChangeType, ComponentId, ProtocolType, TxHash,
     },
     Bytes,
+};
+
+use crate::{
+    extractor::{
+        models::{BlockChanges, BlockContractChanges, BlockEntityChanges},
+        u256_num::bytes_to_f64,
+        ExtractionError,
+    },
+    pb::tycho::evm::v1 as substreams,
 };
 
 pub trait TryFromMessage {

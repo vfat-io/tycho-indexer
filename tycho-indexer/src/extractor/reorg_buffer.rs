@@ -2,6 +2,7 @@ use chrono::NaiveDateTime;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use tracing::{debug, instrument, trace, warn, Level};
+
 use tycho_core::{
     models::{
         blockchain::{Block, BlockScoped},
@@ -396,26 +397,19 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::{
-        collections::{HashMap, HashSet},
-        str::FromStr,
-    };
-
     use chrono::NaiveDateTime;
     use rstest::rstest;
-    use tycho_core::{
-        models::{
-            blockchain::Transaction,
-            protocol::{ComponentBalance, ProtocolChangesWithTx, ProtocolComponentStateDelta},
-            Chain,
-        },
-        storage::StorageError,
-        Bytes,
+    use std::str::FromStr;
+
+    use super::*;
+
+    use tycho_core::models::{
+        blockchain::Transaction,
+        protocol::{ProtocolChangesWithTx, ProtocolComponentStateDelta},
+        Chain,
     };
 
     use crate::{extractor::models::BlockChanges, testing};
-
-    use super::{BlockNumberOrTimestamp, FinalityStatus, ReorgBuffer};
 
     fn transaction() -> Transaction {
         Transaction::new(

@@ -17,7 +17,12 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
 
+use tycho_core::{
+    models::{Chain, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType},
+    Bytes,
+};
 use tycho_ethereum::token_pre_processor::EthereumTokenPreProcessor;
+use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{
     extractor::{
@@ -37,12 +42,6 @@ use crate::{
         SubstreamsEndpoint,
     },
 };
-use tycho_core::{
-    models::{Chain, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType},
-    Bytes,
-};
-use tycho_storage::postgres::cache::CachedGateway;
-
 pub enum ControlMessage {
     Stop,
     Subscribe(Sender<ExtractorMsg>),
@@ -566,11 +565,11 @@ mod test {
     use serde::{Deserialize, Serialize};
     use tracing::info_span;
 
-    use tycho_core::models::NormalisedMessage;
+    use super::*;
 
     use crate::extractor::MockExtractor;
 
-    use super::*;
+    use tycho_core::models::NormalisedMessage;
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     struct DummyMessage {
