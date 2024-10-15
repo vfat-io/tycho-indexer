@@ -107,10 +107,10 @@ pub fn bytes_to_f64(data: &[u8]) -> Option<f64> {
 
 #[cfg(test)]
 mod test {
-
-    use super::*;
     use num_bigint::BigUint;
     use rstest::rstest;
+
+    use super::*;
 
     #[rstest]
     #[case::one(BigUint::one(), 1.0f64)]

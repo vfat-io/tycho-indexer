@@ -13,10 +13,12 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use tycho_core::{
     models::{
-        self,
-        blockchain::{BlockAggregatedChanges, BlockTag},
+        blockchain::{Block, BlockAggregatedChanges, BlockTag},
         contract::{Account, AccountDelta},
-        protocol::{ComponentBalance, ProtocolComponentState, ProtocolComponentStateDelta},
+        protocol::{
+            ComponentBalance, ProtocolComponent, ProtocolComponentState,
+            ProtocolComponentStateDelta,
+        },
         token::{CurrencyToken, TokenOwnerStore},
         Address, Balance, BlockHash, Chain, ChangeType, ExtractionState, ExtractorIdentity,
         ProtocolType, TxHash,
@@ -32,12 +34,10 @@ use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{
     extractor::{
-        evm,
-        evm::{
-            chain_state::ChainState,
-            protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
-            Block,
-        },
+        chain_state::ChainState,
+        models::{BlockChanges, BlockContractChanges, BlockEntityChanges},
+        protobuf_deserialisation::TryFromMessage,
+        protocol_cache::{ProtocolDataCache, ProtocolMemoryCache},
         reorg_buffer::ReorgBuffer,
         BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
     },
@@ -54,7 +54,7 @@ pub struct Inner {
     first_message_processed: bool,
 }
 
-pub struct HybridContractExtractor<G, T> {
+pub struct ProtocolExtractor<G, T> {
     gateway: G,
     name: String,
     chain: Chain,
@@ -65,13 +65,13 @@ pub struct HybridContractExtractor<G, T> {
     inner: Arc<Mutex<Inner>>,
     protocol_types: HashMap<String, ProtocolType>,
     /// Allows to attach some custom logic, e.g. to fix encoding bugs without resync.
-    post_processor: Option<fn(evm::BlockChanges) -> evm::BlockChanges>,
-    reorg_buffer: Mutex<ReorgBuffer<BlockUpdateWithCursor<evm::BlockChanges>>>,
+    post_processor: Option<fn(BlockChanges) -> BlockChanges>,
+    reorg_buffer: Mutex<ReorgBuffer<BlockUpdateWithCursor<BlockChanges>>>,
 }
 
-impl<G, T> HybridContractExtractor<G, T>
+impl<G, T> ProtocolExtractor<G, T>
 where
-    G: HybridGateway,
+    G: ExtractorGateway,
     T: TokenPreProcessor,
 {
     #[allow(clippy::too_many_arguments)]
@@ -84,13 +84,13 @@ where
         protocol_cache: ProtocolMemoryCache,
         protocol_types: HashMap<String, ProtocolType>,
         token_pre_processor: T,
-        post_processor: Option<fn(evm::BlockChanges) -> evm::BlockChanges>,
+        post_processor: Option<fn(BlockChanges) -> BlockChanges>,
     ) -> Result<Self, ExtractionError> {
         // check if this extractor has state
         let res = match gateway.get_cursor().await {
             Err(StorageError::NotFound(_, _)) => {
                 warn!(?name, ?chain, "No cursor found, starting from the beginning");
-                HybridContractExtractor {
+                ProtocolExtractor {
                     gateway,
                     name: name.to_string(),
                     chain,
@@ -118,7 +118,7 @@ where
                     cursor = &cursor_hex,
                     "Found existing cursor! Resuming extractor.."
                 );
-                HybridContractExtractor {
+                ProtocolExtractor {
                     gateway,
                     name: name.to_string(),
                     chain,
@@ -292,7 +292,7 @@ where
     /// to go to storage to retrieve balances that are not stored within the buffer.
     async fn get_balances(
         &self,
-        reorg_buffer: &ReorgBuffer<BlockUpdateWithCursor<evm::BlockChanges>>,
+        reorg_buffer: &ReorgBuffer<BlockUpdateWithCursor<BlockChanges>>,
         reverted_balances_keys: &[(&String, &Bytes)],
     ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, ExtractionError> {
         // First search in the buffer
@@ -366,7 +366,7 @@ where
 
     async fn construct_currency_tokens(
         &self,
-        msg: &evm::BlockChanges,
+        msg: &BlockChanges,
     ) -> Result<HashMap<Address, CurrencyToken>, StorageError> {
         let new_token_addresses = msg
             .protocol_components()
@@ -454,9 +454,9 @@ where
 }
 
 #[async_trait]
-impl<G, T> Extractor for HybridContractExtractor<G, T>
+impl<G, T> Extractor for ProtocolExtractor<G, T>
 where
-    G: HybridGateway,
+    G: ExtractorGateway,
     T: TokenPreProcessor,
 {
     fn get_id(&self) -> ExtractorIdentity {
@@ -507,41 +507,41 @@ where
             url if url.ends_with("BlockChanges") => {
                 let raw_msg = pb::tycho::evm::v1::BlockChanges::decode(data.value.as_slice())?;
                 trace!(?raw_msg, "Received BlockChanges message");
-                evm::BlockChanges::try_from_message(
+                BlockChanges::try_from_message((
                     raw_msg,
                     &self.name,
                     self.chain,
                     &self.protocol_system,
                     &self.protocol_types,
                     inp.final_block_height,
-                )
+                ))
             }
             url if url.ends_with("BlockContractChanges") => {
                 let raw_msg =
                     pb::tycho::evm::v1::BlockContractChanges::decode(data.value.as_slice())?;
                 trace!(?raw_msg, "Received BlockContractChanges message");
-                evm::BlockContractChanges::try_from_message(
+                BlockContractChanges::try_from_message((
                     raw_msg,
                     &self.name,
                     self.chain,
                     self.protocol_system.clone(),
                     &self.protocol_types,
                     inp.final_block_height,
-                )
+                ))
                 .map(Into::into)
             }
             url if url.ends_with("BlockEntityChanges") => {
                 let raw_msg =
                     pb::tycho::evm::v1::BlockEntityChanges::decode(data.value.as_slice())?;
                 trace!(?raw_msg, "Received BlockEntityChanges message");
-                evm::BlockEntityChanges::try_from_message(
+                BlockEntityChanges::try_from_message((
                     raw_msg,
                     &self.name,
                     self.chain,
                     &self.protocol_system,
                     &self.protocol_types,
                     inp.final_block_height,
-                )
+                ))
                 .map(Into::into)
             }
             _ => return Err(ExtractionError::DecodeError("Unknown message type".into())),
@@ -999,7 +999,7 @@ where
         todo!()
     }
 }
-pub struct HybridPgGateway {
+pub struct ExtractorPgGateway {
     name: String,
     chain: Chain,
     db_tx_batch_size: usize,
@@ -1008,14 +1008,14 @@ pub struct HybridPgGateway {
 
 #[automock]
 #[async_trait]
-pub trait HybridGateway: Send + Sync {
+pub trait ExtractorGateway: Send + Sync {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError>;
 
     async fn ensure_protocol_types(&self, new_protocol_types: &[ProtocolType]);
 
     async fn advance(
         &self,
-        changes: &evm::BlockChanges,
+        changes: &BlockChanges,
         new_cursor: &str,
         force_commit: bool,
     ) -> Result<(), StorageError>;
@@ -1025,10 +1025,7 @@ pub trait HybridGateway: Send + Sync {
         component_ids: &[&'a str],
     ) -> Result<Vec<ProtocolComponentState>, StorageError>;
 
-    async fn get_contracts(
-        &self,
-        component_ids: &[models::Address],
-    ) -> Result<Vec<Account>, StorageError>;
+    async fn get_contracts(&self, component_ids: &[Address]) -> Result<Vec<Account>, StorageError>;
 
     async fn get_components_balances<'a>(
         &self,
@@ -1036,7 +1033,7 @@ pub trait HybridGateway: Send + Sync {
     ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, StorageError>;
 }
 
-impl HybridPgGateway {
+impl ExtractorPgGateway {
     pub fn new(
         name: &str,
         chain: Chain,
@@ -1075,7 +1072,7 @@ impl HybridPgGateway {
 }
 
 #[async_trait]
-impl HybridGateway for HybridPgGateway {
+impl ExtractorGateway for ExtractorPgGateway {
     async fn get_cursor(&self) -> Result<Vec<u8>, StorageError> {
         self.get_last_cursor().await
     }
@@ -1089,7 +1086,7 @@ impl HybridGateway for HybridPgGateway {
 
     async fn advance(
         &self,
-        changes: &evm::BlockChanges,
+        changes: &BlockChanges,
         new_cursor: &str,
         force_commit: bool,
     ) -> Result<(), StorageError> {
@@ -1111,12 +1108,11 @@ impl HybridGateway for HybridPgGateway {
             .upsert_block(&[changes.block.clone()])
             .await?;
 
-        let mut new_protocol_components: Vec<models::protocol::ProtocolComponent> = vec![];
-        let mut state_updates: Vec<(TxHash, models::protocol::ProtocolComponentStateDelta)> =
-            vec![];
+        let mut new_protocol_components: Vec<ProtocolComponent> = vec![];
+        let mut state_updates: Vec<(TxHash, ProtocolComponentStateDelta)> = vec![];
         let mut account_changes: Vec<(Bytes, AccountDelta)> = vec![];
 
-        let mut balance_changes: Vec<models::protocol::ComponentBalance> = vec![];
+        let mut balance_changes: Vec<ComponentBalance> = vec![];
         let mut protocol_tokens: HashSet<Bytes> = HashSet::new();
 
         for tx_update in changes.txs_with_update.iter() {
@@ -1225,10 +1221,7 @@ impl HybridGateway for HybridPgGateway {
             .map(|state_data| state_data.entity)
     }
 
-    async fn get_contracts(
-        &self,
-        component_ids: &[models::Address],
-    ) -> Result<Vec<Account>, StorageError> {
+    async fn get_contracts(&self, component_ids: &[Address]) -> Result<Vec<Account>, StorageError> {
         self.state_gateway
             .get_contracts(&self.chain, Some(component_ids), None, true, None)
             .await
@@ -1247,15 +1240,17 @@ impl HybridGateway for HybridPgGateway {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::{
-        pb::tycho::evm::v1::{BlockChanges, BlockContractChanges, BlockEntityChanges},
-        testing::MockGateway,
-    };
     use float_eq::assert_float_eq;
     use mockall::mock;
-    use models::blockchain::{Transaction, TxWithChanges};
-    use tycho_core::{models::protocol::ProtocolComponent, traits::TokenOwnerFinding};
+
+    use super::*;
+
+    use crate::{pb::testing::fixtures as pb_fixtures, testing::MockGateway};
+
+    use tycho_core::{
+        models::blockchain::{Transaction, TxWithChanges},
+        traits::TokenOwnerFinding,
+    };
 
     mock! {
         pub TokenPreProcessor {}
@@ -1274,8 +1269,8 @@ mod test {
     const EXTRACTOR_NAME: &str = "TestExtractor";
     const TEST_PROTOCOL: &str = "TestProtocol";
     async fn create_extractor(
-        gw: MockHybridGateway,
-    ) -> HybridContractExtractor<MockHybridGateway, MockTokenPreProcessor> {
+        gw: MockExtractorGateway,
+    ) -> ProtocolExtractor<MockExtractorGateway, MockTokenPreProcessor> {
         let protocol_types = HashMap::from([("pt_1".to_string(), ProtocolType::default())]);
         let protocol_cache = ProtocolMemoryCache::new(
             Chain::Ethereum,
@@ -1286,7 +1281,7 @@ mod test {
         preprocessor
             .expect_get_tokens()
             .returning(|_, _, _| Vec::new());
-        HybridContractExtractor::new(
+        ProtocolExtractor::new(
             gw,
             EXTRACTOR_NAME,
             Chain::Ethereum,
@@ -1303,7 +1298,7 @@ mod test {
 
     #[tokio::test]
     async fn test_get_cursor() {
-        let mut gw = MockHybridGateway::new();
+        let mut gw = MockExtractorGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -1319,7 +1314,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data() {
-        let mut gw = MockHybridGateway::new();
+        let mut gw = MockExtractorGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -1333,8 +1328,11 @@ mod test {
         let extractor = create_extractor(gw).await;
 
         extractor
-            .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
-                BlockChanges { block: Some(evm::fixtures::pb_blocks(1)), changes: vec![] },
+            .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
+                pb::tycho::evm::v1::BlockChanges {
+                    block: Some(pb_fixtures::pb_blocks(1)),
+                    changes: vec![],
+                },
                 Some(format!("cursor@{}", 1).as_str()),
                 Some(1),
             ))
@@ -1344,8 +1342,11 @@ mod test {
             .unwrap();
 
         extractor
-            .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
-                BlockChanges { block: Some(evm::fixtures::pb_blocks(2)), changes: vec![] },
+            .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
+                pb::tycho::evm::v1::BlockChanges {
+                    block: Some(pb_fixtures::pb_blocks(2)),
+                    changes: vec![],
+                },
                 Some(format!("cursor@{}", 2).as_str()),
                 Some(2),
             ))
@@ -1359,7 +1360,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data_old_native_msg() {
-        let mut gw = MockHybridGateway::new();
+        let mut gw = MockExtractorGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -1373,11 +1374,11 @@ mod test {
         let extractor = create_extractor(gw).await;
 
         extractor
-            .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
-                BlockEntityChanges {
-                    block: Some(evm::fixtures::pb_blocks(1)),
+            .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
+                pb::tycho::evm::v1::BlockEntityChanges {
+                    block: Some(pb_fixtures::pb_blocks(1)),
                     changes: vec![crate::pb::tycho::evm::v1::TransactionEntityChanges {
-                        tx: Some(evm::fixtures::pb_transactions(1, 1)),
+                        tx: Some(pb_fixtures::pb_transactions(1, 1)),
                         entity_changes: vec![],
                         component_changes: vec![],
                         balance_changes: vec![],
@@ -1392,11 +1393,11 @@ mod test {
             .unwrap();
 
         extractor
-            .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
-                BlockEntityChanges {
-                    block: Some(evm::fixtures::pb_blocks(2)),
+            .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
+                pb::tycho::evm::v1::BlockEntityChanges {
+                    block: Some(pb_fixtures::pb_blocks(2)),
                     changes: vec![crate::pb::tycho::evm::v1::TransactionEntityChanges {
-                        tx: Some(evm::fixtures::pb_transactions(2, 1)),
+                        tx: Some(pb_fixtures::pb_transactions(2, 1)),
                         entity_changes: vec![],
                         component_changes: vec![],
                         balance_changes: vec![],
@@ -1415,7 +1416,7 @@ mod test {
 
     #[tokio::test]
     async fn test_handle_tick_scoped_data_old_vm_msg() {
-        let mut gw = MockHybridGateway::new();
+        let mut gw = MockExtractorGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -1429,11 +1430,11 @@ mod test {
         let extractor = create_extractor(gw).await;
 
         extractor
-            .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
-                BlockContractChanges {
-                    block: Some(evm::fixtures::pb_blocks(1)),
+            .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
+                pb::tycho::evm::v1::BlockContractChanges {
+                    block: Some(pb_fixtures::pb_blocks(1)),
                     changes: vec![crate::pb::tycho::evm::v1::TransactionContractChanges {
-                        tx: Some(evm::fixtures::pb_transactions(1, 1)),
+                        tx: Some(pb_fixtures::pb_transactions(1, 1)),
                         contract_changes: vec![],
                         component_changes: vec![],
                         balance_changes: vec![],
@@ -1448,11 +1449,11 @@ mod test {
             .unwrap();
 
         extractor
-            .handle_tick_scoped_data(evm::fixtures::pb_block_scoped_data(
-                BlockContractChanges {
-                    block: Some(evm::fixtures::pb_blocks(2)),
+            .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
+                pb::tycho::evm::v1::BlockContractChanges {
+                    block: Some(pb_fixtures::pb_blocks(2)),
                     changes: vec![crate::pb::tycho::evm::v1::TransactionContractChanges {
-                        tx: Some(evm::fixtures::pb_transactions(2, 1)),
+                        tx: Some(pb_fixtures::pb_transactions(2, 1)),
                         contract_changes: vec![],
                         component_changes: vec![],
                         balance_changes: vec![],
@@ -1470,7 +1471,7 @@ mod test {
     }
     #[tokio::test]
     async fn test_handle_tick_scoped_data_skip() {
-        let mut gw = MockHybridGateway::new();
+        let mut gw = MockExtractorGateway::new();
         gw.expect_ensure_protocol_types()
             .times(1)
             .returning(|_| ());
@@ -1483,7 +1484,7 @@ mod test {
 
         let extractor = create_extractor(gw).await;
 
-        let inp = evm::fixtures::pb_block_scoped_data((), None, None);
+        let inp = pb_fixtures::pb_block_scoped_data((), None, None);
         let res = extractor
             .handle_tick_scoped_data(inp)
             .await;
@@ -1508,14 +1509,13 @@ mod test {
 
     #[test_log::test(tokio::test)]
     async fn test_construct_tokens() {
-        let msg = evm::BlockChanges {
-            extractor: "ex".to_string(),
-            block: Block::default(),
-            chain: Chain::Ethereum,
-            finalized_block_height: 0,
-            revert: false,
-            new_tokens: HashMap::new(),
-            txs_with_update: vec![TxWithChanges {
+        let msg = BlockChanges::new(
+            "ex".to_string(),
+            Chain::Ethereum,
+            Block::default(),
+            0,
+            false,
+            vec![TxWithChanges {
                 protocol_components: HashMap::from([(
                     "TestProtocol".to_string(),
                     ProtocolComponent {
@@ -1535,7 +1535,7 @@ mod test {
                 balance_changes: HashMap::new(),
                 tx: Transaction::default(),
             }],
-        };
+        );
 
         let protocol_gw = MockGateway::new();
         let protocol_cache = ProtocolMemoryCache::new(
@@ -1571,7 +1571,7 @@ mod test {
         preprocessor
             .expect_get_tokens()
             .return_once(|_, _, _| ret);
-        let mut extractor_gw = MockHybridGateway::new();
+        let mut extractor_gw = MockExtractorGateway::new();
         extractor_gw
             .expect_ensure_protocol_types()
             .times(1)
@@ -1580,7 +1580,7 @@ mod test {
             .expect_get_cursor()
             .times(1)
             .returning(|| Ok("cursor".into()));
-        let extractor = HybridContractExtractor::new(
+        let extractor = ProtocolExtractor::new(
             extractor_gw,
             EXTRACTOR_NAME,
             Chain::Ethereum,
@@ -1692,7 +1692,7 @@ mod test {
             .expect("adding tokens failed");
 
         let preprocessor = MockTokenPreProcessor::new();
-        let mut extractor_gw = MockHybridGateway::new();
+        let mut extractor_gw = MockExtractorGateway::new();
         extractor_gw
             .expect_ensure_protocol_types()
             .times(1)
@@ -1705,7 +1705,7 @@ mod test {
             .expect_get_components_balances()
             .return_once(|_| Ok(HashMap::new()));
 
-        let extractor = HybridContractExtractor::new(
+        let extractor = ProtocolExtractor::new(
             extractor_gw,
             "vm_name",
             Chain::Ethereum,
@@ -1748,25 +1748,23 @@ mod test {
 /// between this component and the actual db interactions
 #[cfg(test)]
 mod test_serial_db {
-    use super::*;
-    use crate::{
-        extractor::evm::{ProtocolComponent, Transaction, TxWithChanges},
-        pb::sf::substreams::v1::BlockRef,
-    };
+    use mockall::mock;
+
     use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
     use futures03::{stream, StreamExt};
 
-    use mockall::mock;
+    use super::*;
+
     use tycho_core::{
-        models::{ContractId, FinancialType, ImplementationType},
+        models::{blockchain::TxWithChanges, ContractId, FinancialType, ImplementationType},
         storage::{BlockIdentifier, BlockOrTimestamp},
         traits::TokenOwnerFinding,
     };
-    use tycho_storage::postgres::{
-        self,
-        builder::GatewayBuilder,
-        db_fixtures::{self, yesterday_midnight, yesterday_one_am},
-        testing::run_against_db,
+    use tycho_storage::postgres::{builder::GatewayBuilder, db_fixtures, testing::run_against_db};
+
+    use crate::{
+        extractor::models::fixtures,
+        pb::{sf::substreams::v1::BlockRef, testing::fixtures as pb_fixtures},
     };
 
     mock! {
@@ -1853,27 +1851,26 @@ mod test_serial_db {
     async fn setup_gw(
         pool: Pool<AsyncPgConnection>,
         implementation_type: ImplementationType,
-    ) -> (HybridPgGateway, i64) {
+    ) -> (ExtractorPgGateway, i64) {
         let mut conn = pool
             .get()
             .await
             .expect("pool should get a connection");
-        let chain_id = postgres::db_fixtures::insert_chain(&mut conn, "ethereum").await;
+        let chain_id = db_fixtures::insert_chain(&mut conn, "ethereum").await;
 
         match implementation_type {
             ImplementationType::Custom => {
-                postgres::db_fixtures::insert_protocol_type(
+                db_fixtures::insert_protocol_type(
                     &mut conn,
                     "pool",
-                    Some(models::FinancialType::Swap),
+                    Some(FinancialType::Swap),
                     None,
-                    Some(models::ImplementationType::Custom),
+                    Some(ImplementationType::Custom),
                 )
                 .await;
             }
             ImplementationType::Vm => {
-                postgres::db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None)
-                    .await;
+                db_fixtures::insert_protocol_type(&mut conn, "vm:pool", None, None, None).await;
             }
         }
 
@@ -1888,7 +1885,7 @@ mod test_serial_db {
             .await
             .expect("failed to build postgres gateway");
 
-        let gw = HybridPgGateway::new("test", Chain::Ethereum, 1000, cached_gw);
+        let gw = ExtractorPgGateway::new("test", Chain::Ethereum, 1000, cached_gw);
         (gw, chain_id)
     }
 
@@ -1906,10 +1903,10 @@ mod test_serial_db {
                     .unwrap(),
             );
             evm_gw
-                .start_transaction(&models::blockchain::Block::default(), None)
+                .start_transaction(&Block::default(), None)
                 .await;
             evm_gw
-                .upsert_block(&[models::blockchain::Block {
+                .upsert_block(&[Block {
                     number: 1,
                     chain: Chain::Ethereum,
                     hash: Bytes::from_str(
@@ -1917,7 +1914,7 @@ mod test_serial_db {
                     )
                     .unwrap(),
                     parent_hash: Bytes::default(),
-                    ts: yesterday_one_am(),
+                    ts: db_fixtures::yesterday_one_am(),
                 }])
                 .await
                 .expect("block insertion succeeded");
@@ -1940,20 +1937,20 @@ mod test_serial_db {
         .await;
     }
 
-    fn native_pool_creation() -> evm::BlockChanges {
-        evm::BlockChanges {
-            extractor: "native:test".to_owned(),
-            chain: Chain::Ethereum,
-            block: Block::new(
+    fn native_pool_creation() -> BlockChanges {
+        BlockChanges::new_with_tokens(
+            "native:test".to_owned(),
+            Chain::Ethereum,
+            Block::new(
                 0,
                 Chain::Ethereum,
                 NATIVE_BLOCK_HASH_0.parse().unwrap(),
                 NATIVE_BLOCK_HASH_0.parse().unwrap(),
                 "2020-01-01T01:00:00".parse().unwrap(),
             ),
-            finalized_block_height: 0,
-            revert: false,
-            new_tokens: HashMap::from([
+            0,
+            false,
+            HashMap::from([
                 (
                     Bytes::from("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
                     CurrencyToken::new(
@@ -1979,14 +1976,8 @@ mod test_serial_db {
                     ),
                 ),
             ]),
-            txs_with_update: vec![TxWithChanges {
-                tx: Transaction::new(
-                    Bytes::zero(32),
-                    NATIVE_BLOCK_HASH_0.parse().unwrap(),
-                    Bytes::zero(20),
-                    Some(Bytes::zero(20)),
-                    10,
-                ),
+            vec![TxWithChanges {
+                tx: fixtures::create_transaction(fixtures::HASH_256_0, NATIVE_BLOCK_HASH_0, 10),
                 state_updates: HashMap::new(),
                 balance_changes: HashMap::new(),
                 protocol_components: HashMap::from([(
@@ -2009,10 +2000,10 @@ mod test_serial_db {
                 )]),
                 account_deltas: HashMap::new(),
             }],
-        }
+        )
     }
 
-    fn vm_account(at_version: u64) -> models::contract::Account {
+    fn vm_account(at_version: u64) -> Account {
         match at_version {
             0 => Account::new(
                 Chain::Ethereum,
@@ -2020,7 +2011,7 @@ mod test_serial_db {
                     .parse()
                     .unwrap(),
                 "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688".to_owned(),
-                evm::fixtures::evm_slots([(1, 200)]),
+                fixtures::slots([(1, 200)]),
                 Bytes::from(1000_u64).lpad(32, 0),
                 vec![0, 0, 0, 0].into(),
                 "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
@@ -2036,18 +2027,17 @@ mod test_serial_db {
 
     // Creates a BlockChanges object with a VM contract creation and an account update. Based on an
     // Ambient pool creation
-    fn vm_creation_and_update() -> evm::BlockChanges {
+    fn vm_creation_and_update() -> BlockChanges {
         let base_token = Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
         let quote_token = Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap();
         let component_id = "ambient_USDC_ETH".to_string();
-        evm::BlockChanges {
-            extractor: "vm:ambient".to_owned(),
-            chain: Chain::Ethereum,
-            block: Block { hash: Bytes::zero(32), ..Default::default() },
-            finalized_block_height: 0,
-            revert: false,
-            new_tokens: HashMap::new(),
-            txs_with_update: vec![
+        BlockChanges::new(
+            "vm:ambient".to_owned(),
+            Chain::Ethereum,
+            Block { hash: Bytes::zero(32), ..Default::default() },
+            0,
+            false,
+            vec![
                 TxWithChanges::new(
                     HashMap::from([(
                         component_id.clone(),
@@ -2091,7 +2081,7 @@ mod test_serial_db {
                             },
                         )]),
                     )]),
-                    evm::fixtures::transaction02(VM_TX_HASH_0, evm::fixtures::HASH_256_0, 1),
+                    fixtures::create_transaction(VM_TX_HASH_0, fixtures::HASH_256_0, 1),
                 ),
                 TxWithChanges::new(
                     HashMap::new(),
@@ -2100,7 +2090,7 @@ mod test_serial_db {
                         AccountDelta::new(
                             Chain::Ethereum,
                             VM_CONTRACT.into(),
-                            evm::fixtures::slots([(1, 200)]),
+                            fixtures::optional_slots([(1, 200)]),
                             Some(Bytes::from(1000_u64).lpad(32, 0)),
                             None,
                             ChangeType::Update,
@@ -2122,10 +2112,10 @@ mod test_serial_db {
                             },
                         )]),
                     )]),
-                    evm::fixtures::transaction02(VM_TX_HASH_1, evm::fixtures::HASH_256_0, 2),
+                    fixtures::create_transaction(VM_TX_HASH_1, fixtures::HASH_256_0, 2),
                 ),
             ],
-        }
+        )
     }
 
     // Tests a forward call with a native contract creation and an account update
@@ -2271,7 +2261,7 @@ mod test_serial_db {
                 .await
                 .unwrap();
 
-            let gw = HybridPgGateway::new(
+            let gw = ExtractorPgGateway::new(
                 "native_name",
                 Chain::Ethereum,
                 0,
@@ -2287,7 +2277,7 @@ mod test_serial_db {
                 chrono::Duration::seconds(900),
                 Arc::new(cached_gw),
             );
-            let extractor = HybridContractExtractor::new(
+            let extractor = ProtocolExtractor::new(
                 gw,
                 "native_name",
                 Chain::Ethereum,
@@ -2328,7 +2318,7 @@ mod test_serial_db {
                 .as_any()
                 .downcast_ref::<BlockAggregatedChanges>()
                 .expect("not good type");
-            let base_ts = yesterday_midnight().timestamp();
+            let base_ts = db_fixtures::yesterday_midnight().timestamp();
             let block_entity_changes_result = BlockAggregatedChanges {
                 extractor: "native_name".to_string(),
                 chain: Chain::Ethereum,
@@ -2345,8 +2335,8 @@ mod test_serial_db {
                     ("pc_1".to_string(), ProtocolComponentStateDelta {
                         component_id: "pc_1".to_string(),
                         updated_attributes: HashMap::from([
-                            ("attr_2".to_string(), Bytes::from("0x0000000000000002")),
-                            ("attr_1".to_string(), Bytes::from("0x00000000000003e8")),
+                            ("attr_2".to_string(), Bytes::from(2_u64).lpad(32, 0)),
+                            ("attr_1".to_string(), Bytes::from(1000_u64).lpad(32, 0)),
                         ]),
                         deleted_attributes: HashSet::new(),
                     }),
@@ -2415,6 +2405,7 @@ mod test_serial_db {
         })
             .await;
     }
+
     #[test_log::test(tokio::test)]
     async fn test_handle_vm_revert() {
         run_against_db(|pool| async move {
@@ -2451,7 +2442,7 @@ mod test_serial_db {
                 .await
                 .unwrap();
 
-            let gw = HybridPgGateway::new(
+            let gw = ExtractorPgGateway::new(
                 "vm_name",
                 Chain::Ethereum,
                 0,
@@ -2467,7 +2458,7 @@ mod test_serial_db {
                 Arc::new(cached_gw),
             );
             let preprocessor = get_mocked_token_pre_processor();
-            let extractor = HybridContractExtractor::new(
+            let extractor = ProtocolExtractor::new(
                 gw,
                 "vm_name",
                 Chain::Ethereum,
@@ -2508,7 +2499,7 @@ mod test_serial_db {
                 .downcast_ref::<BlockAggregatedChanges>()
                 .expect("not good type");
 
-            let base_ts = yesterday_midnight().timestamp();
+            let base_ts = db_fixtures::yesterday_midnight().timestamp();
             let block_account_expected = BlockAggregatedChanges {
                 extractor: "vm_name".to_string(),
                 chain: Chain::Ethereum,
@@ -2597,28 +2588,28 @@ mod test_serial_db {
     fn get_native_inp_sequence(
     ) -> impl Iterator<Item = crate::pb::sf::substreams::rpc::v2::BlockScopedData> {
         vec![
-            evm::fixtures::pb_block_scoped_data(
-                evm::fixtures::pb_native_block_changes(1),
+            pb_fixtures::pb_block_scoped_data(
+                pb_fixtures::pb_native_block_changes(1),
                 Some(format!("cursor@{}", 1).as_str()),
                 Some(1), // Syncing (buffered)
             ),
-            evm::fixtures::pb_block_scoped_data(
-                evm::fixtures::pb_native_block_changes(2),
+            pb_fixtures::pb_block_scoped_data(
+                pb_fixtures::pb_native_block_changes(2),
                 Some(format!("cursor@{}", 2).as_str()),
                 Some(1), // Buffered
             ),
-            evm::fixtures::pb_block_scoped_data(
-                evm::fixtures::pb_native_block_changes(3),
+            pb_fixtures::pb_block_scoped_data(
+                pb_fixtures::pb_native_block_changes(3),
                 Some(format!("cursor@{}", 3).as_str()),
                 Some(1), // Buffered
             ),
-            evm::fixtures::pb_block_scoped_data(
-                evm::fixtures::pb_native_block_changes(4),
+            pb_fixtures::pb_block_scoped_data(
+                pb_fixtures::pb_native_block_changes(4),
                 Some(format!("cursor@{}", 4).as_str()),
                 Some(1), // Buffered
             ),
-            evm::fixtures::pb_block_scoped_data(
-                evm::fixtures::pb_native_block_changes(5),
+            pb_fixtures::pb_block_scoped_data(
+                pb_fixtures::pb_native_block_changes(5),
                 Some(format!("cursor@{}", 5).as_str()),
                 Some(3), // Buffered + flush 1 + 2
             ),
@@ -2629,28 +2620,28 @@ mod test_serial_db {
     fn get_vm_inp_sequence(
     ) -> impl Iterator<Item = crate::pb::sf::substreams::rpc::v2::BlockScopedData> {
         vec![
-            evm::fixtures::pb_block_scoped_data(
-                evm::fixtures::pb_vm_block_changes(1),
+            pb_fixtures::pb_block_scoped_data(
+                pb_fixtures::pb_vm_block_changes(1),
                 Some(format!("cursor@{}", 1).as_str()),
                 Some(1), // Syncing (buffered)
             ),
-            evm::fixtures::pb_block_scoped_data(
-                evm::fixtures::pb_vm_block_changes(2),
+            pb_fixtures::pb_block_scoped_data(
+                pb_fixtures::pb_vm_block_changes(2),
                 Some(format!("cursor@{}", 2).as_str()),
                 Some(1), // Buffered
             ),
-            evm::fixtures::pb_block_scoped_data(
-                evm::fixtures::pb_vm_block_changes(3),
+            pb_fixtures::pb_block_scoped_data(
+                pb_fixtures::pb_vm_block_changes(3),
                 Some(format!("cursor@{}", 3).as_str()),
                 Some(1), // Buffered
             ),
-            evm::fixtures::pb_block_scoped_data(
-                evm::fixtures::pb_vm_block_changes(4),
+            pb_fixtures::pb_block_scoped_data(
+                pb_fixtures::pb_vm_block_changes(4),
                 Some(format!("cursor@{}", 4).as_str()),
                 Some(1), // Buffered
             ),
-            evm::fixtures::pb_block_scoped_data(
-                evm::fixtures::pb_vm_block_changes(5),
+            pb_fixtures::pb_block_scoped_data(
+                pb_fixtures::pb_vm_block_changes(5),
                 Some(format!("cursor@{}", 5).as_str()),
                 Some(3), // Buffered + flush 1 + 2
             ),

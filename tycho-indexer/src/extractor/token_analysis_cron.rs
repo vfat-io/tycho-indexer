@@ -1,8 +1,8 @@
-use crate::cli::AnalyzeTokenArgs;
 use futures03::{future::try_join_all, FutureExt};
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::Instant};
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
+
 use tycho_core::{
     models::{
         blockchain::BlockTag,
@@ -16,6 +16,8 @@ use tycho_core::{
 use tycho_ethereum::{
     token_analyzer::trace_call::TraceCallDetector, token_pre_processor::map_vault,
 };
+
+use crate::cli::AnalyzeTokenArgs;
 
 pub async fn analyze_tokens(
     analyze_args: AnalyzeTokenArgs,
@@ -155,16 +157,15 @@ async fn analyze_batch(
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        extractor::evm::token_analysis_cron::{analyze_tokens, AnalyzeTokenArgs},
-        testing,
-    };
     use chrono::NaiveDateTime;
-    use std::{collections::HashMap, sync::Arc};
+
+    use super::*;
+
+    use crate::testing;
+
     use tycho_core::{
-        models::{protocol::ProtocolComponent, token::CurrencyToken, Chain, ChangeType},
+        models::{protocol::ProtocolComponent, ChangeType},
         storage::WithTotal,
-        Bytes,
     };
 
     // requires a running ethereum node

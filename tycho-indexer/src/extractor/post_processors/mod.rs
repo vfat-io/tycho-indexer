@@ -1,7 +1,8 @@
-//! This module collects compatibility components
+//! This module collects post processor components
 //!
 //! Usually changes or modifications required due to bugs in downstream substreams packages
-//! that would require an expensive re-sync or similar.
+//! that would require an expensive re-sync or similar. The post processors allow us to
+//! avoid this by applying the necessary changes to the data after it has been extracted.
 
 mod attributes;
 mod balances;

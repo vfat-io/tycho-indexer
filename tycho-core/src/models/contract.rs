@@ -401,3 +401,306 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
+
+    use chrono::NaiveDateTime;
+    use rstest::rstest;
+
+    use super::*;
+
+    use crate::models::blockchain::fixtures as block_fixtures;
+
+    const HASH_256_0: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    const HASH_256_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
+
+    fn update_balance_delta() -> AccountDelta {
+        AccountDelta::new(
+            Chain::Ethereum,
+            Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
+            HashMap::new(),
+            Some(Bytes::from(420u64).lpad(32, 0)),
+            None,
+            ChangeType::Update,
+        )
+    }
+
+    fn update_slots_delta() -> AccountDelta {
+        AccountDelta::new(
+            Chain::Ethereum,
+            Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
+            slots([(0, 1), (1, 2)]),
+            None,
+            None,
+            ChangeType::Update,
+        )
+    }
+
+    // Utils function that return slots that match `AccountDelta` slots.
+    // TODO: this is temporary, we shoud make AccountDelta.slots use Bytes instead of Option<Bytes>
+    pub fn slots(data: impl IntoIterator<Item = (u64, u64)>) -> HashMap<Bytes, Option<Bytes>> {
+        data.into_iter()
+            .map(|(s, v)| (Bytes::from(s).lpad(32, 0), Some(Bytes::from(v).lpad(32, 0))))
+            .collect()
+    }
+
+    #[test]
+    fn test_merge_account_deltas() {
+        let mut update_left = update_balance_delta();
+        let update_right = update_slots_delta();
+        let mut exp = update_slots_delta();
+        exp.balance = Some(Bytes::from(420u64).lpad(32, 0));
+
+        update_left.merge(update_right).unwrap();
+
+        assert_eq!(update_left, exp);
+    }
+
+    #[test]
+    fn test_merge_account_delta_wrong_address() {
+        let mut update_left = update_balance_delta();
+        let mut update_right = update_slots_delta();
+        update_right.address = Bytes::zero(20);
+        let exp = Err("Can't merge AccountUpdates from differing identities; \
+            Expected 0xe688b84b23f322a994a53dbf8e15fa82cdb71127, \
+            got 0x0000000000000000000000000000000000000000"
+            .into());
+
+        let res = update_left.merge(update_right);
+
+        assert_eq!(res, exp);
+    }
+
+    fn tx_vm_update() -> TransactionVMUpdates {
+        let code = vec![0, 0, 0, 0];
+        let mut account_updates = HashMap::new();
+        account_updates.insert(
+            "0xe688b84b23f322a994A53dbF8E15FA82CDB71127"
+                .parse()
+                .unwrap(),
+            AccountDelta::new(
+                Chain::Ethereum,
+                Bytes::from_str("e688b84b23f322a994A53dbF8E15FA82CDB71127").unwrap(),
+                HashMap::new(),
+                Some(Bytes::from(10000u64).lpad(32, 0)),
+                Some(code.into()),
+                ChangeType::Update,
+            ),
+        );
+
+        TransactionVMUpdates::new(
+            account_updates,
+            HashMap::new(),
+            HashMap::new(),
+            block_fixtures::transaction01(),
+        )
+    }
+
+    fn account() -> Account {
+        let code = vec![0, 0, 0, 0];
+        let code_hash = Bytes::from(keccak256(&code));
+        Account::new(
+            Chain::Ethereum,
+            "0xe688b84b23f322a994A53dbF8E15FA82CDB71127"
+                .parse()
+                .unwrap(),
+            "0xe688b84b23f322a994a53dbf8e15fa82cdb71127".into(),
+            HashMap::new(),
+            Bytes::from(10000u64).lpad(32, 0),
+            code.into(),
+            code_hash,
+            Bytes::zero(32),
+            Bytes::zero(32),
+            Some(Bytes::zero(32)),
+        )
+    }
+
+    #[test]
+    fn test_account_from_update_w_tx() {
+        let update = tx_vm_update();
+        let exp = account();
+
+        assert_eq!(
+            update
+                .account_deltas
+                .values()
+                .next()
+                .unwrap()
+                .ref_into_account(&update.tx),
+            exp
+        );
+    }
+
+    #[rstest]
+    #[case::diff_block(
+    block_fixtures::create_transaction(HASH_256_1, HASH_256_1, 11),
+    Err(format ! ("Can't merge TransactionVMUpdates from different blocks: {:x} != {}", Bytes::zero(32), HASH_256_1))
+    )]
+    #[case::same_tx(
+    block_fixtures::create_transaction(HASH_256_0, HASH_256_0, 11),
+    Err(format ! ("Can't merge TransactionVMUpdates from the same transaction: {:x}", Bytes::zero(32)))
+    )]
+    #[case::lower_idx(
+    block_fixtures::create_transaction(HASH_256_1, HASH_256_0, 1),
+    Err("Can't merge TransactionVMUpdates with lower transaction index: 10 > 1".to_owned())
+    )]
+    fn test_merge_vm_updates_w_tx(#[case] tx: Transaction, #[case] exp: Result<(), String>) {
+        let mut left = tx_vm_update();
+        let mut right = left.clone();
+        right.tx = tx;
+
+        let res = left.merge(&right);
+
+        assert_eq!(res, exp);
+    }
+
+    fn create_protocol_component(tx_hash: Bytes) -> ProtocolComponent {
+        ProtocolComponent {
+            id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_owned(),
+            protocol_system: "ambient".to_string(),
+            protocol_type_name: String::from("WeightedPool"),
+            chain: Chain::Ethereum,
+            tokens: vec![
+                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+            ],
+            contract_addresses: vec![
+                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+            ],
+            static_attributes: HashMap::from([
+                ("key1".to_string(), Bytes::from(b"value1".to_vec())),
+                ("key2".to_string(), Bytes::from(b"value2".to_vec())),
+            ]),
+            change: ChangeType::Creation,
+            creation_tx: tx_hash,
+            created_at: NaiveDateTime::from_timestamp_opt(1000, 0).unwrap(),
+        }
+    }
+
+    #[rstest]
+    fn test_merge_transaction_vm_updates() {
+        let tx_first_update = block_fixtures::transaction01();
+        let tx_second_update = block_fixtures::create_transaction(HASH_256_1, HASH_256_0, 15);
+        let protocol_component_first_tx = create_protocol_component(tx_first_update.hash.clone());
+        let protocol_component_second_tx = create_protocol_component(tx_second_update.hash.clone());
+
+        let first_update = TransactionVMUpdates {
+            account_deltas: [(
+                Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
+                AccountDelta::new(
+                    Chain::Ethereum,
+                    Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                    slots([(2711790500, 2981278644), (3250766788, 3520254932)]),
+                    Some(Bytes::from(1903326068u64).lpad(32, 0)),
+                    Some(vec![129, 130, 131, 132].into()),
+                    ChangeType::Update,
+                ),
+            )]
+            .into_iter()
+            .collect(),
+            protocol_components: [(
+                protocol_component_first_tx.id.clone(),
+                protocol_component_first_tx.clone(),
+            )]
+            .into_iter()
+            .collect(),
+            component_balances: [(
+                protocol_component_first_tx.id.clone(),
+                [(
+                    Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
+                    ComponentBalance {
+                        token: Bytes::from_str("0x0000000000000000000000000000000066666666")
+                            .unwrap(),
+                        balance: Bytes::from(0_i32.to_le_bytes()),
+                        modify_tx: Default::default(),
+                        component_id: protocol_component_first_tx.id.clone(),
+                        balance_float: 0.0,
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            )]
+            .into_iter()
+            .collect(),
+            tx: tx_first_update,
+        };
+        let second_update = TransactionVMUpdates {
+            account_deltas: [(
+                Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
+                AccountDelta::new(
+                    Chain::Ethereum,
+                    Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                    slots([(2981278644, 3250766788), (2442302356, 2711790500)]),
+                    Some(Bytes::from(4059231220u64).lpad(32, 0)),
+                    Some(vec![1, 2, 3, 4].into()),
+                    ChangeType::Update,
+                ),
+            )]
+            .into_iter()
+            .collect(),
+            protocol_components: [(
+                protocol_component_second_tx.id.clone(),
+                protocol_component_second_tx.clone(),
+            )]
+            .into_iter()
+            .collect(),
+            component_balances: [(
+                protocol_component_second_tx.id.clone(),
+                [(
+                    Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
+                    ComponentBalance {
+                        token: Bytes::from_str("0x0000000000000000000000000000000066666666")
+                            .unwrap(),
+                        balance: Bytes::from(500000_i32.to_le_bytes()),
+                        modify_tx: Default::default(),
+                        component_id: protocol_component_first_tx.id.clone(),
+                        balance_float: 500000.0,
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            )]
+            .into_iter()
+            .collect(),
+            tx: tx_second_update,
+        };
+
+        let mut to_merge_on = first_update.clone();
+        to_merge_on
+            .merge(&second_update)
+            .unwrap();
+
+        let expected_protocol_components: HashMap<ComponentId, ProtocolComponent> = [
+            (protocol_component_first_tx.id.clone(), protocol_component_first_tx.clone()),
+            (protocol_component_second_tx.id.clone(), protocol_component_second_tx.clone()),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(to_merge_on.component_balances, second_update.component_balances);
+        assert_eq!(to_merge_on.protocol_components, expected_protocol_components);
+
+        let mut acc_update = second_update
+            .account_deltas
+            .clone()
+            .into_values()
+            .next()
+            .unwrap();
+
+        acc_update.slots = slots([
+            (2442302356, 2711790500),
+            (2711790500, 2981278644),
+            (3250766788, 3520254932),
+            (2981278644, 3250766788),
+        ]);
+
+        let acc_update = [(acc_update.address.clone(), acc_update)]
+            .iter()
+            .cloned()
+            .collect();
+
+        assert_eq!(to_merge_on.account_deltas, acc_update);
+    }
+}

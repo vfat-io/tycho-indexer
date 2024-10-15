@@ -16,21 +16,25 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
-use tycho_ethereum::token_pre_processor::EthereumTokenPreProcessor;
 
 use tycho_core::{
     models::{Chain, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType},
     Bytes,
 };
+use tycho_ethereum::token_pre_processor::EthereumTokenPreProcessor;
 use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{
     extractor::{
-        evm::{
-            hybrid::{HybridContractExtractor, HybridPgGateway},
-            protocol_cache::ProtocolMemoryCache,
+        chain_state::ChainState,
+        post_processors::{
+            add_default_attributes_uniswapv2, add_default_attributes_uniswapv3,
+            ignore_self_balances, transcode_ambient_balances, transcode_usv2_balances,
+            trim_curve_component_token,
         },
-        ExtractionError,
+        protocol_cache::ProtocolMemoryCache,
+        protocol_extractor::{ExtractorPgGateway, ProtocolExtractor},
+        ExtractionError, Extractor, ExtractorMsg,
     },
     pb::sf::substreams::v1::Package,
     substreams::{
@@ -38,16 +42,6 @@ use crate::{
         SubstreamsEndpoint,
     },
 };
-
-use super::{
-    compat::{
-        add_default_attributes_uniswapv2, add_default_attributes_uniswapv3, ignore_self_balances,
-        transcode_ambient_balances, transcode_usv2_balances, trim_curve_component_token,
-    },
-    evm::chain_state::ChainState,
-    Extractor, ExtractorMsg,
-};
-
 pub enum ControlMessage {
     Stop,
     Subscribe(Sender<ExtractorMsg>),
@@ -443,7 +437,7 @@ impl ExtractorBuilder {
             })
             .collect();
 
-        let gw = HybridPgGateway::new(
+        let gw = ExtractorPgGateway::new(
             &self.config.name,
             self.config.chain,
             self.config.sync_batch_size,
@@ -451,7 +445,7 @@ impl ExtractorBuilder {
         );
 
         self.extractor = Some(Arc::new(
-            HybridContractExtractor::new(
+            ProtocolExtractor::new(
                 gw,
                 &self.config.name,
                 self.config.chain,
@@ -571,11 +565,11 @@ mod test {
     use serde::{Deserialize, Serialize};
     use tracing::info_span;
 
-    use tycho_core::models::NormalisedMessage;
+    use super::*;
 
     use crate::extractor::MockExtractor;
 
-    use super::*;
+    use tycho_core::models::NormalisedMessage;
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     struct DummyMessage {

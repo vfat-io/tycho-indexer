@@ -437,9 +437,12 @@ impl PendingDeltasBuffer for PendingDeltas {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::{extractor::evm, testing::block};
     use std::str::FromStr;
+
+    use super::*;
+
+    use crate::{extractor::models::fixtures, testing::block};
+
     use tycho_core::models::{
         contract::AccountDelta,
         protocol::{ComponentBalance, ProtocolComponentStateDelta},
@@ -451,7 +454,7 @@ mod test {
             Chain::Ethereum,
             Bytes::from("0x6F4Feb566b0f29e2edC231aDF88Fe7e1169D7c05"),
             "Contract1".to_string(),
-            evm::fixtures::evm_slots([(2, 2)]),
+            fixtures::slots([(2, 2)]),
             Bytes::from("0x1999"),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0xbabe"),
@@ -476,7 +479,7 @@ mod test {
                     AccountDelta::new(
                         Chain::Ethereum,
                         address,
-                        evm::fixtures::slots([(1, 1), (2, 1)]),
+                        fixtures::optional_slots([(1, 1), (2, 1)]),
                         Some(Bytes::from(1999u32).lpad(32, 0)),
                         None,
                         ChangeType::Update,
@@ -487,7 +490,7 @@ mod test {
                     AccountDelta::new(
                         Chain::Ethereum,
                         Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                        evm::fixtures::slots([(1, 1), (2, 1)]),
+                        fixtures::optional_slots([(1, 1), (2, 1)]),
                         Some(Bytes::from(200u32).lpad(32, 0)),
                         Some(Bytes::from("0x0c0c0c")),
                         ChangeType::Creation,
@@ -715,7 +718,7 @@ mod test {
             Chain::Ethereum,
             address0.clone(),
             "Contract1".to_string(),
-            evm::fixtures::evm_slots([(1, 1), (2, 1)]),
+            fixtures::slots([(1, 1), (2, 1)]),
             Bytes::from("0x00000000000000000000000000000000000000000000000000000000000007cf"),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0xbabe"),
@@ -728,7 +731,7 @@ mod test {
             Chain::Ethereum,
             address1.clone(),
             address1.clone().to_string(),
-            evm::fixtures::evm_slots([(1, 1), (2, 1)]),
+            fixtures::slots([(1, 1), (2, 1)]),
             Bytes::from("0x00000000000000000000000000000000000000000000000000000000000000c8"),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0x58ca1e123f83094287ae82a842f4f49e064d6f2fa946a2130335ff131ebd010b"),

@@ -1,16 +1,18 @@
 //! This module contains Tycho web services implementation
 
-use std::{collections::HashMap, sync::Arc};
-
-use crate::extractor::{runner::ExtractorHandle, ExtractionError};
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
 use futures03::future::try_join_all;
+use std::{collections::HashMap, sync::Arc};
 use tokio::task::JoinHandle;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::services::deltas_buffer::PendingDeltas;
+use crate::{
+    extractor::{runner::ExtractorHandle, ExtractionError},
+    services::deltas_buffer::PendingDeltas,
+};
+
 use tycho_core::{
     dto::{
         AccountUpdate, BlockParam, Chain, ChangeType, ContractId, Health, PaginationParams,

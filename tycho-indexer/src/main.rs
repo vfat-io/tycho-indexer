@@ -1,5 +1,8 @@
 #![doc = include_str!("../../README.md")]
 
+use actix_web::dev::ServerHandle;
+use chrono::{NaiveDateTime, Utc};
+use clap::Parser;
 use futures03::future::select_all;
 use serde::Deserialize;
 use std::{
@@ -10,19 +13,11 @@ use std::{
     str::FromStr,
     sync::{mpsc, Arc},
 };
-use tracing_subscriber::EnvFilter;
-use tycho_ethereum::{
-    account_extractor::contract::EVMAccountExtractor,
-    token_analyzer::rpc_client::EthereumRpcClient, token_pre_processor::EthereumTokenPreProcessor,
-};
-
-use extractor::runner::{ExtractorBuilder, ExtractorHandle};
-
-use actix_web::dev::ServerHandle;
-use chrono::{NaiveDateTime, Utc};
-use clap::Parser;
 use tokio::{runtime::Handle, select, task::JoinHandle};
+
 use tracing::{debug, error, info, instrument, warn};
+use tracing_subscriber::EnvFilter;
+
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction},
@@ -33,15 +28,19 @@ use tycho_core::{
     traits::AccountExtractor,
     Bytes,
 };
+use tycho_ethereum::{
+    account_extractor::contract::EVMAccountExtractor,
+    token_analyzer::rpc_client::EthereumRpcClient, token_pre_processor::EthereumTokenPreProcessor,
+};
 use tycho_indexer::{
     cli::{AnalyzeTokenArgs, Cli, Command, GlobalArgs, IndexArgs, RunSpkgArgs},
     extractor::{
-        self,
-        evm::{
-            chain_state::ChainState, protocol_cache::ProtocolMemoryCache,
-            token_analysis_cron::analyze_tokens,
+        chain_state::ChainState,
+        protocol_cache::ProtocolMemoryCache,
+        runner::{
+            ExtractorBuilder, ExtractorConfig, ExtractorHandle, HandleResult, ProtocolTypeConfig,
         },
-        runner::{ExtractorConfig, HandleResult, ProtocolTypeConfig},
+        token_analysis_cron::analyze_tokens,
         ExtractionError,
     },
     services::ServicesBuilder,

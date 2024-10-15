@@ -320,3 +320,28 @@ pub enum BlockTag {
     /// Block by number
     Number(u64),
 }
+
+#[cfg(test)]
+pub mod fixtures {
+    use super::*;
+
+    pub fn transaction01() -> Transaction {
+        Transaction::new(
+            Bytes::zero(32),
+            Bytes::zero(32),
+            Bytes::zero(20),
+            Some(Bytes::zero(20)),
+            10,
+        )
+    }
+
+    pub fn create_transaction(hash: &str, block: &str, index: u64) -> Transaction {
+        Transaction::new(
+            hash.parse().unwrap(),
+            block.parse().unwrap(),
+            Bytes::zero(20),
+            Some(Bytes::zero(20)),
+            index,
+        )
+    }
+}

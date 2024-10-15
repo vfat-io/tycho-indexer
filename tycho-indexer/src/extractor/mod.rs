@@ -1,15 +1,9 @@
-use crate::{
-    extractor::reorg_buffer::{
-        AccountStateIdType, AccountStateKeyType, AccountStateValueType, ProtocolStateIdType,
-        ProtocolStateKeyType, ProtocolStateValueType, StateUpdateBufferEntry,
-    },
-    pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
-};
 use async_trait::async_trait;
 use mockall::automock;
 use prost::DecodeError;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
+
 use tycho_core::{
     models::{
         blockchain::{Block, BlockScoped},
@@ -20,12 +14,24 @@ use tycho_core::{
     Bytes,
 };
 
-pub mod evm;
+use crate::{
+    extractor::reorg_buffer::{
+        AccountStateIdType, AccountStateKeyType, AccountStateValueType, ProtocolStateIdType,
+        ProtocolStateKeyType, ProtocolStateValueType, StateUpdateBufferEntry,
+    },
+    pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
+};
+
+pub mod chain_state;
+pub mod models;
+pub mod post_processors;
+pub mod protobuf_deserialisation;
+pub mod protocol_cache;
+pub mod protocol_extractor;
 pub mod reorg_buffer;
 pub mod runner;
+pub mod token_analysis_cron;
 mod u256_num;
-
-pub mod compat;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ExtractionError {

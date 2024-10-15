@@ -287,3 +287,178 @@ impl ProtocolChangesWithTx {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use rstest::rstest;
+
+    use crate::models::blockchain::fixtures as block_fixtures;
+
+    const HASH_256_0: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    const HASH_256_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
+
+    fn create_state(id: String) -> ProtocolComponentStateDelta {
+        let attributes1: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(1000u64).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(500u64).lpad(32, 0)),
+            ("static_attribute".to_owned(), Bytes::from(1u64).lpad(32, 0)),
+        ]
+        .into_iter()
+        .collect();
+        ProtocolComponentStateDelta {
+            component_id: id,
+            updated_attributes: attributes1,
+            deleted_attributes: HashSet::new(),
+        }
+    }
+
+    #[test]
+    fn test_merge_protocol_state_updates() {
+        let mut state_1 = create_state("State1".to_owned());
+        state_1
+            .updated_attributes
+            .insert("to_be_removed".to_owned(), Bytes::from(1u64).lpad(32, 0));
+        state_1.deleted_attributes = vec!["to_add_back".to_owned()]
+            .into_iter()
+            .collect();
+
+        let attributes2: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(900u64).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(550u64).lpad(32, 0)),
+            ("new_attribute".to_owned(), Bytes::from(1u64).lpad(32, 0)),
+            ("to_add_back".to_owned(), Bytes::from(200u64).lpad(32, 0)),
+        ]
+        .into_iter()
+        .collect();
+        let del_attributes2: HashSet<String> = vec!["to_be_removed".to_owned()]
+            .into_iter()
+            .collect();
+        let mut state_2 = create_state("State1".to_owned());
+        state_2.updated_attributes = attributes2;
+        state_2.deleted_attributes = del_attributes2;
+
+        let res = state_1.merge(state_2);
+
+        assert!(res.is_ok());
+        let expected_attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(900u64).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(550u64).lpad(32, 0)),
+            ("static_attribute".to_owned(), Bytes::from(1u64).lpad(32, 0)),
+            ("new_attribute".to_owned(), Bytes::from(1u64).lpad(32, 0)),
+            ("to_add_back".to_owned(), Bytes::from(200u64).lpad(32, 0)),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(state_1.updated_attributes, expected_attributes);
+        let expected_del_attributes: HashSet<String> = vec!["to_be_removed".to_owned()]
+            .into_iter()
+            .collect();
+        assert_eq!(state_1.deleted_attributes, expected_del_attributes);
+    }
+
+    fn protocol_state_with_tx() -> ProtocolChangesWithTx {
+        let state_1 = create_state("State1".to_owned());
+        let state_2 = create_state("State2".to_owned());
+        let states: HashMap<String, ProtocolComponentStateDelta> =
+            vec![(state_1.component_id.clone(), state_1), (state_2.component_id.clone(), state_2)]
+                .into_iter()
+                .collect();
+        ProtocolChangesWithTx {
+            protocol_states: states,
+            tx: block_fixtures::transaction01(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_merge_protocol_state_update_with_tx() {
+        let mut base_state = protocol_state_with_tx();
+
+        let new_attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(600u64).lpad(32, 0)),
+            ("new_attribute".to_owned(), Bytes::from(10u64).lpad(32, 0)),
+        ]
+        .into_iter()
+        .collect();
+        let new_tx = block_fixtures::create_transaction(HASH_256_1, HASH_256_0, 11);
+        let new_states: HashMap<String, ProtocolComponentStateDelta> = vec![(
+            "State1".to_owned(),
+            ProtocolComponentStateDelta {
+                component_id: "State1".to_owned(),
+                updated_attributes: new_attributes,
+                deleted_attributes: HashSet::new(),
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let tx_update =
+            ProtocolChangesWithTx { protocol_states: new_states, tx: new_tx, ..Default::default() };
+
+        let res = base_state.merge(tx_update);
+
+        assert!(res.is_ok());
+        assert_eq!(base_state.protocol_states.len(), 2);
+        let expected_attributes: HashMap<String, Bytes> = vec![
+            ("reserve1".to_owned(), Bytes::from(600u64).lpad(32, 0)),
+            ("reserve2".to_owned(), Bytes::from(500u64).lpad(32, 0)),
+            ("static_attribute".to_owned(), Bytes::from(1u64).lpad(32, 0)),
+            ("new_attribute".to_owned(), Bytes::from(10u64).lpad(32, 0)),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            base_state
+                .protocol_states
+                .get("State1")
+                .unwrap()
+                .updated_attributes,
+            expected_attributes
+        );
+    }
+
+    #[rstest]
+    #[case::diff_block(
+    block_fixtures::create_transaction(HASH_256_1, HASH_256_1, 11),
+    Err(format ! ("Can't merge ProtocolStates from different blocks: {:x} != {}", Bytes::zero(32), HASH_256_1))
+    )]
+    #[case::same_tx(
+    block_fixtures::create_transaction(HASH_256_0, HASH_256_0, 11),
+    Err(format ! ("Can't merge ProtocolStates from the same transaction: {:x}", Bytes::zero(32)))
+    )]
+    #[case::lower_idx(
+    block_fixtures::create_transaction(HASH_256_1, HASH_256_0, 1),
+    Err("Can't merge ProtocolStates with lower transaction index: 10 > 1".to_owned())
+    )]
+    fn test_merge_pool_state_update_with_tx_errors(
+        #[case] tx: Transaction,
+        #[case] exp: Result<(), String>,
+    ) {
+        let mut base_state = protocol_state_with_tx();
+
+        let mut new_state = protocol_state_with_tx();
+        new_state.tx = tx;
+
+        let res = base_state.merge(new_state);
+
+        assert_eq!(res, exp);
+    }
+
+    #[test]
+    fn test_merge_protocol_state_update_wrong_id() {
+        let mut state1 = create_state("State1".to_owned());
+        let state2 = create_state("State2".to_owned());
+
+        let res = state1.merge(state2);
+
+        assert_eq!(
+            res,
+            Err(
+                "Can't merge ProtocolStates from differing identities; Expected State1, got State2"
+                    .to_owned()
+            )
+        );
+    }
+}

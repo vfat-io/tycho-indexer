@@ -272,10 +272,13 @@ impl ProtocolDataCache for ProtocolMemoryCache {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::testing::MockGateway;
     use chrono::Duration;
     use mockall::predicate::*;
+
+    use super::*;
+
+    use crate::testing::MockGateway;
+
     use tycho_core::{models::ChangeType, storage::WithTotal};
 
     #[tokio::test]

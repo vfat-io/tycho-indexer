@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use tycho_core::{models::protocol::ProtocolComponentStateDelta, Bytes};
 
-use crate::extractor::evm::BlockChanges;
+use crate::extractor::models::BlockChanges;
 
 const USV3_MANDATORY_ATTRIBUTES: [&str; 3] = ["liquidity", "tick", "sqrt_price_x96"];
 const USV2_MANDATORY_ATTRIBUTES: [&str; 2] = ["reserve0", "reserve1"];
@@ -84,26 +84,15 @@ pub fn add_default_attributes_uniswapv2(changes: BlockChanges) -> BlockChanges {
 
 #[cfg(test)]
 mod test {
-    use crate::extractor::compat::{
-        attributes::{
-            add_default_attributes, PLAIN_POOL, STABLE_SWAP_FACTORY, USV3_MANDATORY_ATTRIBUTES,
-        },
-        trim_curve_component_token,
-    };
-    use std::{
-        collections::{HashMap, HashSet},
-        str::FromStr,
-    };
-    use tycho_core::{
-        models::{
-            blockchain::{Block, Transaction, TxWithChanges},
-            protocol::{ProtocolComponent, ProtocolComponentStateDelta},
-            Chain,
-        },
-        Bytes,
+    use std::str::FromStr;
+
+    use tycho_core::models::{
+        blockchain::{Block, Transaction, TxWithChanges},
+        protocol::ProtocolComponent,
+        Chain,
     };
 
-    use crate::extractor::evm;
+    use super::*;
 
     const BLOCK_HASH_0: &str = "0x98b4a4fef932b1862be52de218cc32b714a295fae48b775202361a6fa09b66eb";
     const CREATED_CONTRACT: &str = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc";
@@ -112,7 +101,7 @@ mod test {
     fn test_add_default_attributes() {
         // Test that uniswap V3 post processor insert mandatory attributes with a default value on
         // new pools detected.
-        let changes = evm::BlockChanges::new(
+        let changes = BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
             Block::new(
@@ -166,7 +155,7 @@ mod test {
             }],
         );
 
-        let expected = evm::BlockChanges::new(
+        let expected = BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
             changes.block.clone(),
@@ -210,7 +199,7 @@ mod test {
     #[test]
     fn test_add_default_attributes_no_new_pools() {
         // Test that uniswap V3 post processor does nothing when no new pools are detected.
-        let changes = evm::BlockChanges::new(
+        let changes = BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
             Block::new(
@@ -254,7 +243,7 @@ mod test {
 
     #[test]
     fn test_trim_curve_tokens() {
-        let changes = evm::BlockChanges::new(
+        let changes = BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
             Block::new(
@@ -303,7 +292,7 @@ mod test {
             }],
         );
 
-        let expected = evm::BlockChanges::new(
+        let expected = BlockChanges::new(
             "native:test".to_owned(),
             Chain::Ethereum,
             Block::new(

@@ -64,11 +64,10 @@ where
             .insert(request.clone(), lock.clone());
         let (response, should_cache) = (fallback)(request.clone())
             .await
-            .map_err(|e| {
+            .inspect_err(|_| {
                 // invalidate the cache if the fallback errors
                 self.cache.invalidate(&request);
                 trace!("FallbackFailure");
-                e
             })?;
 
         // PERF: unnecessary lock if we don't cache the value, could be improved
@@ -86,10 +85,11 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::services::{cache::RpcCache, rpc::RpcError};
     use futures03::future::try_join_all;
     use std::sync::Arc;
     use tokio::sync::Mutex;
+
+    use crate::services::{cache::RpcCache, rpc::RpcError};
 
     #[test_log::test(tokio::test)]
     async fn test_sequential_access() {
