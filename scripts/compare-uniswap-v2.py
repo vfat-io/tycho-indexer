@@ -32,6 +32,19 @@ pool_abi = [
     }
 ]
 
+# ABI for ERC20 balanceOf method
+erc20_abi = [
+    {
+        "constant": True,
+        "inputs": [{"internalType": "address", "name": "owner", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "payable": False,
+        "stateMutability": "view",
+        "type": "function",
+    }
+]
+
 
 def decode_big_endian(hex_str, signed=False):
     if hex_str.startswith("0x"):
@@ -41,15 +54,36 @@ def decode_big_endian(hex_str, signed=False):
     return int.from_bytes(value_bytes, byteorder="big", signed=signed)
 
 
+def get_token_balance(token_address, pool_address, block_number):
+    """Query the token balance of a pool at a specific block."""
+    token_contract = web3.eth.contract(
+        address=web3.to_checksum_address(token_address), abi=erc20_abi
+    )
+    return token_contract.functions.balanceOf(pool_address).call(
+        block_identifier=block_number
+    )
+
+
 def compare_pool_data(pool, target_block_number):
     component_id = web3.to_checksum_address(pool["component_id"])
     contract = web3.eth.contract(address=component_id, abi=pool_abi)
+
+    # Get reserves
     reserves = contract.functions.getReserves().call(
         block_identifier=target_block_number
     )
 
     local_reserve0 = decode_big_endian(pool["attributes"]["reserve0"])
     local_reserve1 = decode_big_endian(pool["attributes"]["reserve1"])
+
+    # Get balances:
+    token0_address = list(pool["balances"].keys())[0]
+    token1_address = list(pool["balances"].keys())[1]
+    balance0 = get_token_balance(token0_address, component_id, target_block_number)
+    balance1 = get_token_balance(token1_address, component_id, target_block_number)
+
+    local_balance0 = decode_big_endian(pool["balances"][token0_address])
+    local_balance1 = decode_big_endian(pool["balances"][token1_address])
 
     # Initialize a variable to track if there are differences
     has_diff = False
@@ -58,18 +92,33 @@ def compare_pool_data(pool, target_block_number):
     # Check for differences in reserve0
     if local_reserve0 != reserves[0]:
         diff_messages.append(
-            f"Local reserve0 (big endian): {local_reserve0}, Historical reserve0: {reserves[0]}"
+            f"Local reserve0: {local_reserve0}, Historical reserve0: {reserves[0]}"
         )
         has_diff = True
 
     # Check for differences in reserve1
     if local_reserve1 != reserves[1]:
         diff_messages.append(
-            f"Local reserve1 (big endian): {local_reserve1}, Historical reserve1: {reserves[1]}"
+            f"Local reserve1: {local_reserve1}, Historical reserve1: {reserves[1]}"
+        )
+        has_diff = True
+
+    # Check for differences in balance0
+    if local_balance0 != balance0:
+        diff_messages.append(
+            f"Local balance0: {local_balance0}, Historical balance0: {balance0}"
+        )
+        has_diff = True
+
+    # Check for differences in balance1
+    if local_balance1 != balance1:
+        diff_messages.append(
+            f"Local balance1: {local_balance1}, Historical balance1: {balance1}"
         )
         has_diff = True
 
     if has_diff:
+        print(f"Differences found in {pool['component_id']}:")
         # If there are differences, print them
         for msg in diff_messages:
             print(msg)
