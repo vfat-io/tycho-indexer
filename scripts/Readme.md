@@ -14,9 +14,9 @@ To run them you will first need to get some data from Tycho RPC. Use the state e
 get the state of the protocol you want to check and store the result in a json file with this 
 name format: `{protocol}_{block_number}.json`. For example `uniswap_v2_10000.json`
 
-Then change the `target_block_number` value in the script file and run it. E.g.
+Then and run it with the following command:
 ```bash
-python compare-uniswap-v2.py
+python compare-uniswap-v2.py <block_number>
 ```
 
 Note, the script uses web3. If you have not got it installed already, you will need to do so:

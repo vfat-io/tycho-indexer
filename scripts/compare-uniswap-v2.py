@@ -1,11 +1,23 @@
 import os
 import json
+import argparse
 from web3 import Web3
 
-target_block_number = 10055556
+# Parse command-line arguments
+parser = argparse.ArgumentParser(
+    description="Compare Uniswap V2 pool data with historical data."
+)
+parser.add_argument("block_number", type=int, help="The target block number to query.")
+args = parser.parse_args()
+
+target_block_number = args.block_number
 
 # Reading the JSON data from the file
-with open(f"uniswap_v2_{target_block_number}.json", "r") as file:
+json_file = f"uniswap_v2_{target_block_number}.json"
+if not os.path.exists(json_file):
+    raise FileNotFoundError(f"JSON file {json_file} not found.")
+
+with open(json_file, "r") as file:
     parsed_data = json.load(file)
 
 # RPC URL
