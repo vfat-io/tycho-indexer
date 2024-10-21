@@ -5,6 +5,7 @@ use actix_web_opentelemetry::RequestTracing;
 use futures03::future::try_join_all;
 use std::{collections::HashMap, sync::Arc};
 use tokio::task::JoinHandle;
+use tracing::info;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -12,7 +13,6 @@ use crate::{
     extractor::{runner::ExtractorHandle, ExtractionError},
     services::deltas_buffer::PendingDeltas,
 };
-
 use tycho_core::{
     dto::{
         AccountUpdate, BlockParam, Chain, ChangeType, ContractId, Health, PaginationParams,
@@ -30,12 +30,12 @@ mod deltas_buffer;
 mod rpc;
 mod ws;
 
+/// Helper struct to build Tycho services such as HTTP and WS server.
 pub struct ServicesBuilder<G> {
     prefix: String,
     port: u16,
     bind: String,
     extractor_handles: ws::MessageSenderMap,
-    extractors: Vec<String>,
     db_gateway: G,
 }
 
@@ -49,36 +49,41 @@ where
             port: 4242,
             bind: "0.0.0.0".to_owned(),
             extractor_handles: HashMap::new(),
-            extractors: Vec::new(),
             db_gateway,
         }
     }
 
-    pub fn register_extractors(mut self, handle: Vec<ExtractorHandle>) -> Self {
-        for e in handle {
+    /// Registers extractors for the services
+    pub fn register_extractors(mut self, handles: Vec<ExtractorHandle>) -> Self {
+        for e in handles {
             let id = e.get_id();
-            self.extractors.push(id.name.clone());
             self.extractor_handles
                 .insert(id, Arc::new(e));
         }
         self
     }
 
+    /// Sets the URL prefix for the endpoints
     pub fn prefix(mut self, v: &str) -> Self {
         v.clone_into(&mut self.prefix);
         self
     }
 
+    /// Sets the IP address for the server
     pub fn bind(mut self, v: &str) -> Self {
         v.clone_into(&mut self.bind);
         self
     }
 
+    /// Sets the port for the server
     pub fn port(mut self, v: u16) -> Self {
         self.port = v;
         self
     }
 
+    /// Starts the Tycho server. Returns a tuple containing a handle for the server and a Tokio
+    /// handle for the tasks. If no extractor tasks are registered, it starts the server without
+    /// running the delta tasks.
     pub fn run(
         self,
     ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
@@ -119,27 +124,63 @@ where
         )]
         struct ApiDoc;
 
-        let openapi = ApiDoc::openapi();
+        let open_api = ApiDoc::openapi();
+
+        // If no extractors are registered, run the server without spawning extractor-related tasks.
+        if self.extractor_handles.is_empty() {
+            info!("Starting standalone rpc server");
+            self.start_server(None, open_api)
+        } else {
+            info!("Starting full server");
+            self.start_server_with_deltas(open_api)
+        }
+    }
+
+    /// Runs the server with both RPC and WebSocket services, and spawns tasks for handling
+    /// pending delta processing.
+    fn start_server_with_deltas(
+        self,
+        openapi: utoipa::openapi::OpenApi,
+    ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
         let pending_deltas = PendingDeltas::new(
-            self.extractors
-                .iter()
-                .map(String::as_str),
+            self.extractor_handles
+                .keys()
+                .map(|e_id| e_id.name.as_str()),
         );
-        let deltas_task = tokio::spawn({
-            let pending_deltas = pending_deltas.clone();
-            let extractor_handles = self.extractor_handles.clone();
-            async move {
-                pending_deltas
-                    .run(extractor_handles.into_values())
-                    .await
-                    .map_err(|err| ExtractionError::Unknown(err.to_string()))
-            }
+        let extractor_handles_clone = self
+            .extractor_handles
+            .clone()
+            .into_values();
+        let pending_deltas_clone = pending_deltas.clone();
+        let deltas_task = tokio::spawn(async move {
+            pending_deltas_clone
+                .run(extractor_handles_clone)
+                .await
+                .map_err(|err| ExtractionError::Unknown(err.to_string()))
         });
-        let ws_data = web::Data::new(ws::WsData::new(self.extractor_handles));
-        let rpc_data =
-            web::Data::new(rpc::RpcHandler::new(self.db_gateway, Arc::new(pending_deltas)));
+        let ws_data = web::Data::new(ws::WsData::new(self.extractor_handles.clone()));
+        let (server_handle, server_task) = self.start_server(Some(ws_data), openapi)?;
+
+        let task = tokio::spawn(async move {
+            try_join_all(vec![deltas_task, server_task])
+                .await
+                .map_err(|err| ExtractionError::Unknown(err.to_string()))?;
+            Ok(())
+        });
+
+        Ok((server_handle, task))
+    }
+
+    /// Helper to spawn the main server task, optionally enabling WebSocket services.
+    fn start_server(
+        self,
+        ws_data: Option<web::Data<ws::WsData>>,
+        openapi: utoipa::openapi::OpenApi,
+    ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
+        let rpc_data = web::Data::new(rpc::RpcHandler::new(self.db_gateway, None));
+
         let server = HttpServer::new(move || {
-            App::new()
+            let mut app = App::new()
                 .app_data(rpc_data.clone())
                 .service(
                     web::resource(format!("/{}/contract_state", self.prefix))
@@ -161,30 +202,28 @@ where
                     web::resource(format!("/{}/health", self.prefix))
                         .route(web::get().to(rpc::health)),
                 )
-                .app_data(ws_data.clone())
-                .service(
-                    web::resource(format!("/{}/ws", self.prefix))
-                        .route(web::get().to(ws::WsActor::ws_index)),
-                )
                 .wrap(RequestTracing::new())
-                // Create a swagger-ui endpoint to http://0.0.0.0:4242/docs/
                 .service(
                     SwaggerUi::new("/docs/{_:.*}").url("/api-docs/openapi.json", openapi.clone()),
-                )
+                );
+
+            if let Some(ws_data) = ws_data.clone() {
+                app = app.app_data(ws_data).service(
+                    web::resource(format!("/{}/ws", self.prefix))
+                        .route(web::get().to(ws::WsActor::ws_index)),
+                );
+            }
+
+            app
         })
         .bind((self.bind, self.port))
         .map_err(|err| ExtractionError::ServiceError(err.to_string()))?
         .run();
         let handle = server.handle();
-        let server_task = tokio::spawn(async move {
-            let res = server.await;
-            res.map_err(|err| ExtractionError::Unknown(err.to_string()))
-        });
         let task = tokio::spawn(async move {
-            try_join_all(vec![deltas_task, server_task])
+            server
                 .await
-                .map_err(|err| ExtractionError::Unknown(err.to_string()))?;
-            Ok(())
+                .map_err(|err| ExtractionError::Unknown(err.to_string()))
         });
         Ok((handle, task))
     }
