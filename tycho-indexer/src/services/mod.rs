@@ -5,6 +5,7 @@ use actix_web_opentelemetry::RequestTracing;
 use futures03::future::try_join_all;
 use std::{collections::HashMap, sync::Arc};
 use tokio::task::JoinHandle;
+use tracing::info;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -127,8 +128,10 @@ where
 
         // If no extractors are registered, run the server without spawning extractor-related tasks.
         if self.extractor_handles.is_empty() {
+            info!("Starting standalone rpc server");
             self.start_server(None, open_api)
         } else {
+            info!("Starting full server");
             self.start_server_with_deltas(open_api)
         }
     }
