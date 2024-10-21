@@ -1010,7 +1010,7 @@ impl ProtocolState {
     }
 }
 
-#[derive(Insertable, Clone, Debug)]
+#[derive(Insertable, Clone, Debug, PartialEq)]
 #[diesel(table_name = protocol_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewProtocolState {

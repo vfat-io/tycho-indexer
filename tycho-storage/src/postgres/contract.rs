@@ -1,6 +1,6 @@
 use super::{
     maybe_lookup_block_ts, maybe_lookup_version_ts, orm, schema, storage_error_from_diesel,
-    versioning::{apply_partitioned_versioning, apply_versioning},
+    versioning::{apply_partitioned_versioning, apply_versioning, VersioningEntry},
     PostgresError, PostgresGateway, WithOrdinal, WithTxHash, MAX_TS,
 };
 use chrono::{NaiveDateTime, Utc};
@@ -518,7 +518,7 @@ impl PostgresGateway {
                     })?;
                 for (slot, value) in storage.iter() {
                     new_entries.push(WithOrdinal::new(
-                        orm::NewSlot {
+                        VersioningEntry::Update(orm::NewSlot {
                             slot: slot.clone(),
                             value: value.clone(),
                             previous_value: None,
@@ -528,7 +528,7 @@ impl PostgresGateway {
                             ordinal: *tx_index,
                             valid_from: *block_ts,
                             valid_to: MAX_TS,
-                        },
+                        }),
                         (*account_id, slot, *block_ts, *tx_index),
                     ))
                 }
@@ -541,8 +541,8 @@ impl PostgresGateway {
             .into_iter()
             .map(|b| b.entity)
             .collect::<Vec<_>>();
-        let (latest, to_archive) =
-            apply_partitioned_versioning(&sorted, None, self.retention_horizon, conn).await?;
+        let (latest, to_archive, _) =
+            apply_partitioned_versioning(&sorted, self.retention_horizon, conn).await?;
         let latest = latest
             .into_iter()
             .map(orm::NewSlotLatest::from)
