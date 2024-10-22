@@ -262,7 +262,7 @@ pub trait PartitionedVersionedRow: Clone + Send + Sync {
 fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
     current_latest_data: &[N],
     new_data: &[VersioningEntry<N>],
-) -> (Vec<N>, Vec<N>, Vec<N::EntityId>) {
+) -> Result<(Vec<N>, Vec<N>, Vec<N::EntityId>), StorageError> {
     let mut latest: HashMap<N::EntityId, N> = current_latest_data
         .iter()
         .map(|row| (row.get_id(), row.clone()))
@@ -287,14 +287,18 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
                 // Handle deleted rows
                 let mut delete_row = latest
                     .remove(id)
-                    .expect("missing state to delete"); //TODO: This is strict to avoid corrupting the data, would it be fine to just skip?
+                    .ok_or(StorageError::Unexpected(format!(
+                        "Missing deleted row with id {:?}",
+                        id
+                    )))?;
+
                 delete_row.delete(*delete_version);
                 archived.push(delete_row);
                 deleted.insert(id.clone());
             }
         }
     }
-    (latest.into_values().collect(), archived, deleted.into_iter().collect())
+    Ok((latest.into_values().collect(), archived, deleted.into_iter().collect()))
 }
 
 /// Applies versioning using partitioned tables.
@@ -373,7 +377,7 @@ pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
     .await?;
 
     let (latest, archive, deleted) =
-        set_partitioned_versioning_attributes(&current_latest_db_rows, new_data);
+        set_partitioned_versioning_attributes(&current_latest_db_rows, new_data)?;
     let filtered_archive: Vec<_> = archive
         .into_iter()
         .filter(|e| e.get_valid_to() > retention_horizon)
