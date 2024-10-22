@@ -237,6 +237,7 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
             run_args.module,
             run_args.initialized_accounts,
             run_args.initialization_block,
+            None,
         ),
     )]));
 
