@@ -74,6 +74,7 @@ pub fn ignore_self_balances(mut changes: BlockChanges) -> BlockChanges {
     changes
 }
 
+#[deprecated]
 pub fn transcode_usv2_balances(mut changes: BlockChanges) -> BlockChanges {
     changes
         .txs_with_update
@@ -95,6 +96,7 @@ pub fn transcode_usv2_balances(mut changes: BlockChanges) -> BlockChanges {
     changes
 }
 
+#[allow(deprecated)]
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, str::FromStr};

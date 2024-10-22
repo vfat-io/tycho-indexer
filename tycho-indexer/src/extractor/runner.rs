@@ -27,11 +27,7 @@ use tycho_storage::postgres::cache::CachedGateway;
 use crate::{
     extractor::{
         chain_state::ChainState,
-        post_processors::{
-            add_default_attributes_uniswapv2, add_default_attributes_uniswapv3,
-            ignore_self_balances, transcode_ambient_balances, transcode_usv2_balances,
-            trim_curve_component_token,
-        },
+        post_processors::POST_PROCESSOR_REGISTRY,
         protocol_cache::ProtocolMemoryCache,
         protocol_extractor::{ExtractorPgGateway, ProtocolExtractor},
         ExtractionError, Extractor, ExtractorMsg,
@@ -298,6 +294,8 @@ pub struct ExtractorConfig {
     pub initialized_accounts: Vec<Bytes>,
     #[serde(default)]
     pub initialized_accounts_block: i64,
+    #[serde(default)]
+    pub post_processor: Option<String>,
 }
 
 impl ExtractorConfig {
@@ -314,6 +312,7 @@ impl ExtractorConfig {
         module_name: String,
         initialized_accounts: Vec<Bytes>,
         initialized_accounts_block: i64,
+        post_processor: Option<String>,
     ) -> Self {
         Self {
             name,
@@ -327,6 +326,7 @@ impl ExtractorConfig {
             module_name,
             initialized_accounts,
             initialized_accounts_block,
+            post_processor,
         }
     }
 }
@@ -444,6 +444,23 @@ impl ExtractorBuilder {
             cached_gw.clone(),
         );
 
+        let post_processor = self
+            .config
+            .post_processor
+            .as_ref()
+            .map(|name| {
+                POST_PROCESSOR_REGISTRY
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| {
+                        ExtractionError::Setup(format!(
+                            "Post processor '{}' not found in registry",
+                            name
+                        ))
+                    })
+            })
+            .transpose()?;
+
         self.extractor = Some(Arc::new(
             ProtocolExtractor::new(
                 gw,
@@ -454,20 +471,7 @@ impl ExtractorBuilder {
                 protocol_cache.clone(),
                 protocol_types,
                 token_pre_processor.clone(),
-                match self.config.name.as_str() {
-                    "uniswap_v2" => {
-                        if self.config.chain == Chain::Ethereum {
-                            Some(|b| transcode_usv2_balances(add_default_attributes_uniswapv2(b)))
-                        } else {
-                            None
-                        }
-                    }
-                    "uniswap_v3" => Some(add_default_attributes_uniswapv3),
-                    "vm:ambient" => Some(transcode_ambient_balances),
-                    "vm:balancer" => Some(ignore_self_balances),
-                    "vm:curve" => Some(trim_curve_component_token),
-                    _ => None,
-                },
+                post_processor,
             )
             .await?,
         ));
@@ -656,22 +660,23 @@ mod test {
         // Build the ExtractorRunnerBuilder
         let extractor = Arc::new(mock_extractor);
         let builder = ExtractorBuilder::new(
-            &ExtractorConfig {
-                name: "test_module".to_owned(),
-                chain: Chain::Ethereum,
-                implementation_type: ImplementationType::Vm,
-                sync_batch_size: 0,
-                start_block: 0,
-                stop_block: None,
-                protocol_types: vec![ProtocolTypeConfig {
+            &ExtractorConfig::new(
+                "test_module".to_owned(),
+                Chain::Ethereum,
+                ImplementationType::Vm,
+                0,
+                0,
+                None,
+                vec![ProtocolTypeConfig {
                     name: "test_module_pool".to_owned(),
                     financial_type: FinancialType::Swap,
                 }],
-                spkg: "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
-                module_name: "test_module".to_owned(),
-                initialized_accounts: vec![],
-                initialized_accounts_block: 0,
-            },
+                "./test/spkg/substreams-ethereum-quickstart-v1.0.0.spkg".to_owned(),
+                "test_module".to_owned(),
+                vec![],
+                0,
+                None,
+            ),
             "https://mainnet.eth.streamingfast.io",
         )
         .token("test_token")
