@@ -27,7 +27,7 @@ use tycho_storage::postgres::cache::CachedGateway;
 use crate::{
     extractor::{
         chain_state::ChainState,
-        post_processors::post_processor_registry,
+        post_processors::POST_PROCESSOR_REGISTRY,
         protocol_cache::ProtocolMemoryCache,
         protocol_extractor::{ExtractorPgGateway, ProtocolExtractor},
         ExtractionError, Extractor, ExtractorMsg,
@@ -449,7 +449,7 @@ impl ExtractorBuilder {
             .post_processor
             .as_ref()
             .and_then(|name| {
-                post_processor_registry()
+                POST_PROCESSOR_REGISTRY
                     .get(name)
                     .cloned()
                     .ok_or_else(|| {

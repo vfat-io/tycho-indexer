@@ -5,6 +5,7 @@
 //! that would require an expensive re-sync or similar. The post processors allow us to
 //! avoid this by applying the necessary changes to the data after it has been extracted.
 
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
 use attributes::{
@@ -24,7 +25,7 @@ fn add_default_usv2_attributes_then_transcode_balances(input: BlockChanges) -> B
     transcode_usv2_balances(add_default_attributes_uniswapv2(input))
 }
 
-pub fn post_processor_registry() -> HashMap<String, PostProcessorFn> {
+pub static POST_PROCESSOR_REGISTRY: Lazy<HashMap<String, PostProcessorFn>> = Lazy::new(|| {
     let mut registry = HashMap::new();
     registry.insert(
         "transcode_ambient_balances".to_string(),
@@ -44,4 +45,4 @@ pub fn post_processor_registry() -> HashMap<String, PostProcessorFn> {
         add_default_usv2_attributes_then_transcode_balances as PostProcessorFn,
     );
     registry
-}
+});
