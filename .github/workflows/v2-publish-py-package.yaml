@@ -22,3 +22,6 @@ jobs:
       contents: read
     with:
       package_root: "tycho-client-py"
+    secrets:
+      app_id: ${{ secrets.APP_ID }}
+      app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
