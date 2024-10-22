@@ -1,3 +1,16 @@
+## [0.34.0](https://github.com/propeller-heads/tycho-indexer/compare/0.33.1...0.34.0) (2024-10-22)
+
+
+### Features
+
+* **indexer:** introduce configurable post processors ([a9b9f2c](https://github.com/propeller-heads/tycho-indexer/commit/a9b9f2ced4f79cd95431a02a9c32dd6234a7dcc4))
+* **indexer:** introduce configurable post processors ([#423](https://github.com/propeller-heads/tycho-indexer/issues/423)) ([4627cb4](https://github.com/propeller-heads/tycho-indexer/commit/4627cb430d3a80773e474e29ced4491d4c4e1eae))
+
+
+### Bug Fixes
+
+* correctly propagate missing post processor error ([5f655ae](https://github.com/propeller-heads/tycho-indexer/commit/5f655aee05c3f7c5cf2fe9c55d30e7c5c495da92))
+
 ## [0.33.1](https://github.com/propeller-heads/tycho-indexer/compare/0.33.0...0.33.1) (2024-10-22)
 
 
