@@ -39,7 +39,6 @@ const config = {
         publishCmd:
           'echo "NEXT_RELEASE_VERSION=${nextRelease.version}" >> $GITHUB_OUTPUT',
         prepareCmd: [
-          "toml set --toml-path substreams/common/Cargo.toml package.version ${nextRelease.version}",
           "toml set --toml-path tycho-ethereum/Cargo.toml package.version ${nextRelease.version}",
           "toml set --toml-path tycho-client/Cargo.toml package.version ${nextRelease.version}",
           "toml set --toml-path tycho-client-py/pyproject.toml project.version ${nextRelease.version}",
@@ -87,7 +86,6 @@ if (
       assets: [
         "CHANGELOG.md",
         "Cargo.lock",
-        "substreams/common/Cargo.toml",
         "tycho-ethereum/Cargo.toml",
         "tycho-client/Cargo.toml",
         "tycho-client-py/pyproject.toml",
