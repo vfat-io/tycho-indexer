@@ -108,6 +108,21 @@ pub trait StoredVersionedRow {
     fn table_name() -> &'static str;
 }
 
+#[derive(Debug)]
+pub(crate) enum VersioningEntry<T: PartitionedVersionedRow> {
+    Update(T),
+    Deletion((T::EntityId, NaiveDateTime)),
+}
+
+impl<T: PartitionedVersionedRow> VersioningEntry<T> {
+    fn get_id(&self) -> T::EntityId {
+        match self {
+            VersioningEntry::Update(e) => e.get_id(),
+            VersioningEntry::Deletion((e_id, _)) => e_id.clone(),
+        }
+    }
+}
+
 /// Sets end versions on a collection of new rows.
 ///
 /// This function will mutate the entries in the passed vector. It will assign a end
@@ -264,7 +279,7 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
                     prev.archive(&mut row);
                     archived.push(prev);
                 }
-                // If it's updated after being deleted, don't need to mark it as deleted
+                // If it's updated after being deleted, it doesn't need to be marked as deleted
                 deleted.remove(&id);
                 latest.insert(id, row);
             }
@@ -311,8 +326,9 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
 /// than the horizon are simply dropped before issuing the inserts.
 ///
 /// ## Deletions
-/// Deletion simply move the row from the default partition to an archive parition by setting the
-/// valid_to column and skipping the update or insert into the current state.
+/// Deletion simply archives a row by setting the valid_to column and marking it as archived. If the
+/// row is not updated again it also marks it as deleted and returns the id that needs to be deleted
+/// from the default partition.
 ///
 /// ## Overview
 ///
@@ -323,9 +339,10 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
 /// - Filter any archived rows by the retention horizon.
 ///
 /// ## Returns
-/// The method returns a vector with the latest version as well as vector of archive versions.
-/// The latest version are supposed to be executed as upserts into the default partition directly,
-/// the archive version can simply be inserted into the partitioned table. Actually executing these
+/// The method returns a vector with the latest version, vector of archive versions and a vector of
+/// entity ids to delete. The latest version are supposed to be executed as upserts into the default
+/// partition directly, the archive version can simply be inserted into the partitioned table and
+/// the deleted ids need to be removed from the default partition. Actually executing these
 /// operations is left to the caller since the exact implementation may vary based on the table
 /// schema.
 ///
@@ -363,20 +380,6 @@ pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
         .collect();
     Ok((latest, filtered_archive, deleted))
 }
-#[derive(Debug)]
-pub(crate) enum VersioningEntry<T: PartitionedVersionedRow> {
-    Update(T),
-    Deletion((T::EntityId, NaiveDateTime)),
-}
-
-impl<T: PartitionedVersionedRow> VersioningEntry<T> {
-    fn get_id(&self) -> T::EntityId {
-        match self {
-            VersioningEntry::Update(e) => e.get_id(),
-            VersioningEntry::Deletion((e_id, _)) => e_id.clone(),
-        }
-    }
-}
 
 #[cfg(test)]
 mod test {
@@ -401,7 +404,7 @@ mod test {
     #[tokio::test]
     async fn test_apply_partitioned_versioning() {
         let mut conn = setup_db().await;
-        let raw1 = VersioningEntry::Update(NewProtocolState {
+        let row1 = VersioningEntry::Update(NewProtocolState {
             protocol_component_id: 0,
             attribute_name: "tick".to_string(),
             attribute_value: Bytes::from(1u8),
@@ -410,7 +413,7 @@ mod test {
             valid_from: NaiveDateTime::from_timestamp_micros(1).unwrap(),
             valid_to: NaiveDateTime::from_timestamp_micros(999).unwrap(),
         });
-        let raw2 = VersioningEntry::Update(NewProtocolState {
+        let row2 = VersioningEntry::Update(NewProtocolState {
             protocol_component_id: 0,
             attribute_name: "tick".to_string(),
             attribute_value: Bytes::from(2u8),
@@ -419,7 +422,7 @@ mod test {
             valid_from: NaiveDateTime::from_timestamp_micros(1).unwrap(),
             valid_to: NaiveDateTime::from_timestamp_micros(999).unwrap(),
         });
-        let raw3 = VersioningEntry::Update(NewProtocolState {
+        let row3 = VersioningEntry::Update(NewProtocolState {
             protocol_component_id: 0,
             attribute_name: "tick".to_string(),
             attribute_value: Bytes::from(3u8),
@@ -429,13 +432,13 @@ mod test {
             valid_to: NaiveDateTime::from_timestamp_micros(999).unwrap(),
         });
 
-        let delete_raw1 = VersioningEntry::Deletion((
+        let delete_row1 = VersioningEntry::Deletion((
             (0i64, "tick".to_string()),
             NaiveDateTime::from_timestamp_micros(1).unwrap(),
         ));
 
         let (latest, to_archive, to_delete) = apply_partitioned_versioning(
-            &[raw1, delete_raw1, raw2, raw3],
+            &[row1, delete_row1, row2, row3],
             NaiveDateTime::from_timestamp_micros(0).unwrap(),
             &mut conn,
         )
@@ -470,7 +473,7 @@ mod test {
                     protocol_component_id: 0,
                     attribute_name: "tick".to_string(),
                     attribute_value: Bytes::from(2u8),
-                    previous_value: None,
+                    previous_value: None, // None because raw 1 has been deleted in the meantime.
                     modify_tx: 2,
                     valid_from: NaiveDateTime::from_timestamp_micros(1).unwrap(),
                     valid_to: NaiveDateTime::from_timestamp_micros(1).unwrap(),
