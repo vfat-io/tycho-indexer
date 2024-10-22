@@ -1,3 +1,14 @@
+## [0.33.1](https://github.com/propeller-heads/tycho-indexer/compare/0.33.0...0.33.1) (2024-10-22)
+
+
+### Bug Fixes
+
+* added secrets for build and push ([#421](https://github.com/propeller-heads/tycho-indexer/issues/421)) ([6567024](https://github.com/propeller-heads/tycho-indexer/commit/656702412ea34b5527c0505cb845dc85b2bd6ddf))
+* **rpc:** allow to run `RpcHandler` without pending deltas. ([9ebb629](https://github.com/propeller-heads/tycho-indexer/commit/9ebb6296851d32c3d213bd7772bb60bf7bff0801))
+* **rpc:** correctly handle requests with no ids specified ([#412](https://github.com/propeller-heads/tycho-indexer/issues/412)) ([8c04f17](https://github.com/propeller-heads/tycho-indexer/commit/8c04f171031b101b9b409372cc22ad7251676ad4))
+* **rpc:** correctly handle when no ids are requested ([5470bf1](https://github.com/propeller-heads/tycho-indexer/commit/5470bf1600984826f0c1f7495ab20ec42121d7ae))
+* **rpc:** fix running RPC without extractors ([#411](https://github.com/propeller-heads/tycho-indexer/issues/411)) ([c5b05cb](https://github.com/propeller-heads/tycho-indexer/commit/c5b05cbf6097c83c2ea90ce472ea880329f6d3ea))
+
 ## [0.33.0](https://github.com/propeller-heads/tycho-indexer/compare/0.32.0...0.33.0) (2024-10-11)
 
 
