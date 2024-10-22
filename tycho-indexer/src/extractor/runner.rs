@@ -448,7 +448,7 @@ impl ExtractorBuilder {
             .config
             .post_processor
             .as_ref()
-            .and_then(|name| {
+            .map(|name| {
                 POST_PROCESSOR_REGISTRY
                     .get(name)
                     .cloned()
@@ -458,8 +458,8 @@ impl ExtractorBuilder {
                             name
                         ))
                     })
-                    .ok()
-            });
+            })
+            .transpose()?;
 
         self.extractor = Some(Arc::new(
             ProtocolExtractor::new(
