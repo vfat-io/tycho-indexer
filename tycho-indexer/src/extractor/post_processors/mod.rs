@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! This module collects post processor components
 //!
 //! Usually changes or modifications required due to bugs in downstream substreams packages
@@ -18,6 +19,7 @@ mod balances;
 
 pub type PostProcessorFn = fn(BlockChanges) -> BlockChanges;
 
+#[deprecated]
 fn add_default_usv2_attributes_then_transcode_balances(input: BlockChanges) -> BlockChanges {
     transcode_usv2_balances(add_default_attributes_uniswapv2(input))
 }

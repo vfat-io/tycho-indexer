@@ -77,6 +77,7 @@ pub fn add_default_attributes_uniswapv3(changes: BlockChanges) -> BlockChanges {
 }
 
 /// Post processor function that adds missing attributes to all new created uniswapV2 pools.
+#[deprecated]
 pub fn add_default_attributes_uniswapv2(changes: BlockChanges) -> BlockChanges {
     // TODO: Remove it while this is handled directly in the substreams modules.
     add_default_attributes(changes, &USV2_MANDATORY_ATTRIBUTES)
