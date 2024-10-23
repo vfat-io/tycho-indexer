@@ -353,7 +353,7 @@ where
                 .collect(),
             None => {
                 let req = dto::ProtocolComponentsRequestBody {
-                    chain: request.chain.clone(),
+                    chain: request.chain,
                     protocol_system: request.protocol_system.clone(),
                     component_ids: None,
                     tvl_gt: None,
