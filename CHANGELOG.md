@@ -1,3 +1,11 @@
+## [0.34.1](https://github.com/propeller-heads/tycho-indexer/compare/0.34.0...0.34.1) (2024-10-23)
+
+
+### Bug Fixes
+
+* **rpc:** correctly pass down delta buffer in RPC ([a1f35d8](https://github.com/propeller-heads/tycho-indexer/commit/a1f35d8bd4871ec01386155c894db8d74ff3f180))
+* **rpc:** correctly pass down delta buffer in RPC ([#428](https://github.com/propeller-heads/tycho-indexer/issues/428)) ([de328a0](https://github.com/propeller-heads/tycho-indexer/commit/de328a04b529331586d40363e2aa1f4b68f79bbe))
+
 ## [0.34.0](https://github.com/propeller-heads/tycho-indexer/compare/0.33.1...0.34.0) (2024-10-22)
 
 
