@@ -15,13 +15,27 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  publish_tycho_indexer_client:
+  publish_tycho_indexer_client_linux:
     uses: propeller-heads/ci-cd-templates/.github/workflows/release-python-package.yaml@main
     permissions:
       id-token: write
       contents: read
-    with:
-      package_root: "tycho-client-py"
     secrets:
       app_id: ${{ secrets.APP_ID }}
       app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
+    with:
+      runs_on: 'ubuntu-latest'
+      package_root: "tycho-client-py"
+      use_maturin: true
+  publish_tycho_indexer_client_macos:
+    uses: propeller-heads/ci-cd-templates/.github/workflows/release-python-package.yaml@main
+    permissions:
+      id-token: write
+      contents: read
+    secrets:
+      app_id: ${{ secrets.APP_ID }}
+      app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
+    with:
+      runs_on: 'macos-latest'
+      package_root: "tycho-client-py"
+      use_maturin: true
