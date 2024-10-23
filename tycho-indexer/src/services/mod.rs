@@ -2,6 +2,7 @@
 
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
+use deltas_buffer::PendingDeltasBuffer;
 use futures03::future::try_join_all;
 use std::{collections::HashMap, sync::Arc};
 use tokio::task::JoinHandle;
@@ -129,7 +130,7 @@ where
         // If no extractors are registered, run the server without spawning extractor-related tasks.
         if self.extractor_handles.is_empty() {
             info!("Starting standalone rpc server");
-            self.start_server(None, open_api)
+            self.start_server(None, open_api, None)
         } else {
             info!("Starting full server");
             self.start_server_with_deltas(open_api)
@@ -159,7 +160,8 @@ where
                 .map_err(|err| ExtractionError::Unknown(err.to_string()))
         });
         let ws_data = web::Data::new(ws::WsData::new(self.extractor_handles.clone()));
-        let (server_handle, server_task) = self.start_server(Some(ws_data), openapi)?;
+        let (server_handle, server_task) =
+            self.start_server(Some(ws_data), openapi, Some(Arc::new(pending_deltas)))?;
 
         let task = tokio::spawn(async move {
             try_join_all(vec![deltas_task, server_task])
@@ -176,8 +178,9 @@ where
         self,
         ws_data: Option<web::Data<ws::WsData>>,
         openapi: utoipa::openapi::OpenApi,
+        pending_deltas: Option<Arc<dyn PendingDeltasBuffer + Send + Sync>>,
     ) -> Result<(ServerHandle, JoinHandle<Result<(), ExtractionError>>), ExtractionError> {
-        let rpc_data = web::Data::new(rpc::RpcHandler::new(self.db_gateway, None));
+        let rpc_data = web::Data::new(rpc::RpcHandler::new(self.db_gateway, pending_deltas));
 
         let server = HttpServer::new(move || {
             let mut app = App::new()
