@@ -29,6 +29,8 @@ pub mod deltas;
 pub mod feed;
 pub mod rpc;
 
+pub mod cli;
+
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;

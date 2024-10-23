@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "tycho-indexer-client"
@@ -14,6 +14,7 @@ authors = [
 requires-python = ">=3.9"
 license = { text = "MIT License" }
 classifiers = [
+    "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
@@ -37,4 +38,13 @@ homepage = "https://propellerswap.xyz"
 repository = "https://github.com/propeller-heads/tycho-indexer"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["./python"]
+
+[tool.maturin]
+python-source = "python"
+python-packages = ["tycho_indexer_client"]
+bindings = "bin"
+
+[[tool.maturin.targets]]
+name = "tycho-client-cli"
+bindings = "bin"
