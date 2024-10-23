@@ -343,14 +343,16 @@ where
         // By precomputing the paginated IDs we also ensure that the fetched balances and
         // protocol state are paginated in the same way.
         // Also, by doing this in a single point prevents failures and increases performance.
-        let paginated_ids: Vec<String> = match ids {
-            Some(ids) => ids
-                .iter()
-                .skip(pagination_params.offset() as usize)
-                .take(pagination_params.page_size as usize)
-                .cloned()
-                .map(|s| s.to_string())
-                .collect(),
+        let (paginated_ids, total): (Vec<String>, i64) = match ids {
+            Some(ids) => (
+                ids.iter()
+                    .skip(pagination_params.offset() as usize)
+                    .take(pagination_params.page_size as usize)
+                    .cloned()
+                    .map(|s| s.to_string())
+                    .collect(),
+                ids.len() as i64,
+            ),
             None => {
                 let req = dto::ProtocolComponentsRequestBody {
                     chain: request.chain,
@@ -363,11 +365,15 @@ where
                     .get_protocol_components_inner(req)
                     .await
                     .expect("Failed to get protocol component IDs");
-                protocol_components
-                    .protocol_components
-                    .into_iter()
-                    .map(|c| c.id)
-                    .collect()
+                let total_components = protocol_components.pagination.total;
+                (
+                    protocol_components
+                        .protocol_components
+                        .into_iter()
+                        .map(|c| c.id)
+                        .collect(),
+                    total_components,
+                )
             }
         };
         let paginated_ids: Vec<&str> = paginated_ids
@@ -407,15 +413,6 @@ where
                 )?;
             }
         }
-
-        let total = match ids {
-            Some(ids) => {
-                // If protocol IDs are specified, the total count is the number of IDs
-                ids.len() as i64
-            }
-            None => state_data.total.unwrap_or_default(), /* TODO: handle case where protocol ids
-                                                           * are not specified */
-        };
 
         Ok(dto::ProtocolStateRequestResponse::new(
             states
