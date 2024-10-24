@@ -19,7 +19,6 @@ log = getLogger(__name__)
 
 
 class TychoStream:
-
     def __init__(
         self,
         tycho_url: str,
@@ -169,7 +168,7 @@ def get_default_log_directory():
 
 def find_tycho_client():
     # Check if 'tycho-client' is in the PATH
-    tycho_client_path = shutil.which("tycho-client")
+    tycho_client_path = shutil.which("tycho-client-cli")
 
     return tycho_client_path
 

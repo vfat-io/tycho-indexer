@@ -3,34 +3,33 @@
 A Python client library for interacting with the Tycho RPC server and streaming data from Tycho.
 
 ## Features
-- RPC Client: Interact with the Tycho RPC server to query various blockchain data, including protocol components, states, contract states, and tokens.
-- Streaming: Stream real-time data using the Tycho client binary, allowing for efficient monitoring and processing of live data.
+
+- RPC Client: Interact with the Tycho RPC server to query various blockchain data, including protocol components,
+  states, contract states, and tokens.
+- Streaming: Stream real-time data using the Tycho client binary, allowing for efficient monitoring and processing of
+  live data.
 
 ## Installation
 
-If you want to build and install the package locally, follow these steps:
+If you want to build and install the package locally, follow these steps (assumes you
+have the Rust workspace already set up):
 
-1. Build the package:
-
-```bash
-./build_wheel.sh
-```
-
-This script will generate the distribution files (wheels) in the dist directory.
-
-2. Install the package locally:
+1. Build and install the package:
 
 ```bash
-pip install dist/tycho_client_py-*.whl
+pip install maturin
+maturin develop
 ```
 
 ## Usage
 
 ### RPC Client
 
-The TychoRPCClient class allows you to interact with the Tycho RPC server. You can query for protocol components, protocol states, contract states, and tokens.
+The TychoRPCClient class allows you to interact with the Tycho RPC server. You can query for protocol components,
+protocol states, contract states, and tokens.
 
 #### Example
+
 ```python
 from tycho_indexer_client import (
     TychoRPCClient,
@@ -74,6 +73,7 @@ import asyncio
 from tycho_indexer_client import Chain, TychoStream
 from decimal import Decimal
 
+
 async def main():
     stream = TychoStream(
         tycho_url="localhost:8888",
@@ -87,6 +87,7 @@ async def main():
 
     async for message in stream:
         print(message)
+
 
 asyncio.run(main())
 ```

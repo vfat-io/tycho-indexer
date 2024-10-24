@@ -2,6 +2,7 @@
 members = [
     "tycho-indexer",
     "tycho-client",
+    "tycho-client-py",
     "tycho-core",
     "tycho-storage",
     "tycho-ethereum",
@@ -37,6 +38,7 @@ hex = "0.4.3"
 tycho-core = { path = "tycho-core" }
 tycho-storage = { path = "./tycho-storage" }
 tycho-ethereum = { path = "./tycho-ethereum" }
+tycho-client = { path = "./tycho-client" }
 futures03 = { version = "0.3.1", package = "futures", features = ["compat"] }
 thiserror = "1"
 tracing = "0.1.37"
