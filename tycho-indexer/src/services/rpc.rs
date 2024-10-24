@@ -319,7 +319,6 @@ where
         &self,
         request: dto::ProtocolStateRequestBody,
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
-        //TODO: handle when no id is specified with filters
         let at = BlockOrTimestamp::try_from(&request.version)?;
         let chain = request.chain.into();
         let (db_version, deltas_version) = self
@@ -341,27 +340,60 @@ where
         // Apply pagination to the protocol ids. This is done so that we can determine which ids
         // were not returned from the db and get them from the buffer instead. For component ids
         // that do not exist in either the db or the buffer, we will return an empty state.
-        let mut paginated_ids: Option<Vec<&str>> = None;
-        if let Some(ids) = ids {
-            paginated_ids = Some(
+        // By precomputing the paginated IDs we also ensure that the fetched balances and
+        // protocol state are paginated in the same way.
+        // Also, by doing this in a single point prevents failures and increases performance.
+        let (paginated_ids, total): (Vec<String>, i64) = match ids {
+            Some(ids) => (
                 ids.iter()
                     .skip(pagination_params.offset() as usize)
                     .take(pagination_params.page_size as usize)
                     .cloned()
+                    .map(|s| s.to_string())
                     .collect(),
-            );
-        }
+                ids.len() as i64,
+            ),
+            None => {
+                let req = dto::ProtocolComponentsRequestBody {
+                    chain: request.chain,
+                    protocol_system: request.protocol_system.clone(),
+                    component_ids: None,
+                    tvl_gt: None,
+                    pagination: request.pagination.clone(),
+                };
+                let protocol_components = self
+                    .get_protocol_components_inner(req)
+                    .await
+                    .expect("Failed to get protocol component IDs");
+                let total_components = protocol_components.pagination.total;
+                (
+                    protocol_components
+                        .protocol_components
+                        .into_iter()
+                        .map(|c| c.id)
+                        .collect(),
+                    total_components,
+                )
+            }
+        };
+        let paginated_ids: Vec<&str> = paginated_ids
+            .iter()
+            .map(AsRef::as_ref)
+            .collect();
 
-        // Get the protocol states from the database
+        debug!(n_ids = paginated_ids.len(), "Getting protocol states for paginated IDs.");
+
+        // Get the protocol states from the database. We skip pagination because we have already
+        // paginated the protocol IDs.
         let state_data = self
             .db_gateway
             .get_protocol_states(
                 &chain,
                 Some(db_version),
                 Some(request.protocol_system.clone()),
-                paginated_ids.as_deref(),
+                Some(paginated_ids.as_slice()),
                 request.include_balances,
-                Some(&pagination_params),
+                None,
             )
             .await
             .map_err(|err| {
@@ -374,22 +406,13 @@ where
         if let Some(at) = deltas_version {
             if let Some(pending_deltas) = &self.pending_deltas {
                 pending_deltas.merge_native_states(
-                    paginated_ids.as_deref(),
+                    Some(paginated_ids.as_slice()),
                     &mut states,
                     Some(at),
                     &request.protocol_system,
                 )?;
             }
         }
-
-        let total = match ids {
-            Some(ids) => {
-                // If protocol IDs are specified, the total count is the number of IDs
-                ids.len() as i64
-            }
-            None => state_data.total.unwrap_or_default(), /* TODO: handle case where protocol ids
-                                                           * are not specified */
-        };
 
         Ok(dto::ProtocolStateRequestResponse::new(
             states
