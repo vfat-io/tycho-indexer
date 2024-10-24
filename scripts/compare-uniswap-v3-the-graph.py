@@ -128,12 +128,12 @@ def fetch_pool_data(pool_id, block_number=None):
         print(f"Error fetching data for pool {pool_id}: {response.status_code}")
         return None
     
-def convert_little_to_big_endian(hex_str, signed=False):
+def hex_to_int(hex_str, signed=False):
     if hex_str.startswith("0x"):
         hex_str = hex_str[2:]
     # Convert hex string to bytes in little endian
     value_bytes_little = bytes.fromhex(hex_str)
-    return int.from_bytes(value_bytes_little, byteorder='little', signed=signed)
+    return int.from_bytes(value_bytes_little, byteorder='big', signed=signed)
 
 def compare_pools(local_pool, fetched_pool, block_number):
     differences = {}
@@ -149,7 +149,7 @@ def compare_pools(local_pool, fetched_pool, block_number):
     for local_key, fetched_value in simple_fields.items():
         # Check if the fetched_key exists and is not None
         if local_key in local_attributes and local_attributes[local_key] is not None:
-            local_value = convert_little_to_big_endian(local_attributes[local_key]) if local_key != 'tick' else convert_little_to_big_endian(local_attributes[local_key], True)
+            local_value = hex_to_int(local_attributes[local_key]) if local_key != 'tick' else hex_to_int(local_attributes[local_key], True)
             if local_value != fetched_value:
                 differences[local_key] = (local_value, fetched_value)
         else:
@@ -159,7 +159,7 @@ def compare_pools(local_pool, fetched_pool, block_number):
     for local_key, local_value in local_attributes.items():
         if local_key.startswith('ticks/'):
             tick_idx = int(local_key.split('/')[1].split('/')[0])
-            liquidity_net = convert_little_to_big_endian(local_value, True)
+            liquidity_net = hex_to_int(local_value, True)
             # Find corresponding tick in fetched data
             fetched_tick = next((tick for tick in fetched_pool['ticks'] if int(tick['tickIdx']) == tick_idx), None)
             if fetched_tick is not None and int(fetched_tick['liquidityNet']) != liquidity_net:
