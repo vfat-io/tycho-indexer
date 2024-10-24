@@ -1,3 +1,13 @@
+## [0.35.1](https://github.com/propeller-heads/tycho-indexer/compare/0.35.0...0.35.1) (2024-10-24)
+
+
+### Bug Fixes
+
+* Fix ProtocolState RPC pagination by pre-paginating IDs ([fa485d2](https://github.com/propeller-heads/tycho-indexer/commit/fa485d25825df645380ea5d155bae010006f5ff4))
+* Fix ProtocolState RPC pagination by pre-paginating IDs ([#425](https://github.com/propeller-heads/tycho-indexer/issues/425)) ([64ee5ce](https://github.com/propeller-heads/tycho-indexer/commit/64ee5ce22a56445b1bf7f970e96e78206b57f40d))
+* remove unnecessary clone ([287d57f](https://github.com/propeller-heads/tycho-indexer/commit/287d57f9565bf2da4dcc80c406da6d9f845b0867))
+* return total components when no id is specified for protocol_states ([8a78cb9](https://github.com/propeller-heads/tycho-indexer/commit/8a78cb9d6a7825afd66f4fa6b15483d8ce3ea771))
+
 ## [0.35.0](https://github.com/propeller-heads/tycho-indexer/compare/0.34.1...0.35.0) (2024-10-24)
 
 
