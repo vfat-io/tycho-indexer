@@ -1,3 +1,12 @@
+## [0.35.0](https://github.com/propeller-heads/tycho-indexer/compare/0.34.1...0.35.0) (2024-10-24)
+
+
+### Features
+
+* **ci:** Build wheels for python client. ([b882252](https://github.com/propeller-heads/tycho-indexer/commit/b8822526aa73f5643f5cf821ce1f64febc07605a))
+* Ship tycho-client-py with binaries ([#427](https://github.com/propeller-heads/tycho-indexer/issues/427)) ([6e55465](https://github.com/propeller-heads/tycho-indexer/commit/6e55465fc8cc6a5f636016b7d45f19310b0c5ea8))
+* **tycho-client:** Distribute binary with python lib. ([1540a4a](https://github.com/propeller-heads/tycho-indexer/commit/1540a4a9fb495746f479d4ce1ed5fd9477ae8556))
+
 ## [0.34.1](https://github.com/propeller-heads/tycho-indexer/compare/0.34.0...0.34.1) (2024-10-23)
 
 
