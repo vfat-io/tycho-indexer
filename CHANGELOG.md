@@ -1,3 +1,11 @@
+## [0.35.3](https://github.com/propeller-heads/tycho-indexer/compare/0.35.2...0.35.3) (2024-10-25)
+
+
+### Bug Fixes
+
+* **indexer:** correctly handle attributes deletions ([57fad94](https://github.com/propeller-heads/tycho-indexer/commit/57fad947c172ad0b5ecf9078a32580c204df679d))
+* **indexer:** correctly handle attributes deletions ([#420](https://github.com/propeller-heads/tycho-indexer/issues/420)) ([faa08f6](https://github.com/propeller-heads/tycho-indexer/commit/faa08f645fc8a63ad2ed1fcd8689f586f96af1b5))
+
 ## [0.35.2](https://github.com/propeller-heads/tycho-indexer/compare/0.35.1...0.35.2) (2024-10-25)
 
 
