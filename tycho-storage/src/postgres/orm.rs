@@ -680,16 +680,19 @@ impl ProtocolState {
         WithTotal { entity: res, total: count }
     }
 
-    /// Used to fetch the full state of a component at a given version, filtered by protocol system.
+    /// Used to fetch the full state of a component at a given version, filtered by protocol system
+    /// and optionally component ids.
     ///
-    /// Retrieves all matching protocol states and their component id, filtered by protocol system.
+    /// Retrieves all matching protocol states and their component id, filtered by protocol system
+    /// and optionally component ids.
     /// If no version is provided, the latest state is returned. The results are grouped by
     /// component id to allow for easy state reconstruction. It can be trusted that all state
     /// updates for a given component are sequential.
     ///
-    /// Note - follows the same logic as by_ids, but filters by protocol system instead of component
-    /// ids.
-    pub async fn by_protocol_system(
+    /// Note - follows the same logic as by_ids, but filters by protocol system and optionally by
+    /// component ids.
+    pub async fn by_protocol(
+        component_ids: Option<&[&str]>,
         system: &str,
         chain_id: &i64,
         version_ts: Option<NaiveDateTime>,
@@ -706,6 +709,10 @@ impl ProtocolState {
             .filter(protocol_component::chain_id.eq(chain_id))
             .select(protocol_component::id)
             .into_boxed();
+
+        if let Some(ids) = component_ids {
+            component_query = component_query.filter(protocol_component::external_id.eq_any(ids));
+        }
 
         // Apply pagination and fetch total count
         let count: Option<i64> = if let Some(pagination) = pagination_params {

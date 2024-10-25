@@ -670,9 +670,6 @@ impl PostgresGateway {
     }
 
     // Gets all protocol states from the db filtered by chain, component ids and/or protocol system.
-    // The filters are applied in the following order: component ids, protocol system, chain. If
-    // component ids are provided, the protocol system filter is ignored. The chain filter is
-    // always applied.
     #[allow(clippy::too_many_arguments)]
     pub async fn get_protocol_states(
         &self,
@@ -699,9 +696,10 @@ impl PostgresGateway {
         };
 
         match (ids, system) {
-            (Some(ids), Some(_)) => {
-                let state_data = orm::ProtocolState::by_id(
-                    ids,
+            (maybe_ids, Some(system)) => {
+                let state_data = orm::ProtocolState::by_protocol(
+                    maybe_ids,
+                    &system.to_string(),
                     &chain_db_id,
                     version_ts,
                     pagination_params,
@@ -711,7 +709,7 @@ impl PostgresGateway {
                 let protocol_states = self._decode_protocol_states(
                     balances,
                     state_data.entity,
-                    ids.join(",").as_str(),
+                    system.to_string().as_str(),
                 )?;
                 Ok(WithTotal { entity: protocol_states, total: state_data.total })
             }
@@ -728,22 +726,6 @@ impl PostgresGateway {
                     balances,
                     state_data.entity,
                     ids.join(",").as_str(),
-                )?;
-                Ok(WithTotal { entity: protocol_states, total: state_data.total })
-            }
-            (_, Some(system)) => {
-                let state_data = orm::ProtocolState::by_protocol_system(
-                    &system.to_string(),
-                    &chain_db_id,
-                    version_ts,
-                    pagination_params,
-                    conn,
-                )
-                .await;
-                let protocol_states = self._decode_protocol_states(
-                    balances,
-                    state_data.entity,
-                    system.to_string().as_str(),
                 )?;
                 Ok(WithTotal { entity: protocol_states, total: state_data.total })
             }
