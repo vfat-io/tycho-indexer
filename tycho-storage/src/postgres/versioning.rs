@@ -45,7 +45,11 @@ use diesel::{
     sql_types::{BigInt, Timestamp},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use std::{collections::HashMap, fmt::Debug, hash::Hash};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+};
 use tycho_core::storage::StorageError;
 
 /// Trait indicating that a struct can be inserted into a versioned table.
@@ -102,6 +106,21 @@ pub trait StoredVersionedRow {
 
     /// Exposes the associated table name.
     fn table_name() -> &'static str;
+}
+
+#[derive(Debug)]
+pub(crate) enum VersioningEntry<T: PartitionedVersionedRow> {
+    Update(T),
+    Deletion((T::EntityId, NaiveDateTime)),
+}
+
+impl<T: PartitionedVersionedRow> VersioningEntry<T> {
+    fn get_id(&self) -> T::EntityId {
+        match self {
+            VersioningEntry::Update(e) => e.get_id(),
+            VersioningEntry::Deletion((e_id, _)) => e_id.clone(),
+        }
+    }
 }
 
 /// Sets end versions on a collection of new rows.
@@ -240,32 +259,51 @@ pub trait PartitionedVersionedRow: Clone + Send + Sync {
         Self: Sized;
 }
 
+type LatestRows<N> = Vec<N>;
+type ArchivedRows<N> = Vec<N>;
+type DeletedIds<N> = Vec<<N as PartitionedVersionedRow>::EntityId>;
+type RowsChanges<N> = (LatestRows<N>, ArchivedRows<N>, DeletedIds<N>);
+
 fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
-    data: &[N],
-    delete_version: &HashMap<N::EntityId, NaiveDateTime>,
-) -> (Vec<N>, Vec<N>) {
-    let mut latest = HashMap::<N::EntityId, N>::new();
+    current_latest_data: &[N],
+    new_data: &[VersioningEntry<N>],
+) -> Result<RowsChanges<N>, StorageError> {
+    let mut latest: HashMap<N::EntityId, N> = current_latest_data
+        .iter()
+        .map(|row| (row.get_id(), row.clone()))
+        .collect();
     let mut archived = Vec::new();
-    for item in data.iter() {
+    let mut deleted = HashSet::new();
+    for item in new_data.iter() {
         let id = item.get_id();
+        match item {
+            VersioningEntry::Update(r) => {
+                // Handle updated rows
+                let mut row = r.clone();
+                if let Some(mut prev) = latest.remove(&id) {
+                    prev.archive(&mut row);
+                    archived.push(prev);
+                }
+                // If it's updated after being deleted, it doesn't need to be marked as deleted
+                deleted.remove(&id);
+                latest.insert(id, row);
+            }
+            VersioningEntry::Deletion((id, delete_version)) => {
+                // Handle deleted rows
+                let mut delete_row = latest
+                    .remove(id)
+                    .ok_or(StorageError::Unexpected(format!(
+                        "Missing deleted row with id {:?}",
+                        id
+                    )))?;
 
-        // Handle deleted rows
-        if let Some(delete_version) = delete_version.get(&id) {
-            let mut delete_row = item.clone();
-            delete_row.delete(*delete_version);
-            archived.push(delete_row);
-            continue;
+                delete_row.delete(*delete_version);
+                archived.push(delete_row);
+                deleted.insert(id.clone());
+            }
         }
-
-        // Handle updated rows
-        let mut current = item.clone();
-        if let Some(mut prev) = latest.remove(&id) {
-            prev.archive(&mut current);
-            archived.push(prev);
-        }
-        latest.insert(id, current);
     }
-    (latest.into_values().collect(), archived)
+    Ok((latest.into_values().collect(), archived, deleted.into_iter().collect()))
 }
 
 /// Applies versioning using partitioned tables.
@@ -297,8 +335,9 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
 /// than the horizon are simply dropped before issuing the inserts.
 ///
 /// ## Deletions
-/// Deletion simply move the row from the default partition to an archive parition by setting the
-/// valid_to column and skipping the update or insert into the current state.
+/// Deletion simply archives a row by setting the valid_to column and marking it as archived. If the
+/// row is not updated again it also marks it as deleted and returns the id that needs to be deleted
+/// from the default partition.
 ///
 /// ## Overview
 ///
@@ -309,9 +348,10 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
 /// - Filter any archived rows by the retention horizon.
 ///
 /// ## Returns
-/// The method returns a vector with the latest version as well as vector of archive versions.
-/// The latest version are supposed to be executed as upserts into the default partition directly,
-/// the archive version can simply be inserted into the partitioned table. Actually executing these
+/// The method returns a vector with the latest version, vector of archive versions and a vector of
+/// entity ids to delete. The latest version are supposed to be executed as upserts into the default
+/// partition directly, the archive version can simply be inserted into the partitioned table and
+/// the deleted ids need to be removed from the default partition. Actually executing these
 /// operations is left to the caller since the exact implementation may vary based on the table
 /// schema.
 ///
@@ -324,34 +364,131 @@ fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
 /// `BIGSERIAL` primary keys won't work here since the method can only deal with a single type, so
 /// you can't use a `New*` orm models here combined with an already stored orm model type.
 pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
-    new_data: &[T],
-    delete_versions: Option<&HashMap<T::EntityId, NaiveDateTime>>,
+    new_data: &[VersioningEntry<T>],
     retention_horizon: NaiveDateTime,
     conn: &mut AsyncPgConnection,
-) -> Result<(Vec<T>, Vec<T>), StorageError> {
-    let empty_delete_versions = HashMap::new();
-    let delete_versions = delete_versions.unwrap_or(&empty_delete_versions);
-
-    if new_data.is_empty() && delete_versions.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
+) -> Result<RowsChanges<T>, StorageError> {
+    if new_data.is_empty() {
+        return Ok((Vec::new(), Vec::new(), Vec::new()));
     }
-    let db_rows: Vec<T> = T::latest_versions_by_ids(
+
+    let current_latest_db_rows: Vec<T> = T::latest_versions_by_ids(
         new_data
             .iter()
             .map(|e| e.get_id())
-            .chain(delete_versions.keys().cloned())
             .collect(),
         conn,
     )
-    .await?
-    .into_iter()
-    .chain(new_data.iter().cloned())
-    .collect();
+    .await?;
 
-    let (latest, archive) = set_partitioned_versioning_attributes(&db_rows, delete_versions);
+    let (latest, archive, deleted) =
+        set_partitioned_versioning_attributes(&current_latest_db_rows, new_data)?;
     let filtered_archive: Vec<_> = archive
         .into_iter()
         .filter(|e| e.get_valid_to() > retention_horizon)
         .collect();
-    Ok((latest, filtered_archive))
+    Ok((latest, filtered_archive, deleted))
+}
+
+#[cfg(test)]
+mod test {
+    use super::apply_partitioned_versioning;
+    use crate::postgres::{orm::NewProtocolState, versioning::VersioningEntry};
+    use chrono::NaiveDateTime;
+    use diesel_async::{AsyncConnection, AsyncPgConnection};
+    use tycho_core::Bytes;
+
+    async fn setup_db() -> AsyncPgConnection {
+        let db_url = std::env::var("DATABASE_URL").unwrap();
+        let mut conn = AsyncPgConnection::establish(&db_url)
+            .await
+            .unwrap();
+        conn.begin_test_transaction()
+            .await
+            .unwrap();
+
+        conn
+    }
+
+    #[tokio::test]
+    async fn test_apply_partitioned_versioning() {
+        let mut conn = setup_db().await;
+        let row1 = VersioningEntry::Update(NewProtocolState {
+            protocol_component_id: 0,
+            attribute_name: "tick".to_string(),
+            attribute_value: Bytes::from(1u8),
+            previous_value: None,
+            modify_tx: 1,
+            valid_from: NaiveDateTime::from_timestamp_micros(1).unwrap(),
+            valid_to: NaiveDateTime::from_timestamp_micros(999).unwrap(),
+        });
+        let row2 = VersioningEntry::Update(NewProtocolState {
+            protocol_component_id: 0,
+            attribute_name: "tick".to_string(),
+            attribute_value: Bytes::from(2u8),
+            previous_value: None,
+            modify_tx: 2,
+            valid_from: NaiveDateTime::from_timestamp_micros(1).unwrap(),
+            valid_to: NaiveDateTime::from_timestamp_micros(999).unwrap(),
+        });
+        let row3 = VersioningEntry::Update(NewProtocolState {
+            protocol_component_id: 0,
+            attribute_name: "tick".to_string(),
+            attribute_value: Bytes::from(3u8),
+            previous_value: None,
+            modify_tx: 3,
+            valid_from: NaiveDateTime::from_timestamp_micros(1).unwrap(),
+            valid_to: NaiveDateTime::from_timestamp_micros(999).unwrap(),
+        });
+
+        let delete_row1 = VersioningEntry::Deletion((
+            (0i64, "tick".to_string()),
+            NaiveDateTime::from_timestamp_micros(1).unwrap(),
+        ));
+
+        let (latest, to_archive, to_delete) = apply_partitioned_versioning(
+            &[row1, delete_row1, row2, row3],
+            NaiveDateTime::from_timestamp_micros(0).unwrap(),
+            &mut conn,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            latest,
+            vec![NewProtocolState {
+                protocol_component_id: 0,
+                attribute_name: "tick".to_string(),
+                attribute_value: Bytes::from(3u8),
+                previous_value: Some(Bytes::from(2u8)),
+                modify_tx: 3,
+                valid_from: NaiveDateTime::from_timestamp_micros(1).unwrap(),
+                valid_to: NaiveDateTime::from_timestamp_micros(999).unwrap(),
+            }]
+        );
+        assert_eq!(
+            to_archive,
+            vec![
+                NewProtocolState {
+                    protocol_component_id: 0,
+                    attribute_name: "tick".to_string(),
+                    attribute_value: Bytes::from(1u8),
+                    previous_value: None,
+                    modify_tx: 1,
+                    valid_from: NaiveDateTime::from_timestamp_micros(1).unwrap(),
+                    valid_to: NaiveDateTime::from_timestamp_micros(1).unwrap(),
+                },
+                NewProtocolState {
+                    protocol_component_id: 0,
+                    attribute_name: "tick".to_string(),
+                    attribute_value: Bytes::from(2u8),
+                    previous_value: None, // None because raw 1 has been deleted in the meantime.
+                    modify_tx: 2,
+                    valid_from: NaiveDateTime::from_timestamp_micros(1).unwrap(),
+                    valid_to: NaiveDateTime::from_timestamp_micros(1).unwrap(),
+                }
+            ]
+        );
+        assert_eq!(to_delete, vec![]);
+    }
 }

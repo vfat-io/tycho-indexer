@@ -25,7 +25,7 @@ use super::{
     schema, storage_error_from_diesel, PostgresError, PostgresGateway, WithOrdinal, WithTxHash,
     MAX_TS, MAX_VERSION_TS,
 };
-use crate::postgres::versioning::apply_partitioned_versioning;
+use crate::postgres::versioning::{apply_partitioned_versioning, VersioningEntry};
 
 // Private methods
 impl PostgresGateway {
@@ -802,7 +802,6 @@ impl PostgresGateway {
         .collect();
 
         let mut state_data = Vec::new();
-        let mut deleted_attributes = HashMap::new();
         for state in new {
             let tx = state
                 .tx
@@ -827,23 +826,28 @@ impl PostgresGateway {
                     .iter()
                     .map(|(attribute, value)| {
                         WithOrdinal::new(
-                            orm::NewProtocolState::new(
+                            VersioningEntry::Update(orm::NewProtocolState::new(
                                 component_db_id,
                                 attribute,
                                 value,
                                 *tx_id,
                                 *tx_ts,
-                            ),
+                            )),
                             (component_db_id, attribute, tx_ts, tx_index),
                         )
                     }),
             );
 
-            deleted_attributes.extend(
+            state_data.extend(
                 state
                     .deleted_attributes
                     .iter()
-                    .map(|attr| ((component_db_id, attr.clone()), *tx_ts)),
+                    .map(|attr| {
+                        WithOrdinal::new(
+                            VersioningEntry::Deletion(((component_db_id, attr.clone()), *tx_ts)),
+                            (component_db_id, attr, tx_ts, tx_index),
+                        )
+                    }),
             );
         }
 
@@ -855,13 +859,8 @@ impl PostgresGateway {
                 .map(|b| b.entity)
                 .collect::<Vec<_>>();
             trace!(entries=?&sorted, "protocol state entries ready for versioning.");
-            let (latest, to_archive) = apply_partitioned_versioning(
-                &sorted,
-                Some(&deleted_attributes),
-                self.retention_horizon,
-                conn,
-            )
-            .await?;
+            let (latest, to_archive, to_delete) =
+                apply_partitioned_versioning(&sorted, self.retention_horizon, conn).await?;
             trace!(records=?&to_archive, "Inserting archival records!");
             diesel::insert_into(schema::protocol_state::table)
                 .values(&to_archive)
@@ -891,10 +890,10 @@ impl PostgresGateway {
                 .await
                 .map_err(PostgresError::from)?;
             // remove deleted attributes from the default table
-            if !deleted_attributes.is_empty() {
+            if !to_delete.is_empty() {
                 let mut delete_query =
                     diesel::delete(schema::protocol_state_default::table).into_boxed();
-                for ((component_id, attr_name), _) in deleted_attributes {
+                for (component_id, attr_name) in to_delete {
                     delete_query = delete_query.or_filter(
                         schema::protocol_state_default::protocol_component_id
                             .eq(component_id)
@@ -1203,7 +1202,7 @@ impl PostgresGateway {
                 *transaction_ts,
             );
             new_component_balances.push(WithOrdinal::new(
-                new_component_balance,
+                VersioningEntry::Update(new_component_balance),
                 (protocol_component_id, *token_id, transaction_ts, transaction_index),
             ));
         }
@@ -1214,8 +1213,8 @@ impl PostgresGateway {
                 .into_iter()
                 .map(|b| b.entity)
                 .collect::<Vec<_>>();
-            let (latest, to_archive) =
-                apply_partitioned_versioning(&sorted, None, self.retention_horizon, conn).await?;
+            let (latest, to_archive, _) =
+                apply_partitioned_versioning(&sorted, self.retention_horizon, conn).await?;
 
             diesel::insert_into(schema::component_balance::table)
                 .values(&to_archive)
