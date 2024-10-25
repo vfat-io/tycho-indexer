@@ -259,10 +259,15 @@ pub trait PartitionedVersionedRow: Clone + Send + Sync {
         Self: Sized;
 }
 
+type LatestRows<N> = Vec<N>;
+type ArchivedRows<N> = Vec<N>;
+type DeletedIds<N> = Vec<<N as PartitionedVersionedRow>::EntityId>;
+type RowsChanges<N> = (LatestRows<N>, ArchivedRows<N>, DeletedIds<N>);
+
 fn set_partitioned_versioning_attributes<N: PartitionedVersionedRow>(
     current_latest_data: &[N],
     new_data: &[VersioningEntry<N>],
-) -> Result<(Vec<N>, Vec<N>, Vec<N::EntityId>), StorageError> {
+) -> Result<RowsChanges<N>, StorageError> {
     let mut latest: HashMap<N::EntityId, N> = current_latest_data
         .iter()
         .map(|row| (row.get_id(), row.clone()))
@@ -362,7 +367,7 @@ pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
     new_data: &[VersioningEntry<T>],
     retention_horizon: NaiveDateTime,
     conn: &mut AsyncPgConnection,
-) -> Result<(Vec<T>, Vec<T>, Vec<T::EntityId>), StorageError> {
+) -> Result<RowsChanges<T>, StorageError> {
     if new_data.is_empty() {
         return Ok((Vec::new(), Vec::new(), Vec::new()));
     }
