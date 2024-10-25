@@ -1,3 +1,11 @@
+## [0.35.2](https://github.com/propeller-heads/tycho-indexer/compare/0.35.1...0.35.2) (2024-10-25)
+
+
+### Bug Fixes
+
+* pacakge release workflow ([5881d64](https://github.com/propeller-heads/tycho-indexer/commit/5881d641467325f26a164c73dd7cd64cbb344135))
+* pacakge release workflow ([#431](https://github.com/propeller-heads/tycho-indexer/issues/431)) ([7b329a3](https://github.com/propeller-heads/tycho-indexer/commit/7b329a3f90fda2b1571617adcad83e8b7c36d39e))
+
 ## [0.35.1](https://github.com/propeller-heads/tycho-indexer/compare/0.35.0...0.35.1) (2024-10-24)
 
 
