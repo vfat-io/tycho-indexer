@@ -68,7 +68,7 @@ def fetch_tycho_data(block: int, component_ids: list[str], page_size: int = 100)
                         "id": cid
                     } for cid in component_chunk
                 ],
-                "include_balances": False,
+                "include_balances": True,
                 "protocol_system": "uniswap_v3",
                 "version": {
                     "block": {
@@ -138,9 +138,10 @@ def hex_to_int(hex_str, signed=False):
 def compare_pools(local_pool, fetched_pool, block_number):
     differences = {}
     local_attributes = local_pool['attributes']
+    component_id = local_pool['component_id']
 
     # Compare simple fields
-    (liquidity,sqrt_price_x96,tick) = get_values_from_node(local_pool['component_id'], block_number)
+    (liquidity,sqrt_price_x96,tick) = get_values_from_node(component_id, block_number)
     simple_fields = {
         'liquidity': liquidity,
         'tick': tick,
@@ -174,6 +175,19 @@ def compare_pools(local_pool, fetched_pool, block_number):
             
             if tycho_tick_key not in local_attributes:
                 differences[tycho_tick_key]=(tick_idx, "Not 0 in TheGraph and missing in Tycho")
+    # Compare balances
+    token0_address = list(local_pool["balances"].keys())[0]
+    token1_address = list(local_pool["balances"].keys())[1]
+    balance0 = get_token_balance(token0_address, component_id, block_number)
+    balance1 = get_token_balance(token1_address, component_id, block_number)
+
+    local_balance0 = hex_to_int(local_pool["balances"][token0_address])
+    local_balance1 = hex_to_int(local_pool["balances"][token1_address])
+    
+    if local_balance0 != balance0:
+        differences["balance0"] = (local_balance0, balance0)
+    if local_balance1 != balance1:
+        differences["balance1"] = (local_balance1, balance1)
 
     return differences
 
@@ -230,6 +244,29 @@ def get_values_from_node(pool: str, block: int):
     
 
     return (liquidity,sqrtPriceX96,tick)
+
+# ABI for ERC20 balanceOf method
+erc20_abi = [
+    {
+        "constant": True,
+        "inputs": [{"internalType": "address", "name": "owner", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "payable": False,
+        "stateMutability": "view",
+        "type": "function",
+    }
+]
+
+def get_token_balance(token_address, pool_address, block_number):
+    """Query the token balance of a pool at a specific block."""
+    token_contract = web3.eth.contract(
+        address=Web3.toChecksumAddress(token_address), abi=erc20_abi
+    )
+    return token_contract.functions.balanceOf(Web3.toChecksumAddress(pool_address)).call(
+        block_identifier=block_number
+    )
+
 
 if __name__ == "__main__":
     main()
