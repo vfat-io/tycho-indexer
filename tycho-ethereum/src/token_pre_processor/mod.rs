@@ -4,9 +4,8 @@ use reqwest::Client;
 use serde_json::from_str;
 use std::{str::FromStr, sync::Arc};
 use tracing::{instrument, warn};
-use url::Url;
 use unicode_segmentation::UnicodeSegmentation;
-
+use url::Url;
 
 use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use tycho_core::{
