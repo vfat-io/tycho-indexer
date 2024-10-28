@@ -121,12 +121,17 @@ def fetch_pool_data(pool_id, block_number=None):
     }
     """
     variables = {"poolId": pool_id, "blockNumber": block_number}
-    response = requests.post(GRAPH_URL, json={'query': query, 'variables': variables})
-    if response.status_code == 200:
-        return response.json()['data']['pool']
-    else:
-        print(f"Error fetching data for pool {pool_id}: {response.status_code}")
-        return None
+    
+    for i in range(5):
+        response = requests.post(GRAPH_URL, json={'query': query, 'variables': variables})
+        if response.status_code == 200:
+            if response.json()['data']['pool'] is not None:
+                return response.json()['data']['pool']
+            else: 
+                continue
+        else:
+            print(f"Error fetching data for pool {pool_id}: {response.status_code}")
+            return None
     
 def hex_to_int(hex_str, signed=False):
     if hex_str.startswith("0x"):
@@ -185,9 +190,9 @@ def compare_pools(local_pool, fetched_pool, block_number):
     local_balance1 = hex_to_int(local_pool["balances"][token1_address])
     
     if local_balance0 != balance0:
-        differences["balance0"] = (local_balance0, balance0)
+        differences[f"balance0:{token0_address}"] = (local_balance0, balance0)
     if local_balance1 != balance1:
-        differences["balance1"] = (local_balance1, balance1)
+        differences[f"balance1:{token1_address}"] = (local_balance1, balance1)
 
     return differences
 
