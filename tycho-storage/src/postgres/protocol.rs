@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use crate::postgres::truncate_to_byte_limit;
 use chrono::{NaiveDateTime, Utc};
 use diesel::{
     prelude::*,
@@ -8,7 +9,6 @@ use diesel::{
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use tracing::{error, instrument, trace, warn};
-use unicode_segmentation::UnicodeSegmentation;
 
 use tycho_core::{
     models::{
@@ -1003,10 +1003,8 @@ impl PostgresGateway {
         let titles: Vec<String> = tokens
             .iter()
             .map(|token| {
-                format!("{:?}_{}", token.chain, token.symbol)
-                    .graphemes(true)
-                    .take(255)
-                    .collect::<String>()
+                let formatted = format!("{:?}_{}", token.chain, token.symbol);
+                truncate_to_byte_limit(&formatted, 255)
             })
             .collect();
 
@@ -1062,7 +1060,9 @@ impl PostgresGateway {
                     .get(&account_key)
                     .expect("Account ID not found");
 
-                orm::NewToken::from_token(account_id, token)
+                let mut new_token = orm::NewToken::from_token(account_id, token);
+                new_token.symbol = truncate_to_byte_limit(&token.symbol, 255);
+                new_token
             })
             .collect();
 
@@ -3710,6 +3710,6 @@ mod test {
         )
         .await
         .unwrap()[0];
-        assert_eq!(inserted_account.title, "Ethereum_USDT".to_string());
+        assert_eq!(inserted_account.title, "Ethereum_🐶🐱🐰🦊🐻🐼🐨🐯🦁🐮🐷🐽🐸🐵🐔🐧🐦🐤🦅🦉🦇🐺🐗🐴🦄🐝🐛🪱🦋🐌🐞🐜🪰🪲🕷🦂🐢🐍🦎🦖🦕🐙🦑🦐🦞🦀🐡🐠🐟🐬🐳🐋🐊🐅🐆🦓🦍🦧🦣🐘🦛".to_string());
     }
 }
