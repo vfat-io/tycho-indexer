@@ -236,26 +236,26 @@ where
                 BlockNumberOrTimestamp::Number(*no as u64)
             }
             BlockOrTimestamp::Block(BlockIdentifier::Hash(hash)) => {
-                let block_number = match self
-                    .db_gateway
-                    .get_block(&BlockIdentifier::Hash(hash.clone()))
-                    .await
+                let block_number = if let Some(block_number) = self
+                    .pending_deltas
+                    .as_ref()
+                    .and_then(|pending| {
+                        pending
+                            .search_block(
+                                &|b: &BlockAggregatedChanges| &b.block.hash == hash,
+                                protocol_system,
+                            )
+                            .ok()
+                    })
+                    .and_then(|block| block.map(|b| b.block.number))
                 {
-                    Ok(b) => Some(b.number), // Successfully found the block in the DB
-                    Err(_) => {
-                        // Try to find the block in pending deltas if the DB lookup failed
-                        self.pending_deltas
-                            .as_ref()
-                            .and_then(|pending| {
-                                pending
-                                    .search_block(
-                                        &|b: &BlockAggregatedChanges| &b.block.hash == hash,
-                                        protocol_system,
-                                    )
-                                    .ok()
-                            })
-                            .and_then(|maybe_block| maybe_block.map(|block| block.block.number))
-                    }
+                    Some(block_number)
+                } else {
+                    self.db_gateway
+                        .get_block(&BlockIdentifier::Hash(hash.clone()))
+                        .await
+                        .ok()
+                        .map(|block| block.number)
                 }
                 .ok_or_else(|| {
                     RpcError::Storage(StorageError::NotFound(
