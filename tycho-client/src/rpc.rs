@@ -16,9 +16,9 @@ use crate::TYCHO_SERVER_VERSION;
 use tycho_core::{
     dto::{
         Chain, PaginationParams, PaginationResponse, ProtocolComponentRequestResponse,
-        ProtocolComponentsRequestBody, ProtocolId, ProtocolStateRequestBody,
-        ProtocolStateRequestResponse, ResponseToken, StateRequestBody, StateRequestResponse,
-        TokensRequestBody, TokensRequestResponse, VersionParam,
+        ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
+        ResponseToken, StateRequestBody, StateRequestResponse, TokensRequestBody,
+        TokensRequestResponse, VersionParam,
     },
     Bytes,
 };
@@ -269,21 +269,28 @@ pub trait RPCClient: Send + Sync {
     ) -> Result<ProtocolStateRequestResponse, RPCError>;
 
     #[allow(clippy::too_many_arguments)]
-    async fn get_protocol_states_paginated(
+    async fn get_protocol_states_paginated<T>(
         &self,
         chain: Chain,
-        ids: &[ProtocolId],
+        ids: &[T],
         protocol_system: &str,
         include_balances: bool,
         version: &VersionParam,
         chunk_size: usize,
         concurrency: usize,
-    ) -> Result<ProtocolStateRequestResponse, RPCError> {
+    ) -> Result<ProtocolStateRequestResponse, RPCError>
+    where
+        T: AsRef<str> + Sync + 'static,
+    {
         let semaphore = Arc::new(Semaphore::new(concurrency));
         let chunked_bodies = ids
             .chunks(chunk_size)
             .map(|c| ProtocolStateRequestBody {
-                protocol_ids: Some(c.to_vec()),
+                protocol_ids: Some(
+                    c.iter()
+                        .map(|id| id.as_ref().to_string())
+                        .collect(),
+                ),
                 protocol_system: protocol_system.to_string(),
                 chain,
                 include_balances,
@@ -413,8 +420,8 @@ impl RPCClient for HttpRPCClient {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.contract_ids.is_none() ||
-            request
+        if request.contract_ids.is_none()
+            || request
                 .contract_ids
                 .as_ref()
                 .unwrap()
@@ -511,8 +518,8 @@ impl RPCClient for HttpRPCClient {
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.protocol_ids.is_none() ||
-            request
+        if request.protocol_ids.is_none()
+            || request
                 .protocol_ids
                 .as_ref()
                 .unwrap()
@@ -606,7 +613,87 @@ mod tests {
 
     use mockito::Server;
 
+    use rstest::rstest;
     use std::{collections::HashMap, str::FromStr};
+
+    #[allow(deprecated)]
+    use tycho_core::dto::ProtocolId;
+
+    // Dummy implementation of `get_protocol_states_paginated` for backwards compatibility testing
+    // purposes
+    impl MockRPCClient {
+        #[allow(clippy::too_many_arguments)]
+        async fn test_get_protocol_states_paginated<T>(
+            &self,
+            chain: Chain,
+            ids: &[T],
+            protocol_system: &str,
+            include_balances: bool,
+            version: &VersionParam,
+            chunk_size: usize,
+            _concurrency: usize,
+        ) -> Vec<ProtocolStateRequestBody>
+        where
+            T: AsRef<str> + Clone + Send + Sync + 'static,
+        {
+            ids.chunks(chunk_size)
+                .map(|chunk| ProtocolStateRequestBody {
+                    protocol_ids: Some(
+                        chunk
+                            .iter()
+                            .map(|id| id.as_ref().to_string())
+                            .collect(),
+                    ),
+                    protocol_system: protocol_system.to_string(),
+                    chain,
+                    include_balances,
+                    version: version.clone(),
+                    pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
+                })
+                .collect()
+        }
+    }
+
+    #[allow(deprecated)]
+    #[rstest]
+    #[case::protocol_id_input(vec![
+        ProtocolId { id: "id1".to_string(), chain: Chain::Ethereum },
+        ProtocolId { id: "id2".to_string(), chain: Chain::Ethereum }
+    ])]
+    #[case::string_input(vec![
+        "id1".to_string(),
+        "id2".to_string()
+    ])]
+    #[tokio::test]
+    async fn test_get_protocol_states_paginated_backwards_compatibility<T>(#[case] ids: Vec<T>)
+    where
+        T: AsRef<str> + Clone + Send + Sync + 'static,
+    {
+        let mock_client = MockRPCClient::new();
+
+        let request_bodies = mock_client
+            .test_get_protocol_states_paginated(
+                Chain::Ethereum,
+                &ids,
+                "test_system",
+                true,
+                &VersionParam::default(),
+                2,
+                2,
+            )
+            .await;
+
+        // Verify that the request bodies have been created correctly
+        assert_eq!(request_bodies.len(), 1);
+        assert_eq!(
+            request_bodies[0]
+                .protocol_ids
+                .as_ref()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
 
     #[tokio::test]
     async fn test_get_contract_state() {

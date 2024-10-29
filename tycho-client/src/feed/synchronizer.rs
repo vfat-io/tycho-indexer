@@ -24,8 +24,8 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 use tycho_core::{
     dto::{
-        BlockChanges, BlockParam, ExtractorIdentity, ProtocolComponent, ProtocolId,
-        ResponseAccount, ResponseProtocolState, VersionParam,
+        BlockChanges, BlockParam, ExtractorIdentity, ProtocolComponent, ResponseAccount,
+        ResponseProtocolState, VersionParam,
     },
     Bytes,
 };
@@ -201,14 +201,13 @@ where
         let request_ids = ids
             .map(|it| {
                 it.into_iter()
-                    .map(|id| ProtocolId { id: id.clone(), chain: self.extractor_id.chain })
+                    .cloned()
                     .collect::<Vec<_>>()
             })
             .unwrap_or_else(|| tracked_components.get_tracked_component_ids());
 
         let component_ids = request_ids
             .iter()
-            .map(|protocol_id| &protocol_id.id)
             .collect::<HashSet<_>>();
 
         if component_ids.is_empty() {
@@ -817,8 +816,7 @@ mod test {
         rpc_client
             .expect_get_protocol_states()
             .with(mockall::predicate::function(move |request_params: &ProtocolStateRequestBody| {
-                let expected_id =
-                    ProtocolId { chain: Chain::Ethereum, id: "Component3".to_string() };
+                let expected_id = "Component3".to_string();
                 if let Some(ids) = request_params.protocol_ids.as_ref() {
                     ids.contains(&expected_id)
                 } else {
@@ -1113,8 +1111,7 @@ mod test {
         rpc_client
             .expect_get_protocol_states()
             .with(mockall::predicate::function(move |request_params: &ProtocolStateRequestBody| {
-                let expected_id =
-                    ProtocolId { chain: Chain::Ethereum, id: "Component3".to_string() };
+                let expected_id = "Component3".to_string();
                 if let Some(ids) = request_params.protocol_ids.as_ref() {
                     ids.contains(&expected_id)
                 } else {
