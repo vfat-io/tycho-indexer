@@ -53,11 +53,13 @@ struct CliArgs {
     #[clap(long)]
     add_tvl_threshold: Option<u32>,
 
-    /// Specifies the client's block time
+    /// Expected block time in seconds. For blockchains with consistent intervals,
+    /// set to the average block time (e.g., "600" for a 10-minute interval).
     #[clap(long, default_value = "600")]
     block_time: u64,
 
-    /// Specifies the client's timeout
+    /// Maximum wait time in seconds beyond the block time. Useful for handling
+    /// chains with variable block intervals or network delays.
     #[clap(long, default_value = "1")]
     timeout: u64,
 

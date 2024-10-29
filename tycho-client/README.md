@@ -87,7 +87,7 @@ stopped tracking them.
 
 #### Component Filtering
 
-You can request individual pools, or use a minimum TVL threshold to filter the components. If you choose minimum TVL tracking, tycho-client will automatically add snapshots for any components that start passing the TVL threshold, e.g. because more liquidity was provided. It will also remove any components that fall below the TVL threshold.
+You can request individual pools, or use a minimum TVL threshold to filter the components. If you choose minimum TVL tracking, tycho-client will automatically add snapshots for any components that exceed the TVL threshold, e.g. because more liquidity was provided. It will also notify you and remove any components that fall below the TVL threshold. Note that the TVL values are estimates intended solely for filtering the most relevant components.
 
 ##### To track a single pool:
 
@@ -184,7 +184,7 @@ lightweight and always contain absolute new values. They will never contain delt
 
 Deltas include the following few special attributes:
 
-- `state_updates`: Includes attribute changes, given as a component to state key-value mapping, with keys being strings and values being bytes.
+- `state_updates`: Includes attribute changes, given as a component to state key-value mapping, with keys being strings and values being bytes. The attributes provided are protocol-specific. Tycho occasionally makes use of reserved attributes, see [here](https://docs.propellerheads.xyz/integrations/indexing/reserved-attributes) for more details.
 - `account_updates`: Includes contract storage changes given as a contract storage key-value mapping for each involved contract address. Here both keys and values are bytes.
 - `new_protocol_components`: Components that were created on this block. Must not necessarily pass the tvl filter to appear here.
 - `deleted_protocol_components`: Any components mentioned here have been removed from
@@ -280,5 +280,5 @@ If you wish to use tycho as a service instead of hosting it yourself, the follow
 |------------------------|---------------------------------------------------------|
 | **URL**                | *tycho-beta.propellerheads.xyz*                         |
 | **RPC Docs**           | *[View Documentation](https://tycho-beta.propellerheads.xyz/docs/)* |
-| **Auth Key**           | *Please contact `@AdeelFarouk` on Telegram to request a beta auth key. <br> Note: Use the `Authorization` header for this key in your RPC requests.* |
+| **Auth Key**           | *Please contact `@tanay_j` on Telegram to request a beta auth key. <br> Note: Use the `Authorization` header for this key in your RPC requests.* |
 | **Supported Protocols** | *uniswap_v2, uniswap_v3, sushiswap, vm:balancer, vm:ambient*                    |
