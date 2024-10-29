@@ -169,6 +169,9 @@ pub struct BlockParam {
     #[schema(value_type=Option<String>)]
     #[serde(with = "hex_bytes_option", default)]
     pub hash: Option<Bytes>,
+    #[deprecated(
+        note = "The `chain` field is deprecated and will be removed in a future version."
+    )]
     #[serde(default)]
     pub chain: Option<Chain>,
     #[serde(default)]

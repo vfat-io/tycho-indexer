@@ -182,6 +182,7 @@ where
     /// The current design separates the concepts of snapshots and deltas, therefore requiring us to
     /// fetch data for snapshots that might already exist in the deltas messages. This is
     /// unnecessary and could be optimized by removing snapshots entirely and only using deltas.
+    #[allow(deprecated)]
     async fn get_snapshots<'a, I: IntoIterator<Item = &'a String>>(
         &self,
         header: Header,

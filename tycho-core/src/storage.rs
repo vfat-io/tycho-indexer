@@ -184,6 +184,7 @@ pub enum BlockOrTimestamp {
     Timestamp(NaiveDateTime),
 }
 
+#[allow(deprecated)]
 impl TryFrom<&dto::VersionParam> for BlockOrTimestamp {
     type Error = anyhow::Error;
 
