@@ -14,12 +14,13 @@ use tokio::{
     time::timeout,
 };
 use tracing::{debug, error, info, trace, warn};
+
 use tycho_core::{
     dto::{Block, ExtractorIdentity},
     Bytes,
 };
 
-use self::{
+use crate::feed::{
     block_history::{BlockHistory, BlockPosition},
     synchronizer::{StateSyncMessage, StateSynchronizer},
 };

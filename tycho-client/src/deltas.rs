@@ -54,8 +54,9 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
-use tycho_core::dto::{BlockChanges, Command, ExtractorIdentity, Response, WebSocketMessage};
 use uuid::Uuid;
+
+use tycho_core::dto::{BlockChanges, Command, ExtractorIdentity, Response, WebSocketMessage};
 
 use crate::TYCHO_SERVER_VERSION;
 

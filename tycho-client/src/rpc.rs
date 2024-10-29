@@ -6,13 +6,17 @@
 #[cfg(test)]
 use mockall::automock;
 use std::sync::Arc;
-use thiserror::Error;
-use tracing::{debug, error, instrument, trace, warn};
 
 use async_trait::async_trait;
 use futures03::future::try_join_all;
+use reqwest::{
+    header::{self, CONTENT_TYPE, USER_AGENT},
+    Client, ClientBuilder, Url,
+};
+use thiserror::Error;
+use tokio::sync::Semaphore;
+use tracing::{debug, error, instrument, trace, warn};
 
-use crate::TYCHO_SERVER_VERSION;
 use tycho_core::{
     dto::{
         Chain, PaginationParams, PaginationResponse, ProtocolComponentRequestResponse,
@@ -23,11 +27,7 @@ use tycho_core::{
     Bytes,
 };
 
-use reqwest::{
-    header::{self, CONTENT_TYPE, USER_AGENT},
-    Client, ClientBuilder, Url,
-};
-use tokio::sync::Semaphore;
+use crate::TYCHO_SERVER_VERSION;
 
 #[derive(Error, Debug)]
 pub enum RPCError {
@@ -420,8 +420,8 @@ impl RPCClient for HttpRPCClient {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.contract_ids.is_none()
-            || request
+        if request.contract_ids.is_none() ||
+            request
                 .contract_ids
                 .as_ref()
                 .unwrap()
@@ -518,8 +518,8 @@ impl RPCClient for HttpRPCClient {
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.protocol_ids.is_none()
-            || request
+        if request.protocol_ids.is_none() ||
+            request
                 .protocol_ids
                 .as_ref()
                 .unwrap()

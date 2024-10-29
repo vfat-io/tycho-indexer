@@ -206,10 +206,7 @@ where
 mod test {
     use super::*;
 
-    use crate::{
-        feed::component_tracker::{ComponentFilter, ComponentTracker},
-        rpc::MockRPCClient,
-    };
+    use crate::rpc::MockRPCClient;
 
     use tycho_core::dto::{PaginationResponse, ProtocolComponentRequestResponse};
 

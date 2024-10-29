@@ -5,13 +5,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
-use super::Header;
-use crate::{
-    deltas::{DeltasClient, SubscriptionOptions},
-    feed::component_tracker::{ComponentFilter, ComponentTracker},
-    rpc::RPCClient,
-};
 use tokio::{
     select,
     sync::{
@@ -22,12 +15,22 @@ use tokio::{
     time::timeout,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
+
 use tycho_core::{
     dto::{
         BlockChanges, BlockParam, ExtractorIdentity, ProtocolComponent, ResponseAccount,
         ResponseProtocolState, VersionParam,
     },
     Bytes,
+};
+
+use crate::{
+    deltas::{DeltasClient, SubscriptionOptions},
+    feed::{
+        component_tracker::{ComponentFilter, ComponentTracker},
+        Header,
+    },
+    rpc::RPCClient,
 };
 
 pub type SyncResult<T> = anyhow::Result<T>;
@@ -525,38 +528,18 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        deltas::{DeltasClient, MockDeltasClient, SubscriptionOptions},
-        feed::{
-            component_tracker::{ComponentFilter, ComponentTracker},
-            synchronizer::{
-                ComponentWithState, ProtocolStateSynchronizer, Snapshot, StateSyncMessage,
-                StateSynchronizer,
-            },
-            Header,
-        },
-        rpc::{MockRPCClient, RPCClient},
-        DeltasError, RPCError,
-    };
-    use async_trait::async_trait;
-    use std::{collections::HashMap, sync::Arc, time::Duration};
+    use super::*;
+
     use test_log::test;
-    use tokio::{
-        sync::mpsc::{channel, Receiver, Sender},
-        task::JoinHandle,
-        time::timeout,
-    };
-    use tycho_core::{
-        dto::{
-            Block, BlockChanges, Chain, ExtractorIdentity, PaginationResponse, ProtocolComponent,
-            ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolId,
-            ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseAccount,
-            ResponseProtocolState, StateRequestBody, StateRequestResponse, TokensRequestBody,
-            TokensRequestResponse,
-        },
-        Bytes,
-    };
     use uuid::Uuid;
+
+    use tycho_core::dto::{
+        Block, Chain, PaginationResponse, ProtocolComponentRequestResponse,
+        ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
+        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
+    };
+
+    use crate::{deltas::MockDeltasClient, rpc::MockRPCClient, DeltasError, RPCError};
 
     // Required for mock client to implement clone
     struct ArcRPCClient<T>(Arc<T>);
