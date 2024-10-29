@@ -402,6 +402,8 @@ where
             })?;
         let mut states = state_data.entity;
 
+        trace!(db_state = ?states, "Retrieved states from database.");
+
         // merge db states with pending deltas
         if let Some(at) = deltas_version {
             if let Some(pending_deltas) = &self.pending_deltas {
@@ -413,6 +415,8 @@ where
                 )?;
             }
         }
+
+        trace!(db_state = ?states, "Updated states with buffer.");
 
         Ok(dto::ProtocolStateRequestResponse::new(
             states
