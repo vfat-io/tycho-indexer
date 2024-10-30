@@ -255,13 +255,28 @@ tycho-client -n 1000 --exchange uniswap_v3:0x....  | gzip -c - > 1kblocks.jsonl.
 
 This file can then be used as mock input to an integration test or a benchmark script.
 
-### Historical state
+### Tokens and Historical state
 
-Tycho also provides access to historical snapshots. Unfortunately we do not have this
-exposed on the tycho-client yet. If you need to retrieve the historical state of a
-component you will have to use the RPC for this.
+Tycho also provides access to recently historical states as well as all tokens supported by the protocols it has integrated. Both of which are accessible throught the Client RPC interfaces. 
 
-Tycho exposes an openapi docs for its RPC endpoints. If you are running tycho locally you can find them under: http://localhost:4242/docs/
+Here is sample code to fetch tokens:
+
+```rust
+use tycho_client::rpc::HttpRPCClient;
+use tycho_core::dto::Chain;
+
+let client = HttpRPCClient::new("insert_tycho_url", Some("my_auth_token"));
+
+let tokens = client
+    .get_all_tokens(
+        Chain::Ethereum,
+        Some(51_i32), // min token quality
+        Some(30_u64), // number of days since last traded
+        1000, // pagination chunk size
+    )
+    .await
+    .unwrap();
+```
 
 ## Light mode
 
