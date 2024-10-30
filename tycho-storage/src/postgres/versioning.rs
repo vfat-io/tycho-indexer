@@ -230,7 +230,7 @@ where
 }
 
 /// Trait allows a struct to be inserted into a partitioned table with versioning
-pub trait PartitionedVersionedRow: Clone + Send + Sync {
+pub trait PartitionedVersionedRow: Clone + Send + Sync + Debug {
     /// The entity identifier this version belongs to.
     type EntityId: Clone + Ord + Hash + Debug + Send + Sync;
     /// Getter for the entity id.
@@ -372,14 +372,24 @@ pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
         return Ok((Vec::new(), Vec::new(), Vec::new()));
     }
 
-    let current_latest_db_rows: Vec<T> = T::latest_versions_by_ids(
-        new_data
-            .iter()
-            .map(|e| e.get_id())
-            .collect(),
-        conn,
-    )
-    .await?;
+    let ids: Vec<_> = new_data
+        .iter()
+        .map(|e| e.get_id())
+        .collect();
+
+    let current_latest_db_rows = T::latest_versions_by_ids(ids.clone(), conn).await?;
+
+    let found: HashSet<_> = current_latest_db_rows
+        .iter()
+        .map(|row| row.get_id())
+        .collect();
+
+    let missing: Vec<_> = ids
+        .into_iter()
+        .filter(|id| !found.contains(id))
+        .collect();
+
+    tracing::trace!(?missing, "Didn't find existing state for some ids");
 
     let (latest, archive, deleted) =
         set_partitioned_versioning_attributes(&current_latest_db_rows, new_data)?;
