@@ -55,6 +55,10 @@ struct CliArgs {
 
     /// Expected block time in seconds. For blockchains with consistent intervals,
     /// set to the average block time (e.g., "600" for a 10-minute interval).
+    ///
+    /// Adjusting `block_time` helps balance efficiency and responsiveness:
+    /// - **Low values**: Increase sync frequency but may waste resources on retries.
+    /// - **High values**: Reduce sync frequency but may delay updates on faster chains.
     #[clap(long, default_value = "600")]
     block_time: u64,
 
