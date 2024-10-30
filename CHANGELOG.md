@@ -1,3 +1,11 @@
+## [0.37.0](https://github.com/propeller-heads/tycho-indexer/compare/0.36.0...0.37.0) (2024-10-30)
+
+
+### Features
+
+* **storage:** update protocol state fetch query to apply all given filters ([1f64df2](https://github.com/propeller-heads/tycho-indexer/commit/1f64df222e7b258571e4b176dc779321f8ca504f))
+* **storage:** update protocol state fetch query to apply all given filters ([#432](https://github.com/propeller-heads/tycho-indexer/issues/432)) ([5cb824e](https://github.com/propeller-heads/tycho-indexer/commit/5cb824e13c1cb4c86b290162cdeca6200307bb9f))
+
 ## [0.36.0](https://github.com/propeller-heads/tycho-indexer/compare/0.35.3...0.36.0) (2024-10-30)
 
 
