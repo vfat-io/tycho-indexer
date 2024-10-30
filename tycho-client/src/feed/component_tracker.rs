@@ -38,7 +38,6 @@ impl ComponentFilter {
         }
     }
 
-    #[deprecated(since = "0.9.2")]
     #[allow(non_snake_case)] // for backwards compatibility
     pub fn Ids(ids: Vec<String>) -> ComponentFilter {
         ComponentFilter { variant: ComponentFilterVariant::Ids(ids) }

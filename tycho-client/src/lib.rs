@@ -25,11 +25,11 @@
 //! - `updates` module handles receiving and processing updates messages from the server.
 const TYCHO_SERVER_VERSION: &str = "v1";
 
+pub mod cli;
+pub mod client;
 pub mod deltas;
 pub mod feed;
 pub mod rpc;
-
-pub mod cli;
 
 #[cfg(test)]
 #[macro_use]
