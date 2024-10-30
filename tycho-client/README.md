@@ -70,7 +70,7 @@ The main use case of the Tycho Client is to provide a stream of protocol compone
 snapshots, their state changes and associated tokens.
 
 If you choose to stream from multiple extractors, the client will try to align the
-messages by their block. You can use the `--block-time` parameter to fine tune this behaviour. This is the maximum time we will wait for another extractor before emitting a message. If any other extractor has not replied within this time it is considered as delayed. If an extractor is marked as delayed for too long, it is considered stale and the client will exit with an error message.
+messages by their block. You can use the `--block-time` and `--timeout` parameters to fine tune this behaviour. This is the maximum time we will wait for another extractor before emitting a message. If any other extractor has not replied within this time it is considered as delayed. If an extractor is marked as delayed for too long, it is considered stale and the client will exit with an error message.
 
 Note: *We do currently not provide support to stream from different chains.*
 
