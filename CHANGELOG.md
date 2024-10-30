@@ -1,3 +1,11 @@
+## [0.36.0](https://github.com/propeller-heads/tycho-indexer/compare/0.35.3...0.36.0) (2024-10-30)
+
+
+### Features
+
+* **scripts:** add balance check in uniswapv3 validation script ([25dc808](https://github.com/propeller-heads/tycho-indexer/commit/25dc8082d7223d89e4de12a539612d007f66fb5f))
+* **scripts:** update uniswapv3 check script ([e1a1ce0](https://github.com/propeller-heads/tycho-indexer/commit/e1a1ce0f7351b29069d2f5b1bf9b9be2f3075012))
+
 ## [0.35.3](https://github.com/propeller-heads/tycho-indexer/compare/0.35.2...0.35.3) (2024-10-25)
 
 
