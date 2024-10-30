@@ -616,6 +616,7 @@ mod tests {
     use rstest::rstest;
     use std::{collections::HashMap, str::FromStr};
 
+    // TODO: remove once deprecated ProtocolId struct is removed
     #[allow(deprecated)]
     use tycho_core::dto::ProtocolId;
 
@@ -654,6 +655,7 @@ mod tests {
         }
     }
 
+    // TODO: remove once deprecated ProtocolId struct is removed
     #[allow(deprecated)]
     #[rstest]
     #[case::protocol_id_input(vec![
