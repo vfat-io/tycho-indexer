@@ -773,13 +773,6 @@ pub async fn protocol_components<G: Gateway>(
 /// Retrieve protocol states
 ///
 /// This endpoint retrieves the state of protocols within a specific execution environment.
-/// Currently, the filters are not compounded, meaning that if multiple filters are provided, one
-/// will be prioritised. The priority from highest to lowest is as follows: 'protocol_ids',
-/// 'protocol_system', 'chain'. Note that 'protocol_system' serves as both a filter and as a way
-/// to specify the protocol system associated with the components requested. This is used to ensure
-/// that the correct extractor's block status is used when querying the database. If omitted, the
-/// block status will be determined by a random extractor, which could be risky if the extractor is
-/// out of sync.
 #[utoipa::path(
     post,
     path = "/v1/protocol_state",
