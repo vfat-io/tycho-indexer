@@ -13,7 +13,7 @@ use crate::{
     HttpRPCClient, WsDeltasClient,
 };
 
-pub struct TychoClientBuilder {
+pub struct TychoStreamBuilder {
     tycho_url: String,
     chain: Chain,
     exchanges: HashMap<String, ComponentFilter>,
@@ -24,8 +24,8 @@ pub struct TychoClientBuilder {
     no_tls: bool,
 }
 
-impl TychoClientBuilder {
-    /// Creates a new `TychoClientBuilder` with the given Tycho URL and blockchain network.
+impl TychoStreamBuilder {
+    /// Creates a new `TychoStreamBuilder` with the given Tycho URL and blockchain network.
     /// Initializes the builder with default values for block time and timeout based on the chain.
     pub fn new(tycho_url: &str, chain: Chain) -> Self {
         let (block_time, timeout) = Self::default_timing(&chain);
@@ -110,13 +110,6 @@ impl TychoClientBuilder {
             self.auth_key
         };
 
-        tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-            )
-            .init();
-
         // Determine the URLs based on the TLS setting
         let (tycho_ws_url, tycho_rpc_url) = if self.no_tls {
             info!("Using non-secure connection: ws:// and http://");
@@ -187,7 +180,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_exchanges() {
-        let receiver = TychoClientBuilder::new("localhost:4242", Chain::Ethereum)
+        let receiver = TychoStreamBuilder::new("localhost:4242", Chain::Ethereum)
             .auth_key(Some("my_api_key".into()))
             .build()
             .await;

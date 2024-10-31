@@ -81,9 +81,9 @@ You can also integrate Tycho Client directly in your Rust projects using the rus
 
 ```rust
 use tycho_core::dto::Chain;
-use tycho_client::{client::TychoClientBuilder, feed::component_tracker::ComponentFilter};
+use tycho_client::{stream::TychoStreamBuilder, feed::component_tracker::ComponentFilter};
 
-let receiver = TychoClientBuilder::new("localhost:4242", Chain::Ethereum)
+let receiver = TychoStreamBuilder::new("localhost:4242", Chain::Ethereum)
     .auth_key(Some("my_api_key".into()))
     .exchange("uniswap_v2", ComponentFilter::with_tvl_range(10.0, 15.0))
     .exchange(
