@@ -4,6 +4,8 @@ use clap::Parser;
 use tracing::{debug, info};
 use tracing_appender::rolling::{self};
 
+use tycho_core::dto::{Chain, ExtractorIdentity};
+
 use crate::{
     deltas::DeltasClient,
     feed::{
@@ -12,7 +14,6 @@ use crate::{
     },
     HttpRPCClient, WsDeltasClient,
 };
-use tycho_core::dto::{Chain, ExtractorIdentity};
 
 #[derive(Parser, Debug, Clone, PartialEq)]
 #[clap(version = env!("CARGO_PKG_VERSION"))]

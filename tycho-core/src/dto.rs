@@ -12,7 +12,10 @@ use std::{
 };
 
 use chrono::{NaiveDateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{self, MapAccess, Visitor},
+    Deserialize, Deserializer, Serialize,
+};
 use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -166,6 +169,9 @@ pub struct BlockParam {
     #[schema(value_type=Option<String>)]
     #[serde(with = "hex_bytes_option", default)]
     pub hash: Option<Bytes>,
+    #[deprecated(
+        note = "The `chain` field is deprecated and will be removed in a future version."
+    )]
     #[serde(default)]
     pub chain: Option<Chain>,
     #[serde(default)]
@@ -985,10 +991,24 @@ impl ProtocolComponentRequestResponse {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
+#[deprecated]
 pub struct ProtocolId {
     pub id: String,
     pub chain: Chain,
 }
+
+impl From<ProtocolId> for String {
+    fn from(protocol_id: ProtocolId) -> Self {
+        protocol_id.id
+    }
+}
+
+impl AsRef<str> for ProtocolId {
+    fn as_ref(&self) -> &str {
+        &self.id
+    }
+}
+
 /// Protocol State struct for the response from Tycho server for a protocol state request.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize, ToSchema)]
 pub struct ResponseProtocolState {
@@ -1017,11 +1037,11 @@ fn default_include_balances_flag() -> bool {
     true
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Default, Eq, Hash)]
+#[derive(Clone, Debug, Serialize, PartialEq, ToSchema, Default, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolStateRequestBody {
     #[serde(alias = "protocolIds")]
-    pub protocol_ids: Option<Vec<ProtocolId>>,
+    pub protocol_ids: Option<Vec<String>>,
     #[serde(alias = "protocolSystem")]
     pub protocol_system: String,
     #[serde(default)]
@@ -1036,8 +1056,122 @@ pub struct ProtocolStateRequestBody {
 }
 
 impl ProtocolStateRequestBody {
-    pub fn id_filtered(ids: Vec<ProtocolId>) -> Self {
-        Self { protocol_ids: Some(ids), ..Default::default() }
+    pub fn id_filtered<I, T>(ids: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        Self {
+            protocol_ids: Some(
+                ids.into_iter()
+                    .map(Into::into)
+                    .collect(),
+            ),
+            ..Default::default()
+        }
+    }
+}
+
+/// Custom deserializer for ProtocolStateRequestBody to support backwards compatibility with the old
+/// ProtocolIds format.
+/// To be removed when the old format is no longer supported.
+impl<'de> Deserialize<'de> for ProtocolStateRequestBody {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ProtocolIdOrString {
+            Old(Vec<ProtocolId>),
+            New(Vec<String>),
+        }
+
+        struct ProtocolStateRequestBodyVisitor;
+
+        impl<'de> Visitor<'de> for ProtocolStateRequestBodyVisitor {
+            type Value = ProtocolStateRequestBody;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct ProtocolStateRequestBody")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<ProtocolStateRequestBody, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut protocol_ids = None;
+                let mut protocol_system = None;
+                let mut version = None;
+                let mut chain = None;
+                let mut include_balances = None;
+                let mut pagination = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "protocol_ids" | "protocolIds" => {
+                            let value: ProtocolIdOrString = map.next_value()?;
+                            protocol_ids = match value {
+                                ProtocolIdOrString::Old(ids) => {
+                                    Some(ids.into_iter().map(|p| p.id).collect())
+                                }
+                                ProtocolIdOrString::New(ids_str) => Some(ids_str),
+                            };
+                        }
+                        "protocol_system" | "protocolSystem" => {
+                            protocol_system = Some(map.next_value()?);
+                        }
+                        "version" => {
+                            version = Some(map.next_value()?);
+                        }
+                        "chain" => {
+                            chain = Some(map.next_value()?);
+                        }
+                        "include_balances" => {
+                            include_balances = Some(map.next_value()?);
+                        }
+                        "pagination" => {
+                            pagination = Some(map.next_value()?);
+                        }
+                        _ => {
+                            return Err(de::Error::unknown_field(
+                                &key,
+                                &[
+                                    "contract_ids",
+                                    "protocol_system",
+                                    "version",
+                                    "chain",
+                                    "include_balances",
+                                    "pagination",
+                                ],
+                            ))
+                        }
+                    }
+                }
+
+                Ok(ProtocolStateRequestBody {
+                    protocol_ids,
+                    protocol_system: protocol_system.unwrap_or_default(),
+                    version: version.unwrap_or_else(VersionParam::default),
+                    chain: chain.unwrap_or_else(Chain::default),
+                    include_balances: include_balances.unwrap_or(true),
+                    pagination: pagination.unwrap_or_else(PaginationParams::default),
+                })
+            }
+        }
+
+        deserializer.deserialize_struct(
+            "ProtocolStateRequestBody",
+            &[
+                "contract_ids",
+                "protocol_system",
+                "version",
+                "chain",
+                "include_balances",
+                "pagination",
+            ],
+            ProtocolStateRequestBodyVisitor,
+        )
     }
 }
 
@@ -1074,6 +1208,7 @@ mod test {
     use std::str::FromStr;
 
     use maplit::hashmap;
+    use rstest::rstest;
 
     use super::*;
 
@@ -1272,6 +1407,89 @@ mod test {
         };
 
         assert_eq!(result, expected);
+    }
+
+    #[rstest]
+    #[case(
+        r#"
+    {
+        "protocol_ids": [
+            {
+                "id": "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092",
+                "chain": "ethereum"
+            }
+        ],
+        "protocol_system": "uniswap_v2",
+        "include_balances": false,
+        "version": {
+            "timestamp": "2069-01-01T04:20:00",
+            "block": {
+                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#
+    )]
+    #[case(
+        r#"
+            {
+        "protocolIds": [
+            "0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092"
+        ],
+        "protocol_system": "uniswap_v2",
+        "include_balances": false,
+        "version": {
+            "timestamp": "2069-01-01T04:20:00",
+            "block": {
+                "hash": "0x24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4",
+                "number": 213,
+                "chain": "ethereum"
+            }
+        }
+    }
+    "#
+    )]
+    fn test_parse_protocol_state_request(#[case] json_str: &str) {
+        let result: ProtocolStateRequestBody = serde_json::from_str(json_str).unwrap();
+
+        let block_hash = "24101f9cb26cd09425b52da10e8c2f56ede94089a8bbe0f31f1cda5f4daa52c4"
+            .parse()
+            .unwrap();
+        let block_number = 213;
+
+        let expected_timestamp =
+            NaiveDateTime::parse_from_str("2069-01-01T04:20:00", "%Y-%m-%dT%H:%M:%S").unwrap();
+
+        let expected = ProtocolStateRequestBody {
+            protocol_ids: Some(vec!["0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092".to_string()]),
+            protocol_system: "uniswap_v2".to_string(),
+            version: VersionParam {
+                timestamp: Some(expected_timestamp),
+                block: Some(BlockParam {
+                    hash: Some(block_hash),
+                    chain: Some(Chain::Ethereum),
+                    number: Some(block_number),
+                }),
+            },
+            chain: Chain::Ethereum,
+            include_balances: false,
+            pagination: PaginationParams::default(),
+        };
+
+        assert_eq!(result, expected);
+    }
+
+    #[rstest]
+    #[case::with_protocol_ids(vec![ProtocolId { id: "id1".to_string(), chain: Chain::Ethereum }, ProtocolId { id: "id2".to_string(), chain: Chain::Ethereum }], vec!["id1".to_string(), "id2".to_string()])]
+    #[case::with_strings(vec!["id1".to_string(), "id2".to_string()], vec!["id1".to_string(), "id2".to_string()])]
+    fn test_id_filtered<T>(#[case] input_ids: Vec<T>, #[case] expected_ids: Vec<String>)
+    where
+        T: Into<String> + Clone,
+    {
+        let request_body = ProtocolStateRequestBody::id_filtered(input_ids);
+        assert_eq!(request_body.protocol_ids, Some(expected_ids));
     }
 
     fn create_models_block_entity_changes() -> crate::models::blockchain::BlockAggregatedChanges {

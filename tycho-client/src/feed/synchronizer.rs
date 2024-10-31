@@ -5,13 +5,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
-use super::Header;
-use crate::{
-    deltas::{DeltasClient, SubscriptionOptions},
-    feed::component_tracker::{ComponentFilter, ComponentTracker},
-    rpc::RPCClient,
-};
 use tokio::{
     select,
     sync::{
@@ -22,12 +15,22 @@ use tokio::{
     time::timeout,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
+
 use tycho_core::{
     dto::{
-        BlockChanges, BlockParam, ExtractorIdentity, ProtocolComponent, ProtocolId,
-        ResponseAccount, ResponseProtocolState, VersionParam,
+        BlockChanges, BlockParam, ExtractorIdentity, ProtocolComponent, ResponseAccount,
+        ResponseProtocolState, VersionParam,
     },
     Bytes,
+};
+
+use crate::{
+    deltas::{DeltasClient, SubscriptionOptions},
+    feed::{
+        component_tracker::{ComponentFilter, ComponentTracker},
+        Header,
+    },
+    rpc::RPCClient,
 };
 
 pub type SyncResult<T> = anyhow::Result<T>;
@@ -179,6 +182,7 @@ where
     /// The current design separates the concepts of snapshots and deltas, therefore requiring us to
     /// fetch data for snapshots that might already exist in the deltas messages. This is
     /// unnecessary and could be optimized by removing snapshots entirely and only using deltas.
+    #[allow(deprecated)]
     async fn get_snapshots<'a, I: IntoIterator<Item = &'a String>>(
         &self,
         header: Header,
@@ -201,14 +205,13 @@ where
         let request_ids = ids
             .map(|it| {
                 it.into_iter()
-                    .map(|id| ProtocolId { id: id.clone(), chain: self.extractor_id.chain })
+                    .cloned()
                     .collect::<Vec<_>>()
             })
             .unwrap_or_else(|| tracked_components.get_tracked_component_ids());
 
         let component_ids = request_ids
             .iter()
-            .map(|protocol_id| &protocol_id.id)
             .collect::<HashSet<_>>();
 
         if component_ids.is_empty() {
@@ -526,38 +529,18 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        deltas::{DeltasClient, MockDeltasClient, SubscriptionOptions},
-        feed::{
-            component_tracker::{ComponentFilter, ComponentTracker},
-            synchronizer::{
-                ComponentWithState, ProtocolStateSynchronizer, Snapshot, StateSyncMessage,
-                StateSynchronizer,
-            },
-            Header,
-        },
-        rpc::{MockRPCClient, RPCClient},
-        DeltasError, RPCError,
-    };
-    use async_trait::async_trait;
-    use std::{collections::HashMap, sync::Arc, time::Duration};
+    use super::*;
+
     use test_log::test;
-    use tokio::{
-        sync::mpsc::{channel, Receiver, Sender},
-        task::JoinHandle,
-        time::timeout,
-    };
-    use tycho_core::{
-        dto::{
-            Block, BlockChanges, Chain, ExtractorIdentity, PaginationResponse, ProtocolComponent,
-            ProtocolComponentRequestResponse, ProtocolComponentsRequestBody, ProtocolId,
-            ProtocolStateRequestBody, ProtocolStateRequestResponse, ResponseAccount,
-            ResponseProtocolState, StateRequestBody, StateRequestResponse, TokensRequestBody,
-            TokensRequestResponse,
-        },
-        Bytes,
-    };
     use uuid::Uuid;
+
+    use tycho_core::dto::{
+        Block, Chain, PaginationResponse, ProtocolComponentRequestResponse,
+        ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
+        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
+    };
+
+    use crate::{deltas::MockDeltasClient, rpc::MockRPCClient, DeltasError, RPCError};
 
     // Required for mock client to implement clone
     struct ArcRPCClient<T>(Arc<T>);
@@ -817,8 +800,7 @@ mod test {
         rpc_client
             .expect_get_protocol_states()
             .with(mockall::predicate::function(move |request_params: &ProtocolStateRequestBody| {
-                let expected_id =
-                    ProtocolId { chain: Chain::Ethereum, id: "Component3".to_string() };
+                let expected_id = "Component3".to_string();
                 if let Some(ids) = request_params.protocol_ids.as_ref() {
                     ids.contains(&expected_id)
                 } else {
@@ -1113,8 +1095,7 @@ mod test {
         rpc_client
             .expect_get_protocol_states()
             .with(mockall::predicate::function(move |request_params: &ProtocolStateRequestBody| {
-                let expected_id =
-                    ProtocolId { chain: Chain::Ethereum, id: "Component3".to_string() };
+                let expected_id = "Component3".to_string();
                 if let Some(ids) = request_params.protocol_ids.as_ref() {
                     ids.contains(&expected_id)
                 } else {

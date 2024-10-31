@@ -329,13 +329,8 @@ where
 
         // Get the protocol IDs from the request
         let protocol_ids = request.protocol_ids.clone();
-        let ids = protocol_ids.as_ref().map(|ids| {
-            ids.iter()
-                .map(|id| id.id.as_str())
-                .collect::<Vec<&str>>()
-        });
-        debug!(?ids, "Getting protocol states.");
-        let ids = ids.as_deref();
+        debug!(?protocol_ids, "Getting protocol states.");
+        let ids = protocol_ids.as_deref();
 
         // Apply pagination to the protocol ids. This is done so that we can determine which ids
         // were not returned from the db and get them from the buffer instead. For component ids
@@ -1174,10 +1169,7 @@ mod tests {
         let req_handler = RpcHandler::new(gw, Some(Arc::new(mock_buffer)));
 
         let request = dto::ProtocolStateRequestBody {
-            protocol_ids: Some(vec![
-                dto::ProtocolId { id: "state1".to_owned(), chain: dto::Chain::Ethereum },
-                dto::ProtocolId { id: "state_buff".to_owned(), chain: dto::Chain::Ethereum },
-            ]),
+            protocol_ids: Some(vec!["state1".to_owned(), "state_buff".to_owned()]),
             protocol_system: "uniswap_v2".to_string(),
             chain: dto::Chain::Ethereum,
             include_balances: true,

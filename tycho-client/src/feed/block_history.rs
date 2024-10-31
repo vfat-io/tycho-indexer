@@ -1,10 +1,11 @@
 use std::{collections::VecDeque, num::NonZeroUsize};
 
 use lru::LruCache;
-
-use super::Header;
 use tracing::error;
+
 use tycho_core::Bytes;
+
+use crate::feed::Header;
 
 pub struct BlockHistory {
     history: VecDeque<Header>,
@@ -141,11 +142,8 @@ impl BlockHistory {
 mod test {
     use rand::Rng;
     use rstest::rstest;
-    use tycho_core::Bytes;
 
-    use crate::feed::{block_history::BlockPosition, Header};
-
-    use super::BlockHistory;
+    use super::*;
 
     fn random_hash() -> Bytes {
         let mut rng = rand::thread_rng();

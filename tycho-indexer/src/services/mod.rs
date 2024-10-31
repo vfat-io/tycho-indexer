@@ -1,5 +1,6 @@
 //! This module contains Tycho web services implementation
-
+// TODO: remove once deprecated ProtocolId struct is removed
+#![allow(deprecated)]
 use actix_web::{dev::ServerHandle, web, App, HttpServer};
 use actix_web_opentelemetry::RequestTracing;
 use deltas_buffer::PendingDeltasBuffer;

@@ -1,10 +1,12 @@
-use crate::{rpc::RPCClient, RPCError};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, instrument, warn};
+
 use tycho_core::{
-    dto::{BlockChanges, Chain, ProtocolComponent, ProtocolComponentsRequestBody, ProtocolId},
+    dto::{BlockChanges, Chain, ProtocolComponent, ProtocolComponentsRequestBody},
     Bytes,
 };
+
+use crate::{rpc::RPCClient, RPCError};
 
 #[derive(Clone, Debug)]
 pub(crate) enum ComponentFilterVariant {
@@ -178,10 +180,10 @@ where
             .collect()
     }
 
-    pub fn get_tracked_component_ids(&self) -> Vec<ProtocolId> {
+    pub fn get_tracked_component_ids(&self) -> Vec<String> {
         self.components
             .keys()
-            .map(|k| ProtocolId { chain: self.chain, id: k.clone() })
+            .cloned()
             .collect()
     }
 
@@ -202,17 +204,11 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        feed::component_tracker::{ComponentFilter, ComponentTracker},
-        rpc::MockRPCClient,
-    };
-    use tycho_core::{
-        dto::{
-            Chain, PaginationResponse, ProtocolComponent, ProtocolComponentRequestResponse,
-            ProtocolId,
-        },
-        Bytes,
-    };
+    use super::*;
+
+    use crate::rpc::MockRPCClient;
+
+    use tycho_core::dto::{PaginationResponse, ProtocolComponentRequestResponse};
 
     fn with_mocked_rpc() -> ComponentTracker<MockRPCClient> {
         let rpc = MockRPCClient::new();
@@ -332,7 +328,7 @@ mod test {
         tracker
             .components
             .insert("Component1".to_string(), component);
-        let exp = vec![ProtocolId { chain: Chain::Ethereum, id: "Component1".to_string() }];
+        let exp = vec!["Component1".to_string()];
 
         let res = tracker.get_tracked_component_ids();
 
