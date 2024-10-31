@@ -77,7 +77,7 @@ tycho-client --help
 
 ## Rust Builder
 
-You can also integrate Tycho Client directly in your Rust projects using the rust client builder:
+You can also integrate Tycho Client directly in your Rust projects using the rust stream builder:
 
 ```rust
 use tycho_core::dto::Chain;
@@ -95,7 +95,7 @@ let receiver = TychoStreamBuilder::new("localhost:4242", Chain::Ethereum)
     )
     .build()
     .await
-    .expect("Failed to build client");
+    .expect("Failed to build tycho stream");
 ```
 
 ## Usage
