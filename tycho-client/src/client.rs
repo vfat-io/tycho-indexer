@@ -1,7 +1,6 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, env, time::Duration};
 use tokio::sync::mpsc::Receiver;
 use tracing::info;
-use tracing_subscriber;
 
 use tycho_core::dto::{Chain, ExtractorIdentity};
 
@@ -14,19 +13,6 @@ use crate::{
     HttpRPCClient, WsDeltasClient,
 };
 
-/// A builder for configuring and initializing a Tycho client.
-/// The `TychoClientBuilder` allows you to set up various options for connecting
-/// to a Tycho server and managing the synchronization of exchange components.
-///
-/// # Fields
-/// - `tycho_url`: The base URL for the Tycho server (e.g., `"localhost:4242"`).
-/// - `chain`: The blockchain network (e.g., `Chain::Ethereum`).
-/// - `exchanges`: A map of exchange names to their respective `ComponentFilter` objects.
-/// - `block_time`: The expected block time interval, in seconds, for the blockchain.
-/// - `timeout`: The timeout duration, in seconds, for network operations.
-/// - `no_state`: If `true`, excludes state updates from the stream.
-/// - `auth_key`: An optional API key for authenticating with the Tycho server.
-/// - `no_tls`: If `true`, disables TLS/SSL for the connection, using `http` and `ws` instead.
 pub struct TychoClientBuilder {
     tycho_url: String,
     chain: Chain,
@@ -41,13 +27,6 @@ pub struct TychoClientBuilder {
 impl TychoClientBuilder {
     /// Creates a new `TychoClientBuilder` with the given Tycho URL and blockchain network.
     /// Initializes the builder with default values for block time and timeout based on the chain.
-    ///
-    /// # Parameters
-    /// - `tycho_url`: The base URL for the Tycho server (e.g., `"localhost:4242"`).
-    /// - `chain`: The blockchain network (e.g., `Chain::Ethereum`).
-    ///
-    /// # Returns
-    /// A new instance of `TychoClientBuilder`.
     pub fn new(tycho_url: &str, chain: Chain) -> Self {
         let (block_time, timeout) = Self::default_timing(&chain);
         Self {
@@ -63,12 +42,6 @@ impl TychoClientBuilder {
     }
 
     /// Returns the default block time and timeout values for the given blockchain network.
-    ///
-    /// # Parameters
-    /// - `chain`: The blockchain network to get the default values for.
-    ///
-    /// # Returns
-    /// A tuple containing the default block time and timeout in seconds.
     fn default_timing(chain: &Chain) -> (u64, u64) {
         match chain {
             Chain::Ethereum => (12, 1),
@@ -79,13 +52,6 @@ impl TychoClientBuilder {
     }
 
     /// Adds an exchange and its corresponding filter to the Tycho client.
-    ///
-    /// # Parameters
-    /// - `name`: The name of the exchange (e.g., `"uniswap_v2"`).
-    /// - `filter`: The `ComponentFilter` for filtering exchange components.
-    ///
-    /// # Returns
-    /// The updated `TychoClientBuilder` instance.
     pub fn exchange(mut self, name: &str, filter: ComponentFilter) -> Self {
         self.exchanges
             .insert(name.to_string(), filter);
@@ -93,36 +59,18 @@ impl TychoClientBuilder {
     }
 
     /// Sets the block time for the Tycho client.
-    ///
-    /// # Parameters
-    /// - `block_time`: The block time in seconds.
-    ///
-    /// # Returns
-    /// The updated `TychoClientBuilder` instance.
     pub fn block_time(mut self, block_time: u64) -> Self {
         self.block_time = block_time;
         self
     }
 
     /// Sets the timeout duration for network operations.
-    ///
-    /// # Parameters
-    /// - `timeout`: The timeout duration in seconds.
-    ///
-    /// # Returns
-    /// The updated `TychoClientBuilder` instance.
     pub fn timeout(mut self, timeout: u64) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Configures the client to exclude state updates from the stream.
-    ///
-    /// # Parameters
-    /// - `no_state`: If `true`, only components and tokens are streamed.
-    ///
-    /// # Returns
-    /// The updated `TychoClientBuilder` instance.
     pub fn no_state(mut self, no_state: bool) -> Self {
         self.no_state = no_state;
         self
@@ -130,11 +78,8 @@ impl TychoClientBuilder {
 
     /// Sets the API key for authenticating with the Tycho server.
     ///
-    /// # Parameters
-    /// - `auth_key`: An optional string containing the API key.
-    ///
-    /// # Returns
-    /// The updated `TychoClientBuilder` instance.
+    /// Optionally you can set the TYCHO_AUTH_TOKEN env var instead. Make sure to set no_tsl
+    /// to false if you do this.
     pub fn auth_key(mut self, auth_key: Option<String>) -> Self {
         self.auth_key = auth_key;
         self.no_tls = false;
@@ -142,12 +87,6 @@ impl TychoClientBuilder {
     }
 
     /// Disables TLS/SSL for the connection, using `http` and `ws` protocols.
-    ///
-    /// # Parameters
-    /// - `no_tls`: If `true`, disables TLS/SSL.
-    ///
-    /// # Returns
-    /// The updated `TychoClientBuilder` instance.
     pub fn no_tls(mut self, no_tls: bool) -> Self {
         self.no_tls = no_tls;
         self
@@ -155,18 +94,21 @@ impl TychoClientBuilder {
 
     /// Builds and starts the Tycho client, connecting to the Tycho server and
     /// setting up the synchronization of exchange components.
-    ///
-    /// # Returns
-    /// A `Result` containing the `Receiver<FeedMessage>` if successful, or an error message if not.
-    ///
-    /// # Errors
-    /// Returns an error if no exchanges have been registered.
     pub async fn build(self) -> Result<Receiver<FeedMessage>, &'static str> {
         if self.exchanges.is_empty() {
             return Err("At least one exchange must be registered before building the client.");
         }
 
-        // Set up logging
+        // If no auth_key is set and no_tls is false, try to read from the TYCHO_AUTH_TOKEN environment variable
+        let auth_key = if self.auth_key.is_none() && !self.no_tls {
+            match env::var("TYCHO_AUTH_TOKEN") {
+                Ok(token) => Some(token),
+                Err(_) => return Err("Authentication key is required when `no_tls` is false. Set the TYCHO_AUTH_TOKEN environment variable or use the `auth_key` method."),
+            }
+        } else {
+            self.auth_key
+        };
+
         tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::try_from_default_env()
@@ -188,7 +130,7 @@ impl TychoClientBuilder {
         };
 
         // Initialize the WebSocket client
-        let ws_client = WsDeltasClient::new(&tycho_ws_url, self.auth_key.as_deref()).unwrap();
+        let ws_client = WsDeltasClient::new(&tycho_ws_url, auth_key.as_deref()).unwrap();
         let ws_jh = ws_client
             .connect()
             .await
@@ -210,7 +152,7 @@ impl TychoClientBuilder {
                 filter,
                 3,
                 !self.no_state,
-                HttpRPCClient::new(&tycho_rpc_url, self.auth_key.as_deref()).unwrap(),
+                HttpRPCClient::new(&tycho_rpc_url, auth_key.as_deref()).unwrap(),
                 ws_client.clone(),
             );
             block_sync = block_sync.register_synchronizer(id, sync);
