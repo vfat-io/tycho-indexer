@@ -1,3 +1,13 @@
+## [0.38.0](https://github.com/propeller-heads/tycho-indexer/compare/0.37.0...0.38.0) (2024-10-31)
+
+
+### Features
+
+* **rpc:** mark chain field in version param as deprecated ([8c00bde](https://github.com/propeller-heads/tycho-indexer/commit/8c00bdeb75edac5939f5eff415639cba7dd0d420))
+* **rpc:** remove chain param from individual protocol ids ([4386dd0](https://github.com/propeller-heads/tycho-indexer/commit/4386dd0993d94484b39e861c989b559dd1f82ee0))
+* **rpc:** remove chain param from individual protocol ids ([#437](https://github.com/propeller-heads/tycho-indexer/issues/437)) ([8c10d6a](https://github.com/propeller-heads/tycho-indexer/commit/8c10d6a9f8960f2d0e6d3bba50d1f82a41e935f2))
+* **tycho-client:** update state endpoint body ([c535f79](https://github.com/propeller-heads/tycho-indexer/commit/c535f79a35bad00ca2443a1d643a9a344bb44118))
+
 ## [0.37.0](https://github.com/propeller-heads/tycho-indexer/compare/0.36.0...0.37.0) (2024-10-30)
 
 
