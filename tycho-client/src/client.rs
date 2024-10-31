@@ -99,7 +99,8 @@ impl TychoClientBuilder {
             return Err("At least one exchange must be registered before building the client.");
         }
 
-        // If no auth_key is set and no_tls is false, try to read from the TYCHO_AUTH_TOKEN environment variable
+        // If no auth_key is set and no_tls is false, try to read from the TYCHO_AUTH_TOKEN
+        // environment variable
         let auth_key = if self.auth_key.is_none() && !self.no_tls {
             match env::var("TYCHO_AUTH_TOKEN") {
                 Ok(token) => Some(token),
