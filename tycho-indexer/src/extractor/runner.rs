@@ -397,18 +397,21 @@ impl ExtractorBuilder {
     async fn ensure_spkg(&self) -> Result<(), ExtractionError> {
         // Pull spkg from s3 and copy it at `spkg_path`
         if !Path::new(&self.config.spkg).exists() {
-            download_file_from_s3(
-                "repo.propellerheads",
-                &self.config.spkg,
-                Path::new(&self.config.spkg),
-            )
-            .await
-            .map_err(|e| {
+            let bucket = std::env::var("TYCHO_S3_BUCKET").map_err(|e| {
                 ExtractionError::Setup(format!(
                     "Failed to download {} from s3. {}",
                     &self.config.spkg, e
                 ))
             })?;
+
+            download_file_from_s3(&bucket, &self.config.spkg, Path::new(&self.config.spkg))
+                .await
+                .map_err(|e| {
+                    ExtractionError::Setup(format!(
+                        "Failed to download {} from s3. {}",
+                        &self.config.spkg, e
+                    ))
+                })?;
         }
         Ok(())
     }
