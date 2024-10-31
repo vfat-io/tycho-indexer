@@ -14,11 +14,15 @@ A Python client library for interacting with the Tycho RPC server and streaming 
 If you want to build and install the package locally, follow these steps (assumes you
 have the Rust workspace already set up):
 
-1. Build and install the package:
-
+1. Build the package:
 ```bash
 pip install maturin
-maturin develop
+python -m maturin build --release
+```
+
+2. Install the package:
+```bash
+pip install <path/to/your_package.whl>
 ```
 
 ## Usage

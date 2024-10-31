@@ -528,6 +528,7 @@ pub struct StateRequestBody {
     pub version: VersionParam,
     #[serde(default)]
     pub chain: Chain,
+    /// Max page size supported is 100
     #[serde(default)]
     pub pagination: PaginationParams,
 }
@@ -772,6 +773,7 @@ pub struct TokensRequestBody {
     pub min_quality: Option<i32>,
     #[serde(default)]
     pub traded_n_days_ago: Option<u64>,
+    /// Max page size supported is 3000
     #[serde(default)]
     pub pagination: PaginationParams,
     #[serde(default)]
@@ -873,6 +875,7 @@ pub struct ProtocolComponentsRequestBody {
     pub tvl_gt: Option<f64>,
     #[serde(default)]
     pub chain: Chain,
+    /// Max page size supported is 500
     #[serde(default)]
     pub pagination: PaginationParams,
 }
@@ -1051,6 +1054,7 @@ pub struct ProtocolStateRequestBody {
     pub include_balances: bool,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
+    /// Max page size supported is 100
     #[serde(default)]
     pub pagination: PaginationParams,
 }

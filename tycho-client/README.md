@@ -70,7 +70,7 @@ The main use case of the Tycho Client is to provide a stream of protocol compone
 snapshots, their state changes and associated tokens.
 
 If you choose to stream from multiple extractors, the client will try to align the
-messages by their block. You can use the `--block-time` parameter to fine tune this behaviour. This is the maximum time we will wait for another extractor before emitting a message. If any other extractor has not replied within this time it is considered as delayed. If an extractor is marked as delayed for too long, it is considered stale and the client will exit with an error message.
+messages by their block. You can use the `--block-time` and `--timeout` parameters to fine tune this behaviour. This is the maximum time we will wait for another extractor before emitting a message. If any other extractor has not replied within this time it is considered as delayed. If an extractor is marked as delayed for too long, it is considered stale and the client will exit with an error message.
 
 Note: *We do currently not provide support to stream from different chains.*
 
@@ -87,7 +87,7 @@ stopped tracking them.
 
 #### Component Filtering
 
-You can request individual pools, or use a minimum TVL threshold to filter the components. If you choose minimum TVL tracking, tycho-client will automatically add snapshots for any components that start passing the TVL threshold, e.g. because more liquidity was provided. It will also remove any components that fall below the TVL threshold.
+You can request individual pools, or use a minimum TVL threshold to filter the components. If you choose minimum TVL tracking, tycho-client will automatically add snapshots for any components that exceed the TVL threshold, e.g. because more liquidity was provided. It will also notify you and remove any components that fall below the TVL threshold. Note that the TVL values are estimates intended solely for filtering the most relevant components.
 
 ##### To track a single pool:
 
@@ -184,7 +184,7 @@ lightweight and always contain absolute new values. They will never contain delt
 
 Deltas include the following few special attributes:
 
-- `state_updates`: Includes attribute changes, given as a component to state key-value mapping, with keys being strings and values being bytes.
+- `state_updates`: Includes attribute changes, given as a component to state key-value mapping, with keys being strings and values being bytes. The attributes provided are protocol-specific. Tycho occasionally makes use of reserved attributes, see [here](https://docs.propellerheads.xyz/integrations/indexing/reserved-attributes) for more details.
 - `account_updates`: Includes contract storage changes given as a contract storage key-value mapping for each involved contract address. Here both keys and values are bytes.
 - `new_protocol_components`: Components that were created on this block. Must not necessarily pass the tvl filter to appear here.
 - `deleted_protocol_components`: Any components mentioned here have been removed from
@@ -255,13 +255,28 @@ tycho-client -n 1000 --exchange uniswap_v3:0x....  | gzip -c - > 1kblocks.jsonl.
 
 This file can then be used as mock input to an integration test or a benchmark script.
 
-### Historical state
+### Tokens and Historical state
 
-Tycho also provides access to historical snapshots. Unfortunately we do not have this
-exposed on the tycho-client yet. If you need to retrieve the historical state of a
-component you will have to use the RPC for this.
+Tycho also provides access to recently historical states as well as all tokens supported by the protocols it has integrated. Both of which are accessible throught the Client RPC interfaces. 
 
-Tycho exposes an openapi docs for its RPC endpoints. If you are running tycho locally you can find them under: http://localhost:4242/docs/
+Here is sample code to fetch tokens:
+
+```rust
+use tycho_client::rpc::HttpRPCClient;
+use tycho_core::dto::Chain;
+
+let client = HttpRPCClient::new("insert_tycho_url", Some("my_auth_token"));
+
+let tokens = client
+    .get_all_tokens(
+        Chain::Ethereum,
+        Some(51_i32), // min token quality
+        Some(30_u64), // number of days since last traded
+        1000, // pagination chunk size
+    )
+    .await
+    .unwrap();
+```
 
 ## Light mode
 
@@ -280,5 +295,5 @@ If you wish to use tycho as a service instead of hosting it yourself, the follow
 |------------------------|---------------------------------------------------------|
 | **URL**                | *tycho-beta.propellerheads.xyz*                         |
 | **RPC Docs**           | *[View Documentation](https://tycho-beta.propellerheads.xyz/docs/)* |
-| **Auth Key**           | *Please contact `@AdeelFarouk` on Telegram to request a beta auth key. <br> Note: Use the `Authorization` header for this key in your RPC requests.* |
+| **Auth Key**           | *Please contact `@tanay_j` on Telegram to request a beta auth key. <br> Note: Use the `Authorization` header for this key in your RPC requests.* |
 | **Supported Protocols** | *uniswap_v2, uniswap_v3, sushiswap, vm:balancer, vm:ambient*                    |
