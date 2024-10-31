@@ -1,4 +1,5 @@
 use std::{collections::HashMap, env, time::Duration};
+use thiserror::Error;
 use tokio::sync::mpsc::Receiver;
 use tracing::info;
 
@@ -12,6 +13,18 @@ use crate::{
     },
     HttpRPCClient, WsDeltasClient,
 };
+
+#[derive(Error, Debug)]
+pub enum StreamError {
+    #[error("Error during stream set up: {0}")]
+    SetUpError(String),
+
+    #[error("WebSocket client connection error: {0}")]
+    WebSocketConnectionError(String),
+
+    #[error("BlockSynchronizer error: {0}")]
+    BlockSynchronizerError(String),
+}
 
 pub struct TychoStreamBuilder {
     tycho_url: String,
@@ -94,9 +107,11 @@ impl TychoStreamBuilder {
 
     /// Builds and starts the Tycho client, connecting to the Tycho server and
     /// setting up the synchronization of exchange components.
-    pub async fn build(self) -> Result<Receiver<FeedMessage>, &'static str> {
+    pub async fn build(self) -> Result<Receiver<FeedMessage>, StreamError> {
         if self.exchanges.is_empty() {
-            return Err("At least one exchange must be registered before building the client.");
+            return Err(StreamError::SetUpError(
+                "At least one exchange must be registered.".to_string(),
+            ));
         }
 
         // If no auth_key is set and no_tls is false, try to read from the TYCHO_AUTH_TOKEN
@@ -104,7 +119,7 @@ impl TychoStreamBuilder {
         let auth_key = if self.auth_key.is_none() && !self.no_tls {
             match env::var("TYCHO_AUTH_TOKEN") {
                 Ok(token) => Some(token),
-                Err(_) => return Err("Authentication key is required when `no_tls` is false. Set the TYCHO_AUTH_TOKEN environment variable or use the `auth_key` method."),
+                Err(_) => return Err(StreamError::SetUpError("Authentication key is required when `no_tls` is false. Set the TYCHO_AUTH_TOKEN environment variable or use the `auth_key` method.".to_string())),
             }
         } else {
             self.auth_key
@@ -128,7 +143,7 @@ impl TychoStreamBuilder {
         let ws_jh = ws_client
             .connect()
             .await
-            .expect("ws client connection error");
+            .map_err(|e| StreamError::WebSocketConnectionError(e.to_string()))?;
 
         // Create and configure the BlockSynchronizer
         let mut block_sync = BlockSynchronizer::new(
@@ -156,16 +171,16 @@ impl TychoStreamBuilder {
         let (sync_jh, rx) = block_sync
             .run()
             .await
-            .expect("block sync start error");
+            .map_err(|e| StreamError::BlockSynchronizerError(e.to_string()))?;
 
         // Monitor WebSocket and BlockSynchronizer futures
         tokio::spawn(async move {
             tokio::select! {
                 res = ws_jh => {
-                    let _ = res.expect("WebSocket connection dropped unexpectedly");
+                    let _ = res.map_err(|e| StreamError::WebSocketConnectionError(e.to_string()));
                 }
                 res = sync_jh => {
-                    res.expect("BlockSynchronizer stopped unexpectedly");
+                    res.map_err(|e| StreamError::BlockSynchronizerError(e.to_string())).unwrap();
                 }
             }
         });
