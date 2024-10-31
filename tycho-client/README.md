@@ -33,7 +33,9 @@ This should display the version of the Tycho client installed.
 
 ## Quickstart
 
-To use the Tycho Client, you will need a connection to the Tycho Indexer: either by hosting your own tycho instance or via a [hosted endpoint](#hosted-endpoints). After this, you can simply create a stream using:
+### Client CLI Binary
+
+To get started with the Tycho Client, you'll first need access to a Tycho Indexer. This can be achieved by either running your own Tycho instance or connecting to a [hosted endpoint](#hosted-endpoints). Once connected, you can create a data stream using the following command:
 
 ```bash
 tycho-client \
@@ -44,25 +46,57 @@ tycho-client \
     --min-tvl 100 \
     --tycho-url {TYCHO_INDEXER_URL}
 ```
- - TYCHO_INDEXER_URL defaults to `localhost:4242`
+
+Note: If not specified, `TYCHO_INDEXER_URL` defaults to *localhost:4242*.
 
 #### Authentication
 
-If the gateway requires authentication you can provide it one of two ways: 
-- Set it via an enviroment variable:
- ```bash
- export TYCHO_AUTH_TOKEN={your_token}
- ```
-- Use the `--auth-key {your_token}` flag directly in the command.
+If your Tycho Indexer requires authentication, you can provide your token in one of two ways:
 
- If you wish to use unsecure transports, you may omit setting the auth-key and instead use the `--no-tls` flag. This is useful if you are hosting your own instance of tycho and do not require the added security.
+Environment Variable:
+
+```bash
+export TYCHO_AUTH_TOKEN={your_token}
+```
+
+Command-Line Flag:
+
+```bash
+tycho-client --auth-key {your_token}
+```
+
+For setups that do not require secure connections (e.g., self-hosted Tycho instances), you can skip setting an auth key and use the --no-tls flag to disable TLS encryption.
 
 #### Help and More Information
 
- For more details on using the CLI, run:
- ```bash
- tycho client --help
- ```
+To explore more options and details about the CLI, run:
+
+```bash
+tycho-client --help
+```
+
+## Rust Builder
+
+You can also integrate Tycho Client directly in your Rust projects using the rust client builder:
+
+```rust
+use tycho_core::dto::Chain;
+use tycho_client::{client::TychoClientBuilder, feed::component_tracker::ComponentFilter};
+
+let receiver = TychoClientBuilder::new("localhost:4242", Chain::Ethereum)
+    .auth_key(Some("my_api_key".into()))
+    .exchange("uniswap_v2", ComponentFilter::with_tvl_range(10.0, 15.0))
+    .exchange(
+        "uniswap_v3",
+        ComponentFilter::Ids(vec![
+            "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD".to_string(),
+            "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640".to_string(),
+        ]),
+    )
+    .build()
+    .await
+    .expect("Failed to build client");
+```
 
 ## Usage
 
