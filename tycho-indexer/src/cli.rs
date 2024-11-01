@@ -49,6 +49,10 @@ pub struct GlobalArgs {
     )]
     pub database_url: String,
 
+    /// Name of the s3 bucket used to retrieve spkgs
+    #[clap(env = "TYCHO_S3_BUCKET", long)]
+    pub s3_bucket: Option<String>,
+
     /// Substreams API endpoint
     #[clap(name = "endpoint", long, default_value = "https://mainnet.eth.streamingfast.io")]
     pub endpoint_url: String,
@@ -210,6 +214,7 @@ mod cli_tests {
             global_args: GlobalArgs {
                 endpoint_url: "http://example.com".to_string(),
                 database_url: "my_db".to_string(),
+                s3_bucket: None,
                 server_ip: "0.0.0.0".to_string(),
                 server_port: 4242,
                 server_version_prefix: "v1".to_string(),
@@ -255,6 +260,7 @@ mod cli_tests {
             global_args: GlobalArgs {
                 endpoint_url: "http://example.com".to_string(),
                 database_url: "my_db".to_string(),
+                s3_bucket: None,
                 server_ip: "0.0.0.0".to_string(),
                 server_port: 4242,
                 server_version_prefix: "v1".to_string(),

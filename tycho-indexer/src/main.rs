@@ -317,7 +317,7 @@ async fn create_indexing_tasks(
 
     let (tasks, extractor_handles): (Vec<_>, Vec<_>) =
         // TODO: accept substreams configuration from cli.
-        build_all_extractors(&extractors_config, chain_state, chains, &global_args.endpoint_url, &cached_gw, &token_processor, rpc_url, extraction_runtime)
+        build_all_extractors(&extractors_config, chain_state, chains, &global_args.endpoint_url,global_args.s3_bucket.as_deref(), &cached_gw, &token_processor, rpc_url, extraction_runtime)
             .await
             .map_err(|e| ExtractionError::Setup(format!("Failed to create extractors: {}", e)))?
             .into_iter()
@@ -344,6 +344,7 @@ async fn build_all_extractors(
     chain_state: ChainState,
     chains: &[Chain],
     endpoint_url: &str,
+    s3_bucket: Option<&str>,
     cached_gw: &CachedGateway,
     token_pre_processor: &EthereumTokenPreProcessor,
     rpc_url: &str,
@@ -377,7 +378,7 @@ async fn build_all_extractors(
             .cloned()
             .unwrap_or_else(|| tokio::runtime::Handle::current());
 
-        let (task, handle) = ExtractorBuilder::new(extractor_config, endpoint_url)
+        let (task, handle) = ExtractorBuilder::new(extractor_config, endpoint_url, s3_bucket)
             .build(chain_state, cached_gw, token_pre_processor, &protocol_cache)
             .await?
             .set_runtime(runtime)
