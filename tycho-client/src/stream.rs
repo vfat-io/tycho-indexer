@@ -57,7 +57,7 @@ impl TychoStreamBuilder {
     /// Returns the default block time and timeout values for the given blockchain network.
     fn default_timing(chain: &Chain) -> (u64, u64) {
         match chain {
-            Chain::Ethereum => (12, 1),
+            Chain::Ethereum => (600, 1),
             Chain::Starknet => (30, 5),
             Chain::ZkSync => (1, 2),
             Chain::Arbitrum => (1, 0), // Typically closer to 0.25s
@@ -114,16 +114,10 @@ impl TychoStreamBuilder {
             ));
         }
 
-        // If no auth_key is set and no_tls is false, try to read from the TYCHO_AUTH_TOKEN
-        // environment variable
-        let auth_key = if self.auth_key.is_none() && !self.no_tls {
-            match env::var("TYCHO_AUTH_TOKEN") {
-                Ok(token) => Some(token),
-                Err(_) => return Err(StreamError::SetUpError("Authentication key is required when `no_tls` is false. Set the TYCHO_AUTH_TOKEN environment variable or use the `auth_key` method.".to_string())),
-            }
-        } else {
-            self.auth_key
-        };
+        // Attempt to read the authentication key from the environment variable if not provided
+        let auth_key = self
+            .auth_key
+            .or_else(|| env::var("TYCHO_AUTH_TOKEN").ok());
 
         // Determine the URLs based on the TLS setting
         let (tycho_ws_url, tycho_rpc_url) = if self.no_tls {
@@ -200,5 +194,20 @@ mod tests {
             .build()
             .await;
         assert!(receiver.is_err(), "Client should fail to build when no exchanges are registered.");
+    }
+
+    #[ignore = "require tycho gateway"]
+    #[tokio::test]
+    async fn teat_simple_build() {
+        let token = env::var("TYCHO_AUTH_TOKEN").unwrap();
+        let receiver = TychoStreamBuilder::new("tycho-beta.propellerheads.xyz", Chain::Ethereum)
+            .exchange("uniswap_v2", ComponentFilter::with_tvl_range(100.0, 100.0))
+            .auth_key(Some(token))
+            .build()
+            .await;
+
+        dbg!(&receiver);
+
+        assert!(receiver.is_ok(), "Client should build successfully with exchanges registered.");
     }
 }

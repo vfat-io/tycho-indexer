@@ -6327,8 +6327,10 @@ checksum = "212d5dcb2a1ce06d81107c3d0ffa3121fe974b73f068c8282cb1c32328113b6c"
 dependencies = [
  "futures-util",
  "log",
+ "native-tls",
  "rustls 0.21.10",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls 0.24.1",
  "tungstenite",
  "webpki-roots",
@@ -6658,6 +6660,7 @@ dependencies = [
  "http 0.2.11",
  "httparse",
  "log",
+ "native-tls",
  "rand",
  "rustls 0.21.10",
  "sha1",
