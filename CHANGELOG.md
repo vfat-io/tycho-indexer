@@ -1,3 +1,12 @@
+## [0.39.0](https://github.com/propeller-heads/tycho-indexer/compare/0.38.0...0.39.0) (2024-11-02)
+
+
+### Features
+
+* **indexer:** expose s3 bucket as cli arg ([a55e126](https://github.com/propeller-heads/tycho-indexer/commit/a55e1265af2bf5b5bdc6c284c49128fc2590ae2f))
+* **indexer:** parse s3 bucket from env variable ([c67fc38](https://github.com/propeller-heads/tycho-indexer/commit/c67fc3812007edc644b86efc45fa499aa098b2a9))
+* **indexer:** parse s3 bucket from env variable ([#440](https://github.com/propeller-heads/tycho-indexer/issues/440)) ([104c4e9](https://github.com/propeller-heads/tycho-indexer/commit/104c4e90cf18a81dfe40ea5ea71b57f9be607691))
+
 ## [0.38.0](https://github.com/propeller-heads/tycho-indexer/compare/0.37.0...0.38.0) (2024-10-31)
 
 
