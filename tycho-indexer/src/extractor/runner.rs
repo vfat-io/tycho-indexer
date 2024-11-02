@@ -334,6 +334,7 @@ impl ExtractorConfig {
 pub struct ExtractorBuilder {
     config: ExtractorConfig,
     endpoint_url: String,
+    s3_bucket: Option<String>,
     token: String,
     extractor: Option<Arc<dyn Extractor>>,
     final_block_only: bool,
@@ -345,10 +346,11 @@ pub struct ExtractorBuilder {
 pub type HandleResult = (JoinHandle<Result<(), ExtractionError>>, ExtractorHandle);
 
 impl ExtractorBuilder {
-    pub fn new(config: &ExtractorConfig, endpoint_url: &str) -> Self {
+    pub fn new(config: &ExtractorConfig, endpoint_url: &str, s3_bucket: Option<&str>) -> Self {
         Self {
             config: config.clone(),
             endpoint_url: endpoint_url.to_owned(),
+            s3_bucket: s3_bucket.map(ToString::to_string),
             token: env::var("SUBSTREAMS_API_TOKEN").unwrap_or("".to_string()),
             extractor: None,
             final_block_only: false,
@@ -398,7 +400,12 @@ impl ExtractorBuilder {
         // Pull spkg from s3 and copy it at `spkg_path`
         if !Path::new(&self.config.spkg).exists() {
             download_file_from_s3(
-                "repo.propellerheads",
+                self.s3_bucket.as_ref().ok_or_else(|| {
+                    ExtractionError::Setup(format!(
+                        "Missing spkg and s3 bucket config for {}",
+                        &self.config.spkg
+                    ))
+                })?,
                 &self.config.spkg,
                 Path::new(&self.config.spkg),
             )
@@ -678,6 +685,7 @@ mod test {
                 None,
             ),
             "https://mainnet.eth.streamingfast.io",
+            None,
         )
         .token("test_token")
         .set_extractor(extractor);
