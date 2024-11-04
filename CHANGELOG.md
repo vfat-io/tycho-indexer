@@ -1,3 +1,18 @@
+## [0.40.0](https://github.com/propeller-heads/tycho-indexer/compare/0.39.0...0.40.0) (2024-11-04)
+
+
+### Features
+
+* **tycho-client:** create rust client builder ([21d11a1](https://github.com/propeller-heads/tycho-indexer/commit/21d11a1a8dae0d79d675350902bbeaad60fa09a4))
+* **tycho-client:** implement a rust client stream builder ([#439](https://github.com/propeller-heads/tycho-indexer/issues/439)) ([20be73c](https://github.com/propeller-heads/tycho-indexer/commit/20be73cdc4391805e2acf405ccf2fb5191dec3b7))
+* **tycho-client:** improve error handling on TychoStreamBuilder ([b0a175c](https://github.com/propeller-heads/tycho-indexer/commit/b0a175ce0b4b484eecf85e12330f75925c3fa717))
+
+
+### Bug Fixes
+
+* **tycho-client:** do not error if no auth key is provided with tsl active ([19ac0d1](https://github.com/propeller-heads/tycho-indexer/commit/19ac0d12b1ed974b5ccb95cf2f62eca0f3b647ed))
+* **tycho-client:** support fetching auth token from env var ([c1c03aa](https://github.com/propeller-heads/tycho-indexer/commit/c1c03aaa0a74b9170b57e70cf8e05fc9a8e79573))
+
 ## [0.39.0](https://github.com/propeller-heads/tycho-indexer/compare/0.38.0...0.39.0) (2024-11-02)
 
 
