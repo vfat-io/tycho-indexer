@@ -1,3 +1,11 @@
+## [0.41.0](https://github.com/propeller-heads/tycho-indexer/compare/0.40.0...0.41.0) (2024-11-04)
+
+
+### Features
+
+* **tycho-client:** return the tokio handle from the stream builder ([06a669e](https://github.com/propeller-heads/tycho-indexer/commit/06a669e59ef2ec05c3aeb9a60b571a44ccf6e5ec))
+* **tycho-client:** return the tokio handle from the stream builder ([#441](https://github.com/propeller-heads/tycho-indexer/issues/441)) ([173e774](https://github.com/propeller-heads/tycho-indexer/commit/173e774bd3726df5c93a938eafa8d1762a363250))
+
 ## [0.40.0](https://github.com/propeller-heads/tycho-indexer/compare/0.39.0...0.40.0) (2024-11-04)
 
 
