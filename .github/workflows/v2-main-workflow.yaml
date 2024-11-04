@@ -43,6 +43,9 @@ jobs:
     with:
       image_tag: ${{ needs.release.outputs.next_release_version }}
       image_name: tycho-indexer
+      role_to_assume: ${{ vars.ROLE_TO_ASSUME }}
+      repository_url: ${{ vars.REPOSITORY_URL }}
+      domain_owner: ${{ vars.DOMAIN_OWNER }}
     secrets:
       app_id: ${{ secrets.APP_ID }}
       app_private_key: ${{ secrets.APP_PRIVATE_KEY }}

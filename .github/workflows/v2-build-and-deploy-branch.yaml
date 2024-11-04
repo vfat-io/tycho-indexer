@@ -26,6 +26,9 @@ jobs:
     with:
       image_tag: ${{ github.sha }}
       image_name: tycho-indexer
+      role_to_assume: ${{ vars.ROLE_TO_ASSUME }}
+      repository_url: ${{ vars.REPOSITORY_URL }}
+      domain_owner: ${{ vars.DOMAIN_OWNER }}
     secrets:
       app_id: ${{ secrets.APP_ID }}
       app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -41,6 +44,8 @@ jobs:
       image_name: tycho-indexer
       image_tag: ${{ github.sha }}
       app_name: ${{ inputs.app_name }}
+      role_to_assume: ${{ vars.ROLE_TO_ASSUME }}
+      repository_url: ${{ vars.REPOSITORY_URL }}
     secrets:
       app_id: ${{ secrets.APP_ID }}
       app_private_key: ${{ secrets.APP_PRIVATE_KEY }}

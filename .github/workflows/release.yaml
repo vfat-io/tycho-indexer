@@ -44,7 +44,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          role-to-assume: 'arn:aws:iam::827659017777:role/github-actions'
+          role-to-assume: ${{ vars.ROLE_TO_ASSUME }}
           audience: sts.amazonaws.com
           aws-region: eu-central-1
       - name: Upload binary to S3

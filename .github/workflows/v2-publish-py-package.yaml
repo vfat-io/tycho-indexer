@@ -28,6 +28,8 @@ jobs:
       package_root: "tycho-client-py"
       yum_packages: "pkgconfig openssl-devel"
       use_maturin: true
+      role_to_assume: ${{ vars.ROLE_TO_ASSUME }}
+      domain_owner: ${{ vars.DOMAIN_OWNER }}
   publish_tycho_indexer_client_macos:
     uses: propeller-heads/ci-cd-templates/.github/workflows/release-python-package.yaml@main
     permissions:
@@ -40,3 +42,5 @@ jobs:
       runs_on: 'macos-latest'
       package_root: "tycho-client-py"
       use_maturin: true
+      role_to_assume: ${{ vars.ROLE_TO_ASSUME }}
+      domain_owner: ${{ vars.DOMAIN_OWNER }}

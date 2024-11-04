@@ -21,7 +21,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          role-to-assume: 'arn:aws:iam::827659017777:role/github-actions'
+          role-to-assume: ${{ vars.ROLE_TO_ASSUME }}
           audience: sts.amazonaws.com
           aws-region: eu-central-1
 
@@ -43,7 +43,7 @@ jobs:
 
       - name: 'Build, tag, and push image to Amazon ECR'
         env:
-          ECR_REGISTRY: 827659017777.dkr.ecr.eu-central-1.amazonaws.com
+          ECR_REGISTRY: ${{ vars.REPOSITORY_URL }}
           ECR_REPOSITORY: tycho-indexer
           ECR_BUILD_CACHE_REPOSITORY: build-cache
         run: >
