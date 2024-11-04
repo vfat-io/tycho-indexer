@@ -2,7 +2,7 @@ use std::{str::FromStr, time::Duration};
 
 use clap::Parser;
 use tracing::{debug, info};
-use tracing_appender::rolling::{self};
+use tracing_appender::rolling;
 
 use tycho_core::dto::{Chain, ExtractorIdentity};
 

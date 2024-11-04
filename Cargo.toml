@@ -54,7 +54,7 @@ tokio = { version = "1.27", features = [
     "tracing",
 ] }
 console-subscriber = "0.2.0"
-tokio-tungstenite = "0.20.0"
+tokio-tungstenite = { version = "0.20.0", features = ["native-tls"] }
 utoipa = { version = "4.2.0", features = ["chrono"] }
 diesel = { version = "2.1.0", features = ["postgres", "chrono", "serde_json"] }
 diesel-async = { version = "0.4.1", features = ["postgres", "deadpool"] }
