@@ -1,6 +1,6 @@
 use std::{collections::HashMap, env, time::Duration};
 use thiserror::Error;
-use tokio::sync::mpsc::Receiver;
+use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tracing::info;
 
 use tycho_core::dto::{Chain, ExtractorIdentity};
@@ -107,7 +107,7 @@ impl TychoStreamBuilder {
 
     /// Builds and starts the Tycho client, connecting to the Tycho server and
     /// setting up the synchronization of exchange components.
-    pub async fn build(self) -> Result<Receiver<FeedMessage>, StreamError> {
+    pub async fn build(self) -> Result<(JoinHandle<()>, Receiver<FeedMessage>), StreamError> {
         if self.exchanges.is_empty() {
             return Err(StreamError::SetUpError(
                 "At least one exchange must be registered.".to_string(),
@@ -168,7 +168,7 @@ impl TychoStreamBuilder {
             .map_err(|e| StreamError::BlockSynchronizerError(e.to_string()))?;
 
         // Monitor WebSocket and BlockSynchronizer futures
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             tokio::select! {
                 res = ws_jh => {
                     let _ = res.map_err(|e| StreamError::WebSocketConnectionError(e.to_string()));
@@ -179,7 +179,7 @@ impl TychoStreamBuilder {
             }
         });
 
-        Ok(rx)
+        Ok((handle, rx))
     }
 }
 
