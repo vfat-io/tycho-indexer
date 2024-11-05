@@ -44,9 +44,9 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          role-to-assume: 'arn:aws:iam::827659017777:role/github-actions'
+          role-to-assume: ${{ secrets.ROLE_TO_ASSUME }}
           audience: sts.amazonaws.com
-          aws-region: eu-central-1
+          aws-region: ${{ secrets.AWS_REGION }}
       - name: Upload binary to S3
         run: |
           FILE_NAME=${{ matrix.package }}-${{ matrix.target }}-${{ github.event.release.tag_name }}.tar.gz

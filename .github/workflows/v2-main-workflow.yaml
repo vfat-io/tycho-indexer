@@ -46,6 +46,10 @@ jobs:
     secrets:
       app_id: ${{ secrets.APP_ID }}
       app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
+      role_to_assume: ${{ secrets.ROLE_TO_ASSUME }}
+      aws_region: ${{ secrets.AWS_REGION }}
+      repository_url: ${{ secrets.REPOSITORY_URL }}
+      domain_owner: ${{ secrets.DOMAIN_OWNER }}
 
   promote-to-dev:
     needs:
