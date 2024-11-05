@@ -23,7 +23,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.ROLE_TO_ASSUME }}
           audience: sts.amazonaws.com
-          aws-region: eu-central-1
+          aws-region: ${{ secrets.AWS_REGION }}
 
       - id: install-aws-cli
         uses: unfor19/install-aws-cli-action@v1
@@ -59,7 +59,7 @@ jobs:
 
           CHECK_IMAGE=$(aws ecr describe-images --repository-name
           $ECR_REPOSITORY --image-ids imageTag=$CONTAINER_TAG --region
-          eu-central-1 || true)
+          ${{ secrets.AWS_REGION }} || true)
 
           if [ -z "$CHECK_IMAGE" ]; then
               docker buildx build --push -t $ECR_REGISTRY/$ECR_REPOSITORY:$CONTAINER_TAG \
