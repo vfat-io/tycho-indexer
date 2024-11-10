@@ -1,6 +1,6 @@
 # Tycho Indexer
 
-![Asteroid Belt](./assets/belt.webp)
+![Tycho Indexer](./assets/tycho.png)
 
 Tycho Indexer is a low-latency solution designed to track and update the state of onchain and offchain financial protocols in real time. With Tycho, clients can subscribe to a stream of state update messages or query historical states at any specific timestamp or block through an RPC interface.
 
