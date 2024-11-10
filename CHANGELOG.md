@@ -1,3 +1,13 @@
+## [0.41.1](https://github.com/propeller-heads/tycho-indexer/compare/0.41.0...0.41.1) (2024-11-10)
+
+
+### Bug Fixes
+
+* fix formatting ([02f4d59](https://github.com/propeller-heads/tycho-indexer/commit/02f4d59ab7515a154110030eea97d956b8fcda47))
+* fix token preprocessor symbol length to 255 chars ([0af6caa](https://github.com/propeller-heads/tycho-indexer/commit/0af6caa6c559222c12cc23f420c01dd5989a6a6c))
+* fix token preprocessor symbol length to 255 chars ([#433](https://github.com/propeller-heads/tycho-indexer/issues/433)) ([466e620](https://github.com/propeller-heads/tycho-indexer/commit/466e6202e2409a47d0585dcbd535b63c23574e4b))
+* **indexer:** correctly truncate token symbol ([9d7cd61](https://github.com/propeller-heads/tycho-indexer/commit/9d7cd6126c6e5dead0fa544a08c6d86807730ac8))
+
 ## [0.41.0](https://github.com/propeller-heads/tycho-indexer/compare/0.40.0...0.41.0) (2024-11-04)
 
 
