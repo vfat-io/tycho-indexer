@@ -1,3 +1,17 @@
+## [0.42.0](https://github.com/propeller-heads/tycho-indexer/compare/0.41.1...0.42.0) (2024-11-19)
+
+
+### Features
+
+* **hex_bytes:** change hex bytes conversions to big endian ([3961824](https://github.com/propeller-heads/tycho-indexer/commit/39618244c4bbdc90d09af3af740edc34e6e68f76))
+* **hex_bytes:** change hex bytes conversions to big endian ([#429](https://github.com/propeller-heads/tycho-indexer/issues/429)) ([e88a4c6](https://github.com/propeller-heads/tycho-indexer/commit/e88a4c67a9865f9505cf9827bb64e24e9cd73845))
+* **tycho-ethereum:** update ether <-> bytes conversions to big endian ([3943560](https://github.com/propeller-heads/tycho-indexer/commit/39435606aaf0e92f9d5051a5df17617a0c7a075e))
+
+
+### Bug Fixes
+
+* make ethcontract optional ([2482ecc](https://github.com/propeller-heads/tycho-indexer/commit/2482ecc0592c1ef2592252543d00759fe22c11fc))
+
 ## [0.41.1](https://github.com/propeller-heads/tycho-indexer/compare/0.41.0...0.41.1) (2024-11-10)
 
 
