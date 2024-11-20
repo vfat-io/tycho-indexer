@@ -132,11 +132,16 @@ async fn analyze_batch(
             }
         };
 
-        if let TokenQuality::Bad { reason } = token_quality {
-            debug!(?t.address, ?reason, "Token quality detected as bad!");
-            // Remove 1 to the quality for each attempt. If it fails 5 times we won't try again.
-            t.quality -= 1;
-        };
+        match token_quality {
+            TokenQuality::Good => {
+                t.quality = 100;
+            }
+            TokenQuality::Bad { reason } => {
+                debug!(?t.address, ?reason, "Token quality detected as bad!");
+                // Remove 1 to the quality for each attempt. If it fails 5 times we won't try again.
+                t.quality -= 1;
+            }
+        }
 
         // If it's a fee token, set quality to 50
         if tax.map_or(false, |tax_value| tax_value > 0) {
@@ -185,38 +190,69 @@ mod test {
             .returning(|_, _, _, _, _| {
                 Box::pin(async {
                     Ok(WithTotal {
-                        entity: vec![CurrencyToken::new(
-                            &Bytes::from("0x45804880de22913dafe09f4980848ece6ecbaf78"),
-                            "PAXG",
-                            18,
-                            0,
-                            &[],
-                            Chain::Ethereum,
-                            10,
-                        )],
-                        total: Some(1),
+                        entity: vec![
+                            CurrencyToken::new(
+                                &Bytes::from("0x228c6fcd7376177ff0cff304043f461189752750"),
+                                "BLITZ",
+                                9,
+                                0,
+                                &[],
+                                Chain::Ethereum,
+                                10,
+                            ),
+                            CurrencyToken::new(
+                                &Bytes::from("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                                "WETH",
+                                18,
+                                0,
+                                &[],
+                                Chain::Ethereum,
+                                10,
+                            ),
+                        ],
+                        total: Some(2),
                     })
                 })
             });
-        let exp = vec![CurrencyToken::new(
-            &Bytes::from("0x45804880de22913dafe09f4980848ece6ecbaf78"),
-            "PAXG",
-            18,
-            1,
-            &[Some(59_264)],
-            Chain::Ethereum,
-            50,
-        )];
+        let exp = vec![
+            CurrencyToken::new(
+                &Bytes::from("0x228c6fcd7376177ff0cff304043f461189752750"),
+                "BLITZ",
+                9,
+                500,
+                &[Some(66_960)],
+                Chain::Ethereum,
+                50,
+            ),
+            CurrencyToken::new(
+                &Bytes::from("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                "WETH",
+                18,
+                0,
+                &[Some(29_962)],
+                Chain::Ethereum,
+                100,
+            ),
+        ];
         gw.expect_get_token_owners()
             .returning(|_, _, _| {
                 Box::pin(async move {
-                    Ok(HashMap::from([(
-                        Bytes::from("0x45804880de22913dafe09f4980848ece6ecbaf78"),
+                    Ok(HashMap::from([
                         (
-                            "0xe25a329d385f77df5d4ed56265babe2b99a5436e".to_string(),
-                            Bytes::from("0x0186a0"),
+                            Bytes::from("0x228c6fcd7376177ff0cff304043f461189752750"),
+                            (
+                                "0x7ec8e94a9b379f6b90ee5af7b9a78624280b50ea".to_string(),
+                                Bytes::from("0x0186a0"),
+                            ),
                         ),
-                    )]))
+                        (
+                            Bytes::from("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                            (
+                                "0x7ec8e94a9b379f6b90ee5af7b9a78624280b50ea".to_string(),
+                                Bytes::from("0x0186a0"),
+                            ),
+                        ),
+                    ]))
                 })
             });
         gw.expect_get_protocol_components()
@@ -224,11 +260,14 @@ mod test {
                 Box::pin(async move {
                     Ok(WithTotal {
                         entity: vec![ProtocolComponent::new(
-                            "0xe25a329d385f77df5d4ed56265babe2b99a5436e",
+                            "0x7ec8e94a9b379f6b90ee5af7b9a78624280b50ea",
                             "uniswap_v2",
                             "pool",
                             Chain::Ethereum,
-                            vec![Bytes::from("0x45804880de22913dafe09f4980848ece6ecbaf78")],
+                            vec![
+                                Bytes::from("0x228c6fcd7376177ff0cff304043f461189752750"),
+                                Bytes::from("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+                            ],
                             vec![],
                             HashMap::new(),
                             ChangeType::Creation,
