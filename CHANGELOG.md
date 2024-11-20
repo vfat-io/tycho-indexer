@@ -1,3 +1,10 @@
+## [0.42.1](https://github.com/propeller-heads/tycho-indexer/compare/0.42.0...0.42.1) (2024-11-20)
+
+
+### Bug Fixes
+
+* fix token analysis cronjob not setting quality for good tokens ([e0470dd](https://github.com/propeller-heads/tycho-indexer/commit/e0470dd0a97ea209d6789822ed80879e4311df6d))
+
 ## [0.42.0](https://github.com/propeller-heads/tycho-indexer/compare/0.41.1...0.42.0) (2024-11-19)
 
 
