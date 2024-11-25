@@ -1,3 +1,11 @@
+## [0.42.2](https://github.com/propeller-heads/tycho-indexer/compare/0.42.1...0.42.2) (2024-11-25)
+
+
+### Bug Fixes
+
+* **rpc:** add buffer lookup for version given as block hash ([8fd6a86](https://github.com/propeller-heads/tycho-indexer/commit/8fd6a86eef8a328ef2ea625d71144e27af1529c9))
+* **rpc:** add buffer lookup for version given as block hash ([#435](https://github.com/propeller-heads/tycho-indexer/issues/435)) ([a9672ad](https://github.com/propeller-heads/tycho-indexer/commit/a9672ad0e92dcc5af2f04c452e48e9007088a572))
+
 ## [0.42.1](https://github.com/propeller-heads/tycho-indexer/compare/0.42.0...0.42.1) (2024-11-20)
 
 
