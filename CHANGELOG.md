@@ -1,3 +1,11 @@
+## [0.42.3](https://github.com/propeller-heads/tycho-indexer/compare/0.42.2...0.42.3) (2024-11-26)
+
+
+### Bug Fixes
+
+* **client:** remove hardcoded tycho host url ([2d9b1e1](https://github.com/propeller-heads/tycho-indexer/commit/2d9b1e1cda595c4a1329fcdd478bd2e57d77a260))
+* **client:** remove hardcoded Tycho host url ([#449](https://github.com/propeller-heads/tycho-indexer/issues/449)) ([0181a1e](https://github.com/propeller-heads/tycho-indexer/commit/0181a1ef8c76a747e2192443525feb91973b155d))
+
 ## [0.42.2](https://github.com/propeller-heads/tycho-indexer/compare/0.42.1...0.42.2) (2024-11-25)
 
 
