@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -54,13 +54,13 @@ struct SharedState {
     last_synced_block: Option<Header>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct ComponentWithState {
     pub state: ResponseProtocolState,
     pub component: ProtocolComponent,
 }
 
-#[derive(Clone, PartialEq, Debug, Default, Serialize)]
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct Snapshot {
     states: HashMap<String, ComponentWithState>,
     vm_storage: HashMap<Bytes, ResponseAccount>,
@@ -81,7 +81,7 @@ impl Snapshot {
     }
 }
 
-#[derive(Clone, PartialEq, Debug, Default, Serialize)]
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct StateSyncMessage {
     /// The block information for this update.
     pub header: Header,
