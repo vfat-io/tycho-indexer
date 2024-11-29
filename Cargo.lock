@@ -6671,7 +6671,7 @@ dependencies = [
 
 [[package]]
 name = "tycho-client"
-version = "0.42.3"
+version = "0.43.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6710,7 +6710,7 @@ dependencies = [
 
 [[package]]
 name = "tycho-core"
-version = "0.42.3"
+version = "0.43.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6738,7 +6738,7 @@ dependencies = [
 
 [[package]]
 name = "tycho-ethereum"
-version = "0.42.3"
+version = "0.43.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6765,7 +6765,7 @@ dependencies = [
 
 [[package]]
 name = "tycho-indexer"
-version = "0.42.3"
+version = "0.43.0"
 dependencies = [
  "actix",
  "actix-rt",
@@ -6826,7 +6826,7 @@ dependencies = [
 
 [[package]]
 name = "tycho-storage"
-version = "0.42.3"
+version = "0.43.0"
 dependencies = [
  "async-trait",
  "chrono",

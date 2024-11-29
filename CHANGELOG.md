@@ -1,3 +1,11 @@
+## [0.43.0](https://github.com/propeller-heads/tycho-indexer/compare/0.42.3...0.43.0) (2024-11-29)
+
+
+### Features
+
+* Allow FeedMsg to be deserialized. ([f8d7655](https://github.com/propeller-heads/tycho-indexer/commit/f8d765554194ddd222e4c6f07811e8c99700615a))
+* Allow FeedMsg to be deserialized. ([#451](https://github.com/propeller-heads/tycho-indexer/issues/451)) ([5d22803](https://github.com/propeller-heads/tycho-indexer/commit/5d228037843eb71555bb4478ca17a47e0ab996b7))
+
 ## [0.42.3](https://github.com/propeller-heads/tycho-indexer/compare/0.42.2...0.42.3) (2024-11-26)
 
 
