@@ -1,3 +1,11 @@
+## [0.44.0](https://github.com/propeller-heads/tycho-indexer/compare/0.43.0...0.44.0) (2024-12-06)
+
+
+### Features
+
+* add metrics exporter and expose /metrics endpoint ([ff247c7](https://github.com/propeller-heads/tycho-indexer/commit/ff247c7a1b3e01c347bc66899be154b8143d4cfc))
+* set up metrics exporter ([#453](https://github.com/propeller-heads/tycho-indexer/issues/453)) ([c426cd3](https://github.com/propeller-heads/tycho-indexer/commit/c426cd3e7588e62286d9cfc86c2d2e55204ff6fa))
+
 ## [0.43.0](https://github.com/propeller-heads/tycho-indexer/compare/0.42.3...0.43.0) (2024-11-29)
 
 
