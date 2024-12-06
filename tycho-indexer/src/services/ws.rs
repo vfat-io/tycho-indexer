@@ -10,7 +10,7 @@ use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use futures03::executor::block_on;
-use metrics::gauge;
+use metrics::{counter, gauge};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -118,6 +118,7 @@ impl WsActor {
             // Check client heartbeats
             if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
                 warn!("Websocket Client heartbeat failed, disconnecting!");
+                counter!("websocket_connections_dropped", "reason" => "timeout").increment(1);
                 ctx.stop();
                 return;
             }
@@ -229,7 +230,7 @@ impl Actor for WsActor {
     fn started(&mut self, ctx: &mut Self::Context) {
         info!("Websocket connection established");
 
-        gauge!("websocket_connections").increment(1);
+        gauge!("websocket_connections_active").increment(1);
 
         // Start the heartbeat
         self.heartbeat(ctx);
@@ -239,7 +240,7 @@ impl Actor for WsActor {
     fn stopped(&mut self, ctx: &mut Self::Context) {
         info!("Websocket connection closed");
 
-        gauge!("websocket_connections").decrement(1);
+        gauge!("websocket_connections_active").decrement(1);
 
         // Close all remaining subscriptions
         for (subscription_id, handle) in self.subscriptions.drain() {
@@ -344,6 +345,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsActor {
             }
             Err(err) => {
                 error!(error = %err, "Failed to receive message from websocket");
+                counter!("websocket_connections_dropped", "reason" => "network_error").increment(1);
                 ctx.stop()
             }
             _ => (),
