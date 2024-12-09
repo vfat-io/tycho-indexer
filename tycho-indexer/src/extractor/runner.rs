@@ -133,6 +133,7 @@ impl ExtractorRunner {
             runtime_handle,
         }
     }
+
     pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
         let runtime = self
             .runtime_handle
