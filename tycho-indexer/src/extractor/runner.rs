@@ -4,7 +4,7 @@ use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::Client;
-use metrics::histogram;
+use metrics::{gauge, histogram};
 use prost::Message;
 use serde::Deserialize;
 use tokio::{
@@ -174,6 +174,7 @@ impl ExtractorRunner {
                             Some(Ok(BlockResponse::New(data))) => {
                                 let block_number = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 tracing::Span::current().record("block_number", block_number);
+                                gauge!("extractor_current_block", "extractor_id" => id.to_string()).set(block_number as f64);
 
                                 // Start measuring block processing time
                                 let start_time = std::time::Instant::now();
