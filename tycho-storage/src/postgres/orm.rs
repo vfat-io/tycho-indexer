@@ -551,7 +551,6 @@ pub struct NewProtocolComponent {
 }
 
 impl NewProtocolComponent {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         external_id: &str,
         chain_id: i64,

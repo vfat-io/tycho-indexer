@@ -208,7 +208,6 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(hash: Bytes, block_hash: Bytes, from: Bytes, to: Option<Bytes>, index: u64) -> Self {
         Self { hash, block_hash, from, to, index }
     }
@@ -360,7 +359,6 @@ pub struct AccountUpdate {
 }
 
 impl AccountUpdate {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         address: Bytes,
         chain: Chain,
