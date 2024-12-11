@@ -528,6 +528,7 @@ impl ExtractorBuilder {
             self.config.start_block,
             self.config.stop_block.unwrap_or(0) as u64,
             self.final_block_only,
+            extractor.get_id().to_string(),
         );
 
         let id = extractor.get_id();
