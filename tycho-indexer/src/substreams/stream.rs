@@ -1,14 +1,15 @@
 use std::{
+    cmp::max,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Error};
 use async_stream::try_stream;
 use futures03::{Stream, StreamExt};
-use metrics::counter;
+use metrics::{counter, gauge};
 use once_cell::sync::Lazy;
 use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
@@ -103,6 +104,14 @@ fn stream_blocks(
                     for await response in stream {
                         match process_substreams_response(response).await {
                             BlockProcessedResult::BlockScopedData(block_scoped_data) => {
+                                if let Some(block) = block_scoped_data.clock.clone() {
+                                    if let Some(block_ts) = block.timestamp {
+                                        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards!?").as_secs();
+                                        let lag = max(now - block_ts.seconds as u64, 0);
+                                        gauge!("substreams_lag_seconds", "extractor" => extractor_id.clone()).set(lag as f64);
+                                    }
+                                };
+
                                 // Reset backoff because we got a good value from the stream
                                 backoff = DEFAULT_BACKOFF.clone();
 
