@@ -701,10 +701,10 @@ pub async fn contract_state<G: Gateway>(
     tracing::Span::current().record("page", body.pagination.page);
     tracing::Span::current().record("page.size", body.pagination.page_size);
     tracing::Span::current().record("protocol.system", &body.protocol_system);
-    counter!("rpc_requests_total", "endpoint" => "contract_state").increment(1);
+    counter!("rpc_requests", "endpoint" => "contract_state").increment(1);
 
     if body.pagination.page_size > 100 {
-        counter!("rpc_requests_failed_total", "endpoint" => "contract_state", "status" => "400")
+        counter!("rpc_requests_failed", "endpoint" => "contract_state", "status" => "400")
             .increment(1);
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 100.");
     }
@@ -720,7 +720,8 @@ pub async fn contract_state<G: Gateway>(
         Err(err) => {
             error!(error = %err, ?body, "Error while getting contract state.");
             let status = err.status_code().as_u16().to_string();
-            counter!("rpc_requests_failed_total", "endpoint" => "contract_state", "status" => status).increment(1);
+            counter!("rpc_requests_failed", "endpoint" => "contract_state", "status" => status)
+                .increment(1);
             HttpResponse::from_error(err)
         }
     }
@@ -745,11 +746,10 @@ pub async fn tokens<G: Gateway>(
     // Tracing and metrics
     tracing::Span::current().record("page", body.pagination.page);
     tracing::Span::current().record("page.size", body.pagination.page_size);
-    counter!("rpc_requests_total", "endpoint" => "tokens").increment(1);
+    counter!("rpc_requests", "endpoint" => "tokens").increment(1);
 
     if body.pagination.page_size > 3000 {
-        counter!("rpc_requests_failed_total", "endpoint" => "tokens", "status" => "400")
-            .increment(1);
+        counter!("rpc_requests_failed", "endpoint" => "tokens", "status" => "400").increment(1);
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 3000.");
     }
 
@@ -764,7 +764,7 @@ pub async fn tokens<G: Gateway>(
         Err(err) => {
             error!(error = %err, ?body, "Error while getting tokens.");
             let status = err.status_code().as_u16().to_string();
-            counter!("rpc_requests_failed_total", "endpoint" => "tokens", "status" => status)
+            counter!("rpc_requests_failed", "endpoint" => "tokens", "status" => status)
                 .increment(1);
             HttpResponse::from_error(err)
         }
@@ -791,10 +791,10 @@ pub async fn protocol_components<G: Gateway>(
     tracing::Span::current().record("page", body.pagination.page);
     tracing::Span::current().record("page.size", body.pagination.page_size);
     tracing::Span::current().record("protocol.system", &body.protocol_system);
-    counter!("rpc_requests_total", "endpoint" => "protocol_components").increment(1);
+    counter!("rpc_request", "endpoint" => "protocol_components").increment(1);
 
     if body.pagination.page_size > 500 {
-        counter!("rpc_requests_failed_total", "endpoint" => "protocol_components", "status" => "400")
+        counter!("rpc_requests_failed", "endpoint" => "protocol_components", "status" => "400")
             .increment(1);
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 500.");
     }
@@ -810,7 +810,7 @@ pub async fn protocol_components<G: Gateway>(
         Err(err) => {
             error!(error = %err, ?body, "Error while getting tokens.");
             let status = err.status_code().as_u16().to_string();
-            counter!("rpc_requests_failed_total", "endpoint" => "protocol_components", "status" => status).increment(1);
+            counter!("rpc_requests_failed", "endpoint" => "protocol_components", "status" => status).increment(1);
             HttpResponse::from_error(err)
         }
     }
@@ -835,10 +835,10 @@ pub async fn protocol_state<G: Gateway>(
     tracing::Span::current().record("page", body.pagination.page);
     tracing::Span::current().record("page.size", body.pagination.page_size);
     tracing::Span::current().record("protocol.system", &body.protocol_system);
-    counter!("rpc_requests_total", "endpoint" => "protocol_state").increment(1);
+    counter!("rpc_requests", "endpoint" => "protocol_state").increment(1);
 
     if body.pagination.page_size > 100 {
-        counter!("rpc_requests_failed_total", "endpoint" => "protocol_state", "status" => "400")
+        counter!("rpc_requests_failed", "endpoint" => "protocol_state", "status" => "400")
             .increment(1);
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 100.");
     }
@@ -854,7 +854,8 @@ pub async fn protocol_state<G: Gateway>(
         Err(err) => {
             error!(error = %err, ?body, "Error while getting protocol states.");
             let status = err.status_code().as_u16().to_string();
-            counter!("rpc_requests_failed_total", "endpoint" => "protocol_state", "status" => status).increment(1);
+            counter!("rpc_requests_failed", "endpoint" => "protocol_state", "status" => status)
+                .increment(1);
             HttpResponse::from_error(err)
         }
     }
@@ -871,7 +872,7 @@ pub async fn protocol_state<G: Gateway>(
     ),
 )]
 pub async fn health() -> HttpResponse {
-    counter!("rpc_requests_total", "endpoint" => "health").increment(1);
+    counter!("rpc_requests", "endpoint" => "health").increment(1);
     HttpResponse::Ok().json(dto::Health::Ready)
 }
 

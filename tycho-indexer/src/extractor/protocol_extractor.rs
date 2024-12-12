@@ -193,7 +193,7 @@ where
             state.last_report_ts = now;
             state.last_report_block_number = block.number;
             gauge!(
-                "extractor_sync_time_remaining",
+                "extractor_sync_remaining_minutes",
                 "extractor" => self.get_id().to_string(),
             )
             .set(time_remaining.num_minutes() as f64);
