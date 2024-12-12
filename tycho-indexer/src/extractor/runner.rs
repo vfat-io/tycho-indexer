@@ -368,7 +368,6 @@ impl ExtractorBuilder {
         }
     }
 
-    #[allow(dead_code)]
     pub fn endpoint_url(mut self, val: &str) -> Self {
         val.clone_into(&mut self.endpoint_url);
         self
@@ -384,7 +383,6 @@ impl ExtractorBuilder {
         self
     }
 
-    #[allow(dead_code)]
     pub fn token(mut self, val: &str) -> Self {
         val.clone_into(&mut self.token);
         self
@@ -584,13 +582,11 @@ async fn download_file_from_s3(
 
 #[cfg(test)]
 mod test {
-    use serde::{Deserialize, Serialize};
-    use tracing::info_span;
-
     use super::*;
 
-    use crate::extractor::MockExtractor;
+    use serde::Serialize;
 
+    use crate::extractor::MockExtractor;
     use tycho_core::models::NormalisedMessage;
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -601,12 +597,6 @@ mod test {
     impl std::fmt::Display for DummyMessage {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "{}", self.extractor_id)
-        }
-    }
-
-    impl DummyMessage {
-        pub fn new(extractor_id: ExtractorIdentity) -> Self {
-            Self { extractor_id }
         }
     }
 
@@ -622,45 +612,6 @@ mod test {
 
         fn as_any(&self) -> &dyn std::any::Any {
             self
-        }
-    }
-
-    pub struct MyMessageSender {
-        extractor_id: ExtractorIdentity,
-    }
-
-    impl MyMessageSender {
-        #[allow(dead_code)]
-        pub fn new(extractor_id: ExtractorIdentity) -> Self {
-            Self { extractor_id }
-        }
-    }
-
-    #[async_trait]
-    impl MessageSender for MyMessageSender {
-        async fn subscribe(&self) -> Result<Receiver<ExtractorMsg>, SendError<ControlMessage>> {
-            let (tx, rx) = mpsc::channel::<ExtractorMsg>(1);
-            let extractor_id = self.extractor_id.clone();
-
-            // Spawn a task that sends a DummyMessage every 100ms
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    debug!("Sending DummyMessage");
-                    let dummy_message = DummyMessage::new(extractor_id.clone());
-                    if tx
-                        .send(Arc::new(dummy_message))
-                        .await
-                        .is_err()
-                    {
-                        debug!("Receiver dropped");
-                        break;
-                    }
-                }
-                .instrument(info_span!("DummyMessageSender", extractor_id = %extractor_id))
-            });
-
-            Ok(rx)
         }
     }
 

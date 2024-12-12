@@ -30,7 +30,6 @@ impl ComponentFilter {
         ComponentFilter { variant: ComponentFilterVariant::MinimumTVLRange((min_tvl, min_tvl)) }
     }
 
-    #[allow(non_snake_case)]
     pub fn with_tvl_range(remove_tvl_threshold: f64, add_tvl_threshold: f64) -> ComponentFilter {
         ComponentFilter {
             variant: ComponentFilterVariant::MinimumTVLRange((

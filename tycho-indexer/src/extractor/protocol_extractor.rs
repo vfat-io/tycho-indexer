@@ -201,7 +201,6 @@ where
     }
 
     #[instrument(skip_all, fields(chain = % self.chain, name = % self.name, block_number = % msg.block.number))]
-    #[allow(clippy::mutable_key_type)]
     async fn handle_tvl_changes(
         &self,
         msg: &mut BlockAggregatedChanges,
@@ -636,9 +635,8 @@ where
         return Ok(Some(Arc::new(changes)));
     }
 
-    // Clippy thinks that tuple with Bytes are a mutable type.
     #[instrument(skip_all, fields(target_hash, target_number))]
-    #[allow(clippy::mutable_key_type)]
+    #[allow(clippy::mutable_key_type)] // Clippy thinks that tuple with Bytes are a mutable type.
     async fn handle_revert(
         &self,
         inp: BlockUndoSignal,

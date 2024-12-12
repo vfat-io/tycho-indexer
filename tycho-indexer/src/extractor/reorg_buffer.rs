@@ -268,7 +268,7 @@ pub(crate) trait StateUpdateBufferEntry: std::fmt::Debug {
         keys: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
     ) -> HashMap<(AccountStateIdType, AccountStateKeyType), AccountStateValueType>;
 
-    #[allow(clippy::mutable_key_type)] // Clippy thinks that tuple with Bytes are a mutable type.
+    #[allow(clippy::mutable_key_type)]
     fn get_filtered_balance_update(
         &self,
         keys: Vec<(&String, &Bytes)>,
@@ -319,10 +319,7 @@ where
 
     /// Looks up buffered account state updates for the provided keys. Returns a map of updates and
     /// a list of keys for which updates were not found in the buffered blocks.
-    ///
-    /// Clippy thinks it is a complex type that is difficult to read
-    #[allow(clippy::type_complexity)]
-    #[allow(clippy::mutable_key_type)]
+    #[allow(clippy::mutable_key_type, clippy::type_complexity)]
     pub fn lookup_account_state(
         &self,
         keys: &[(&AccountStateIdType, &AccountStateKeyType)],
@@ -360,8 +357,7 @@ where
     /// Looks up buffered balance updates for the provided component and token keys. Returns a map
     /// where each key is a component ID associated with its token balances, and a list of
     /// component-token pairs for which no updates were found.
-    #[allow(clippy::mutable_key_type)] // Clippy thinks that tuple with Bytes are a mutable type.
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::mutable_key_type)]
     pub fn lookup_balances(
         &self,
         keys: &[(&ComponentId, &Bytes)],

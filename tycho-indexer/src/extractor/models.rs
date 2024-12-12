@@ -711,6 +711,7 @@ mod test {
         ];
 
         #[allow(clippy::mutable_key_type)]
+        // Clippy thinks that hashmaps with Bytes are a mutable type.
         let filtered = BlockChanges::from(block).get_filtered_account_state_update(keys);
 
         assert_eq!(
@@ -739,7 +740,7 @@ mod test {
         ];
 
         #[allow(clippy::mutable_key_type)]
-        // Clippy thinks that tuple with Bytes are a mutable type.
+        // Clippy thinks that hashmaps with Bytes are a mutable type.
         let filtered = BlockChanges::from(block).get_filtered_balance_update(keys);
 
         assert_eq!(
@@ -799,7 +800,7 @@ mod test {
         ];
 
         #[allow(clippy::mutable_key_type)]
-        // Clippy thinks that tuple with Bytes are a mutable type.
+        // Clippy thinks that hashmaps with Bytes are a mutable type.
         let filtered = BlockChanges::from(block).get_filtered_balance_update(keys);
 
         assert_eq!(

@@ -226,14 +226,11 @@ pub enum VersionKind {
     /// executed in that block.
     #[default]
     Last,
-
     /// Represents the initial state of a specific block. In other words,
     /// it is the state before any transaction has been executed within that block.
-    #[allow(dead_code)]
     First,
     /// Represents a specific transactions indexed position within a block.
     /// It includes the state after executing the transaction at that index.
-    #[allow(dead_code)]
     Index(i64),
 }
 
