@@ -50,7 +50,6 @@ use tycho_storage::postgres::{builder::GatewayBuilder, cache::CachedGateway};
 mod ot;
 
 // TODO: We need to use `use pretty_assertions::{assert_eq, assert_ne}` per test module.
-#[allow(unused_imports)]
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;

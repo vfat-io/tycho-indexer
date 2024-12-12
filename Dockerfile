@@ -1,4 +1,4 @@
-FROM rust:1.74-bookworm AS chef
+FROM rust:1.78-bookworm AS chef
 ARG TARGETPLATFORM=linux/amd64
 WORKDIR /build
 RUN apt-get update && apt-get install -y libpq-dev jq
@@ -12,7 +12,7 @@ RUN ARCH=$(echo $TARGETPLATFORM | sed -e 's/\//_/g') && \
 RUN cargo install cargo-workspaces
 RUN cargo install cargo-chef
 COPY rust-toolchain.toml .
-RUN rustup update 1.74
+RUN rustup update 1.78
 
 FROM chef AS planner
 COPY . .

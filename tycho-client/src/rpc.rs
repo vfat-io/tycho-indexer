@@ -56,7 +56,6 @@ pub trait RPCClient: Send + Sync {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError>;
 
-    #[allow(clippy::too_many_arguments)]
     async fn get_contract_state_paginated(
         &self,
         chain: Chain,

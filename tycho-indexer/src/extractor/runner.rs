@@ -4,6 +4,7 @@ use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::Client;
+use metrics::{gauge, histogram};
 use prost::Message;
 use serde::Deserialize;
 use tokio::{
@@ -132,6 +133,7 @@ impl ExtractorRunner {
             runtime_handle,
         }
     }
+
     pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
         let runtime = self
             .runtime_handle
@@ -173,6 +175,11 @@ impl ExtractorRunner {
                             Some(Ok(BlockResponse::New(data))) => {
                                 let block_number = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 tracing::Span::current().record("block_number", block_number);
+                                gauge!("extractor_current_block_number", "extractor_id" => id.to_string()).set(block_number as f64);
+
+                                // Start measuring block processing time
+                                let start_time = std::time::Instant::now();
+
                                 // TODO: change interface to take a reference to avoid this clone
                                 match self.extractor.handle_tick_scoped_data(data.clone()).await {
                                     Ok(Some(msg)) => {
@@ -188,6 +195,9 @@ impl ExtractorRunner {
                                         return Err(err);
                                     }
                                 }
+
+                                let duration = start_time.elapsed();
+                                histogram!("block_processing_time_ms").record(duration.as_millis() as f64);
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
                                 info!(block=?&undo_signal.last_valid_block,  "Revert requested!");
@@ -518,6 +528,7 @@ impl ExtractorBuilder {
             self.config.start_block,
             self.config.stop_block.unwrap_or(0) as u64,
             self.final_block_only,
+            extractor.get_id().to_string(),
         );
 
         let id = extractor.get_id();
