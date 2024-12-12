@@ -1,3 +1,11 @@
+## [0.45.1](https://github.com/propeller-heads/tycho-indexer/compare/0.45.0...0.45.1) (2024-12-12)
+
+
+### Bug Fixes
+
+* update SQL script to prune `transaction` table ([e43094a](https://github.com/propeller-heads/tycho-indexer/commit/e43094a529ea41c3a739ad458599bfc7eb627755))
+* update SQL script to prune `transaction` table ([#455](https://github.com/propeller-heads/tycho-indexer/issues/455)) ([34ec325](https://github.com/propeller-heads/tycho-indexer/commit/34ec32557a5647bc828015e0813b6297ef9b4dc0))
+
 ## [0.45.0](https://github.com/propeller-heads/tycho-indexer/compare/0.44.0...0.45.0) (2024-12-12)
 
 
