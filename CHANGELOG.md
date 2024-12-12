@@ -1,3 +1,26 @@
+## [0.45.0](https://github.com/propeller-heads/tycho-indexer/compare/0.44.0...0.45.0) (2024-12-12)
+
+
+### Features
+
+* add active websocket connections metric ([94f0a44](https://github.com/propeller-heads/tycho-indexer/commit/94f0a44c79a805c2075c30a219c3549811452ea4))
+* add block processing time metric ([dc83c5e](https://github.com/propeller-heads/tycho-indexer/commit/dc83c5ea279c7d0140c65ba8404dcda60b9268a3))
+* add dropped websocket connections metric ([5349418](https://github.com/propeller-heads/tycho-indexer/commit/53494184d16647c16fb6295e71fa6a45349ab57b))
+* add metric for extractors current block ([ce89671](https://github.com/propeller-heads/tycho-indexer/commit/ce896718605054fc1073f1c4281c8b41d717b51b))
+* add remaining sync time metric ([49de728](https://github.com/propeller-heads/tycho-indexer/commit/49de7281ae4f686b5332fdeaf32d73efc728c6e1))
+* add RPC cache hits and misses count metrics ([10cef88](https://github.com/propeller-heads/tycho-indexer/commit/10cef881e903a1fb233df9dca0dca00fd370010a))
+* add RPC failed requests count metric ([1dd9f95](https://github.com/propeller-heads/tycho-indexer/commit/1dd9f950ea7e8982f6b852f8f21597b106d04049))
+* add RPC requests count metric ([571af0f](https://github.com/propeller-heads/tycho-indexer/commit/571af0fae7753abdf04eb1ca39f731224dff837d))
+* add substream failure metrics ([258acb9](https://github.com/propeller-heads/tycho-indexer/commit/258acb90b1f5cfedc5f908ed7b526846544c72e1))
+* add substreams lag metric ([485ea9c](https://github.com/propeller-heads/tycho-indexer/commit/485ea9cbf5d6b1d9508560ad33e072b2136d620f))
+* add tycho-indexer metrics  ([#454](https://github.com/propeller-heads/tycho-indexer/issues/454)) ([13f780f](https://github.com/propeller-heads/tycho-indexer/commit/13f780fc4a5af6e5d0aa33987b94104c8f816044))
+
+
+### Bug Fixes
+
+* improve metric naming ([ddfedab](https://github.com/propeller-heads/tycho-indexer/commit/ddfedabdf85522b99cb8b9f42bc66001a5e1afef))
+* improve substream metric labels ([3bfbf37](https://github.com/propeller-heads/tycho-indexer/commit/3bfbf378ce7f1feeed5dcee8601514b730d1a28e))
+
 ## [0.44.0](https://github.com/propeller-heads/tycho-indexer/compare/0.43.0...0.44.0) (2024-12-06)
 
 
