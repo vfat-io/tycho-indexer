@@ -1584,6 +1584,7 @@ impl PartitionedVersionedRow for NewSlot {
             .iter()
             .zip(slots.iter())
             .collect::<HashSet<_>>();
+
         Ok(contract_storage::table
             .select(ContractStorage::as_select())
             .into_boxed()

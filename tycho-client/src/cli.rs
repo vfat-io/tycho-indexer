@@ -168,7 +168,6 @@ pub async fn run_cli() {
     run(exchanges, args).await;
 }
 
-#[allow(deprecated)]
 async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     //TODO: remove "or args.auth_key.is_none()" when our internal client use the no_tls flag
     let (tycho_ws_url, tycho_rpc_url) = if args.no_tls || args.auth_key.is_none() {

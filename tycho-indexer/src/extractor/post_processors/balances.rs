@@ -96,7 +96,6 @@ pub fn transcode_usv2_balances(mut changes: BlockChanges) -> BlockChanges {
     changes
 }
 
-#[allow(deprecated)]
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, str::FromStr};

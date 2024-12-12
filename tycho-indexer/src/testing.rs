@@ -43,7 +43,6 @@ mock! {
     }
 
     impl ContractStateGateway for Gateway {
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn get_contract<'life0, 'life1, 'life2, 'async_trait>(
             &'life0 self,
             id: &'life1 ContractId,
@@ -62,7 +61,7 @@ mock! {
             'life2: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        #[allow(clippy::type_complexity)]
         fn get_contracts<'life0, 'life1, 'life2, 'life3, 'life4, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
@@ -85,7 +84,6 @@ mock! {
             'life4: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn upsert_contract<'life0, 'life1, 'async_trait>(
             &'life0 self,
             new: &'life1 Account,
@@ -101,7 +99,6 @@ mock! {
             'life1: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn update_contracts<'life0, 'life1, 'async_trait>(
             &'life0 self,
             new: &'life1 [(TxHash, AccountDelta)],
@@ -117,7 +114,6 @@ mock! {
             'life1: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn delete_contract<'life0, 'life1, 'life2, 'async_trait>(
             &'life0 self,
             id: &'life1 ContractId,
@@ -135,7 +131,6 @@ mock! {
             'life2: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn get_accounts_delta<'life0, 'life1, 'life2, 'life3, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
@@ -158,8 +153,7 @@ mock! {
     }
 
     impl ProtocolGateway for Gateway {
-
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        #[allow(clippy::type_complexity)]
         fn get_protocol_components<'life0, 'life1, 'life2, 'life3, 'life4, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
@@ -184,7 +178,7 @@ mock! {
             'life4: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        #[allow(clippy::type_complexity)]
         fn get_token_owners<'life0, 'life1, 'life2, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
@@ -206,7 +200,6 @@ mock! {
             'life2: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn add_protocol_components<'life0, 'life1, 'async_trait>(
             &'life0 self,
             new: &'life1 [ProtocolComponent],
@@ -222,7 +215,6 @@ mock! {
             'life1: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn delete_protocol_components<'life0, 'life1, 'async_trait>(
             &'life0 self,
             to_delete: &'life1 [ProtocolComponent],
@@ -239,7 +231,6 @@ mock! {
             'life1: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn add_protocol_types<'life0, 'life1, 'async_trait>(
             &'life0 self,
             new_protocol_types: &'life1 [ProtocolType],
@@ -255,7 +246,7 @@ mock! {
             'life1: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        #[allow(clippy::type_complexity)]
         fn get_protocol_states<'life0, 'life1, 'life2, 'life3, 'life4, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
@@ -281,7 +272,6 @@ mock! {
             'life4: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn update_protocol_states<'life0, 'life1, 'async_trait>(
             &'life0 self,
             new: &'life1 [(TxHash, ProtocolComponentStateDelta)],
@@ -297,7 +287,7 @@ mock! {
             'life1: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        #[allow(clippy::type_complexity)]
         fn get_tokens<'life0, 'life1, 'life2, 'life3, 'async_trait>(
             &'life0 self,
             chain: Chain,
@@ -319,7 +309,6 @@ mock! {
             'life3: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn add_component_balances<'life0, 'life1, 'async_trait>(
             &'life0 self,
             component_balances: &'life1 [ComponentBalance],
@@ -335,7 +324,6 @@ mock! {
             'life1: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn add_tokens<'life0, 'life1, 'async_trait>(
             &'life0 self,
             tokens: &'life1 [CurrencyToken],
@@ -351,7 +339,6 @@ mock! {
             'life1: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn update_tokens<'life0, 'life1, 'async_trait>(
             &'life0 self,
             tokens: &'life1 [CurrencyToken],
@@ -367,7 +354,6 @@ mock! {
             'life1: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn get_protocol_states_delta<'life0, 'life1, 'life2, 'life3, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
@@ -390,7 +376,6 @@ mock! {
             'life3: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn get_balance_deltas<'life0, 'life1, 'life2, 'life3, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
@@ -413,7 +398,7 @@ mock! {
             'life3: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        #[allow(clippy::type_complexity)]
         fn get_balances<'life0, 'life1, 'life2, 'life3, 'life4, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
@@ -434,7 +419,7 @@ mock! {
             'life4: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+        #[allow(clippy::type_complexity)]
         fn get_token_prices<'life0, 'life1, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
@@ -450,7 +435,6 @@ mock! {
             'life1: 'async_trait,
             Self: 'async_trait;
 
-        #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
         fn upsert_component_tvl<'life0, 'life1, 'life2, 'async_trait>(
             &'life0 self,
             chain: &'life1 Chain,
