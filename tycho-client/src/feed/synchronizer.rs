@@ -224,7 +224,7 @@ where
                 &self.extractor_id.name,
                 self.retrieve_balances,
                 &version,
-                50,
+                100,
                 4,
             )
             .await?
@@ -267,7 +267,7 @@ where
                     ids.as_slice(),
                     &self.extractor_id.name,
                     &version,
-                    50,
+                    100,
                     4,
                 )
                 .await?
