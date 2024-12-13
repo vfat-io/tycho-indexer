@@ -197,7 +197,7 @@ impl ExtractorRunner {
                                 }
 
                                 let duration = start_time.elapsed();
-                                histogram!("block_processing_time_ms").record(duration.as_millis() as f64);
+                                histogram!("block_processing_time_ms", "extractor_id" => id.to_string()).record(duration.as_millis() as f64);
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
                                 info!(block=?&undo_signal.last_valid_block,  "Revert requested!");
