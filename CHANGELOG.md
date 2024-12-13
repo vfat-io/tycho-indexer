@@ -1,3 +1,11 @@
+## [0.45.2](https://github.com/propeller-heads/tycho-indexer/compare/0.45.1...0.45.2) (2024-12-13)
+
+
+### Bug Fixes
+
+* add extractor tag to block processing time metric ([d055d29](https://github.com/propeller-heads/tycho-indexer/commit/d055d295d0134e94d28bde725183f1f97686b360))
+* add extractor tag to block processing time metric ([#458](https://github.com/propeller-heads/tycho-indexer/issues/458)) ([8305784](https://github.com/propeller-heads/tycho-indexer/commit/830578471caed1462a4e34148ade8680f00b569c))
+
 ## [0.45.1](https://github.com/propeller-heads/tycho-indexer/compare/0.45.0...0.45.1) (2024-12-12)
 
 
