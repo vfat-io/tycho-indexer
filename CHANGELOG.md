@@ -1,3 +1,11 @@
+## [0.46.0](https://github.com/propeller-heads/tycho-indexer/compare/0.45.2...0.46.0) (2024-12-16)
+
+
+### Features
+
+* **tycho-client:** increase pagination chunksize to 100 ([6c9b2da](https://github.com/propeller-heads/tycho-indexer/commit/6c9b2dac16b1f1ba999dc3028c480c908065037c))
+* **tycho-client:** increase pagination chunksize to 100 ([#459](https://github.com/propeller-heads/tycho-indexer/issues/459)) ([c8b7ac6](https://github.com/propeller-heads/tycho-indexer/commit/c8b7ac6c6d30f484d03fffb6bcde29a7a4e41b6b))
+
 ## [0.45.2](https://github.com/propeller-heads/tycho-indexer/compare/0.45.1...0.45.2) (2024-12-13)
 
 
