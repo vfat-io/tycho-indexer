@@ -1,3 +1,12 @@
+## [0.46.1](https://github.com/propeller-heads/tycho-indexer/compare/0.46.0...0.46.1) (2024-12-17)
+
+
+### Bug Fixes
+
+* improve websocket metrics with extended metadata ([51c70eb](https://github.com/propeller-heads/tycho-indexer/commit/51c70eb54c8be6500f67335a393b89b60e9f9124))
+* improve websocket metrics with extended metadata ([#460](https://github.com/propeller-heads/tycho-indexer/issues/460)) ([b8b3e1e](https://github.com/propeller-heads/tycho-indexer/commit/b8b3e1e8d5a9b966a830aed6dab18bfea72ba318))
+* remove api key metric metadata ([4c12f56](https://github.com/propeller-heads/tycho-indexer/commit/4c12f5600f2d3cdbd185b8ced5274940c9434fc3))
+
 ## [0.46.0](https://github.com/propeller-heads/tycho-indexer/compare/0.45.2...0.46.0) (2024-12-16)
 
 
