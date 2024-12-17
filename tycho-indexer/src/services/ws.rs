@@ -120,17 +120,7 @@ impl WsActor {
                     .to_string()
             })
             .unwrap_or_default();
-        let api_key = req
-            .headers()
-            .get("authorization")
-            .map(|value| {
-                value
-                    .to_str()
-                    .unwrap_or_default()
-                    .to_string()
-            })
-            .unwrap_or_default();
-        counter!("websocket_connections_metadata", "id" => ws_actor.id.to_string(), "client_version"=> user_agent.clone(), "api_key" => api_key.clone()).increment(1);
+        counter!("websocket_connections_metadata", "id" => ws_actor.id.to_string(), "client_version"=> user_agent.clone()).increment(1);
 
         ws::start(ws_actor, &req, stream)
     }
