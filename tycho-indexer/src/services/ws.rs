@@ -79,7 +79,7 @@ impl WsData {
 /// Actor handling a single WS connection
 ///
 /// This actor is responsible for:
-/// - Receiving adn forwarding messages from the extractor
+/// - Receiving and forwarding messages from the extractor
 /// - Receiving and handling commands from the client
 pub struct WsActor {
     id: Uuid,
@@ -107,7 +107,22 @@ impl WsActor {
         stream: web::Payload,
         data: web::Data<WsData>,
     ) -> Result<HttpResponse, Error> {
-        ws::start(WsActor::new(data), &req, stream)
+        let ws_actor = WsActor::new(data);
+
+        // metrics
+        let user_agent = req
+            .headers()
+            .get("user-agent")
+            .map(|value| {
+                value
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .unwrap_or_default();
+        counter!("websocket_connections_metadata", "id" => ws_actor.id.to_string(), "client_version"=> user_agent.clone()).increment(1);
+
+        ws::start(ws_actor, &req, stream)
     }
 
     /// Helper method that sends heartbeat ping to client every 5 seconds (HEARTBEAT_INTERVAL)
@@ -171,6 +186,8 @@ impl WsActor {
                         self.subscriptions
                             .insert(subscription_id, handle);
                         debug!("Added subscription to hashmap");
+                        gauge!("websocket_extractor_subscriptions_active", "subscription_id" => subscription_id.to_string()).increment(1);
+                        counter!("websocket_extractor_subscriptions_metadata", "subscription_id" => subscription_id.to_string(), "extractor" => extractor_id.to_string()).increment(1);
 
                         let message = Response::NewSubscription {
                             extractor_id: extractor_id.clone(),
@@ -211,6 +228,7 @@ impl WsActor {
             // Cancel the future of the subscription stream
             ctx.cancel_future(handle);
             debug!("Cancelled subscription future");
+            gauge!("websocket_extractor_subscriptions_active", "subscription_id" => subscription_id.to_string()).decrement(1);
 
             let message = Response::SubscriptionEnded { subscription_id };
             ctx.text(serde_json::to_string(&message).unwrap());
@@ -230,7 +248,7 @@ impl Actor for WsActor {
     fn started(&mut self, ctx: &mut Self::Context) {
         info!("Websocket connection established");
 
-        gauge!("websocket_connections_active").increment(1);
+        gauge!("websocket_connections_active", "id" => self.id.to_string()).increment(1);
 
         // Start the heartbeat
         self.heartbeat(ctx);
@@ -240,7 +258,7 @@ impl Actor for WsActor {
     fn stopped(&mut self, ctx: &mut Self::Context) {
         info!("Websocket connection closed");
 
-        gauge!("websocket_connections_active").decrement(1);
+        gauge!("websocket_connections_active", "id" => self.id.to_string()).decrement(1);
 
         // Close all remaining subscriptions
         for (subscription_id, handle) in self.subscriptions.drain() {
