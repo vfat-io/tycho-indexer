@@ -50,6 +50,9 @@ jobs:
       aws_region: ${{ secrets.AWS_REGION }}
       repository_url: ${{ secrets.REPOSITORY_URL }}
       domain_owner: ${{ secrets.DOMAIN_OWNER }}
+      aws_old_account_id: ${{ secrets.AWS_OLD_ACCOUNT_ID }}
+      aws_new_account_id: ${{ secrets.AWS_NEW_ACCOUNT_ID }}
+      new_repository_url: ${{ secrets.NEW_REPOSITORY_URL }}
 
   promote-to-dev:
     needs:
