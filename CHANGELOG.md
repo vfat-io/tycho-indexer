@@ -1,3 +1,12 @@
+## [0.46.3](https://github.com/propeller-heads/tycho-indexer/compare/0.46.2...0.46.3) (2024-12-18)
+
+
+### Bug Fixes
+
+* rpc_requests metrics typo ([5cc490c](https://github.com/propeller-heads/tycho-indexer/commit/5cc490c6f6283c0c5b40bd54e17f8d5f290de3e2))
+* split chain and extractor metric labels ([f15f2e2](https://github.com/propeller-heads/tycho-indexer/commit/f15f2e2ffa17cd4f34a4a8493bdb6e8892a7789e))
+* split chain and extractor metric labels ([#463](https://github.com/propeller-heads/tycho-indexer/issues/463)) ([b98a5db](https://github.com/propeller-heads/tycho-indexer/commit/b98a5dbc74cbf76cfae8eae3d8b93a9c2c36d73a))
+
 ## [0.46.2](https://github.com/propeller-heads/tycho-indexer/compare/0.46.1...0.46.2) (2024-12-18)
 
 
