@@ -1,3 +1,11 @@
+## [0.46.2](https://github.com/propeller-heads/tycho-indexer/compare/0.46.1...0.46.2) (2024-12-18)
+
+
+### Bug Fixes
+
+* decrement active subscription on ws connection close ([329fedd](https://github.com/propeller-heads/tycho-indexer/commit/329fedda025f42d6c65da931d4a9f0af1cc7a94c))
+* decrement active subscription on ws connection close ([#462](https://github.com/propeller-heads/tycho-indexer/issues/462)) ([585ec90](https://github.com/propeller-heads/tycho-indexer/commit/585ec90fd6a62166a379e5a5a7a9e2917fd11a44))
+
 ## [0.46.1](https://github.com/propeller-heads/tycho-indexer/compare/0.46.0...0.46.1) (2024-12-17)
 
 
