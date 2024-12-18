@@ -791,7 +791,7 @@ pub async fn protocol_components<G: Gateway>(
     tracing::Span::current().record("page", body.pagination.page);
     tracing::Span::current().record("page.size", body.pagination.page_size);
     tracing::Span::current().record("protocol.system", &body.protocol_system);
-    counter!("rpc_request", "endpoint" => "protocol_components").increment(1);
+    counter!("rpc_requests", "endpoint" => "protocol_components").increment(1);
 
     if body.pagination.page_size > 500 {
         counter!("rpc_requests_failed", "endpoint" => "protocol_components", "status" => "400")

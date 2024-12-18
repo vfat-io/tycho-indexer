@@ -187,7 +187,13 @@ impl WsActor {
                             .insert(subscription_id, handle);
                         debug!("Added subscription to hashmap");
                         gauge!("websocket_extractor_subscriptions_active", "subscription_id" => subscription_id.to_string()).increment(1);
-                        counter!("websocket_extractor_subscriptions_metadata", "subscription_id" => subscription_id.to_string(), "extractor" => extractor_id.to_string()).increment(1);
+                        counter!(
+                            "websocket_extractor_subscriptions_metadata",
+                            "subscription_id" => subscription_id.to_string(),
+                            "chain"=> extractor_id.chain.to_string(),
+                            "extractor" => extractor_id.name.to_string()
+                        )
+                        .increment(1);
 
                         let message = Response::NewSubscription {
                             extractor_id: extractor_id.clone(),

@@ -192,9 +192,11 @@ where
             );
             state.last_report_ts = now;
             state.last_report_block_number = block.number;
+            let extractor_id = self.get_id();
             gauge!(
                 "extractor_sync_remaining_minutes",
-                "extractor" => self.get_id().to_string(),
+                "chain" => extractor_id.chain.to_string(),
+                "extractor" => extractor_id.name.to_string(),
             )
             .set(time_remaining.num_minutes() as f64);
         }
