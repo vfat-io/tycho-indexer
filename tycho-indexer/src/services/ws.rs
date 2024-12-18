@@ -264,6 +264,7 @@ impl Actor for WsActor {
         for (subscription_id, handle) in self.subscriptions.drain() {
             debug!(subscription_id = ?subscription_id, "Closing subscription.");
             ctx.cancel_future(handle);
+            gauge!("websocket_extractor_subscriptions_active", "subscription_id" => subscription_id.to_string()).decrement(1);
         }
     }
 }
