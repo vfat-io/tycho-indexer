@@ -175,7 +175,11 @@ impl ExtractorRunner {
                             Some(Ok(BlockResponse::New(data))) => {
                                 let block_number = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 tracing::Span::current().record("block_number", block_number);
-                                gauge!("extractor_current_block_number", "extractor_id" => id.to_string()).set(block_number as f64);
+                                gauge!(
+                                    "extractor_current_block_number", 
+                                    "chain" => id.chain.to_string(), 
+                                    "extractor" => id.name.to_string()
+                                ).set(block_number as f64);
 
                                 // Start measuring block processing time
                                 let start_time = std::time::Instant::now();
@@ -197,7 +201,11 @@ impl ExtractorRunner {
                                 }
 
                                 let duration = start_time.elapsed();
-                                histogram!("block_processing_time_ms", "extractor_id" => id.to_string()).record(duration.as_millis() as f64);
+                                histogram!(
+                                    "block_processing_time_ms", 
+                                    "chain" => id.chain.to_string(), 
+                                    "extractor" => id.name.to_string()
+                                ).record(duration.as_millis() as f64);
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
                                 info!(block=?&undo_signal.last_valid_block,  "Revert requested!");
