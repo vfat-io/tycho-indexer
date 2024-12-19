@@ -1,5 +1,4 @@
 use std::{
-    cmp::max,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -106,9 +105,9 @@ fn stream_blocks(
                             BlockProcessedResult::BlockScopedData(block_scoped_data) => {
                                 if let Some(block) = block_scoped_data.clock.clone() {
                                     if let Some(block_ts) = block.timestamp {
-                                        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards!?").as_secs();
-                                        let lag = max(now - block_ts.seconds as u64, 0);
-                                        gauge!("substreams_lag_seconds", "extractor" => extractor_id.clone()).set(lag as f64);
+                                        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards!?").as_millis();
+                                        let lag = now.saturating_sub((block_ts.seconds * 1000) as u128);
+                                        gauge!("substreams_lag_millis", "extractor" => extractor_id.clone()).set(lag as f64);
                                     }
                                 };
 
