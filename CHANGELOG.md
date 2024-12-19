@@ -1,3 +1,11 @@
+## [0.46.4](https://github.com/propeller-heads/tycho-indexer/compare/0.46.3...0.46.4) (2024-12-19)
+
+
+### Bug Fixes
+
+* calculate substream lag in millis ([5f3d503](https://github.com/propeller-heads/tycho-indexer/commit/5f3d503141f0b89c3c1ebae0f8c5f734b2b2770c))
+* calculate substream lag in millis ([#465](https://github.com/propeller-heads/tycho-indexer/issues/465)) ([07916ff](https://github.com/propeller-heads/tycho-indexer/commit/07916fffbd61f6d68eaf3609762a41fa8b5c5057))
+
 ## [0.46.3](https://github.com/propeller-heads/tycho-indexer/compare/0.46.2...0.46.3) (2024-12-18)
 
 
