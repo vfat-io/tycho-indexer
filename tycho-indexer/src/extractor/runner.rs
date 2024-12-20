@@ -4,7 +4,7 @@ use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::Client;
-use metrics::{gauge, histogram};
+use metrics::gauge;
 use prost::Message;
 use serde::Deserialize;
 use tokio::{
@@ -201,11 +201,11 @@ impl ExtractorRunner {
                                 }
 
                                 let duration = start_time.elapsed();
-                                histogram!(
+                                gauge!(
                                     "block_processing_time_ms", 
                                     "chain" => id.chain.to_string(), 
                                     "extractor" => id.name.to_string()
-                                ).record(duration.as_millis() as f64);
+                                ).set(duration.as_millis() as f64);
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
                                 info!(block=?&undo_signal.last_valid_block,  "Revert requested!");
