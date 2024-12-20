@@ -1,3 +1,11 @@
+## [0.46.5](https://github.com/propeller-heads/tycho-indexer/compare/0.46.4...0.46.5) (2024-12-20)
+
+
+### Bug Fixes
+
+* switch block_processing_time metric to a gauge ([6ce8fd0](https://github.com/propeller-heads/tycho-indexer/commit/6ce8fd08f314862724a2a3aa805341cf02c5d88d))
+* switch block_processing_time metric to a gauge ([#466](https://github.com/propeller-heads/tycho-indexer/issues/466)) ([8f2f584](https://github.com/propeller-heads/tycho-indexer/commit/8f2f5848d4dccf488557f9f55db0adb1baee9faa))
+
 ## [0.46.4](https://github.com/propeller-heads/tycho-indexer/compare/0.46.3...0.46.4) (2024-12-19)
 
 
