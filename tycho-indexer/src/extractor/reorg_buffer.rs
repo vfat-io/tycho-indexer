@@ -192,27 +192,60 @@ where
         tracing::Span::current().record("buffered_range", buffered_range.as_str());
 
         let start_index = if let Some(version) = start_version {
-            self.find_index(|b| !version.greater_than(&b.block()))
-                .ok_or_else(|| {
-                    StorageError::NotFound("Block".to_string(), format!("{:?}", version))
-                })?
+            match version {
+                BlockNumberOrTimestamp::Timestamp(ts) => {
+                    if let Some(last) = self.block_messages.back() {
+                        if ts > last.block().ts {
+                            // Return the latest block when timestamp is greater than last block
+                            self.block_messages.len() - 1
+                        } else {
+                            self.find_index(|b| b.block().ts >= ts)
+                                .unwrap_or(0)
+                        }
+                    } else {
+                        0
+                    }
+                }
+                _ => self
+                    .find_index(|b| !version.greater_than(&b.block()))
+                    .ok_or_else(|| {
+                        StorageError::NotFound("Block".to_string(), format!("{:?}", version))
+                    })?,
+            }
         } else {
             0
         };
 
         let end_index = if let Some(version) = end_version {
-            let end_idx = self
-                .find_index(|b| !version.greater_than(&b.block()))
-                .ok_or_else(|| {
-                    StorageError::NotFound("Block".to_string(), format!("{:?}", version))
-                })?;
+            match version {
+                BlockNumberOrTimestamp::Timestamp(ts) => {
+                    if let Some(last) = self.block_messages.back() {
+                        if ts > last.block().ts {
+                            // Include the latest block when timestamp is greater than last block
+                            self.block_messages.len()
+                        } else {
+                            self.find_index(|b| b.block().ts > ts)
+                                .unwrap_or(self.block_messages.len())
+                        }
+                    } else {
+                        self.block_messages.len()
+                    }
+                }
+                _ => {
+                    let end_idx = self
+                        .find_index(|b| !version.greater_than(&b.block()))
+                        .ok_or_else(|| {
+                            StorageError::NotFound("Block".to_string(), format!("{:?}", version))
+                        })?;
 
-            if end_idx < start_index {
-                return Err(StorageError::Unexpected(
-                    "ReorgBuffer: Invalid block range".to_string(),
-                ));
+                    if end_idx < start_index {
+                        return Err(StorageError::Unexpected(
+                            "ReorgBuffer: Invalid block range".to_string(),
+                        ));
+                    }
+                    end_idx + 1
+                }
             }
-            end_idx + 1
         } else {
             self.block_messages.len()
         };
@@ -233,8 +266,8 @@ where
 
                 if !version.greater_than(&first_block) {
                     Some(FinalityStatus::Finalized)
-                } else if (version.greater_than(&first_block)) &
-                    (!version.greater_than(&last_block))
+                } else if (version.greater_than(&first_block))
+                    & (!version.greater_than(&last_block))
                 {
                     Some(FinalityStatus::Unfinalized)
                 } else {
