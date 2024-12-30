@@ -201,31 +201,28 @@ where
         };
 
         let end_index = match end_version {
-            Some(version) => match version {
-                BlockNumberOrTimestamp::Timestamp(ts) => {
-                    let last = self.block_messages.back();
-                    match last {
-                        Some(last) if ts > last.block().ts => self.block_messages.len(),
-                        _ => self
-                            .find_index(|b| b.block().ts > ts)
-                            .unwrap_or(self.block_messages.len()),
+            Some(version) => {
+                // Handle case where timestamp or block is beyond last block.
+                // Additionally, latest ts (NOW) is always beyond last block.
+                if let Some(last) = self.block_messages.back() {
+                    if version.greater_than(&last.block()) {
+                        return Ok(self.block_messages.range(start_index..));
                     }
                 }
-                _ => {
-                    let end_idx = self
-                        .find_index(|b| !version.greater_than(&b.block()))
-                        .ok_or_else(|| {
-                            StorageError::NotFound("Block".to_string(), format!("{:?}", version))
-                        })?;
 
-                    if end_idx < start_index {
-                        return Err(StorageError::Unexpected(
-                            "ReorgBuffer: Invalid block range".to_string(),
-                        ));
-                    }
-                    end_idx + 1
+                let end_idx = self
+                    .find_index(|b| !version.greater_than(&b.block()))
+                    .ok_or_else(|| {
+                        StorageError::NotFound("Block".to_string(), format!("{:?}", version))
+                    })?;
+
+                if end_idx < start_index {
+                    return Err(StorageError::Unexpected(
+                        "ReorgBuffer: Invalid block range".to_string(),
+                    ));
                 }
-            },
+                end_idx + 1
+            }
             None => self.block_messages.len(),
         };
 
