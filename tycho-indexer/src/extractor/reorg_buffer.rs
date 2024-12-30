@@ -192,43 +192,23 @@ where
         tracing::Span::current().record("buffered_range", buffered_range.as_str());
 
         let start_index = if let Some(version) = start_version {
-            match version {
-                BlockNumberOrTimestamp::Timestamp(ts) => {
-                    if let Some(last) = self.block_messages.back() {
-                        if ts > last.block().ts {
-                            // Return the latest block when timestamp is greater than last block
-                            self.block_messages.len() - 1
-                        } else {
-                            self.find_index(|b| b.block().ts >= ts)
-                                .unwrap_or(0)
-                        }
-                    } else {
-                        0
-                    }
-                }
-                _ => self
-                    .find_index(|b| !version.greater_than(&b.block()))
-                    .ok_or_else(|| {
-                        StorageError::NotFound("Block".to_string(), format!("{:?}", version))
-                    })?,
-            }
+            self.find_index(|b| !version.greater_than(&b.block()))
+                .ok_or_else(|| {
+                    StorageError::NotFound("Block".to_string(), format!("{:?}", version))
+                })?
         } else {
             0
         };
 
-        let end_index = if let Some(version) = end_version {
-            match version {
+        let end_index = match end_version {
+            Some(version) => match version {
                 BlockNumberOrTimestamp::Timestamp(ts) => {
-                    if let Some(last) = self.block_messages.back() {
-                        if ts > last.block().ts {
-                            // Include the latest block when timestamp is greater than last block
-                            self.block_messages.len()
-                        } else {
-                            self.find_index(|b| b.block().ts > ts)
-                                .unwrap_or(self.block_messages.len())
-                        }
-                    } else {
-                        self.block_messages.len()
+                    let last = self.block_messages.back();
+                    match last {
+                        Some(last) if ts > last.block().ts => self.block_messages.len(),
+                        _ => self
+                            .find_index(|b| b.block().ts > ts)
+                            .unwrap_or(self.block_messages.len()),
                     }
                 }
                 _ => {
@@ -245,9 +225,8 @@ where
                     }
                     end_idx + 1
                 }
-            }
-        } else {
-            self.block_messages.len()
+            },
+            None => self.block_messages.len(),
         };
 
         Ok(self
