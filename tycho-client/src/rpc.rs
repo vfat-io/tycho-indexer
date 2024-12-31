@@ -73,7 +73,7 @@ pub trait RPCClient: Send + Sync {
                 contract_ids: Some(chunk.to_vec()),
                 protocol_system: protocol_system.to_string(),
                 chain,
-                version: version.clone(),
+                version: Some(version.clone()),
                 pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
             })
             .collect::<Vec<_>>();
@@ -293,7 +293,7 @@ pub trait RPCClient: Send + Sync {
                 protocol_system: protocol_system.to_string(),
                 chain,
                 include_balances,
-                version: version.clone(),
+                version: Some(version.clone()),
                 pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
             })
             .collect::<Vec<_>>();
@@ -647,7 +647,7 @@ mod tests {
                     protocol_system: protocol_system.to_string(),
                     chain,
                     include_balances,
-                    version: version.clone(),
+                    version: Some(version.clone()),
                     pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
                 })
                 .collect()
