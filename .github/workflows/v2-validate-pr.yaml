@@ -1,7 +1,7 @@
 name: Validate PR title
 
 on:
-  pull_request:
+  pull_request_target:
     branches:
       - main
       - release/*
@@ -15,4 +15,4 @@ jobs:
     uses: propeller-heads/ci-cd-templates/.github/workflows/validate-pr.yaml@main
     secrets:
       app_id: ${{ secrets.APP_ID }}
-      app_private_key: ${{ secrets.APP_PRIVATE_KEY }} # test comment
+      app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
