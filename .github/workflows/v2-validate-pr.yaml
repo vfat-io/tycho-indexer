@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - release/*
+      - fix/*
     types:
       - opened
       - edited
