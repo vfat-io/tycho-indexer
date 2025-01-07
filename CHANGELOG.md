@@ -1,3 +1,14 @@
+## [0.46.6](https://github.com/propeller-heads/tycho-indexer/compare/0.46.5...0.46.6) (2025-01-07)
+
+
+### Bug Fixes
+
+* changed validate pr condition ([c2913e6](https://github.com/propeller-heads/tycho-indexer/commit/c2913e618aba3000f4f5be0f1ae2b9a5f017b3a3))
+* changed validate pr condition ([#476](https://github.com/propeller-heads/tycho-indexer/issues/476)) ([7bb6e84](https://github.com/propeller-heads/tycho-indexer/commit/7bb6e84bb31b63330d471265e6826eb9f8b5193f))
+* try to run validate pr ([e646ed8](https://github.com/propeller-heads/tycho-indexer/commit/e646ed882662eb352c109f1391dda556591303ba))
+* try to run validate pr ([4da002f](https://github.com/propeller-heads/tycho-indexer/commit/4da002f687cc1548f2cbf024e40c2270dc2bb4a5))
+* try to run validate pr ([e85317d](https://github.com/propeller-heads/tycho-indexer/commit/e85317df16a7dcdf49847817ae7f89e9e250e2b5))
+
 ## [0.46.5](https://github.com/propeller-heads/tycho-indexer/compare/0.46.4...0.46.5) (2024-12-20)
 
 
