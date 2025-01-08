@@ -30,7 +30,6 @@ use tycho_core::{
     traits::TokenPreProcessor,
     Bytes,
 };
-use tycho_ethereum::token_pre_processor::map_vault;
 use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{
@@ -409,7 +408,14 @@ where
                     // Filtering to keep only components with ChangeType::Creation
                     .filter(|(_, c_change)| c_change.change == ChangeType::Creation)
                     .filter_map(|(c_id, change)| {
-                        map_vault(&change.protocol_system)
+                        tx.state_updates
+                            .get(&change.id)
+                            .and_then(|state| {
+                                state
+                                    .updated_attributes
+                                    .get("balance_owner")
+                                    .cloned()
+                            })
                             .or_else(|| {
                                 change
                                     .contract_addresses
