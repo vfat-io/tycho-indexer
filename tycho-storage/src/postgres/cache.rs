@@ -851,7 +851,7 @@ impl ProtocolGateway for CachedGateway {
         chain: &Chain,
         at: Option<Version>,
         system: Option<String>,
-        id: Option<&[&str]>,
+        ids: Option<&[&str]>,
         retrieve_balances: bool,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<WithTotal<Vec<ProtocolComponentState>>, StorageError> {
@@ -864,7 +864,7 @@ impl ProtocolGateway for CachedGateway {
                 chain,
                 at,
                 system,
-                id,
+                ids,
                 retrieve_balances,
                 pagination_params,
                 &mut conn,

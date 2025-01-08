@@ -252,7 +252,7 @@ mock! {
             chain: &'life1 Chain,
             at: Option<Version>,
             system: Option<String>,
-            id: Option<&'life2 [&'life3 str]>,
+            ids: Option<&'life2 [&'life3 str]>,
             retrieve_balances: bool,
             pagination_params: Option<&'life4 PaginationParams>,
         ) -> ::core::pin::Pin<
