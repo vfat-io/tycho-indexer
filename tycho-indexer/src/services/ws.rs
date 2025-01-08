@@ -115,7 +115,7 @@ impl WsActor {
             .map(|value| {
                 value
                     .to_str()
-                    .unwrap_or_default()
+                    .unwrap_or("unknown")
                     .to_string()
             });
         let ws_actor = WsActor::new(data, user_identity);
@@ -135,7 +135,7 @@ impl WsActor {
             "websocket_connections_metadata",
             "id" => ws_actor.id.to_string(),
             "client_version" => user_agent,
-            "user_identity" => ws_actor.user_identity.clone().unwrap_or_default()
+            "user_identity" => ws_actor.user_identity.clone().unwrap_or("unknown".to_string()),
         )
         .increment(1);
 
