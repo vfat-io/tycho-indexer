@@ -4,7 +4,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use actix_web::{web, HttpResponse, ResponseError};
 use anyhow::Error;
-use chrono::{Duration, Utc};
+use chrono::{Duration, SubsecRound, Utc};
 use diesel_async::pooled_connection::deadpool;
 use metrics::counter;
 use reqwest::StatusCode;
@@ -141,12 +141,15 @@ where
         &self,
         request: dto::StateRequestBody,
     ) -> Result<dto::StateRequestResponse, RpcError> {
-        // Get the latest block if the version is not provided
-        let at = request.version.map_or_else(
-            || Ok(BlockOrTimestamp::Block(BlockIdentifier::Latest(request.chain.into()))),
-            |v| BlockOrTimestamp::try_from(&v),
-        )?;
-
+        let at: BlockOrTimestamp = match &request.version {
+            // Match the version to the latest block if the timestamp is the current time
+            v if v.timestamp.unwrap().trunc_subsecs(0)
+                == Utc::now().naive_utc().trunc_subsecs(0) =>
+            {
+                BlockOrTimestamp::Block(BlockIdentifier::Latest(request.chain.into()))
+            }
+            _ => BlockOrTimestamp::try_from(&request.version)?,
+        };
         let chain = request.chain.into();
         let (db_version, deltas_version) = self
             .calculate_versions(&at, &request.protocol_system.clone(), chain)
@@ -356,11 +359,15 @@ where
         &self,
         request: dto::ProtocolStateRequestBody,
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
-        let at = request.version.map_or_else(
-            || Ok(BlockOrTimestamp::Block(BlockIdentifier::Latest(request.chain.into()))),
-            |v| BlockOrTimestamp::try_from(&v),
-        )?;
-
+        let at: BlockOrTimestamp = match &request.version {
+            // Match the version to the latest block if the timestamp is the current time
+            v if v.timestamp.unwrap().trunc_subsecs(0)
+                == Utc::now().naive_utc().trunc_subsecs(0) =>
+            {
+                BlockOrTimestamp::Block(BlockIdentifier::Latest(request.chain.into()))
+            }
+            _ => BlockOrTimestamp::try_from(&request.version)?,
+        };
         let chain = request.chain.into();
         let (db_version, deltas_version) = self
             .calculate_versions(&at, &request.protocol_system.clone(), chain)
@@ -969,14 +976,7 @@ mod tests {
 
         let body: dto::StateRequestBody = serde_json::from_str(json_str).unwrap();
 
-        let version = body
-            .version
-            .map_or_else(
-                || Ok(BlockOrTimestamp::Block(BlockIdentifier::Latest(body.chain.into()))),
-                |v| BlockOrTimestamp::try_from(&v),
-            )
-            .unwrap();
-
+        let version = BlockOrTimestamp::try_from(&body.version).unwrap();
         assert_eq!(
             version,
             BlockOrTimestamp::Block(BlockIdentifier::Hash(
@@ -1002,14 +1002,7 @@ mod tests {
         let body: dto::StateRequestBody =
             serde_json::from_str(json_str).expect("serde parsing error");
 
-        let version = body
-            .version
-            .map_or_else(
-                || Ok(BlockOrTimestamp::Block(BlockIdentifier::Latest(body.chain.into()))),
-                |v| BlockOrTimestamp::try_from(&v),
-            )
-            .unwrap();
-
+        let version = BlockOrTimestamp::try_from(&body.version).expect("nor block nor timestamp");
         assert_eq!(
             version,
             BlockOrTimestamp::Block(BlockIdentifier::Number((Chain::Ethereum, 213)))
@@ -1034,22 +1027,18 @@ mod tests {
         let expected = dto::StateRequestBody {
             contract_ids: Some(vec![contract0]),
             protocol_system: "uniswap_v2".to_string(),
-            version: Some(dto::VersionParam {
-                timestamp: Some(Utc::now().naive_utc()),
-                block: None,
-            }),
+            version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             chain: dto::Chain::Ethereum,
             pagination: dto::PaginationParams::default(),
         };
 
-        let expected_version = expected.version.unwrap_or_default();
-        let result_version = result.version.unwrap_or_default();
-
-        let time_difference = expected_version
+        let time_difference = expected
+            .version
             .timestamp
             .unwrap()
-            .timestamp_millis() -
-            result_version
+            .timestamp_millis()
+            - result
+                .version
                 .timestamp
                 .unwrap()
                 .timestamp_millis();
@@ -1057,7 +1046,7 @@ mod tests {
         // Allowing a small time delta (1 second)
         assert!(time_difference <= 1000);
         assert_eq!(result.contract_ids, expected.contract_ids);
-        assert_eq!(result_version.block, expected_version.block);
+        assert_eq!(result.version.block, expected.version.block);
     }
 
     #[tokio::test]
@@ -1137,7 +1126,7 @@ mod tests {
                 Bytes::from_str("388C818CA8B9251b393131C08a736A67ccB19297").unwrap(),
             ]),
             protocol_system: "uniswap_v2".to_string(),
-            version: None,
+            version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             chain: dto::Chain::Ethereum,
             pagination: dto::PaginationParams::default(),
         };
@@ -1163,7 +1152,7 @@ mod tests {
                 Bytes::from_str("b4eccE46b8D4e4abFd03C9B806276A6735C9c092").unwrap()
             ]),
             protocol_system: "uniswap_v2".to_string(),
-            version: Some(dto::VersionParam::default()),
+            version: dto::VersionParam::default(),
             chain: dto::Chain::Ethereum,
             pagination: dto::PaginationParams::default(),
         };
@@ -1266,7 +1255,7 @@ mod tests {
             protocol_system: "uniswap_v2".to_string(),
             chain: dto::Chain::Ethereum,
             include_balances: true,
-            version: None,
+            version: dto::VersionParam { timestamp: Some(Utc::now().naive_utc()), block: None },
             pagination: dto::PaginationParams::default(),
         };
         let res = req_handler

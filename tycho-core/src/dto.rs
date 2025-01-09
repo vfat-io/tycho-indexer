@@ -522,7 +522,8 @@ pub struct StateRequestBody {
     pub contract_ids: Option<Vec<Bytes>>,
     #[serde(alias = "protocolSystem", default)]
     pub protocol_system: String,
-    pub version: Option<VersionParam>,
+    #[serde(default = "VersionParam::default")]
+    pub version: VersionParam,
     #[serde(default)]
     pub chain: Chain,
     /// Max page size supported is 100
@@ -534,7 +535,7 @@ impl StateRequestBody {
     pub fn new(
         contract_ids: Option<Vec<Bytes>>,
         protocol_system: String,
-        version: Option<VersionParam>,
+        version: VersionParam,
         chain: Chain,
         pagination: PaginationParams,
     ) -> Self {
@@ -545,7 +546,7 @@ impl StateRequestBody {
         Self {
             contract_ids: None,
             protocol_system: protocol_system.to_string(),
-            version: Some(VersionParam { timestamp: None, block: Some(block.clone()) }),
+            version: VersionParam { timestamp: None, block: Some(block.clone()) },
             chain: block.chain.unwrap_or_default(),
             pagination: PaginationParams::default(),
         }
@@ -555,7 +556,7 @@ impl StateRequestBody {
         Self {
             contract_ids: None,
             protocol_system: protocol_system.to_string(),
-            version: Some(VersionParam { timestamp: Some(timestamp), block: None }),
+            version: VersionParam { timestamp: Some(timestamp), block: None },
             chain,
             pagination: PaginationParams::default(),
         }
@@ -886,11 +887,11 @@ impl PartialEq for ProtocolComponentsRequestBody {
             _ => false,
         };
 
-        self.protocol_system == other.protocol_system &&
-            self.component_ids == other.component_ids &&
-            tvl_close_enough &&
-            self.chain == other.chain &&
-            self.pagination == other.pagination
+        self.protocol_system == other.protocol_system
+            && self.component_ids == other.component_ids
+            && tvl_close_enough
+            && self.chain == other.chain
+            && self.pagination == other.pagination
     }
 }
 
@@ -1049,7 +1050,8 @@ pub struct ProtocolStateRequestBody {
     /// Whether to include account balances in the response. Defaults to true.
     #[serde(default = "default_include_balances_flag")]
     pub include_balances: bool,
-    pub version: Option<VersionParam>,
+    #[serde(default = "VersionParam::default")]
+    pub version: VersionParam,
     /// Max page size supported is 100
     #[serde(default)]
     pub pagination: PaginationParams,
@@ -1152,7 +1154,7 @@ impl<'de> Deserialize<'de> for ProtocolStateRequestBody {
                 Ok(ProtocolStateRequestBody {
                     protocol_ids,
                     protocol_system: protocol_system.unwrap_or_default(),
-                    version: version.unwrap_or(None),
+                    version: version.unwrap_or_else(VersionParam::default),
                     chain: chain.unwrap_or_else(Chain::default),
                     include_balances: include_balances.unwrap_or(true),
                     pagination: pagination.unwrap_or_else(PaginationParams::default),
@@ -1291,14 +1293,14 @@ mod test {
         let expected = StateRequestBody {
             contract_ids: Some(vec![contract0]),
             protocol_system: "uniswap_v2".to_string(),
-            version: Some(VersionParam {
+            version: VersionParam {
                 timestamp: Some(expected_timestamp),
                 block: Some(BlockParam {
                     hash: Some(block_hash),
                     chain: Some(Chain::Ethereum),
                     number: Some(block_number),
                 }),
-            }),
+            },
             chain: Chain::Ethereum,
             pagination: PaginationParams::default(),
         };
@@ -1394,14 +1396,14 @@ mod test {
         let expected = StateRequestBody {
             contract_ids: None,
             protocol_system: "uniswap_v2".to_string(),
-            version: Some(VersionParam {
+            version: VersionParam {
                 timestamp: Some(expected_timestamp),
                 block: Some(BlockParam {
                     hash: Some(block_hash),
                     chain: Some(Chain::Ethereum),
                     number: Some(block_number),
                 }),
-            }),
+            },
             chain: Chain::Ethereum,
             pagination: PaginationParams { page: 0, page_size: 20 },
         };
@@ -1465,14 +1467,14 @@ mod test {
         let expected = ProtocolStateRequestBody {
             protocol_ids: Some(vec!["0xb4eccE46b8D4e4abFd03C9B806276A6735C9c092".to_string()]),
             protocol_system: "uniswap_v2".to_string(),
-            version: Some(VersionParam {
+            version: VersionParam {
                 timestamp: Some(expected_timestamp),
                 block: Some(BlockParam {
                     hash: Some(block_hash),
                     chain: Some(Chain::Ethereum),
                     number: Some(block_number),
                 }),
-            }),
+            },
             chain: Chain::Ethereum,
             include_balances: false,
             pagination: PaginationParams::default(),

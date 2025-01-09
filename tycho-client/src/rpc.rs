@@ -73,7 +73,7 @@ pub trait RPCClient: Send + Sync {
                 contract_ids: Some(chunk.to_vec()),
                 protocol_system: protocol_system.to_string(),
                 chain,
-                version: Some(version.clone()),
+                version: version.clone(),
                 pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
             })
             .collect::<Vec<_>>();
@@ -293,7 +293,7 @@ pub trait RPCClient: Send + Sync {
                 protocol_system: protocol_system.to_string(),
                 chain,
                 include_balances,
-                version: Some(version.clone()),
+                version: version.clone(),
                 pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
             })
             .collect::<Vec<_>>();
@@ -419,8 +419,8 @@ impl RPCClient for HttpRPCClient {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.contract_ids.is_none() ||
-            request
+        if request.contract_ids.is_none()
+            || request
                 .contract_ids
                 .as_ref()
                 .unwrap()
@@ -517,8 +517,8 @@ impl RPCClient for HttpRPCClient {
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.protocol_ids.is_none() ||
-            request
+        if request.protocol_ids.is_none()
+            || request
                 .protocol_ids
                 .as_ref()
                 .unwrap()
@@ -647,7 +647,7 @@ mod tests {
                     protocol_system: protocol_system.to_string(),
                     chain,
                     include_balances,
-                    version: Some(version.clone()),
+                    version: version.clone(),
                     pagination: PaginationParams { page: 0, page_size: chunk_size as i64 },
                 })
                 .collect()
