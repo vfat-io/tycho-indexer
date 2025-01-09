@@ -143,8 +143,8 @@ where
     ) -> Result<dto::StateRequestResponse, RpcError> {
         let at: BlockOrTimestamp = match &request.version {
             // Match the version to the latest block if the timestamp is the current time
-            v if v.timestamp.unwrap().trunc_subsecs(0)
-                == Utc::now().naive_utc().trunc_subsecs(0) =>
+            v if v.timestamp.unwrap().trunc_subsecs(0) ==
+                Utc::now().naive_utc().trunc_subsecs(0) =>
             {
                 BlockOrTimestamp::Block(BlockIdentifier::Latest(request.chain.into()))
             }
@@ -361,8 +361,8 @@ where
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
         let at: BlockOrTimestamp = match &request.version {
             // Match the version to the latest block if the timestamp is the current time
-            v if v.timestamp.unwrap().trunc_subsecs(0)
-                == Utc::now().naive_utc().trunc_subsecs(0) =>
+            v if v.timestamp.unwrap().trunc_subsecs(0) ==
+                Utc::now().naive_utc().trunc_subsecs(0) =>
             {
                 BlockOrTimestamp::Block(BlockIdentifier::Latest(request.chain.into()))
             }
@@ -1036,8 +1036,8 @@ mod tests {
             .version
             .timestamp
             .unwrap()
-            .timestamp_millis()
-            - result
+            .timestamp_millis() -
+            result
                 .version
                 .timestamp
                 .unwrap()
