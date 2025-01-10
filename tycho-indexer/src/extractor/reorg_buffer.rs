@@ -177,6 +177,9 @@ where
     /// The retrieved iterator will include both the start and end block of specified range. In case
     /// either start or end block are None, the iterator will start the range at the oldest / end
     /// the range at the latest block.
+    /// If the end version is a timestamp, it will be compared to the timestamp of the last block in
+    /// the buffer. If the timestamp is greater than the last block's timestamp, the range will be
+    /// returned from the start of the buffer to the last block.
     #[instrument(skip(self), level = Level::DEBUG, fields(buffered_range))]
     pub fn get_block_range(
         &self,
@@ -244,8 +247,8 @@ where
 
                 if !version.greater_than(&first_block) {
                     Some(FinalityStatus::Finalized)
-                } else if (version.greater_than(&first_block)) &
-                    (!version.greater_than(&last_block))
+                } else if (version.greater_than(&first_block))
+                    & (!version.greater_than(&last_block))
                 {
                     Some(FinalityStatus::Unfinalized)
                 } else {
