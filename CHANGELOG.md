@@ -1,3 +1,5 @@
+## [0.46.8](https://github.com/propeller-heads/tycho-indexer/compare/0.46.7...0.46.8) (2025-01-10)
+
 ## [0.46.7](https://github.com/propeller-heads/tycho-indexer/compare/0.46.6...0.46.7) (2025-01-09)
 
 
