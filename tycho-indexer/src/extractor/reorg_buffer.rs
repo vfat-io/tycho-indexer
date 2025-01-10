@@ -247,8 +247,8 @@ where
 
                 if !version.greater_than(&first_block) {
                     Some(FinalityStatus::Finalized)
-                } else if (version.greater_than(&first_block))
-                    & (!version.greater_than(&last_block))
+                } else if (version.greater_than(&first_block)) &
+                    (!version.greater_than(&last_block))
                 {
                     Some(FinalityStatus::Unfinalized)
                 } else {
