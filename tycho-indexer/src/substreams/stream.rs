@@ -10,6 +10,7 @@ use async_stream::try_stream;
 use futures03::{Stream, StreamExt};
 use metrics::{counter, gauge};
 use once_cell::sync::Lazy;
+use prost::Message as ProstMessage;
 use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, trace, warn};
@@ -110,6 +111,8 @@ fn stream_blocks(
                                         gauge!("substreams_lag_millis", "extractor" => extractor_id.clone()).set(lag as f64);
                                     }
                                 };
+
+                                gauge!("block_message_size_bytes", "extractor" => extractor_id.clone()).set(block_scoped_data.encoded_len() as f64);
 
                                 // Reset backoff because we got a good value from the stream
                                 backoff = DEFAULT_BACKOFF.clone();
