@@ -141,13 +141,12 @@ WHERE account_id IN (
     JOIN protocol_component pc ON pchc.protocol_component_id = pc.id
     JOIN protocol_system ps ON pc.protocol_system_id = ps.id
     WHERE ps.name = :'protocol_system_name'
-    AND EXISTS (
+    AND NOT EXISTS (
         SELECT 1
-        FROM protocol_component_holds_token pcht
-        JOIN token t ON pcht.token_id = t.id 
-        JOIN protocol_component pc2 ON pcht.protocol_component_id = pc2.id
+        FROM protocol_component_holds_contract pchc2
+        JOIN protocol_component pc2 ON pchc2.protocol_component_id = pc2.id
         JOIN protocol_system ps2 ON pc2.protocol_system_id = ps2.id
-        WHERE t.account_id = cc.account_id
+        WHERE pchc2.contract_code_id = cc.id
         AND ps2.name <> :'protocol_system_name'
     )
 );
