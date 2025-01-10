@@ -1,3 +1,23 @@
+## [0.48.0](https://github.com/propeller-heads/tycho-indexer/compare/0.47.0...0.48.0) (2025-01-10)
+
+
+### Features
+
+* bound end_idx to latest ([ea548ef](https://github.com/propeller-heads/tycho-indexer/commit/ea548ef21d78c3ace7c144223029f35b29f956ed))
+* predefined behaviour for latest ts ([2ae6012](https://github.com/propeller-heads/tycho-indexer/commit/2ae60126cc71cd60a16d36e430e3b732a9b53542))
+* revert changes and match current time ([81ad8e1](https://github.com/propeller-heads/tycho-indexer/commit/81ad8e19cfc654f8b21bd1817efaad34a1826fe7))
+* revert previous changes && make version optional ([be15c0d](https://github.com/propeller-heads/tycho-indexer/commit/be15c0d8932219ca716644e1c4a685a02171401c))
+
+
+### Bug Fixes
+
+* delete all account balances for accounts to be deleted ([a3d9ffc](https://github.com/propeller-heads/tycho-indexer/commit/a3d9ffc0db659d8a074cb0e5c73f92fea9e1c72d))
+* fix account balances bug ([c0b6678](https://github.com/propeller-heads/tycho-indexer/commit/c0b6678fb09786f0522a875cebae345e521ddf3c))
+* fix protocol system deletion script account balances bug ([#477](https://github.com/propeller-heads/tycho-indexer/issues/477)) ([a749b53](https://github.com/propeller-heads/tycho-indexer/commit/a749b5305f23d4a66b177f6c89d6c269a62801e4))
+* get_block_range ([6460d3d](https://github.com/propeller-heads/tycho-indexer/commit/6460d3d297a6667417f71f39fc066f897c0af762))
+* test ([fe343d4](https://github.com/propeller-heads/tycho-indexer/commit/fe343d4e5e0396cb05c33a84de12fb3c1878a6ef))
+* Update get_block_range to return full buffer when Ts is now or greater ([#470](https://github.com/propeller-heads/tycho-indexer/issues/470)) ([9507f32](https://github.com/propeller-heads/tycho-indexer/commit/9507f3280678be1b13f47feae7b90d523ef9d91e))
+
 ## [0.47.0](https://github.com/propeller-heads/tycho-indexer/compare/0.46.8...0.47.0) (2025-01-10)
 
 
