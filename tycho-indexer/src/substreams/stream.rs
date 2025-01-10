@@ -10,6 +10,7 @@ use async_stream::try_stream;
 use futures03::{Stream, StreamExt};
 use metrics::{counter, gauge};
 use once_cell::sync::Lazy;
+use prost::Message as ProstMessage;
 use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, trace, warn};
@@ -74,6 +75,7 @@ fn stream_blocks(
     extractor_id: String,
 ) -> impl Stream<Item = Result<BlockResponse, Error>> {
     let mut latest_cursor = cursor.unwrap_or_default();
+    let mut latest_block = start_block_num as u64;
     let mut retry_count = 0;
     let mut backoff = DEFAULT_BACKOFF.clone();
 
@@ -109,7 +111,10 @@ fn stream_blocks(
                                         let lag = now.saturating_sub((block_ts.seconds * 1000) as u128);
                                         gauge!("substreams_lag_millis", "extractor" => extractor_id.clone()).set(lag as f64);
                                     }
+                                    latest_block = block.number;
                                 };
+
+                                gauge!("block_message_size_bytes", "extractor" => extractor_id.clone()).set(block_scoped_data.encoded_len() as f64);
 
                                 // Reset backoff because we got a good value from the stream
                                 backoff = DEFAULT_BACKOFF.clone();
@@ -122,6 +127,15 @@ fn stream_blocks(
                             BlockProcessedResult::BlockUndoSignal(block_undo_signal) => {
                                 // Reset backoff because we got a good value from the stream
                                 backoff = DEFAULT_BACKOFF.clone();
+
+                                let to_block = block_undo_signal.last_valid_block.clone().unwrap_or_default().number;
+                                counter!(
+                                    "chain_reorg",
+                                    "extractor" => extractor_id.clone(),
+                                    "to_block" => to_block.to_string(),
+                                    "from_block" => latest_block.to_string()
+                                )
+                                .increment(1);
 
                                 let cursor = block_undo_signal.last_valid_cursor.clone();
                                 yield BlockResponse::Undo(block_undo_signal);
