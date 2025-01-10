@@ -126,6 +126,8 @@ cargo build --release
 sudo ln -s $(pwd)/target/release/tycho-indexer /usr/local/bin/tycho-indexer
 ```
 This creates a symbolic link, allowing you to run `tycho-indexer` from anywhere.
+Note: Ensure that `/usr/local/bin/` is included in your system's PATH. On most systems, this is the default, 
+but on minimalist Linux distributions or custom setups, you may need to verify or modify your PATH.
 
 3. **Verify the installation:**
 After completing the above steps, you can check that the binary is correctly linked by running:
