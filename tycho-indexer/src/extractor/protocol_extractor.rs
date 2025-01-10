@@ -30,7 +30,6 @@ use tycho_core::{
     traits::TokenPreProcessor,
     Bytes,
 };
-use tycho_ethereum::token_pre_processor::map_vault;
 use tycho_storage::postgres::cache::CachedGateway;
 
 use crate::{
@@ -409,7 +408,14 @@ where
                     // Filtering to keep only components with ChangeType::Creation
                     .filter(|(_, c_change)| c_change.change == ChangeType::Creation)
                     .filter_map(|(c_id, change)| {
-                        map_vault(&change.protocol_system)
+                        tx.state_updates
+                            .get(&change.id)
+                            .and_then(|state| {
+                                state
+                                    .updated_attributes
+                                    .get("balance_owner")
+                                    .cloned()
+                            })
                             .or_else(|| {
                                 change
                                     .contract_addresses
@@ -1514,7 +1520,7 @@ mod test {
         ])
     }
 
-    #[test_log::test(tokio::test)]
+    #[test_log::test(tokio::test(flavor = "multi_thread", worker_threads = 2))]
     async fn test_construct_tokens() {
         let msg = BlockChanges::new(
             "ex".to_string(),
@@ -1524,8 +1530,9 @@ mod test {
             false,
             vec![TxWithChanges {
                 protocol_components: HashMap::from([(
-                    "TestProtocol".to_string(),
+                    "TestComponent".to_string(),
                     ProtocolComponent {
+                        id: "TestComponent".to_string(),
                         tokens: vec![
                             "0x0000000000000000000000000000000000000001"
                                 .parse()
@@ -1534,12 +1541,49 @@ mod test {
                                 .parse()
                                 .unwrap(),
                         ],
+                        change: ChangeType::Creation,
                         ..Default::default()
                     },
                 )]),
                 account_deltas: HashMap::new(),
-                state_updates: Default::default(),
-                balance_changes: HashMap::new(),
+                state_updates: HashMap::from([(
+                    "TestComponent".to_string(),
+                    ProtocolComponentStateDelta::new(
+                        "TestComponent",
+                        HashMap::from([(
+                            "balance_owner".to_string(),
+                            Bytes::from_str("0000000000000000000000000000000000000b0b").unwrap(),
+                        )]),
+                        HashSet::new(),
+                    ),
+                )]),
+                balance_changes: HashMap::from([(
+                    "TestComponent".to_string(),
+                    HashMap::from([
+                        (
+                            Bytes::from_str("0x0000000000000000000000000000000000000001").unwrap(),
+                            ComponentBalance {
+                                token: Bytes::from_str("0x0000000000000000000000000000000000000001")
+                                    .unwrap(),
+                                balance: Bytes::from(1000_i32.to_le_bytes()),
+                                balance_float: 36522027799.0,
+                                modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
+                                component_id: "TestComponent".to_string(),
+                            },
+                        ),
+                        (
+                            Bytes::from_str("0x0000000000000000000000000000000000000003").unwrap(),
+                            ComponentBalance {
+                                token: Bytes::from_str("0x0000000000000000000000000000000000000003")
+                                    .unwrap(),
+                                balance: Bytes::from(10000_i32.to_le_bytes()),
+                                balance_float: 36522027799.0,
+                                modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
+                                component_id: "TestComponent".to_string(),
+                            },
+                        ),
+                    ]),
+                )]),
                 tx: Transaction::default(),
             }],
         );
@@ -1577,7 +1621,45 @@ mod test {
         let ret = vec![t3.clone()];
         preprocessor
             .expect_get_tokens()
-            .return_once(|_, _, _| ret);
+            .return_once(|_, balance_owner_store, _| {
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        assert_eq!(
+                            balance_owner_store
+                                .find_owner(
+                                    Bytes::from_str("0000000000000000000000000000000000000003")
+                                        .unwrap(),
+                                    Bytes::from(1000_i32.to_le_bytes()),
+                                )
+                                .await
+                                .unwrap()
+                                .unwrap(),
+                            (
+                                Bytes::from_str("0000000000000000000000000000000000000b0b")
+                                    .unwrap(),
+                                Bytes::from(10000_i32.to_le_bytes())
+                            )
+                        );
+                        assert_eq!(
+                            balance_owner_store
+                                .find_owner(
+                                    Bytes::from_str("0000000000000000000000000000000000000001")
+                                        .unwrap(),
+                                    Bytes::from(1000_i32.to_le_bytes()),
+                                )
+                                .await
+                                .unwrap()
+                                .unwrap(),
+                            (
+                                Bytes::from_str("0000000000000000000000000000000000000b0b")
+                                    .unwrap(),
+                                Bytes::from(1000_i32.to_le_bytes())
+                            )
+                        );
+                    });
+                });
+                ret
+            });
         let mut extractor_gw = MockExtractorGateway::new();
         extractor_gw
             .expect_ensure_protocol_types()

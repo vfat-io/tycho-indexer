@@ -335,14 +335,14 @@ pub trait ProtocolGateway {
     /// # Parameters
     /// - `chain` The chain of the component
     /// - `system` The protocol system this component belongs to
-    /// - `id` The external id of the component e.g. address, or the pair
+    /// - `ids` The external ids of the components e.g. addresses, or the pairs
     /// - `at` The version at which the state is valid at.
     async fn get_protocol_states(
         &self,
         chain: &Chain,
         at: Option<Version>,
         system: Option<String>,
-        id: Option<&[&str]>,
+        ids: Option<&[&str]>,
         retrieve_balances: bool,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<WithTotal<Vec<models::protocol::ProtocolComponentState>>, StorageError>;
