@@ -1,3 +1,16 @@
+## [0.47.0](https://github.com/propeller-heads/tycho-indexer/compare/0.46.8...0.47.0) (2025-01-10)
+
+
+### Features
+
+* add user identity to ws connection metrics ([ac807b2](https://github.com/propeller-heads/tycho-indexer/commit/ac807b265f775aa27509cc3caa06274fddcda467))
+* add user identity to ws connection metrics ([#480](https://github.com/propeller-heads/tycho-indexer/issues/480)) ([f2a3c8d](https://github.com/propeller-heads/tycho-indexer/commit/f2a3c8d1b0fbacdaea73277a60ca52a862b29d10))
+
+
+### Bug Fixes
+
+* default to 'unknown' if no user identity is present ([977f02e](https://github.com/propeller-heads/tycho-indexer/commit/977f02e6385ed283b0915ab020de6403a910f2df))
+
 ## [0.46.8](https://github.com/propeller-heads/tycho-indexer/compare/0.46.7...0.46.8) (2025-01-10)
 
 ## [0.46.7](https://github.com/propeller-heads/tycho-indexer/compare/0.46.6...0.46.7) (2025-01-09)
