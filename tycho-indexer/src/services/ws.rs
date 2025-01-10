@@ -88,15 +88,17 @@ pub struct WsActor {
     heartbeat: Instant,
     app_state: web::Data<WsData>,
     subscriptions: HashMap<Uuid, SpawnHandle>,
+    user_identity: Option<String>,
 }
 
 impl WsActor {
-    fn new(app_state: web::Data<WsData>) -> Self {
+    fn new(app_state: web::Data<WsData>, user_identity: Option<String>) -> Self {
         Self {
             id: Uuid::new_v4(),
             heartbeat: Instant::now(),
             app_state,
             subscriptions: HashMap::new(),
+            user_identity,
         }
     }
 
@@ -107,7 +109,16 @@ impl WsActor {
         stream: web::Payload,
         data: web::Data<WsData>,
     ) -> Result<HttpResponse, Error> {
-        let ws_actor = WsActor::new(data);
+        let user_identity = req
+            .headers()
+            .get("user-identity")
+            .map(|value| {
+                value
+                    .to_str()
+                    .unwrap_or("unknown")
+                    .to_string()
+            });
+        let ws_actor = WsActor::new(data, user_identity);
 
         // metrics
         let user_agent = req
@@ -120,7 +131,13 @@ impl WsActor {
                     .to_string()
             })
             .unwrap_or_default();
-        counter!("websocket_connections_metadata", "id" => ws_actor.id.to_string(), "client_version"=> user_agent.clone()).increment(1);
+        counter!(
+            "websocket_connections_metadata",
+            "id" => ws_actor.id.to_string(),
+            "client_version" => user_agent,
+            "user_identity" => ws_actor.user_identity.clone().unwrap_or("unknown".to_string()),
+        )
+        .increment(1);
 
         ws::start(ws_actor, &req, stream)
     }
@@ -191,7 +208,8 @@ impl WsActor {
                             "websocket_extractor_subscriptions_metadata",
                             "subscription_id" => subscription_id.to_string(),
                             "chain"=> extractor_id.chain.to_string(),
-                            "extractor" => extractor_id.name.to_string()
+                            "extractor" => extractor_id.name.to_string(),
+                            "user_identity" => self.user_identity.clone().unwrap_or_default(),
                         )
                         .increment(1);
 
