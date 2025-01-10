@@ -126,6 +126,8 @@ fn stream_blocks(
                                 // Reset backoff because we got a good value from the stream
                                 backoff = DEFAULT_BACKOFF.clone();
 
+                                counter!("chain_reorg", "extractor" => extractor_id.clone()).increment(1);
+
                                 let cursor = block_undo_signal.last_valid_cursor.clone();
                                 yield BlockResponse::Undo(block_undo_signal);
 
