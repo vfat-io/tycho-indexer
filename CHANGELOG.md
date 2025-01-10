@@ -1,3 +1,17 @@
+## [0.49.0](https://github.com/propeller-heads/tycho-indexer/compare/0.48.0...0.49.0) (2025-01-10)
+
+
+### Features
+
+* add chain reorg metric ([b17b74f](https://github.com/propeller-heads/tycho-indexer/commit/b17b74f42b702d05d5283f010f7ebc0e5fe0766c))
+* add substreams block message size metric ([5180275](https://github.com/propeller-heads/tycho-indexer/commit/5180275a876f29f06c9548d116cfc99980ac343a))
+* extend substreams block message metrics ([#482](https://github.com/propeller-heads/tycho-indexer/issues/482)) ([b005e26](https://github.com/propeller-heads/tycho-indexer/commit/b005e26ec23b9ef318b324ac10301f04852d2be7))
+
+
+### Bug Fixes
+
+* add to and from block data to reorg metric ([44df826](https://github.com/propeller-heads/tycho-indexer/commit/44df826b5635864e1e6c067c7c8516e29fc94066))
+
 ## [0.48.0](https://github.com/propeller-heads/tycho-indexer/compare/0.47.0...0.48.0) (2025-01-10)
 
 
