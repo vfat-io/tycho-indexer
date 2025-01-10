@@ -4,7 +4,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use actix_web::{web, HttpResponse, ResponseError};
 use anyhow::Error;
-use chrono::{Duration, SubsecRound, Utc};
+use chrono::{Duration, Utc};
 use diesel_async::pooled_connection::deadpool;
 use metrics::counter;
 use reqwest::StatusCode;
@@ -141,15 +141,7 @@ where
         &self,
         request: dto::StateRequestBody,
     ) -> Result<dto::StateRequestResponse, RpcError> {
-        let at: BlockOrTimestamp = match &request.version {
-            // Match the version to the latest block if the timestamp is the current time
-            v if v.timestamp.unwrap().trunc_subsecs(0) ==
-                Utc::now().naive_utc().trunc_subsecs(0) =>
-            {
-                BlockOrTimestamp::Block(BlockIdentifier::Latest(request.chain.into()))
-            }
-            _ => BlockOrTimestamp::try_from(&request.version)?,
-        };
+        let at = BlockOrTimestamp::try_from(&request.version)?;
         let chain = request.chain.into();
         let (db_version, deltas_version) = self
             .calculate_versions(&at, &request.protocol_system.clone(), chain)
@@ -359,15 +351,7 @@ where
         &self,
         request: dto::ProtocolStateRequestBody,
     ) -> Result<dto::ProtocolStateRequestResponse, RpcError> {
-        let at: BlockOrTimestamp = match &request.version {
-            // Match the version to the latest block if the timestamp is the current time
-            v if v.timestamp.unwrap().trunc_subsecs(0) ==
-                Utc::now().naive_utc().trunc_subsecs(0) =>
-            {
-                BlockOrTimestamp::Block(BlockIdentifier::Latest(request.chain.into()))
-            }
-            _ => BlockOrTimestamp::try_from(&request.version)?,
-        };
+        let at = BlockOrTimestamp::try_from(&request.version)?;
         let chain = request.chain.into();
         let (db_version, deltas_version) = self
             .calculate_versions(&at, &request.protocol_system.clone(), chain)

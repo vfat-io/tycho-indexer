@@ -200,21 +200,32 @@ where
             0
         };
 
-        let end_index = if let Some(version) = end_version {
-            let end_idx = self
-                .find_index(|b| !version.greater_than(&b.block()))
-                .ok_or_else(|| {
-                    StorageError::NotFound("Block".to_string(), format!("{:?}", version))
-                })?;
+        let end_index = match end_version {
+            Some(version) => {
+                // Handle case where timestamp is beyond last block.
+                // Additionally, latest ts (NOW) is always beyond last block.
+                if let Some(last) = self.block_messages.back() {
+                    if let BlockNumberOrTimestamp::Timestamp(ts) = version {
+                        if ts > last.block().ts {
+                            return Ok(self.block_messages.range(start_index..));
+                        }
+                    }
+                }
 
-            if end_idx < start_index {
-                return Err(StorageError::Unexpected(
-                    "ReorgBuffer: Invalid block range".to_string(),
-                ));
+                let end_idx = self
+                    .find_index(|b| !version.greater_than(&b.block()))
+                    .ok_or_else(|| {
+                        StorageError::NotFound("Block".to_string(), format!("{:?}", version))
+                    })?;
+
+                if end_idx < start_index {
+                    return Err(StorageError::Unexpected(
+                        "ReorgBuffer: Invalid block range".to_string(),
+                    ));
+                }
+                end_idx + 1
             }
-            end_idx + 1
-        } else {
-            self.block_messages.len()
+            None => self.block_messages.len(),
         };
 
         Ok(self
@@ -787,12 +798,12 @@ mod test {
     }
 
     #[rstest]
-    #[case::not_found(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:36".parse::<NaiveDateTime>().unwrap()), StorageError::NotFound("Block".to_string(), "Timestamp(2020-01-01T00:00:36)".to_string()))]
-    #[case::invalid(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), StorageError::Unexpected("ReorgBuffer: Invalid block range".to_string()))]
-    fn test_get_block_range_invalid_range(
+    #[case::beyond_range(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:36".parse::<NaiveDateTime>().unwrap()), Ok(vec![1, 2]))]
+    #[case::invalid(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Err(StorageError::Unexpected("ReorgBuffer: Invalid block range".to_string())))]
+    fn test_get_block_range_edge_cases(
         #[case] start: Option<NaiveDateTime>,
         #[case] end: Option<NaiveDateTime>,
-        #[case] exp: StorageError,
+        #[case] exp: Result<Vec<u64>, StorageError>,
     ) {
         let start = start.map(BlockNumberOrTimestamp::Timestamp);
         let end = end.map(BlockNumberOrTimestamp::Timestamp);
@@ -806,8 +817,10 @@ mod test {
 
         let res = reorg_buffer
             .get_block_range(start, end)
-            .err()
-            .unwrap();
+            .map(|iter| {
+                iter.map(|b| b.block().number)
+                    .collect::<Vec<_>>()
+            });
 
         assert_eq!(res, exp);
     }
