@@ -21,8 +21,9 @@ use tycho_core::{
     dto::{
         Chain, PaginationParams, PaginationResponse, ProtocolComponentRequestResponse,
         ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
-        ResponseToken, StateRequestBody, StateRequestResponse, TokensRequestBody,
-        TokensRequestResponse, VersionParam,
+        ProtocolSystemsRequestBody, ProtocolSystemsRequestResponse, ResponseToken,
+        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
+        VersionParam,
     },
     Bytes,
 };
@@ -373,6 +374,11 @@ pub trait RPCClient: Send + Sync {
         }
         Ok(all_tokens)
     }
+
+    async fn get_protocol_systems(
+        &self,
+        request: &ProtocolSystemsRequestBody,
+    ) -> Result<ProtocolSystemsRequestResponse, RPCError>;
 }
 
 #[derive(Debug, Clone)]
@@ -603,6 +609,39 @@ impl RPCClient for HttpRPCClient {
         })?;
 
         Ok(tokens)
+    }
+
+    async fn get_protocol_systems(
+        &self,
+        request: &ProtocolSystemsRequestBody,
+    ) -> Result<ProtocolSystemsRequestResponse, RPCError> {
+        let uri = format!(
+            "{}/{}/protocol_systems",
+            self.url
+                .to_string()
+                .trim_end_matches('/'),
+            TYCHO_SERVER_VERSION
+        );
+        debug!(%uri, "Sending protocol_systems request to Tycho server");
+        let response = self
+            .http_client
+            .post(&uri)
+            .json(request)
+            .send()
+            .await
+            .map_err(|e| RPCError::HttpClient(e.to_string()))?;
+
+        let body = response
+            .text()
+            .await
+            .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
+        let protocol_systems = serde_json::from_str::<ProtocolSystemsRequestResponse>(&body)
+            .map_err(|e| {
+                error!("Failed to parse protocol systems response {:?}", &body);
+                RPCError::ParseResponse(e.to_string())
+            })?;
+
+        Ok(protocol_systems)
     }
 }
 
@@ -953,5 +992,42 @@ mod tests {
         mocked_server.assert();
         assert_eq!(response.tokens, expected);
         assert_eq!(response.pagination, PaginationResponse { page: 0, page_size: 20, total: 10 });
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_systems() {
+        let mut server = Server::new_async().await;
+        let server_resp = r#"
+        {
+            "protocol_systems": [
+                "system1",
+                "system2"
+            ],
+            "pagination": {
+                "page": 0,
+                "page_size": 20,
+                "total": 10
+            }
+        }
+        "#;
+        // test that the response is deserialized correctly
+        serde_json::from_str::<ProtocolSystemsRequestResponse>(server_resp).expect("deserialize");
+
+        let mocked_server = server
+            .mock("POST", "/v1/protocol_systems")
+            .expect(1)
+            .with_body(server_resp)
+            .create_async()
+            .await;
+        let client = HttpRPCClient::new(server.url().as_str(), None).expect("create client");
+
+        let response = client
+            .get_protocol_systems(&Default::default())
+            .await
+            .expect("get protocol systems");
+        let protocol_systems = response.protocol_systems;
+
+        mocked_server.assert();
+        assert_eq!(protocol_systems, vec!["system1", "system2"]);
     }
 }

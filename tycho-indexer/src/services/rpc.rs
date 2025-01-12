@@ -347,6 +347,39 @@ where
             .await
     }
 
+    #[instrument(skip(self, request))]
+    async fn get_protocol_systems(
+        &self,
+        request: &dto::ProtocolSystemsRequestBody,
+    ) -> Result<dto::ProtocolSystemsRequestResponse, RpcError> {
+        info!(?request, "Getting protocol systems.");
+        let chain = request.chain.into();
+        let pagination_params: PaginationParams = (&request.pagination).into();
+        match self
+            .db_gateway
+            .get_protocol_systems(&chain, Some(&pagination_params))
+            .await
+        {
+            Ok(protocol_systems) => Ok(dto::ProtocolSystemsRequestResponse::new(
+                protocol_systems
+                    .entity
+                    .into_iter()
+                    .collect(),
+                PaginationResponse::new(
+                    request.pagination.page,
+                    request.pagination.page_size,
+                    protocol_systems
+                        .total
+                        .unwrap_or_default(),
+                ),
+            )),
+            Err(err) => {
+                error!(error = %err, "Error while getting protocol systems.");
+                Err(err.into())
+            }
+        }
+    }
+
     async fn get_protocol_state_inner(
         &self,
         request: dto::ProtocolStateRequestBody,
@@ -855,6 +888,50 @@ pub async fn protocol_state<G: Gateway>(
             error!(error = %err, ?body, "Error while getting protocol states.");
             let status = err.status_code().as_u16().to_string();
             counter!("rpc_requests_failed", "endpoint" => "protocol_state", "status" => status)
+                .increment(1);
+            HttpResponse::from_error(err)
+        }
+    }
+}
+
+/// Retrieve protocol systems
+///
+/// This endpoint retrieves the protocol systems available in the indexer.
+#[utoipa::path(
+    post,
+    path = "/v1/protocol_systems",
+    responses(
+        (status = 200, description = "OK", body = ProtocolSystemsRequestResponse),
+    ),
+    request_body = ProtocolSystemsRequestBody,
+)]
+pub async fn protocol_systems<G: Gateway>(
+    body: web::Json<dto::ProtocolSystemsRequestBody>,
+    handler: web::Data<RpcHandler<G>>,
+) -> HttpResponse {
+    // Tracing and metrics
+    tracing::Span::current().record("page", body.pagination.page);
+    tracing::Span::current().record("page.size", body.pagination.page_size);
+    counter!("rpc_requests", "endpoint" => "protocol_systems").increment(1);
+
+    if body.pagination.page_size > 100 {
+        counter!("rpc_requests_failed", "endpoint" => "protocol_systems", "status" => "400")
+            .increment(1);
+        return HttpResponse::BadRequest().body("Page size must be less than or equal to 100.");
+    }
+
+    // Call the handler to get protocol systems
+    let response = handler
+        .into_inner()
+        .get_protocol_systems(&body)
+        .await;
+
+    match response {
+        Ok(systems) => HttpResponse::Ok().json(systems),
+        Err(err) => {
+            error!(error = %err, "Error while getting protocol systems.");
+            let status = err.status_code().as_u16().to_string();
+            counter!("rpc_requests_failed", "endpoint" => "protocol_systems", "status" => status)
                 .increment(1);
             HttpResponse::from_error(err)
         }

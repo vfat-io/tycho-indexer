@@ -1027,6 +1027,17 @@ impl ProtocolGateway for CachedGateway {
             .upsert_component_tvl(chain, tvl_values, &mut conn)
             .await
     }
+
+    #[instrument(skip_all)]
+    async fn get_protocol_systems(
+        &self,
+        chain: &Chain,
+        pagination_params: Option<&PaginationParams>,
+    ) -> Result<WithTotal<Vec<String>>, StorageError> {
+        self.state_gateway
+            .get_protocol_systems(chain, pagination_params)
+            .await
+    }
 }
 
 impl Gateway for CachedGateway {}

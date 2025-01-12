@@ -535,7 +535,8 @@ mod test {
     use tycho_core::dto::{
         Block, Chain, PaginationResponse, ProtocolComponentRequestResponse,
         ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
-        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
+        ProtocolSystemsRequestBody, ProtocolSystemsRequestResponse, StateRequestBody,
+        StateRequestResponse, TokensRequestBody, TokensRequestResponse,
     };
 
     use crate::{deltas::MockDeltasClient, rpc::MockRPCClient, DeltasError, RPCError};
@@ -584,6 +585,15 @@ mod test {
         ) -> Result<ProtocolStateRequestResponse, RPCError> {
             self.0
                 .get_protocol_states(request)
+                .await
+        }
+
+        async fn get_protocol_systems(
+            &self,
+            request: &ProtocolSystemsRequestBody,
+        ) -> Result<ProtocolSystemsRequestResponse, RPCError> {
+            self.0
+                .get_protocol_systems(request)
                 .await
         }
     }

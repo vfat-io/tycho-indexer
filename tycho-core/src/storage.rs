@@ -465,6 +465,22 @@ pub trait ProtocolGateway {
         chain: &Chain,
         tvl_values: &HashMap<String, f64>,
     ) -> Result<(), StorageError>;
+
+    /// Retrieve a list of actively supported protocol systems
+    ///
+    /// Fetches the list of protocol systems supported by the Tycho indexing service.
+    ///
+    /// # Parameters
+    /// - `chain` The chain for which to retrieve supported protocol systems.
+    /// - `pagination_params` Optional pagination parameters to control the number of results.
+    ///
+    /// # Return
+    /// A paginated list of supported protocol systems, along with the total count.
+    async fn get_protocol_systems(
+        &self,
+        chain: &Chain,
+        pagination_params: Option<&PaginationParams>,
+    ) -> Result<WithTotal<Vec<String>>, StorageError>;
 }
 
 /// Manage contracts and their state in storage.

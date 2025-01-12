@@ -1205,6 +1205,28 @@ pub enum Health {
     NotReady(String),
 }
 
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema, Eq, Hash, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ProtocolSystemsRequestBody {
+    #[serde(default)]
+    pub chain: Chain,
+    /// Max page size supported is 100
+    #[serde(default)]
+    pub pagination: PaginationParams,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Eq, Hash)]
+pub struct ProtocolSystemsRequestResponse {
+    pub protocol_systems: Vec<String>,
+    pub pagination: PaginationResponse,
+}
+
+impl ProtocolSystemsRequestResponse {
+    pub fn new(protocol_systems: Vec<String>, pagination: PaginationResponse) -> Self {
+        Self { protocol_systems, pagination }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
