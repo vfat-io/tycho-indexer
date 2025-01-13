@@ -209,7 +209,7 @@ impl WsActor {
                             "subscription_id" => subscription_id.to_string(),
                             "chain"=> extractor_id.chain.to_string(),
                             "extractor" => extractor_id.name.to_string(),
-                            "user_identity" => self.user_identity.clone().unwrap_or_default(),
+                            "user_identity" => self.user_identity.clone().unwrap_or("unknown".to_string()),
                         )
                         .increment(1);
 
