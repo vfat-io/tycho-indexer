@@ -1,3 +1,11 @@
+## [0.49.1](https://github.com/propeller-heads/tycho-indexer/compare/0.49.0...0.49.1) (2025-01-13)
+
+
+### Bug Fixes
+
+* map empty user identity to 'unknown' in metrics ([352016a](https://github.com/propeller-heads/tycho-indexer/commit/352016abbf6f9b8947af8a3a4baf1a0353a6ca33))
+* map empty user identity to 'unknown' in metrics ([#485](https://github.com/propeller-heads/tycho-indexer/issues/485)) ([8d9fb62](https://github.com/propeller-heads/tycho-indexer/commit/8d9fb62c940f7b4d1c3c96e2d1dbb82242ef8f56))
+
 ## [0.49.0](https://github.com/propeller-heads/tycho-indexer/compare/0.48.0...0.49.0) (2025-01-10)
 
 
