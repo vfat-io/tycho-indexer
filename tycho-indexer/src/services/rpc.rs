@@ -347,39 +347,6 @@ where
             .await
     }
 
-    #[instrument(skip(self, request))]
-    async fn get_protocol_systems(
-        &self,
-        request: &dto::ProtocolSystemsRequestBody,
-    ) -> Result<dto::ProtocolSystemsRequestResponse, RpcError> {
-        info!(?request, "Getting protocol systems.");
-        let chain = request.chain.into();
-        let pagination_params: PaginationParams = (&request.pagination).into();
-        match self
-            .db_gateway
-            .get_protocol_systems(&chain, Some(&pagination_params))
-            .await
-        {
-            Ok(protocol_systems) => Ok(dto::ProtocolSystemsRequestResponse::new(
-                protocol_systems
-                    .entity
-                    .into_iter()
-                    .collect(),
-                PaginationResponse::new(
-                    request.pagination.page,
-                    request.pagination.page_size,
-                    protocol_systems
-                        .total
-                        .unwrap_or_default(),
-                ),
-            )),
-            Err(err) => {
-                error!(error = %err, "Error while getting protocol systems.");
-                Err(err.into())
-            }
-        }
-    }
-
     async fn get_protocol_state_inner(
         &self,
         request: dto::ProtocolStateRequestBody,
@@ -485,6 +452,39 @@ where
                 .collect(),
             PaginationResponse::new(pagination_params.page, pagination_params.page_size, total),
         ))
+    }
+
+    #[instrument(skip(self, request))]
+    async fn get_protocol_systems(
+        &self,
+        request: &dto::ProtocolSystemsRequestBody,
+    ) -> Result<dto::ProtocolSystemsRequestResponse, RpcError> {
+        info!(?request, "Getting protocol systems.");
+        let chain = request.chain.into();
+        let pagination_params: PaginationParams = (&request.pagination).into();
+        match self
+            .db_gateway
+            .get_protocol_systems(&chain, Some(&pagination_params))
+            .await
+        {
+            Ok(protocol_systems) => Ok(dto::ProtocolSystemsRequestResponse::new(
+                protocol_systems
+                    .entity
+                    .into_iter()
+                    .collect(),
+                PaginationResponse::new(
+                    request.pagination.page,
+                    request.pagination.page_size,
+                    protocol_systems
+                        .total
+                        .unwrap_or_default(),
+                ),
+            )),
+            Err(err) => {
+                error!(error = %err, "Error while getting protocol systems.");
+                Err(err.into())
+            }
+        }
     }
 
     #[instrument(skip(self, request))]
@@ -929,7 +929,7 @@ pub async fn protocol_systems<G: Gateway>(
     match response {
         Ok(systems) => HttpResponse::Ok().json(systems),
         Err(err) => {
-            error!(error = %err, "Error while getting protocol systems.");
+            error!(error = %err, ?body, "Error while getting protocol systems.");
             let status = err.status_code().as_u16().to_string();
             counter!("rpc_requests_failed", "endpoint" => "protocol_systems", "status" => status)
                 .increment(1);

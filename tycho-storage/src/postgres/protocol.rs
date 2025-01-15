@@ -1711,9 +1711,10 @@ impl PostgresGateway {
 
     pub async fn get_protocol_systems(
         &self,
-        _chain: &Chain, // TODO: Add chain filter
+        chain: &Chain,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<WithTotal<Vec<String>>, StorageError> {
+        let _ = self.get_chain_id(chain);
         let all_protocol_systems: Vec<String> = self
             .protocol_system_id_cache
             .map_enum

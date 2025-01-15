@@ -623,6 +623,7 @@ impl RPCClient for HttpRPCClient {
             TYCHO_SERVER_VERSION
         );
         debug!(%uri, "Sending protocol_systems request to Tycho server");
+        trace!(?request, "Sending request to Tycho server");
         let response = self
             .http_client
             .get(&uri)
@@ -630,7 +631,7 @@ impl RPCClient for HttpRPCClient {
             .send()
             .await
             .map_err(|e| RPCError::HttpClient(e.to_string()))?;
-
+        trace!(?response, "Received response from Tycho server");
         let body = response
             .text()
             .await
@@ -640,7 +641,7 @@ impl RPCClient for HttpRPCClient {
                 error!("Failed to parse protocol systems response {:?}", &body);
                 RPCError::ParseResponse(e.to_string())
             })?;
-
+        trace!(?protocol_systems, "Received protocol_systems response from Tycho server");
         Ok(protocol_systems)
     }
 }
