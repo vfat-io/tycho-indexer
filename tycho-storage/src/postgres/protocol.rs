@@ -1714,7 +1714,9 @@ impl PostgresGateway {
         chain: &Chain,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<WithTotal<Vec<String>>, StorageError> {
-        let _ = self.get_chain_id(chain);
+        if !self.chain_id_cache.value_exist(chain) {
+            return Err(StorageError::NotFound("Chain".to_string(), chain.to_string()));
+        }
         let all_protocol_systems: Vec<String> = self
             .protocol_system_id_cache
             .map_enum
