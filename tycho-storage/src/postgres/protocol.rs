@@ -3721,26 +3721,18 @@ mod test {
         let mut conn = setup_db().await;
         let _ = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-        let exp = ["ambient"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<HashSet<_>>();
+        let exp = ["ambient", "zigzag"];
 
         let res = gw
             .get_protocol_systems(
                 &Chain::Ethereum,
-                Some(&PaginationParams { page: 0, page_size: 1 }),
+                Some(&PaginationParams { page: 0, page_size: 2 }),
             )
             .await
             .expect("retrieving protocol systems failed!");
 
         assert_eq!(res.total, Some(exp.len() as i64));
-        assert_eq!(
-            res.entity
-                .into_iter()
-                .collect::<HashSet<_>>(),
-            exp
-        );
+        assert_eq!(res.entity.iter().collect_vec(), exp);
     }
 
     #[tokio::test]
