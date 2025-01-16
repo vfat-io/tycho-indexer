@@ -1,3 +1,11 @@
+## [0.49.2](https://github.com/propeller-heads/tycho-indexer/compare/0.49.1...0.49.2) (2025-01-16)
+
+
+### Bug Fixes
+
+* add more db gateway 'get' tracing spans ([#487](https://github.com/propeller-heads/tycho-indexer/issues/487)) ([b11ee91](https://github.com/propeller-heads/tycho-indexer/commit/b11ee913628b0ae3053081b415e0c67472390df6))
+* add more db gateway read spans ([958f357](https://github.com/propeller-heads/tycho-indexer/commit/958f357b7fd9ee8f4f59484133803c52ebbad3b5))
+
 ## [0.49.1](https://github.com/propeller-heads/tycho-indexer/compare/0.49.0...0.49.1) (2025-01-13)
 
 
