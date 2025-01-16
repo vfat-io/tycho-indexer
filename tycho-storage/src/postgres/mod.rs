@@ -229,16 +229,6 @@ where
             .to_owned()
     }
 
-    /// Checks if a database ID exists in the cache. Returns `true` if the ID is found,
-    /// otherwise returns `false`.
-    ///
-    /// # Arguments
-    ///
-    /// * `id` - The database ID to check for existence.
-    fn id_exist(&self, id: &i64) -> bool {
-        self.map_enum.contains_key(id)
-    }
-
     /// Checks if an enum variant exists in the cache. Returns `true` if the variant is found,
     /// otherwise returns `false`.
     ///

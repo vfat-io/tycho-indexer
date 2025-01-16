@@ -3744,6 +3744,29 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_get_protocol_systems_chain_not_exist() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp = ["ambient", "zigzag"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<HashSet<_>>();
+
+        let res = gw
+            .get_protocol_systems(&Chain::Arbitrum, None)
+            .await;
+
+        match res {
+            Err(StorageError::NotFound(entity, value)) => {
+                assert_eq!(entity, "Chain");
+                assert_eq!(value, Chain::Arbitrum.to_string());
+            }
+            _ => panic!("Expected StorageError::NotFound, but got {:?}", res),
+        }
+    }
+
+    #[tokio::test]
     async fn test_truncate_token_title() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
