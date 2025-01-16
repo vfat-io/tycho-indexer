@@ -10,7 +10,7 @@ use diesel::{
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, instrument, Level};
 use tycho_core::{
     keccak256,
     models::{
@@ -39,7 +39,7 @@ impl PostgresGateway {
     /// This method returns a mapping from each account id to its respective `Balance`. The returned
     /// map indicates the new balance that needs to be applied to reach the desired target
     /// version.
-    #[instrument(skip(self, conn))]
+    #[instrument(level = Level::DEBUG, skip(self, conn))]
     async fn get_balance_deltas_internal(
         &self,
         chain_id: i64,
@@ -115,7 +115,7 @@ impl PostgresGateway {
     /// This method returns a mapping from each account id to its respective
     /// `Code`. The returned map indicates the new code that needs to be applied
     /// to reach the desired target version.
-    #[instrument(skip(self, conn))]
+    #[instrument(level = Level::DEBUG, skip(self, conn))]
     async fn get_code_deltas(
         &self,
         chain_id: i64,
@@ -191,7 +191,7 @@ impl PostgresGateway {
     /// This method returns a mapping from each account id to a `ContractStore`.
     /// The returned store entries indicate the updates needed to reach the specified target
     /// version.
-    #[instrument(skip(self, conn))]
+    #[instrument(level = Level::DEBUG, skip(self, conn))]
     async fn get_slots_delta(
         &self,
         chain_id: i64,
@@ -306,7 +306,7 @@ impl PostgresGateway {
     /// attribute. We can use this attribute to satisfy the first operation. It also contains new
     /// restored / deleted delta structs withing the `restored` attribute with which we can satisfy
     /// the second rule.
-    #[instrument(skip(self, conn))]
+    #[instrument(level = Level::DEBUG, skip(self, conn))]
     async fn get_created_or_deleted_accounts(
         &self,
         chain: &Chain,
@@ -467,7 +467,7 @@ impl PostgresGateway {
     /// An empty `Ok(())` if the operation succeeded. Will raise an error if any
     /// of the related entities can not be found: e.g. one of the referenced
     /// transactions or accounts is not or not yet persisted.
-    #[instrument(skip_all)]
+    #[instrument(level = Level::DEBUG, skip_all)]
     async fn upsert_slots(
         &self,
         slots: HashMap<i64, AccountToContractStore>,
@@ -598,7 +598,7 @@ impl PostgresGateway {
     /// - `contracts` Optionally allows filtering by contract address.
     /// - `at` The version at which to retrieve slots. None retrieves the latest
     /// - `conn` The database handle or connection. state.
-    #[instrument(skip(self, contracts, conn))]
+    #[instrument(level = Level::DEBUG, skip(self, contracts, conn))]
     async fn get_contract_slots(
         &self,
         chain: &Chain,
@@ -673,20 +673,21 @@ impl PostgresGateway {
         Ok(result)
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, conn))]
     pub async fn get_contract(
         &self,
         id: &ContractId,
         version: Option<&Version>,
         include_slots: bool,
-        db: &mut AsyncPgConnection,
+        conn: &mut AsyncPgConnection,
     ) -> Result<models::contract::Account, StorageError> {
-        let account_orm: orm::Account = orm::Account::by_id(id, db)
+        let account_orm: orm::Account = orm::Account::by_id(id, conn)
             .await
             .map_err(|err| {
                 storage_error_from_diesel(err, "Account", &hex::encode(&id.address), None)
             })?;
         let version_ts = match &version {
-            Some(version) => maybe_lookup_version_ts(version, db).await?,
+            Some(version) => maybe_lookup_version_ts(version, conn).await?,
             None => Utc::now().naive_utc(),
         };
 
@@ -705,7 +706,7 @@ impl PostgresGateway {
                 schema::account_balance::valid_from.desc(),
                 schema::transaction::index.desc(),
             ))
-            .first::<(Bytes, orm::AccountBalance)>(db)
+            .first::<(Bytes, orm::AccountBalance)>(conn)
             .await
             .map_err(|err| {
                 storage_error_from_diesel(
@@ -731,7 +732,7 @@ impl PostgresGateway {
                 schema::contract_code::valid_from.desc(),
                 schema::transaction::index.desc(),
             ))
-            .first::<(Bytes, orm::ContractCode)>(db)
+            .first::<(Bytes, orm::ContractCode)>(conn)
             .await
             .map_err(|err| {
                 storage_error_from_diesel(
@@ -746,7 +747,7 @@ impl PostgresGateway {
             Some(tx) => schema::transaction::table
                 .filter(schema::transaction::id.eq(tx))
                 .select(schema::transaction::hash)
-                .first::<Bytes>(db)
+                .first::<Bytes>(conn)
                 .await
                 .ok(),
             None => None,
@@ -766,7 +767,7 @@ impl PostgresGateway {
 
         if include_slots {
             account.slots = self
-                .get_contract_slots(&id.chain, Some(&[account.address.clone()]), version, db)
+                .get_contract_slots(&id.chain, Some(&[account.address.clone()]), version, conn)
                 .await?
                 .remove(&id.address)
                 .unwrap_or_default()
@@ -778,6 +779,7 @@ impl PostgresGateway {
         Ok(account)
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, ids, conn))]
     pub async fn get_contracts(
         &self,
         chain: &Chain,
@@ -1295,6 +1297,7 @@ impl PostgresGateway {
         Ok(())
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, conn))]
     pub async fn get_accounts_delta(
         &self,
         chain: &Chain,

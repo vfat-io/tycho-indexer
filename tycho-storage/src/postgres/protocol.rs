@@ -8,7 +8,7 @@ use diesel::{
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
-use tracing::{error, instrument, trace, warn};
+use tracing::{error, instrument, trace, warn, Level};
 
 use tycho_core::{
     models::{
@@ -43,6 +43,7 @@ impl PostgresGateway {
     ///
     /// ## Returns:
     /// - A Result containing a vector of `ProtocolState`, otherwise, it will return a StorageError.
+    #[instrument(level = Level::DEBUG, skip(self, balances, states_result))]
     fn _decode_protocol_states(
         &self,
         mut balances: HashMap<ComponentId, HashMap<Address, models::protocol::ComponentBalance>>,
@@ -102,6 +103,7 @@ impl PostgresGateway {
         Ok(protocol_states)
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, conn))]
     async fn _get_or_create_protocol_system_id(
         &self,
         new: String,
@@ -130,6 +132,7 @@ impl PostgresGateway {
         }
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, ids, conn))]
     pub async fn get_protocol_components(
         &self,
         chain: &Chain,
@@ -235,6 +238,7 @@ impl PostgresGateway {
         Ok(WithTotal { entity: res, total: Some(count) })
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, orm_protocol_components, conn))]
     async fn build_protocol_components(
         &self,
         orm_protocol_components: Vec<(orm::ProtocolComponent, Option<TxHash>)>,
@@ -352,6 +356,7 @@ impl PostgresGateway {
             .collect()
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, tokens, conn))]
     pub async fn get_token_owners(
         &self,
         chain: &Chain,
@@ -624,6 +629,7 @@ impl PostgresGateway {
             .map_err(PostgresError::from)?;
         Ok(())
     }
+
     pub async fn add_protocol_types(
         &self,
         new_protocol_types: &[models::ProtocolType],
@@ -671,6 +677,7 @@ impl PostgresGateway {
 
     // Gets all protocol states from the db filtered by chain, component ids and/or protocol system.
     #[allow(clippy::too_many_arguments)]
+    #[instrument(level = Level::DEBUG, skip(self, ids, conn))]
     pub async fn get_protocol_states(
         &self,
         chain: &Chain,
@@ -891,6 +898,7 @@ impl PostgresGateway {
         Ok(())
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, addresses, conn))]
     pub async fn get_tokens(
         &self,
         chain: Chain,
@@ -1350,6 +1358,7 @@ impl PostgresGateway {
         Ok(res)
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, ids, conn))]
     pub async fn get_balances(
         &self,
         chain: &Chain,
@@ -1475,6 +1484,7 @@ impl PostgresGateway {
         Ok(balances)
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, conn))]
     pub async fn get_protocol_states_delta(
         &self,
         chain: &Chain,
@@ -1654,6 +1664,7 @@ impl PostgresGateway {
         }
     }
 
+    #[instrument(level = Level::DEBUG, skip(self, conn))]
     pub async fn get_token_prices(
         &self,
         chain: &Chain,
