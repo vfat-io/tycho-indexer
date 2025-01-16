@@ -3748,10 +3748,6 @@ mod test {
         let mut conn = setup_db().await;
         let _ = setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
-        let exp = ["ambient", "zigzag"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<HashSet<_>>();
 
         let res = gw
             .get_protocol_systems(&Chain::Arbitrum, None)
