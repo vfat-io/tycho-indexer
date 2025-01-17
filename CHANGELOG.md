@@ -1,3 +1,18 @@
+## [0.50.0](https://github.com/propeller-heads/tycho-indexer/compare/0.49.2...0.50.0) (2025-01-17)
+
+
+### Features
+
+* add protocol system rpc ([#484](https://github.com/propeller-heads/tycho-indexer/issues/484)) ([9987d56](https://github.com/propeller-heads/tycho-indexer/commit/9987d5630c8be58173ca73a85549bf5f7c585644))
+* add protocol_systems rpc ([9e44522](https://github.com/propeller-heads/tycho-indexer/commit/9e4452234a51a3ce83e76c82cfad0d430b0775ab))
+
+
+### Bug Fixes
+
+* add cache exist ([97f75a1](https://github.com/propeller-heads/tycho-indexer/commit/97f75a12cd1ff3b2a6cca8edf9b555d819192ac9))
+* add sort before pagination ([c864f8f](https://github.com/propeller-heads/tycho-indexer/commit/c864f8f43669f778d01dca937d0e263918abf9ae))
+* get method ([8540c47](https://github.com/propeller-heads/tycho-indexer/commit/8540c474e9b7a716cb4e2d61229d874d19fd51ad))
+
 ## [0.49.2](https://github.com/propeller-heads/tycho-indexer/compare/0.49.1...0.49.2) (2025-01-16)
 
 
