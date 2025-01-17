@@ -16,9 +16,9 @@ use tycho_core::{
         AccountUpdate, BlockParam, Chain, ChangeType, ContractId, Health, PaginationParams,
         PaginationResponse, ProtocolComponent, ProtocolComponentRequestResponse,
         ProtocolComponentsRequestBody, ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody,
-        ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState, ResponseToken,
-        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
-        VersionParam,
+        ProtocolStateRequestResponse, ProtocolSystemsRequestBody, ProtocolSystemsRequestResponse,
+        ResponseAccount, ResponseProtocolState, ResponseToken, StateRequestBody,
+        StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
     },
     storage::Gateway,
 };
@@ -98,6 +98,7 @@ where
                 rpc::protocol_components,
                 rpc::protocol_state,
                 rpc::health,
+                rpc::protocol_systems
             ),
             components(
                 schemas(VersionParam),
@@ -123,6 +124,8 @@ where
                 schemas(ChangeType),
                 schemas(ProtocolStateDelta),
                 schemas(Health),
+                schemas(ProtocolSystemsRequestBody),
+                schemas(ProtocolSystemsRequestResponse),
             )
         )]
         struct ApiDoc;
@@ -206,6 +209,10 @@ where
                 .service(
                     web::resource(format!("/{}/health", self.prefix))
                         .route(web::get().to(rpc::health)),
+                )
+                .service(
+                    web::resource(format!("/{}/protocol_systems", self.prefix))
+                        .route(web::get().to(rpc::protocol_systems::<G>)),
                 )
                 .wrap(RequestTracing::new())
                 .service(

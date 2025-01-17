@@ -1719,6 +1719,36 @@ impl PostgresGateway {
             .map_err(PostgresError::from)?;
         Ok(())
     }
+
+    pub async fn get_protocol_systems(
+        &self,
+        chain: &Chain,
+        pagination_params: Option<&PaginationParams>,
+    ) -> Result<WithTotal<Vec<String>>, StorageError> {
+        if !self.chain_id_cache.value_exist(chain) {
+            return Err(StorageError::NotFound("Chain".to_string(), chain.to_string()));
+        }
+        let all_protocol_systems: Vec<String> = self
+            .protocol_system_id_cache
+            .map_enum
+            .values()
+            .cloned()
+            .sorted()
+            .collect();
+
+        let total = all_protocol_systems.len() as i64;
+        let paginated_protocol_systems = if let Some(params) = pagination_params {
+            all_protocol_systems
+                .into_iter()
+                .skip(params.offset() as usize)
+                .take(params.page_size as usize)
+                .collect()
+        } else {
+            all_protocol_systems
+        };
+
+        Ok(WithTotal { total: Some(total), entity: paginated_protocol_systems })
+    }
 }
 
 #[cfg(test)]
@@ -3672,6 +3702,69 @@ mod test {
             .collect::<HashMap<_, _>>();
 
         assert_eq!(tvl_values, exp);
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_systems() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let exp = ["ambient", "zigzag"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<HashSet<_>>();
+
+        let res = gw
+            .get_protocol_systems(&Chain::Ethereum, None)
+            .await
+            .expect("retrieving protocol systems failed!");
+
+        assert_eq!(res.total, Some(exp.len() as i64));
+        assert_eq!(
+            res.entity
+                .into_iter()
+                .collect::<HashSet<_>>(),
+            exp
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_systems_with_pagination() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+        let all = ["ambient", "zigzag"];
+        let exp = vec![all[0]];
+
+        let res = gw
+            .get_protocol_systems(
+                &Chain::Ethereum,
+                Some(&PaginationParams { page: 0, page_size: 1 }),
+            )
+            .await
+            .expect("retrieving protocol systems failed!");
+
+        assert_eq!(res.total, Some(all.len() as i64));
+        assert_eq!(res.entity.iter().collect_vec(), exp);
+    }
+
+    #[tokio::test]
+    async fn test_get_protocol_systems_chain_not_exist() {
+        let mut conn = setup_db().await;
+        let _ = setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let res = gw
+            .get_protocol_systems(&Chain::Arbitrum, None)
+            .await;
+
+        match res {
+            Err(StorageError::NotFound(entity, value)) => {
+                assert_eq!(entity, "Chain");
+                assert_eq!(value, Chain::Arbitrum.to_string());
+            }
+            _ => panic!("Expected StorageError::NotFound, but got {:?}", res),
+        }
     }
 
     #[tokio::test]

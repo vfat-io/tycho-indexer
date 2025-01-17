@@ -228,6 +228,16 @@ where
             })
             .to_owned()
     }
+
+    /// Checks if an enum variant exists in the cache. Returns `true` if the variant is found,
+    /// otherwise returns `false`.
+    ///
+    /// # Arguments
+    ///
+    /// * `val` - The enum variant to check for existence.
+    fn value_exist(&self, val: &E) -> bool {
+        self.map_id.contains_key(val)
+    }
 }
 
 type ChainEnumCache = ValueIdTableCache<Chain>;
