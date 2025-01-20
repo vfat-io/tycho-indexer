@@ -37,7 +37,7 @@ metrics-exporter-prometheus = { workspace = true }
 async-stream = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-retry = "0.3"
-tonic = { version = "0.9", features = ["tls-roots"] }
+tonic = { version = "0.9", features = ["tls-roots", "gzip"] }
 prost = "0.11"
 prost-types = "0.11"
 clap = { workspace = true, features = ["derive", "env"] }
