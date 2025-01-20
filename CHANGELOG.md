@@ -1,3 +1,11 @@
+## [0.51.0](https://github.com/propeller-heads/tycho-indexer/compare/0.50.0...0.51.0) (2025-01-20)
+
+
+### Features
+
+* update substreams client to accept compressed messages ([3a68674](https://github.com/propeller-heads/tycho-indexer/commit/3a6867418ba78a89568757a249dcd66fe2b758ff))
+* update substreams client to accept compressed messages ([#489](https://github.com/propeller-heads/tycho-indexer/issues/489)) ([b441682](https://github.com/propeller-heads/tycho-indexer/commit/b4416824d66799d208812bd698ca12e16bba01cc))
+
 ## [0.50.0](https://github.com/propeller-heads/tycho-indexer/compare/0.49.2...0.50.0) (2025-01-17)
 
 
