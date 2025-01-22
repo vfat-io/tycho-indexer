@@ -61,6 +61,7 @@ impl TychoStreamBuilder {
             Chain::Starknet => (30, 5),
             Chain::ZkSync => (1, 2),
             Chain::Arbitrum => (1, 0), // Typically closer to 0.25s
+            Chain::Base => (2, 2),
         }
     }
 

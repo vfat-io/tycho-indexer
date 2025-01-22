@@ -41,6 +41,7 @@ class Chain(str, Enum):
     ethereum = "ethereum"
     starknet = "starknet"
     arbitrum = "arbitrum"
+    base = "base"
 
 
 class ChangeType(str, Enum):
