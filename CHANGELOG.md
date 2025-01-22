@@ -1,3 +1,11 @@
+## [0.52.0](https://github.com/propeller-heads/tycho-indexer/compare/0.51.0...0.52.0) (2025-01-22)
+
+
+### Features
+
+* Add Base to supported chains ([c0afd1a](https://github.com/propeller-heads/tycho-indexer/commit/c0afd1ac5df5a3302e4a5153638d1c71889fa2be))
+* Add Base to supported chains ([#491](https://github.com/propeller-heads/tycho-indexer/issues/491)) ([31447a8](https://github.com/propeller-heads/tycho-indexer/commit/31447a8ad3de358f330775e634bda326714cf2da))
+
 ## [0.51.0](https://github.com/propeller-heads/tycho-indexer/compare/0.50.0...0.51.0) (2025-01-20)
 
 
