@@ -16,8 +16,10 @@ use std::{
 use tracing::warn;
 
 use super::{
-    contract::TransactionVMUpdates, protocol::ProtocolChangesWithTx, token::CurrencyToken, Address,
-    ExtractorIdentity, NormalisedMessage,
+    contract::{AccountBalance, TransactionVMUpdates},
+    protocol::ProtocolChangesWithTx,
+    token::CurrencyToken,
+    Address, ExtractorIdentity, NormalisedMessage,
 };
 
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize, Debug)]
@@ -170,18 +172,20 @@ impl BlockScoped for BlockAggregatedChanges {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TxWithChanges {
     pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub account_deltas: HashMap<Bytes, AccountDelta>,
+    pub account_deltas: HashMap<Address, AccountDelta>,
     pub state_updates: HashMap<ComponentId, ProtocolComponentStateDelta>,
-    pub balance_changes: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+    pub balance_changes: HashMap<ComponentId, HashMap<Address, ComponentBalance>>,
+    pub account_balance_changes: HashMap<Address, HashMap<Address, AccountBalance>>,
     pub tx: Transaction,
 }
 
 impl TxWithChanges {
     pub fn new(
         protocol_components: HashMap<ComponentId, ProtocolComponent>,
-        account_deltas: HashMap<Bytes, AccountDelta>,
+        account_deltas: HashMap<Address, AccountDelta>,
         protocol_states: HashMap<ComponentId, ProtocolComponentStateDelta>,
-        balance_changes: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+        balance_changes: HashMap<ComponentId, HashMap<Address, ComponentBalance>>,
+        account_balance_changes: HashMap<Address, HashMap<Address, AccountBalance>>,
         tx: Transaction,
     ) -> Self {
         Self {
@@ -189,6 +193,7 @@ impl TxWithChanges {
             protocol_components,
             state_updates: protocol_states,
             balance_changes,
+            account_balance_changes,
             tx,
         }
     }
@@ -267,7 +272,7 @@ impl TxWithChanges {
             }
         }
 
-        // Merge Balance Changes
+        // Merge component balance changes
         for (component_id, balance_changes) in other.balance_changes {
             let token_balances = self
                 .balance_changes
@@ -277,6 +282,18 @@ impl TxWithChanges {
                 token_balances.insert(token, balance);
             }
         }
+
+        // Merge account balance changes
+        for (account_addr, balance_changes) in other.account_balance_changes {
+            let token_balances = self
+                .account_balance_changes
+                .entry(account_addr)
+                .or_default();
+            for (token, balance) in balance_changes {
+                token_balances.insert(token, balance);
+            }
+        }
+
         Ok(())
     }
 }
@@ -288,18 +305,20 @@ impl From<TransactionVMUpdates> for TxWithChanges {
             account_deltas: value.account_deltas,
             state_updates: HashMap::new(),
             balance_changes: value.component_balances,
+            account_balance_changes: value.account_balances,
             tx: value.tx,
         }
     }
 }
 
 impl From<ProtocolChangesWithTx> for TxWithChanges {
-    fn from(value: ProtocolChangesWithTx) -> TxWithChanges {
-        TxWithChanges {
+    fn from(value: ProtocolChangesWithTx) -> Self {
+        Self {
             protocol_components: value.new_protocol_components,
             account_deltas: HashMap::new(),
             state_updates: value.protocol_states,
             balance_changes: value.balance_changes,
+            account_balance_changes: HashMap::new(),
             tx: value.tx,
         }
     }
