@@ -1,3 +1,16 @@
+## [0.53.0](https://github.com/propeller-heads/tycho-indexer/compare/0.52.0...0.53.0) (2025-01-23)
+
+
+### Features
+
+* add account balances to protobuf messages ([349aa2c](https://github.com/propeller-heads/tycho-indexer/commit/349aa2c61e0766db72b18c4920588c3969c12de8))
+* add AccountBalances to the protobuf messages ([#492](https://github.com/propeller-heads/tycho-indexer/issues/492)) ([08cb0c6](https://github.com/propeller-heads/tycho-indexer/commit/08cb0c600447851c91493d1e58e81ce1362d47da))
+
+
+### Bug Fixes
+
+* remove unnecessary tx field in ProtocolComponent ([43e6573](https://github.com/propeller-heads/tycho-indexer/commit/43e65737f05fb48f06051670882ffc379616b1dd))
+
 ## [0.52.0](https://github.com/propeller-heads/tycho-indexer/compare/0.51.0...0.52.0) (2025-01-22)
 
 
