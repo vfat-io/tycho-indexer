@@ -6,7 +6,7 @@ use tracing::warn;
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction, TxWithChanges},
-        contract::{AccountDelta, TransactionVMUpdates},
+        contract::{AccountChangesWithTx, AccountDelta},
         protocol::{
             ComponentBalance, ProtocolChangesWithTx, ProtocolComponent, ProtocolComponentStateDelta,
         },
@@ -426,7 +426,7 @@ impl TryFromMessage for BlockContractChanges {
                             .insert(token_address, balance);
                     }
 
-                    tx_updates.push(TransactionVMUpdates::new(
+                    tx_updates.push(AccountChangesWithTx::new(
                         account_updates,
                         protocol_components,
                         balances_changes,

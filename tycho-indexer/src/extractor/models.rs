@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use tycho_core::{
     models::{
         blockchain::{Block, BlockAggregatedChanges, BlockScoped, TxWithChanges},
-        contract::TransactionVMUpdates,
+        contract::AccountChangesWithTx,
         protocol::{ComponentBalance, ProtocolChangesWithTx, ProtocolComponent},
         token::CurrencyToken,
         Address, AttrStoreKey, Chain, ComponentId,
@@ -32,7 +32,7 @@ pub struct BlockContractChanges {
     /// finalized.
     pub new_tokens: HashMap<Address, CurrencyToken>,
     /// Vec of updates at this block, aggregated by tx and sorted by tx index in ascending order
-    pub tx_updates: Vec<TransactionVMUpdates>,
+    pub tx_updates: Vec<AccountChangesWithTx>,
 }
 
 impl BlockContractChanges {
@@ -42,7 +42,7 @@ impl BlockContractChanges {
         block: Block,
         finalized_block_height: u64,
         revert: bool,
-        tx_updates: Vec<TransactionVMUpdates>,
+        tx_updates: Vec<AccountChangesWithTx>,
     ) -> Self {
         BlockContractChanges {
             extractor,
@@ -346,7 +346,9 @@ pub mod fixtures {
     use super::*;
 
     use tycho_core::models::{
-        blockchain::Transaction, contract::AccountDelta, protocol::ProtocolComponentStateDelta,
+        blockchain::Transaction,
+        contract::{AccountBalance, AccountDelta},
+        protocol::ProtocolComponentStateDelta,
         ChangeType,
     };
     use tycho_storage::postgres::db_fixtures::yesterday_midnight;
@@ -470,6 +472,8 @@ pub mod fixtures {
             5,
         );
         let protocol_component = create_protocol_component(tx.hash.clone());
+        let account_addr = Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap();
+        let weth_addr = Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap();
         BlockContractChanges::new(
             "test".to_string(),
             Chain::Ethereum,
@@ -483,12 +487,12 @@ pub mod fixtures {
             0,
             false,
             vec![
-                TransactionVMUpdates {
+                AccountChangesWithTx {
                     account_deltas: [(
-                        Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
+                        account_addr.clone(),
                         AccountDelta::new(
                             Chain::Ethereum,
-                            Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                            account_addr.clone(),
                             fixtures::optional_slots([
                                 (2711790500, 2981278644),
                                 (3250766788, 3520254932),
@@ -506,9 +510,9 @@ pub mod fixtures {
                     component_balances: [(
                         "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                         [(
-                            Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                            weth_addr.clone(),
                             ComponentBalance {
-                                token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                                token: weth_addr.clone(),
                                 balance: Bytes::from(50000000.encode_to_vec()),
                                 balance_float: 36522027799.0,
                                 modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
@@ -520,15 +524,31 @@ pub mod fixtures {
                     )]
                         .into_iter()
                         .collect(),
-
+                    account_balances: [(
+                        account_addr.clone(),
+                        [(
+                            weth_addr.clone(),
+                            AccountBalance {
+                                token: weth_addr.clone(),
+                                balance: Bytes::from(0_i32.to_le_bytes()),
+                                modify_tx: Default::default(),
+                                account: account_addr.clone(),
+                                balance_float: 0.0,
+                            },
+                        )]
+                        .into_iter()
+                        .collect(),
+                    )]
+                        .into_iter()
+                        .collect(),
                     tx,
                 },
-                TransactionVMUpdates {
+                AccountChangesWithTx {
                     account_deltas: [(
-                        Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
+                        account_addr.clone(),
                         AccountDelta::new(
                             Chain::Ethereum,
-                            Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                            account_addr.clone(),
                             fixtures::optional_slots([
                                 (2711790500, 3250766788),
                                 (2442302356, 2711790500),
@@ -544,9 +564,9 @@ pub mod fixtures {
                     component_balances: [(
                         "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_string(),
                         [(
-                            Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                            weth_addr.clone(),
                             ComponentBalance {
-                                token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                                token: weth_addr.clone(),
                                 balance: Bytes::from(10.encode_to_vec()),
                                 balance_float: 2058.0,
                                 modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
@@ -555,6 +575,23 @@ pub mod fixtures {
                         )]
                             .into_iter()
                             .collect(),
+                    )]
+                        .into_iter()
+                        .collect(),
+                    account_balances: [(
+                        account_addr.clone(),
+                        [(
+                            weth_addr.clone(),
+                            AccountBalance {
+                                token: weth_addr,
+                                balance: Bytes::from(2058_i32.to_le_bytes()),
+                                modify_tx: Default::default(),
+                                account: account_addr,
+                                balance_float: 2058.0,
+                            },
+                        )]
+                        .into_iter()
+                        .collect(),
                     )]
                         .into_iter()
                         .collect(),

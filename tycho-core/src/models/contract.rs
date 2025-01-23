@@ -65,7 +65,10 @@ impl Account {
         let self_id = (self.chain, &self.address);
         let other_id = (delta.chain, &delta.address);
         if self_id != other_id {
-            return Err(DeltaError::IdMismatch(format!("{:?}", self_id), format!("{:?}", other_id)));
+            return Err(DeltaError::IdMismatch(
+                format!("{:?}", self_id),
+                format!("{:?}", other_id),
+            ));
         }
         if let Some(balance) = delta.balance.as_ref() {
             self.native_balance.clone_from(balance);
@@ -208,7 +211,7 @@ impl AccountDelta {
     ///
     /// There are no further validation checks within this method, hence it
     /// could be used as needed. However, you should give preference to
-    /// utilizing [TransactionVMUpdates] for merging, when possible.
+    /// utilizing [AccountChangesWithTx] for merging, when possible.
     ///
     /// # Errors
     ///
@@ -286,7 +289,7 @@ impl AccountBalance {
 
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq)]
-pub struct TransactionVMUpdates {
+pub struct AccountChangesWithTx {
     // map of account changes in the transaction
     pub account_deltas: HashMap<Address, AccountDelta>,
     // map of new protocol components created in the transaction
@@ -299,7 +302,7 @@ pub struct TransactionVMUpdates {
     pub tx: Transaction,
 }
 
-impl TransactionVMUpdates {
+impl AccountChangesWithTx {
     pub fn new(
         account_deltas: HashMap<Address, AccountDelta>,
         protocol_components: HashMap<ComponentId, ProtocolComponent>,
@@ -326,22 +329,22 @@ impl TransactionVMUpdates {
     ///
     /// # Errors
     /// This method will return an error if any of the above conditions is violated.
-    pub fn merge(&mut self, other: &TransactionVMUpdates) -> Result<(), String> {
+    pub fn merge(&mut self, other: &AccountChangesWithTx) -> Result<(), String> {
         if self.tx.block_hash != other.tx.block_hash {
             return Err(format!(
-                "Can't merge TransactionVMUpdates from different blocks: {:x} != {:x}",
+                "Can't merge AccountChangesWithTx from different blocks: {:x} != {:x}",
                 self.tx.block_hash, other.tx.block_hash,
             ));
         }
         if self.tx.hash == other.tx.hash {
             return Err(format!(
-                "Can't merge TransactionVMUpdates from the same transaction: {:x}",
+                "Can't merge AccountChangesWithTx from the same transaction: {:x}",
                 self.tx.hash
             ));
         }
         if self.tx.index > other.tx.index {
             return Err(format!(
-                "Can't merge TransactionVMUpdates with lower transaction index: {} > {}",
+                "Can't merge AccountChangesWithTx with lower transaction index: {} > {}",
                 self.tx.index, other.tx.index
             ));
         }
@@ -408,7 +411,7 @@ impl TransactionVMUpdates {
     }
 }
 
-impl From<&TransactionVMUpdates> for Vec<Account> {
+impl From<&AccountChangesWithTx> for Vec<Account> {
     /// Creates a full account from a change.
     ///
     /// This can be used to get an insertable an account if we know the update
@@ -418,7 +421,7 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
     /// missing, it will use the corresponding types default.
     /// Will use the associated transaction as creation, balance and code modify
     /// transaction.
-    fn from(value: &TransactionVMUpdates) -> Self {
+    fn from(value: &AccountChangesWithTx) -> Self {
         value
             .account_deltas
             .clone()
@@ -521,7 +524,7 @@ mod test {
         assert_eq!(res, exp);
     }
 
-    fn tx_vm_update() -> TransactionVMUpdates {
+    fn tx_vm_update() -> AccountChangesWithTx {
         let code = vec![0, 0, 0, 0];
         let mut account_updates = HashMap::new();
         account_updates.insert(
@@ -538,7 +541,7 @@ mod test {
             ),
         );
 
-        TransactionVMUpdates::new(
+        AccountChangesWithTx::new(
             account_updates,
             HashMap::new(),
             HashMap::new(),
@@ -585,15 +588,15 @@ mod test {
     #[rstest]
     #[case::diff_block(
     block_fixtures::create_transaction(HASH_256_1, HASH_256_1, 11),
-    Err(format ! ("Can't merge TransactionVMUpdates from different blocks: {:x} != {}", Bytes::zero(32), HASH_256_1))
+    Err(format ! ("Can't merge AccountChangesWithTx from different blocks: {:x} != {}", Bytes::zero(32), HASH_256_1))
     )]
     #[case::same_tx(
     block_fixtures::create_transaction(HASH_256_0, HASH_256_0, 11),
-    Err(format ! ("Can't merge TransactionVMUpdates from the same transaction: {:x}", Bytes::zero(32)))
+    Err(format ! ("Can't merge AccountChangesWithTx from the same transaction: {:x}", Bytes::zero(32)))
     )]
     #[case::lower_idx(
     block_fixtures::create_transaction(HASH_256_1, HASH_256_0, 1),
-    Err("Can't merge TransactionVMUpdates with lower transaction index: 10 > 1".to_owned())
+    Err("Can't merge AccountChangesWithTx with lower transaction index: 10 > 1".to_owned())
     )]
     fn test_merge_vm_updates_w_tx(#[case] tx: Transaction, #[case] exp: Result<(), String>) {
         let mut left = tx_vm_update();
@@ -639,7 +642,7 @@ mod test {
             Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap();
         let token_address = Bytes::from_str("0x0000000000000000000000000000000066666666").unwrap();
 
-        let first_update = TransactionVMUpdates {
+        let first_update = AccountChangesWithTx {
             account_deltas: [(
                 account_address.clone(),
                 AccountDelta::new(
@@ -695,7 +698,7 @@ mod test {
             .collect(),
             tx: tx_first_update,
         };
-        let second_update = TransactionVMUpdates {
+        let second_update = AccountChangesWithTx {
             account_deltas: [(
                 account_address.clone(),
                 AccountDelta::new(

@@ -16,7 +16,7 @@ use std::{
 use tracing::warn;
 
 use super::{
-    contract::{AccountBalance, TransactionVMUpdates},
+    contract::{AccountBalance, AccountChangesWithTx},
     protocol::ProtocolChangesWithTx,
     token::CurrencyToken,
     Address, ExtractorIdentity, NormalisedMessage,
@@ -298,8 +298,8 @@ impl TxWithChanges {
     }
 }
 
-impl From<TransactionVMUpdates> for TxWithChanges {
-    fn from(value: TransactionVMUpdates) -> Self {
+impl From<AccountChangesWithTx> for TxWithChanges {
+    fn from(value: AccountChangesWithTx) -> Self {
         Self {
             protocol_components: value.protocol_components,
             account_deltas: value.account_deltas,
