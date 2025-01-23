@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use std::collections::{HashMap, HashSet};
 
 use tycho_core::{
@@ -22,6 +23,7 @@ use crate::extractor::{
 /// Hold the detailed state changes for a block alongside with protocol
 /// component changes.
 #[derive(Debug, PartialEq, Clone)]
+#[deprecated(note = "Use BlockChanges instead")]
 pub struct BlockContractChanges {
     extractor: String,
     chain: Chain,
@@ -78,6 +80,7 @@ impl BlockScoped for BlockContractChanges {
 /// Hold the detailed state changes for a block alongside with protocol
 /// component changes.
 #[derive(Debug, PartialEq, Default, Clone)]
+#[deprecated(note = "Use BlockChanges instead")]
 pub struct BlockEntityChanges {
     extractor: String,
     chain: Chain,
@@ -530,10 +533,10 @@ pub mod fixtures {
                             weth_addr.clone(),
                             AccountBalance {
                                 token: weth_addr.clone(),
-                                balance: Bytes::from(0_i32.to_le_bytes()),
-                                modify_tx: Default::default(),
+                                balance: Bytes::from(50000000.encode_to_vec()),
+                                modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
                                 account: account_addr.clone(),
-                                balance_float: 0.0,
+                                balance_float: 36522027799.0,
                             },
                         )]
                         .into_iter()
@@ -584,8 +587,8 @@ pub mod fixtures {
                             weth_addr.clone(),
                             AccountBalance {
                                 token: weth_addr,
-                                balance: Bytes::from(2058_i32.to_le_bytes()),
-                                modify_tx: Default::default(),
+                                balance: Bytes::from(10.encode_to_vec()),
+                                modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
                                 account: account_addr,
                                 balance_float: 2058.0,
                             },

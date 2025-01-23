@@ -32,6 +32,7 @@ use tycho_core::{
 };
 use tycho_storage::postgres::cache::CachedGateway;
 
+#[allow(deprecated)]
 use crate::{
     extractor::{
         chain_state::ChainState,
@@ -501,6 +502,7 @@ where
             .clone()
     }
 
+    #[allow(deprecated)]
     #[instrument(skip_all, fields(block_number))]
     async fn handle_tick_scoped_data(
         &self,

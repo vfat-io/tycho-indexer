@@ -1,16 +1,16 @@
-use std::collections::{hash_map::Entry, HashMap, HashSet};
-
+#![allow(deprecated)]
 use chrono::NaiveDateTime;
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 use tracing::warn;
 
 use tycho_core::{
     models::{
         blockchain::{Block, Transaction, TxWithChanges},
-        contract::{AccountChangesWithTx, AccountDelta},
+        contract::{AccountBalance, AccountChangesWithTx, AccountDelta},
         protocol::{
             ComponentBalance, ProtocolChangesWithTx, ProtocolComponent, ProtocolComponentStateDelta,
         },
-        Chain, ChangeType, ComponentId, ProtocolType, TxHash,
+        Address, Chain, ChangeType, ComponentId, ProtocolType, TxHash,
     },
     Bytes,
 };
@@ -50,6 +50,22 @@ impl TryFromMessage for AccountDelta {
             change,
         );
         Ok(update)
+    }
+}
+
+impl TryFromMessage for AccountBalance {
+    type Args<'a> = (substreams::AccountBalanceChange, &'a Address, &'a Transaction);
+
+    fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
+        let (msg, addr, tx) = args;
+        let balance_float = bytes_to_f64(&msg.balance).unwrap_or(f64::NAN);
+        Ok(Self {
+            token: msg.token.into(),
+            balance: Bytes::from(msg.balance),
+            balance_float,
+            modify_tx: tx.hash.clone(),
+            account: addr.clone(),
+        })
     }
 }
 
@@ -309,10 +325,13 @@ impl TryFromMessage for TxWithChanges {
             &block.hash.clone(),
         ))?;
 
-        let mut new_protocol_components: HashMap<String, ProtocolComponent> = HashMap::new();
-        let mut account_updates: HashMap<Bytes, AccountDelta> = HashMap::new();
-        let mut state_updates: HashMap<String, ProtocolComponentStateDelta> = HashMap::new();
-        let mut balance_changes: HashMap<String, HashMap<Bytes, ComponentBalance>> = HashMap::new();
+        let mut new_protocol_components: HashMap<ComponentId, ProtocolComponent> = HashMap::new();
+        let mut account_updates: HashMap<Address, AccountDelta> = HashMap::new();
+        let mut state_updates: HashMap<ComponentId, ProtocolComponentStateDelta> = HashMap::new();
+        let mut balance_changes: HashMap<ComponentId, HashMap<Address, ComponentBalance>> =
+            HashMap::new();
+        let mut account_balance_changes: HashMap<Address, HashMap<Address, AccountBalance>> =
+            HashMap::new();
 
         // First, parse the new protocol components
         for change in msg.component_changes.into_iter() {
@@ -328,7 +347,7 @@ impl TryFromMessage for TxWithChanges {
         }
 
         // Then, parse the account updates
-        for contract_change in msg.contract_changes.into_iter() {
+        for contract_change in msg.contract_changes.clone().into_iter() {
             let update = AccountDelta::try_from_message((contract_change, block.chain))?;
             account_updates.insert(update.address.clone(), update);
         }
@@ -349,7 +368,7 @@ impl TryFromMessage for TxWithChanges {
             }
         }
 
-        // Finally, parse the balance changes
+        // Finally, parse the component balance changes
         for balance_change in msg.balance_changes.into_iter() {
             let component_id = String::from_utf8(balance_change.component_id.clone())
                 .map_err(|error| ExtractionError::DecodeError(error.to_string()))?;
@@ -362,11 +381,30 @@ impl TryFromMessage for TxWithChanges {
                 .insert(token_address, balance);
         }
 
+        // parse the account balance changes
+        for contract_change in msg.contract_changes.into_iter() {
+            for balance_change in contract_change
+                .token_balances
+                .into_iter()
+            {
+                let account_addr = contract_change.address.clone().into();
+                let token_address = Bytes::from(balance_change.token.clone());
+                let balance =
+                    AccountBalance::try_from_message((balance_change, &account_addr, &tx))?;
+
+                account_balance_changes
+                    .entry(account_addr)
+                    .or_default()
+                    .insert(token_address, balance);
+            }
+        }
+
         Ok(Self {
             protocol_components: new_protocol_components,
             account_deltas: account_updates,
             state_updates,
             balance_changes,
+            account_balance_changes,
             tx,
         })
     }
@@ -392,12 +430,20 @@ impl TryFromMessage for BlockContractChanges {
             for change in msg.changes.into_iter() {
                 let mut account_updates = HashMap::new();
                 let mut protocol_components = HashMap::new();
-                let mut balances_changes: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>> =
+                let mut balances_changes: HashMap<ComponentId, HashMap<Address, ComponentBalance>> =
                     HashMap::new();
+                let mut account_balance_changes: HashMap<
+                    Address,
+                    HashMap<Address, AccountBalance>,
+                > = HashMap::new();
 
                 if let Some(tx) = change.tx {
                     let tx = Transaction::try_from_message((tx, &block.hash.clone()))?;
-                    for contract_change in change.contract_changes.into_iter() {
+                    for contract_change in change
+                        .contract_changes
+                        .clone()
+                        .into_iter()
+                    {
                         let update = AccountDelta::try_from_message((contract_change, chain))?;
                         account_updates.insert(update.address.clone(), update);
                     }
@@ -413,6 +459,7 @@ impl TryFromMessage for BlockContractChanges {
                         protocol_components.insert(component.id.clone(), component);
                     }
 
+                    // parse the balance changes
                     for balance_change in change.balance_changes.into_iter() {
                         let component_id =
                             String::from_utf8(balance_change.component_id.clone())
@@ -426,10 +473,32 @@ impl TryFromMessage for BlockContractChanges {
                             .insert(token_address, balance);
                     }
 
+                    // parse the account balance changes
+                    for contract_change in change.contract_changes.into_iter() {
+                        for balance_change in contract_change
+                            .token_balances
+                            .into_iter()
+                        {
+                            let account_addr = contract_change.address.clone().into();
+                            let token_address = Bytes::from(balance_change.token.clone());
+                            let balance = AccountBalance::try_from_message((
+                                balance_change,
+                                &account_addr,
+                                &tx,
+                            ))?;
+
+                            account_balance_changes
+                                .entry(account_addr)
+                                .or_default()
+                                .insert(token_address, balance);
+                        }
+                    }
+
                     tx_updates.push(AccountChangesWithTx::new(
                         account_updates,
                         protocol_components,
                         balances_changes,
+                        account_balance_changes,
                         tx,
                     ));
                 }
