@@ -1584,6 +1584,7 @@ mod test {
                         ),
                     ]),
                 )]),
+                account_balance_changes: HashMap::new(),
                 tx: Transaction::default(),
             }],
         );
@@ -1845,7 +1846,10 @@ mod test_serial_db {
     use super::*;
 
     use tycho_core::{
-        models::{blockchain::TxWithChanges, ContractId, FinancialType, ImplementationType},
+        models::{
+            blockchain::TxWithChanges, contract::AccountBalance, ContractId, FinancialType,
+            ImplementationType,
+        },
         storage::{BlockIdentifier, BlockOrTimestamp},
         traits::TokenOwnerFinding,
     };
@@ -2088,6 +2092,7 @@ mod test_serial_db {
                     },
                 )]),
                 account_deltas: HashMap::new(),
+                account_balance_changes: HashMap::new(),
             }],
         )
     }
@@ -2144,7 +2149,7 @@ mod test_serial_db {
                         },
                     )]),
                     [(
-                        Bytes::from(VM_CONTRACT),
+                        VM_CONTRACT.into(),
                         AccountDelta::new(
                             Chain::Ethereum,
                             VM_CONTRACT.into(),
@@ -2170,12 +2175,25 @@ mod test_serial_db {
                             },
                         )]),
                     )]),
+                    HashMap::from([(
+                        VM_CONTRACT.into(),
+                        HashMap::from([(
+                            base_token.clone(),
+                            AccountBalance {
+                                token: base_token.clone(),
+                                balance: Bytes::from(&[0u8]),
+                                balance_float: 10.0,
+                                modify_tx: VM_TX_HASH_0.parse().unwrap(),
+                                account: VM_CONTRACT.into(),
+                            },
+                        )]),
+                    )]),
                     fixtures::create_transaction(VM_TX_HASH_0, fixtures::HASH_256_0, 1),
                 ),
                 TxWithChanges::new(
                     HashMap::new(),
                     [(
-                        Bytes::from(VM_CONTRACT),
+                        VM_CONTRACT.into(),
                         AccountDelta::new(
                             Chain::Ethereum,
                             VM_CONTRACT.into(),
@@ -2193,11 +2211,24 @@ mod test_serial_db {
                         HashMap::from([(
                             base_token.clone(),
                             ComponentBalance {
-                                token: base_token,
+                                token: base_token.clone(),
                                 balance: Bytes::from(&[0u8]),
                                 balance_float: 10.0,
                                 modify_tx: VM_TX_HASH_1.parse().unwrap(),
                                 component_id: component_id.clone(),
+                            },
+                        )]),
+                    )]),
+                    HashMap::from([(
+                        VM_CONTRACT.into(),
+                        HashMap::from([(
+                            base_token.clone(),
+                            AccountBalance {
+                                token: base_token,
+                                balance: Bytes::from(&[0u8]),
+                                balance_float: 10.0,
+                                modify_tx: VM_TX_HASH_0.parse().unwrap(),
+                                account: VM_CONTRACT.into(),
                             },
                         )]),
                     )]),
