@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{hash_map::Entry, HashMap};
 use tracing::warn;
 
 use crate::{
@@ -6,7 +7,6 @@ use crate::{
     models::{Chain, ChangeType, ContractId, DeltaError},
     Bytes,
 };
-use std::collections::{hash_map::Entry, HashMap};
 
 use super::{
     blockchain::Transaction,
@@ -113,7 +113,7 @@ impl AccountDelta {
         code: Option<Code>,
         change: ChangeType,
     ) -> Self {
-        Self { chain, address, change, slots, balance, code }
+        Self { chain, address, slots, balance, code, change }
     }
 
     pub fn contract_id(&self) -> ContractId {
@@ -208,7 +208,7 @@ impl AccountDelta {
     ///
     /// There are no further validation checks within this method, hence it
     /// could be used as needed. However, you should give preference to
-    /// utilizing [TransactionVMUpdates] for merging, when possible.
+    /// utilizing [AccountChangesWithTx] for merging, when possible.
     ///
     /// # Errors
     ///
@@ -263,23 +263,51 @@ impl From<Account> for AccountDelta {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AccountBalance {
+    pub account: Address,
+    pub token: Address,
+    pub balance: Balance,
+    pub balance_float: f64,
+    pub modify_tx: TxHash,
+}
+
+impl AccountBalance {
+    pub fn new(
+        account: Address,
+        token: Address,
+        balance: Balance,
+        balance_float: f64,
+        modify_tx: TxHash,
+    ) -> Self {
+        Self { account, token, balance, balance_float, modify_tx }
+    }
+}
+
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq)]
-pub struct TransactionVMUpdates {
-    pub account_deltas: HashMap<Bytes, AccountDelta>,
+pub struct AccountChangesWithTx {
+    // map of account changes in the transaction
+    pub account_deltas: HashMap<Address, AccountDelta>,
+    // map of new protocol components created in the transaction
     pub protocol_components: HashMap<ComponentId, ProtocolComponent>,
-    pub component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+    // map of component balance updates given as component ids to their token-balance pairs
+    pub component_balances: HashMap<ComponentId, HashMap<Address, ComponentBalance>>,
+    // map of account balance updates given as account addresses to their token-balance pairs
+    pub account_balances: HashMap<Address, HashMap<Address, AccountBalance>>,
+    // transaction linked to the updates
     pub tx: Transaction,
 }
 
-impl TransactionVMUpdates {
+impl AccountChangesWithTx {
     pub fn new(
-        account_deltas: HashMap<Bytes, AccountDelta>,
+        account_deltas: HashMap<Address, AccountDelta>,
         protocol_components: HashMap<ComponentId, ProtocolComponent>,
-        component_balances: HashMap<ComponentId, HashMap<Bytes, ComponentBalance>>,
+        component_balances: HashMap<ComponentId, HashMap<Address, ComponentBalance>>,
+        account_balances: HashMap<Address, HashMap<Address, AccountBalance>>,
         tx: Transaction,
     ) -> Self {
-        Self { account_deltas, protocol_components, component_balances, tx }
+        Self { account_deltas, protocol_components, component_balances, account_balances, tx }
     }
 
     /// Merges this update with another one.
@@ -298,22 +326,22 @@ impl TransactionVMUpdates {
     ///
     /// # Errors
     /// This method will return an error if any of the above conditions is violated.
-    pub fn merge(&mut self, other: &TransactionVMUpdates) -> Result<(), String> {
+    pub fn merge(&mut self, other: &AccountChangesWithTx) -> Result<(), String> {
         if self.tx.block_hash != other.tx.block_hash {
             return Err(format!(
-                "Can't merge TransactionVMUpdates from different blocks: {:x} != {:x}",
+                "Can't merge AccountChangesWithTx from different blocks: {:x} != {:x}",
                 self.tx.block_hash, other.tx.block_hash,
             ));
         }
         if self.tx.hash == other.tx.hash {
             return Err(format!(
-                "Can't merge TransactionVMUpdates from the same transaction: {:x}",
+                "Can't merge AccountChangesWithTx from the same transaction: {:x}",
                 self.tx.hash
             ));
         }
         if self.tx.index > other.tx.index {
             return Err(format!(
-                "Can't merge TransactionVMUpdates with lower transaction index: {} > {}",
+                "Can't merge AccountChangesWithTx with lower transaction index: {} > {}",
                 self.tx.index, other.tx.index
             ));
         }
@@ -346,8 +374,8 @@ impl TransactionVMUpdates {
                 .get_mut(&component_id)
             {
                 // Iterate through the inner map and update values
-                for (inner_key, value) in balance_by_token_map {
-                    existing_inner_map.insert(inner_key, value);
+                for (token, value) in balance_by_token_map {
+                    existing_inner_map.insert(token, value);
                 }
             } else {
                 self.component_balances
@@ -355,11 +383,32 @@ impl TransactionVMUpdates {
             }
         }
 
+        // Add new account balances and overwrite existing ones
+        for (account_addr, balance_by_token_map) in other
+            .account_balances
+            .clone()
+            .into_iter()
+        {
+            // Check if the key exists in the first map
+            if let Some(existing_inner_map) = self
+                .account_balances
+                .get_mut(&account_addr)
+            {
+                // Iterate through the inner map and update values
+                for (token, value) in balance_by_token_map {
+                    existing_inner_map.insert(token, value);
+                }
+            } else {
+                self.account_balances
+                    .insert(account_addr, balance_by_token_map);
+            }
+        }
+
         Ok(())
     }
 }
 
-impl From<&TransactionVMUpdates> for Vec<Account> {
+impl From<&AccountChangesWithTx> for Vec<Account> {
     /// Creates a full account from a change.
     ///
     /// This can be used to get an insertable an account if we know the update
@@ -369,7 +418,7 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
     /// missing, it will use the corresponding types default.
     /// Will use the associated transaction as creation, balance and code modify
     /// transaction.
-    fn from(value: &TransactionVMUpdates) -> Self {
+    fn from(value: &AccountChangesWithTx) -> Self {
         value
             .account_deltas
             .clone()
@@ -404,10 +453,9 @@ impl From<&TransactionVMUpdates> for Vec<Account> {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use chrono::NaiveDateTime;
     use rstest::rstest;
+    use std::str::FromStr;
 
     use super::*;
 
@@ -473,7 +521,7 @@ mod test {
         assert_eq!(res, exp);
     }
 
-    fn tx_vm_update() -> TransactionVMUpdates {
+    fn tx_vm_update() -> AccountChangesWithTx {
         let code = vec![0, 0, 0, 0];
         let mut account_updates = HashMap::new();
         account_updates.insert(
@@ -490,8 +538,9 @@ mod test {
             ),
         );
 
-        TransactionVMUpdates::new(
+        AccountChangesWithTx::new(
             account_updates,
+            HashMap::new(),
             HashMap::new(),
             HashMap::new(),
             block_fixtures::transaction01(),
@@ -536,15 +585,15 @@ mod test {
     #[rstest]
     #[case::diff_block(
     block_fixtures::create_transaction(HASH_256_1, HASH_256_1, 11),
-    Err(format ! ("Can't merge TransactionVMUpdates from different blocks: {:x} != {}", Bytes::zero(32), HASH_256_1))
+    Err(format ! ("Can't merge AccountChangesWithTx from different blocks: {:x} != {}", Bytes::zero(32), HASH_256_1))
     )]
     #[case::same_tx(
     block_fixtures::create_transaction(HASH_256_0, HASH_256_0, 11),
-    Err(format ! ("Can't merge TransactionVMUpdates from the same transaction: {:x}", Bytes::zero(32)))
+    Err(format ! ("Can't merge AccountChangesWithTx from the same transaction: {:x}", Bytes::zero(32)))
     )]
     #[case::lower_idx(
     block_fixtures::create_transaction(HASH_256_1, HASH_256_0, 1),
-    Err("Can't merge TransactionVMUpdates with lower transaction index: 10 > 1".to_owned())
+    Err("Can't merge AccountChangesWithTx with lower transaction index: 10 > 1".to_owned())
     )]
     fn test_merge_vm_updates_w_tx(#[case] tx: Transaction, #[case] exp: Result<(), String>) {
         let mut left = tx_vm_update();
@@ -586,13 +635,16 @@ mod test {
         let tx_second_update = block_fixtures::create_transaction(HASH_256_1, HASH_256_0, 15);
         let protocol_component_first_tx = create_protocol_component(tx_first_update.hash.clone());
         let protocol_component_second_tx = create_protocol_component(tx_second_update.hash.clone());
+        let account_address =
+            Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap();
+        let token_address = Bytes::from_str("0x0000000000000000000000000000000066666666").unwrap();
 
-        let first_update = TransactionVMUpdates {
+        let first_update = AccountChangesWithTx {
             account_deltas: [(
-                Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
+                account_address.clone(),
                 AccountDelta::new(
                     Chain::Ethereum,
-                    Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                    account_address.clone(),
                     slots([(2711790500, 2981278644), (3250766788, 3520254932)]),
                     Some(Bytes::from(1903326068u64).lpad(32, 0)),
                     Some(vec![129, 130, 131, 132].into()),
@@ -610,10 +662,9 @@ mod test {
             component_balances: [(
                 protocol_component_first_tx.id.clone(),
                 [(
-                    Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
+                    token_address.clone(),
                     ComponentBalance {
-                        token: Bytes::from_str("0x0000000000000000000000000000000066666666")
-                            .unwrap(),
+                        token: token_address.clone(),
                         balance: Bytes::from(0_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
@@ -625,14 +676,31 @@ mod test {
             )]
             .into_iter()
             .collect(),
+            account_balances: [(
+                account_address.clone(),
+                [(
+                    token_address.clone(),
+                    AccountBalance {
+                        token: token_address.clone(),
+                        balance: Bytes::from(0_i32.to_le_bytes()),
+                        modify_tx: Default::default(),
+                        account: account_address.clone(),
+                        balance_float: 0.0,
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            )]
+            .into_iter()
+            .collect(),
             tx: tx_first_update,
         };
-        let second_update = TransactionVMUpdates {
+        let second_update = AccountChangesWithTx {
             account_deltas: [(
-                Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
+                account_address.clone(),
                 AccountDelta::new(
                     Chain::Ethereum,
-                    Bytes::from_str("0000000000000000000000000000000061626364").unwrap(),
+                    account_address.clone(),
                     slots([(2981278644, 3250766788), (2442302356, 2711790500)]),
                     Some(Bytes::from(4059231220u64).lpad(32, 0)),
                     Some(vec![1, 2, 3, 4].into()),
@@ -650,10 +718,9 @@ mod test {
             component_balances: [(
                 protocol_component_second_tx.id.clone(),
                 [(
-                    Bytes::from_str("0x0000000000000000000000000000000061626364").unwrap(),
+                    token_address.clone(),
                     ComponentBalance {
-                        token: Bytes::from_str("0x0000000000000000000000000000000066666666")
-                            .unwrap(),
+                        token: token_address.clone(),
                         balance: Bytes::from(500000_i32.to_le_bytes()),
                         modify_tx: Default::default(),
                         component_id: protocol_component_first_tx.id.clone(),
@@ -665,14 +732,33 @@ mod test {
             )]
             .into_iter()
             .collect(),
+            account_balances: [(
+                account_address.clone(),
+                [(
+                    token_address.clone(),
+                    AccountBalance {
+                        token: token_address,
+                        balance: Bytes::from(20000_i32.to_le_bytes()),
+                        modify_tx: Default::default(),
+                        account: account_address,
+                        balance_float: 20000.0,
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            )]
+            .into_iter()
+            .collect(),
             tx: tx_second_update,
         };
 
+        // merge
         let mut to_merge_on = first_update.clone();
         to_merge_on
             .merge(&second_update)
             .unwrap();
 
+        // assertions
         let expected_protocol_components: HashMap<ComponentId, ProtocolComponent> = [
             (protocol_component_first_tx.id.clone(), protocol_component_first_tx.clone()),
             (protocol_component_second_tx.id.clone(), protocol_component_second_tx.clone()),
@@ -680,6 +766,7 @@ mod test {
         .into_iter()
         .collect();
         assert_eq!(to_merge_on.component_balances, second_update.component_balances);
+        assert_eq!(to_merge_on.account_balances, second_update.account_balances);
         assert_eq!(to_merge_on.protocol_components, expected_protocol_components);
 
         let mut acc_update = second_update
