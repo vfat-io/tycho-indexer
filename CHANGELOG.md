@@ -1,3 +1,12 @@
+## [0.54.0](https://github.com/propeller-heads/tycho-indexer/compare/0.53.0...0.54.0) (2025-01-27)
+
+
+### Features
+
+* add AccountBalance model to tx aggregated model ([ee96ba2](https://github.com/propeller-heads/tycho-indexer/commit/ee96ba27233b1e6a114f2e7326c79d7f938fb416))
+* Add AccountBalance to core models ([#493](https://github.com/propeller-heads/tycho-indexer/issues/493)) ([cb86d4e](https://github.com/propeller-heads/tycho-indexer/commit/cb86d4e0ffb905c4d51a0a3514296305b8d19d3b))
+* update parsing of new protobuf message changes ([1c424c0](https://github.com/propeller-heads/tycho-indexer/commit/1c424c05606bf9f056b7849a64bce559b17d008f))
+
 ## [0.53.0](https://github.com/propeller-heads/tycho-indexer/compare/0.52.0...0.53.0) (2025-01-23)
 
 
