@@ -898,7 +898,7 @@ pub async fn protocol_state<G: Gateway>(
 ///
 /// This endpoint retrieves the protocol systems available in the indexer.
 #[utoipa::path(
-    get,
+    post,
     path = "/v1/protocol_systems",
     responses(
         (status = 200, description = "OK", body = ProtocolSystemsRequestResponse),
