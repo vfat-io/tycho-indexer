@@ -1,3 +1,11 @@
+## [0.55.0](https://github.com/propeller-heads/tycho-indexer/compare/0.54.0...0.55.0) (2025-01-29)
+
+
+### Features
+
+* make protocol system a POST endpoint ([d85b2a4](https://github.com/propeller-heads/tycho-indexer/commit/d85b2a44166c376808e634c13839d2a95b4705fa))
+* make protocol system a POST endpoint ([#496](https://github.com/propeller-heads/tycho-indexer/issues/496)) ([aad6b51](https://github.com/propeller-heads/tycho-indexer/commit/aad6b5153203a502920b05b1fcad67c80e307ae3))
+
 ## [0.54.0](https://github.com/propeller-heads/tycho-indexer/compare/0.53.0...0.54.0) (2025-01-27)
 
 
