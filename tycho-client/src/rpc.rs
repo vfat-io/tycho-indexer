@@ -626,7 +626,7 @@ impl RPCClient for HttpRPCClient {
         trace!(?request, "Sending request to Tycho server");
         let response = self
             .http_client
-            .get(&uri)
+            .post(&uri)
             .json(request)
             .send()
             .await
@@ -1015,7 +1015,7 @@ mod tests {
         serde_json::from_str::<ProtocolSystemsRequestResponse>(server_resp).expect("deserialize");
 
         let mocked_server = server
-            .mock("GET", "/v1/protocol_systems")
+            .mock("POST", "/v1/protocol_systems")
             .expect(1)
             .with_body(server_resp)
             .create_async()
