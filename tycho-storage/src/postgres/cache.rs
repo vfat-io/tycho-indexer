@@ -8,11 +8,7 @@ use diesel_async::{
 };
 use lru::LruCache;
 use tokio::{
-    sync::{
-        mpsc,
-        oneshot::{self},
-        Mutex,
-    },
+    sync::{mpsc, oneshot, Mutex},
     task::JoinHandle,
 };
 use tracing::{debug, info, info_span, instrument, trace, Instrument};

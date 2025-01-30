@@ -9,10 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures03::future::try_join_all;
-use reqwest::{
-    header::{self, CONTENT_TYPE, USER_AGENT},
-    Client, ClientBuilder, Url,
-};
+use reqwest::{header, Client, ClientBuilder, Url};
 use thiserror::Error;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, instrument, trace, warn};
@@ -398,7 +395,7 @@ impl HttpRPCClient {
         headers.insert(header::CONTENT_TYPE, header::HeaderValue::from_static("application/json"));
         let user_agent = format!("tycho-client-{}", env!("CARGO_PKG_VERSION"));
         headers.insert(
-            USER_AGENT,
+            header::USER_AGENT,
             header::HeaderValue::from_str(&user_agent).expect("invalid user agent format"),
         );
 
@@ -496,7 +493,7 @@ impl RPCClient for HttpRPCClient {
         let response = self
             .http_client
             .post(uri)
-            .header(CONTENT_TYPE, "application/json")
+            .header(header::CONTENT_TYPE, "application/json")
             .json(request)
             .send()
             .await

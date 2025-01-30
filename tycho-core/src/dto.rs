@@ -5,16 +5,12 @@
 //!
 //! Structs in here implement utoipa traits so they can be used to derive an OpenAPI schema.
 #![allow(deprecated)]
+use chrono::{NaiveDateTime, Utc};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     hash::{Hash, Hasher},
-};
-
-use chrono::{NaiveDateTime, Utc};
-use serde::{
-    de::{self, MapAccess, Visitor},
-    Deserialize, Deserializer, Serialize,
 };
 use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
@@ -22,7 +18,6 @@ use uuid::Uuid;
 
 use crate::{
     models,
-    models::{contract::Account, token::CurrencyToken},
     serde_primitives::{
         hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value, hex_hashmap_value,
     },
@@ -55,7 +50,7 @@ pub enum Chain {
 }
 
 impl From<models::contract::Account> for ResponseAccount {
-    fn from(value: Account) -> Self {
+    fn from(value: models::contract::Account) -> Self {
         ResponseAccount::new(
             value.chain.into(),
             value.address,
@@ -851,7 +846,7 @@ pub struct ResponseToken {
 }
 
 impl From<models::token::CurrencyToken> for ResponseToken {
-    fn from(value: CurrencyToken) -> Self {
+    fn from(value: models::token::CurrencyToken) -> Self {
         Self {
             chain: value.chain.into(),
             address: value.address,
@@ -1093,7 +1088,7 @@ impl<'de> Deserialize<'de> for ProtocolStateRequestBody {
 
         struct ProtocolStateRequestBodyVisitor;
 
-        impl<'de> Visitor<'de> for ProtocolStateRequestBodyVisitor {
+        impl<'de> de::Visitor<'de> for ProtocolStateRequestBodyVisitor {
             type Value = ProtocolStateRequestBody;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -1102,7 +1097,7 @@ impl<'de> Deserialize<'de> for ProtocolStateRequestBody {
 
             fn visit_map<V>(self, mut map: V) -> Result<ProtocolStateRequestBody, V::Error>
             where
-                V: MapAccess<'de>,
+                V: de::MapAccess<'de>,
             {
                 let mut protocol_ids = None;
                 let mut protocol_system = None;
