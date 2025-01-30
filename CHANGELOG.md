@@ -1,3 +1,13 @@
+## [0.55.1](https://github.com/propeller-heads/tycho-indexer/compare/0.55.0...0.55.1) (2025-01-30)
+
+
+### Bug Fixes
+
+* clean up imports ([a32f8f9](https://github.com/propeller-heads/tycho-indexer/commit/a32f8f9e8ce1cc933c39ea1578aea77f4e181673))
+* clean up imports ([#499](https://github.com/propeller-heads/tycho-indexer/issues/499)) ([0a8971b](https://github.com/propeller-heads/tycho-indexer/commit/0a8971ba9b7b566247431f8bd0c9c087ac2f4161))
+* fix protocol system endpoint conversion to POST ([9f8d11b](https://github.com/propeller-heads/tycho-indexer/commit/9f8d11bdd2aa76ed4a7869d966142a110cb804f3))
+* fix protocol system endpoint conversion to POST ([#498](https://github.com/propeller-heads/tycho-indexer/issues/498)) ([e559128](https://github.com/propeller-heads/tycho-indexer/commit/e5591282340b408c1d23a13b4d4cebf5b3b64115))
+
 ## [0.55.0](https://github.com/propeller-heads/tycho-indexer/compare/0.54.0...0.55.0) (2025-01-29)
 
 
