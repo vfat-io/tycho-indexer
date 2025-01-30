@@ -33,9 +33,6 @@ jobs:
       repository_url: ${{ secrets.REPOSITORY_URL }}
       aws_region: ${{ secrets.AWS_REGION }}
       domain_owner: ${{ secrets.DOMAIN_OWNER }}
-      aws_old_account_id: ${{ secrets.AWS_OLD_ACCOUNT_ID }}
-      aws_new_account_id: ${{ secrets.AWS_NEW_ACCOUNT_ID }}
-      new_repository_url: ${{ secrets.NEW_REPOSITORY_URL }}
 
   deploy-dev:
     needs:
