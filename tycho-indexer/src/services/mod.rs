@@ -212,7 +212,7 @@ where
                 )
                 .service(
                     web::resource(format!("/{}/protocol_systems", self.prefix))
-                        .route(web::get().to(rpc::protocol_systems::<G>)),
+                        .route(web::post().to(rpc::protocol_systems::<G>)),
                 )
                 .wrap(RequestTracing::new())
                 .service(
