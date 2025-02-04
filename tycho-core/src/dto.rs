@@ -78,7 +78,9 @@ impl From<models::Chain> for Chain {
     }
 }
 
-#[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize, ToSchema)]
+#[derive(
+    Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize, ToSchema, EnumString, Display,
+)]
 pub enum ChangeType {
     #[default]
     Update,
