@@ -1,3 +1,11 @@
+## [0.55.2](https://github.com/propeller-heads/tycho-indexer/compare/0.55.1...0.55.2) (2025-02-05)
+
+
+### Bug Fixes
+
+* update ChangeType enum derived traits ([2e9032e](https://github.com/propeller-heads/tycho-indexer/commit/2e9032ea0afe219e897f87d4bcbf10c9360bb011))
+* update ChangeType enum derived traits ([#502](https://github.com/propeller-heads/tycho-indexer/issues/502)) ([383e348](https://github.com/propeller-heads/tycho-indexer/commit/383e3482f45bb7960ad6e2593c3d54e964b6357d))
+
 ## [0.55.1](https://github.com/propeller-heads/tycho-indexer/compare/0.55.0...0.55.1) (2025-01-30)
 
 
