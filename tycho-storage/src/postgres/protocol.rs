@@ -934,12 +934,16 @@ impl PostgresGateway {
         }
 
         if let Some(last_traded_ts_threshold) = last_traded_ts_threshold {
-            let active_tokens_subquery = schema::component_balance_default::table
-                .select(schema::component_balance_default::token_id)
-                .filter(schema::component_balance_default::valid_from.gt(last_traded_ts_threshold))
-                .distinct();
-            query = query.filter(schema::token::id.eq_any(active_tokens_subquery));
-            count_query = count_query.filter(schema::token::id.eq_any(active_tokens_subquery));
+            let active_tokens_exists = diesel::dsl::exists(
+                schema::component_balance_default::table
+                    .filter(
+                        schema::component_balance_default::valid_from.gt(last_traded_ts_threshold),
+                    )
+                    .filter(schema::component_balance_default::token_id.eq(schema::token::id)),
+            );
+
+            query = query.filter(active_tokens_exists);
+            count_query = count_query.filter(active_tokens_exists);
         }
 
         // TODO: Improve performance by running as subquery
