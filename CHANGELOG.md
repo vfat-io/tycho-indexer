@@ -1,3 +1,11 @@
+## [0.56.0](https://github.com/propeller-heads/tycho-indexer/compare/0.55.2...0.56.0) (2025-02-05)
+
+
+### Features
+
+* **rpc:** sort tokens by address in `get_protocol_component` ([3014126](https://github.com/propeller-heads/tycho-indexer/commit/3014126a7deecdc56ed5cdf998968193ef9b3443))
+* **rpc:** sort tokens by address in `get_protocol_component` ([#503](https://github.com/propeller-heads/tycho-indexer/issues/503)) ([f59b665](https://github.com/propeller-heads/tycho-indexer/commit/f59b6658d5bfe87e61776f199901dabf7b31c1f9))
+
 ## [0.55.2](https://github.com/propeller-heads/tycho-indexer/compare/0.55.1...0.55.2) (2025-02-05)
 
 
