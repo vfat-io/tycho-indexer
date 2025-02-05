@@ -631,7 +631,11 @@ where
                             .min(total as usize),
                     )
                     .take(pagination_params.page_size as usize)
-                    .map(dto::ProtocolComponent::from)
+                    .map(|c| {
+                        let mut pc = dto::ProtocolComponent::from(c);
+                        pc.tokens.sort_unstable();
+                        pc
+                    })
                     .collect();
 
                 return Ok(dto::ProtocolComponentRequestResponse::new(
@@ -686,7 +690,11 @@ where
 
                 let response_components = components
                     .into_iter()
-                    .map(dto::ProtocolComponent::from)
+                    .map(|c| {
+                        let mut pc = dto::ProtocolComponent::from(c);
+                        pc.tokens.sort_unstable();
+                        pc
+                    })
                     .collect::<Vec<dto::ProtocolComponent>>();
                 Ok(dto::ProtocolComponentRequestResponse::new(
                     response_components,
@@ -1340,12 +1348,16 @@ mod tests {
     #[tokio::test]
     async fn test_get_protocol_components() {
         let mut gw = MockGateway::new();
+
+        let unsorted_tokens =
+            vec![Bytes::from_str("0x01").unwrap(), Bytes::from_str("0x00").unwrap()];
+
         let expected = ProtocolComponent::new(
             "comp1",
             "ambient",
             "pool",
             Chain::Ethereum,
-            vec![],
+            vec![Bytes::from_str("0x00").unwrap(), Bytes::from_str("0x01").unwrap()],
             vec![],
             HashMap::new(),
             ChangeType::Creation,
@@ -1354,7 +1366,12 @@ mod tests {
                 .unwrap(),
             NaiveDateTime::default(),
         );
-        let mock_response = Ok(WithTotal { entity: vec![expected.clone()], total: Some(1) });
+
+        let mut mock_res = expected.clone();
+        mock_res
+            .tokens
+            .clone_from(&unsorted_tokens);
+        let mock_response = Ok(WithTotal { entity: vec![mock_res], total: Some(1) });
         gw.expect_get_protocol_components()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
 
@@ -1364,7 +1381,7 @@ mod tests {
             "ambient",
             "pool",
             Chain::Ethereum,
-            vec![],
+            vec![Bytes::from_str("0x00").unwrap(), Bytes::from_str("0x01").unwrap()],
             vec![],
             HashMap::new(),
             ChangeType::Creation,
@@ -1373,12 +1390,12 @@ mod tests {
                 .unwrap(),
             NaiveDateTime::default(),
         );
+
+        let mut mock_res = buf_expected.clone();
+        mock_res.tokens = unsorted_tokens;
         mock_buffer
             .expect_get_new_components()
-            .return_once({
-                let buf_expected_clone = buf_expected.clone();
-                move |_, _| Ok(vec![buf_expected_clone])
-            });
+            .return_once(move |_, _| Ok(vec![mock_res]));
 
         let req_handler = RpcHandler::new(gw, Some(Arc::new(mock_buffer)));
 
