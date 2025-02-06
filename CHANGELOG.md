@@ -1,3 +1,11 @@
+## [0.56.1](https://github.com/propeller-heads/tycho-indexer/compare/0.56.0...0.56.1) (2025-02-06)
+
+
+### Bug Fixes
+
+* improve efficiency of activity filter on tokens query ([5649e46](https://github.com/propeller-heads/tycho-indexer/commit/5649e4659aed1a9f23e64a8d2812b72b412dc03e))
+* improve efficiency of activity filter on tokens query ([#504](https://github.com/propeller-heads/tycho-indexer/issues/504)) ([de741e6](https://github.com/propeller-heads/tycho-indexer/commit/de741e64d9de08d50017872c27975113310dffd8))
+
 ## [0.56.0](https://github.com/propeller-heads/tycho-indexer/compare/0.55.2...0.56.0) (2025-02-05)
 
 
