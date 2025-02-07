@@ -408,7 +408,7 @@ impl HttpRPCClient {
 
         let client = ClientBuilder::new()
             .default_headers(headers)
-            .pool_max_idle_per_host(0) // Disable connection pooling
+            .http2_prior_knowledge()
             .build()
             .map_err(|e| RPCError::HttpClient(e.to_string()))?;
         Ok(Self { http_client: client, url: uri })

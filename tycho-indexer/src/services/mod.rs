@@ -228,7 +228,7 @@ where
 
             app
         })
-        .bind((self.bind, self.port))
+        .bind_auto_h2c((self.bind, self.port))
         .map_err(|err| ExtractionError::ServiceError(err.to_string()))?
         .run();
         let handle = server.handle();
