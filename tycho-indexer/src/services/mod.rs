@@ -228,7 +228,9 @@ where
 
             app
         })
-        .bind_auto_h2c((self.bind, self.port))
+        .keep_alive(std::time::Duration::from_secs(60)) // prevents early connection closures
+        .client_disconnect_timeout(std::time::Duration::from_secs(30)) // prevents premature force disconnections
+        .bind_auto_h2c((self.bind, self.port)) // allow HTTP2 requests over http connections
         .map_err(|err| ExtractionError::ServiceError(err.to_string()))?
         .run();
         let handle = server.handle();
