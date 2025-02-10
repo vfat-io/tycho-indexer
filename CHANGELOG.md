@@ -1,3 +1,11 @@
+## [0.56.3](https://github.com/propeller-heads/tycho-indexer/compare/0.56.2...0.56.3) (2025-02-10)
+
+
+### Bug Fixes
+
+* increase Base block time default ([9bcb718](https://github.com/propeller-heads/tycho-indexer/commit/9bcb7188f281c39c36b20af860666605d7d3b82f))
+* increase Base blocktime default ([#510](https://github.com/propeller-heads/tycho-indexer/issues/510)) ([82702cd](https://github.com/propeller-heads/tycho-indexer/commit/82702cdeee20c53e04e0c9e6e720909a4155cd00))
+
 ## [0.56.2](https://github.com/propeller-heads/tycho-indexer/compare/0.56.1...0.56.2) (2025-02-07)
 
 ## [0.56.1](https://github.com/propeller-heads/tycho-indexer/compare/0.56.0...0.56.1) (2025-02-06)
