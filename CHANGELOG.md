@@ -1,3 +1,13 @@
+## [0.56.4](https://github.com/propeller-heads/tycho-indexer/compare/0.56.3...0.56.4) (2025-02-11)
+
+
+### Bug Fixes
+
+* default RPC client and server to use HTTP/2 ([#508](https://github.com/propeller-heads/tycho-indexer/issues/508)) ([f611383](https://github.com/propeller-heads/tycho-indexer/commit/f6113838c889e5fd76feeaa85b3e41fc9a5bebe6))
+* disable connection pooling on tycho-client rpc ([c6bb715](https://github.com/propeller-heads/tycho-indexer/commit/c6bb715d24f4122801f71d86791483ec41a07d8c))
+* finetune connection timeouts on rpc ([b06ec9b](https://github.com/propeller-heads/tycho-indexer/commit/b06ec9b9a107892acb76bbe012abd510b6e495e4))
+* set both client and server to use HTTP/2 ([1516abe](https://github.com/propeller-heads/tycho-indexer/commit/1516abea713ab747835941e7a95726e54d38dd29))
+
 ## [0.56.3](https://github.com/propeller-heads/tycho-indexer/compare/0.56.2...0.56.3) (2025-02-10)
 
 
