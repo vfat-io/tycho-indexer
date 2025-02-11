@@ -408,6 +408,7 @@ impl HttpRPCClient {
 
         let client = ClientBuilder::new()
             .default_headers(headers)
+            .http2_prior_knowledge()
             .build()
             .map_err(|e| RPCError::HttpClient(e.to_string()))?;
         Ok(Self { http_client: client, url: uri })

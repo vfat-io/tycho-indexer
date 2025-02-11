@@ -228,7 +228,11 @@ where
 
             app
         })
-        .bind((self.bind, self.port))
+        .keep_alive(std::time::Duration::from_secs(60)) // prevents early connection closures
+        // Allows clients up to 30 seconds to reconnect before forcefully closing the connection.
+        // This prevents us from closing a connection the client is expecting to be able to reuse.
+        .client_disconnect_timeout(std::time::Duration::from_secs(30))
+        .bind_auto_h2c((self.bind, self.port)) // allow HTTP2 requests over http connections
         .map_err(|err| ExtractionError::ServiceError(err.to_string()))?
         .run();
         let handle = server.handle();
