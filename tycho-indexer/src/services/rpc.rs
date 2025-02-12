@@ -609,7 +609,7 @@ where
             .pending_deltas
             .as_ref()
             .map_or(Ok(Vec::new()), |pending_delta| {
-                pending_delta.get_new_components(ids_slice, &system)
+                pending_delta.get_new_components(ids_slice, &system, request.tvl_gt)
             })?;
 
         debug!(n_components = buffered_components.len(), "RetrievedBufferedComponents");
@@ -1011,6 +1011,7 @@ mod tests {
                 &self,
                 ids: Option<&'a [&'a str]>,
                 protocol_system: &'a str,
+                min_tvl: Option<f64>,
             ) -> Result<Vec<ProtocolComponent>, PendingDeltasError>;
 
             fn get_block_finality<'a>(
@@ -1395,7 +1396,7 @@ mod tests {
         mock_res.tokens = unsorted_tokens;
         mock_buffer
             .expect_get_new_components()
-            .return_once(move |_, _| Ok(vec![mock_res]));
+            .return_once(move |_, _, _| Ok(vec![mock_res]));
 
         let req_handler = RpcHandler::new(gw, Some(Arc::new(mock_buffer)));
 
@@ -1487,7 +1488,7 @@ mod tests {
             .returning({
                 let buf_expected1_clone = buf_expected1.clone();
                 let buf_expected2_clone = buf_expected2.clone();
-                move |_, _| Ok(vec![buf_expected1_clone.clone(), buf_expected2_clone.clone()])
+                move |_, _, _| Ok(vec![buf_expected1_clone.clone(), buf_expected2_clone.clone()])
             });
 
         let req_handler = RpcHandler::new(gw, Some(Arc::new(mock_buffer)));

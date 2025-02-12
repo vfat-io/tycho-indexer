@@ -73,6 +73,7 @@ pub trait PendingDeltasBuffer {
         &self,
         ids: Option<&[&str]>,
         protocol_system: &str,
+        min_tvl: Option<f64>,
     ) -> Result<Vec<ProtocolComponent>>;
 
     fn get_block_finality(
@@ -380,6 +381,7 @@ impl PendingDeltasBuffer for PendingDeltas {
         &self,
         ids: Option<&[&str]>,
         protocol_system: &str,
+        min_tvl: Option<f64>,
     ) -> Result<Vec<ProtocolComponent>> {
         let requested_ids: Option<HashSet<&str>> = ids.map(|ids| ids.iter().cloned().collect());
         let mut new_components = Vec::new();
@@ -397,16 +399,27 @@ impl PendingDeltasBuffer for PendingDeltas {
         })?;
 
         for entry in guard.get_block_range(None, None)? {
+            let components_tvls = &entry.component_tvl;
+
             new_components.extend(
                 entry
                     .new_protocol_components
-                    .clone()
-                    .into_values()
+                    .values()
                     .filter(|comp| {
-                        requested_ids
+                        let id_matches = requested_ids
                             .as_ref()
-                            .map_or(true, |ids| ids.contains(comp.id.as_str()))
-                    }),
+                            .map_or(true, |ids| ids.contains(comp.id.as_str()));
+
+                        let tvl_matches = min_tvl.as_ref().map_or(true, |tvl| {
+                            components_tvls
+                                .get(&comp.id)
+                                .unwrap_or(&0.0) >=
+                                tvl
+                        });
+
+                        id_matches && tvl_matches
+                    })
+                    .cloned(),
             );
         }
 
@@ -531,26 +544,60 @@ mod test {
             .into_iter()
             .collect::<HashMap<_, _>>(),
             HashMap::new(),
-            [(
-                "component2".to_string(),
-                ProtocolComponent {
-                    id: "component2".to_string(),
-                    protocol_system: "vm_swap".to_string(),
-                    protocol_type_name: "swap".to_string(),
-                    chain: Chain::Ethereum,
-                    tokens: Vec::new(),
-                    contract_addresses: Vec::new(),
-                    static_attributes: HashMap::new(),
-                    change: ChangeType::Creation,
-                    creation_tx: Bytes::new(),
-                    created_at: "2020-01-01T00:00:00".parse().unwrap(),
-                },
-            )]
+            [
+                (
+                    "component2".to_string(),
+                    ProtocolComponent {
+                        id: "component2".to_string(),
+                        protocol_system: "vm_swap".to_string(),
+                        protocol_type_name: "swap".to_string(),
+                        chain: Chain::Ethereum,
+                        tokens: Vec::new(),
+                        contract_addresses: Vec::new(),
+                        static_attributes: HashMap::new(),
+                        change: ChangeType::Creation,
+                        creation_tx: Bytes::new(),
+                        created_at: "2020-01-01T00:00:00".parse().unwrap(),
+                    },
+                ),
+                (
+                    "component5".to_string(),
+                    ProtocolComponent {
+                        id: "component5".to_string(),
+                        protocol_system: "vm_swap".to_string(),
+                        protocol_type_name: "swap".to_string(),
+                        chain: Chain::Ethereum,
+                        tokens: Vec::new(),
+                        contract_addresses: Vec::new(),
+                        static_attributes: HashMap::new(),
+                        change: ChangeType::Creation,
+                        creation_tx: Bytes::new(),
+                        created_at: "2020-01-01T00:00:00".parse().unwrap(),
+                    },
+                ),
+                (
+                    "component4".to_string(),
+                    ProtocolComponent {
+                        id: "component4".to_string(),
+                        protocol_system: "vm_swap".to_string(),
+                        protocol_type_name: "swap".to_string(),
+                        chain: Chain::Ethereum,
+                        tokens: Vec::new(),
+                        contract_addresses: Vec::new(),
+                        static_attributes: HashMap::new(),
+                        change: ChangeType::Creation,
+                        creation_tx: Bytes::new(),
+                        created_at: "2020-01-01T00:00:00".parse().unwrap(),
+                    },
+                ),
+            ]
             .into_iter()
             .collect::<HashMap<_, _>>(),
             HashMap::new(),
             HashMap::new(),
-            HashMap::new(),
+            [("component2".to_string(), 1.5), ("component3".to_string(), 0.5)]
+                .into_iter()
+                .collect::<HashMap<_, _>>(),
         )
     }
 
@@ -811,6 +858,30 @@ mod test {
                 Bytes::new(),
                 "2020-01-01T00:00:00".parse().unwrap(),
             ),
+            ProtocolComponent::new(
+                "component5",
+                "vm_swap",
+                "swap",
+                Chain::Ethereum,
+                Vec::new(),
+                Vec::new(),
+                HashMap::new(),
+                ChangeType::Creation,
+                Bytes::new(),
+                "2020-01-01T00:00:00".parse().unwrap(),
+            ),
+            ProtocolComponent::new(
+                "component4",
+                "vm_swap",
+                "swap",
+                Chain::Ethereum,
+                Vec::new(),
+                Vec::new(),
+                HashMap::new(),
+                ChangeType::Creation,
+                Bytes::new(),
+                "2020-01-01T00:00:00".parse().unwrap(),
+            ),
         ];
         let buffer = PendingDeltas::new(["vm:extractor", "native:extractor"]);
         buffer
@@ -821,16 +892,23 @@ mod test {
             .unwrap();
 
         let new_components = buffer
-            .get_new_components(Some(&["component3"]), "native:extractor")
+            .get_new_components(Some(&["component3"]), "native:extractor", None)
             .unwrap();
 
         assert_eq!(new_components, vec![exp[0].clone()]);
 
-        let new_components = buffer
-            .get_new_components(None, "vm:extractor")
+        let mut new_components = buffer
+            .get_new_components(None, "vm:extractor", None)
             .unwrap();
 
-        assert_eq!(new_components, vec![exp[1].clone()]);
+        new_components.sort_by_key(|comp| comp.id.clone());
+        assert_eq!(new_components, vec![exp[1].clone(), exp[3].clone(), exp[2].clone()]);
+
+        let new_components_tvl_filtered = buffer
+            .get_new_components(None, "vm:extractor", Some(1.0))
+            .unwrap();
+
+        assert_eq!(new_components_tvl_filtered, vec![exp[1].clone()]);
     }
 
     use rstest::rstest;
