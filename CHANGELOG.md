@@ -1,3 +1,11 @@
+## [0.56.5](https://github.com/propeller-heads/tycho-indexer/compare/0.56.4...0.56.5) (2025-02-12)
+
+
+### Bug Fixes
+
+* **rpc:** correctly apply TVL filtering on `/protocol_component` requests ([dd4dc20](https://github.com/propeller-heads/tycho-indexer/commit/dd4dc203ededcbe9c6de1eb73b1f99884966f3b2))
+* **rpc:** correctly apply TVL filtering on `/protocol_component` requests ([#511](https://github.com/propeller-heads/tycho-indexer/issues/511)) ([588e368](https://github.com/propeller-heads/tycho-indexer/commit/588e36806046b1a779c791d6d9959b4fc76153a2))
+
 ## [0.56.4](https://github.com/propeller-heads/tycho-indexer/compare/0.56.3...0.56.4) (2025-02-11)
 
 
