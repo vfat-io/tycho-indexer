@@ -413,8 +413,8 @@ impl PendingDeltasBuffer for PendingDeltas {
                         let tvl_matches = min_tvl.as_ref().map_or(true, |tvl| {
                             components_tvls
                                 .get(&comp.id)
-                                .unwrap_or(&0.0)
-                                >= tvl
+                                .unwrap_or(&0.0) >=
+                                tvl
                         });
 
                         id_matches && tvl_matches
