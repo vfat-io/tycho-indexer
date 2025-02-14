@@ -7,7 +7,7 @@ BEGIN
     IF (
         SELECT COUNT(*) 
         FROM chain 
-        WHERE name IN ('ethereum', 'base')
+        WHERE name IN ('ethereum', 'base', 'arbitrum')
     ) = 1 THEN
         INSERT INTO account (chain_id, title, address)
         VALUES (
