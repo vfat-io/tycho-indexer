@@ -343,7 +343,11 @@ pub enum BlockTag {
 
 #[cfg(test)]
 pub mod fixtures {
+    use crate::models::ChangeType;
+
     use super::*;
+
+    use std::str::FromStr;
 
     pub fn transaction01() -> Transaction {
         Transaction::new(
@@ -363,5 +367,222 @@ pub mod fixtures {
             Some(Bytes::zero(20)),
             index,
         )
+    }
+
+    #[test]
+    fn test_merge_tx_with_changes() {
+        let component_id = "ambient_USDC_ETH".to_string();
+        let base_token = Bytes::from_str("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
+        let quote_token = Bytes::from_str("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap();
+        let contract_addr = Bytes::from_str("aaaaaaaaa24eeeb8d57d431224f73832bc34f688").unwrap();
+        let tx_hash0 = "0x2f6350a292c0fc918afe67cb893744a080dacb507b0cea4cc07437b8aff23cdb";
+        let tx_hash1 = "0x0d9e0da36cf9f305a189965b248fc79c923619801e8ab5ef158d4fd528a291ad";
+        let block = "0x0000000000000000000000000000000000000000000000000000000000000000";
+        let mut changes1 = TxWithChanges::new(
+            HashMap::from([(
+                component_id.clone(),
+                ProtocolComponent {
+                    id: component_id.clone(),
+                    protocol_system: "test".to_string(),
+                    protocol_type_name: "vm:pool".to_string(),
+                    chain: Chain::Ethereum,
+                    tokens: vec![base_token.clone(), quote_token.clone()],
+                    contract_addresses: vec![contract_addr.clone()],
+                    static_attributes: Default::default(),
+                    change: Default::default(),
+                    creation_tx: Bytes::from_str(tx_hash0).unwrap(),
+                    created_at: Default::default(),
+                },
+            )]),
+            [(
+                contract_addr.clone(),
+                AccountDelta::new(
+                    Chain::Ethereum,
+                    contract_addr.clone(),
+                    HashMap::new(),
+                    None,
+                    Some(vec![0, 0, 0, 0].into()),
+                    ChangeType::Creation,
+                ),
+            )]
+            .into_iter()
+            .collect(),
+            HashMap::new(),
+            HashMap::from([(
+                component_id.clone(),
+                HashMap::from([(
+                    base_token.clone(),
+                    ComponentBalance {
+                        token: base_token.clone(),
+                        balance: Bytes::from(800_u64).lpad(32, 0),
+                        balance_float: 800.0,
+                        component_id: component_id.clone(),
+                        modify_tx: Bytes::from_str(tx_hash0).unwrap(),
+                    },
+                )]),
+            )]),
+            HashMap::from([(
+                contract_addr.clone(),
+                HashMap::from([(
+                    base_token.clone(),
+                    AccountBalance {
+                        token: base_token.clone(),
+                        balance: Bytes::from(800_u64).lpad(32, 0),
+                        modify_tx: Bytes::from_str(tx_hash0).unwrap(),
+                        account: contract_addr.clone(),
+                    },
+                )]),
+            )]),
+            create_transaction(tx_hash0, block, 1),
+        );
+        let changes2 = TxWithChanges::new(
+            HashMap::from([(
+                component_id.clone(),
+                ProtocolComponent {
+                    id: component_id.clone(),
+                    protocol_system: "test".to_string(),
+                    protocol_type_name: "vm:pool".to_string(),
+                    chain: Chain::Ethereum,
+                    tokens: vec![base_token.clone(), quote_token],
+                    contract_addresses: vec![contract_addr.clone()],
+                    static_attributes: Default::default(),
+                    change: Default::default(),
+                    creation_tx: Bytes::from_str(tx_hash1).unwrap(),
+                    created_at: Default::default(),
+                },
+            )]),
+            [(
+                contract_addr.clone(),
+                AccountDelta::new(
+                    Chain::Ethereum,
+                    contract_addr.clone(),
+                    HashMap::new(),
+                    None,
+                    Some(vec![0, 0, 0, 0].into()),
+                    ChangeType::Creation,
+                ),
+            )]
+            .into_iter()
+            .collect(),
+            HashMap::new(),
+            HashMap::from([(
+                component_id.clone(),
+                HashMap::from([(
+                    base_token.clone(),
+                    ComponentBalance {
+                        token: base_token.clone(),
+                        balance: Bytes::from(1000_u64).lpad(32, 0),
+                        balance_float: 1000.0,
+                        component_id: component_id.clone(),
+                        modify_tx: Bytes::from_str(tx_hash1).unwrap(),
+                    },
+                )]),
+            )]),
+            HashMap::from([(
+                contract_addr.clone(),
+                HashMap::from([(
+                    base_token.clone(),
+                    AccountBalance {
+                        token: base_token.clone(),
+                        balance: Bytes::from(1000_u64).lpad(32, 0),
+                        modify_tx: Bytes::from_str(tx_hash1).unwrap(),
+                        account: contract_addr.clone(),
+                    },
+                )]),
+            )]),
+            create_transaction(tx_hash1, block, 2),
+        );
+
+        assert!(changes1.merge(changes2).is_ok());
+        assert_eq!(
+            changes1
+                .account_balance_changes
+                .get(&contract_addr)
+                .unwrap()
+                .get(&base_token)
+                .unwrap()
+                .balance,
+            Bytes::from(1000_u64).lpad(32, 0),
+        );
+        assert_eq!(
+            changes1
+                .balance_changes
+                .get(&component_id)
+                .unwrap()
+                .get(&base_token)
+                .unwrap()
+                .balance,
+            Bytes::from(1000_u64).lpad(32, 0),
+        );
+        assert_eq!(changes1.tx.hash, Bytes::from_str(tx_hash1).unwrap(),);
+    }
+
+    #[test]
+    fn test_merge_different_blocks() {
+        let mut tx1 = TxWithChanges::new(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            fixtures::create_transaction("0x01", "0x0abc", 1),
+        );
+
+        let tx2 = TxWithChanges::new(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            fixtures::create_transaction("0x02", "0x0def", 2),
+        );
+
+        assert!(tx1.merge(tx2).is_err());
+    }
+
+    #[test]
+    fn test_merge_same_transaction() {
+        let mut tx1 = TxWithChanges::new(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            fixtures::create_transaction("0x01", "0x0abc", 1),
+        );
+
+        let tx2 = TxWithChanges::new(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            fixtures::create_transaction("0x01", "0x0abc", 1),
+        );
+
+        assert!(tx1.merge(tx2).is_err());
+    }
+
+    #[test]
+    fn test_merge_lower_transaction_index() {
+        let mut tx1 = TxWithChanges::new(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            fixtures::create_transaction("0x02", "0x0abc", 2),
+        );
+
+        let tx2 = TxWithChanges::new(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            fixtures::create_transaction("0x01", "0x0abc", 1),
+        );
+
+        assert!(tx1.merge(tx2).is_err());
     }
 }
