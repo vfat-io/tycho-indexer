@@ -1,3 +1,11 @@
+## [0.57.1](https://github.com/propeller-heads/tycho-indexer/compare/0.57.0...0.57.1) (2025-02-14)
+
+
+### Bug Fixes
+
+* add arbitrum to the native token migration ([657aa53](https://github.com/propeller-heads/tycho-indexer/commit/657aa53110416f5c54c8fc0ef6bba3293dcacf12))
+* add arbitrum to the native token migration ([#512](https://github.com/propeller-heads/tycho-indexer/issues/512)) ([4a76b38](https://github.com/propeller-heads/tycho-indexer/commit/4a76b3802b1b1c9082f6bfc162d585c8173a2d6e))
+
 ## [0.57.0](https://github.com/propeller-heads/tycho-indexer/compare/0.56.5...0.57.0) (2025-02-14)
 
 
