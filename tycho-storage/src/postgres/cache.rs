@@ -20,7 +20,7 @@ use tycho_core::{
         contract::{Account, AccountBalance, AccountDelta},
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
-            ProtocolComponentStateDelta,
+            ProtocolComponentStateDelta, QualityRange,
         },
         token::CurrencyToken,
         Address, Chain, ComponentId, ContractId, ExtractionState, PaginationParams, ProtocolType,
@@ -923,7 +923,7 @@ impl ProtocolGateway for CachedGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
-        min_quality: Option<i32>,
+        quality: QualityRange,
         traded_n_days_ago: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<WithTotal<Vec<CurrencyToken>>, StorageError> {
@@ -932,14 +932,7 @@ impl ProtocolGateway for CachedGateway {
                 StorageError::Unexpected(format!("Failed to retrieve connection: {e}"))
             })?;
         self.state_gateway
-            .get_tokens(
-                chain,
-                address,
-                min_quality,
-                traded_n_days_ago,
-                pagination_params,
-                &mut conn,
-            )
+            .get_tokens(chain, address, quality, traded_n_days_ago, pagination_params, &mut conn)
             .await
     }
 

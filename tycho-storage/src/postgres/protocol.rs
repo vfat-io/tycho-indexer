@@ -12,7 +12,7 @@ use tycho_core::{
     models::{
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
-            ProtocolComponentStateDelta,
+            ProtocolComponentStateDelta, QualityRange,
         },
         token::CurrencyToken,
         Address, Balance, Chain, ChangeType, ComponentId, FinancialType, ImplementationType,
@@ -905,7 +905,7 @@ impl PostgresGateway {
         &self,
         chain: Chain,
         addresses: Option<&[&Address]>,
-        min_quality: Option<i32>,
+        quality_filter: QualityRange,
         last_traded_ts_threshold: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
         conn: &mut AsyncPgConnection,
@@ -930,9 +930,13 @@ impl PostgresGateway {
             count_query = count_query.filter(schema::account::address.eq_any(addrs));
         }
 
-        if let Some(min_quality) = min_quality {
+        if let Some(min_quality) = quality_filter.min {
             query = query.filter(schema::token::quality.ge(min_quality));
             count_query = count_query.filter(schema::token::quality.ge(min_quality));
+        }
+        if let Some(max_quality) = quality_filter.max {
+            query = query.filter(schema::token::quality.le(max_quality));
+            count_query = count_query.filter(schema::token::quality.le(max_quality));
         }
 
         if let Some(last_traded_ts_threshold) = last_traded_ts_threshold {
@@ -2798,7 +2802,7 @@ mod test {
 
         // get all eth tokens (no address filter)
         let tokens = gw
-            .get_tokens(Chain::Ethereum, None, None, None, None, &mut conn)
+            .get_tokens(Chain::Ethereum, None, QualityRange::default(), None, None, &mut conn)
             .await
             .unwrap()
             .entity;
@@ -2809,7 +2813,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 Some(&[&WETH.into(), &USDC.into()]),
-                None,
+                QualityRange::default(),
                 None,
                 None,
                 &mut conn,
@@ -2821,7 +2825,14 @@ mod test {
 
         // get weth
         let tokens = gw
-            .get_tokens(Chain::Ethereum, Some(&[&WETH.into()]), None, None, None, &mut conn)
+            .get_tokens(
+                Chain::Ethereum,
+                Some(&[&WETH.into()]),
+                QualityRange::default(),
+                None,
+                None,
+                &mut conn,
+            )
             .await
             .unwrap()
             .entity;
@@ -2841,7 +2852,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 None,
-                None,
+                QualityRange::default(),
                 None,
                 Some(&PaginationParams { page: 0, page_size: 1 }),
                 &mut conn,
@@ -2858,7 +2869,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 None,
-                None,
+                QualityRange::default(),
                 None,
                 Some(&PaginationParams { page: 0, page_size: 0 }),
                 &mut conn,
@@ -2873,7 +2884,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 None,
-                None,
+                QualityRange::default(),
                 None,
                 Some(&PaginationParams { page: 2, page_size: 1 }),
                 &mut conn,
@@ -2892,7 +2903,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let tokens = gw
-            .get_tokens(Chain::ZkSync, None, None, None, None, &mut conn)
+            .get_tokens(Chain::ZkSync, None, QualityRange::default(), None, None, &mut conn)
             .await
             .unwrap()
             .entity;
@@ -2912,13 +2923,20 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_get_tokens_with_80_quality() {
+    async fn test_get_tokens_with_min_quality() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let tokens = gw
-            .get_tokens(Chain::Ethereum, None, Some(80i32), None, None, &mut conn)
+            .get_tokens(
+                Chain::Ethereum,
+                None,
+                QualityRange::min_only(80_i32),
+                None,
+                None,
+                &mut conn,
+            )
             .await
             .unwrap()
             .entity;
@@ -2939,6 +2957,40 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_get_tokens_with_quality_range() {
+        let mut conn = setup_db().await;
+        setup_data(&mut conn).await;
+        let gw = EVMGateway::from_connection(&mut conn).await;
+
+        let tokens = gw
+            .get_tokens(
+                Chain::Ethereum,
+                None,
+                QualityRange::new(60_i32, 70_i32),
+                None,
+                None,
+                &mut conn,
+            )
+            .await
+            .unwrap()
+            .entity;
+
+        assert_eq!(tokens.len(), 1);
+
+        let expected_token = CurrencyToken::new(
+            &LUSD.parse().unwrap(),
+            "LUSD",
+            18,
+            10,
+            &[Some(10)],
+            Chain::Ethereum,
+            100,
+        );
+
+        assert_eq!(tokens[1], expected_token);
+    }
+
+    #[tokio::test]
     async fn test_get_tokens_with_30_day_activity() {
         let mut conn = setup_db().await;
         setup_data(&mut conn).await;
@@ -2947,7 +2999,14 @@ mod test {
         let days_cutoff: Option<NaiveDateTime> = Some(yesterday_half_past_midnight());
 
         let tokens = gw
-            .get_tokens(Chain::Ethereum, None, None, days_cutoff, None, &mut conn)
+            .get_tokens(
+                Chain::Ethereum,
+                None,
+                QualityRange::default(),
+                days_cutoff,
+                None,
+                &mut conn,
+            )
             .await
             .unwrap()
             .entity;
@@ -3043,7 +3102,14 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
         let dai_address = Bytes::from(DAI);
         let mut prev = gw
-            .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, None, None, &mut conn)
+            .get_tokens(
+                Chain::Ethereum,
+                Some(&[&dai_address]),
+                QualityRange::default(),
+                None,
+                None,
+                &mut conn,
+            )
             .await
             .expect("failed to get old token")
             .entity
@@ -3054,7 +3120,14 @@ mod test {
             .await
             .expect("failed to update tokens");
         let updated = gw
-            .get_tokens(Chain::Ethereum, Some(&[&dai_address]), None, None, None, &mut conn)
+            .get_tokens(
+                Chain::Ethereum,
+                Some(&[&dai_address]),
+                QualityRange::default(),
+                None,
+                None,
+                &mut conn,
+            )
             .await
             .expect("failed to get updated token")
             .entity

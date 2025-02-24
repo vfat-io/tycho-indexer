@@ -6,6 +6,7 @@ use tracing::{debug, info, warn};
 use tycho_core::{
     models::{
         blockchain::BlockTag,
+        protocol::QualityRange,
         token::{CurrencyToken, TokenOwnerStore, TokenQuality},
         Chain, PaginationParams,
     },
@@ -28,9 +29,16 @@ pub async fn analyze_tokens(
         let start = Instant::now();
         let pagination_params = PaginationParams::new(page, page_size);
         tokens.clone_from(
-            &(gw.get_tokens(analyze_args.chain, None, None, None, Some(&pagination_params))
-                .await?
-                .entity),
+            &(gw.get_tokens(
+                analyze_args.chain,
+                None,
+                // Skip tokens that failed previously and ones we already analyzed successfully
+                QualityRange::new(6, 10),
+                None,
+                Some(&pagination_params),
+            )
+            .await?
+            .entity),
         );
         let sem = Arc::new(Semaphore::new(analyze_args.concurrency));
         let tasks = tokens
@@ -130,11 +138,6 @@ async fn analyze_batch(
         Arc::new(TokenOwnerStore::new(liquidity_token_owners)),
     );
     for t in tokens.iter_mut() {
-        // Skip tokens that failed previously and ones we already analyzed successfully.
-        if t.quality <= 5 || !t.gas.is_empty() {
-            continue;
-        }
-
         debug!(?t.address, "Analyzing token");
         let (token_quality, gas, tax) = match analyzer
             .analyze(t.address.clone(), BlockTag::Latest)

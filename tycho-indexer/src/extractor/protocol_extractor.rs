@@ -2004,7 +2004,10 @@ mod test_serial_db {
     use super::*;
 
     use tycho_core::{
-        models::{blockchain::TxWithChanges, ContractId, FinancialType, ImplementationType},
+        models::{
+            blockchain::TxWithChanges, protocol::QualityRange, ContractId, FinancialType,
+            ImplementationType,
+        },
         storage::{BlockIdentifier, BlockOrTimestamp},
         traits::TokenOwnerFinding,
     };
@@ -2483,7 +2486,7 @@ mod test_serial_db {
             assert_eq!(res, exp);
 
             let tokens = cached_gw
-                .get_tokens(Chain::Ethereum, None, None, None, None)
+                .get_tokens(Chain::Ethereum, None, QualityRange::default(), None, None)
                 .await
                 .unwrap()
                 .entity;

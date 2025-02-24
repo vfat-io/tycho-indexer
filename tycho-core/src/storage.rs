@@ -11,7 +11,7 @@ use crate::{
         contract::{Account, AccountBalance, AccountDelta},
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
-            ProtocolComponentStateDelta,
+            ProtocolComponentStateDelta, QualityRange,
         },
         token::CurrencyToken,
         Address, BlockHash, Chain, ComponentId, ContractId, ExtractionState, PaginationParams,
@@ -364,7 +364,7 @@ pub trait ProtocolGateway {
         &self,
         chain: Chain,
         address: Option<&[&Address]>,
-        min_quality: Option<i32>,
+        quality: QualityRange,
         traded_n_days_ago: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
     ) -> Result<WithTotal<Vec<CurrencyToken>>, StorageError>;

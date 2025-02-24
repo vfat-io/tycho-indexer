@@ -5,7 +5,11 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
 
 use tycho_core::{
-    models::{protocol::ProtocolComponent, token::CurrencyToken, Address, Chain, ComponentId},
+    models::{
+        protocol::{ProtocolComponent, QualityRange},
+        token::CurrencyToken,
+        Address, Chain, ComponentId,
+    },
     storage::{ProtocolGateway, StorageError},
     Bytes,
 };
@@ -82,7 +86,7 @@ impl ProtocolMemoryCache {
         {
             let mut cached_tokens = self.tokens.write().await;
             self.gateway
-                .get_tokens(self.chain, None, None, None, None)
+                .get_tokens(self.chain, None, QualityRange::default(), None, None)
                 .await?
                 .entity
                 .into_iter()
@@ -165,7 +169,7 @@ impl ProtocolDataCache for ProtocolMemoryCache {
             let mut cached_tokens = self.tokens.write().await;
             let mut n_fetched = 0;
             self.gateway
-                .get_tokens(self.chain, Some(&missing), None, None, None)
+                .get_tokens(self.chain, Some(&missing), QualityRange::default(), None, None)
                 .await?
                 .entity
                 .into_iter()

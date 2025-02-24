@@ -196,6 +196,25 @@ impl ComponentBalance {
     }
 }
 
+/// Token quality range filter
+///
+/// The quality range is considered inclusive and used as a filter, will be applied as such.
+#[derive(Debug, Clone, Default)]
+pub struct QualityRange {
+    pub min: Option<i32>,
+    pub max: Option<i32>,
+}
+
+impl QualityRange {
+    pub fn new(min: i32, max: i32) -> Self {
+        Self { min: Some(min), max: Some(max) }
+    }
+
+    pub fn min_only(min: i32) -> Self {
+        Self { min: Some(min), max: None }
+    }
+}
+
 /// Updates grouped by their respective transaction.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ProtocolChangesWithTx {
