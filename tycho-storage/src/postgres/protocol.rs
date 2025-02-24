@@ -2984,10 +2984,10 @@ mod test {
             10,
             &[Some(10)],
             Chain::Ethereum,
-            100,
+            70,
         );
 
-        assert_eq!(tokens[1], expected_token);
+        assert_eq!(tokens[0], expected_token);
     }
 
     #[tokio::test]

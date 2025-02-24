@@ -162,7 +162,7 @@ async fn analyze_batch(
         }
 
         // If it's a fee token, set quality to 50
-        if tax.map_or(false, |tax_value| tax_value > 0) {
+        if tax.is_some_and(|tax_value| tax_value > 0) {
             t.quality = 50;
         }
 
