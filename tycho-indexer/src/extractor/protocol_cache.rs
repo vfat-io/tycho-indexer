@@ -86,7 +86,7 @@ impl ProtocolMemoryCache {
         {
             let mut cached_tokens = self.tokens.write().await;
             self.gateway
-                .get_tokens(self.chain, None, QualityRange::default(), None, None)
+                .get_tokens(self.chain, None, QualityRange::None(), None, None)
                 .await?
                 .entity
                 .into_iter()
@@ -169,7 +169,7 @@ impl ProtocolDataCache for ProtocolMemoryCache {
             let mut cached_tokens = self.tokens.write().await;
             let mut n_fetched = 0;
             self.gateway
-                .get_tokens(self.chain, Some(&missing), QualityRange::default(), None, None)
+                .get_tokens(self.chain, Some(&missing), QualityRange::None(), None, None)
                 .await?
                 .entity
                 .into_iter()

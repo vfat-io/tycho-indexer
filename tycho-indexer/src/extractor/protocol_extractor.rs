@@ -2486,7 +2486,7 @@ mod test_serial_db {
             assert_eq!(res, exp);
 
             let tokens = cached_gw
-                .get_tokens(Chain::Ethereum, None, QualityRange::default(), None, None)
+                .get_tokens(Chain::Ethereum, None, QualityRange::None(), None, None)
                 .await
                 .unwrap()
                 .entity;

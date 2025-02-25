@@ -2802,7 +2802,7 @@ mod test {
 
         // get all eth tokens (no address filter)
         let tokens = gw
-            .get_tokens(Chain::Ethereum, None, QualityRange::default(), None, None, &mut conn)
+            .get_tokens(Chain::Ethereum, None, QualityRange::None(), None, None, &mut conn)
             .await
             .unwrap()
             .entity;
@@ -2813,7 +2813,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 Some(&[&WETH.into(), &USDC.into()]),
-                QualityRange::default(),
+                QualityRange::None(),
                 None,
                 None,
                 &mut conn,
@@ -2828,7 +2828,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 Some(&[&WETH.into()]),
-                QualityRange::default(),
+                QualityRange::None(),
                 None,
                 None,
                 &mut conn,
@@ -2852,7 +2852,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 None,
-                QualityRange::default(),
+                QualityRange::None(),
                 None,
                 Some(&PaginationParams { page: 0, page_size: 1 }),
                 &mut conn,
@@ -2869,7 +2869,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 None,
-                QualityRange::default(),
+                QualityRange::None(),
                 None,
                 Some(&PaginationParams { page: 0, page_size: 0 }),
                 &mut conn,
@@ -2884,7 +2884,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 None,
-                QualityRange::default(),
+                QualityRange::None(),
                 None,
                 Some(&PaginationParams { page: 2, page_size: 1 }),
                 &mut conn,
@@ -2903,7 +2903,7 @@ mod test {
         let gw = EVMGateway::from_connection(&mut conn).await;
 
         let tokens = gw
-            .get_tokens(Chain::ZkSync, None, QualityRange::default(), None, None, &mut conn)
+            .get_tokens(Chain::ZkSync, None, QualityRange::None(), None, None, &mut conn)
             .await
             .unwrap()
             .entity;
@@ -2999,14 +2999,7 @@ mod test {
         let days_cutoff: Option<NaiveDateTime> = Some(yesterday_half_past_midnight());
 
         let tokens = gw
-            .get_tokens(
-                Chain::Ethereum,
-                None,
-                QualityRange::default(),
-                days_cutoff,
-                None,
-                &mut conn,
-            )
+            .get_tokens(Chain::Ethereum, None, QualityRange::None(), days_cutoff, None, &mut conn)
             .await
             .unwrap()
             .entity;
@@ -3105,7 +3098,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 Some(&[&dai_address]),
-                QualityRange::default(),
+                QualityRange::None(),
                 None,
                 None,
                 &mut conn,
@@ -3123,7 +3116,7 @@ mod test {
             .get_tokens(
                 Chain::Ethereum,
                 Some(&[&dai_address]),
-                QualityRange::default(),
+                QualityRange::None(),
                 None,
                 None,
                 &mut conn,

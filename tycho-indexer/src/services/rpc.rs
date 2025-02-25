@@ -526,7 +526,7 @@ where
         let quality = if let Some(min_quality) = request.min_quality {
             QualityRange::min_only(min_quality)
         } else {
-            QualityRange::default()
+            QualityRange::None()
         };
 
         let traded_n_days_ago = request.traded_n_days_ago;
