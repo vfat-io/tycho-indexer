@@ -12,7 +12,7 @@ use tycho_core::{
         contract::{Account, AccountBalance, AccountDelta},
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
-            ProtocolComponentStateDelta,
+            ProtocolComponentStateDelta, QualityRange,
         },
         token::CurrencyToken,
         Address, Chain, ComponentId, ContractId, ExtractionState, PaginationParams, ProtocolType,
@@ -328,7 +328,7 @@ mock! {
             &'life0 self,
             chain: Chain,
             address: Option<&'life1 [&'life2 Address]>,
-            min_quality: Option<i32>,
+            quality: QualityRange,
             traded_n_days_ago: Option<NaiveDateTime>,
             pagination_params: Option<&'life3 PaginationParams>,
         ) -> ::core::pin::Pin<

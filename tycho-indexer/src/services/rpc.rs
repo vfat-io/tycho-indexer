@@ -12,7 +12,10 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use tycho_core::{
     dto::{self, PaginationResponse},
-    models::{blockchain::BlockAggregatedChanges, Address, Chain, PaginationParams},
+    models::{
+        blockchain::BlockAggregatedChanges, protocol::QualityRange, Address, Chain,
+        PaginationParams,
+    },
     storage::{BlockIdentifier, BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
     Bytes,
 };
@@ -520,7 +523,11 @@ where
         debug!(?addresses_slice, "Getting tokens.");
 
         let converted_params: PaginationParams = (&request.pagination).into();
-        let min_quality = request.min_quality;
+        let quality = if let Some(min_quality) = request.min_quality {
+            QualityRange::min_only(min_quality)
+        } else {
+            QualityRange::None()
+        };
 
         let traded_n_days_ago = request.traded_n_days_ago;
 
@@ -537,7 +544,7 @@ where
             .get_tokens(
                 request.chain.into(),
                 addresses_slice,
-                min_quality,
+                quality,
                 n_days_ago,
                 Some(&converted_params),
             )
