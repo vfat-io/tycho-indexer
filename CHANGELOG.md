@@ -1,3 +1,10 @@
+## [0.58.1](https://github.com/propeller-heads/tycho-indexer/compare/0.58.0...0.58.1) (2025-02-26)
+
+
+### Bug Fixes
+
+* index tokens table on quality for quicker quality based lookups ([7f38460](https://github.com/propeller-heads/tycho-indexer/commit/7f38460f1189deee46c934ec7ad535d93218fdec))
+
 ## [0.58.0](https://github.com/propeller-heads/tycho-indexer/compare/0.57.2...0.58.0) (2025-02-26)
 
 
