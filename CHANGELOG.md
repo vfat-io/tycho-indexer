@@ -1,3 +1,11 @@
+## [0.58.0](https://github.com/propeller-heads/tycho-indexer/compare/0.57.2...0.58.0) (2025-02-26)
+
+
+### Features
+
+* update PG gateway get_tokens quality filter to be ranged ([9648dd6](https://github.com/propeller-heads/tycho-indexer/commit/9648dd6b4b5d7021d8cc0057b644bbf3e5a656f2))
+* update postgres gateway get_tokens quality filter to be ranged ([#516](https://github.com/propeller-heads/tycho-indexer/issues/516)) ([72fac95](https://github.com/propeller-heads/tycho-indexer/commit/72fac95de65110625d5fba154e675240866274f7))
+
 ## [0.57.2](https://github.com/propeller-heads/tycho-indexer/compare/0.57.1...0.57.2) (2025-02-14)
 
 ## [0.57.1](https://github.com/propeller-heads/tycho-indexer/compare/0.57.0...0.57.1) (2025-02-14)
