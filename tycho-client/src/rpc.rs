@@ -423,8 +423,8 @@ impl RPCClient for HttpRPCClient {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.contract_ids.is_none() ||
-            request
+        if request.contract_ids.is_none()
+            || request
                 .contract_ids
                 .as_ref()
                 .unwrap()
@@ -468,9 +468,9 @@ impl RPCClient for HttpRPCClient {
             });
         }
 
-        let accounts = serde_json::from_str::<StateRequestResponse>(&body).map_err(|_| {
+        let accounts = serde_json::from_str::<StateRequestResponse>(&body).map_err(|err| {
             error!("Failed to parse contract state response: {:?}", &body);
-            RPCError::ParseResponse(body)
+            RPCError::ParseResponse(format!("Error: {}, Body: {}", err, body))
         })?;
         trace!(?accounts, "Received contract_state response from Tycho server");
 
@@ -507,9 +507,9 @@ impl RPCClient for HttpRPCClient {
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         let components =
-            serde_json::from_str::<ProtocolComponentRequestResponse>(&body).map_err(|_| {
+            serde_json::from_str::<ProtocolComponentRequestResponse>(&body).map_err(|err| {
                 error!("Failed to parse protocol component response: {:?}", &body);
-                RPCError::ParseResponse(body)
+                RPCError::ParseResponse(format!("Error: {}, Body: {}", err, body))
             })?;
         trace!(?components, "Received protocol_components response from Tycho server");
 
@@ -521,8 +521,8 @@ impl RPCClient for HttpRPCClient {
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.protocol_ids.is_none() ||
-            request
+        if request.protocol_ids.is_none()
+            || request
                 .protocol_ids
                 .as_ref()
                 .unwrap()
@@ -567,10 +567,11 @@ impl RPCClient for HttpRPCClient {
             });
         }
 
-        let states = serde_json::from_str::<ProtocolStateRequestResponse>(&body).map_err(|_| {
-            error!("Failed to parse protocol state response: {:?}", &body);
-            RPCError::ParseResponse(body)
-        })?;
+        let states =
+            serde_json::from_str::<ProtocolStateRequestResponse>(&body).map_err(|err| {
+                error!("Failed to parse protocol state response: {:?}", &body);
+                RPCError::ParseResponse(format!("Error: {}, Body: {}", err, body))
+            })?;
         trace!(?states, "Received protocol_states response from Tycho server");
 
         Ok(states)
@@ -601,9 +602,9 @@ impl RPCClient for HttpRPCClient {
             .text()
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
-        let tokens = serde_json::from_str::<TokensRequestResponse>(&body).map_err(|_| {
+        let tokens = serde_json::from_str::<TokensRequestResponse>(&body).map_err(|err| {
             error!("Failed to parse tokens response: {:?}", &body);
-            RPCError::ParseResponse(body)
+            RPCError::ParseResponse(format!("Error: {}, Body: {}", err, body))
         })?;
 
         Ok(tokens)
@@ -635,9 +636,9 @@ impl RPCClient for HttpRPCClient {
             .await
             .map_err(|e| RPCError::ParseResponse(e.to_string()))?;
         let protocol_systems = serde_json::from_str::<ProtocolSystemsRequestResponse>(&body)
-            .map_err(|_| {
+            .map_err(|err| {
                 error!("Failed to parse protocol systems response: {:?}", &body);
-                RPCError::ParseResponse(body)
+                RPCError::ParseResponse(format!("Error: {}, Body: {}", err, body))
             })?;
         trace!(?protocol_systems, "Received protocol_systems response from Tycho server");
         Ok(protocol_systems)
