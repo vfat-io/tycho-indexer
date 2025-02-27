@@ -1,3 +1,12 @@
+## [0.58.2](https://github.com/propeller-heads/tycho-indexer/compare/0.58.1...0.58.2) (2025-02-27)
+
+
+### Bug Fixes
+
+* propagate more meaningful RPC errors on the client ([#515](https://github.com/propeller-heads/tycho-indexer/issues/515)) ([6261432](https://github.com/propeller-heads/tycho-indexer/commit/6261432585ae1f2d4f8a99b6cfd629e4a9f1285f))
+* propogate more meaningful RPC errors on the client ([bf92d73](https://github.com/propeller-heads/tycho-indexer/commit/bf92d73ae4a0535619b4d8d42f78c6c981403c34))
+* return error with body on failed response parsing ([08b74cc](https://github.com/propeller-heads/tycho-indexer/commit/08b74cc0178dc0d69a3e461c271c401e3d23ee1e))
+
 ## [0.58.1](https://github.com/propeller-heads/tycho-indexer/compare/0.58.0...0.58.1) (2025-02-26)
 
 
