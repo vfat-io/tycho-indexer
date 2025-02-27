@@ -423,8 +423,8 @@ impl RPCClient for HttpRPCClient {
         request: &StateRequestBody,
     ) -> Result<StateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.contract_ids.is_none()
-            || request
+        if request.contract_ids.is_none() ||
+            request
                 .contract_ids
                 .as_ref()
                 .unwrap()
@@ -521,8 +521,8 @@ impl RPCClient for HttpRPCClient {
         request: &ProtocolStateRequestBody,
     ) -> Result<ProtocolStateRequestResponse, RPCError> {
         // Check if contract ids are specified
-        if request.protocol_ids.is_none()
-            || request
+        if request.protocol_ids.is_none() ||
+            request
                 .protocol_ids
                 .as_ref()
                 .unwrap()
