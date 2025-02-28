@@ -1,6 +1,6 @@
 [package]
 name = "tycho-storage"
-version = "0.58.3"
+version = "0.59.0"
 edition = "2021"
 
 [dependencies]

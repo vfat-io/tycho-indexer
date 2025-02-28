@@ -1,3 +1,15 @@
+## [0.59.0](https://github.com/propeller-heads/tycho-indexer/compare/0.58.3...0.59.0) (2025-02-28)
+
+
+### Features
+
+* fix conflicting timestamps, update latest block on reverts ([0bbd30e](https://github.com/propeller-heads/tycho-indexer/commit/0bbd30e64c7a5e74e173d5e3195449353c76efbd))
+* get block by hash instead of number ([b38d97d](https://github.com/propeller-heads/tycho-indexer/commit/b38d97d1288bf528df6a9f21f68b8390479612e6))
+* Handle blocks with same ts ([#494](https://github.com/propeller-heads/tycho-indexer/issues/494)) ([314de48](https://github.com/propeller-heads/tycho-indexer/commit/314de48e270ad8a749a72d3b254fc634a8994cc6))
+* remove #[allow(dead_code)] ([f88c606](https://github.com/propeller-heads/tycho-indexer/commit/f88c606fe9040b316164727870645abf415c8632))
+* return block_id together with cursor ([160757a](https://github.com/propeller-heads/tycho-indexer/commit/160757a1b662248dc0894074f342cb4e5250383b))
+* simplify logic, remove previous block ts overwrite for Arbitrum ([e32cd2b](https://github.com/propeller-heads/tycho-indexer/commit/e32cd2bbb3778e10b5f25f7c8867b944ce63b8be))
+
 ## [0.58.3](https://github.com/propeller-heads/tycho-indexer/compare/0.58.2...0.58.3) (2025-02-28)
 
 
