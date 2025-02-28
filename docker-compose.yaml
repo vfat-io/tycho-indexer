@@ -12,7 +12,7 @@ services:
     ports:
       - "5431:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/bitnami/postgresql
   tycho-indexer:
     image: ${TYCHO_IMAGE}
     restart: "no"
