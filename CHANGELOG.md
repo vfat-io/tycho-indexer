@@ -1,3 +1,11 @@
+## [0.58.3](https://github.com/propeller-heads/tycho-indexer/compare/0.58.2...0.58.3) (2025-02-28)
+
+
+### Bug Fixes
+
+* Fix token_balances typing on ResponseAccount ([e9d854b](https://github.com/propeller-heads/tycho-indexer/commit/e9d854bd9dedced448ffe6067a55738bf21cc689))
+* Fix token_balances typing on ResponseAccount ([#514](https://github.com/propeller-heads/tycho-indexer/issues/514)) ([924e3d0](https://github.com/propeller-heads/tycho-indexer/commit/924e3d037d3def9dfb4804548de49e4095a547d7))
+
 ## [0.58.2](https://github.com/propeller-heads/tycho-indexer/compare/0.58.1...0.58.2) (2025-02-27)
 
 
