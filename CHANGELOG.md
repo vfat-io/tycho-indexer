@@ -1,3 +1,13 @@
+## [0.59.3](https://github.com/propeller-heads/tycho-indexer/compare/0.59.2...0.59.3) (2025-03-04)
+
+
+### Bug Fixes
+
+* update dockerfile ([114ad12](https://github.com/propeller-heads/tycho-indexer/commit/114ad127b494ec117f47dc30a21df141f9953739))
+* update dockerfile ([dd4ffdc](https://github.com/propeller-heads/tycho-indexer/commit/dd4ffdc5e5a9bf177ce3504ab09f2285b9ad750f))
+* update dockerfile ([be3c408](https://github.com/propeller-heads/tycho-indexer/commit/be3c40842e83a44e93244fd8c498e0da6e68b0df))
+* update dockerfile ([#522](https://github.com/propeller-heads/tycho-indexer/issues/522)) ([488ac2e](https://github.com/propeller-heads/tycho-indexer/commit/488ac2edf3298085577b9b0eb506b4db37d27657))
+
 ## [0.59.2](https://github.com/propeller-heads/tycho-indexer/compare/0.59.1...0.59.2) (2025-03-04)
 
 ## [0.59.1](https://github.com/propeller-heads/tycho-indexer/compare/0.59.0...0.59.1) (2025-03-04)
