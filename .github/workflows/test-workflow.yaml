@@ -12,7 +12,7 @@ jobs:
       id-token: write
       contents: read
     with:
-      image_tag: ${{ needs.release.outputs.next_release_version }}
+      image_tag: testdockerfileupdatetag
       image_name: tycho-indexer
     secrets:
       app_id: ${{ secrets.APP_ID }}
