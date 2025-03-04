@@ -6,7 +6,7 @@ use std::{
 
 use async_trait::async_trait;
 use chrono::{Duration, NaiveDateTime};
-use metrics::gauge;
+use metrics::{counter, gauge};
 use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
@@ -783,6 +783,19 @@ where
 
         tracing::Span::current().record("target_hash", format!("{:x}", block_hash));
         tracing::Span::current().record("target_number", block_ref.number);
+
+        let last_processed_block_number = self
+            .get_last_processed_block()
+            .await
+            .map_or(String::new(), |block| block.number.to_string());
+
+        counter!(
+            "extractor_revert",
+            "extractor" => self.name.clone(),
+            "current_block" => last_processed_block_number,
+            "target_block" => block_ref.number.to_string()
+        )
+        .increment(1);
 
         // It can happen that the first received message is an undo signal. In that case we expect
         // to not have the target block in our buffer, therefore we early return and ignore this
