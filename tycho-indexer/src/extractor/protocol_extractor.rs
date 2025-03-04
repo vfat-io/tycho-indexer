@@ -184,6 +184,15 @@ where
             let distance_to_current = current_block - block.number;
             let blocks_processed = block.number - state.last_report_block_number;
             let blocks_per_minute = blocks_processed as f64 * 60.0 / time_passed as f64;
+
+            let extractor_id = self.get_id();
+            gauge!(
+                "extractor_sync_block_rate",
+                "chain" => extractor_id.chain.to_string(),
+                "extractor" => extractor_id.name.to_string(),
+            )
+            .set(blocks_per_minute);
+
             if let Some(time_remaining) = chrono::Duration::try_minutes(
                 (distance_to_current as f64 / blocks_per_minute) as i64,
             ) {
@@ -198,13 +207,6 @@ where
                     time_remaining = format!("{:02}h{:02}m", hours, minutes),
                     name = "SyncProgress"
                 );
-                let extractor_id = self.get_id();
-                gauge!(
-                    "extractor_sync_remaining_minutes",
-                    "chain" => extractor_id.chain.to_string(),
-                    "extractor" => extractor_id.name.to_string(),
-                )
-                .set(time_remaining.num_minutes() as f64);
             } else {
                 warn!(
                     "Failed to convert {} to a duration",
