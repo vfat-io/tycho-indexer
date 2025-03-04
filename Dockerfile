@@ -13,6 +13,7 @@ RUN cargo install cargo-workspaces
 RUN cargo install cargo-chef
 COPY rust-toolchain.toml .
 RUN rustup update 1.81
+RUN rustup set profile minimal && rustup install stable
 
 FROM chef AS planner
 COPY . .
