@@ -25,6 +25,7 @@ use crate::{
     Bytes,
 };
 
+/// Currently supported Blockchains
 #[derive(
     Debug,
     Clone,
@@ -534,19 +535,21 @@ impl ProtocolStateDelta {
     }
 }
 
+/// Maximum page size for this endpoint is 100
 #[derive(Clone, Serialize, Debug, Default, Deserialize, PartialEq, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct StateRequestBody {
+    /// Filters response by contract addresses
     #[serde(alias = "contractIds")]
     #[schema(value_type=Option<Vec<String>>)]
     pub contract_ids: Option<Vec<Bytes>>,
+    /// Required to correctly apply unconfirmed state from ReorgBuffers
     #[serde(alias = "protocolSystem", default)]
     pub protocol_system: String,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
     #[serde(default)]
     pub chain: Chain,
-    /// Max page size supported is 100
     #[serde(default)]
     pub pagination: PaginationParams,
 }
@@ -795,23 +798,26 @@ impl StateRequestParameters {
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema, Eq, Hash, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct TokensRequestBody {
+    /// Filters tokens by addresses
     #[serde(alias = "tokenAddresses")]
     #[schema(value_type=Option<Vec<String>>)]
     pub token_addresses: Option<Vec<Bytes>>,
     /// Quality is between 0-100, where:
-    ///  - 100: Normal token
-    ///  - 75: Rebase token
-    ///  - 50: Fee token
-    ///  - 10: Token analysis failed at creation
-    ///  - 5: Token analysis failed on cronjob (after creation).
-    ///  - 0: Failed to extract decimals onchain
+    ///  - 100: Normal ERC-20 Token behavior
+    ///  - 75: Rebasing token
+    ///  - 50: Fee-on-transfer token
+    ///  - 10: Token analysis failed at first detection
+    ///  - 5: Token analysis failed multiple times (after creation)
+    ///  - 0: Failed to extract attributes, like Decimal or Symbol
     #[serde(default)]
     pub min_quality: Option<i32>,
+    /// Filters tokens by recent trade activity
     #[serde(default)]
     pub traded_n_days_ago: Option<u64>,
     /// Max page size supported is 3000
     #[serde(default)]
     pub pagination: PaginationParams,
+    /// Filter tokens by blockchain, default 'ethereum'
     #[serde(default)]
     pub chain: Chain,
 }
@@ -829,11 +835,14 @@ impl TokensRequestResponse {
     }
 }
 
+/// Pagination parameter
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct PaginationParams {
+    /// What page to retrieve
     #[serde(default)]
     pub page: i64,
+    /// How many results to return per page
     #[serde(default)]
     pub page_size: i64,
 }
@@ -903,10 +912,13 @@ impl From<models::token::CurrencyToken> for ResponseToken {
 #[derive(Serialize, Deserialize, Debug, Default, ToSchema, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolComponentsRequestBody {
+    /// Required to correctly apply unconfirmed state from ReorgBuffers
     pub protocol_system: String,
+    /// Filter by component ids
     #[serde(alias = "componentAddresses")]
     pub component_ids: Option<Vec<String>>,
-    /// The minimum TVL of the protocol components to return, denoted in the chain's native token.
+    /// The minimum TVL of the protocol components to return, denoted in the chain's
+    /// native token.
     #[serde(default)]
     pub tvl_gt: Option<f64>,
     #[serde(default)]
@@ -1079,8 +1091,10 @@ fn default_include_balances_flag() -> bool {
 #[derive(Clone, Debug, Serialize, PartialEq, ToSchema, Default, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolStateRequestBody {
+    /// Filters response by protocol components ids
     #[serde(alias = "protocolIds")]
     pub protocol_ids: Option<Vec<String>>,
+    /// Required to correctly apply unconfirmed state from ReorgBuffers
     #[serde(alias = "protocolSystem")]
     pub protocol_system: String,
     #[serde(default)]
