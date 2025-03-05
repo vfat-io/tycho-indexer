@@ -444,6 +444,7 @@ pub struct ProtocolComponent {
     #[schema(value_type=HashMap<String, String>)]
     pub static_attributes: HashMap<String, Bytes>,
     /// Internal use only
+    #[serde(skip_serializing)]
     pub change: ChangeType,
     /// Transaction hash which created this component
     #[serde(with = "hex_bytes")]
@@ -1126,6 +1127,7 @@ fn default_include_balances_flag() -> bool {
     true
 }
 
+/// Max page size supported is 100
 #[derive(Clone, Debug, Serialize, PartialEq, ToSchema, Default, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolStateRequestBody {
@@ -1143,7 +1145,6 @@ pub struct ProtocolStateRequestBody {
     pub include_balances: bool,
     #[serde(default = "VersionParam::default")]
     pub version: VersionParam,
-    /// Max page size supported is 100
     #[serde(default)]
     pub pagination: PaginationParams,
 }
@@ -1301,7 +1302,6 @@ pub enum Health {
 pub struct ProtocolSystemsRequestBody {
     #[serde(default)]
     pub chain: Chain,
-    /// Max page size supported is 100
     #[serde(default)]
     pub pagination: PaginationParams,
 }
