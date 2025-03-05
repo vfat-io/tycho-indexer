@@ -530,7 +530,6 @@ where
                                     // solution.
                                     .first()
                                     .cloned()
-                                    .map(Into::into)
                                     .or_else(|| Bytes::from_str(&change.id).ok())
                             })
                             .map(|owner| (c_id, owner))

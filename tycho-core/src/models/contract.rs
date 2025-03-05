@@ -131,7 +131,7 @@ impl AccountDelta {
             format!("{:#020x}", self.address),
             self.slots
                 .into_iter()
-                .map(|(k, v)| (k, v.map(Into::into).unwrap_or_default()))
+                .map(|(k, v)| (k, v.unwrap_or_default()))
                 .collect(),
             self.balance.unwrap_or_default(),
             // token balances are not set in the delta
@@ -158,7 +158,7 @@ impl AccountDelta {
             format!("{:#020x}", self.address),
             self.slots
                 .into_iter()
-                .map(|(k, v)| (k, v.map(Into::into).unwrap_or_default()))
+                .map(|(k, v)| (k, v.unwrap_or_default()))
                 .collect(),
             self.balance.unwrap_or_default(),
             // token balances are not set in the delta
