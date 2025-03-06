@@ -191,6 +191,7 @@ where
         let server = HttpServer::new(move || {
             let cors = Cors::default()
                 .allowed_origin("https://open.gitbook.com")
+                .allowed_origin("https://docs.propellerheads.xyz")
                 .allow_any_method()
                 .allowed_headers(vec![
                     http::header::AUTHORIZATION,
