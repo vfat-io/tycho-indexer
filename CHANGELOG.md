@@ -1,3 +1,12 @@
+## [0.60.0](https://github.com/propeller-heads/tycho-indexer/compare/0.59.5...0.60.0) (2025-03-06)
+
+
+### Features
+
+* update codebase with latest substream message changes ([c5dca5e](https://github.com/propeller-heads/tycho-indexer/commit/c5dca5e5aac38b65f3fbd7e6472da28450263db9))
+* update substreams proto files ([b72cb77](https://github.com/propeller-heads/tycho-indexer/commit/b72cb776e6ec88aaffd954c4374be39ee4c8b99c))
+* update substreams proto messages ([#525](https://github.com/propeller-heads/tycho-indexer/issues/525)) ([3175a47](https://github.com/propeller-heads/tycho-indexer/commit/3175a470c552ca19495e1f7a532f07914b0a791b))
+
 ## [0.59.5](https://github.com/propeller-heads/tycho-indexer/compare/0.59.4...0.59.5) (2025-03-06)
 
 ## [0.59.4](https://github.com/propeller-heads/tycho-indexer/compare/0.59.3...0.59.4) (2025-03-06)
