@@ -3,6 +3,7 @@ syntax = "proto3";
 package sf.substreams.rpc.v2;
 
 import "google/protobuf/any.proto";
+import "sf/firehose/v2/firehose.proto";
 import "sf/substreams/v1/clock.proto";
 import "sf/substreams/v1/modules.proto";
 
@@ -10,6 +11,10 @@ option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/rpc/v2
 
 service Stream {
   rpc Blocks(Request) returns (stream Response);
+}
+
+service EndpointInfo {
+  rpc Info(sf.firehose.v2.InfoRequest) returns (sf.firehose.v2.InfoResponse);
 }
 
 message Request {
@@ -48,6 +53,8 @@ message Request {
 
   // Available only in developer mode
   repeated string debug_initial_store_snapshot_for_modules = 10;
+
+  bool noop_mode = 11;
 }
 
 message Response {
@@ -83,6 +90,10 @@ message BlockScopedData {
 
   repeated MapModuleOutput debug_map_outputs = 10;
   repeated StoreModuleOutput debug_store_outputs = 11;
+
+  // Signed attestation, enabling economic security as per GIP-0083. Signatures are
+  // done using the key specified by SessionInit::attestation_public_key.
+  string attestation = 12;
 }
 
 message SessionInit {
@@ -90,6 +101,9 @@ message SessionInit {
   uint64 resolved_start_block = 2;
   uint64 linear_handoff_block = 3;
   uint64 max_parallel_workers = 4;
+
+  // Operator's attestation public_key or address, enabling economic security as per GIP-0083.
+  string attestation_public_key = 5;
 }
 
 message InitialSnapshotComplete {
