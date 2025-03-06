@@ -1472,9 +1472,7 @@ mod test {
     };
 
     use super::*;
-    use crate::{
-        extractor::protobuf_deserialisation::fixtures as pb_fixtures, testing::MockGateway,
-    };
+    use crate::testing::{fixtures as pb_fixtures, MockGateway};
 
     mock! {
         pub TokenPreProcessor {}
@@ -2175,8 +2173,8 @@ mod test_serial_db {
 
     use super::*;
     use crate::{
-        extractor::{models::fixtures, protobuf_deserialisation::fixtures as pb_fixtures},
-        pb::sf::substreams::v1::BlockRef,
+        extractor::models::fixtures, pb::sf::substreams::v1::BlockRef,
+        testing::fixtures as pb_fixtures,
     };
 
     mock! {
