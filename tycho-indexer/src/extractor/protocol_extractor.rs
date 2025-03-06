@@ -31,6 +31,7 @@ use tycho_core::{
     Bytes,
 };
 use tycho_storage::postgres::cache::CachedGateway;
+use tycho_substreams::pb::tycho::evm::v1 as tycho_substreams;
 
 #[allow(deprecated)]
 use crate::{
@@ -42,7 +43,6 @@ use crate::{
         reorg_buffer::ReorgBuffer,
         BlockUpdateWithCursor, ExtractionError, Extractor, ExtractorMsg,
     },
-    pb,
     pb::sf::substreams::rpc::v2::{BlockScopedData, BlockUndoSignal, ModulesProgress},
 };
 
@@ -530,7 +530,6 @@ where
                                     // solution.
                                     .first()
                                     .cloned()
-                                    .map(Into::into)
                                     .or_else(|| Bytes::from_str(&change.id).ok())
                             })
                             .map(|owner| (c_id, owner))
@@ -624,7 +623,7 @@ where
         // then we need to decode as the corresponding message type, then convert it to BlockChanges
         let msg = match data.type_url.as_str() {
             url if url.ends_with("BlockChanges") => {
-                let raw_msg = pb::tycho::evm::v1::BlockChanges::decode(data.value.as_slice())?;
+                let raw_msg = tycho_substreams::BlockChanges::decode(data.value.as_slice())?;
                 trace!(?raw_msg, "Received BlockChanges message");
                 BlockChanges::try_from_message((
                     raw_msg,
@@ -637,7 +636,7 @@ where
             }
             url if url.ends_with("BlockContractChanges") => {
                 let raw_msg =
-                    pb::tycho::evm::v1::BlockContractChanges::decode(data.value.as_slice())?;
+                    tycho_substreams::BlockContractChanges::decode(data.value.as_slice())?;
                 trace!(?raw_msg, "Received BlockContractChanges message");
                 BlockContractChanges::try_from_message((
                     raw_msg,
@@ -650,8 +649,7 @@ where
                 .map(Into::into)
             }
             url if url.ends_with("BlockEntityChanges") => {
-                let raw_msg =
-                    pb::tycho::evm::v1::BlockEntityChanges::decode(data.value.as_slice())?;
+                let raw_msg = tycho_substreams::BlockEntityChanges::decode(data.value.as_slice())?;
                 trace!(?raw_msg, "Received BlockEntityChanges message");
                 BlockEntityChanges::try_from_message((
                     raw_msg,
@@ -1474,7 +1472,7 @@ mod test {
     };
 
     use super::*;
-    use crate::{pb::testing::fixtures as pb_fixtures, testing::MockGateway};
+    use crate::testing::{fixtures as pb_fixtures, MockGateway};
 
     mock! {
         pub TokenPreProcessor {}
@@ -1559,7 +1557,7 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
-                pb::tycho::evm::v1::BlockChanges {
+                tycho_substreams::BlockChanges {
                     block: Some(pb_fixtures::pb_blocks(1)),
                     changes: vec![],
                 },
@@ -1573,7 +1571,7 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
-                pb::tycho::evm::v1::BlockChanges {
+                tycho_substreams::BlockChanges {
                     block: Some(pb_fixtures::pb_blocks(2)),
                     changes: vec![],
                 },
@@ -1608,9 +1606,9 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
-                pb::tycho::evm::v1::BlockEntityChanges {
+                tycho_substreams::BlockEntityChanges {
                     block: Some(pb_fixtures::pb_blocks(1)),
-                    changes: vec![crate::pb::tycho::evm::v1::TransactionEntityChanges {
+                    changes: vec![tycho_substreams::TransactionEntityChanges {
                         tx: Some(pb_fixtures::pb_transactions(1, 1)),
                         entity_changes: vec![],
                         component_changes: vec![],
@@ -1627,9 +1625,9 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
-                pb::tycho::evm::v1::BlockEntityChanges {
+                tycho_substreams::BlockEntityChanges {
                     block: Some(pb_fixtures::pb_blocks(2)),
-                    changes: vec![crate::pb::tycho::evm::v1::TransactionEntityChanges {
+                    changes: vec![tycho_substreams::TransactionEntityChanges {
                         tx: Some(pb_fixtures::pb_transactions(2, 1)),
                         entity_changes: vec![],
                         component_changes: vec![],
@@ -1667,9 +1665,9 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
-                pb::tycho::evm::v1::BlockContractChanges {
+                tycho_substreams::BlockContractChanges {
                     block: Some(pb_fixtures::pb_blocks(1)),
-                    changes: vec![crate::pb::tycho::evm::v1::TransactionContractChanges {
+                    changes: vec![tycho_substreams::TransactionContractChanges {
                         tx: Some(pb_fixtures::pb_transactions(1, 1)),
                         contract_changes: vec![],
                         component_changes: vec![],
@@ -1686,9 +1684,9 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
-                pb::tycho::evm::v1::BlockContractChanges {
+                tycho_substreams::BlockContractChanges {
                     block: Some(pb_fixtures::pb_blocks(2)),
-                    changes: vec![crate::pb::tycho::evm::v1::TransactionContractChanges {
+                    changes: vec![tycho_substreams::TransactionContractChanges {
                         tx: Some(pb_fixtures::pb_transactions(2, 1)),
                         contract_changes: vec![],
                         component_changes: vec![],
@@ -1766,7 +1764,7 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
-                pb::tycho::evm::v1::BlockChanges { block: Some(block_1), changes: vec![] },
+                tycho_substreams::BlockChanges { block: Some(block_1), changes: vec![] },
                 Some(format!("cursor@{}", 1).as_str()),
                 Some(1),
             ))
@@ -1777,7 +1775,7 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
-                pb::tycho::evm::v1::BlockChanges { block: Some(block_2), changes: vec![] },
+                tycho_substreams::BlockChanges { block: Some(block_2), changes: vec![] },
                 Some(format!("cursor@{}", 2).as_str()),
                 Some(2),
             ))
@@ -1799,7 +1797,7 @@ mod test {
 
         extractor
             .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
-                pb::tycho::evm::v1::BlockChanges { block: Some(block_3), changes: vec![] },
+                tycho_substreams::BlockChanges { block: Some(block_3), changes: vec![] },
                 Some(format!("cursor@{}", 3).as_str()),
                 Some(2),
             ))
@@ -2175,8 +2173,8 @@ mod test_serial_db {
 
     use super::*;
     use crate::{
-        extractor::models::fixtures,
-        pb::{sf::substreams::v1::BlockRef, testing::fixtures as pb_fixtures},
+        extractor::models::fixtures, pb::sf::substreams::v1::BlockRef,
+        testing::fixtures as pb_fixtures,
     };
 
     mock! {
@@ -3137,8 +3135,8 @@ mod test_serial_db {
                 .into_iter()
                 .map(|version| {
                     pb_fixtures::pb_block_scoped_data(
-                        pb::tycho::evm::v1::BlockChanges {
-                            block: Some(pb::tycho::evm::v1::Block {
+                        tycho_substreams::BlockChanges {
+                            block: Some(tycho_substreams::Block {
                                 number: version,
                                 hash: Bytes::from(version)
                                     .lpad(32, 0)
@@ -3189,8 +3187,8 @@ mod test_serial_db {
             // New block #4 should have the same timestamp as block #3.
             extractor
                 .handle_tick_scoped_data(pb_fixtures::pb_block_scoped_data(
-                    pb::tycho::evm::v1::BlockChanges {
-                        block: Some(pb::tycho::evm::v1::Block {
+                    tycho_substreams::BlockChanges {
+                        block: Some(tycho_substreams::Block {
                             number: 4,
                             hash: Bytes::from(4_u64).lpad(32, 0).to_vec(),
                             parent_hash: Bytes::from(3_u64).lpad(32, 0).to_vec(),

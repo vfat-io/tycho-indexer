@@ -121,7 +121,7 @@ impl TokenPreProcessor for EthereumTokenPreProcessor {
             };
 
             // If quality is 100 but it's a fee token, set quality to 50
-            if quality == 100 && tax.map_or(false, |tax_value| tax_value > 0) {
+            if quality == 100 && tax.is_some_and(|tax_value| tax_value > 0) {
                 quality = 50;
             }
 

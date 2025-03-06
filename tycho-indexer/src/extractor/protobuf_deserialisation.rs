@@ -14,14 +14,12 @@ use tycho_core::{
     },
     Bytes,
 };
+use tycho_substreams::pb::tycho::evm::v1 as substreams;
 
-use crate::{
-    extractor::{
-        models::{BlockChanges, BlockContractChanges, BlockEntityChanges},
-        u256_num::bytes_to_f64,
-        ExtractionError,
-    },
-    pb::tycho::evm::v1 as substreams,
+use crate::extractor::{
+    models::{BlockChanges, BlockContractChanges, BlockEntityChanges},
+    u256_num::bytes_to_f64,
+    ExtractionError,
 };
 
 pub trait TryFromMessage {
@@ -37,7 +35,7 @@ impl TryFromMessage for AccountDelta {
 
     fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
         let (msg, chain) = args;
-        let change = msg.change().into();
+        let change = ChangeType::try_from_message(msg.change())?;
         let update = AccountDelta::new(
             chain,
             msg.address.into(),
@@ -177,22 +175,25 @@ impl TryFromMessage for ProtocolComponent {
             contract_addresses: contract_ids,
             static_attributes,
             chain,
-            change: msg.change().into(),
+            change: ChangeType::try_from_message(msg.change())?,
             creation_tx: tx_hash,
             created_at: creation_ts,
         })
     }
 }
 
-impl From<substreams::ChangeType> for ChangeType {
-    fn from(value: substreams::ChangeType) -> Self {
-        match value {
-            substreams::ChangeType::Unspecified => {
-                panic!("Unkown enum member encountered: {:?}", value)
-            }
-            substreams::ChangeType::Update => ChangeType::Update,
-            substreams::ChangeType::Creation => ChangeType::Creation,
-            substreams::ChangeType::Deletion => ChangeType::Deletion,
+impl TryFromMessage for ChangeType {
+    type Args<'a> = substreams::ChangeType;
+
+    fn try_from_message(args: Self::Args<'_>) -> Result<Self, ExtractionError> {
+        match args {
+            substreams::ChangeType::Creation => Ok(ChangeType::Creation),
+            substreams::ChangeType::Update => Ok(ChangeType::Update),
+            substreams::ChangeType::Deletion => Ok(ChangeType::Deletion),
+            substreams::ChangeType::Unspecified => Err(ExtractionError::DecodeError(format!(
+                "Unknown ChangeType enum member encountered: {:?}",
+                args
+            ))),
         }
     }
 }
@@ -206,7 +207,7 @@ impl TryFromMessage for ProtocolComponentStateDelta {
         let (mut updates, mut deletions) = (HashMap::new(), HashSet::new());
 
         for attribute in msg.attributes.into_iter() {
-            match attribute.change().into() {
+            match ChangeType::try_from_message(attribute.change())? {
                 ChangeType::Update | ChangeType::Creation => {
                     updates.insert(attribute.name, Bytes::from(attribute.value));
                 }
@@ -618,7 +619,7 @@ mod test {
         extractor::models::fixtures::{
             block_entity_changes, block_state_changes, create_transaction,
         },
-        pb::testing::fixtures,
+        testing::fixtures,
     };
 
     #[test]

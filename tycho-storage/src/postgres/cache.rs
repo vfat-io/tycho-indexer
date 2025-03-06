@@ -272,13 +272,10 @@ impl DBCacheWriteExecutor {
             .await
             .expect("pool should be connected");
 
-        let persisted_block = match state_gateway
+        let persisted_block = state_gateway
             .get_block(&BlockIdentifier::Latest(chain), &mut conn)
             .await
-        {
-            Ok(block) => Some(block),
-            Err(_) => None,
-        };
+            .ok();
 
         debug!("Persisted block: {:?}", persisted_block);
 

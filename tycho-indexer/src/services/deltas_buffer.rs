@@ -410,9 +410,9 @@ impl PendingDeltasBuffer for PendingDeltas {
                     .filter(|comp| {
                         let id_matches = requested_ids
                             .as_ref()
-                            .map_or(true, |ids| ids.contains(comp.id.as_str()));
+                            .is_none_or(|ids| ids.contains(comp.id.as_str()));
 
-                        let tvl_matches = min_tvl.as_ref().map_or(true, |tvl| {
+                        let tvl_matches = min_tvl.as_ref().is_none_or(|tvl| {
                             components_tvls
                                 .get(&comp.id)
                                 .unwrap_or(&0.0) >=

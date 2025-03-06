@@ -150,6 +150,7 @@ pub enum Response {
 }
 
 /// A message sent from the server to the client
+#[allow(clippy::large_enum_variant)]
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum WebSocketMessage {

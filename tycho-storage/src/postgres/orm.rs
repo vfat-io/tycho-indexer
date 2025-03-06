@@ -1468,6 +1468,7 @@ pub struct NewContractCode<'a> {
     pub valid_to: Option<NaiveDateTime>,
 }
 
+#[allow(clippy::needless_lifetimes)]
 impl<'a> VersionedRow for NewContractCode<'a> {
     type SortKey = (i64, NaiveDateTime, i64);
     type EntityId = i64;
