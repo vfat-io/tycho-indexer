@@ -1531,6 +1531,7 @@ pub mod fixtures {
             final_block_height: final_block_height.unwrap_or(420),
             debug_map_outputs: vec![],
             debug_store_outputs: vec![],
+            attestation: "test_attestation".to_owned(),
         }
     }
 

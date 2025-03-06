@@ -19,9 +19,7 @@ url = "2"
 
 # Required dependencies
 ethers = "^2.0.2"
-primitive-types = "0.12"
 web3 = { version = "0.19", default-features = false }
-mockall = "0.11"
 
 # Optional dependencies
 contracts = { git = "https://github.com/cowprotocol/services", rev = "f3678428991e055ceb517f184d1b37244f2d8f51", optional = true }
