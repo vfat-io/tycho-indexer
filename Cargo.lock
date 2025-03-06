@@ -7448,7 +7448,7 @@ dependencies = [
 [[package]]
 name = "tycho-substreams"
 version = "0.2.0"
-source = "git+https://github.com/propeller-heads/tycho-protocol-sdk.git?rev=04d14db#04d14db719e52423244e1c4ac74a79f81fc30e1f"
+source = "git+https://github.com/propeller-heads/tycho-protocol-sdk.git?tag=0.2.0#ae10195bca567c60423002497d1815a59d5d83ed"
 dependencies = [
  "ethabi 18.0.0",
  "hex",
