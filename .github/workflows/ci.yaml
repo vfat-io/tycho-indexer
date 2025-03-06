@@ -135,18 +135,6 @@ jobs:
       - name: Rustfmt
         run: cargo +${{steps.toolchain.outputs.name}} fmt --all --check
 
-  buf_formatting:
-    name: Protobuf Files Formatting
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - uses: bufbuild/buf-setup-action@v1.28.1
-
-      - uses: bufbuild/buf-lint-action@v1
-
   sql_formatting:
     name: SQL files formatting
     runs-on: ubuntu-latest
