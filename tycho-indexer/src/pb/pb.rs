@@ -1,9 +1,32 @@
 // @generated
 pub mod sf {
+    pub mod codegen {
+        pub mod conversation {
+            // @@protoc_insertion_point(attribute:sf.codegen.conversation.v1)
+            pub mod v1 {
+                include!("sf.codegen.conversation.v1.rs");
+                // @@protoc_insertion_point(sf.codegen.conversation.v1)
+            }
+        }
+    }
+    pub mod firehose {
+        // @@protoc_insertion_point(attribute:sf.firehose.v2)
+        pub mod v2 {
+            include!("sf.firehose.v2.rs");
+            // @@protoc_insertion_point(sf.firehose.v2)
+        }
+    }
     // @@protoc_insertion_point(attribute:sf.substreams)
     pub mod substreams {
         include!("sf.substreams.rs");
         // @@protoc_insertion_point(sf.substreams)
+        pub mod index {
+            // @@protoc_insertion_point(attribute:sf.substreams.index.v1)
+            pub mod v1 {
+                include!("sf.substreams.index.v1.rs");
+                // @@protoc_insertion_point(sf.substreams.index.v1)
+            }
+        }
         pub mod internal {
             // @@protoc_insertion_point(attribute:sf.substreams.internal.v2)
             pub mod v2 {

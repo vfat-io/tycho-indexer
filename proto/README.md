@@ -1,5 +1,6 @@
 # Protobuf
 We use protobuf mainly to communicate with substreams. You can use the [language support extension](https://marketplace.visualstudio.com/items?itemName=pbkit.vscode-pbkit) and for formatting use the [buf extension for VS Code](https://marketplace.visualstudio.com/items?itemName=bufbuild.vscode-buf).
+
 1. To communicate with substreams, we always want to use their latest protobuf images. Usually the sf module is already committed but in case there was an update we can pull the latest version into the repo with:
 ```
 buf export buf.build/streamingfast/substreams -o ./proto

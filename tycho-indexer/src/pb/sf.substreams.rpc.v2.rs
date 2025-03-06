@@ -40,6 +40,8 @@ pub struct Request {
     /// Available only in developer mode
     #[prost(string, repeated, tag="10")]
     pub debug_initial_store_snapshot_for_modules: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(bool, tag="11")]
+    pub noop_mode: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -99,6 +101,10 @@ pub struct BlockScopedData {
     pub debug_map_outputs: ::prost::alloc::vec::Vec<MapModuleOutput>,
     #[prost(message, repeated, tag="11")]
     pub debug_store_outputs: ::prost::alloc::vec::Vec<StoreModuleOutput>,
+    /// Signed attestation, enabling economic security as per GIP-0083. Signatures are 
+    /// done using the key specified by SessionInit::attestation_public_key.
+    #[prost(string, tag="12")]
+    pub attestation: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -111,6 +117,9 @@ pub struct SessionInit {
     pub linear_handoff_block: u64,
     #[prost(uint64, tag="4")]
     pub max_parallel_workers: u64,
+    /// Operator's attestation public_key or address, enabling economic security as per GIP-0083.
+    #[prost(string, tag="5")]
+    pub attestation_public_key: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
