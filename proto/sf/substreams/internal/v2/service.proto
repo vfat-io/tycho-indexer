@@ -3,7 +3,6 @@ syntax = "proto3";
 package sf.substreams.internal.v2;
 option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/intern/v2;pbssinternal";
 
-import "google/protobuf/any.proto";
 import "sf/substreams/v1/modules.proto";
 
 service Substreams {

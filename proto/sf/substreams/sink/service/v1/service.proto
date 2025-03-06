@@ -5,7 +5,6 @@ package sf.substreams.sink.service.v1;
 option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/sink/service/v1;pbsinksvc";
 
 import "sf/substreams/v1/package.proto";
-import "sf/substreams/options.proto";
 
 service Provider {
   rpc Deploy(DeployRequest) returns (DeployResponse);

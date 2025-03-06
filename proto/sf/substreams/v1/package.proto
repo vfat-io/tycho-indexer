@@ -33,7 +33,7 @@ message Package {
 }
 
 message NetworkParams {
-  map<string, uint64> initialBlocks = 1;
+  map<string, uint64> initial_blocks = 1;
   map<string, string> params = 2;
 }
 
