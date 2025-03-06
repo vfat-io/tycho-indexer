@@ -2204,7 +2204,10 @@ mod test_serial_db {
     const VM_TX_HASH_1: &str = "0x0d9e0da36cf9f305a189965b248fc79c923619801e8ab5ef158d4fd528a291ad";
 
     // Ambient Contract
-    const VM_CONTRACT: [u8; 20] = hex_literal::hex!("aaaaaaaaa24eeeb8d57d431224f73832bc34f688");
+    const VM_CONTRACT: [u8; 20] = [
+        0xaa, 0xaa, 0xaa, 0xaa, 0xa2, 0x4e, 0xee, 0xb8, 0xd5, 0x7d, 0x43, 0x12, 0x24, 0xf7, 0x38,
+        0x32, 0xbc, 0x34, 0xf6, 0x88,
+    ]; // 0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688
 
     // SETUP
     fn get_mocked_token_pre_processor() -> MockTokenPreProcessor {

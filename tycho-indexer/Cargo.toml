@@ -22,25 +22,19 @@ async-trait.workspace = true
 tokio.workspace = true
 console-subscriber.workspace = true
 diesel-async.workspace = true
-tycho-core = { workspace = true }
+tycho-core.workspace = true
 tycho-storage.workspace = true
 tycho-ethereum.workspace = true
 anyhow.workspace = true
 reqwest.workspace = true
-url.workspace = true
-tracing-opentelemetry = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-metrics = { workspace = true }
-metrics-exporter-prometheus = { workspace = true }
+typetag.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
 async-stream = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-retry = "0.3"
 tonic = { version = "0.9", features = ["tls-roots", "gzip"] }
 prost = "0.11"
 prost-types = "0.11"
-clap = { workspace = true, features = ["derive", "env"] }
 tracing-subscriber = { version = "0.3.17", default-features = false, features = [
     "env-filter",
     "fmt",
@@ -49,14 +43,20 @@ once_cell = "1.18.0"
 actix = "0.13.1"
 actix-web = "4.4.0"
 actix-web-actors = "4.2.0"
-hex-literal = "0.4.1"
 mockall = "0.11.4"
 actix-web-opentelemetry = "0.16.0"
 aws-config = { version = "1.1.8", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.77"
 serde_yaml = "0.9.32"
-# TODO still required??
-typetag = "0.2.16"
+tracing-opentelemetry = { version = "0.22", default-features = false }
+opentelemetry = { version = "0.21" }
+opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.14", default-features = false, features = [
+    "trace",
+    "grpc-tonic",
+] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
 utoipa = { version = "4.2.0", features = ["chrono"] }
 utoipa-swagger-ui = { version = "6.0.0", features = ["actix-web"] }
 ethrpc = { git = "https://github.com/cowprotocol/services", rev = "f3678428991e055ceb517f184d1b37244f2d8f51" }
@@ -67,10 +67,10 @@ num_cpus = "1.16.0"
 tycho-substreams = { git = "https://github.com/propeller-heads/tycho-protocol-sdk.git", tag = "0.2.0" }
 
 [dev-dependencies]
+pretty_assertions.workspace = true
+tokio-tungstenite.workspace = true
+rstest.workspace = true
 actix-rt = "2.9.0"
 actix-test = "0.1.2"
-rstest = "0.18.2"
-tokio-tungstenite.workspace = true
-pretty_assertions = "1.4.0"
 test-log = { version = "0.2.14", features = ["trace"] }
 float_eq = "1.0.1"
