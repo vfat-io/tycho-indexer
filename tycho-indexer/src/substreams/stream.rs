@@ -23,6 +23,7 @@ use crate::{
     substreams::SubstreamsEndpoint,
 };
 
+#[allow(clippy::large_enum_variant)]
 pub enum BlockResponse {
     New(BlockScopedData),
     Undo(BlockUndoSignal),
@@ -98,6 +99,7 @@ fn stream_blocks(
                 // module.
                 production_mode: true,
                 debug_initial_store_snapshot_for_modules: vec![],
+                noop_mode: false,
             }).await;
 
             match result {
@@ -184,6 +186,7 @@ fn stream_blocks(
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum BlockProcessedResult {
     Skip(),
     BlockScopedData(BlockScopedData),
