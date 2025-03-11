@@ -1,3 +1,12 @@
+## [0.61.1](https://github.com/propeller-heads/tycho-indexer/compare/0.61.0...0.61.1) (2025-03-11)
+
+
+### Bug Fixes
+
+* Add default to change attr to deprecate ([38efe73](https://github.com/propeller-heads/tycho-indexer/commit/38efe738f1620409f521c8ee5757c1b0f0598032))
+* Revert skipping serialization on change field ([12e4482](https://github.com/propeller-heads/tycho-indexer/commit/12e4482f0b7e148223dbf550b3dd2223291d51fe))
+* Revert skipping serialization on change field ([#529](https://github.com/propeller-heads/tycho-indexer/issues/529)) ([d53c7cf](https://github.com/propeller-heads/tycho-indexer/commit/d53c7cfe2607e30eaba517a49f0f3a444df7445c))
+
 ## [0.61.0](https://github.com/propeller-heads/tycho-indexer/compare/0.60.0...0.61.0) (2025-03-11)
 
 
