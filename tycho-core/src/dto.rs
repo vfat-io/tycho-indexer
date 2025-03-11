@@ -445,6 +445,7 @@ pub struct ProtocolComponent {
     #[schema(value_type=HashMap<String, String>)]
     pub static_attributes: HashMap<String, Bytes>,
     /// Indicates if last change was update, create or delete (for internal use only).
+    #[serde(default)]
     pub change: ChangeType,
     /// Transaction hash which created this component
     #[serde(with = "hex_bytes")]
