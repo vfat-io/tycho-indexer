@@ -19,7 +19,7 @@ use crate::{
 #[clap(version = env!("CARGO_PKG_VERSION"))]
 struct CliArgs {
     /// Tycho server URL, without protocol. Example: localhost:4242
-    #[clap(long, default_value = "localhost:4242")]
+    #[clap(long, default_value = "localhost:4242", env = "TYCHO_URL")]
     tycho_url: String,
 
     /// Tycho gateway API key, used as authentication for both websocket and http connections.
