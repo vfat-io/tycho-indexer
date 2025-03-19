@@ -141,7 +141,7 @@ pub trait StateSynchronizer: Send + Sync + 'static {
 impl<R, D> ProtocolStateSynchronizer<R, D>
 where
     // TODO: Consider moving these constraints directly to the
-    //  client...
+    // client...
     R: RPCClient + Clone + Send + Sync + 'static,
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
@@ -341,15 +341,11 @@ where
             .await?;
 
         info!("Waiting for deltas...");
-        // we need to wait 2 messages because of cache gateways insertion delay.
-        let first_msg = timeout(Duration::from_secs(360), msg_rx.recv())
+        // wait for first deltas message
+        let mut first_msg = timeout(Duration::from_secs(360), msg_rx.recv())
             .await?
             .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
-        let mut second_msg = timeout(Duration::from_secs(360), msg_rx.recv())
-            .await?
-            .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
-
-        self.filter_deltas(&mut second_msg, &tracker);
+        self.filter_deltas(&mut first_msg, &tracker);
 
         // initial snapshot
         let block = first_msg.get_block().clone();
@@ -360,9 +356,9 @@ where
             .await
             .map_err(|rpc_err| anyhow::format_err!("failed to get initial snapshot: {}", rpc_err))?
             .merge(StateSyncMessage {
-                header: Header::from_block(second_msg.get_block(), second_msg.is_revert()),
+                header: Header::from_block(first_msg.get_block(), first_msg.is_revert()),
                 snapshots: Default::default(),
-                deltas: Some(second_msg),
+                deltas: Some(first_msg),
                 removed_components: Default::default(),
             });
 
