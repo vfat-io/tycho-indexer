@@ -63,6 +63,7 @@ pub enum Chain {
     ZkSync,
     Arbitrum,
     Base,
+    Unichain,
 }
 
 impl From<dto::Chain> for Chain {
@@ -73,6 +74,7 @@ impl From<dto::Chain> for Chain {
             dto::Chain::ZkSync => Chain::ZkSync,
             dto::Chain::Arbitrum => Chain::Arbitrum,
             dto::Chain::Base => Chain::Base,
+            dto::Chain::Unichain => Chain::Unichain,
         }
     }
 }
@@ -100,6 +102,7 @@ impl Chain {
             Chain::ZkSync => native_eth(Chain::ZkSync),
             Chain::Arbitrum => native_eth(Chain::Arbitrum),
             Chain::Base => native_eth(Chain::Base),
+            Chain::Unichain => native_eth(Chain::Unichain),
         }
     }
 }
