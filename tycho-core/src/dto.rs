@@ -49,6 +49,7 @@ pub enum Chain {
     ZkSync,
     Arbitrum,
     Base,
+    Unichain,
 }
 
 impl From<models::contract::Account> for ResponseAccount {
@@ -81,6 +82,7 @@ impl From<models::Chain> for Chain {
             models::Chain::ZkSync => Chain::ZkSync,
             models::Chain::Arbitrum => Chain::Arbitrum,
             models::Chain::Base => Chain::Base,
+            models::Chain::Unichain => Chain::Unichain,
         }
     }
 }
