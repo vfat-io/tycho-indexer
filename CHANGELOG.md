@@ -1,3 +1,11 @@
+## [0.62.0](https://github.com/propeller-heads/tycho-indexer/compare/0.61.1...0.62.0) (2025-03-25)
+
+
+### Features
+
+* add Unichain support ([2422692](https://github.com/propeller-heads/tycho-indexer/commit/242269286d6020c1bd1489606783f2bf2e9ed6fd))
+* add Unichain support ([#534](https://github.com/propeller-heads/tycho-indexer/issues/534)) ([e0c1b41](https://github.com/propeller-heads/tycho-indexer/commit/e0c1b41209b95b7408ef7a795ab99baea7b922d2))
+
 ## [0.61.1](https://github.com/propeller-heads/tycho-indexer/compare/0.61.0...0.61.1) (2025-03-11)
 
 
