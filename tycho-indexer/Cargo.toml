@@ -2,6 +2,14 @@
 name = "tycho-indexer"
 version = "0.63.1"
 edition = "2021"
+description = "Tycho indexer application binary. Runs the actual indexing. Exposes ws and http endpoints to access extracted data"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+license.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

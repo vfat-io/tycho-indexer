@@ -2,6 +2,14 @@
 name = "tycho-ethereum"
 version = "0.63.1"
 edition = "2021"
+description = "Ethereum specific implementation of core tycho traits"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+license.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [dependencies]
 anyhow.workspace = true
