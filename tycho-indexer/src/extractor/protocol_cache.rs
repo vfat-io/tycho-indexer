@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{Local, NaiveDateTime};
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
-use tycho_core::{
+use tycho_common::{
     models::{
         protocol::{ProtocolComponent, QualityRange},
         token::CurrencyToken,
@@ -278,7 +278,7 @@ impl ProtocolDataCache for ProtocolMemoryCache {
 mod tests {
     use chrono::Duration;
     use mockall::predicate::*;
-    use tycho_core::{models::ChangeType, storage::WithTotal};
+    use tycho_common::{models::ChangeType, storage::WithTotal};
 
     use super::*;
     use crate::testing::MockGateway;

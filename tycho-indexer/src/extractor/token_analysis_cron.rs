@@ -3,7 +3,7 @@ use std::{collections::HashMap, str::FromStr, sync::Arc, time::Instant};
 use futures03::{future::try_join_all, FutureExt};
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::BlockTag,
         protocol::QualityRange,
@@ -181,7 +181,7 @@ async fn analyze_batch(
 #[cfg(test)]
 mod test {
     use chrono::NaiveDateTime;
-    use tycho_core::{
+    use tycho_common::{
         models::{protocol::ProtocolComponent, ChangeType},
         storage::WithTotal,
     };

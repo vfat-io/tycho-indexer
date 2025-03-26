@@ -3,7 +3,7 @@ use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use chrono::NaiveDateTime;
 use tracing::warn;
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::{Block, Transaction, TxWithChanges},
         contract::{AccountBalance, AccountChangesWithTx, AccountDelta},

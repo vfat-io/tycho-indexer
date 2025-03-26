@@ -14,7 +14,7 @@ use tokio::{
     time::timeout,
 };
 use tracing::{debug, error, info, trace, warn};
-use tycho_core::{
+use tycho_common::{
     dto::{Block, ExtractorIdentity},
     Bytes,
 };
@@ -527,7 +527,7 @@ mod tests {
     use async_trait::async_trait;
     use test_log::test;
     use tokio::sync::{oneshot, Mutex};
-    use tycho_core::dto::Chain;
+    use tycho_common::dto::Chain;
 
     use super::*;
     use crate::feed::synchronizer::SyncResult;

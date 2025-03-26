@@ -11,7 +11,7 @@ use mockall::automock;
 use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, instrument, trace, warn};
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::{Block, BlockAggregatedChanges, BlockTag},
         contract::{Account, AccountBalance, AccountDelta},
@@ -1472,7 +1472,7 @@ impl ExtractorGateway for ExtractorPgGateway {
 mod test {
     use float_eq::assert_float_eq;
     use mockall::mock;
-    use tycho_core::{
+    use tycho_common::{
         models::blockchain::{Transaction, TxWithChanges},
         traits::TokenOwnerFinding,
     };
@@ -2164,7 +2164,7 @@ mod test_serial_db {
     use diesel_async::{pooled_connection::deadpool::Pool, AsyncPgConnection};
     use futures03::{stream, StreamExt};
     use mockall::mock;
-    use tycho_core::{
+    use tycho_common::{
         models::{
             blockchain::TxWithChanges, protocol::QualityRange, ContractId, FinancialType,
             ImplementationType,

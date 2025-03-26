@@ -16,7 +16,7 @@ use tokio::{
     time::timeout,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
-use tycho_core::{
+use tycho_common::{
     dto::{
         BlockChanges, BlockParam, ExtractorIdentity, ProtocolComponent, ResponseAccount,
         ResponseProtocolState, VersionParam,
@@ -528,7 +528,7 @@ where
 #[cfg(test)]
 mod test {
     use test_log::test;
-    use tycho_core::dto::{
+    use tycho_common::dto::{
         Block, Chain, PaginationResponse, ProtocolComponentRequestResponse,
         ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
         ProtocolSystemsRequestBody, ProtocolSystemsRequestResponse, StateRequestBody,
@@ -1034,7 +1034,7 @@ mod test {
                 vm_storage: HashMap::new(),
             },
             // Our deltas are empty and since merge methods are
-            // tested in tycho-core we don't have much to do here.
+            // tested in tycho-common we don't have much to do here.
             deltas: Some(BlockChanges {
                 extractor: "uniswap-v2".to_string(),
                 chain: Chain::Ethereum,

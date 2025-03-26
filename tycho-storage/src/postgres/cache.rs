@@ -12,7 +12,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{debug, info, info_span, instrument, trace, Instrument};
-use tycho_core::{
+use tycho_common::{
     models::{
         self,
         blockchain::{Block, Transaction},
@@ -1071,7 +1071,7 @@ impl Gateway for CachedGateway {}
 mod test_serial_db {
     use std::{collections::HashSet, str::FromStr, time::Duration};
 
-    use tycho_core::models::ChangeType;
+    use tycho_common::models::ChangeType;
 
     use super::*;
     use crate::postgres::{db_fixtures, db_fixtures::yesterday_one_am, testing::run_against_db};

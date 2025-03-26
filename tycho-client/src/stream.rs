@@ -7,7 +7,7 @@ use std::{
 use thiserror::Error;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tracing::info;
-use tycho_core::dto::{Chain, ExtractorIdentity, PaginationParams, ProtocolSystemsRequestBody};
+use tycho_common::dto::{Chain, ExtractorIdentity, PaginationParams, ProtocolSystemsRequestBody};
 
 use crate::{
     deltas::DeltasClient,

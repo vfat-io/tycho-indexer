@@ -4,7 +4,7 @@ use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use tracing::{instrument, warn};
-use tycho_core::{
+use tycho_common::{
     models::{blockchain::*, BlockHash, TxHash},
     storage::{BlockIdentifier, StorageError},
     Bytes,
@@ -267,7 +267,7 @@ mod test {
     use std::{str::FromStr, time::Duration};
 
     use diesel_async::AsyncConnection;
-    use tycho_core::models::Chain;
+    use tycho_common::models::Chain;
 
     use super::*;
     use crate::postgres::{

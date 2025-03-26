@@ -12,7 +12,7 @@ use diesel::{
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
-use tycho_core::{
+use tycho_common::{
     models,
     models::{
         Address, AttrStoreKey, Balance, BlockHash, Code, CodeHash, ComponentId, ContractId,

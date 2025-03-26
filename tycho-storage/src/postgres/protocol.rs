@@ -8,7 +8,7 @@ use diesel::{
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use tracing::{error, instrument, trace, warn, Level};
-use tycho_core::{
+use tycho_common::{
     models::{
         protocol::{
             ComponentBalance, ProtocolComponent, ProtocolComponentState,
@@ -1750,7 +1750,7 @@ mod test {
     use diesel_async::AsyncConnection;
     use rstest::rstest;
     use serde_json::json;
-    use tycho_core::storage::BlockIdentifier;
+    use tycho_common::storage::BlockIdentifier;
 
     use super::*;
     use crate::postgres::{db_fixtures, db_fixtures::yesterday_half_past_midnight};

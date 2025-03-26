@@ -55,7 +55,7 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
-use tycho_core::dto::{BlockChanges, Command, ExtractorIdentity, Response, WebSocketMessage};
+use tycho_common::dto::{BlockChanges, Command, ExtractorIdentity, Response, WebSocketMessage};
 use uuid::Uuid;
 
 use crate::TYCHO_SERVER_VERSION;
@@ -746,7 +746,7 @@ mod tests {
     use std::net::SocketAddr;
 
     use tokio::{net::TcpListener, time::timeout};
-    use tycho_core::dto::Chain;
+    use tycho_common::dto::Chain;
 
     use super::*;
 

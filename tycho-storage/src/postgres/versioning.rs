@@ -50,7 +50,7 @@ use diesel::{
     sql_types::{BigInt, Timestamp},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use tycho_core::storage::StorageError;
+use tycho_common::storage::StorageError;
 
 use crate::postgres::PostgresError;
 
@@ -406,7 +406,7 @@ pub async fn apply_partitioned_versioning<T: PartitionedVersionedRow>(
 mod test {
     use chrono::NaiveDateTime;
     use diesel_async::{AsyncConnection, AsyncPgConnection};
-    use tycho_core::Bytes;
+    use tycho_common::Bytes;
 
     use super::apply_partitioned_versioning;
     use crate::postgres::{orm::NewProtocolState, versioning::VersioningEntry};

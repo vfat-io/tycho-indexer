@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use tracing::{debug, instrument, warn};
-use tycho_core::{
+use tycho_common::{
     dto::{BlockChanges, Chain, ProtocolComponent, ProtocolComponentsRequestBody},
     Bytes,
 };
@@ -231,7 +231,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use tycho_core::dto::{PaginationResponse, ProtocolComponentRequestResponse};
+    use tycho_common::dto::{PaginationResponse, ProtocolComponentRequestResponse};
 
     use super::*;
     use crate::rpc::MockRPCClient;

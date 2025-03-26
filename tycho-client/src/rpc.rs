@@ -13,7 +13,7 @@ use reqwest::{header, Client, ClientBuilder, Url};
 use thiserror::Error;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, instrument, trace, warn};
-use tycho_core::{
+use tycho_common::{
     dto::{
         Chain, PaginationParams, PaginationResponse, ProtocolComponentRequestResponse,
         ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
@@ -652,7 +652,7 @@ mod tests {
     use rstest::rstest;
     // TODO: remove once deprecated ProtocolId struct is removed
     #[allow(deprecated)]
-    use tycho_core::dto::ProtocolId;
+    use tycho_common::dto::ProtocolId;
 
     use super::*;
 

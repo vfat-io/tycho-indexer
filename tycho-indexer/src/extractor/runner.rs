@@ -17,7 +17,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument};
-use tycho_core::{
+use tycho_common::{
     models::{Chain, ExtractorIdentity, FinancialType, ImplementationType, ProtocolType},
     Bytes,
 };
@@ -590,7 +590,7 @@ async fn download_file_from_s3(
 #[cfg(test)]
 mod test {
     use serde::Serialize;
-    use tycho_core::models::NormalisedMessage;
+    use tycho_common::models::NormalisedMessage;
 
     use super::*;
     use crate::extractor::MockExtractor;

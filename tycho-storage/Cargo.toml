@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 chrono.workspace = true
-tycho-core = { workspace = true, features = ["diesel"] }
+tycho-common = { workspace = true, features = ["diesel"] }
 diesel.workspace = true
 diesel-async.workspace = true
 tokio.workspace = true

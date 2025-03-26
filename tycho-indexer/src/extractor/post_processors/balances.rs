@@ -1,6 +1,6 @@
 use num_bigint::BigUint;
 use num_traits::Num;
-use tycho_core::Bytes;
+use tycho_common::Bytes;
 
 use crate::extractor::{models::BlockChanges, u256_num::bytes_to_f64};
 
@@ -101,7 +101,7 @@ pub fn transcode_usv2_balances(mut changes: BlockChanges) -> BlockChanges {
 mod tests {
     use std::{collections::HashMap, str::FromStr};
 
-    use tycho_core::models::{
+    use tycho_common::models::{
         blockchain::{Transaction, TxWithChanges},
         contract::AccountBalance,
         protocol::ComponentBalance,

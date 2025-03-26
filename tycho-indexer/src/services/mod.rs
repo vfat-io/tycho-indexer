@@ -10,7 +10,7 @@ use deltas_buffer::PendingDeltasBuffer;
 use futures03::future::try_join_all;
 use tokio::task::JoinHandle;
 use tracing::info;
-use tycho_core::{
+use tycho_common::{
     dto::{
         AccountUpdate, BlockParam, Chain, ChangeType, ContractId, Health, PaginationParams,
         PaginationResponse, ProtocolComponent, ProtocolComponentRequestResponse,

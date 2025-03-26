@@ -1,7 +1,7 @@
 #![allow(deprecated)]
 use std::collections::{HashMap, HashSet};
 
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::{Block, BlockAggregatedChanges, BlockScoped, TxWithChanges},
         contract::{AccountBalance, AccountChangesWithTx},
@@ -70,7 +70,7 @@ impl BlockContractChanges {
 }
 
 impl BlockScoped for BlockContractChanges {
-    fn block(&self) -> tycho_core::models::blockchain::Block {
+    fn block(&self) -> tycho_common::models::blockchain::Block {
         self.block.clone()
     }
 }
@@ -127,7 +127,7 @@ impl BlockEntityChanges {
 }
 
 impl BlockScoped for BlockEntityChanges {
-    fn block(&self) -> tycho_core::models::blockchain::Block {
+    fn block(&self) -> tycho_common::models::blockchain::Block {
         self.block.clone()
     }
 }
@@ -325,7 +325,7 @@ impl StateUpdateBufferEntry for BlockChanges {
 }
 
 impl BlockScoped for BlockChanges {
-    fn block(&self) -> tycho_core::models::blockchain::Block {
+    fn block(&self) -> tycho_common::models::blockchain::Block {
         self.block.clone()
     }
 }
@@ -372,7 +372,7 @@ pub mod fixtures {
 
     use chrono::NaiveDateTime;
     use prost::Message;
-    use tycho_core::models::{
+    use tycho_common::models::{
         blockchain::Transaction, contract::AccountDelta, protocol::ProtocolComponentStateDelta,
         ChangeType,
     };
@@ -810,7 +810,7 @@ mod test {
             filtered,
             HashMap::from([(
                 (c_id_key.clone(), token_key.clone()),
-                tycho_core::models::protocol::ComponentBalance {
+                tycho_common::models::protocol::ComponentBalance {
                     token: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
                     balance: Bytes::from(10.encode_to_vec()),
                     balance_float: 2058.0,
@@ -906,7 +906,7 @@ mod test {
             filtered,
             HashMap::from([(
                 (c_id_key.clone(), token_key.clone()),
-                tycho_core::models::protocol::ComponentBalance {
+                tycho_common::models::protocol::ComponentBalance {
                     token: Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                     balance: Bytes::from(1_i32.to_le_bytes()),
                     balance_float: 16777216.0,

@@ -76,7 +76,7 @@ In future iterations, the service might be enhanced with the capability to strea
 
 ## Special Attributes
 
-Tycho utilises several special attributes to support specific functionality. Some of these reserved attributes are static and can be found on the *Protocol Component*, however most are considered potentially dynamic and are found in the *Protocol State* (see [tycho-core](../tycho-core/README.md) docs for more information on these structs).
+Tycho utilises several special attributes to support specific functionality. Some of these reserved attributes are static and can be found on the *Protocol Component*, however most are considered potentially dynamic and are found in the *Protocol State* (see [tycho-common](../tycho-common/README.md) docs for more information on these structs).
 
 #### Protocol Component static attributes:
 - `manual_updates`: indicates whether the component's updates should be applied automatically, i.e. whenever there is a change in any of the linked contracts, or manually triggered using the *update_marker* state attribute. In scenarios where a contract undergoes frequent changes, automatic updates may not be desirable. This field helps to control and prevent unnecessary updates in such cases. If omitted, updates should be applied on all changes.
