@@ -2,7 +2,7 @@ name: Release
 
 on:
   release:
-    types: [created, prereleased]
+    types: [ created, prereleased ]
 
 permissions:
   id-token: write
@@ -52,3 +52,16 @@ jobs:
           FILE_NAME=${{ matrix.package }}-${{ matrix.target }}-${{ github.event.release.tag_name }}.tar.gz
           BUCKET_NAME=repo.propellerheads-propellerheads/tycho-client
           aws s3 cp $FILE_NAME s3://$BUCKET_NAME/$FILE_NAME
+  publish-crate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: katyo/publish-crates@v2
+        with:
+          path: "./tycho-core"
+          registry-token: ${{ secrets.CRATESIO_REGISTRY_TOKEN }}
+          dry-run: true
