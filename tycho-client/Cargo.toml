@@ -2,7 +2,7 @@
 name = "tycho-client"
 version = "0.63.1"
 edition = "2021"
-description = "Library & cli tool supporting clients to pull liquidity data from tycho indexer"
+description = "A library and CLI tool for querying and accessing liquidity data from Tycho indexer."
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true

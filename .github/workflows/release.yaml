@@ -1,6 +1,8 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs: { }
   release:
     types: [ created, prereleased ]
 
@@ -64,4 +66,4 @@ jobs:
         with:
           path: "./tycho-common"
           registry-token: ${{ secrets.CRATESIO_REGISTRY_TOKEN }}
-          dry-run: true
+

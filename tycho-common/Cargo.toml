@@ -2,7 +2,7 @@
 name = "tycho-common"
 version = "0.63.1"
 edition = "2021"
-description = "Contains shared models, traits and helpers used within the tycho system"
+description = "Contains shared models, traits and helpers used within the Tycho system"
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
