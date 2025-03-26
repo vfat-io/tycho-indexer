@@ -1,3 +1,11 @@
+## [0.63.0](https://github.com/propeller-heads/tycho-indexer/compare/0.62.0...0.63.0) (2025-03-26)
+
+
+### Features
+
+* Rename tycho-core to tycho-common. ([f5ed755](https://github.com/propeller-heads/tycho-indexer/commit/f5ed7559adf4fc64b4ac39ea0afdb9845e23bb1e))
+* Rename tycho-core to tycho-common. ([#536](https://github.com/propeller-heads/tycho-indexer/issues/536)) ([476f3f3](https://github.com/propeller-heads/tycho-indexer/commit/476f3f34f58039877fa47863fd37e541ae4bb25f))
+
 ## [0.62.0](https://github.com/propeller-heads/tycho-indexer/compare/0.61.1...0.62.0) (2025-03-25)
 
 
