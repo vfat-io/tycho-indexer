@@ -1,3 +1,11 @@
+## [0.63.1](https://github.com/propeller-heads/tycho-indexer/compare/0.63.0...0.63.1) (2025-03-26)
+
+
+### Bug Fixes
+
+* add missing version to checkout action ([c025616](https://github.com/propeller-heads/tycho-indexer/commit/c025616b3c19106113c195bc95cb04c05848153f))
+* add missing version to checkout action ([#537](https://github.com/propeller-heads/tycho-indexer/issues/537)) ([a803970](https://github.com/propeller-heads/tycho-indexer/commit/a803970ee129ef8d9ed8317ca0d2ecb5fe8c52c6))
+
 ## [0.63.0](https://github.com/propeller-heads/tycho-indexer/compare/0.62.0...0.63.0) (2025-03-26)
 
 
