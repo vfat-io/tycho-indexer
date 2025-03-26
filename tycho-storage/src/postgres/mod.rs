@@ -138,7 +138,7 @@ use diesel_async::{
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use tracing::{debug, info};
-use tycho_core::{
+use tycho_common::{
     models::{Chain, TxHash},
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError, Version, VersionKind},
 };
@@ -849,7 +849,7 @@ pub mod db_fixtures {
     use diesel::{prelude::*, sql_query};
     use diesel_async::{AsyncPgConnection, RunQueryDsl};
     use serde_json::Value;
-    use tycho_core::{
+    use tycho_common::{
         keccak256,
         models::{Balance, Code, FinancialType, ImplementationType},
         Bytes,

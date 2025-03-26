@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use mockall::automock;
 use prost::DecodeError;
 use thiserror::Error;
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::{Block, BlockScoped},
         contract::AccountBalance,

@@ -1,6 +1,6 @@
 use chrono::NaiveDateTime;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tycho_core::{models::Chain, storage::StorageError};
+use tycho_common::{models::Chain, storage::StorageError};
 
 use crate::{
     postgres,

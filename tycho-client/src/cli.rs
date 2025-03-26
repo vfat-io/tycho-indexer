@@ -3,7 +3,7 @@ use std::{collections::HashSet, str::FromStr, time::Duration};
 use clap::Parser;
 use tracing::{debug, info};
 use tracing_appender::rolling;
-use tycho_core::dto::{Chain, ExtractorIdentity, PaginationParams, ProtocolSystemsRequestBody};
+use tycho_common::dto::{Chain, ExtractorIdentity, PaginationParams, ProtocolSystemsRequestBody};
 
 use crate::{
     deltas::DeltasClient,

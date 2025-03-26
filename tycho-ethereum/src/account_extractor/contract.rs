@@ -8,7 +8,7 @@ use ethers::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::trace;
-use tycho_core::{
+use tycho_common::{
     models::{blockchain::Block, contract::AccountDelta, Address, Chain, ChangeType},
     traits::AccountExtractor,
     Bytes,
@@ -27,7 +27,7 @@ impl AccountExtractor for EVMAccountExtractor {
 
     async fn get_accounts(
         &self,
-        block: tycho_core::models::blockchain::Block,
+        block: tycho_common::models::blockchain::Block,
         account_addresses: Vec<Address>,
     ) -> Result<HashMap<Bytes, AccountDelta>, RPCError> {
         let mut updates = HashMap::new();

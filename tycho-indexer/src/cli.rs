@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use tycho_core::{models::Chain, Bytes};
+use tycho_common::{models::Chain, Bytes};
 
 /// Tycho Indexer using Substreams
 ///

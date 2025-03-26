@@ -6,7 +6,7 @@ use ethcontract::{dyns::DynTransport, transaction::TransactionBuilder, PrivateKe
 use ethers::types::{H160, U256};
 use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use reqwest::Client;
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::BlockTag,
         token::{TokenQuality, TransferCost, TransferTax},

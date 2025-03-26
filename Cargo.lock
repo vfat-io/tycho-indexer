@@ -7305,7 +7305,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "tycho-core",
+ "tycho-common",
  "uuid 1.7.0",
 ]
 
@@ -7318,7 +7318,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tycho-core"
+name = "tycho-common"
 version = "0.62.0"
 dependencies = [
  "anyhow",
@@ -7364,7 +7364,7 @@ dependencies = [
  "thiserror 1.0.56",
  "tokio",
  "tracing",
- "tycho-core",
+ "tycho-common",
  "unicode-segmentation",
  "url",
  "web3",
@@ -7422,7 +7422,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
- "tycho-core",
+ "tycho-common",
  "tycho-ethereum",
  "tycho-storage",
  "tycho-substreams",
@@ -7452,7 +7452,7 @@ dependencies = [
  "test-log",
  "tokio",
  "tracing",
- "tycho-core",
+ "tycho-common",
  "unicode-segmentation",
 ]
 

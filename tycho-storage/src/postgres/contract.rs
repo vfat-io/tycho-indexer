@@ -8,7 +8,7 @@ use diesel::{
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use itertools::Itertools;
 use tracing::{debug, error, instrument, Level};
-use tycho_core::{
+use tycho_common::{
     keccak256,
     models::{
         contract::{Account, AccountBalance, AccountDelta},
@@ -1651,7 +1651,7 @@ mod test {
 
     use diesel_async::AsyncConnection;
     use rstest::rstest;
-    use tycho_core::{
+    use tycho_common::{
         models::{FinancialType, ImplementationType},
         storage::{BlockIdentifier, VersionKind},
     };

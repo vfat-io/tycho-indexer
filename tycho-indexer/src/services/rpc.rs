@@ -10,7 +10,7 @@ use metrics::counter;
 use reqwest::StatusCode;
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
-use tycho_core::{
+use tycho_common::{
     dto::{self, PaginationResponse},
     models::{
         blockchain::BlockAggregatedChanges, protocol::QualityRange, Address, Chain,
@@ -992,7 +992,7 @@ mod tests {
     use actix_web::test;
     use chrono::NaiveDateTime;
     use mockall::mock;
-    use tycho_core::{
+    use tycho_common::{
         models::{
             contract::Account,
             protocol::{ProtocolComponent, ProtocolComponentState},

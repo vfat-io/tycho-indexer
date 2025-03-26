@@ -17,7 +17,7 @@ use serde::Deserialize;
 use tokio::{runtime::Handle, select, task::JoinHandle};
 use tracing::{debug, error, info, instrument, warn};
 use tracing_subscriber::EnvFilter;
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::{Block, Transaction},
         contract::AccountDelta,
@@ -266,7 +266,9 @@ async fn run_spkg(global_args: GlobalArgs, run_args: RunSpkgArgs) -> Result<(), 
             run_args
                 .protocol_type_names
                 .into_iter()
-                .map(|name| ProtocolTypeConfig::new(name, tycho_core::models::FinancialType::Swap))
+                .map(|name| {
+                    ProtocolTypeConfig::new(name, tycho_common::models::FinancialType::Swap)
+                })
                 .collect::<Vec<_>>(),
             run_args.spkg,
             run_args.module,

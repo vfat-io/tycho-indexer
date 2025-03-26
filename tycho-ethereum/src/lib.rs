@@ -10,7 +10,7 @@ use ethers::{
     types::{H160, H256, U256},
 };
 use thiserror::Error;
-use tycho_core::{models::blockchain::BlockTag, Bytes};
+use tycho_common::{models::blockchain::BlockTag, Bytes};
 use web3::types::BlockNumber;
 
 #[derive(Error, Debug)]

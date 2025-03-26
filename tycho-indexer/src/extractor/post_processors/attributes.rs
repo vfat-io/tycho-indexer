@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use tycho_core::{models::protocol::ProtocolComponentStateDelta, Bytes};
+use tycho_common::{models::protocol::ProtocolComponentStateDelta, Bytes};
 
 use crate::extractor::models::BlockChanges;
 
@@ -87,7 +87,7 @@ pub fn add_default_attributes_uniswapv2(changes: BlockChanges) -> BlockChanges {
 mod test {
     use std::str::FromStr;
 
-    use tycho_core::models::{
+    use tycho_common::models::{
         blockchain::{Block, Transaction, TxWithChanges},
         protocol::ProtocolComponent,
         Chain,

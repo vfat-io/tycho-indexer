@@ -6,7 +6,7 @@ use ethrpc::{http::HttpTransport, Web3, Web3Transport};
 use reqwest::Client;
 use serde_json::from_str;
 use tracing::{instrument, warn};
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::BlockTag,
         token::{CurrencyToken, TokenQuality},
@@ -150,7 +150,7 @@ impl TokenPreProcessor for EthereumTokenPreProcessor {
 mod tests {
     use std::{collections::HashMap, env};
 
-    use tycho_core::models::token::TokenOwnerStore;
+    use tycho_common::models::token::TokenOwnerStore;
 
     use super::*;
 

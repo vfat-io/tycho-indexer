@@ -62,6 +62,6 @@ jobs:
           override: true
       - uses: katyo/publish-crates@v2
         with:
-          path: "./tycho-core"
+          path: "./tycho-common"
           registry-token: ${{ secrets.CRATESIO_REGISTRY_TOKEN }}
           dry-run: true

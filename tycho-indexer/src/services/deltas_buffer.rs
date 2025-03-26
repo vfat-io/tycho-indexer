@@ -7,7 +7,7 @@ use futures03::{stream, StreamExt};
 use thiserror::Error;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, instrument, trace, Level};
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::BlockAggregatedChanges,
         contract::Account,
@@ -485,7 +485,7 @@ impl PendingDeltasBuffer for PendingDeltas {
 mod test {
     use std::str::FromStr;
 
-    use tycho_core::models::{
+    use tycho_common::models::{
         contract::{AccountBalance, AccountDelta},
         protocol::{ComponentBalance, ProtocolComponentStateDelta},
         Chain, ChangeType,

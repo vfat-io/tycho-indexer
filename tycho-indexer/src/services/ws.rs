@@ -14,7 +14,7 @@ use metrics::{counter, gauge};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
-use tycho_core::models::ExtractorIdentity;
+use tycho_common::models::ExtractorIdentity;
 use uuid::Uuid;
 
 use crate::extractor::{runner::MessageSender, ExtractorMsg};
@@ -416,7 +416,7 @@ mod tests {
         MaybeTlsStream, WebSocketStream,
     };
     use tracing::{debug, info_span, Instrument};
-    use tycho_core::models::{Chain, NormalisedMessage};
+    use tycho_common::models::{Chain, NormalisedMessage};
 
     use super::*;
     use crate::extractor::runner::ControlMessage;

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use chrono::NaiveDateTime;
 use tracing::{debug, instrument, trace, warn, Level};
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::{Block, BlockScoped},
         contract::AccountBalance,
@@ -165,7 +165,7 @@ where
 
     /// Returns an `Option` containing the most recent block in the buffer or `None` if the buffer
     /// is empty
-    pub fn get_most_recent_block(&self) -> Option<tycho_core::models::blockchain::Block> {
+    pub fn get_most_recent_block(&self) -> Option<tycho_common::models::blockchain::Block> {
         if let Some(block_message) = self.block_messages.back() {
             return Some(block_message.block());
         }
@@ -456,7 +456,7 @@ mod test {
     use std::str::FromStr;
 
     use rstest::rstest;
-    use tycho_core::models::{
+    use tycho_common::models::{
         blockchain::{Transaction, TxWithChanges},
         protocol::ProtocolComponentStateDelta,
         Chain,
@@ -750,7 +750,7 @@ mod test {
                     c_ids[0].clone(),
                     HashMap::from([(
                         token_key.clone(),
-                        tycho_core::models::protocol::ComponentBalance {
+                        tycho_common::models::protocol::ComponentBalance {
                             token: token_key.clone(),
                             balance: Bytes::from(3_i32.to_be_bytes()),
                             modify_tx: transaction().hash,
@@ -763,7 +763,7 @@ mod test {
                     c_ids[1].clone(),
                     HashMap::from([(
                         token_key.clone(),
-                        tycho_core::models::protocol::ComponentBalance {
+                        tycho_common::models::protocol::ComponentBalance {
                             token: token_key.clone(),
                             balance: Bytes::from(30_i32.to_be_bytes()),
                             modify_tx: transaction().hash,

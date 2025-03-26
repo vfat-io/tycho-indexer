@@ -2,7 +2,7 @@ use std::{collections::VecDeque, num::NonZeroUsize};
 
 use lru::LruCache;
 use tracing::error;
-use tycho_core::Bytes;
+use tycho_common::Bytes;
 
 use crate::feed::Header;
 

@@ -209,7 +209,7 @@ The *component state* is dynamic: it contains attributes that can change at any 
 
 This contains all contract data needed to perform simulations. This includes the contract address, code, storage slots, native balance, etc.
 
-[Link to structs](https://github.com/propeller-heads/tycho-indexer/blob/main/tycho-core/src/dto.rs#L569)
+[Link to structs](https://github.com/propeller-heads/tycho-indexer/blob/main/tycho-common/src/dto.rs#L569)
 
 #### Deltas
 
@@ -229,7 +229,7 @@ Deltas include the following few special attributes:
 
 Note: exact byte encoding might differ depending on the protocol, but as a general guideline integers are big-endian encoded.
 
-[Link to structs](https://github.com/propeller-heads/tycho-indexer/blob/main/tycho-core/src/dto.rs#L215)
+[Link to structs](https://github.com/propeller-heads/tycho-indexer/blob/main/tycho-common/src/dto.rs#L215)
 
 ## Debugging
 

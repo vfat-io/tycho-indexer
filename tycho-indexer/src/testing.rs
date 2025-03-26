@@ -3,7 +3,7 @@ use std::{collections::HashMap, time::Duration};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use mockall::mock;
-use tycho_core::{
+use tycho_common::{
     models::{
         blockchain::{Block, Transaction},
         contract::{Account, AccountBalance, AccountDelta},
@@ -540,7 +540,7 @@ pub mod fixtures {
     use std::{collections::HashSet, str::FromStr};
 
     use prost::Message;
-    use tycho_core::{models::protocol::ProtocolComponentStateDelta, Bytes};
+    use tycho_common::{models::protocol::ProtocolComponentStateDelta, Bytes};
     use tycho_storage::postgres::db_fixtures::yesterday_midnight;
     use tycho_substreams::pb::tycho::evm::v1::*;
 

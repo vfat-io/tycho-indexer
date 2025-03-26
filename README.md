@@ -48,7 +48,7 @@ Tycho's architecture is designed to handle both real-time and historical data ef
 
 Tycho consists of several crates, each responsible for different aspects of the system:
 
-- `tycho-core`: defines the core structs and traits used throughout the Tycho system. More detailed docs [here](./tycho-core/README.md).
+- `tycho-common`: defines the core structs and traits used throughout the Tycho system. More detailed docs [here](tycho-common/README.md).
 - `tycho-indexer`: contains the main logic used to process incoming data and propogate the relevant information to clients and storage. Includes the RPC service. More detailed docs [here](./tycho-indexer/README.md).
 - `tycho-storage`: manages the underlying database and provides gateways for data access. More detailed docs [here](./tycho-storage/README.md).
 - `tycho-client`: a rust client to simplify the start-up and managing of data from a Tycho connection. More detailed docs [here](./tycho-client/README.md).
