@@ -9,6 +9,15 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+repository = "https://github.com/propeller-heads/tycho-indexer"
+homepage = "https://www.propellerheads.xyz/tycho"
+documentation = "https://docs.propellerheads.xyz/tycho"
+keywords = ["propellerheads", "solver", "defi", "dex", "mev"]
+license = "MIT"
+categories = ["finance"]
+readme = "README.md"
+
 # profile for building substreams crates
 [profile.substreams]
 inherits = "release"
