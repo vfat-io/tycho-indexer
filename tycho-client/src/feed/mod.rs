@@ -376,7 +376,7 @@ where
         let mut startup_futures = Vec::new();
         for (id, sh) in sync_streams.iter_mut() {
             let fut = async {
-                let res = timeout(self.block_time, sh.rx.recv()).await;
+                let res = timeout(self.block_time + self.max_wait, sh.rx.recv()).await;
                 (id.clone(), res)
             };
             startup_futures.push(fut);
