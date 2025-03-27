@@ -52,35 +52,33 @@ type BlockSyncResult<T> = anyhow::Result<T>;
 /// Aligns multiple StateSynchronizers on the block dimension.
 ///
 /// ## Purpose
-///
 /// The purpose of this component is to handle streams from multiple state synchronizers and
-/// basically align/merge them according to their blocks. Ideally this should be done in a
-/// fault-tolerant way meaning we can recover from a state synchronizer suffering from timing
-/// issues. E.g. a delayed or unresponsive state synchronizer might recover again. An advanced state
-/// synchronizer can be included again once we reach the block it is at.
+/// align/merge them according to their blocks. Ideally this should be done in a fault-tolerant way,
+/// meaning we can recover from a state synchronizer suffering from timing issues. E.g. a delayed or
+/// unresponsive state synchronizer might recover again, or an advanced state synchronizer can be
+/// included again once we reach the block it is at.
 ///
 /// ## Limitations
-/// - Supports only chains with fixed blocks time for now due to the lock step mechanism
+/// - Supports only chains with fixed blocks time for now due to the lock step mechanism.
 ///
 /// ## Initialisation
-/// Queries all registered synchronizers for their first message. It expects all synchronizers to
-/// return a message from the same header. If this is not the case the run method will error.
+/// Queries all registered synchronizers for their first message and evaluates the state of each
+/// synchronizer. If a synchronizer's first message is an older block, it is marked as delayed.
+/// If no message is received within the startup timeout, the synchronizer is marked as stale and is
+/// closed.
 ///
 /// ## Main loop
 /// Once started, the synchronizers are queried concurrently for messages in lock step:
 /// the main loop queries all synchronizers in ready for the last emitted data, builds the
-/// `FeedMessage` and emits it, then it schedules the wait procedure for the
-/// next block.
+/// `FeedMessage` and emits it, then it schedules the wait procedure for the next block.
 ///
 /// ## Synchronization Logic
 ///
-/// To classify a synchronizer as delayed or advanced, we need to first define the current
-/// block. Currently, we simply expect all synchronizers to be at the same block at startup. The
-/// block they are at is then simply taken as the current block.
+/// To classify a synchronizer as delayed, we need to first define the current block. The highest
+/// block number of all ready synchronizers is considered the current block.
 ///
 /// Once we have the current block we can easily determine which block we expect next. And if a
-/// state synchronizer delivers a different block from that we can classify it as delayed or
-/// advanced.
+/// synchronizer delivers an older block we can classify it as delayed.
 ///
 /// If any synchronizer is not in the ready state we will try to bring it back to the ready state.
 /// This is done by trying to empty any buffers of a delayed synchronizer or waiting to reach
@@ -213,8 +211,8 @@ impl SynchronizerStream {
     /// Tries to catch up a delayed state synchronizer.
     ///
     /// If a synchronizer is delayed, this method will try to catch up to the next expected block
-    /// by consuming all waiting messages in it's queue and waiting for any new block messages within
-    /// a timeout. Finally, all update messages are merged into one and returned.
+    /// by consuming all waiting messages in it's queue and waiting for any new block messages
+    /// within a timeout. Finally, all update messages are merged into one and returned.
     async fn try_catch_up(
         &mut self,
         block_history: &BlockHistory,
@@ -269,10 +267,12 @@ impl SynchronizerStream {
         }
     }
 
-    /// Logic to transition a state synchronizer.
+    /// Logic to transition a state synchronizer based on newly received block
     ///
-    /// Given a newly received block from a state synchronizer, this method transitions its state
-    /// accordingly.
+    /// Updates the synchronizer's state according to the position of the received block:
+    /// - Next expected block -> Ready state
+    /// - Latest/Delayed block -> Either Delayed or Stale (if >60s since last update)
+    /// - Advanced block -> Advanced state (block ahead of expected position)
     fn transition(&mut self, latest_retrieved: Header, block_history: &BlockHistory) {
         let extractor_id = &self.extractor_id;
         let last_message_at = self.modify_ts;
@@ -422,7 +422,7 @@ where
                     None
                 }
                 Err(_) => {
-                    warn!(%extractor_id, "Stale synchronizer at startup will be purged!");
+                    warn!(%extractor_id, "Timed out waiting for first message: Stale synchronizer at startup will be purged!");
                     synchronizer.state = SynchronizerState::Stale(Header::default());
                     synchronizer.modify_ts = Local::now().naive_utc();
                     None
@@ -446,9 +446,13 @@ where
         );
 
         // Purge any stale synchronizers
+        // All synchronizers that did not timeout on start up are initialized as Ready, including
+        // those that are Delayed. Delayed synchronizers are identified and updated accordingly in
+        // the next step.
         sync_streams.retain(|_, v| matches!(v.state, SynchronizerState::Ready(_)));
 
-        // Determine correct state for each remaining synchronizer, based on their header vs the latest one
+        // Determine correct state for each remaining synchronizer, based on their header vs the
+        // latest one
         for (_, stream) in sync_streams.iter_mut() {
             if let SynchronizerState::Ready(header) = &stream.state.clone() {
                 if header.number < start_header.number {
