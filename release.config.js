@@ -39,12 +39,12 @@ const config = {
         publishCmd:
           'echo "NEXT_RELEASE_VERSION=${nextRelease.version}" >> $GITHUB_OUTPUT',
         prepareCmd: [
-          "toml set --toml-path tycho-ethereum/Cargo.toml package.version ${nextRelease.version}",
-          "toml set --toml-path tycho-client/Cargo.toml package.version ${nextRelease.version}",
+          "toml set --toml-path ./Cargo.toml workspace.package.version ${nextRelease.version}",
           "toml set --toml-path tycho-client-py/pyproject.toml project.version ${nextRelease.version}",
-          "toml set --toml-path tycho-common/Cargo.toml package.version ${nextRelease.version}",
-          "toml set --toml-path tycho-indexer/Cargo.toml package.version ${nextRelease.version}",
-          "toml set --toml-path tycho-storage/Cargo.toml package.version ${nextRelease.version}",
+          "toml set --toml-path Cargo.toml workspace.dependencies.tycho-common.version ${nextRelease.version}",
+          "toml set --toml-path Cargo.toml workspace.dependencies.tycho-client.version ${nextRelease.version}",
+          "toml set --toml-path Cargo.toml workspace.dependencies.tycho-ethereum.version ${nextRelease.version}",
+          "toml set --toml-path Cargo.toml workspace.dependencies.tycho-storage.version ${nextRelease.version}",
           "cargo update -p tycho-ethereum",
           "cargo update -p tycho-client",
           "cargo update -p tycho-common",

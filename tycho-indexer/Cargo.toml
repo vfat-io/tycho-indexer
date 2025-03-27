@@ -1,6 +1,6 @@
 [package]
 name = "tycho-indexer"
-version = "0.63.1"
+version.workspace = true
 edition = "2021"
 description = "Tycho indexer application binary. Runs the actual indexing. Exposes ws and http endpoints to access extracted data"
 repository.workspace = true

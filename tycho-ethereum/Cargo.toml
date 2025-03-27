@@ -1,6 +1,6 @@
 [package]
 name = "tycho-ethereum"
-version = "0.63.1"
+version.workspace = true
 edition = "2021"
 description = "Ethereum specific implementation of core tycho traits"
 repository.workspace = true
