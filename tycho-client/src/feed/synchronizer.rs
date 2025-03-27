@@ -900,19 +900,6 @@ mod test {
                     ts: Default::default(),
                 },
                 revert: false,
-                ..Default::default()
-            },
-            BlockChanges {
-                extractor: "uniswap-v2".to_string(),
-                chain: Chain::Ethereum,
-                block: Block {
-                    number: 3,
-                    hash: Bytes::from("0x03"),
-                    parent_hash: Bytes::from("0x02"),
-                    chain: Chain::Ethereum,
-                    ts: Default::default(),
-                },
-                revert: false,
                 component_tvl: [
                     ("Component1".to_string(), 100.0),
                     ("Component2".to_string(), 0.0),
@@ -937,16 +924,13 @@ mod test {
         tx.send(deltas[0].clone())
             .await
             .expect("deltas channel msg 0 closed!");
-        tx.send(deltas[1].clone())
-            .await
-            .expect("deltas channel msg 1 closed!");
         let first_msg = timeout(Duration::from_millis(100), rx.recv())
             .await
             .expect("waiting for first state msg timed out!")
             .expect("state sync block sender closed!");
-        tx.send(deltas[2].clone())
+        tx.send(deltas[1].clone())
             .await
-            .expect("deltas channel msg 2 closed!");
+            .expect("deltas channel msg 1 closed!");
         let second_msg = timeout(Duration::from_millis(100), rx.recv())
             .await
             .expect("waiting for second state msg timed out!")
@@ -957,11 +941,11 @@ mod test {
             .expect("state sync task panicked!");
 
         // assertions
-        let exp = StateSyncMessage {
+        let exp1 = StateSyncMessage {
             header: Header {
-                number: 2,
-                hash: Bytes::from("0x02"),
-                parent_hash: Bytes::from("0x01"),
+                number: 1,
+                hash: Bytes::from("0x01"),
+                parent_hash: Bytes::from("0x00"),
                 revert: false,
             },
             snapshots: Snapshot {
@@ -997,15 +981,15 @@ mod test {
                 .collect(),
                 vm_storage: HashMap::new(),
             },
-            deltas: Some(deltas[1].clone()),
+            deltas: Some(deltas[0].clone()),
             removed_components: Default::default(),
         };
 
         let exp2 = StateSyncMessage {
             header: Header {
-                number: 3,
-                hash: Bytes::from("0x03"),
-                parent_hash: Bytes::from("0x02"),
+                number: 2,
+                hash: Bytes::from("0x02"),
+                parent_hash: Bytes::from("0x01"),
                 revert: false,
             },
             snapshots: Snapshot {
@@ -1035,9 +1019,9 @@ mod test {
                 extractor: "uniswap-v2".to_string(),
                 chain: Chain::Ethereum,
                 block: Block {
-                    number: 3,
-                    hash: Bytes::from("0x03"),
-                    parent_hash: Bytes::from("0x02"),
+                    number: 2,
+                    hash: Bytes::from("0x02"),
+                    parent_hash: Bytes::from("0x01"),
                     chain: Chain::Ethereum,
                     ts: Default::default(),
                 },
@@ -1059,7 +1043,7 @@ mod test {
             .into_iter()
             .collect(),
         };
-        assert_eq!(first_msg, exp);
+        assert_eq!(first_msg, exp1);
         assert_eq!(second_msg, exp2);
         assert!(exit.is_ok());
     }
@@ -1190,19 +1174,6 @@ mod test {
                     ts: Default::default(),
                 },
                 revert: false,
-                ..Default::default()
-            },
-            BlockChanges {
-                extractor: "uniswap-v2".to_string(),
-                chain: Chain::Ethereum,
-                block: Block {
-                    number: 3,
-                    hash: Bytes::from("0x03"),
-                    parent_hash: Bytes::from("0x02"),
-                    chain: Chain::Ethereum,
-                    ts: Default::default(),
-                },
-                revert: false,
                 component_tvl: [
                     ("Component1".to_string(), 6.0), // Within range, should not trigger changes
                     ("Component2".to_string(), 2.0), // Below lower threshold, should be removed
@@ -1223,9 +1194,6 @@ mod test {
         tx.send(deltas[0].clone())
             .await
             .expect("deltas channel msg 0 closed!");
-        tx.send(deltas[1].clone())
-            .await
-            .expect("deltas channel msg 1 closed!");
 
         // Expecting to receive the initial state message
         let _ = timeout(Duration::from_millis(100), rx.recv())
@@ -1234,9 +1202,9 @@ mod test {
             .expect("state sync block sender closed!");
 
         // Send the third message, which should trigger TVL-based changes
-        tx.send(deltas[2].clone())
+        tx.send(deltas[1].clone())
             .await
-            .expect("deltas channel msg 2 closed!");
+            .expect("deltas channel msg 1 closed!");
         let second_msg = timeout(Duration::from_millis(100), rx.recv())
             .await
             .expect("waiting for second state msg timed out!")
@@ -1249,9 +1217,9 @@ mod test {
 
         let expected_second_msg = StateSyncMessage {
             header: Header {
-                number: 3,
-                hash: Bytes::from("0x03"),
-                parent_hash: Bytes::from("0x02"),
+                number: 2,
+                hash: Bytes::from("0x02"),
+                parent_hash: Bytes::from("0x01"),
                 revert: false,
             },
             snapshots: Snapshot {
@@ -1276,9 +1244,9 @@ mod test {
                 extractor: "uniswap-v2".to_string(),
                 chain: Chain::Ethereum,
                 block: Block {
-                    number: 3,
-                    hash: Bytes::from("0x03"),
-                    parent_hash: Bytes::from("0x02"),
+                    number: 2,
+                    hash: Bytes::from("0x02"),
+                    parent_hash: Bytes::from("0x01"),
                     chain: Chain::Ethereum,
                     ts: Default::default(),
                 },
