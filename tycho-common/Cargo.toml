@@ -1,6 +1,6 @@
 [package]
 name = "tycho-common"
-version = "0.63.1"
+version.workspace = true
 edition = "2021"
 description = "Contains shared models, traits and helpers used within the Tycho system"
 repository.workspace = true
@@ -9,7 +9,7 @@ documentation.workspace = true
 keywords.workspace = true
 license.workspace = true
 categories.workspace = true
-readme.workspace = true
+readme = "README.md"
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
