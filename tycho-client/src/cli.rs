@@ -245,6 +245,7 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
             !args.no_state,
             rpc_client.clone(),
             ws_client.clone(),
+            args.block_time + args.timeout,
         );
         block_sync = block_sync.register_synchronizer(id, sync);
     }

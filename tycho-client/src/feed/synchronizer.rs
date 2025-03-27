@@ -46,6 +46,7 @@ pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
     component_tracker: Arc<Mutex<ComponentTracker<R>>>,
     shared: Arc<Mutex<SharedState>>,
     end_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    timeout: u64,
 }
 
 #[derive(Debug, Default)]
@@ -146,6 +147,7 @@ where
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
     /// Creates a new state synchronizer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor_id: ExtractorIdentity,
         retrieve_balances: bool,
@@ -154,6 +156,7 @@ where
         include_snapshots: bool,
         rpc_client: R,
         deltas_client: D,
+        timeout: u64,
     ) -> Self {
         Self {
             extractor_id: extractor_id.clone(),
@@ -170,6 +173,7 @@ where
             max_retries,
             shared: Arc::new(Mutex::new(SharedState::default())),
             end_tx: Arc::new(Mutex::new(None)),
+            timeout,
         }
     }
 
@@ -342,7 +346,7 @@ where
 
         info!("Waiting for deltas...");
         // wait for first deltas message
-        let mut first_msg = timeout(Duration::from_secs(360), msg_rx.recv())
+        let mut first_msg = timeout(Duration::from_secs(self.timeout), msg_rx.recv())
             .await?
             .ok_or_else(|| anyhow::format_err!("Subscription ended too soon"))?;
         self.filter_deltas(&mut first_msg, &tracker);
@@ -649,6 +653,7 @@ mod test {
             true,
             rpc_client,
             deltas_client,
+            10_u64,
         )
     }
 
@@ -1142,6 +1147,7 @@ mod test {
             true,
             ArcRPCClient(Arc::new(rpc_client)),
             ArcDeltasClient(Arc::new(deltas_client)),
+            10_u64,
         );
         state_sync
             .initialize()
