@@ -62,8 +62,13 @@ jobs:
         with:
           toolchain: stable
           override: true
-      - uses: katyo/publish-crates@v2
-        with:
-          path: "./tycho-common"
-          registry-token: ${{ secrets.CRATESIO_REGISTRY_TOKEN }}
+      - name: Push to crates.io
+        run: |
+          cargo publish --locked --verbose --package tycho-common
+          cargo publish --locked --verbose --package tycho-client
+# we can't use the action because it errors on github dependencies in any workspace crate
+#      - uses: katyo/publish-crates@v2
+#        with:
+#          path: "./tycho-common"
+#          registry-token: ${{ secrets.CRATESIO_REGISTRY_TOKEN }}
 
