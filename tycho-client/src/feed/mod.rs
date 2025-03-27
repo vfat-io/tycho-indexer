@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use chrono::{Local, NaiveDateTime};
+use chrono::{Duration as ChronoDuration, Local, NaiveDateTime};
 use futures03::{
     future::{join_all, try_join_all},
     stream::FuturesUnordered,
@@ -100,6 +100,7 @@ pub struct BlockSynchronizer<S> {
     block_time: std::time::Duration,
     max_wait: std::time::Duration,
     max_messages: Option<usize>,
+    max_missed_blocks: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -129,6 +130,7 @@ impl SynchronizerStream {
         &mut self,
         block_history: &BlockHistory,
         max_wait: std::time::Duration,
+        stale_threshold: std::time::Duration,
     ) -> Option<StateSyncMessage> {
         let extractor_id = &self.extractor_id;
         let latest_block = block_history.latest();
@@ -140,13 +142,18 @@ impl SynchronizerStream {
             SynchronizerState::Advanced(b) => {
                 let future_block = b.clone();
                 // Transition to ready once we arrived at the expected height
-                self.transition(future_block, block_history);
+                self.transition(future_block, block_history, stale_threshold);
                 None
             }
             SynchronizerState::Ready(previous_block) => {
                 // Try to recv the next expected block, update state accordingly.
-                self.try_recv_next_expected(max_wait, block_history, previous_block.clone())
-                    .await
+                self.try_recv_next_expected(
+                    max_wait,
+                    block_history,
+                    previous_block.clone(),
+                    stale_threshold,
+                )
+                .await
                 // TODO: if we entered advanced state we need to buffer the message for a while.
             }
             SynchronizerState::Delayed(old_block) => {
@@ -157,7 +164,7 @@ impl SynchronizerStream {
                     %extractor_id,
                     "Trying to catch up to latest block"
                 );
-                self.try_catch_up(block_history, max_wait)
+                self.try_catch_up(block_history, max_wait, stale_threshold)
                     .await
             }
             SynchronizerState::Stale(old_block) => {
@@ -167,7 +174,7 @@ impl SynchronizerStream {
                     %extractor_id,
                     "Trying to catch up to latest block"
                 );
-                self.try_catch_up(block_history, max_wait)
+                self.try_catch_up(block_history, max_wait, stale_threshold)
                     .await
             }
         }
@@ -182,11 +189,12 @@ impl SynchronizerStream {
         max_wait: std::time::Duration,
         block_history: &BlockHistory,
         previous_block: Header,
+        stale_threshold: std::time::Duration,
     ) -> Option<StateSyncMessage> {
         let extractor_id = &self.extractor_id;
         match timeout(max_wait, self.rx.recv()).await {
             Ok(Some(msg)) => {
-                self.transition(msg.header.clone(), block_history);
+                self.transition(msg.header.clone(), block_history, stale_threshold);
                 Some(msg)
             }
             Ok(None) => {
@@ -217,6 +225,7 @@ impl SynchronizerStream {
         &mut self,
         block_history: &BlockHistory,
         max_wait: std::time::Duration,
+        stale_threshold: std::time::Duration,
     ) -> Option<StateSyncMessage> {
         let mut results = Vec::new();
         let extractor_id = &self.extractor_id;
@@ -260,7 +269,7 @@ impl SynchronizerStream {
         if let Some(msg) = merged {
             // we were able to get at least one block out
             debug!(?extractor_id, "Delayed extractor made progress!");
-            self.transition(msg.header.clone(), block_history);
+            self.transition(msg.header.clone(), block_history, stale_threshold);
             Some(msg)
         } else {
             None
@@ -273,7 +282,12 @@ impl SynchronizerStream {
     /// - Next expected block -> Ready state
     /// - Latest/Delayed block -> Either Delayed or Stale (if >60s since last update)
     /// - Advanced block -> Advanced state (block ahead of expected position)
-    fn transition(&mut self, latest_retrieved: Header, block_history: &BlockHistory) {
+    fn transition(
+        &mut self,
+        latest_retrieved: Header,
+        block_history: &BlockHistory,
+        stale_threshold: std::time::Duration,
+    ) {
         let extractor_id = &self.extractor_id;
         let last_message_at = self.modify_ts;
         let block = &latest_retrieved;
@@ -290,7 +304,9 @@ impl SynchronizerStream {
                 let wait_duration = self
                     .modify_ts
                     .signed_duration_since(now);
-                if wait_duration > chrono::Duration::seconds(60) {
+                let stale_threshold_chrono = ChronoDuration::from_std(stale_threshold)
+                    .expect("Staleness threshold could not convert to chrono Duration");
+                if wait_duration > stale_threshold_chrono {
                     warn!(
                         ?extractor_id,
                         ?last_message_at,
@@ -341,8 +357,12 @@ impl<S> BlockSynchronizer<S>
 where
     S: StateSynchronizer,
 {
-    pub fn new(block_time: std::time::Duration, max_wait: std::time::Duration) -> Self {
-        Self { synchronizers: None, max_messages: None, block_time, max_wait }
+    pub fn new(
+        block_time: std::time::Duration,
+        max_wait: std::time::Duration,
+        max_missed_blocks: u64,
+    ) -> Self {
+        Self { synchronizers: None, max_messages: None, block_time, max_wait, max_missed_blocks }
     }
 
     pub fn max_messages(&mut self, val: usize) {
@@ -504,7 +524,12 @@ where
                 for (extractor_id, sh) in sync_streams.iter_mut() {
                     recv_futures.push(async {
                         let res = sh
-                            .try_advance(&block_history, self.block_time + self.max_wait)
+                            .try_advance(
+                                &block_history,
+                                self.block_time + self.max_wait,
+                                self.block_time
+                                    .mul_f64(self.max_missed_blocks as f64),
+                            )
                             .await;
                         res.map(|msg| (extractor_id.name.clone(), msg))
                     });
@@ -648,6 +673,7 @@ mod tests {
         let block_sync = BlockSynchronizer::new(
             std::time::Duration::from_millis(500),
             std::time::Duration::from_millis(50),
+            10,
         )
         .register_synchronizer(
             ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap-v2".to_string() },
@@ -730,6 +756,7 @@ mod tests {
         let block_sync = BlockSynchronizer::new(
             std::time::Duration::from_millis(500),
             std::time::Duration::from_millis(50),
+            10,
         )
         .register_synchronizer(
             ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap-v2".to_string() },
@@ -866,6 +893,7 @@ mod tests {
         let block_sync = BlockSynchronizer::new(
             std::time::Duration::from_millis(500),
             std::time::Duration::from_millis(50),
+            10,
         )
         .register_synchronizer(
             ExtractorIdentity { chain: Chain::Ethereum, name: "uniswap-v2".to_string() },

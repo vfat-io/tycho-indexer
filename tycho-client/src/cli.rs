@@ -86,6 +86,11 @@ struct CliArgs {
     /// used to trigger a regular restart or resync.
     #[clap(short='n', long, default_value=None)]
     max_messages: Option<usize>,
+
+    /// Maximum blocks an exchange can be absent for before it is marked as stale. Used
+    /// in conjunction with block_time to calculate a timeout: block_time * max_missed_blocks.
+    #[clap(long, default_value = "10")]
+    max_missed_blocks: u64,
 }
 
 impl CliArgs {
@@ -194,6 +199,7 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     let mut block_sync = BlockSynchronizer::new(
         Duration::from_secs(args.block_time),
         Duration::from_secs(args.timeout),
+        args.max_missed_blocks,
     );
 
     if let Some(mm) = &args.max_messages {
