@@ -1,3 +1,20 @@
+## [0.64.0](https://github.com/propeller-heads/tycho-indexer/compare/0.63.1...0.64.0) (2025-03-31)
+
+
+### Features
+
+* add max_missed_blocks as staleness threshold ([d9c6846](https://github.com/propeller-heads/tycho-indexer/commit/d9c6846cb407a4a10928b3df6a1a7779530272ac))
+* handle delayed exchanges on tycho-client ([d106b82](https://github.com/propeller-heads/tycho-indexer/commit/d106b82056a1db551031c3bf1911069fa19dd371))
+* Handle delayed exchanges on tycho-client ([#539](https://github.com/propeller-heads/tycho-indexer/issues/539)) ([a5da6fd](https://github.com/propeller-heads/tycho-indexer/commit/a5da6fd1ebf7212430cff2b3d28d1efe48f211f6))
+* only wait for one deltas message on client start up ([4fba42f](https://github.com/propeller-heads/tycho-indexer/commit/4fba42f168fac3a6d6c94a235a6aac9e39ffbdd5))
+* use block_time + timeout as wait time for first deltas ([51e2313](https://github.com/propeller-heads/tycho-indexer/commit/51e23130d96f7b69fbe02eb439482fd7042bc693))
+
+
+### Bug Fixes
+
+* **tycho-client:** allow setting TYCHO_URL as an env var ([54fa5c4](https://github.com/propeller-heads/tycho-indexer/commit/54fa5c4a53f58e3562d1225f523c46831e8ae4ce))
+* wait block time + timeout for first message ([751aae7](https://github.com/propeller-heads/tycho-indexer/commit/751aae7e62881412ca58840dd97085147b5a47df))
+
 ## [0.63.1](https://github.com/propeller-heads/tycho-indexer/compare/0.63.0...0.63.1) (2025-03-26)
 
 
