@@ -86,12 +86,8 @@ if (
       assets: [
         "CHANGELOG.md",
         "Cargo.lock",
-        "tycho-ethereum/Cargo.toml",
-        "tycho-client/Cargo.toml",
+        "Cargo.toml",
         "tycho-client-py/pyproject.toml",
-        "tycho-common/Cargo.toml",
-        "tycho-indexer/Cargo.toml",
-        "tycho-storage/Cargo.toml",
       ],
       message:
         "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
