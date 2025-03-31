@@ -1,3 +1,11 @@
+## [0.64.1](https://github.com/propeller-heads/tycho-indexer/compare/0.64.0...0.64.1) (2025-03-31)
+
+
+### Bug Fixes
+
+* include workspace cargo toml in release config ([2cecbd8](https://github.com/propeller-heads/tycho-indexer/commit/2cecbd8f050544b35e8bb82171dde7fa75781dd0))
+* include workspace cargo toml in release config ([#543](https://github.com/propeller-heads/tycho-indexer/issues/543)) ([071af8a](https://github.com/propeller-heads/tycho-indexer/commit/071af8a0e40e51aa089d9b9d73da08d9ea736e6d))
+
 ## [0.64.0](https://github.com/propeller-heads/tycho-indexer/compare/0.63.1...0.64.0) (2025-03-31)
 
 
