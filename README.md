@@ -2,16 +2,7 @@
 
 ![Tycho Indexer](./assets/tycho.png)
 
-Tycho Indexer is a low-latency solution designed to track and update the state of onchain and offchain financial
-protocols in real time. With Tycho, clients can subscribe to a stream of state update messages or query historical
-states at any specific timestamp or block through an RPC interface.
-
-Clients do not have to be aware of forks. In case the underlying chain experiences a fork, Tycho will automatically
-resolve the fork and emit events. These events allow the clients to "revert" (through usual updates) to the correct
-state immediately.
-
-With Tycho, clients stay updated with the latest state of **all** protocols they are interested in. If they can handle
-all, they can get all.
+Tycho Indexer gives you a low-latency, reorg-aware stream of all attributes you need to simulate swaps over DEX and other onchain liquidity.
 
 For comprehensive documentation about tycho-indexer, visit our [GitBook](https://docs.propellerheads.xyz/tycho/for-solvers/indexer).
 
@@ -63,24 +54,7 @@ Contact [security@propellerheads.xyz](mailto:security@propellerheads.xyz)
 
 As Tycho is still in heavy development, the documentation can be a bit scattered.
 
-The [Official Documentation](https://docs.propellerheads.xyz/tycho) is our
-current best-effort attempt at keeping up-to-date information.
-
-## Core Concepts:
-
-#### Protocol Systems
-
-A protocol system is a financial protocol defined by its swapping logic. Tycho indexes entire protocol systems, 
-including dynamically created components. This means that components, such as Uniswap pools, which were not predetermined, 
-are included in the indexing logic. They are automatically added and indexed upon their creation/detection.
-
-#### Protocol Components
-
-A Protocol Component represents an entity that facilitates the swapping of two tokens. A component consists of static
-values that remain constant after creation. Separate to the _Protocol Component_ is the _Protocol Component State_.
-_Protocol Component State_ tracks the dynamic values of the component, which Tycho uses to maintain a historical record.
-For VM-based protocols, _Accounts_ (or Contracts) also link to the Protocol Component, and provides contract code and
-storage values necessary for building historical states.
+The [Official Documentation](https://docs.propellerheads.xyz/tycho) is our current best-effort attempt at keeping up-to-date information.
 
 ## Architecture
 
@@ -88,13 +62,15 @@ Tycho's architecture is designed to handle both real-time and historical data ef
 which then propagate the data to clients and storage. Clients can access stored data with the RPC service,
 and combine it with streamed deltas to reconstruct the current state of a protocol system.
 
-![Tycho Flow Diagram](./assets/tycho_flow_diagram.png)
+![Tycho Flow Diagram](./assets/tycho_architecture.png)
 
 Tycho consists of several crates, each responsible for different aspects of the system:
 
-- `tycho-common`: defines the common structs and traits used throughout the Tycho system. More detailed docs [here](./tycho-common/README.md).
-- `tycho-indexer`: contains the main logic used to process incoming data and propogate the relevant information to clients and storage. Includes the RPC service. More detailed docs [here](./tycho-indexer/README.md).
-- `tycho-storage`: manages the underlying database and provides gateways for data access. More detailed docs [here](./tycho-storage/README.md).
-- `tycho-client`: a rust client to simplify the start-up and managing of data from a Tycho connection. More detailed docs [here](./tycho-client/README.md).
-- `tycho-client-py`: a python interface for the rust client and RPC service. More detailed docs [here](./tycho-client-py/README.md).
-- `tycho-ethereum`: a module that integrates Ethereum-specific blockchain functionalities into Tycho. More detailed docs [here](./tycho-ethereum/README.md).
+- `tycho-simulation`: Provides tools for interacting with protocol states, calculating spot prices, and quoting token swaps. More detailed docs [here](https://docs.propellerheads.xyz/tycho/for-solvers/simulation).
+- `tycho-execution`: Modules for encoding and executing swaps against Tycho router and protocol executors. [here](https://docs.propellerheads.xyz/tycho/for-solvers/execution)
+- `tycho-common`: Defines the common structs and traits used throughout the Tycho system. More detailed docs [here](./tycho-common/README.md).
+- `tycho-indexer`: Contains the main logic used to process incoming data and propogate the relevant information to clients and storage. Includes the RPC service. More detailed docs [here](./tycho-indexer/README.md).
+- `tycho-storage`: Manages the underlying database and provides gateways for data access. More detailed docs [here](./tycho-storage/README.md).
+- `tycho-client`: A rust client to simplify the start-up and managing of data from a Tycho connection. More detailed docs [here](./tycho-client/README.md).
+- `tycho-client-py`: A python interface for the rust client and RPC service. More detailed docs [here](./tycho-client-py/README.md).
+- `tycho-ethereum`: A module that integrates Ethereum-specific blockchain functionalities into Tycho. More detailed docs [here](./tycho-ethereum/README.md).
