@@ -13,6 +13,8 @@ state immediately.
 With Tycho, clients stay updated with the latest state of **all** protocols they are interested in. If they can handle
 all, they can get all.
 
+For comprehensive documentation about tycho-indexer, visit our [GitBook](https://docs.propellerheads.xyz/tycho/for-solvers/indexer).
+
 ## How to Contribute
 
 We warmly welcome open-source contributions!
@@ -37,7 +39,7 @@ participate in reviewing PRs.
 
 ### Opening a Pull Request
 
-Please submit pull requests (PRs) targeting the main branch. Ensure all PR titles follow the [Conventional Commit format](https://www.conventionalcommits.org/en/v1.0.0/) using a prefix like `fix: bug XXX`. This prefix is essential for automatically incrementing the version number.
+Please submit pull requests (PRs) targeting the main branch. Ensure all PR and commits titles follow the [Conventional Commit format](https://www.conventionalcommits.org/en/v1.0.0/) using a prefix like `fix: bug XXX`. This prefix is essential for automatically incrementing the version number.
 
 Please ensure the following commands pass if you have changed the code:
 
@@ -90,15 +92,9 @@ and combine it with streamed deltas to reconstruct the current state of a protoc
 
 Tycho consists of several crates, each responsible for different aspects of the system:
 
-- `tycho-common`: defines the core structs and traits used throughout the Tycho system. More detailed
-  docs [here](./tycho-common/README.md).
-- `tycho-indexer`: contains the main logic used to process incoming data and propogate the relevant information to
-  clients and storage. Includes the RPC service. More detailed docs [here](./tycho-indexer/README.md).
-- `tycho-storage`: manages the underlying database and provides gateways for data access. More detailed
-  docs [here](./tycho-storage/README.md).
-- `tycho-client`: a rust client to simplify the start-up and managing of data from a Tycho connection. More detailed
-  docs [here](./tycho-client/README.md).
-- `tycho-client-py`: a python interface for the rust client and RPC service. More detailed
-  docs [here](./tycho-client-py/README.md).
-- `tycho-ethereum`: a module that integrates Ethereum-specific blockchain functionalities into Tycho. More detailed
-  docs [here](./tycho-ethereum/README.md).
+- `tycho-common`: defines the common structs and traits used throughout the Tycho system. More detailed docs [here](./tycho-common/README.md).
+- `tycho-indexer`: contains the main logic used to process incoming data and propogate the relevant information to clients and storage. Includes the RPC service. More detailed docs [here](./tycho-indexer/README.md).
+- `tycho-storage`: manages the underlying database and provides gateways for data access. More detailed docs [here](./tycho-storage/README.md).
+- `tycho-client`: a rust client to simplify the start-up and managing of data from a Tycho connection. More detailed docs [here](./tycho-client/README.md).
+- `tycho-client-py`: a python interface for the rust client and RPC service. More detailed docs [here](./tycho-client-py/README.md).
+- `tycho-ethereum`: a module that integrates Ethereum-specific blockchain functionalities into Tycho. More detailed docs [here](./tycho-ethereum/README.md).
