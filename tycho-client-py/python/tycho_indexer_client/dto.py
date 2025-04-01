@@ -163,7 +163,7 @@ class BlockChanges(BaseModel):
     new_protocol_components: Dict[str, ProtocolComponent]
     deleted_protocol_components: Dict[str, ProtocolComponent]
     component_balances: Dict[str, TokenBalances]
-    account_balances: Dict[HexBytes, Dict[HexBytes, HexBytes]]
+    account_balances: Dict[HexBytes, Dict[HexBytes, HexBytes]] = Field(default_factory=dict)
     component_tvl: Dict[str, float]
 
 
