@@ -1,3 +1,11 @@
+## [0.64.2](https://github.com/propeller-heads/tycho-indexer/compare/0.64.1...0.64.2) (2025-04-01)
+
+
+### Bug Fixes
+
+* Set default value for account_balances in BlockChanges model ([4f69191](https://github.com/propeller-heads/tycho-indexer/commit/4f69191e2507a1e397ba930ce9719fec8bcd9366))
+* Set default value for account_balances in BlockChanges model ([#544](https://github.com/propeller-heads/tycho-indexer/issues/544)) ([8ced9f9](https://github.com/propeller-heads/tycho-indexer/commit/8ced9f92a4c2d36feab51677f4fffea448dd5b60))
+
 ## [0.64.1](https://github.com/propeller-heads/tycho-indexer/compare/0.64.0...0.64.1) (2025-03-31)
 
 
