@@ -1,3 +1,10 @@
+## [0.65.0](https://github.com/propeller-heads/tycho-indexer/compare/0.64.2...0.65.0) (2025-04-02)
+
+
+### Features
+
+* Add link to Tycho.build telegram ([2ef1fe6](https://github.com/propeller-heads/tycho-indexer/commit/2ef1fe6687eb005b7f0b305abcb886136242a415))
+
 ## [0.64.2](https://github.com/propeller-heads/tycho-indexer/compare/0.64.1...0.64.2) (2025-04-01)
 
 
