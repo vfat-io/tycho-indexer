@@ -1,3 +1,5 @@
+[![Telegram Chat](https://img.shields.io/badge/chat-telegram-blue)][tg-url]
+
 # Tycho Indexer
 
 ![Tycho Indexer](./assets/tycho.png)
@@ -74,3 +76,5 @@ Tycho consists of several crates, each responsible for different aspects of the 
 - `tycho-client`: A rust client to simplify the start-up and managing of data from a Tycho connection. More detailed docs [here](./tycho-client/README.md).
 - `tycho-client-py`: A python interface for the rust client and RPC service. More detailed docs [here](./tycho-client-py/README.md).
 - `tycho-ethereum`: A module that integrates Ethereum-specific blockchain functionalities into Tycho. More detailed docs [here](./tycho-ethereum/README.md).
+
+[tg-url]: https://t.me/+B4CNQwv7dgIyYTJl
