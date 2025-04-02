@@ -1,6 +1,4 @@
-[![Telegram Chat][tg-badge]][tg-url]
-[tg-badge]: https://img.shields.io/badge/chat-telegram-blue
-
+[![Telegram Chat](https://img.shields.io/badge/chat-telegram-blue)][tg-url]
 
 # Tycho Indexer
 
