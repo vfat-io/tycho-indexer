@@ -11,7 +11,7 @@ use tokio::{
     sync::{mpsc, oneshot, Mutex},
     task::JoinHandle,
 };
-use tracing::{debug, info, info_span, instrument, trace, Instrument};
+use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
 use tycho_common::{
     models::{
         self,
@@ -352,7 +352,7 @@ impl DBCacheWriteExecutor {
                     retry_count += 1;
                     if retry_count < max_retries {
                         let delay = std::time::Duration::from_secs(retry_count);
-                        debug!(
+                        warn!(
                             "Deadlock detected, retrying in {:?} (attempt {}/{})",
                             delay,
                             retry_count + 1,
