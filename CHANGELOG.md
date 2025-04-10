@@ -1,3 +1,11 @@
+## [0.66.0](https://github.com/propeller-heads/tycho-indexer/compare/0.65.0...0.66.0) (2025-04-10)
+
+
+### Features
+
+* Implement retry logic for deadlock detection in database transactions ([5d63e49](https://github.com/propeller-heads/tycho-indexer/commit/5d63e497a0b8279a57f3809c84a1df91dd9cc261))
+* Implement retry logic for deadlock detection in database transactions ([#549](https://github.com/propeller-heads/tycho-indexer/issues/549)) ([5a4b28e](https://github.com/propeller-heads/tycho-indexer/commit/5a4b28e49533ad3a99b2e7a08e905c18f9990a75))
+
 ## [0.65.0](https://github.com/propeller-heads/tycho-indexer/compare/0.64.2...0.65.0) (2025-04-02)
 
 
