@@ -1,3 +1,10 @@
+## [0.66.2](https://github.com/propeller-heads/tycho-indexer/compare/0.66.1...0.66.2) (2025-04-11)
+
+
+### Bug Fixes
+
+* Make Snapshot attributes pub ([#552](https://github.com/propeller-heads/tycho-indexer/issues/552)) ([55c668e](https://github.com/propeller-heads/tycho-indexer/commit/55c668e29a453809d820e362435093485d77d019))
+
 ## [0.66.1](https://github.com/propeller-heads/tycho-indexer/compare/0.66.0...0.66.1) (2025-04-10)
 
 ## [0.66.0](https://github.com/propeller-heads/tycho-indexer/compare/0.65.0...0.66.0) (2025-04-10)
