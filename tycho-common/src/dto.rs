@@ -50,6 +50,7 @@ pub enum Chain {
     Arbitrum,
     Base,
     Unichain,
+    Worldchain,
 }
 
 impl From<models::contract::Account> for ResponseAccount {
@@ -83,6 +84,7 @@ impl From<models::Chain> for Chain {
             models::Chain::Arbitrum => Chain::Arbitrum,
             models::Chain::Base => Chain::Base,
             models::Chain::Unichain => Chain::Unichain,
+            models::Chain::Worldchain => Chain::Worldchain,
         }
     }
 }

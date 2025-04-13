@@ -64,6 +64,7 @@ pub enum Chain {
     Arbitrum,
     Base,
     Unichain,
+    Worldchain,
 }
 
 impl From<dto::Chain> for Chain {
@@ -75,6 +76,7 @@ impl From<dto::Chain> for Chain {
             dto::Chain::Arbitrum => Chain::Arbitrum,
             dto::Chain::Base => Chain::Base,
             dto::Chain::Unichain => Chain::Unichain,
+            dto::Chain::Worldchain => Chain::Worldchain,
         }
     }
 }
@@ -103,6 +105,7 @@ impl Chain {
             Chain::Arbitrum => native_eth(Chain::Arbitrum),
             Chain::Base => native_eth(Chain::Base),
             Chain::Unichain => native_eth(Chain::Unichain),
+            Chain::Worldchain => native_eth(Chain::Worldchain),
         }
     }
 }
