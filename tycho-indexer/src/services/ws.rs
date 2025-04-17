@@ -150,6 +150,10 @@ impl WsActor {
             if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
                 warn!("Websocket Client heartbeat failed, disconnecting!");
                 counter!("websocket_connections_dropped", "reason" => "timeout").increment(1);
+                ctx.close(Some(ws::CloseReason {
+                    code: ws::CloseCode::Away,
+                    description: Some("Client heartbeat failed".into()),
+                }));
                 ctx.stop();
                 return;
             }
