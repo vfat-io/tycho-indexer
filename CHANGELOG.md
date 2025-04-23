@@ -1,3 +1,19 @@
+## [0.66.4](https://github.com/propeller-heads/tycho-indexer/compare/0.66.3...0.66.4) (2025-04-18)
+
+
+### Bug Fixes
+
+* **tycho-client:** relax default timeout values ([eba302f](https://github.com/propeller-heads/tycho-indexer/commit/eba302f11606798acc589f0ae3a57407a7b16da3))
+* **tycho-client:** relax default timeout values ([#555](https://github.com/propeller-heads/tycho-indexer/issues/555)) ([3852e6a](https://github.com/propeller-heads/tycho-indexer/commit/3852e6a5db5932083feb37d9a0817e54ad8d3c49))
+
+## [0.66.3](https://github.com/propeller-heads/tycho-indexer/compare/0.66.2...0.66.3) (2025-04-18)
+
+
+### Bug Fixes
+
+* cleanly close ws connections on timeouts ([319d988](https://github.com/propeller-heads/tycho-indexer/commit/319d988d3d095326f191907ab5e2a28e7fe7ca77))
+* cleanly close ws connections on timeouts ([#556](https://github.com/propeller-heads/tycho-indexer/issues/556)) ([262d070](https://github.com/propeller-heads/tycho-indexer/commit/262d070b827730a594fef833484667d8825bdd78))
+
 ## [0.66.2](https://github.com/propeller-heads/tycho-indexer/compare/0.66.1...0.66.2) (2025-04-11)
 
 
